@@ -108,6 +108,7 @@ import { startSequentialPolling } from '../../components/conversation-runtime/se
 import {
   type SessionStateStatus,
   type SessionTodoItem,
+  resolveSessionStopCapability,
   shouldPollSessionRuntime,
 } from '../../components/conversation-runtime/session/session-runtime.js';
 
@@ -1494,19 +1495,13 @@ export default function ChatPage() {
     (streaming || isCurrentSessionRunning),
   );
   const stopCapability = useMemo<'none' | 'precise' | 'best_effort' | 'observe_only'>(() => {
-    if (streaming || canStopCurrentSessionStream) {
-      return 'precise';
-    }
-
-    if (currentSessionId && sessionStateStatus === 'running') {
-      return 'best_effort';
-    }
-
-    if (remoteSessionBusyState !== null) {
-      return 'observe_only';
-    }
-
-    return 'none';
+    return resolveSessionStopCapability({
+      canStopCurrentSessionStream,
+      currentSessionId,
+      remoteSessionBusyState,
+      sessionStateStatus,
+      streaming,
+    });
   }, [
     canStopCurrentSessionStream,
     currentSessionId,

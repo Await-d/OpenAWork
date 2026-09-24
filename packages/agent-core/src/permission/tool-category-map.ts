@@ -58,6 +58,19 @@ const BASE_TOOL_TO_CATEGORY = {
   skill: 'skill',
   skill_mcp: 'skill',
   mcp_call: 'mcp_call',
+  // MCP 配置管理（添加/修改/启停/移除）：默认 ask；工具内的只读 list 动作由
+  // 权限派生器返回 null 免审批，变更动作走审批（见 tool-permission-derivers.ts）。
+  mcp_manage_servers: 'mcp_manage',
+  // 记忆管理（新增/修改/删除用户长期记忆）：默认 ask；只读 list 免审批。
+  memory_manage: 'memory_manage',
+  // 技能管理（安装/卸载/启停）：默认 ask；只读 list 免审批。
+  skill_manage: 'skill_manage',
+  // 定时任务管理（新建/修改/启停/删除）：默认 ask；只读 list / history 免审批。
+  schedule_manage: 'schedule_manage',
+  // 自定义 Agent 管理（新建/修改/删除/恢复默认）：默认 ask；只读 list 免审批。
+  agent_manage: 'agent_manage',
+  // 团队工作区管理（新建/修改/删除）：默认 ask；只读 list 免审批。
+  team_workspace_manage: 'team_manage',
   lsp_rename: 'lsp',
   websearch: 'websearch',
   webfetch: 'webfetch',
@@ -115,6 +128,11 @@ export const ALLOW_BY_DEFAULT_TOOL_NAMES: ReadonlySet<string> = new Set<string>(
   // 读取媒体内容 / 历史工具输出（只读）。
   'look_at',
   'read_tool_output',
+  // 折叠工具目录检索（只读；结果仍受会话 visible allowlist 约束）。
+  'tool_search',
+  // 折叠工具调用入口：解包发生在权限阶梯之前（内层工具走完整阶梯），
+  // 因此这里只做「模型可见名必须有运行期路径」的分类登记。
+  'tool_invoke',
   // batch 只是复用沙箱分发器，子调用逐个走各自的权限检查。
   'batch',
   // LSP 只读查询（lsp_rename 已映射到 lsp 类，仍需审批）。

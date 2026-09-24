@@ -5,6 +5,12 @@ import {
   filterEnabledGatewayToolsForSession,
   isGatewayToolEnabledForSessionMetadata,
 } from '../../session/session-tool-visibility.js';
+import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../../mcp/mcp-manage-tool-name.js';
+import { MEMORY_MANAGE_TOOL_NAME } from '../../memory/memory-manage-tool-name.js';
+import { SKILL_MANAGE_TOOL_NAME } from '../../skill/skill-manage-tool-name.js';
+import { SCHEDULE_MANAGE_TOOL_NAME } from '../../cron/schedule-manage-tool-name.js';
+import { AGENT_MANAGE_TOOL_NAME } from '../../agent/agent-manage-tool-name.js';
+import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../../team/team-workspace-manage-tool-name.js';
 
 const FEISHU_TOOL_NAMES = [
   'FeishuSendImage',
@@ -37,6 +43,218 @@ function makeTool(name: string): GatewayToolDefinition {
     },
   };
 }
+
+describe('mcp_manage_servers 会话可见性', () => {
+  it('个人会话可见（含 task 子代理）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MCP_MANAGE_SERVERS_TOOL_NAME, { source: 'desktop' }),
+    ).toBe(true);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MCP_MANAGE_SERVERS_TOOL_NAME, {
+        createdByTool: 'task',
+      }),
+    ).toBe(true);
+  });
+
+  it('team 会话不可见（teamWorkspaceId / teamRoleInstance）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MCP_MANAGE_SERVERS_TOOL_NAME, {
+        teamWorkspaceId: 'ws-1',
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MCP_MANAGE_SERVERS_TOOL_NAME, {
+        teamRoleInstance: { role: 'executor' },
+      }),
+    ).toBe(false);
+  });
+
+  it('cron / channel 会话不可见', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MCP_MANAGE_SERVERS_TOOL_NAME, { source: 'cron' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MCP_MANAGE_SERVERS_TOOL_NAME, { source: 'channel' }),
+    ).toBe(false);
+  });
+
+  it('clarify 模式不可见（只读白名单之外）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MCP_MANAGE_SERVERS_TOOL_NAME, {
+        dialogueMode: 'clarify',
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('memory_manage 会话可见性', () => {
+  it('个人会话可见（含 task 子代理）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MEMORY_MANAGE_TOOL_NAME, { source: 'desktop' }),
+    ).toBe(true);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MEMORY_MANAGE_TOOL_NAME, { createdByTool: 'task' }),
+    ).toBe(true);
+  });
+
+  it('team / cron / channel / clarify 均不可见', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MEMORY_MANAGE_TOOL_NAME, { teamWorkspaceId: 'ws-1' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MEMORY_MANAGE_TOOL_NAME, {
+        teamRoleInstance: { role: 'executor' },
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MEMORY_MANAGE_TOOL_NAME, { source: 'cron' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MEMORY_MANAGE_TOOL_NAME, { source: 'channel' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MEMORY_MANAGE_TOOL_NAME, { dialogueMode: 'clarify' }),
+    ).toBe(false);
+  });
+});
+
+describe('skill_manage 会话可见性', () => {
+  it('个人会话可见（含 task 子代理）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, { source: 'desktop' }),
+    ).toBe(true);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, { createdByTool: 'task' }),
+    ).toBe(true);
+  });
+
+  it('team / cron / channel / clarify 均不可见', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, { teamWorkspaceId: 'ws-1' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, {
+        teamRoleInstance: { role: 'executor' },
+      }),
+    ).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, { source: 'cron' })).toBe(
+      false,
+    );
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, { source: 'channel' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, { dialogueMode: 'clarify' }),
+    ).toBe(false);
+  });
+});
+
+describe('schedule_manage 会话可见性', () => {
+  it('个人会话可见（含 task 子代理）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, { source: 'desktop' }),
+    ).toBe(true);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, { createdByTool: 'task' }),
+    ).toBe(true);
+  });
+
+  it('cron / team / channel / clarify 均不可见', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, { source: 'cron' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, {
+        teamWorkspaceId: 'ws-1',
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, {
+        teamRoleInstance: { role: 'executor' },
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, { source: 'channel' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, {
+        dialogueMode: 'clarify',
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('agent_manage 会话可见性', () => {
+  it('个人会话可见（含 task 子代理）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(AGENT_MANAGE_TOOL_NAME, { source: 'desktop' }),
+    ).toBe(true);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(AGENT_MANAGE_TOOL_NAME, { createdByTool: 'task' }),
+    ).toBe(true);
+  });
+
+  it('team / cron / channel / clarify 均不可见', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(AGENT_MANAGE_TOOL_NAME, { teamWorkspaceId: 'ws-1' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(AGENT_MANAGE_TOOL_NAME, {
+        teamRoleInstance: { role: 'executor' },
+      }),
+    ).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata(AGENT_MANAGE_TOOL_NAME, { source: 'cron' })).toBe(
+      false,
+    );
+    expect(
+      isGatewayToolEnabledForSessionMetadata(AGENT_MANAGE_TOOL_NAME, { source: 'channel' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(AGENT_MANAGE_TOOL_NAME, { dialogueMode: 'clarify' }),
+    ).toBe(false);
+  });
+});
+
+describe('team_workspace_manage 会话可见性', () => {
+  it('个人会话可见（含 task 子代理）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(TEAM_WORKSPACE_MANAGE_TOOL_NAME, {
+        source: 'desktop',
+      }),
+    ).toBe(true);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(TEAM_WORKSPACE_MANAGE_TOOL_NAME, {
+        createdByTool: 'task',
+      }),
+    ).toBe(true);
+  });
+
+  it('team / cron / channel / clarify 均不可见', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(TEAM_WORKSPACE_MANAGE_TOOL_NAME, {
+        teamWorkspaceId: 'ws-1',
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(TEAM_WORKSPACE_MANAGE_TOOL_NAME, {
+        teamRoleInstance: { role: 'executor' },
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(TEAM_WORKSPACE_MANAGE_TOOL_NAME, { source: 'cron' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(TEAM_WORKSPACE_MANAGE_TOOL_NAME, {
+        source: 'channel',
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(TEAM_WORKSPACE_MANAGE_TOOL_NAME, {
+        dialogueMode: 'clarify',
+      }),
+    ).toBe(false);
+  });
+});
 
 describe('filterEnabledGatewayToolsForDialogueMode — 本轮模式收敛工具面', () => {
   const tools = [makeTool('read'), makeTool('edit'), makeTool('bash'), makeTool('question')];

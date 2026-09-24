@@ -11,6 +11,7 @@ import {
   findPaneContaining,
   findSplit,
   layoutTerminalIds,
+  resolveOrphanHostPaneId,
 } from './queries.js';
 import { assertLayoutInvariants } from './invariants-helpers.js';
 import { makePane, makeSplit } from './test-fixtures.js';
@@ -80,6 +81,21 @@ describe('layoutTerminalIds / countPanes', () => {
     const layout = makeSplit('s1', 'row', [makePane('p1', ['a', 'b']), makePane('p2', ['b', 'c'])]);
     expect([...layoutTerminalIds(layout)].sort()).toEqual(['a', 'b', 'c']);
     expect(countPanes(layout)).toBe(2);
+  });
+});
+
+describe('resolveOrphanHostPaneId', () => {
+  it('返回 DFS 首个 pane（树外终端的托管组）', () => {
+    const layout = makeSplit('s1', 'row', [
+      makePane('p1', ['a']),
+      makeSplit('s2', 'column', [makePane('p2', ['b']), makePane('p3', ['c'])]),
+    ]);
+    expect(resolveOrphanHostPaneId(layout)).toBe('p1');
+    expect(resolveOrphanHostPaneId(makePane('only', ['a']))).toBe('only');
+  });
+
+  it('null 布局 → null（没有托管组）', () => {
+    expect(resolveOrphanHostPaneId(null)).toBeNull();
   });
 });
 

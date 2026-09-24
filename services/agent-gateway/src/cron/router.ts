@@ -3,10 +3,32 @@ import { z } from 'zod';
 import { requireAuth } from '../infra/auth.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { runCronAgentJob } from './agent-handler.js';
-import { CronScheduler } from './scheduler.js';
+import {
+  deleteCronJob,
+  listCronExecutionsForJob,
+  recordCronExecution,
+  upsertCronJob,
+} from './cron-store.js';
+import { CronScheduler, type CronSchedulerPersistence } from './scheduler.js';
 import type { CronJobRecord } from './types.js';
 
-export const cronScheduler = new CronScheduler(runCronAgentJob);
+/**
+ * 持久化钩子：任务定义与执行历史落 `cron_jobs` / `cron_job_executions`；
+ * 启动时由 `restoreCronJobsFromStore` 重新装载（见 index.ts boot 步骤）。
+ */
+const cronPersistence: CronSchedulerPersistence = {
+  upsertJob: (job) => upsertCronJob(job),
+  deleteJob: (id) => deleteCronJob(id),
+  recordExecution: (job, exec) => recordCronExecution(job.user_id, exec),
+};
+
+export const cronScheduler = new CronScheduler(
+  runCronAgentJob,
+  3,
+  undefined,
+  undefined,
+  cronPersistence,
+);
 
 const jobSchema = z.object({
   name: z.string().min(1),
@@ -212,7 +234,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       }
       lookupStep.succeed();
       const historyStep = child('read', undefined, { jobId: id });
-      const history = cronScheduler.getExecutionHistory(id);
+      // 读持久化历史（重启后仍可查）；调度器内存 ring 仅作运行期内部状态。
+      const history = listCronExecutionsForJob(id);
       historyStep.succeed(undefined, { entries: history.length, jobId: id });
       step.succeed(undefined, { entries: history.length, jobId: id });
       return reply.send({ history });

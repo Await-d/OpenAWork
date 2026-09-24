@@ -394,9 +394,10 @@ export function createMemory(userId: string, input: CreateMemoryInput): MemoryEn
   const id = randomUUID();
   const now = new Date().toISOString();
   const roleLayers = normalizeMemoryRoleLayers(input.roleLayers);
+  const enabled = input.enabled !== false;
   sqliteRun(
     `INSERT INTO memories (id, user_id, type, key, value, source, confidence, priority, workspace_root, team_workspace_id, role_layers_json, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       userId,
@@ -409,6 +410,7 @@ export function createMemory(userId: string, input: CreateMemoryInput): MemoryEn
       input.workspaceRoot ?? null,
       input.teamWorkspaceId ?? null,
       serializeMemoryRoleLayers(roleLayers),
+      enabled ? 1 : 0,
       now,
       now,
     ],
@@ -425,7 +427,7 @@ export function createMemory(userId: string, input: CreateMemoryInput): MemoryEn
     workspaceRoot: input.workspaceRoot ?? null,
     teamWorkspaceId: input.teamWorkspaceId ?? null,
     roleLayers,
-    enabled: true,
+    enabled,
     createdAt: now,
     updatedAt: now,
   };

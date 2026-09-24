@@ -53,6 +53,11 @@ export interface UseTerminalSessionParams {
   /** 写失败等异常的上报通道（父面板已有 error 条）。 */
   onWriteError?: (message: string) => void;
   /**
+   * 窗口标题上报（xterm `onTitleChange`，源是 pty 的 OSC 0/1/2 转义）。
+   * 父面板按 terminalId 缓存后供 tab 标签使用；空串表示应用主动清空标题。
+   */
+  onTitleChange?: (title: string | null) => void;
+  /**
    * 面板命令段（新建 / 拆分 / 终止 / 重命名 / 关闭），由 pane 构建后透传。
    * 面板语义不进本 hook：这里只负责把它拼在剪贴板项之前。
    */
@@ -129,6 +134,7 @@ export function useTerminalSession({
   terminal,
   inputEnabled,
   onWriteError,
+  onTitleChange,
   menuItems,
 }: UseTerminalSessionParams): TerminalSessionState {
   const terminalId = terminal.terminalId;
@@ -144,6 +150,9 @@ export function useTerminalSession({
   const pasteResolveRef = useRef<((approved: boolean) => void) | null>(null);
   const onWriteErrorRef = useRef(onWriteError);
   onWriteErrorRef.current = onWriteError;
+  // 标题上报同样走 ref：内联箭头每次渲染都换身份，进 effect 依赖会让 xterm 重建。
+  const onTitleChangeRef = useRef(onTitleChange);
+  onTitleChangeRef.current = onTitleChange;
 
   /**
    * 令牌走 ref，不进 effect 依赖：JWT 到期前会自动轮换 `accessToken`，若让
@@ -204,6 +213,13 @@ export function useTerminalSession({
     const { terminal: term, fitAddon, searchAddon } = runtime;
     termRef.current = term;
     searchRef.current = searchAddon;
+    /**
+     * 窗口标题（pty 的 OSC 0/1/2）：xterm 解析到就上报，宿主按 terminalId 缓存给
+     * tab 标签用。快照回放里带的重放序列同样会触发它 —— 切 tab / 重挂载后标题自愈。
+     */
+    const titleDisposable = term.onTitleChange((title) => {
+      onTitleChangeRef.current?.(title.length > 0 ? title : null);
+    });
     // 终端重建（令牌轮换 / 传输重挂 / 分屏物化）：把焦点还给终端。
     if (wasFocusedRef.current) {
       wasFocusedRef.current = false;
@@ -726,6 +742,7 @@ export function useTerminalSession({
       container.removeEventListener('contextmenu', handleContextMenu);
       dataDisposable.dispose();
       selectionDisposable.dispose();
+      titleDisposable.dispose();
       scrollDisposable.dispose();
       writeParsedDisposable.dispose();
       closeSocket();

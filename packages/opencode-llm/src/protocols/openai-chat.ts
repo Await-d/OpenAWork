@@ -3,6 +3,7 @@ import { Route } from '../route/client.js';
 import { Auth } from '../route/auth.js';
 import { Endpoint } from '../route/endpoint.js';
 import { HttpTransport } from '../route/transport/index.js';
+import { Framing } from '../route/framing.js';
 import { Protocol } from '../route/protocol.js';
 import {
   LLMEvent,
@@ -27,6 +28,10 @@ import { ToolSchemaProjection } from './utils/tool-schema.js';
 import { ToolStream } from './utils/tool-stream.js';
 
 const ADAPTER = 'openai-chat';
+/**
+ * 对齐参考库：思维链字段名不能与 OpenAI Chat 的保留字段冲突。
+ */
+const RESERVED_REASONING_FIELDS = new Set(['role', 'content', 'refusal', 'tool_calls']);
 const IMAGE_MIMES = new Set<string>(ProviderShared.IMAGE_MIMES);
 export const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 export const PATH = '/chat/completions';
@@ -41,6 +46,8 @@ const OpenAIChatFunction = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   parameters: JsonObject,
+  // 对齐参考库：仅在上游支持时显式下发 `strict: false`。
+  strict: Schema.optional(Schema.Boolean),
 });
 
 const OpenAIChatTool = Schema.Struct({
@@ -120,12 +127,18 @@ export const bodyFields = {
   thinking_budget: Schema.optional(Schema.Number),
   google: Schema.optional(JsonObject),
   max_tokens: Schema.optional(Schema.Number),
+  // 对齐参考库：原生 OpenAI 新模型只接受 `max_completion_tokens`。
+  max_completion_tokens: Schema.optional(Schema.Number),
   temperature: Schema.optional(Schema.Number),
   top_p: Schema.optional(Schema.Number),
   frequency_penalty: Schema.optional(Schema.Number),
   presence_penalty: Schema.optional(Schema.Number),
   seed: Schema.optional(Schema.Number),
   stop: optionalArray(Schema.String),
+  // 对齐参考库：仅在 `supportsPromptCacheKey` 显式开启时下发。
+  prompt_cache_key: Schema.optional(Schema.String),
+  // 对齐参考库：ZAI / Zhipu 流式工具调用开关（`zaiToolStream` 探测命中时下发）。
+  tool_stream: Schema.optional(Schema.Boolean),
 };
 const OpenAIChatBody = Schema.Struct(bodyFields);
 export type OpenAIChatBody = Schema.Schema.Type<typeof OpenAIChatBody>;
@@ -133,9 +146,9 @@ export type OpenAIChatBody = Schema.Schema.Type<typeof OpenAIChatBody>;
 // =============================================================================
 // Streaming Event Schema
 // =============================================================================
-// The event schema is one decoded SSE `data:` payload. `Framing.sse` splits the
-// byte stream into strings, then `Protocol.jsonEvent` decodes each string into
-// this provider-native event shape.
+// The event schema is one decoded SSE `data:` payload. `Framing.sseWithDone`
+// splits the byte stream into strings (keeping the `[DONE]` sentinel), then the
+// union below decodes each string into this provider-native event shape.
 const OpenAIChatUsage = Schema.Struct({
   prompt_tokens: Schema.optional(Schema.Number),
   completion_tokens: Schema.optional(Schema.Number),
@@ -225,7 +238,22 @@ const OpenAIChatEvent = Schema.StructWithRest(
 type OpenAIChatEvent = Schema.Schema.Type<typeof OpenAIChatEvent>;
 type OpenAIChatRequestMessage = LLMRequest['messages'][number];
 
+/**
+ * 对齐参考库：`[DONE]` 是 OpenAI Chat 流的终止哨兵，必须作为独立帧保留
+ * （见 `Framing.sseWithDone`），由 `stream.terminal` 停止读取。
+ * 之前把它当保活帧在 framing 层丢弃，只能读到 HTTP body EOF 才知道流结束，
+ * 上游发完 `[DONE]` 不关连接时会被误判为 STALL。
+ */
+const DONE = '[DONE]' as const;
+const OpenAIChatStreamEvent = Schema.Union([
+  Schema.Literal(DONE),
+  Protocol.jsonEvent(OpenAIChatEvent),
+]);
+type OpenAIChatStreamEvent = Schema.Schema.Type<typeof OpenAIChatStreamEvent>;
+
 export interface ParserState {
+  /** 元数据命名空间（路由 `providerMetadataKey`，未配置时回退 provider 字符串）。 */
+  readonly providerMetadataKey: string;
   readonly tools: ToolStream.State<number>;
   readonly pendingToolArguments: Partial<Record<number, string>>;
   readonly toolCallEvents: ReadonlyArray<LLMEvent>;
@@ -244,9 +272,21 @@ export interface ParserState {
    * 对齐 opencode：首个被识别的思维链字段名。
    *
    * 不同兼容网关对思维链字段命名不一致（`reasoning_content` / `reasoning` /
-   * `reasoning_text`），记住首个命中项，避免同一响应内反复猜测字段。
+   * `reasoning_text`），记住首个命中项，避免同一响应内反复猜测字段，
+   * 并让历史回传时按同一字段名写回。
    */
   readonly reasoningField?: string;
+  /**
+   * 对齐 opencode：累计的结构化思维链条目（`reasoning_details`）。
+   *
+   * 部分兼容网关要求把 `reasoning_details` 原样回传才能续接工具回合；
+   * 它同时会作为 `reasoning-end` 的 providerMetadata 下发。
+   */
+  readonly reasoningDetails: ReadonlyArray<unknown>;
+  /** 本响应是否出现过 `reasoning_details`（决定是否下发聚合元数据）。 */
+  readonly reasoningDetailsObserved: boolean;
+  /** 本响应是否已经产出过思维链事件（避免 `finishEvents` 重复开启空块）。 */
+  readonly reasoningEmitted: boolean;
   /**
    * 对齐 opencode：流必须以 `finish_reason` 收尾（默认 true）。
    *
@@ -272,12 +312,182 @@ const invalid = ProviderShared.invalidRequest;
 // Lowering is the only place that knows how common LLM messages map onto the
 // OpenAI Chat wire format. Keep provider quirks here instead of leaking native
 // fields into `LLMRequest`.
-const lowerTool = (tool: ToolDefinition, inputSchema: JsonSchema): OpenAIChatTool => ({
+const isMistralModel = (modelID: string) =>
+  ['mistral', 'devstral', 'codestral', 'pixtral', 'mixtral'].some((family) =>
+    modelID.includes(family),
+  );
+
+/**
+ * 对齐参考库：按 provider / baseURL 探测 `max_tokens` vs `max_completion_tokens`。
+ *
+ * 原生 OpenAI 新模型（o 系 / GPT-5）只接受 `max_completion_tokens`；下列
+ * 兼容网关（models.dev 命名对齐）仍只认 `max_tokens`。
+ *
+ * 与参考库的差异：额外把 `custom` / `openai-compatible` 归入 `max_tokens`。
+ * 参考库由 catalog 保证 provider 是具体厂商 id；移植版网关把用户自建的
+ * 第三方中转统一标为 `custom`，这些中转普遍只认旧字段，保守处理避免 400。
+ */
+const detectMaxTokensField = (
+  provider: string,
+  baseURL: string | undefined,
+): 'max_tokens' | 'max_completion_tokens' => {
+  const p = provider.toLowerCase();
+  const url = (baseURL ?? '').toLowerCase();
+  if (
+    p === 'custom' ||
+    p === 'openai-compatible' ||
+    p === 'deepseek' ||
+    url.includes('deepseek.com') ||
+    p === 'moonshotai' ||
+    url.includes('api.moonshot.ai') ||
+    p === 'togetherai' ||
+    url.includes('api.together.') ||
+    p === 'zai' ||
+    p === 'zai-coding-plan' ||
+    p === 'zhipuai' ||
+    p === 'zhipuai-coding-plan' ||
+    url.includes('api.z.ai') ||
+    url.includes('open.bigmodel.cn') ||
+    p === 'nvidia' ||
+    url.includes('integrate.api.nvidia.com') ||
+    p === 'cerebras' ||
+    url.includes('cerebras.ai') ||
+    url.includes('llm.chutes.ai') ||
+    p === 'chutes' ||
+    p === 'cloudflare-ai-gateway' ||
+    url.includes('gateway.ai.cloudflare.com') ||
+    p === 'cloudflare-workers-ai' ||
+    url.includes('api.cloudflare.com')
+  )
+    return 'max_tokens';
+  return 'max_completion_tokens';
+};
+
+/** 对齐参考库：下列网关不支持 `store` 字段，不能下发。 */
+const detectSupportsStore = (provider: string, baseURL: string | undefined): boolean => {
+  const p = provider.toLowerCase();
+  const url = (baseURL ?? '').toLowerCase();
+  const isNonStandard =
+    // 与参考库的差异：移植版把用户自建的第三方中转（custom /
+    // openai-compatible）按保守处理——不发 `store`，避免严格网关 400。
+    p === 'custom' ||
+    p === 'openai-compatible' ||
+    p === 'nvidia' ||
+    url.includes('integrate.api.nvidia.com') ||
+    p === 'cerebras' ||
+    url.includes('cerebras.ai') ||
+    p === 'xai' ||
+    url.includes('api.x.ai') ||
+    p === 'togetherai' ||
+    p === 'together' ||
+    url.includes('api.together.') ||
+    p === 'chutes' ||
+    url.includes('chutes.ai') ||
+    p === 'deepseek' ||
+    url.includes('deepseek.com') ||
+    p === 'zai' ||
+    p === 'zai-coding-plan' ||
+    p === 'zhipuai' ||
+    p === 'zhipuai-coding-plan' ||
+    url.includes('api.z.ai') ||
+    url.includes('open.bigmodel.cn') ||
+    p === 'moonshotai' ||
+    p === 'moonshotai-cn' ||
+    url.includes('api.moonshot.') ||
+    p === 'opencode' ||
+    url.includes('opencode.ai') ||
+    p === 'cloudflare-workers-ai' ||
+    url.includes('api.cloudflare.com') ||
+    p === 'cloudflare-ai-gateway' ||
+    url.includes('gateway.ai.cloudflare.com') ||
+    p === 'vercel-ai-gateway' ||
+    url.includes('ai-gateway.vercel.sh') ||
+    url.includes('vercel.sh') ||
+    p === 'ant-ling' ||
+    url.includes('api.ant-ling.com');
+  return !isNonStandard;
+};
+
+/** 对齐参考库：下列网关拒绝工具定义上的 `strict` 字段。 */
+const detectSupportsStrictMode = (provider: string, baseURL: string | undefined): boolean => {
+  const p = provider.toLowerCase();
+  const url = (baseURL ?? '').toLowerCase();
+  // 与参考库的差异：用户自建的第三方中转（custom / openai-compatible）
+  // 同样不下发 `strict`（此前行为是永不下发，保持兼容）。
+  if (p === 'custom' || p === 'openai-compatible') return false;
+  const isMoonshot = p === 'moonshotai' || p === 'moonshotai-cn' || url.includes('api.moonshot.');
+  const isTogether = p === 'togetherai' || p === 'together' || url.includes('api.together.');
+  const isCloudflareAiGateway =
+    p === 'cloudflare-ai-gateway' || url.includes('gateway.ai.cloudflare.com');
+  const isNvidia = p === 'nvidia' || url.includes('integrate.api.nvidia.com');
+  return !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia;
+};
+
+/**
+ * 对齐参考库：ZAI / Zhipu 的流式工具调用开关。
+ *
+ * 命中 `zai` / `zai-coding-plan` / `zhipuai` / `zhipuai-coding-plan` / `zhipu`
+ * 或 z.ai / bigmodel.cn 端点时启用；GLM 4.5 系列不支持，保持关闭。
+ */
+const detectZaiToolStream = (
+  provider: string,
+  baseURL: string | undefined,
+  modelID: string,
+): boolean => {
+  const p = provider.toLowerCase();
+  const url = (baseURL ?? '').toLowerCase();
+  const isZai =
+    p === 'zai' ||
+    p === 'zai-coding-plan' ||
+    p === 'zhipuai' ||
+    p === 'zhipuai-coding-plan' ||
+    // 移植版网关的 provider catalog 用 `zhipu` 作为平台类型。
+    p === 'zhipu' ||
+    url.includes('api.z.ai') ||
+    url.includes('open.bigmodel.cn');
+  if (!isZai) return false;
+  const id = modelID.toLowerCase();
+  if (id === 'glm-4.5' || id === 'glm-4.5-air' || id === 'glm-4.5-flash' || id === 'glm-4.5v')
+    return false;
+  return true;
+};
+
+/**
+ * 对齐参考库：工具调用 ID 的线上归一化（Mistral 9 位字母数字、Claude 字符集、
+ * OpenAI 40 字符上限）。assistant 的 `tool_calls[].id` 与 `tool` 消息的
+ * `tool_call_id` 必须使用同一映射。
+ */
+const toolCallIDNormalizer = (input: {
+  readonly modelID: string;
+  readonly provider: string;
+}): ((id: string) => string) => {
+  if (isMistralModel(input.modelID))
+    return (id) =>
+      id
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .slice(0, 9)
+        .padEnd(9, '0');
+  if (input.modelID.includes('claude')) return (id) => id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  if (
+    input.provider === 'openai' ||
+    input.provider === 'azure' ||
+    input.modelID.startsWith('openai/')
+  )
+    return (id) => id.slice(0, 40);
+  return (id) => id;
+};
+
+const lowerTool = (
+  tool: ToolDefinition,
+  inputSchema: JsonSchema,
+  supportsStrictMode: boolean,
+): OpenAIChatTool => ({
   type: 'function',
   function: {
     name: tool.name,
     description: tool.description,
     parameters: ToolSchemaProjection.openAI(inputSchema),
+    ...(supportsStrictMode ? { strict: false } : {}),
   },
 });
 
@@ -289,8 +499,11 @@ const lowerToolChoice = (toolChoice: NonNullable<LLMRequest['toolChoice']>) =>
     tool: (name) => ({ type: 'function' as const, function: { name } }),
   });
 
-const lowerToolCall = (part: ToolCallPart): OpenAIChatAssistantToolCall => ({
-  id: part.id,
+const lowerToolCall = (
+  part: ToolCallPart,
+  toolCallID: (id: string) => string,
+): OpenAIChatAssistantToolCall => ({
+  id: toolCallID(part.id),
   type: 'function',
   function: {
     name: part.name,
@@ -307,6 +520,51 @@ const openAICompatibleReasoningContent = (native: unknown) =>
   isRecord(native) && typeof native.reasoning_content === 'string'
     ? native.reasoning_content
     : undefined;
+
+/**
+ * 对齐参考库 `reasoningMetadata`：思维链事件的 providerMetadata。
+ *
+ * `reasoningField` 记录字段名，`reasoningDetails` 携带累计的结构化条目；
+ * 两者都会随 `reasoning-delta` / `reasoning-end` 下发，供上层持久化后
+ * 在历史回传时原样写回上游。命名空间来自路由的 `providerMetadataKey`
+ * （未配置时回退到 provider 字符串）。
+ */
+const reasoningMetadata = (
+  key: string,
+  field: string | undefined,
+  details?: ReadonlyArray<unknown>,
+) => ({
+  [key]: {
+    ...(field === undefined ? {} : { reasoningField: field }),
+    ...(details === undefined ? {} : { reasoningDetails: details }),
+  },
+});
+
+/** 从 reasoning part 的 providerMetadata 读回思维链字段名（历史回传）。 */
+const reasoningFieldOf = (part: ReasoningPart, key: string): string | undefined => {
+  const field = part.providerMetadata?.[key]?.['reasoningField'];
+  return typeof field === 'string' ? field : undefined;
+};
+
+/**
+ * 从 reasoning part 的 providerMetadata（`native.openaiCompatible` 兜底）
+ * 读回结构化思维链条目。对齐参考库 `reasoningDetails`。
+ */
+const reasoningDetailsOf = (
+  parts: ReadonlyArray<ReasoningPart>,
+  native: unknown,
+  key: string,
+): ReadonlyArray<unknown> | undefined => {
+  const observed = parts.flatMap((part) => {
+    const details = part.providerMetadata?.[key]?.['reasoningDetails'];
+    return Array.isArray(details) ? details : [];
+  });
+  if (parts.some((part) => Array.isArray(part.providerMetadata?.[key]?.['reasoningDetails'])))
+    return observed;
+  if (isRecord(native) && Array.isArray(native['reasoning_details']))
+    return native['reasoning_details'];
+  return undefined;
+};
 
 const lowerUserMessage = Effect.fn('OpenAIChat.lowerUserMessage')(function* (
   message: OpenAIChatRequestMessage,
@@ -330,6 +588,10 @@ const lowerUserMessage = Effect.fn('OpenAIChat.lowerUserMessage')(function* (
 
 const lowerAssistantMessage = Effect.fn('OpenAIChat.lowerAssistantMessage')(function* (
   message: OpenAIChatRequestMessage,
+  configuredField: string | undefined,
+  requireReasoning: boolean,
+  providerMetadataKey: string,
+  toolCallID: (id: string) => string,
 ) {
   const content: TextPart[] = [];
   const reasoning: ReasoningPart[] = [];
@@ -350,10 +612,45 @@ const lowerAssistantMessage = Effect.fn('OpenAIChat.lowerAssistantMessage')(func
       continue;
     }
     if (part.type === 'tool-call') {
-      toolCalls.push(lowerToolCall(part));
+      toolCalls.push(lowerToolCall(part, toolCallID));
       continue;
     }
   }
+  const text = reasoning.map((part) => part.text).join('');
+  const details = reasoningDetailsOf(
+    reasoning,
+    message.native?.openaiCompatible,
+    providerMetadataKey,
+  );
+  const observedField = reasoning
+    .map((part) => reasoningFieldOf(part, providerMetadataKey))
+    .find((value) => value !== undefined);
+  const nativeReasoning = openAICompatibleReasoningContent(message.native?.openaiCompatible);
+  const fullyStructured = reasoning.every((part) =>
+    Array.isArray(part.providerMetadata?.[providerMetadataKey]?.['reasoningDetails']),
+  );
+  // 对齐参考库的字段名选择：显式配置优先 → 回放观测到的字段名 → native /
+  // `reasoning_content` 兜底。DeepSeek 系要求始终带字段（requireReasoning）。
+  const field = (() => {
+    if (
+      configuredField !== undefined &&
+      (requireReasoning || reasoning.length > 0 || nativeReasoning !== undefined)
+    )
+      return configuredField;
+    if (reasoning.length === 0) return requireReasoning ? 'reasoning_content' : undefined;
+    if (observedField !== undefined) return observedField;
+    if (nativeReasoning !== undefined) return 'reasoning_content';
+    if (!fullyStructured || requireReasoning) return 'reasoning_content';
+    return undefined;
+  })();
+  const reasoningText = (() => {
+    if (configuredField !== undefined)
+      return reasoning.length === 0
+        ? (nativeReasoning ?? (requireReasoning ? '' : undefined))
+        : text;
+    if (reasoning.length === 0) return nativeReasoning ?? (requireReasoning ? '' : undefined);
+    return text;
+  })();
   return {
     role: 'assistant' as const,
     // OpenAI Chat requires `content` or `tool_calls` to be set. A reasoning-only
@@ -363,15 +660,16 @@ const lowerAssistantMessage = Effect.fn('OpenAIChat.lowerAssistantMessage')(func
     content:
       content.length > 0 ? ProviderShared.joinText(content) : toolCalls.length > 0 ? null : '',
     tool_calls: toolCalls.length === 0 ? undefined : toolCalls,
-    reasoning_content:
-      reasoning.length > 0
-        ? reasoning.map((part) => part.text).join('')
-        : openAICompatibleReasoningContent(message.native?.openaiCompatible),
+    // 对齐参考库：结构化思维链条目原样回传（部分网关要求它才能续接工具回合）。
+    ...(details === undefined ? {} : { reasoning_details: details }),
+    // 对齐参考库：思维链按「原字段名」回传；字段名或文本缺失时省略该字段。
+    ...(field === undefined || reasoningText === undefined ? {} : { [field]: reasoningText }),
   };
 });
 
 const lowerToolMessages = Effect.fn('OpenAIChat.lowerToolMessages')(function* (
   message: OpenAIChatRequestMessage,
+  toolCallID: (id: string) => string,
 ) {
   const messages: OpenAIChatMessage[] = [];
   const images: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = [];
@@ -381,7 +679,7 @@ const lowerToolMessages = Effect.fn('OpenAIChat.lowerToolMessages')(function* (
     if (part.result.type !== 'content') {
       messages.push({
         role: 'tool',
-        tool_call_id: part.id,
+        tool_call_id: toolCallID(part.id),
         content: ProviderShared.toolResultText(part),
       });
       continue;
@@ -390,7 +688,7 @@ const lowerToolMessages = Effect.fn('OpenAIChat.lowerToolMessages')(function* (
     const text = content
       .filter((item): item is Extract<ToolContent, { type: 'text' }> => item.type === 'text')
       .map((item) => item.text);
-    messages.push({ role: 'tool', tool_call_id: part.id, content: text.join('\n') });
+    messages.push({ role: 'tool', tool_call_id: toolCallID(part.id), content: text.join('\n') });
     const files = content.filter(
       (item): item is Extract<ToolContent, { type: 'file' }> => item.type === 'file',
     );
@@ -405,10 +703,23 @@ const lowerToolMessages = Effect.fn('OpenAIChat.lowerToolMessages')(function* (
 
 const lowerMessage = Effect.fn('OpenAIChat.lowerMessage')(function* (
   message: OpenAIChatRequestMessage,
+  configuredField: string | undefined,
+  requireReasoning: boolean,
+  providerMetadataKey: string,
+  toolCallID: (id: string) => string,
 ) {
   if (message.role === 'user') return [yield* lowerUserMessage(message)];
-  if (message.role === 'assistant') return [yield* lowerAssistantMessage(message)];
-  return (yield* lowerToolMessages(message)).messages;
+  if (message.role === 'assistant')
+    return [
+      yield* lowerAssistantMessage(
+        message,
+        configuredField,
+        requireReasoning,
+        providerMetadataKey,
+        toolCallID,
+      ),
+    ];
+  return (yield* lowerToolMessages(message, toolCallID)).messages;
 });
 
 const lowerMessages = Effect.fn('OpenAIChat.lowerMessages')(function* (request: LLMRequest) {
@@ -417,12 +728,35 @@ const lowerMessages = Effect.fn('OpenAIChat.lowerMessages')(function* (request: 
       ? []
       : [{ role: 'system', content: ProviderShared.joinText(request.system) }];
   const messages = [...system];
+  // 对齐参考库：思维链字段名与「是否必须回传」由模型兼容配置决定；
+  // 未配置时按 DeepSeek 系（provider / baseURL / 模型名）自动推断。
+  const configuredField = request.model.compatibility?.reasoningField;
+  const modelID = request.model.id.toLowerCase();
+  const providerMetadataKey =
+    request.model.route.providerMetadataKey ?? String(request.model.provider);
+  const requireReasoning =
+    request.model.compatibility?.requireReasoning ??
+    (configuredField !== undefined ||
+      request.model.provider === 'deepseek' ||
+      (request.model.route.endpoint.baseURL ?? '').toLowerCase().includes('deepseek.com') ||
+      modelID.includes('deepseek'));
+  const toolCallID = toolCallIDNormalizer({ modelID, provider: String(request.model.provider) });
+  // 对齐参考库：Mistral 系不接受「tool 消息紧跟 tool 消息」的历史形态，
+  // 在下一个用户轮 / 图片轮之前桥接一条 assistant 消息。
+  const requireAssistantAfterTool =
+    request.model.compatibility?.requireAssistantAfterTool ?? isMistralModel(modelID);
+  const bridgeTools = () => {
+    if (requireAssistantAfterTool && messages.at(-1)?.role === 'tool')
+      messages.push({ role: 'assistant', content: 'Done.' });
+  };
   const pendingImages: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = [];
   const flushImages = () => {
     if (pendingImages.length === 0) return;
+    bridgeTools();
     messages.push({ role: 'user', content: pendingImages.splice(0) });
   };
   for (const message of request.messages) {
+    if (message.role === 'user') bridgeTools();
     if (message.role === 'system') {
       const part = yield* ProviderShared.wrappedSystemUpdate('OpenAI Chat', message);
       if (pendingImages.length > 0) {
@@ -456,28 +790,51 @@ const lowerMessages = Effect.fn('OpenAIChat.lowerMessages')(function* (request: 
     )
       continue;
     if (message.role === 'tool') {
-      const lowered = yield* lowerToolMessages(message);
+      const lowered = yield* lowerToolMessages(message, toolCallID);
       messages.push(...lowered.messages);
       pendingImages.push(...lowered.images);
       continue;
     }
     flushImages();
-    messages.push(...(yield* lowerMessage(message)));
+    messages.push(
+      ...(yield* lowerMessage(
+        message,
+        configuredField,
+        requireReasoning,
+        providerMetadataKey,
+        toolCallID,
+      )),
+    );
   }
   flushImages();
   return messages;
 });
 
-const lowerOptions = Effect.fn('OpenAIChat.lowerOptions')(function* (request: LLMRequest) {
+const lowerOptions = Effect.fn('OpenAIChat.lowerOptions')(function* (
+  request: LLMRequest,
+  supportsStore: boolean,
+) {
   const store = OpenAIOptions.store(request);
   const serviceTier = OpenAIOptions.serviceTier(request);
   const reasoningEffort = OpenAIOptions.reasoningEffort(request);
+  // 对齐参考库：`prompt_cache_key` 默认关闭（严格网关会对未知字段 400），
+  // 仅在上游显式声明 `supportsPromptCacheKey` 时下发。优先取请求级
+  // `promptCacheKey`，回退到既有的 `providerOptions.openai.promptCacheKey`
+  // 生产者（网关历史上只为 Responses 路径注入后者）。
+  const cacheKey =
+    request.model.compatibility?.supportsPromptCacheKey === true
+      ? (ProviderShared.promptCacheKey(request) ?? OpenAIOptions.promptCacheKey(request))
+      : undefined;
   if (reasoningEffort && !OpenAIOptions.isReasoningEffort(reasoningEffort))
     return yield* invalid(
       `OpenAI Chat does not support reasoning effort ${String(reasoningEffort)}`,
     );
   return {
-    ...(store !== undefined ? { store } : {}),
+    ...(supportsStore && store !== undefined ? { store } : {}),
+    // 对齐参考库：支持 `store` 的上游显式下发 `store: false`（原生 OpenAI
+    // Chat 默认）；不支持的上游完全省略该字段，避免被 400 拒绝。
+    ...(supportsStore && store === undefined ? { store: false } : {}),
+    ...(cacheKey === undefined ? {} : { prompt_cache_key: cacheKey }),
     ...(serviceTier ? { service_tier: serviceTier } : {}),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
   };
@@ -491,8 +848,29 @@ const lowerCompatibleProviderOptions = (request: LLMRequest) =>
 const fromRequest = Effect.fn('OpenAIChat.fromRequest')(function* (request: LLMRequest) {
   // `fromRequest` returns the provider body only. Endpoint, auth, framing,
   // validation, and HTTP execution are composed by `Route.make`.
+  const reasoningField = request.model.compatibility?.reasoningField;
+  if (reasoningField !== undefined && RESERVED_REASONING_FIELDS.has(reasoningField))
+    return yield* invalid(
+      `OpenAI Chat reasoning field conflicts with reserved field ${reasoningField}`,
+    );
   const generation = request.generation;
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema;
+  // 对齐参考库：请求侧兼容开关先看显式配置，未配置时按 provider / baseURL 探测。
+  const provider = String(request.model.provider);
+  const baseURL = request.model.route.endpoint.baseURL;
+  const maxTokensField =
+    request.model.compatibility?.maxTokensField ?? detectMaxTokensField(provider, baseURL);
+  const supportsStore =
+    request.model.compatibility?.supportsStore ?? detectSupportsStore(provider, baseURL);
+  const supportsUsageInStreaming = request.model.compatibility?.supportsUsageInStreaming ?? true;
+  const supportsStrictMode =
+    request.model.compatibility?.supportsStrictMode ?? detectSupportsStrictMode(provider, baseURL);
+  const zaiToolStream =
+    request.model.compatibility?.zaiToolStream ??
+    detectZaiToolStream(provider, baseURL, request.model.id);
+  // 对齐参考库：只有存在可用工具（且未被 tool_choice: none 禁用）时才发
+  // `tool_stream`。
+  const hasActiveTools = request.tools.length > 0 && request.toolChoice?.type !== 'none';
   return {
     ...lowerCompatibleProviderOptions(request),
     model: request.model.id,
@@ -504,19 +882,23 @@ const fromRequest = Effect.fn('OpenAIChat.fromRequest')(function* (request: LLMR
             lowerTool(
               tool,
               ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
+              supportsStrictMode,
             ),
           ),
     tool_choice: request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined,
     stream: true as const,
-    stream_options: { include_usage: true },
-    max_tokens: generation?.maxTokens,
+    ...(zaiToolStream && hasActiveTools ? { tool_stream: true } : {}),
+    ...(supportsUsageInStreaming ? { stream_options: { include_usage: true } } : {}),
+    ...(maxTokensField === 'max_completion_tokens'
+      ? { max_completion_tokens: generation?.maxTokens }
+      : { max_tokens: generation?.maxTokens }),
     temperature: generation?.temperature,
     top_p: generation?.topP,
     frequency_penalty: generation?.frequencyPenalty,
     presence_penalty: generation?.presencePenalty,
     seed: generation?.seed,
     stop: generation?.stop,
-    ...(yield* lowerOptions(request)),
+    ...(yield* lowerOptions(request, supportsStore)),
   };
 });
 
@@ -604,7 +986,10 @@ function reasoningDetailText(details: unknown): string | undefined {
   return parts.length > 0 ? parts.join('') : undefined;
 }
 
-const mapUsage = (usage: OpenAIChatEvent['usage']): Usage | undefined => {
+const mapUsage = (
+  usage: OpenAIChatEvent['usage'],
+  providerMetadataKey: string,
+): Usage | undefined => {
   if (!usage) return undefined;
   const cached = usage.prompt_tokens_details?.cached_tokens;
   const reasoning = usage.completion_tokens_details?.reasoning_tokens;
@@ -620,7 +1005,7 @@ const mapUsage = (usage: OpenAIChatEvent['usage']): Usage | undefined => {
       usage.completion_tokens,
       usage.total_tokens,
     ),
-    providerMetadata: { openai: usage },
+    providerMetadata: { [providerMetadataKey]: usage },
   });
 };
 
@@ -631,7 +1016,9 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     const choiceUsage = (event.choices?.[0] as unknown as { usage?: OpenAIChatEvent['usage'] })
       ?.usage;
     const usage =
-      mapUsage(event.usage) ?? (choiceUsage ? mapUsage(choiceUsage) : undefined) ?? state.usage;
+      mapUsage(event.usage, state.providerMetadataKey) ??
+      (choiceUsage ? mapUsage(choiceUsage, state.providerMetadataKey) : undefined) ??
+      state.usage;
     const serviceTier = event.service_tier ?? state.serviceTier;
     // 200-with-error body: OpenAI-compatible gateways report rate limits and
     // quota errors as a top-level `error` object instead of an HTTP failure.
@@ -713,20 +1100,50 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
 
     let lifecycle = state.lifecycle;
 
+    // 对齐 opencode：`refusal`（模型拒绝文本）同样按正文渲染。
+    // 严格 Struct 丢弃该字段时，整轮回答会表现为「有思考、正文为空」。
+    const refusal = (delta as unknown as Record<string, unknown> | undefined)?.['refusal'];
+    const hasRefusal = typeof refusal === 'string' && refusal.length > 0;
+
     // 思维链提取（对齐 opencode）：
     //   1. `reasoning_details`（结构化条目）优先，其次按字段名探测
     //      （`reasoning_content` / `reasoning` / `reasoning_text`）；
-    //   2. 思维链是「响应级通道」——**保持打开**，由 `finishEvents` 统一关闭，
+    //   2. 结构化条目累计进 state，并随 `reasoning-delta` 下发 providerMetadata
+    //      （字段名 + 累计条目），供上层持久化后历史回传；
+    //   3. 思维链是「响应级通道」——**保持打开**，由 `finishEvents` 统一关闭，
     //      这样迟到的思维链 delta 会并入同一块，而不是反复开关产生多个块。
     const pickedReasoning = pickReasoningDelta(delta, state.reasoningField);
     const reasoningField = state.reasoningField ?? pickedReasoning?.field;
-    const detailText = reasoningDetailText(
-      (delta as unknown as Record<string, unknown> | undefined)?.['reasoning_details'],
-    );
+    const rawDetails = (delta as unknown as Record<string, unknown> | undefined)?.[
+      'reasoning_details'
+    ];
+    const detailDelta = Array.isArray(rawDetails) ? rawDetails : undefined;
+    const reasoningDetails =
+      detailDelta === undefined
+        ? state.reasoningDetails
+        : [...state.reasoningDetails, ...detailDelta];
+    const reasoningDetailsObserved = state.reasoningDetailsObserved || detailDelta !== undefined;
+    const deltaMetadata = reasoningMetadata(state.providerMetadataKey, reasoningField);
+    const detailText = reasoningDetailText(detailDelta);
     const reasoningText = detailText ?? pickedReasoning?.text;
     if (reasoningText !== undefined) {
-      lifecycle = Lifecycle.reasoningDelta(lifecycle, events, 'reasoning-0', reasoningText);
+      lifecycle = Lifecycle.reasoningDelta(
+        lifecycle,
+        events,
+        'reasoning-0',
+        reasoningText,
+        deltaMetadata,
+      );
+    } else if (
+      reasoningDetailsObserved &&
+      !lifecycle.reasoning.has('reasoning-0') &&
+      (Boolean(delta?.content) || hasRefusal || toolDeltas.length > 0)
+    ) {
+      // 只有结构化条目、没有可提取文本时，也要开启思维链块，
+      // 让 `finishEvents` 能把完整元数据下发（对齐参考库）。
+      lifecycle = Lifecycle.reasoningStart(lifecycle, events, 'reasoning-0', deltaMetadata);
     }
+    const reasoningEmitted = state.reasoningEmitted || lifecycle.reasoning.has('reasoning-0');
 
     if (delta?.content) {
       const text =
@@ -736,10 +1153,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', text);
     }
 
-    // 对齐 opencode：`refusal`（模型拒绝文本）同样按正文渲染。
-    // 严格 Struct 丢弃该字段时，整轮回答会表现为「有思考、正文为空」。
-    const refusal = (delta as unknown as Record<string, unknown> | undefined)?.['refusal'];
-    if (typeof refusal === 'string' && refusal.length > 0) {
+    if (hasRefusal) {
       lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', refusal);
     }
 
@@ -813,6 +1227,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
 
     return [
       {
+        providerMetadataKey: state.providerMetadataKey,
         tools: finished?.tools ?? tools,
         pendingToolArguments,
         toolCallEvents: finished?.events ?? state.toolCallEvents,
@@ -825,6 +1240,9 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         toolIndexById,
         lifecycle,
         reasoningField,
+        reasoningDetails,
+        reasoningDetailsObserved,
+        reasoningEmitted,
         requireFinishReason: state.requireFinishReason,
         providerFailed: state.providerFailed,
       },
@@ -834,36 +1252,73 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
 
 const finishEvents = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
+    // 已产生 provider-error（顶层 error 体）时视为已有终态：不再产出任何
+    // 事件，否则会触发外层 `requireTerminalEvent` 的「终态之后仍有事件」失败。
+    if (state.providerFailed) return [];
     // 对齐 opencode 参考库：流在终态事件前结束（无 `finish_reason`）即
     // 「不完整流」。以 `incomplete-stream` 失败整条流，让上层据此重试，
     // 而不是把截断的响应当成正常收尾。
-    // 已产生 provider-error（顶层 error 体）时视为已有终态，不再叠加。
-    if (state.finishReason === undefined && state.requireFinishReason && !state.providerFailed) {
+    if (state.finishReason === undefined && state.requireFinishReason) {
       return yield* ProviderShared.incompleteStreamError(
         ADAPTER,
         'OpenAI Chat stream ended without finish_reason',
       );
     }
     const events: LLMEvent[] = [];
-    const hasToolCalls = state.toolCallEvents.length > 0;
+    // 对齐参考库：关闭思维链块时带上完整元数据（字段名 + 累计结构化条目），
+    // 供上层持久化后历史回传；若只观测到结构化条目而从未产出过 delta，
+    // 这里补一次 start，保证元数据仍能随 `reasoning-end` 下发。
+    const reasoningMetadataValue = reasoningMetadata(
+      state.providerMetadataKey,
+      state.reasoningField,
+      state.reasoningDetailsObserved ? [...state.reasoningDetails] : undefined,
+    );
+    const started =
+      state.reasoningDetailsObserved && !state.reasoningEmitted
+        ? Lifecycle.reasoningStart(
+            state.lifecycle,
+            events,
+            'reasoning-0',
+            reasoningMetadata(state.providerMetadataKey, state.reasoningField),
+          )
+        : state.lifecycle;
+    const reasoned = Lifecycle.reasoningEnd(started, events, 'reasoning-0', reasoningMetadataValue);
+    // 对齐参考库：`requireFinishReason=false` 且上游未给终态时，仍要收尾
+    // 未完成的工具调用，并合成一个终态 reason，否则外层
+    // `requireTerminalEvent` 会因为缺少 finish / provider-error 事件再次失败。
+    const toolCallEvents =
+      state.finishReason === undefined && Object.keys(state.tools).length > 0
+        ? (yield* ToolStream.finishAll(ADAPTER, state.tools)).events
+        : state.toolCallEvents;
+    const hasToolCalls = toolCallEvents.length > 0;
     const reason =
-      state.finishReason === 'stop' && hasToolCalls ? 'tool-calls' : state.finishReason;
-    const lifecycle = state.toolCallEvents.length
-      ? Lifecycle.stepStart(state.lifecycle, events)
-      : state.lifecycle;
-    events.push(...state.toolCallEvents);
-    if (reason) {
-      Lifecycle.finish(lifecycle, events, {
-        reason,
-        reasonRaw: state.finishReasonRaw,
-        usage: state.usage,
-        ...(state.serviceTier === undefined
-          ? {}
-          : { providerMetadata: { openai: { serviceTier: state.serviceTier } } }),
-      });
-    }
+      state.finishReason === 'stop' && hasToolCalls
+        ? 'tool-calls'
+        : (state.finishReason ?? (hasToolCalls ? 'tool-calls' : 'stop'));
+    const lifecycle = toolCallEvents.length ? Lifecycle.stepStart(reasoned, events) : reasoned;
+    events.push(...toolCallEvents);
+    Lifecycle.finish(lifecycle, events, {
+      reason,
+      reasonRaw: state.finishReasonRaw,
+      usage: state.usage,
+      ...(state.serviceTier === undefined
+        ? {}
+        : {
+            providerMetadata: { [state.providerMetadataKey]: { serviceTier: state.serviceTier } },
+          }),
+    });
     return events;
   });
+
+/**
+ * 对齐参考库：`[DONE]` 是终止哨兵，不是内容帧；解析器把它当空操作，
+ * 由 `terminal` 让客户端停止读取（不必等 HTTP body EOF）。
+ */
+const stepEvent = (
+  state: ParserState,
+  event: OpenAIChatStreamEvent,
+): Effect.Effect<readonly [ParserState, ReadonlyArray<LLMEvent>], LLMError> =>
+  event === DONE ? Effect.succeed([state, []]) : step(state, event);
 
 // =============================================================================
 // Protocol And OpenAI Route
@@ -881,8 +1336,10 @@ export const protocol = Protocol.make({
     from: fromRequest,
   },
   stream: {
-    event: Protocol.jsonEvent(OpenAIChatEvent),
+    event: OpenAIChatStreamEvent,
     initial: (request) => ({
+      providerMetadataKey:
+        request.model.route.providerMetadataKey ?? String(request.model.provider),
       tools: ToolStream.empty<number>(),
       pendingToolArguments: {},
       toolCallEvents: [],
@@ -892,19 +1349,27 @@ export const protocol = Protocol.make({
       ...(request.model.compatibility?.reasoningField === undefined
         ? {}
         : { reasoningField: request.model.compatibility.reasoningField }),
+      reasoningDetails: [],
+      reasoningDetailsObserved: false,
+      reasoningEmitted: false,
       requireFinishReason: request.model.compatibility?.requireFinishReason ?? true,
       providerFailed: false,
     }),
-    step,
+    step: stepEvent,
+    terminal: (event) => event === DONE,
     onHalt: finishEvents,
   },
 });
 
-export const httpTransport = HttpTransport.sseJson.with<OpenAIChatBody>();
+/** 对齐参考库：openai-chat 家族的规范 framing（保留 `[DONE]` 终止哨兵）。 */
+export const framing = Framing.sseWithDone;
+
+export const httpTransport = HttpTransport.sseJson.with<OpenAIChatBody>().with({ framing });
 
 export const route = Route.make({
   id: ADAPTER,
   provider: 'openai',
+  providerMetadataKey: 'openai',
   protocol,
   endpoint: Endpoint.path(PATH, { baseURL: DEFAULT_BASE_URL }),
   auth: Auth.none,

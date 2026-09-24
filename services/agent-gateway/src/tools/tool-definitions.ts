@@ -14,6 +14,7 @@ import { websearchTool } from './tool-aliases.js';
 import { codesearchToolDefinition } from './codesearch-tools.js';
 import { subTodoReadTool, subTodoWriteTool, todoReadTool, todoWriteTool } from './todo-tools.js';
 import { webfetchTool } from './web-tools.js';
+import { toolInvokeDefinition, toolSearchDefinition } from './tool-folding.js';
 import { createEditTool } from './edit-tools.js';
 import { createMultiEditTool } from './multi-edit-tool.js';
 import { batchToolDefinition } from './batch-tools.js';
@@ -87,6 +88,12 @@ import {
 import { repoCloneToolDefinition } from './repo-clone-tools.js';
 import { repoOverviewToolDefinition } from './repo-overview-tools.js';
 import { CHANNEL_TOOL_DEFINITIONS } from './channel-tools.js';
+import { mcpManageServersToolDefinition } from '../mcp/mcp-admin-tools.js';
+import { memoryManageToolDefinition } from '../memory/memory-admin-tools.js';
+import { skillManageToolDefinition } from '../skill/skill-admin-tools.js';
+import { scheduleManageToolDefinition } from '../cron/schedule-admin-tools.js';
+import { agentManageToolDefinition } from '../agent/agent-admin-tools.js';
+import { teamWorkspaceManageToolDefinition } from '../team/team-workspace-admin-tools.js';
 import type { EffectiveSkill } from '../skill/skill-selection.js';
 
 const CLAUDE_FIRST_VISIBLE_NAME_OVERRIDES = {
@@ -212,6 +219,12 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   subTodoReadTool,
   MCP_LIST_TOOLS_DEFINITION,
   MCP_CALL_DEFINITION,
+  mcpManageServersToolDefinition,
+  memoryManageToolDefinition,
+  skillManageToolDefinition,
+  scheduleManageToolDefinition,
+  agentManageToolDefinition,
+  teamWorkspaceManageToolDefinition,
   generateImageToolDefinition,
   convertMediaToolDefinition,
   extractMediaInfoToolDefinition,
@@ -221,6 +234,8 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   repoOverviewToolDefinition,
   ...CHANNEL_TOOL_DEFINITIONS,
   ...CODEGRAPH_TOOL_DEFINITIONS,
+  toolInvokeDefinition,
+  toolSearchDefinition,
 ] as const;
 
 export interface BuildGatewayToolDefinitionsContext {
@@ -953,6 +968,41 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
         required: ['patchText'],
         additionalProperties: false,
       };
+    case 'tool_invoke':
+      return {
+        type: 'object',
+        properties: {
+          tool: {
+            type: 'string',
+            description: '折叠工具名（见系统提示的「可折叠工具目录」）。',
+          },
+          arguments: {
+            type: 'object',
+            description: '工具入参对象；参数不确定时先用 tool_search 查询完整 JSON Schema。',
+            additionalProperties: true,
+          },
+        },
+        required: ['tool'],
+        additionalProperties: false,
+      };
+    case 'tool_search':
+      return {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: '检索关键词（工具名或能力描述，例如 "lsp" / "session" / "mcp"）。',
+          },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 20,
+            description: '返回数量上限，默认 8。',
+          },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      };
     case 'read_tool_output':
       return {
         type: 'object',
@@ -1078,7 +1128,8 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
           full_session: {
             type: 'boolean',
-            description: '返回过滤后的子会话消息而不仅是任务概要',
+            description:
+              '显式 opt-in：返回过滤后的子会话消息；默认 false 只回任务状态与子代理最终总结（摘要视图）。',
           },
           include_thinking: {
             type: 'boolean',
@@ -1151,7 +1202,16 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           session_id: { type: 'string' },
           include_todos: { type: 'boolean' },
           include_transcript: { type: 'boolean' },
-          limit: { type: 'integer', minimum: 1, maximum: 500 },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 500,
+            description: '返回最近多少条消息，默认 20；上限 500。',
+          },
+          full: {
+            type: 'boolean',
+            description: 'true 时返回消息完整文本；默认折叠长消息（每条约 600 字符）。',
+          },
         },
         required: ['session_id'],
         additionalProperties: false,
@@ -1616,6 +1676,257 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
           },
         },
         required: ['serverId', 'toolName', 'arguments'],
+        additionalProperties: false,
+      };
+    case 'mcp_manage_servers':
+      return {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'add', 'update', 'remove', 'enable', 'disable'],
+            description:
+              '管理动作：list 列举；add/update 新增或覆盖；remove 移除；enable/disable 启停。',
+          },
+          server: {
+            type: 'object',
+            description:
+              'add/update 时的服务器定义。内置 MCP（websearch / grep_app / codegraph / git_bash / lsp / omo）只接受 name 与 disabledTools。',
+            properties: {
+              id: {
+                type: 'string',
+                description: '服务器 id（小写字母 / 数字 / 短横线）；省略时由 name 生成。',
+              },
+              name: { type: 'string', description: '显示名称' },
+              transport: { type: 'string', enum: ['sse', 'stdio'] },
+              url: { type: 'string', description: 'sse 传输的完整 URL' },
+              command: { type: 'string', description: 'stdio 传输的可执行命令' },
+              args: { type: 'array', items: { type: 'string' } },
+              cwd: { type: 'string', description: 'stdio 工作目录' },
+              env: {
+                type: 'object',
+                additionalProperties: { type: 'string' },
+                description: 'stdio 环境变量',
+              },
+              headers: {
+                type: 'object',
+                additionalProperties: { type: 'string' },
+                description: 'sse 请求头（如 API Key）',
+              },
+              required: { type: 'boolean' },
+              disabledTools: {
+                type: 'array',
+                items: { type: 'string' },
+                description: '要禁用的工具名列表',
+              },
+              oauth: {
+                description: 'OAuth 配置；false 表示显式关闭。省略时沿用原值。',
+                oneOf: [
+                  { type: 'boolean', enum: [false] },
+                  {
+                    type: 'object',
+                    properties: {
+                      clientId: { type: 'string' },
+                      clientSecret: { type: 'string' },
+                      scope: { type: 'string' },
+                      redirectUri: { type: 'string' },
+                    },
+                    additionalProperties: false,
+                  },
+                ],
+              },
+            },
+            required: ['name', 'transport'],
+            additionalProperties: false,
+          },
+          serverId: {
+            type: 'string',
+            description: 'update/remove/enable/disable 的目标服务器 id。',
+          },
+          enabled: {
+            type: 'boolean',
+            description: 'add/update 时可显式指定启用状态；省略时保留原值（新增默认启用）。',
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      };
+    case 'memory_manage':
+      return {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'add', 'update', 'delete'],
+            description: '管理动作：list 检索/列举；add 新增；update 修改；delete 删除。',
+          },
+          memoryId: { type: 'string', description: 'update/delete 的目标记忆 id。' },
+          memory: {
+            type: 'object',
+            description: '记忆内容。add 必须提供 type / key / value；update 可只传要修改的字段。',
+            properties: {
+              type: {
+                type: 'string',
+                enum: ['preference', 'fact', 'instruction', 'project_context', 'learned_pattern'],
+              },
+              key: { type: 'string', description: '记忆键（1–200 字符）。' },
+              value: { type: 'string', description: '记忆内容（1–4000 字符）。' },
+              priority: { type: 'integer', minimum: 0, maximum: 100 },
+              confidence: { type: 'number', minimum: 0, maximum: 1 },
+              workspaceRoot: {
+                type: ['string', 'null'],
+                description: '限定到某个工作区路径（可选）。',
+              },
+              roleLayers: {
+                type: ['array', 'null'],
+                items: {
+                  type: 'string',
+                  enum: ['reception', 'pm1', 'pm2', 'executor', 'reviewer'],
+                },
+              },
+              enabled: { type: 'boolean', description: 'update 时可启停该记忆。' },
+            },
+            additionalProperties: false,
+          },
+          search: { type: 'string', description: 'list 的 key/value 关键词过滤。' },
+          type: {
+            type: 'string',
+            enum: ['preference', 'fact', 'instruction', 'project_context', 'learned_pattern'],
+            description: 'list 的类型过滤。',
+          },
+          enabled: { type: 'boolean', description: 'list 的启用态过滤。' },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+            description: 'list 返回上限，默认 50。',
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      };
+    case 'skill_manage':
+      return {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'install', 'uninstall', 'enable', 'disable'],
+            description: '管理动作：list 列举；install 安装；uninstall 卸载；enable/disable 启停。',
+          },
+          skillId: {
+            type: 'string',
+            description:
+              '目标技能 id（list 之外必填）。install 仅支持已配置注册源技能；github: / claude-marketplace: 前缀请在设置页安装。',
+          },
+          sourceId: {
+            type: 'string',
+            description: 'install 时可指定注册源 id；省略时由注册源解析。',
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      };
+    case 'schedule_manage':
+      return {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'add', 'update', 'remove', 'enable', 'disable', 'history'],
+            description:
+              '管理动作：list 列举；add 新建；update 修改；remove 删除；enable/disable 启停；history 执行历史。',
+          },
+          jobId: { type: 'string', description: 'list 之外的目标任务 id。' },
+          job: {
+            type: 'object',
+            description: 'add 必须提供 name / schedule_kind / prompt；update 可只传要修改的字段。',
+            properties: {
+              name: { type: 'string' },
+              schedule_kind: { type: 'string', enum: ['at', 'every', 'cron'] },
+              schedule_at: {
+                type: ['number', 'null'],
+                description: 'at 调度的一次性触发时间（epoch 毫秒）。',
+              },
+              schedule_every: {
+                type: ['number', 'null'],
+                description: 'every 调度的间隔毫秒数。',
+              },
+              schedule_expr: {
+                type: ['string', 'null'],
+                description: 'cron 调度的 5 段表达式（分 时 日 月 周）。',
+              },
+              schedule_tz: { type: 'string', description: 'IANA 时区，默认 UTC。' },
+              prompt: { type: 'string', description: '到点执行的任务提示词。' },
+              agent_id: { type: ['string', 'null'] },
+              model: { type: ['string', 'null'] },
+              working_folder: { type: ['string', 'null'] },
+              session_id: { type: ['string', 'null'] },
+              delivery_mode: { type: 'string', enum: ['desktop', 'session', 'none'] },
+              delivery_target: { type: ['string', 'null'] },
+              plugin_id: { type: ['string', 'null'] },
+              plugin_chat_id: { type: ['string', 'null'] },
+              enabled: { type: 'boolean' },
+              delete_after_run: { type: 'boolean', description: '一次性任务执行后自动删除。' },
+              max_iterations: { type: 'integer', minimum: 1, maximum: 100 },
+            },
+            additionalProperties: false,
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      };
+    case 'agent_manage':
+      return {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'create', 'update', 'delete', 'reset'],
+            description:
+              '管理动作：list 列举；create 新建；update 修改；delete 删除；reset 恢复默认。',
+          },
+          agentId: { type: 'string', description: 'update/delete/reset 的目标 Agent id。' },
+          agent: {
+            type: 'object',
+            description:
+              'create 需要 label 与 systemPrompt（可含 description / aliases / canonicalRole / model / variant / fallbackModels / note / enabled）；update 只需提供要改的字段。',
+            additionalProperties: true,
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      };
+    case 'team_workspace_manage':
+      return {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'create', 'update', 'delete'],
+            description: '管理动作：list 列举；create 新建；update 修改；delete 删除。',
+          },
+          workspaceId: { type: 'string', description: 'update/delete 的目标工作区 id。' },
+          workspace: {
+            type: 'object',
+            description:
+              'create 需要 name；update 只需提供要改的字段。defaultTeamRoster 槽位需完整字段，能力绑定 skillIds/mcpServerIds 必须已安装/已配置。',
+            properties: {
+              name: { type: 'string' },
+              description: { type: ['string', 'null'] },
+              visibility: { type: 'string', enum: ['open', 'closed', 'private'] },
+              defaultWorkingRoot: { type: ['string', 'null'] },
+              defaultTeamRoster: {
+                type: 'array',
+                items: { type: 'object', additionalProperties: true },
+                description:
+                  '成员槽位数组；每项需 id / layer / specialty / displayName / personaKey / toolsets / required。',
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        required: ['action'],
         additionalProperties: false,
       };
     case 'repo_clone':

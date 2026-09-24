@@ -7,8 +7,8 @@ import type { LLMError } from '../schema/index.js';
  *
  * `Framing` is the byte-stream-shaped seam between transport and protocol:
  *
- * - SSE (`Framing.sse`) — UTF-8 decode the body, run the SSE channel decoder,
- *   drop empty / `[DONE]` keep-alives. Each emitted frame is the JSON `data:`
+ * - SSE (`Framing.sse`) — UTF-8 decode the body, run the SSE parser, drop
+ *   empty / `[DONE]` keep-alives. Each emitted frame is the JSON `data:`
  *   payload of one event.
  * - AWS event stream — length-prefixed binary frames with CRC checksums.
  *   Each emitted frame is one parsed binary event record.
@@ -23,5 +23,12 @@ export interface Framing<Frame> {
 
 /** Server-Sent Events framing. Used by every JSON-streaming HTTP provider. */
 export const sse = { id: 'sse', frame: ProviderShared.sseFraming } as Framing<string>;
+
+/** Server-Sent Events framing that retains the conventional `[DONE]` sentinel. */
+export const sseWithDone = {
+  id: 'sse',
+  frame: (bytes: Stream.Stream<Uint8Array, LLMError>) =>
+    ProviderShared.sseFraming(bytes, { includeDone: true }),
+} as Framing<string>;
 
 export * as Framing from './framing.js';

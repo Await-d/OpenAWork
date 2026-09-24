@@ -167,3 +167,32 @@ export interface MCPServerStatus {
   error?: string;
   tools?: Array<{ description?: string; name: string }>;
 }
+
+export interface McpServerManagerProps {
+  servers: MCPServerEntry[];
+  statuses?: MCPServerStatus[];
+  onAdd?: (entry: MCPServerEntry) => void;
+  onRemove?: (id: string) => void;
+  onUpdate?: (id: string, entry: MCPServerEntry) => void;
+  onRetry?: (serverId: string) => void;
+  title?: string;
+  emptyHint?: string;
+  showAddForm?: boolean;
+}
+
+/**
+ * 应用测试替身：真实 `McpServerManager` 的紧凑列表行为由
+ * `packages/shared-ui/src/mcp/McpServerManager.test.tsx` 覆盖；这里只保留
+ * 设置页接线需要的「标题 / 服务器 id 列表 / 新增表单开关」契约。
+ */
+export function McpServerManager(props: McpServerManagerProps): ReactElement {
+  const { servers, statuses = [], title = 'MCP 服务器', showAddForm = true } = props;
+  return (
+    <div data-openawork-mcp-manager="true">
+      <span>{title}</span>
+      <span>{showAddForm ? '显示新增' : '隐藏新增'}</span>
+      <span>配置:{servers.map((server) => server.id).join(',')}</span>
+      <span>状态:{statuses.map((server) => server.id).join(',')}</span>
+    </div>
+  );
+}

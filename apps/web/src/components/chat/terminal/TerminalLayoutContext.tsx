@@ -100,6 +100,16 @@ export interface TerminalViewEnvironment {
   /** 只有持久前台终端能接收 stdin（与既有 ACTIVE_STATUSES 判定同源）。 */
   inputEnabled(terminal: SessionTerminalView): boolean;
   onWriteError(message: string): void;
+  /**
+   * 窗口标题缓存（terminalId → xterm `onTitleChange` 的 OSC 0/1/2 标题）。
+   *
+   * 由面板层持有：同一终端会因切 tab / 分屏移动反复挂载 xterm，标题必须在挂载
+   * 之外存活，tab 条才能在未挂载（非 active tab）时也显示同一个名字。
+   * 瞬态数据，不落盘 —— 窗口标题随 shell / TUI 实时变化，落盘没有意义。
+   */
+  terminalTitles: ReadonlyMap<string, string>;
+  /** xterm 标题上报入口；空串 / null = 清空该终端的缓存标题。 */
+  onTerminalTitleChange(terminalId: string, title: string | null): void;
 }
 
 export interface TerminalLayoutContextValue {

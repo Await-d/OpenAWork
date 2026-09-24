@@ -54,7 +54,7 @@ src/
 | ChatPage render helper       | `src/pages/chat-page/conversation/render/`                                                                             |
 | 认证 Token / 登录状态        | `src/stores/auth.ts`（Zustand persist）                                                                                |
 | 全局布局/导航                | `src/components/Layout.tsx`                                                                                            |
-| 网关 WS/SSE 客户端           | `src/hooks/useGatewayClient.ts`                                                                                        |
+| 网关 WS/SSE 客户端           | `src/hooks/gateway/useGatewayClient.ts`                                                                                |
 | 主题（深色/浅色）            | `App.tsx` + `src/index.css` CSS 变量                                                                                   |
 | 共享 UI 组件                 | `@openAwork/shared-ui`（非本地）                                                                                       |
 
@@ -67,6 +67,9 @@ src/
 - **ESLint**：`apps/web` 当前按阶段性策略仍被根目录 ESLint 排除；`bun run --filter @openAwork/web lint` 会显式提示跳过，待后续单独收口历史 lint 债务。
 - **会话权限档位（composer）**：档位控件 `src/components/chat/composer/ComposerPermissionModeSelect.tsx`（在 `UnifiedComposer.tsx:616` 渲染，`ComposerPermissionMode = SessionPermissionMode`，选项定义见 :21-37）；顶栏 `src/components/chat/session/ChatTopBar.tsx` 的 `auto-edit`（:167）与 `yolo`（:114）chip 是只读展示。
 - **metadata 快照必须含 `permissionMode`**：`createSessionMetadataSnapshot`（`src/pages/chat-page/conversation/render/chat-page-utils.ts:86`）的 `permissionMode` 字段（:103）参与 dirty 检查；若遗漏，`ask → auto-edit` 会得到完全相同的快照，导致 PATCH 被静默跳过。同一快照里 `yoloMode` 仍按 `permissionMode === 'yolo'` 派生回写（:104）。
+- **流式传输 SSE 回退契约（`src/hooks/gateway/useGatewayClient.ts`）**：WS 断开后的 SSE 回退是**有界重试**（`SSE_FALLBACK_RETRY_DELAYS_MS` = 1s/2s/4s），重试前用 `resolveFreshStreamToken` 取认证 store 里的最新 token（距过期 ≤60s 先单飞刷新）——禁止再用 `stream()` 闭包里的发送时刻 token，长回合里它会过期并让 EventSource 401 硬失败。每次重试都携带最新 `afterSeq`，网关按 `clientRequestId` 单飞重放不会重复执行；只有重试预算耗尽才向用户抛 `SSE_ERROR`。用户显式停止（`stopStream`）或新流/attach 接管时必须取消待触发重试。
+- **attach 的 `no_active_stream` 不是终态（会话仍 running 时）**：`runSessionAttachEffect` 收到网关「无活跃流」但会话状态仍为 `running` 时必须 `scheduleAttachRetry` 有界重试，不能直接 `cancelAttachRetry()` 放弃——典型场景是权限批准后的续跑（网关先执行被批准的工具、运行线程稍后才可见）。会话真正 idle（`isAttachStreamTerminal`）时 disposition 会转入 `terminal` 并取消重试，因此不会空转。
+- **权限 / 提问暂停不得呈现为「停止」**：`resolveSessionStopCapability`（`src/components/conversation-runtime/session/session-runtime.ts`）在 `remoteSessionBusyState === 'paused'` 时必须返回 `'none'`——composer 主按钮随之显示专属等待态（「待处理」+ 时钟图标，禁用），**禁止**退化成停止按钮（⏹ +「尝试停止」），否则用户会误以为会话已停止。暂停期间取消运行走审批卡 / 问题面板的拒绝入口。配套：`formatStopReasonLabel('tool_permission')` 固定映射「等待权限」（`src/components/conversation-runtime/messages/message-format.ts`），不得原样透传或显示「已停止」。
 
 ## 约定
 

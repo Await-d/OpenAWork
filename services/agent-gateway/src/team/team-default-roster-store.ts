@@ -180,6 +180,19 @@ function normalizeMemberSlot(entry: unknown): FixedTeamMemberSlot | null {
   };
 }
 
+/**
+ * 统计原始输入中能通过 `normalizeMemberSlot` 校验的槽位数量。
+ *
+ * 供 `team_workspace_manage` 工具做「输入非空但被丢弃」的显式检测：
+ * `normalizeTeamWorkspaceDefaultRoster` 在有效槽位为 0 时会**静默回退默认编制**，
+ * 工具必须报错而不是让模型以为配置了成员却得到默认 roster。
+ */
+export function countValidMemberSlots(entries: readonly unknown[]): number {
+  return entries
+    .slice(0, MAX_ROSTER_MEMBER_SLOTS)
+    .filter((entry) => normalizeMemberSlot(entry) !== null).length;
+}
+
 export function normalizeTeamWorkspaceDefaultRoster(
   memberSlots: FixedTeamMemberSlot[],
 ): FixedTeamMemberSlot[] {

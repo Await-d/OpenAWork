@@ -49,7 +49,11 @@ export function buildNativeModel(input: NativeModelInput): OpenCodeLLM.Model {
   }
 
   if (providerType === 'openai') {
-    return openAI.chat(input.model);
+    // 原生 OpenAI 支持 `prompt_cache_key`（会话级缓存亲和）；协议侧只在
+    // compatibility 显式开启时下发，中转/兼容端点保持关闭。
+    return OpenCodeLLM.Model.update(openAI.chat(input.model), {
+      compatibility: { supportsPromptCacheKey: true },
+    });
   }
 
   return OpenCodeLLM.Providers.OpenAICompatible.configure({

@@ -204,6 +204,10 @@ const OpenAIResponsesCoreFields = {
   max_output_tokens: Schema.optional(Schema.Number),
   temperature: Schema.optional(Schema.Number),
   top_p: Schema.optional(Schema.Number),
+  // 对齐参考库：由 `parallelToolCalls` / `ToolChoice.disableParallelToolUse` 推导。
+  parallel_tool_calls: Schema.optional(Schema.Boolean),
+  // 对齐参考库：单次响应内工具调用上限（providerOptions.openai.maxToolCalls）。
+  max_tool_calls: Schema.optional(Schema.Number),
 };
 
 const OpenAIResponsesBody = Schema.Struct({
@@ -603,6 +607,8 @@ const lowerOptions = Effect.fn('OpenAIResponses.lowerOptions')(function* (reques
   const verbosity = OpenAIOptions.textVerbosity(request);
   const instructions = OpenAIOptions.instructions(request);
   const serviceTier = OpenAIOptions.serviceTier(request);
+  const parallelToolCalls = OpenAIOptions.parallelToolCalls(request);
+  const maxToolCalls = OpenAIOptions.maxToolCalls(request);
   return {
     ...(instructions ? { instructions } : {}),
     ...(store !== undefined ? { store } : {}),
@@ -611,6 +617,8 @@ const lowerOptions = Effect.fn('OpenAIResponses.lowerOptions')(function* (reques
     ...(effort || summary ? { reasoning: { effort, summary } } : {}),
     ...(verbosity ? { text: { verbosity } } : {}),
     ...(serviceTier ? { service_tier: serviceTier } : {}),
+    ...(parallelToolCalls === undefined ? {} : { parallel_tool_calls: parallelToolCalls }),
+    ...(maxToolCalls === undefined ? {} : { max_tool_calls: maxToolCalls }),
   };
 });
 

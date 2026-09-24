@@ -205,6 +205,28 @@ export function markPermissionNotificationsReadByRequestIds(input: {
   }
 }
 
+/**
+ * 会话级清扫：把该会话所有未读的 `permission_asked` 通知标记为已读。
+ *
+ * 停止整段运行（`/stream/stop`、`/stream/stop-active`）时会连待审批一起作废，
+ * 对应的通知必须同步收口，否则通知中心会残留一条指向已作废审批的未读项
+ * （浮层本身按 pending 过滤不会再弹出，但红点会骗人）。
+ */
+export function markPermissionNotificationsReadForSession(input: {
+  sessionId: string;
+  userId: string;
+}): void {
+  sqliteRun(
+    `UPDATE notifications
+     SET status = 'read', read_at = COALESCE(read_at, datetime('now'))
+     WHERE user_id = ?
+       AND session_id = ?
+       AND event_type = 'permission_asked'
+       AND status = 'unread'`,
+    [input.userId, input.sessionId],
+  );
+}
+
 export function markAllNotificationsRead(input: { userId: string }): void {
   sqliteRun(
     `UPDATE notifications

@@ -93,7 +93,7 @@ describe('extractSessionMemory · sessionId 透传', () => {
       sessionId: SESSION_ID,
       userId: USER_ID,
       route: ROUTE,
-      config: { initializationThreshold: 0 },
+      config: { enabled: true, initializationThreshold: 0 },
     });
 
     expect(result).toEqual({ success: true });

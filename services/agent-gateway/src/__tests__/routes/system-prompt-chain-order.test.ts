@@ -28,6 +28,8 @@ const INPUT = {
   thinkingLanguagePrompt: '<<THINKING>>',
   pinnedSkillsPrompt: '<<PINNED_SKILLS>>',
   teamInstructionStack: '<<TEAM_STACK>>',
+  toolCatalogPrompt: '<<TOOL_CATALOG>>',
+  capabilityCatalogPrompt: '<<CAPABILITY_CATALOG>>',
 };
 
 function orderOf(haystack: string, ...needles: string[]): number[] {
@@ -35,7 +37,7 @@ function orderOf(haystack: string, ...needles: string[]): number[] {
 }
 
 describe('buildSystemPromptChain · 槽位顺序', () => {
-  it('route → workspace → dynamicAgent → startWork → command → lsp → dialogue → yolo → thinking → pinnedSkills → teamStack 固定顺序', () => {
+  it('route → workspace → dynamicAgent → startWork → command → lsp → dialogue → yolo → thinking → pinnedSkills → teamStack → toolCatalog → capabilityCatalog 固定顺序', () => {
     const chain = buildSystemPromptChain(INPUT);
     const joined = chain.join('\n');
     const idx = orderOf(
@@ -51,6 +53,8 @@ describe('buildSystemPromptChain · 槽位顺序', () => {
       '<<THINKING>>',
       '<<PINNED_SKILLS>>',
       '<<TEAM_STACK>>',
+      '<<TOOL_CATALOG>>',
+      '<<CAPABILITY_CATALOG>>',
     );
     // 全部出现
     for (const i of idx) expect(i).toBeGreaterThanOrEqual(0);
@@ -60,24 +64,38 @@ describe('buildSystemPromptChain · 槽位顺序', () => {
     }
   });
 
-  it('team 指令栈位于链末尾', () => {
+  it('能力目录位于链末尾（工具折叠目录之后）', () => {
     const chain = buildSystemPromptChain(INPUT);
     const joined = chain.join('\n');
-    // teamStack 之后不应再有其它已知槽位标记
-    const teamIdx = joined.indexOf('<<TEAM_STACK>>');
-    for (const marker of ['<<ROUTE>>', '<<WORKSPACE>>', '<<LSP>>', '<<PINNED_SKILLS>>']) {
-      expect(joined.indexOf(marker)).toBeLessThan(teamIdx);
+    const capabilityIdx = joined.indexOf('<<CAPABILITY_CATALOG>>');
+    for (const marker of [
+      '<<ROUTE>>',
+      '<<WORKSPACE>>',
+      '<<LSP>>',
+      '<<PINNED_SKILLS>>',
+      '<<TEAM_STACK>>',
+      '<<TOOL_CATALOG>>',
+    ]) {
+      expect(joined.indexOf(marker)).toBeLessThan(capabilityIdx);
     }
   });
 });
 
 describe('buildTwoPartSystemPrompts · stable / dynamic 分段', () => {
-  it('team 指令栈进 stable 段（prompt-cache 友好），且是 stable 段最后一块', () => {
+  it('team 指令栈、工具目录与能力目录进 stable 段（prompt-cache 友好），能力目录收尾', () => {
     const { stable, dynamic } = buildTwoPartSystemPrompts(INPUT);
     expect(stable).toContain('<<TEAM_STACK>>');
+    expect(stable).toContain('<<TOOL_CATALOG>>');
+    expect(stable).toContain('<<CAPABILITY_CATALOG>>');
     expect(dynamic).not.toContain('<<TEAM_STACK>>');
-    // stable 段内：pinnedSkills 在 teamStack 之前，teamStack 收尾
+    expect(dynamic).not.toContain('<<TOOL_CATALOG>>');
+    expect(dynamic).not.toContain('<<CAPABILITY_CATALOG>>');
+    // stable 段内：pinnedSkills → teamStack → toolCatalog → capabilityCatalog
     expect(stable.indexOf('<<PINNED_SKILLS>>')).toBeLessThan(stable.indexOf('<<TEAM_STACK>>'));
+    expect(stable.indexOf('<<TEAM_STACK>>')).toBeLessThan(stable.indexOf('<<TOOL_CATALOG>>'));
+    expect(stable.indexOf('<<TOOL_CATALOG>>')).toBeLessThan(
+      stable.indexOf('<<CAPABILITY_CATALOG>>'),
+    );
   });
 
   it('dynamicAgent / startWork / command 进 dynamic 段（每轮可变）', () => {
@@ -88,7 +106,7 @@ describe('buildTwoPartSystemPrompts · stable / dynamic 分段', () => {
     expect(stable).not.toContain('<<DYNAMIC_AGENT>>');
   });
 
-  it('stable 段固定顺序：route → workspace → lsp → dialogue → yolo → thinking → pinnedSkills → teamStack', () => {
+  it('stable 段固定顺序：route → workspace → lsp → dialogue → yolo → thinking → pinnedSkills → teamStack → toolCatalog → capabilityCatalog', () => {
     const { stable } = buildTwoPartSystemPrompts(INPUT);
     const idx = orderOf(
       stable,
@@ -100,6 +118,8 @@ describe('buildTwoPartSystemPrompts · stable / dynamic 分段', () => {
       '<<THINKING>>',
       '<<PINNED_SKILLS>>',
       '<<TEAM_STACK>>',
+      '<<TOOL_CATALOG>>',
+      '<<CAPABILITY_CATALOG>>',
     );
     for (const i of idx) expect(i).toBeGreaterThanOrEqual(0);
     for (let k = 1; k < idx.length; k++) {

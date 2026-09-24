@@ -217,10 +217,41 @@ describe('listCapabilitiesForUser installed-manifest resilience', () => {
 
     const context = capabilities.buildCapabilityContext(USER_ID, sessionId);
 
-    expect(context).toContain('- websearch:');
-    expect(context).not.toContain('- lsp_goto_definition:');
-    expect(context).not.toContain('- list:');
-    expect(context).not.toContain('- PluginSendMessage:');
+    expect(context).toContain('## 聊天可调用工具（仅名称）');
+    const toolsLine = context
+      .split('\n')
+      .find((line) => line.startsWith('- ') && line.includes('websearch'));
+    expect(toolsLine).toBeDefined();
+    expect(toolsLine).toContain('webfetch');
+    // 分组关闭的工具不出现在名称清单里；能力目录不再二次展开工具描述。
+    expect(context).not.toContain('lsp_goto_definition');
+    expect(context).not.toContain('PluginSendMessage');
+    expect(context).not.toMatch(/(^|, )list(,|$)/m);
+  });
+
+  it('工具与技能目录去重：工具只列名称，技能指向 Skill 工具描述', () => {
+    const sessionId = 'session-capability-context-dedup';
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, messages_json, state_status, metadata_json)
+       VALUES (?, ?, 'cap dedup', '[]', 'idle', '{"webSearchEnabled":true}')`,
+      [sessionId, USER_ID],
+    );
+
+    const context = capabilities.buildCapabilityContext(USER_ID, sessionId);
+
+    // 工具区只列名称：不再二次展开完整描述。
+    expect(context).toContain('## 聊天可调用工具（仅名称）');
+    expect(context).not.toContain('Fetch content from a specific URL');
+    const toolsLine = context
+      .split('\n')
+      .find((line) => line.startsWith('- ') && line.includes('webfetch'));
+    expect(toolsLine).toBeDefined();
+    expect(toolsLine).not.toContain(': ');
+
+    // 技能区在 `Skill` 工具可见时只列名称 + 指向工具描述（描述不重复）。
+    expect(context).toContain('`Skill` 工具描述');
+    expect(context).toContain('git-master');
+    expect(context).not.toContain('MUST USE for ANY git operations');
   });
 
   it('会在 capabilityContext 五段都关闭时返回空字符串', () => {

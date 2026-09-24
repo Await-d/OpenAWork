@@ -211,6 +211,248 @@ describe('tool permission derivers · skill / skill_mcp / mcp_call / flat MCP', 
   });
 });
 
+describe('tool permission derivers · mcp_manage_servers', () => {
+  it('list：只读列举免审批（返回 null）', () => {
+    expect(
+      buildToolPermissionRequestContext(ctx('mcp_manage_servers', { action: 'list' })),
+    ).toBeNull();
+  });
+
+  it('add：scope=action:serverId，always 只覆盖同动作，sse 预览剥离 query', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('mcp_manage_servers', {
+        action: 'add',
+        server: {
+          id: 'github',
+          name: 'GitHub',
+          transport: 'sse',
+          url: 'https://mcp.example.com/sse?key=super-secret',
+        },
+      }),
+    );
+    expect(out).toMatchObject({ scope: 'add:github', riskLevel: 'high', always: ['add:*'] });
+    expect(out?.previewAction).toContain('https://mcp.example.com/sse');
+    expect(out?.previewAction).not.toContain('super-secret');
+  });
+
+  it('add：未提供 id 时 scope 使用 new', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('mcp_manage_servers', {
+        action: 'add',
+        server: { name: 'X', transport: 'sse', url: 'https://x.dev' },
+      }),
+    );
+    expect(out).toMatchObject({ scope: 'add:new', always: ['add:*'] });
+  });
+
+  it('remove / disable：serverId 即 scope，always 按动作隔离', () => {
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('mcp_manage_servers', { action: 'remove', serverId: 'fs' }),
+      ),
+    ).toMatchObject({ scope: 'remove:fs', always: ['remove:*'] });
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('mcp_manage_servers', { action: 'disable', serverId: 'websearch' }),
+      ),
+    ).toMatchObject({ scope: 'disable:websearch', always: ['disable:*'] });
+  });
+
+  it('stdio：预览展示 command + args', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('mcp_manage_servers', {
+        action: 'add',
+        server: {
+          id: 'fs',
+          name: 'fs',
+          transport: 'stdio',
+          command: 'npx',
+          args: ['-y', 'server-fs'],
+        },
+      }),
+    );
+    expect(out?.previewAction).toContain('npx -y server-fs');
+  });
+});
+
+describe('tool permission derivers · memory_manage', () => {
+  it('list：只读检索免审批（返回 null）', () => {
+    expect(buildToolPermissionRequestContext(ctx('memory_manage', { action: 'list' }))).toBeNull();
+  });
+
+  it('add：scope=add:new，always 按动作隔离，预览展示 key/type/value 片段', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('memory_manage', {
+        action: 'add',
+        memory: { type: 'preference', key: 'editor', value: '偏好 Vim 键位' },
+      }),
+    );
+    expect(out).toMatchObject({ scope: 'add:new', riskLevel: 'high', always: ['add:*'] });
+    expect(out?.previewAction).toContain('editor');
+    expect(out?.previewAction).toContain('preference');
+    expect(out?.previewAction).toContain('偏好 Vim 键位');
+  });
+
+  it('update / delete：scope 精确到 memoryId', () => {
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('memory_manage', { action: 'update', memoryId: 'm-1', memory: { value: 'x' } }),
+      ),
+    ).toMatchObject({ scope: 'update:m-1', always: ['update:*'] });
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('memory_manage', { action: 'delete', memoryId: 'm-2' }),
+      ),
+    ).toMatchObject({ scope: 'delete:m-2', always: ['delete:*'] });
+    expect(
+      buildToolPermissionRequestContext(ctx('memory_manage', { action: 'delete' }))?.previewAction,
+    ).toContain('删除记忆');
+  });
+});
+
+describe('tool permission derivers · skill_manage', () => {
+  it('list：只读列举免审批（返回 null）', () => {
+    expect(buildToolPermissionRequestContext(ctx('skill_manage', { action: 'list' }))).toBeNull();
+  });
+
+  it('install：scope=install:skillId，always 按动作隔离，预览含来源', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('skill_manage', { action: 'install', skillId: 'demo', sourceId: 'src-a' }),
+    );
+    expect(out).toMatchObject({ scope: 'install:demo', riskLevel: 'high', always: ['install:*'] });
+    expect(out?.previewAction).toContain('安装技能 demo');
+    expect(out?.previewAction).toContain('src-a');
+  });
+
+  it('uninstall / enable / disable：scope 与预览动词正确', () => {
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('skill_manage', { action: 'uninstall', skillId: 'demo' }),
+      ),
+    ).toMatchObject({ scope: 'uninstall:demo', always: ['uninstall:*'] });
+    expect(
+      buildToolPermissionRequestContext(ctx('skill_manage', { action: 'enable', skillId: 'demo' }))
+        ?.previewAction,
+    ).toContain('启用技能');
+    expect(
+      buildToolPermissionRequestContext(ctx('skill_manage', { action: 'disable', skillId: 'demo' }))
+        ?.previewAction,
+    ).toContain('停用技能');
+  });
+});
+
+describe('tool permission derivers · schedule_manage', () => {
+  it('list / history：只读免审批（返回 null）', () => {
+    expect(
+      buildToolPermissionRequestContext(ctx('schedule_manage', { action: 'list' })),
+    ).toBeNull();
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('schedule_manage', { action: 'history', jobId: 'j-1' }),
+      ),
+    ).toBeNull();
+  });
+
+  it('add：scope=add:new，always 按动作隔离，预览含调度表达式、时区与执行环境', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('schedule_manage', {
+        action: 'add',
+        job: {
+          name: '巡检',
+          schedule_kind: 'cron',
+          schedule_expr: '0 9 * * *',
+          schedule_tz: 'Asia/Shanghai',
+          prompt: '检查服务状态',
+          working_folder: '/workspace/project',
+          agent_id: 'reviewer',
+          model: 'gpt-4o',
+          delivery_mode: 'session',
+        },
+      }),
+    );
+    expect(out).toMatchObject({ scope: 'add:new', riskLevel: 'high', always: ['add:*'] });
+    expect(out?.previewAction).toContain('0 9 * * *');
+    expect(out?.previewAction).toContain('Asia/Shanghai');
+    expect(out?.previewAction).toContain('检查服务状态');
+    // 执行环境必须可见（防被任务名掩护扩大工作区 / 换执行身份）。
+    expect(out?.previewAction).toContain('/workspace/project');
+    expect(out?.previewAction).toContain('reviewer');
+    expect(out?.previewAction).toContain('gpt-4o');
+  });
+
+  it('remove / disable：scope 精确到 jobId', () => {
+    expect(
+      buildToolPermissionRequestContext(ctx('schedule_manage', { action: 'remove', jobId: 'j-9' })),
+    ).toMatchObject({ scope: 'remove:j-9', always: ['remove:*'] });
+    expect(
+      buildToolPermissionRequestContext(ctx('schedule_manage', { action: 'disable', jobId: 'j-9' }))
+        ?.previewAction,
+    ).toContain('停用定时任务');
+  });
+});
+
+describe('tool permission derivers · agent_manage', () => {
+  it('list：只读列举免审批（返回 null）', () => {
+    expect(buildToolPermissionRequestContext(ctx('agent_manage', { action: 'list' }))).toBeNull();
+  });
+
+  it('create：scope=create:new，预览含 label', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('agent_manage', {
+        action: 'create',
+        agent: { label: '代码审查员', systemPrompt: 'x' },
+      }),
+    );
+    expect(out).toMatchObject({ scope: 'create:new', riskLevel: 'high', always: ['create:*'] });
+    expect(out?.previewAction).toContain('代码审查员');
+  });
+
+  it('delete / reset：scope 精确到 agentId', () => {
+    expect(
+      buildToolPermissionRequestContext(ctx('agent_manage', { action: 'delete', agentId: 'a-1' })),
+    ).toMatchObject({ scope: 'delete:a-1', always: ['delete:*'] });
+    expect(
+      buildToolPermissionRequestContext(ctx('agent_manage', { action: 'reset', agentId: 'a-1' }))
+        ?.previewAction,
+    ).toContain('恢复默认');
+  });
+});
+
+describe('tool permission derivers · team_workspace_manage', () => {
+  it('list：只读列举免审批（返回 null）', () => {
+    expect(
+      buildToolPermissionRequestContext(ctx('team_workspace_manage', { action: 'list' })),
+    ).toBeNull();
+  });
+
+  it('create：scope=create:new，预览含名称 / 可见性 / 成员数 / 工作根', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('team_workspace_manage', {
+        action: 'create',
+        workspace: {
+          name: '研发团队',
+          visibility: 'closed',
+          defaultWorkingRoot: '/workspace/team',
+          defaultTeamRoster: [{ id: 'a' }, { id: 'b' }],
+        },
+      }),
+    );
+    expect(out).toMatchObject({ scope: 'create:new', riskLevel: 'high', always: ['create:*'] });
+    expect(out?.previewAction).toContain('研发团队');
+    expect(out?.previewAction).toContain('closed');
+    expect(out?.previewAction).toContain('成员 2 个');
+    expect(out?.previewAction).toContain('/workspace/team');
+  });
+
+  it('delete：scope 精确到 workspaceId', () => {
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('team_workspace_manage', { action: 'delete', workspaceId: 'w-9' }),
+      ),
+    ).toMatchObject({ scope: 'delete:w-9', always: ['delete:*'] });
+  });
+});
+
 describe('tool permission derivers · 文件 / bash / patch 类', () => {
   it('write：workspace 内路径 → 相对 scope', () => {
     const out = buildToolPermissionRequestContext(
@@ -333,7 +575,20 @@ describe('tool permission derivers · 兜底与注册表', () => {
 
   it('注册表包含文件 / bash / 渠道 / MCP / 桌面核心工具', () => {
     const names = listToolPermissionDeriverNames();
-    for (const name of ['write', 'edit', 'multi_edit', 'bash', 'mcp_call', 'PluginSendMessage']) {
+    for (const name of [
+      'write',
+      'edit',
+      'multi_edit',
+      'bash',
+      'mcp_call',
+      'mcp_manage_servers',
+      'memory_manage',
+      'skill_manage',
+      'schedule_manage',
+      'agent_manage',
+      'team_workspace_manage',
+      'PluginSendMessage',
+    ]) {
       expect(names).toContain(name);
     }
   });

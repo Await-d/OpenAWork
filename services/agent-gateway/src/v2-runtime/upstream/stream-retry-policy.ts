@@ -28,12 +28,10 @@ export function withUpstreamStreamRetry<A, E, R>(
 
   const hasOutput = { value: false };
 
-  const retrySchedule = Schedule.exponential(
-    Duration.millis(UPSTREAM_STREAM_RETRY_INITIAL_DELAY_MS),
-  ).pipe(
-    Schedule.both(Schedule.recurs(maxRetries)),
-    Schedule.while(({ input }) => !hasOutput.value && isRetryableUpstreamStreamError(input)),
-  );
+  const retrySchedule = Schedule.max([
+    Schedule.exponential(Duration.millis(UPSTREAM_STREAM_RETRY_INITIAL_DELAY_MS)),
+    Schedule.recurs(maxRetries),
+  ]).pipe(Schedule.while(({ input }) => !hasOutput.value && isRetryableUpstreamStreamError(input)));
 
   return source.pipe(
     Stream.tap(() =>

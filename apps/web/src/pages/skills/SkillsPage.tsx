@@ -1,306 +1,31 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { createSkillsClient } from '@openAwork/web-client';
-import { useAuthStore } from '../../stores/auth/auth.js';
-import { SkillDetailPage, InstallProgressUI } from '@openAwork/shared-ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { InstallProgressUI, SkillDetailPage, SkillMarketHome } from '@openAwork/shared-ui';
 import type {
+  InstallStep,
   MarketSkill,
   MarketSkillDetail,
-  MarketInstalledSkill,
   RegistrySource,
-  InstallStep,
 } from '@openAwork/shared-ui';
+import { SkillsInstalledSection } from '../../components/skills/skills-installed-section.js';
+import { SkillsPageHeader } from '../../components/skills/skills-page-header.js';
+import { SkillsTabBar, type SkillsTab } from '../../components/skills/skills-tab-bar.js';
+import { useInstalledSkills } from '../../hooks/skills/use-installed-skills.js';
 import {
-  SkillsHero,
-  SkillsInstalledSection,
-  SkillsMarketSection,
-  SkillsToolbar,
-  sharedUiThemeVars,
-} from '../../components/skills/SkillsPageSections.js';
-import { DEFAULT_PREINSTALLED_SKILL_IDS } from './shared/skills-shared-constants.js';
-
-type ActiveTab = 'market' | 'local' | 'installed';
-
-const MARKET_PAGE_SIZE = 24;
-
-interface SkillEntryDto {
-  id: string;
-  name?: string;
-  displayName?: string;
-  version?: string;
-  description?: string;
-  category?: string;
-  tags?: string[];
-  downloads?: number;
-  verified?: boolean;
-  sourceId?: string;
-  author?: string;
-  readme?: string;
-  permissions?: string[];
-  changelog?: string;
-}
-
-interface MarketSearchResult {
-  skills: MarketSkill[];
-  sourceMap: Map<string, string>;
-  total: number;
-}
-
-interface LocalSkillEntryDto extends SkillEntryDto {
-  dirPath: string;
-  manifestPath: string;
-  workspaceRelativePath: string;
-  installed?: boolean;
-}
+  MARKET_PAGE_SIZE,
+  matchesLocalSkill,
+  toLocalSkill,
+  useSkillsApi,
+  type LocalWorkspaceSkill,
+} from './use-skills-api.js';
 
 type InstallTarget =
   | { mode: 'market'; skillId: string; sourceId?: string }
   | { mode: 'local'; skillId: string; dirPath: string };
 
-type LocalWorkspaceSkill = (MarketSkill & Partial<MarketSkillDetail>) & {
-  dirPath: string;
-  manifestPath: string;
-  workspaceRelativePath: string;
-};
-
-function toMarketSkill(entry: SkillEntryDto): MarketSkill & Partial<MarketSkillDetail> {
-  const installable = entry.sourceId !== 'builtin';
-  return {
-    id: entry.id,
-    name: entry.displayName ?? entry.name ?? entry.id,
-    version: entry.version ?? '0.0.0',
-    description: entry.description ?? '',
-    category: entry.category ?? 'other',
-    tags: entry.tags ?? [],
-    downloads: entry.downloads ?? 0,
-    verified: entry.verified ?? false,
-    installable,
-    author: entry.author,
-    readme: entry.readme,
-    permissions: entry.permissions,
-    changelog: entry.changelog,
-  };
-}
-
-function toLocalSkill(entry: LocalSkillEntryDto): LocalWorkspaceSkill {
-  const base = toMarketSkill({
-    ...entry,
-    downloads: entry.downloads ?? 0,
-    sourceId: entry.sourceId ?? 'local-workspace',
-    verified: false,
-  });
-  const location =
-    entry.workspaceRelativePath && entry.workspaceRelativePath !== '.'
-      ? `路径：${entry.workspaceRelativePath}`
-      : '路径：工作区根目录';
-  return {
-    ...base,
-    description:
-      base.description.trim().length > 0 ? `${base.description} · ${location}` : location,
-    dirPath: entry.dirPath,
-    manifestPath: entry.manifestPath,
-    workspaceRelativePath: entry.workspaceRelativePath,
-  };
-}
-
-function matchesLocalSkill(skill: LocalWorkspaceSkill, query?: string, category?: string): boolean {
-  if (category && skill.category !== category) {
-    return false;
-  }
-  const normalizedQuery = query?.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return true;
-  }
-  return [skill.id, skill.name, skill.description, skill.workspaceRelativePath, ...skill.tags]
-    .join(' ')
-    .toLowerCase()
-    .includes(normalizedQuery);
-}
-
-function useSkillsApi() {
-  const { gatewayUrl, accessToken } = useAuthStore();
-  const client = useMemo(() => createSkillsClient(gatewayUrl), [gatewayUrl]);
-  const token = accessToken ?? '';
-
-  const searchSkills = useCallback(
-    async (
-      q?: string,
-      category?: string,
-      page = 1,
-      pageSize = MARKET_PAGE_SIZE,
-    ): Promise<MarketSearchResult> => {
-      const data = (await client.search(token, {
-        ...(q ? { q } : {}),
-        ...(category ? { category } : {}),
-        limit: pageSize,
-        offset: (page - 1) * pageSize,
-      })) as { skills: SkillEntryDto[]; total?: number };
-      const sourceMap = new Map<string, string>();
-      for (const entry of data.skills) {
-        if (entry.sourceId) sourceMap.set(entry.id, entry.sourceId);
-      }
-      return {
-        skills: data.skills.map(toMarketSkill),
-        sourceMap,
-        total: data.total ?? data.skills.length,
-      };
-    },
-    [client, token],
-  );
-
-  const fetchInstalled = useCallback(async (): Promise<MarketInstalledSkill[]> => {
-    const data = (await client.listInstalled(token)) as {
-      skills: Array<{
-        skillId: string;
-        manifest: { name: string; version: string };
-        sourceId: string;
-        enabled: boolean;
-        latestVersion?: string | null;
-      }>;
-    };
-    return data.skills.map((s) => ({
-      id: s.skillId,
-      name: s.manifest.name,
-      version: s.manifest.version,
-      // Backend now writes the real remote version from the periodic
-      // checker. Fall back to local version when the check hasn't run
-      // yet (newly-installed skill, or non-GitHub source that we
-      // don't probe at all).
-      latestVersion: s.latestVersion ?? s.manifest.version,
-      source: s.sourceId,
-      enabled: s.enabled,
-      preinstalled: DEFAULT_PREINSTALLED_SKILL_IDS.has(s.skillId),
-    }));
-  }, [client, token]);
-
-  const installSkill = useCallback(
-    async (skillId: string, sourceId?: string): Promise<void> => {
-      await client.install(token, { skillId, ...(sourceId ? { sourceId } : {}) });
-    },
-    [client, token],
-  );
-
-  const uninstallSkill = useCallback(
-    async (skillId: string): Promise<void> => {
-      await client.uninstall(token, skillId);
-    },
-    [client, token],
-  );
-
-  const toggleInstalledSkill = useCallback(
-    async (skillId: string, enabled: boolean): Promise<void> => {
-      await client.setEnabled(token, skillId, enabled);
-    },
-    [client, token],
-  );
-
-  const discoverLocalSkills = useCallback(async (): Promise<LocalSkillEntryDto[]> => {
-    const data = (await client.discoverLocal(token)) as { skills: LocalSkillEntryDto[] };
-    return data.skills;
-  }, [client, token]);
-
-  const installLocalSkill = useCallback(
-    async (dirPath: string): Promise<void> => {
-      await client.installLocal(token, dirPath);
-    },
-    [client, token],
-  );
-
-  const resyncSystemSkills = useCallback(async (): Promise<{
-    added: number;
-    updated: number;
-    removed: number;
-    total: number;
-  }> => {
-    return (await client.resyncSystem(token)) as {
-      added: number;
-      updated: number;
-      removed: number;
-      total: number;
-    };
-  }, [client, token]);
-
-  const fetchSources = useCallback(async (): Promise<RegistrySource[]> => {
-    const data = (await client.listRegistrySources(token)) as { sources: RegistrySource[] };
-    return data.sources;
-  }, [client, token]);
-
-  const syncSources = useCallback(
-    async (sourceIds?: string[]): Promise<void> => {
-      await client.syncRegistrySources(token, sourceIds);
-    },
-    [client, token],
-  );
-
-  const addSource = useCallback(
-    async (url: string): Promise<void> => {
-      await client.addRegistrySource(token, { name: url, url });
-    },
-    [client, token],
-  );
-
-  const removeSource = useCallback(
-    async (id: string): Promise<void> => {
-      await client.removeRegistrySource(token, id);
-    },
-    [client, token],
-  );
-
-  const toggleSource = useCallback(
-    async (id: string, enabled: boolean): Promise<void> => {
-      await client.setRegistrySourceEnabled(token, id, enabled);
-    },
-    [client, token],
-  );
-
-  const fetchSkillDetail = useCallback(
-    async (skillId: string): Promise<MarketSkillDetail> => {
-      const data = (await client.getDetail(token, skillId)) as SkillEntryDto & {
-        readme?: string;
-        license?: string;
-        permissions?: string[];
-        downloads?: number;
-        verified?: boolean;
-      };
-      return {
-        id: data.id,
-        name: data.displayName ?? data.name ?? data.id,
-        version: data.version ?? '0.0.0',
-        description: data.description ?? '',
-        category: data.category ?? 'other',
-        tags: data.tags ?? [],
-        downloads: data.downloads ?? 0,
-        verified: data.verified ?? false,
-        author: data.author ?? '',
-        license: data.license ?? '',
-        readme: data.readme ?? '',
-        permissions: data.permissions ?? [],
-        changelog: data.changelog,
-      };
-    },
-    [client, token],
-  );
-
-  return {
-    searchSkills,
-    fetchInstalled,
-    installSkill,
-    uninstallSkill,
-    toggleInstalledSkill,
-    fetchSources,
-    syncSources,
-    addSource,
-    removeSource,
-    toggleSource,
-    fetchSkillDetail,
-    discoverLocalSkills,
-    installLocalSkill,
-    resyncSystemSkills,
-  };
-}
+type MarketSkillEntry = MarketSkill & Partial<MarketSkillDetail>;
 
 export default function SkillsPage() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('market');
-  const [tabChanging, setTabChanging] = useState(false);
+  const [activeTab, setActiveTab] = useState<SkillsTab>('market');
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<MarketSkillDetail | null>(null);
   const [selectedInstallTarget, setSelectedInstallTarget] = useState<InstallTarget | null>(null);
@@ -308,9 +33,7 @@ export default function SkillsPage() {
   const didInitMarketRef = useRef(false);
   const marketRequestSeqRef = useRef(0);
 
-  const [marketSkills, setMarketSkills] = useState<Array<MarketSkill & Partial<MarketSkillDetail>>>(
-    [],
-  );
+  const [marketSkills, setMarketSkills] = useState<MarketSkillEntry[]>([]);
   const [marketSkillSources, setMarketSkillSources] = useState<Map<string, string>>(new Map());
   const [marketLoading, setMarketLoading] = useState(false);
   const [marketError, setMarketError] = useState<string | null>(null);
@@ -325,29 +48,22 @@ export default function SkillsPage() {
   const [localQuery, setLocalQuery] = useState<string | undefined>(undefined);
   const [localCategory, setLocalCategory] = useState<string | undefined>(undefined);
 
-  const [installedSkills, setInstalledSkills] = useState<MarketInstalledSkill[]>([]);
-  const [installedLoading, setInstalledLoading] = useState(false);
-
   const [registrySources, setRegistrySources] = useState<RegistrySource[]>([]);
-
   const [installingSkillId, setInstallingSkillId] = useState<string | null>(null);
   const [installSteps, setInstallSteps] = useState<InstallStep[]>([]);
 
+  const installed = useInstalledSkills();
   const {
     searchSkills,
-    fetchInstalled,
     installSkill,
-    uninstallSkill,
-    toggleInstalledSkill,
+    installLocalSkill,
+    discoverLocalSkills,
     fetchSources,
     syncSources,
     addSource,
     removeSource,
     toggleSource,
     fetchSkillDetail,
-    discoverLocalSkills,
-    installLocalSkill,
-    resyncSystemSkills,
   } = useSkillsApi();
 
   const loadMarket = useCallback(
@@ -396,18 +112,6 @@ export default function SkillsPage() {
     [marketCategory, marketPage, marketQuery, searchSkills],
   );
 
-  const loadInstalled = useCallback(async () => {
-    setInstalledLoading(true);
-    try {
-      const skills = await fetchInstalled();
-      setInstalledSkills(skills);
-    } catch (_err) {
-      setInstalledSkills([]);
-    } finally {
-      setInstalledLoading(false);
-    }
-  }, [fetchInstalled]);
-
   const loadLocalCatalog = useCallback(async () => {
     setLocalLoading(true);
     setLocalError(null);
@@ -452,34 +156,20 @@ export default function SkillsPage() {
   }, [loadMarket, loadSources]);
 
   useEffect(() => {
-    if (activeTab === 'installed' || activeTab === 'local') {
-      void loadInstalled();
-    }
     if (activeTab === 'local') {
       void loadLocalCatalog();
     }
-  }, [activeTab, loadInstalled, loadLocalCatalog]);
+  }, [activeTab, loadLocalCatalog]);
 
-  const installedSkillIds = useMemo(
-    () => new Set(installedSkills.map((skill) => skill.id)),
-    [installedSkills],
-  );
+  const installedSkillIds = new Set(installed.skills.map((skill) => skill.id));
+  const localSkills = localCatalog
+    .filter((skill) => matchesLocalSkill(skill, localQuery, localCategory))
+    .map((skill) => ({
+      ...skill,
+      actionLabel: installedSkillIds.has(skill.id) ? '重新加载' : '安装',
+    }));
 
-  const localSkills = useMemo(
-    () =>
-      localCatalog
-        .filter((skill) => matchesLocalSkill(skill, localQuery, localCategory))
-        .map((skill) => ({
-          ...skill,
-          actionLabel: installedSkillIds.has(skill.id) ? '重新加载' : '安装',
-        })),
-    [installedSkillIds, localCatalog, localCategory, localQuery],
-  );
-
-  const combinedSkillIndex = useMemo(
-    () => [...marketSkills, ...localSkills],
-    [localSkills, marketSkills],
-  );
+  const combinedSkillIndex = [...marketSkills, ...localSkills];
 
   async function handleInstall(target: InstallTarget) {
     const isLocalSkill = target.mode === 'local';
@@ -529,7 +219,7 @@ export default function SkillsPage() {
               { label: '校验', status: 'done' },
             ],
       );
-      void loadInstalled();
+      void installed.reload();
       if (isLocalSkill) {
         void loadLocalCatalog();
       }
@@ -556,32 +246,8 @@ export default function SkillsPage() {
     }
   }
 
-  async function handleUninstall(id: string) {
-    await uninstallSkill(id);
-    void loadInstalled();
-  }
-
-  async function handleToggle(id: string, nextEnabled: boolean) {
-    // Optimistic update so the switch animates instantly. If the
-    // request fails, the eventually-consistent reload below pulls
-    // the canonical state back from the server.
-    setInstalledSkills((prev) =>
-      prev.map((skill) => (skill.id === id ? { ...skill, enabled: nextEnabled } : skill)),
-    );
-    try {
-      await toggleInstalledSkill(id, nextEnabled);
-    } catch {
-      // Swallowed: a failed toggle just means the optimistic update
-      // gets reverted by `loadInstalled()`. We deliberately don't
-      // surface a toast here because (a) there's no toast system
-      // wired into this page, and (b) the row will visibly snap back.
-    } finally {
-      void loadInstalled();
-    }
-  }
-
   function handleUpdate(id: string) {
-    const installedSkill = installedSkills.find((skill) => skill.id === id);
+    const installedSkill = installed.skills.find((skill) => skill.id === id);
     if (!installedSkill) {
       return;
     }
@@ -593,27 +259,17 @@ export default function SkillsPage() {
         if (!matchingLocalSkill) {
           return;
         }
-        await handleInstall({
-          mode: 'local',
-          skillId: id,
-          dirPath: matchingLocalSkill.dirPath,
-        });
+        await handleInstall({ mode: 'local', skillId: id, dirPath: matchingLocalSkill.dirPath });
       })();
       return;
     }
 
-    // System-installed skills (auto-discovered from `~/.claude/skills` etc.)
-    // can't go through the market-install path — their source_id is the
-    // scan root, not a registry URL. Rescan the well-known OS dirs instead;
-    // the resync updates manifest_json for any SKILL.md whose content
-    // changed since the last sync.
+    // 系统安装的技能（~/.claude/skills 等自动发现）不能走市场安装路径：
+    // 其 source_id 是扫描根目录而非注册源地址，改为触发系统目录重扫。
     if (installedSkill.source.startsWith('local-system:')) {
       void (async () => {
-        try {
-          await resyncSystemSkills();
-        } finally {
-          await loadInstalled();
-        }
+        await installed.resync();
+        await installed.reload();
       })();
       return;
     }
@@ -621,20 +277,9 @@ export default function SkillsPage() {
     void handleInstall({ mode: 'market', skillId: id, sourceId: installedSkill.source });
   }
 
-  function handleCheckUpdates() {
-    void (async () => {
-      // System-skill resync first so any newly-added/edited SKILL.md in
-      // `~/.claude/skills`-style dirs surfaces before we re-render the
-      // installed list. Swallow errors — the legacy reload below is
-      // still useful even if the FS scan flaked out.
-      await resyncSystemSkills().catch(() => {});
-      await loadInstalled();
-    })();
-  }
-
   function handleSelectSkill(
     id: string,
-    fallbackBase: (MarketSkill & Partial<MarketSkillDetail>) | LocalWorkspaceSkill,
+    fallbackBase: MarketSkillEntry | LocalWorkspaceSkill,
     installTarget: InstallTarget,
   ) {
     setSelectedSkillId(id);
@@ -660,7 +305,7 @@ export default function SkillsPage() {
       });
   }
 
-  const updateCount = installedSkills.filter(
+  const updateCount = installed.skills.filter(
     (skill) => skill.latestVersion && skill.latestVersion !== skill.version,
   ).length;
 
@@ -682,7 +327,7 @@ export default function SkillsPage() {
               setSelectedDetail(null);
               setSelectedInstallTarget(null);
             }}
-            isInstalled={installedSkills.some((s) => s.id === selectedSkillId)}
+            isInstalled={installed.skills.some((s) => s.id === selectedSkillId)}
           />
         )}
       </div>
@@ -694,79 +339,65 @@ export default function SkillsPage() {
       {installingSkillId !== null && (
         <div
           style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.55)',
-            display: 'flex',
             alignItems: 'center',
+            background: 'color-mix(in oklab, var(--bg-base) 72%, transparent)',
+            display: 'flex',
+            inset: 0,
             justifyContent: 'center',
+            position: 'fixed',
             zIndex: 999,
           }}
         >
-          <div style={sharedUiThemeVars}>
-            <InstallProgressUI
-              skillName={
-                combinedSkillIndex.find((s) => s.id === installingSkillId)?.name ??
-                installingSkillId
-              }
-              steps={installSteps}
-              onCancel={() => setInstallingSkillId(null)}
-            />
-          </div>
+          <InstallProgressUI
+            skillName={
+              combinedSkillIndex.find((s) => s.id === installingSkillId)?.name ?? installingSkillId
+            }
+            steps={installSteps}
+            onCancel={() => setInstallingSkillId(null)}
+          />
         </div>
       )}
-      <div
-        className="page-content"
-        style={{
-          opacity: tabChanging ? 0 : 1,
-          transition: 'opacity 100ms ease',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
-      >
+
+      <div className="page-content">
         <div
           style={{
-            width: '100%',
-            maxWidth: 1380,
-            margin: '0 auto',
             display: 'grid',
             gap: 16,
+            margin: '0 auto',
+            maxWidth: 1380,
             padding: '2px 4px 20px',
+            width: '100%',
           }}
         >
-          <SkillsHero
+          <SkillsPageHeader
             marketTotal={marketTotal}
-            installedCount={installedSkills.length}
+            installedCount={installed.skills.length}
             sourceCount={registrySources.length}
             updateCount={updateCount}
-          />
-
-          <SkillsToolbar
-            activeTab={activeTab}
-            busy={marketLoading || localLoading || installedLoading}
+            busy={marketLoading || localLoading || installed.busy}
             onRefresh={() => {
-              if (activeTab === 'market') void refreshMarket();
-              else if (activeTab === 'local') {
+              if (activeTab === 'market') {
+                void refreshMarket();
+              } else if (activeTab === 'local') {
                 void loadLocalCatalog();
-                void loadInstalled();
+                void installed.reload();
               } else {
-                void loadInstalled();
+                void installed.reload();
                 void loadSources();
               }
             }}
-            onTabChange={(tab) => {
-              setTabChanging(true);
-              setTimeout(() => {
-                setActiveTab(tab);
-                setTabChanging(false);
-              }, 100);
-            }}
+          />
+
+          <SkillsTabBar
+            activeTab={activeTab}
+            updateCount={updateCount}
+            onTabChange={(tab) => setActiveTab(tab)}
           />
 
           {activeTab === 'market' && (
-            <SkillsMarketSection
+            <SkillMarketHome
               skills={marketSkills}
+              categories={[]}
               loading={marketLoading}
               error={marketError}
               currentPage={marketPage}
@@ -802,8 +433,9 @@ export default function SkillsPage() {
           )}
 
           {activeTab === 'local' && (
-            <SkillsMarketSection
+            <SkillMarketHome
               skills={localSkills}
+              categories={[]}
               title="本地工作区技能"
               subtitle="扫描当前工作区中的 skill.yaml，并支持直接安装或重新加载。"
               loading={localLoading}
@@ -839,13 +471,15 @@ export default function SkillsPage() {
 
           {activeTab === 'installed' && (
             <SkillsInstalledSection
-              loading={installedLoading}
-              installedSkills={installedSkills}
+              loading={!installed.loaded}
+              skills={installed.skills}
               registrySources={registrySources}
-              onUninstall={(id) => void handleUninstall(id)}
+              onUninstall={(id) => void installed.uninstall(id)}
               onUpdate={handleUpdate}
-              onCheckUpdates={handleCheckUpdates}
-              onToggle={(id, next) => void handleToggle(id, next)}
+              onCheckUpdates={() => void installed.checkUpdates()}
+              onToggle={(id, next) => void installed.toggle(id, next)}
+              statusMessage={installed.statusMessage}
+              error={installed.error}
               onAddSource={(url) => {
                 void (async () => {
                   await addSource(url);

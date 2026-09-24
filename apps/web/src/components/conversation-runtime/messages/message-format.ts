@@ -16,6 +16,7 @@ export function formatStopReasonLabel(stopReason: string | undefined): string | 
   if (!stopReason) return null;
   if (stopReason === 'end_turn') return '完成';
   if (stopReason === 'tool_use') return '调用工具';
+  if (stopReason === 'tool_permission') return '等待权限';
   if (stopReason === 'max_tokens') return '达到上限';
   if (stopReason === 'error') return '错误';
   if (stopReason === 'cancelled') return '已停止';

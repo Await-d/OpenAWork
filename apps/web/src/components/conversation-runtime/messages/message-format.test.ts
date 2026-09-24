@@ -69,6 +69,8 @@ describe('formatStopReasonLabel', () => {
   it('已知 stopReason 映射为中文标签', () => {
     expect(formatStopReasonLabel('end_turn')).toBe('完成');
     expect(formatStopReasonLabel('tool_use')).toBe('调用工具');
+    // 权限暂停是「等待」而不是「已停止」：标签必须给出专属等待态，避免误导。
+    expect(formatStopReasonLabel('tool_permission')).toBe('等待权限');
     expect(formatStopReasonLabel('max_tokens')).toBe('达到上限');
     expect(formatStopReasonLabel('error')).toBe('错误');
     expect(formatStopReasonLabel('cancelled')).toBe('已停止');

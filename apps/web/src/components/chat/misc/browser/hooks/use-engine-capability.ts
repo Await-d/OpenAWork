@@ -11,9 +11,9 @@
  * - 「可实时画面」（`liveView`）：还要求 screencast 受支持——只有 Chromium 有
  *   （`BrowserLiveSession.supportsScreencast()`），非 Chromium 引擎能截图但不能推流。
  *
- * Tauri 原生 webview 是「只显示」表面：实时通道对它刻意关闭
- * （`use-browser-live-wiring` 的 `enabled` 为 false），所以即使探测到实时引擎，
- * 也不能在这里宣称可读 DOM / 截图 / 实时预览。
+ * Tauri 原生 webview 是「只显示」表面：画面由系统 webview 渲染，实时通道只用于
+ * 控制台 / 网络采集、不接管画面，所以即使探测到实时引擎，也不能在这里宣称可读
+ * DOM / 截图 / 实时预览。
  */
 
 export type BrowserEngineKind = 'tauri-webview' | 'iframe';
@@ -64,7 +64,7 @@ function resolveOrigin(url: string | null, base: string): string | null {
  *   （元素拾取 / computed styles），因此 `liveAvailable` 为真时同样视为可用；
  * - `screenshot`：由实时引擎提供（Playwright `page.screenshot`，不依赖 screencast）；
  * - `liveView`：由 screencast 提供，仅 Chromium（`liveScreencast`）；
- * - `tauri-webview`：实时通道不接入，三个实时能力位一律为 false。
+ * - `tauri-webview`：实时通道不接管画面（仅采集控制台 / 网络），三个实时能力位一律为 false。
  */
 export function computeEngineCapability(
   engine: BrowserEngineKind,

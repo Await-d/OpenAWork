@@ -6,14 +6,14 @@
 ## 1. 这是什么
 
 聊天页内置浏览器面板（`apps/web/src/components/chat/misc/BuiltInBrowser.tsx`）用于预览
-页面、查看控制台 / 网络瀑布、检查 DOM 与样式、拾取元素引用进对话。它有两种本质不同的
+页面、查看控制台 / 网络瀑布、检查 DOM 与样式、拾取元素引用进对话。它有三种本质不同的
 渲染引擎，能力边界完全不同：
 
-| 引擎             | 实现                                                          | 本质                                     |
-| ---------------- | ------------------------------------------------------------- | ---------------------------------------- |
-| **CDP 实时引擎** | 网关侧 Playwright + Chromium，screencast 帧渲染到 DOM `<img>` | 真浏览器，可编程、可采集、可输入         |
-| **iframe**       | Web 端 `<iframe>`（`engines/browser-content-area.tsx`）       | 只能显示；同源时可注入脚本采集控制台     |
-| **原生 webview** | 桌面端 Tauri 原生 `Webview`（`hooks/use-tauri-webview.ts`）   | 只能显示；宿主无法注入、无法采集、无法截 |
+| 引擎             | 实现                                                          | 本质                                                    |
+| ---------------- | ------------------------------------------------------------- | ------------------------------------------------------- |
+| **CDP 实时引擎** | 网关侧 Playwright + Chromium，screencast 帧渲染到 DOM `<img>` | 真浏览器，可编程、可采集、可输入                        |
+| **iframe**       | Web 端 `<iframe>`（`engines/browser-content-area.tsx`）       | 只能显示；同源时可注入脚本采集控制台                    |
+| **原生 webview** | 桌面端 Tauri 原生 `Webview`（`hooks/use-tauri-webview.ts`）   | 画面只能显示；控制台 / 网络由网关侧 CDP 采集（见 §2.2） |
 
 面板从不「猜」用哪个引擎：`liveView` 为真时 CDP 实时引擎接管内容区（iframe 保留为回退），
 否则按平台回退到 iframe / 原生 webview。
@@ -22,17 +22,17 @@
 
 ### 2.1 能力总表
 
-| 能力                                | CDP 实时引擎（Chromium） | Web iframe（同源）     | Web iframe（跨域）    | Tauri 原生 webview |
-| ----------------------------------- | ------------------------ | ---------------------- | --------------------- | ------------------ |
-| 显示页面                            | ✅ screencast 帧         | ✅                     | ✅（多数站点禁嵌）    | ✅                 |
-| 实时画面（screencast）              | ✅                       | ❌                     | ❌                    | ❌                 |
-| 控制台 `console.*`                  | ✅ 网关侧 CDP 采集       | ✅ 注入脚本            | ❌ 注入被同源策略拒绝 | ❌                 |
-| 网络瀑布                            | ✅（无 body，见 §6）     | ✅ 注入（body 有截断） | ❌                    | ❌                 |
-| DOM 树 / 无障碍树 / computed styles | ✅ 网关侧 CDP            | ❌                     | ❌                    | ❌                 |
-| 元素拾取（引用进输入框）            | ✅                       | ❌                     | ❌                    | ❌                 |
-| 截图                                | ✅                       | ❌                     | ❌                    | ❌                 |
-| 设备预设（视口 / UA）               | ✅ CDP Emulation         | ✅ 容器尺寸（无 UA）   | ✅ 容器尺寸           | ❌（工具条隐藏）   |
-| 纯前端缩放                          | ✅ CSS transform         | ✅ CSS transform       | ✅ CSS transform      | ❌                 |
+| 能力                                | CDP 实时引擎（Chromium） | Web iframe（同源）     | Web iframe（跨域）    | Tauri 原生 webview                      |
+| ----------------------------------- | ------------------------ | ---------------------- | --------------------- | --------------------------------------- |
+| 显示页面                            | ✅ screencast 帧         | ✅                     | ✅（多数站点禁嵌）    | ✅                                      |
+| 实时画面（screencast）              | ✅                       | ❌                     | ❌                    | ❌                                      |
+| 控制台 `console.*`                  | ✅ 网关侧 CDP 采集       | ✅ 注入脚本            | ❌ 注入被同源策略拒绝 | ✅ 网关侧 CDP 采集（独立页面，见 §2.2） |
+| 网络瀑布                            | ✅（无 body，见 §6）     | ✅ 注入（body 有截断） | ❌                    | ✅ 同上（无 body）                      |
+| DOM 树 / 无障碍树 / computed styles | ✅ 网关侧 CDP            | ❌                     | ❌                    | ❌                                      |
+| 元素拾取（引用进输入框）            | ✅                       | ❌                     | ❌                    | ❌                                      |
+| 截图                                | ✅                       | ❌                     | ❌                    | ❌                                      |
+| 设备预设（视口 / UA）               | ✅ CDP Emulation         | ✅ 容器尺寸（无 UA）   | ✅ 容器尺寸           | ❌（工具条隐藏）                        |
+| 纯前端缩放                          | ✅ CSS transform         | ✅ CSS transform       | ✅ CSS transform      | ❌                                      |
 
 > 表格里的「❌」不只是体验缺省，而是能力判定结果：UI 一律以
 > `apps/web/src/components/chat/misc/browser/hooks/use-engine-capability.ts` 的
@@ -49,9 +49,16 @@
   但控制台 / 网络仍由网关采集，检查器仍可读 DOM、仍可截图——只是没有实时画面。
 - 当前探测只会解析到 Chromium（`engine: 'chromium'`），所以该降级态主要出现在协议契约与
   测试注入里；UI 仍必须显式消费 `screencast`，不得假定 Chromium。
-- **Tauri 原生 webview 是只显示表面**：Web 端对 Tauri 直接关闭实时通道
-  （`use-browser-live-wiring` 的 `enabled: !isTauri`），能力矩阵对 `tauri-webview` 也不因
-  探测到实时引擎而解锁任何能力位。
+- **Tauri 原生 webview：画面与采集分离**。画面由系统 webview 渲染，但实时通道同样接入
+  （`use-browser-live-wiring` 不再按平台关闭）：控制台 / 网络由网关侧 CDP 采集，导航由
+  `use-browser-live-navigation` 把当前标签页 URL / 刷新信号下发给远端采集页面（预览不可见时
+  不下发，重新可见时补发）。
+- **采集页面是一个独立页面实例**：它由 sidecar 的 Chromium 打开，与系统 webview 不共享
+  cookie / 登录态，窗口内的点击等交互不会同步过去——采集到的是「同一 URL 的另一次加载」。
+  站内跳转（页面内点链接）同样不会同步：导航同步只跟随地址栏 / 标签页层面的 URL 变化。
+  本地开发服务器（无需登录、加载即产生日志）是主要受益场景。
+- 能力矩阵对 `tauri-webview` 仍不解锁 `domEval` / `screenshot` / `liveView`（元素拾取依赖
+  DOM 上的 overlay，截图与实时画面依赖 CDP 视图），这些能力只在 Web 模式下可用。
 
 ### 2.3 能力判定的单一入口
 
@@ -71,7 +78,8 @@
 - 内容区接管：`liveView`（`BuiltInBrowser` → `BrowserContentArea` 的 `liveActive`）；
 - 元素拾取按钮：`liveView`（拾取器只存在于实时引擎的 DOM 视图里）；
 - 控制台 / 检查器：宿主从网关状态派生一次的 `available`（它们吃的是采集与 DOM 读取，
-  不需要 screencast），同一份派生值透传给三个消费点。
+  不需要 screencast），同一份派生值透传给三个消费点。控制台 / 网络对两种引擎都生效
+  （含 Tauri 原生窗口）；检查器仍只在 Web 模式可用。
 
 ## 3. 让实时预览真正跑起来
 
@@ -285,18 +293,19 @@ body；Fastify 5 对「JSON content-type + 空 body」直接返回 400，而不�
 
 ## 8. 相关文件
 
-| 作用                      | 路径                                                                          |
-| ------------------------- | ----------------------------------------------------------------------------- |
-| 引擎能力矩阵（单一入口）  | `apps/web/src/components/chat/misc/browser/hooks/use-engine-capability.ts`    |
-| 实时接线（事件 → 控制台） | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-wiring.ts`  |
-| 实时会话生命周期          | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-session.ts` |
-| CDP 实时视图              | `apps/web/src/components/chat/misc/browser/engines/cdp-live-engine.tsx`       |
-| 内容区（三引擎分支）      | `apps/web/src/components/chat/misc/browser/engines/browser-content-area.tsx`  |
-| 引擎可用性探测            | `packages/browser-automation/src/live-browser-availability.ts`                |
-| 实时会话实现 + source map | `packages/browser-automation/src/live-session.ts`、`source-map-resolver.ts`   |
-| 网关 WS / REST 路由       | `services/agent-gateway/src/routes/browser-live.ts`                           |
-| 会话管理器 + 开关         | `services/agent-gateway/src/browser-live/manager.ts`                          |
-| 扇出 + 帧背压             | `services/agent-gateway/src/browser-live/hub.ts`                              |
-| 线路协议（shared）        | `packages/shared/src/browser-live.ts`                                         |
-| 客户端（web-client）      | `packages/web-client/src/infra/browser-live.ts`                               |
-| 桌面端浏览器目录注入      | `apps/desktop/src-tauri/src/lib.rs`（`playwright_browsers_dir`）              |
+| 作用                      | 路径                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| 引擎能力矩阵（单一入口）  | `apps/web/src/components/chat/misc/browser/hooks/use-engine-capability.ts`       |
+| 实时接线（事件 → 控制台） | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-wiring.ts`     |
+| Tauri 采集导航同步        | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-navigation.ts` |
+| 实时会话生命周期          | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-session.ts`    |
+| CDP 实时视图              | `apps/web/src/components/chat/misc/browser/engines/cdp-live-engine.tsx`          |
+| 内容区（三引擎分支）      | `apps/web/src/components/chat/misc/browser/engines/browser-content-area.tsx`     |
+| 引擎可用性探测            | `packages/browser-automation/src/live-browser-availability.ts`                   |
+| 实时会话实现 + source map | `packages/browser-automation/src/live-session.ts`、`source-map-resolver.ts`      |
+| 网关 WS / REST 路由       | `services/agent-gateway/src/routes/browser-live.ts`                              |
+| 会话管理器 + 开关         | `services/agent-gateway/src/browser-live/manager.ts`                             |
+| 扇出 + 帧背压             | `services/agent-gateway/src/browser-live/hub.ts`                                 |
+| 线路协议（shared）        | `packages/shared/src/browser-live.ts`                                            |
+| 客户端（web-client）      | `packages/web-client/src/infra/browser-live.ts`                                  |
+| 桌面端浏览器目录注入      | `apps/desktop/src-tauri/src/lib.rs`（`playwright_browsers_dir`）                 |

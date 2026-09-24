@@ -4,7 +4,8 @@
  * 职责：按级别/关键字过滤日志、渲染每一条（含网络请求的请求/响应详情）、
  * 以及把条目复制到剪贴板或引用进聊天输入框。
  *
- * 数据由宿主（`BuiltInBrowser`）从注入脚本的 postMessage 收集后传入；
+ * 数据由宿主（`BuiltInBrowser`）收集后传入——iframe 注入脚本的 postMessage 与
+ * 网关侧实时引擎（`/browser-live`）两条来源共用同一套 `ConsoleEntry` 模型；
  * 本面板不订阅任何来源，便于单独测试。
  */
 
@@ -137,6 +138,26 @@ export function BrowserConsolePanel({
         <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-default)', marginRight: 4 }}>
           控制台
         </span>
+        {tauriMode === true && liveAvailable === true ? (
+          <span
+            data-testid="console-capture-badge"
+            title="Tauri 原生窗口无法直接注入页面：控制台与网络由网关侧实时引擎在独立页面中采集，窗口内的点击等交互不会同步到采集页面。"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              height: 16,
+              padding: '0 5px',
+              borderRadius: 8,
+              border: '1px solid color-mix(in oklch, var(--aux) 40%, transparent)',
+              background: 'color-mix(in oklch, var(--aux) 10%, transparent)',
+              color: 'var(--aux)',
+              fontSize: 9,
+              flexShrink: 0,
+            }}
+          >
+            网关采集
+          </span>
+        ) : null}
 
         <BrowserPill
           label="列表"
@@ -335,8 +356,9 @@ export function BrowserConsolePanel({
 /**
  * 列表视图空态文案。
  *
- * 跨域提示只在「iframe 回退且没有实时引擎」时成立：CDP 引擎采集不受同源策略
- * 限制，此时声称"跨域无法注入"会让用户以为功能坏了。
+ * 判定顺序：过滤无匹配 > 实时引擎采集 > Tauri 原生窗口 > iframe 跨域提示。
+ * 「有日志但被过滤掉」必须优先于引擎说明——否则用户会误以为采集坏了；
+ * 实时引擎可用时（Web 与 Tauri 共用同一条采集通道）也不该再声称无法采集。
  */
 function ConsoleEmptyState({
   tauriMode,
@@ -347,23 +369,24 @@ function ConsoleEmptyState({
   liveAvailable: boolean;
   hasAnyLogs: boolean;
 }) {
+  if (hasAnyLogs) {
+    return '当前过滤条件下无匹配';
+  }
+  if (liveAvailable) {
+    return '暂无控制台输出 · 日志由网关侧实时引擎采集,页面产生日志后会自动显示';
+  }
   if (tauriMode) {
     return (
       <>
-        Tauri 原生窗口模式下无法监听页面控制台与网络
+        Tauri 原生窗口本身无法注入采集,控制台与网络需依赖网关侧实时引擎
         <br />
         <span style={{ opacity: 0.7 }}>
-          建议在浏览器(Web)模式下使用控制台,或在 dev tools 中查看
+          当前实时引擎不可用:请按上方提示处理,或改用浏览器(Web)模式查看
         </span>
       </>
     );
   }
-  if (hasAnyLogs) {
-    return '当前过滤条件下无匹配';
-  }
-  return liveAvailable
-    ? '暂无控制台输出 · 日志由网关侧实时引擎采集,页面产生日志后会自动显示'
-    : '暂无控制台输出 · 跨域页面(非 localhost)无法注入,只能展示同源页面的日志';
+  return '暂无控制台输出 · 跨域页面(非 localhost)无法注入,只能展示同源页面的日志';
 }
 
 /**

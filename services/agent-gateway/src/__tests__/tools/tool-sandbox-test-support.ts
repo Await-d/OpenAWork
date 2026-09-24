@@ -14,6 +14,7 @@ interface ToolSandboxTestMocks {
   readonly listMcpToolsForSessionMock: Mock;
   readonly sqliteGetMock: Mock;
   readonly sqliteRunMock: Mock;
+  readonly sqliteTransactionMock: Mock;
   readonly transitionToolToRunningMock: Mock;
   readonly dispatchRunBashInBackgroundMock: Mock;
 }
@@ -74,6 +75,8 @@ export const mocks: ToolSandboxTestMocks = {
     return undefined;
   }),
   sqliteRunMock: vi.fn(),
+  // 直通实现：调用方只关心「事务内语句被执行」，mock 环境无真实事务语义。
+  sqliteTransactionMock: vi.fn((fn: () => void) => fn()),
   transitionToolToRunningMock: vi.fn(),
   dispatchRunBashInBackgroundMock: vi.fn(),
 };

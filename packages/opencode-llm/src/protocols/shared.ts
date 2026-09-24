@@ -281,6 +281,20 @@ export const supportsAnthropicContextManagement = (request: LLMRequest) =>
   String(request.model.route.protocol) === 'anthropic-messages' &&
   isAnthropicOfficialBaseUrl(request.model.route.endpoint.baseURL);
 
+export const OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH = 64;
+
+/**
+ * 对齐参考库：OpenAI 的 `prompt_cache_key` 上限 64 字符（DeepSeek / Zai 等
+ * OpenAI 兼容网关继承同一限制）。`cache: 'none'` 或未提供 key 时不下发。
+ * 按 Unicode 码点截断，避免切断代理对。
+ */
+export const promptCacheKey = (request: LLMRequest): string | undefined => {
+  if (request.cache === 'none' || request.promptCacheKey === undefined) return undefined;
+  const chars = Array.from(request.promptCacheKey);
+  if (chars.length <= OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH) return request.promptCacheKey;
+  return chars.slice(0, OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH).join('');
+};
+
 export const toolResultText = (part: ToolResultPart) => {
   if (part.result.type === 'text') return String(part.result.value);
   if (part.result.type === 'error') {
@@ -306,26 +320,63 @@ export const errorText = (error: unknown) => {
   return 'Unknown stream error';
 };
 
+export interface SseFramingOptions {
+  /**
+   * Retain the conventional `[DONE]` sentinel frame instead of dropping it.
+   *
+   * Protocols that use `[DONE]` as their terminal boundary (OpenAI Chat) need
+   * the frame to reach `stream.terminal`; everyone else keeps dropping it.
+   */
+  readonly includeDone?: boolean;
+}
+
 /**
- * `framing` step for Server-Sent Events. Decodes UTF-8, runs the SSE channel
- * decoder, and drops empty / bare `null` / `[DONE]` keep-alive events so the
- * downstream `decodeChunk` sees one JSON string per element. The SSE channel emits a
- * `Retry` control event on its error channel; we drop it here (we don't
- * implement client-driven retries) so the public error channel stays
- * `LLMError`.
+ * `framing` step for Server-Sent Events. Decodes UTF-8, feeds a stateful SSE
+ * parser, and drops empty / bare `null` keep-alive events (and `[DONE]` unless
+ * `includeDone`) so the downstream `decodeChunk` sees one JSON string per
+ * element.
+ *
+ * The parser is fed directly instead of going through `Sse.decode()` because
+ * that channel surfaces SSE `retry:` control directives as failures. A `retry:`
+ * line is a keep-alive/reconnect hint, not a terminal condition — treating it as
+ * an error silently truncates every event after it, which then surfaces as a
+ * bogus "stream ended without finish_reason" on long responses. Ignoring the
+ * directive (aligned with the opencode reference implementation) keeps the
+ * public error channel `LLMError` without losing data.
  */
 export const sseFraming = (
   bytes: Stream.Stream<Uint8Array, LLMError>,
+  options?: SseFramingOptions,
 ): Stream.Stream<string, LLMError> =>
   bytes.pipe(
     Stream.decodeText,
-    Stream.pipeThroughChannel(Sse.decode()),
-    Stream.catchTag('Retry', () => Stream.empty),
+    Stream.mapAccumEffect(
+      () => {
+        const output: Array<Sse.Event> = [];
+        return {
+          output,
+          parser: Sse.makeParser((event) => {
+            if (event._tag === 'Event') output.push(event);
+          }),
+        };
+      },
+      (state, chunk) =>
+        Effect.gen(function* () {
+          // rc.112 起 `feed` 会在单个事件超过 `maxEventSize`（默认 10MiB）时
+          // 返回 `SseError`；转成 provider output 错误而不是静默丢帧。
+          const error = state.parser.feed(chunk);
+          if (error !== undefined) return yield* eventError('sse', error.message, chunk, error);
+          return [state, state.output.splice(0)] as const;
+        }),
+    ),
     // Some OpenAI-compatible proxies serialize an empty flush as a bare
     // `data: null`, between events or after `[DONE]`. No protocol has a null
     // event, so it carries nothing and must not abort the stream.
     Stream.filter(
-      (event) => event.data.length > 0 && event.data !== '[DONE]' && event.data !== 'null',
+      (event) =>
+        event.data.length > 0 &&
+        (event.data !== '[DONE]' || options?.includeDone === true) &&
+        event.data !== 'null',
     ),
     Stream.map((event) => {
       if (event.event === 'message') return event.data;

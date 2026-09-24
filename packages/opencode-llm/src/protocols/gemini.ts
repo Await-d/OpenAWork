@@ -111,6 +111,8 @@ const GeminiToolConfig = Schema.Struct({
 const GeminiThinkingConfig = Schema.Struct({
   thinkingBudget: Schema.optional(Schema.Number),
   includeThoughts: Schema.optional(Schema.Boolean),
+  // 对齐参考库：thinkingLevel（minimal / low / medium / high），与 budget 互斥使用。
+  thinkingLevel: Schema.optional(Schema.String),
 });
 
 const GeminiGenerationConfig = Schema.Struct({
@@ -125,12 +127,21 @@ const GeminiGenerationConfig = Schema.Struct({
   thinkingConfig: Schema.optional(GeminiThinkingConfig),
 });
 
+// 对齐参考库：Gemini 安全设置（category / threshold 接受任意字符串，
+// 已知值仅用于提示，避免闭集校验挡住新类目）。
+const GeminiSafetySetting = Schema.Struct({
+  category: Schema.String,
+  threshold: Schema.String,
+});
+
 const GeminiBodyFields = {
   contents: Schema.Array(GeminiContent),
   systemInstruction: Schema.optional(GeminiSystemInstruction),
   tools: optionalArray(GeminiTool),
   toolConfig: Schema.optional(GeminiToolConfig),
   generationConfig: Schema.optional(GeminiGenerationConfig),
+  safetySettings: optionalArray(GeminiSafetySetting),
+  serviceTier: Schema.optional(Schema.String),
 };
 const GeminiBody = Schema.Struct(GeminiBodyFields);
 export type GeminiBody = Schema.Schema.Type<typeof GeminiBody>;
@@ -356,10 +367,34 @@ const thinkingConfig = (request: LLMRequest) => {
   // Requesting a thinking budget implicitly asks for thoughts unless the caller
   // explicitly opts out; an empty thinkingConfig still enables thoughts.
   return {
-    thinkingBudget: typeof value.thinkingBudget === 'number' ? value.thinkingBudget : undefined,
-    includeThoughts: typeof value.includeThoughts === 'boolean' ? value.includeThoughts : true,
+    thinkingBudget:
+      typeof value['thinkingBudget'] === 'number' ? value['thinkingBudget'] : undefined,
+    includeThoughts:
+      typeof value['includeThoughts'] === 'boolean' ? value['includeThoughts'] : true,
+    // 对齐参考库：thinkingLevel 透传（与 budget 二选一，由调用方决定）。
+    thinkingLevel: typeof value['thinkingLevel'] === 'string' ? value['thinkingLevel'] : undefined,
   };
 };
+
+/** 对齐参考库：`serviceTier` provider option 透传（standard / flex / priority）。 */
+const lowerServiceTier = (request: LLMRequest): string | undefined => {
+  const value = geminiOptions(request)?.['serviceTier'];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+};
+
+/**
+ * 对齐参考库：`safetySettings` provider option 透传（category / threshold）。
+ * 非法条目在边界报错而不是静默丢弃。
+ */
+const lowerSafetySettings = Effect.fn('Gemini.lowerSafetySettings')(function* (
+  request: LLMRequest,
+) {
+  const value = geminiOptions(request)?.['safetySettings'];
+  if (value === undefined) return undefined;
+  return yield* ProviderShared.validateWith(
+    Schema.decodeUnknownEffect(Schema.Array(GeminiSafetySetting)),
+  )(value);
+});
 
 const fromRequest = Effect.fn('Gemini.fromRequest')(function* (request: LLMRequest) {
   const toolsEnabled = request.tools.length > 0 && request.toolChoice?.type !== 'none';
@@ -400,6 +435,8 @@ const fromRequest = Effect.fn('Gemini.fromRequest')(function* (request: LLMReque
     generationConfig: Object.values(generationConfig).some((value) => value !== undefined)
       ? generationConfig
       : undefined,
+    safetySettings: yield* lowerSafetySettings(request),
+    serviceTier: lowerServiceTier(request),
   };
 });
 

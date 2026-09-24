@@ -9,6 +9,7 @@ import {
   formatGatewayStreamErrorMessage,
   resolveChatWsLivenessAction,
   safeParseGatewayEventData,
+  SSE_FALLBACK_RETRY_DELAYS_MS,
   STREAM_CLIENT_ERROR_MESSAGES,
 } from './useGatewayClient.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
@@ -626,7 +627,7 @@ describe('useGatewayClient', () => {
     expect(result.current).toBe(initialClient);
   });
 
-  it('WS 断开后切到 SSE replay 时，不会重复分发已经收到过的 eventId', () => {
+  it('WS 断开后切到 SSE replay 时，不会重复分发已经收到过的 eventId', async () => {
     vi.stubGlobal('WebSocket', MockWebSocket);
     vi.stubGlobal('EventSource', MockEventSource);
     useAuthStore.setState({
@@ -661,7 +662,7 @@ describe('useGatewayClient', () => {
     const ws = MockWebSocket.instances[0];
     expect(ws).toBeDefined();
 
-    act(() => {
+    await act(async () => {
       ws?.onopen?.();
       ws?.onmessage?.({
         data: JSON.stringify({
@@ -752,7 +753,7 @@ describe('useGatewayClient', () => {
     );
   });
 
-  it('WS 已消费部分事件后回退 SSE 会携带当前 afterSeq 游标', () => {
+  it('WS 已消费部分事件后回退 SSE 会携带当前 afterSeq 游标', async () => {
     vi.stubGlobal('WebSocket', MockWebSocket);
     vi.stubGlobal('EventSource', MockEventSource);
     useAuthStore.setState({
@@ -782,7 +783,7 @@ describe('useGatewayClient', () => {
     const request = JSON.parse(MockWebSocket.instances[0]?.sentPayloads[0] ?? '{}') as {
       clientRequestId?: string;
     };
-    act(() => {
+    await act(async () => {
       MockWebSocket.instances[0]?.onmessage?.({
         data: JSON.stringify({
           type: 'text_delta',
@@ -858,45 +859,274 @@ describe('useGatewayClient', () => {
     );
   });
 
-  it('SSE 回退连接失败时向界面提供可复制的连接详情', () => {
+  it('SSE 回退连接失败时按退避自动重连，预算耗尽后才提供可复制的连接详情', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('WebSocket', MockWebSocket);
+      vi.stubGlobal('EventSource', MockEventSource);
+      useAuthStore.setState({
+        accessToken: 'token-test',
+        clearAuth: () => undefined,
+        email: 'qa@example.com',
+        gatewayUrl: 'https://gw.test',
+        refreshAccessToken: async () => undefined,
+        refreshToken: null,
+        setAuth: () => undefined,
+        setGatewayUrl: () => undefined,
+        setWebAccess: () => undefined,
+        tokenExpiresAt: null,
+        webAccessEnabled: false,
+        webExposeLan: false,
+        webPort: 3000,
+      });
+
+      const onError = vi.fn();
+      const { result } = renderHook(() => useGatewayClient('token-test'));
+
+      await act(async () => {
+        result.current.stream('session-sse-error', 'hello', {
+          onDelta: vi.fn(),
+          onDone: vi.fn(),
+          onError,
+        });
+      });
+
+      await act(async () => {
+        MockWebSocket.instances[0]?.onclose?.();
+      });
+
+      for (const retryDelay of SSE_FALLBACK_RETRY_DELAYS_MS) {
+        await act(async () => {
+          MockEventSource.instances.at(-1)?.onerror?.();
+          await vi.advanceTimersByTimeAsync(retryDelay);
+        });
+      }
+      await act(async () => {
+        MockEventSource.instances.at(-1)?.onerror?.();
+      });
+
+      expect(MockEventSource.instances).toHaveLength(SSE_FALLBACK_RETRY_DELAYS_MS.length + 1);
+      expect(onError).toHaveBeenCalledWith(
+        'SSE_ERROR',
+        'SSE 连接异常。',
+        '连接在收到 SSE 响应前中断。Gateway：https://gw.test；会话：session-sse-error。已自动重连 3 次仍未成功。浏览器没有提供底层失败原因。',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('同一次失败的 SSE 派发多次 onerror 时只排期一次重连', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('WebSocket', MockWebSocket);
+      vi.stubGlobal('EventSource', MockEventSource);
+      useAuthStore.setState({
+        accessToken: 'token-test',
+        clearAuth: () => undefined,
+        email: 'qa@example.com',
+        gatewayUrl: 'https://gw.test',
+        refreshAccessToken: async () => undefined,
+        refreshToken: null,
+        setAuth: () => undefined,
+        setGatewayUrl: () => undefined,
+        setWebAccess: () => undefined,
+        tokenExpiresAt: null,
+        webAccessEnabled: false,
+        webExposeLan: false,
+        webPort: 3000,
+      });
+
+      const { result } = renderHook(() => useGatewayClient('token-test'));
+      await act(async () => {
+        result.current.stream('session-sse-dedupe', 'hello', {
+          onDelta: vi.fn(),
+          onDone: vi.fn(),
+          onError: vi.fn(),
+        });
+      });
+      await act(async () => {
+        MockWebSocket.instances[0]?.onclose?.();
+      });
+
+      const firstEventSource = MockEventSource.instances[0];
+      await act(async () => {
+        firstEventSource?.onerror?.();
+        firstEventSource?.onerror?.();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SSE_FALLBACK_RETRY_DELAYS_MS[0]);
+      });
+      // 重复 onerror 不得覆盖定时器引用而漏出第二个定时器。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect(MockEventSource.instances).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('SSE 回退首次连接失败后自动重连成功，不向用户抛错', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('WebSocket', MockWebSocket);
+      vi.stubGlobal('EventSource', MockEventSource);
+      useAuthStore.setState({
+        accessToken: 'token-test',
+        clearAuth: () => undefined,
+        email: 'qa@example.com',
+        gatewayUrl: 'https://gw.test',
+        refreshAccessToken: async () => undefined,
+        refreshToken: null,
+        setAuth: () => undefined,
+        setGatewayUrl: () => undefined,
+        setWebAccess: () => undefined,
+        tokenExpiresAt: null,
+        webAccessEnabled: false,
+        webExposeLan: false,
+        webPort: 3000,
+      });
+
+      const onDone = vi.fn();
+      const onError = vi.fn();
+      const { result } = renderHook(() => useGatewayClient('token-test'));
+
+      await act(async () => {
+        result.current.stream('session-sse-retry', 'hello', {
+          onDelta: vi.fn(),
+          onDone,
+          onError,
+        });
+      });
+      await act(async () => {
+        MockWebSocket.instances[0]?.onclose?.();
+      });
+
+      const firstEventSource = MockEventSource.instances[0];
+      expect(firstEventSource?.url).toContain('/sessions/session-sse-retry/stream/sse?');
+
+      await act(async () => {
+        firstEventSource?.onerror?.();
+        await vi.advanceTimersByTimeAsync(SSE_FALLBACK_RETRY_DELAYS_MS[0]);
+      });
+
+      const secondEventSource = MockEventSource.instances[1];
+      expect(secondEventSource).toBeDefined();
+      expect(firstEventSource?.closed).toBe(true);
+
+      await act(async () => {
+        secondEventSource?.onmessage?.({
+          data: JSON.stringify({ type: 'done', stopReason: 'end_turn' }),
+        } as MessageEvent);
+      });
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(onDone).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('SSE 回退打开前会先刷新临近过期的 token，避免 401 硬失败', async () => {
     vi.stubGlobal('WebSocket', MockWebSocket);
     vi.stubGlobal('EventSource', MockEventSource);
+    const refreshAccessToken = vi.fn(async () => {
+      useAuthStore.setState({
+        accessToken: 'fresh-token',
+        tokenExpiresAt: Date.now() + 900_000,
+      });
+    });
     useAuthStore.setState({
-      accessToken: 'token-test',
+      accessToken: 'stale-token',
       clearAuth: () => undefined,
       email: 'qa@example.com',
       gatewayUrl: 'https://gw.test',
-      refreshAccessToken: async () => undefined,
-      refreshToken: null,
+      refreshAccessToken,
+      refreshToken: 'refresh-token',
       setAuth: () => undefined,
       setGatewayUrl: () => undefined,
       setWebAccess: () => undefined,
-      tokenExpiresAt: null,
+      tokenExpiresAt: Date.now() - 1,
       webAccessEnabled: false,
       webExposeLan: false,
       webPort: 3000,
     });
 
-    const onError = vi.fn();
-    const { result } = renderHook(() => useGatewayClient('token-test'));
-
-    act(() => {
-      result.current.stream('session-sse-error', 'hello', {
+    const { result } = renderHook(() => useGatewayClient('stale-token'));
+    await act(async () => {
+      result.current.stream('session-sse-token', 'hello', {
         onDelta: vi.fn(),
         onDone: vi.fn(),
-        onError,
+        onError: vi.fn(),
       });
     });
-
-    act(() => {
+    await act(async () => {
       MockWebSocket.instances[0]?.onclose?.();
-      MockEventSource.instances[0]?.onerror?.();
     });
 
-    expect(onError).toHaveBeenCalledWith(
-      'SSE_ERROR',
-      'SSE 连接异常。',
-      '连接在收到 SSE 响应前中断。Gateway：https://gw.test；会话：session-sse-error。浏览器没有提供底层失败原因。',
-    );
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    const sseUrl = MockEventSource.instances[0]?.url ?? '';
+    expect(sseUrl).toContain('token=fresh-token');
+    expect(sseUrl).not.toContain('token=stale-token');
+  });
+
+  it('用户停止后取消待触发的 SSE 重连，不会重新拉活流', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({ stopped: true }),
+      ok: true,
+      status: 200,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      vi.stubGlobal('WebSocket', MockWebSocket);
+      vi.stubGlobal('EventSource', MockEventSource);
+      useAuthStore.setState({
+        accessToken: 'token-test',
+        clearAuth: () => undefined,
+        email: 'qa@example.com',
+        gatewayUrl: 'https://gw.test',
+        refreshAccessToken: async () => undefined,
+        refreshToken: null,
+        setAuth: () => undefined,
+        setGatewayUrl: () => undefined,
+        setWebAccess: () => undefined,
+        tokenExpiresAt: null,
+        webAccessEnabled: false,
+        webExposeLan: false,
+        webPort: 3000,
+      });
+
+      const onError = vi.fn();
+      const { result } = renderHook(() => useGatewayClient('token-test'));
+
+      await act(async () => {
+        result.current.stream('session-stop-retry', 'hello', {
+          onDelta: vi.fn(),
+          onDone: vi.fn(),
+          onError,
+        });
+      });
+      await act(async () => {
+        MockWebSocket.instances[0]?.onclose?.();
+      });
+      await act(async () => {
+        MockEventSource.instances[0]?.onerror?.();
+      });
+
+      await act(async () => {
+        await result.current.stopStream();
+        await vi.advanceTimersByTimeAsync(SSE_FALLBACK_RETRY_DELAYS_MS[0]);
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(MockEventSource.instances).toHaveLength(1);
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

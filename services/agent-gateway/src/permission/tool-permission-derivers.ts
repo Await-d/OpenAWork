@@ -18,6 +18,12 @@ import { WORKSPACE_ROOT } from '../infra/db.js';
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
 import { getConfiguredMcpServerForSession, getMcpServerFingerprint } from '../mcp/mcp-runtime.js';
 import { parseMcpCallRawInput } from '../mcp/mcp-tool-input.js';
+import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../mcp/mcp-manage-tool-name.js';
+import { MEMORY_MANAGE_TOOL_NAME } from '../memory/memory-manage-tool-name.js';
+import { SKILL_MANAGE_TOOL_NAME } from '../skill/skill-manage-tool-name.js';
+import { SCHEDULE_MANAGE_TOOL_NAME } from '../cron/schedule-manage-tool-name.js';
+import { AGENT_MANAGE_TOOL_NAME } from '../agent/agent-manage-tool-name.js';
+import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../team/team-workspace-manage-tool-name.js';
 import { buildApplyPatchPermissionScope } from '../tools/apply-patch-tools.js';
 import { buildBashApprovalPatterns, tokenizeCommand } from '../tools/bash-arity.js';
 import { readToolPathInput } from '../tools/tool-path-aliases.js';
@@ -572,6 +578,340 @@ const mcpCallPermissionDeriver: ToolPermissionDeriver = (ctx) => {
   }
 };
 
+/**
+ * `mcp_manage_servers` 的权限派生。
+ *
+ * - `list` 是只读列举（与 `mcp_list_tools` 同类），返回 `null` 免审批；
+ * - 变更动作（add/update/remove/enable/disable）默认 ask，scope 精确到
+ *   `action:serverId`，永久允许只覆盖同一动作类型（`action:*`），避免一次
+ *   「永久允许」把添加 / 移除 / 启停全部放行。
+ * - 审批预览：stdio 展示 command + args，sse 只展示 origin + pathname
+ *   （剥离 query，防止模型把 API Key 写进 URL 后在审批记录里回显）。
+ */
+const mcpManageServersPermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const action =
+    typeof ctx.rawInput['action'] === 'string' ? ctx.rawInput['action'].trim().toLowerCase() : '';
+  if (action === 'list') {
+    return null;
+  }
+  const serverRecord =
+    ctx.rawInput['server'] && typeof ctx.rawInput['server'] === 'object'
+      ? (ctx.rawInput['server'] as Record<string, unknown>)
+      : null;
+  const explicitServerId =
+    typeof ctx.rawInput['serverId'] === 'string' ? ctx.rawInput['serverId'].trim() : '';
+  const draftServerId =
+    serverRecord && typeof serverRecord['id'] === 'string' ? serverRecord['id'].trim() : '';
+  const serverId = explicitServerId || draftServerId;
+  const scope = `${action}:${serverId || 'new'}`;
+  return {
+    scope,
+    reason: '需要修改 MCP 服务器配置',
+    riskLevel: 'high',
+    previewAction: buildMcpManagePreviewAction(action, serverId, serverRecord),
+    always: [`${action}:*`],
+  };
+};
+
+/**
+ * `memory_manage` 的权限派生。
+ *
+ * - `list` 只读免审批；
+ * - 变更动作（add/update/delete）默认 ask，scope 精确到 `action:memoryId|new`，
+ *   永久允许只覆盖同一动作类型（`action:*`）；
+ * - 审批预览展示 key / type / value 片段（截断 120 字），让用户在批准前看到
+ *   即将写入的长期记忆内容。
+ */
+const memoryManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const action =
+    typeof ctx.rawInput['action'] === 'string' ? ctx.rawInput['action'].trim().toLowerCase() : '';
+  if (action === 'list') {
+    return null;
+  }
+  const memoryId =
+    typeof ctx.rawInput['memoryId'] === 'string' ? ctx.rawInput['memoryId'].trim() : '';
+  const memoryRecord =
+    ctx.rawInput['memory'] && typeof ctx.rawInput['memory'] === 'object'
+      ? (ctx.rawInput['memory'] as Record<string, unknown>)
+      : null;
+  const key =
+    memoryRecord && typeof memoryRecord['key'] === 'string' ? memoryRecord['key'].trim() : '';
+  const type =
+    memoryRecord && typeof memoryRecord['type'] === 'string' ? memoryRecord['type'].trim() : '';
+  const valueSnippet =
+    memoryRecord && typeof memoryRecord['value'] === 'string'
+      ? memoryRecord['value'].trim().slice(0, 120)
+      : '';
+  const scope = `${action}:${memoryId || 'new'}`;
+  const previewAction =
+    action === 'delete'
+      ? `删除记忆 ${memoryId || '(未知 id)'}`
+      : `${action === 'add' ? '新增' : '更新'}记忆${key ? `「${key}」` : ''}${type ? ` (${type})` : ''}${valueSnippet ? `：${valueSnippet}` : ''}`;
+  return {
+    scope,
+    reason: '需要修改用户的长期记忆',
+    riskLevel: 'high',
+    previewAction: previewAction.slice(0, 200),
+    always: [`${action}:*`],
+  };
+};
+
+/**
+ * `skill_manage` 的权限派生。
+ *
+ * - `list` 只读免审批；
+ * - 变更动作（install/uninstall/enable/disable）默认 ask，scope 精确到
+ *   `action:skillId`，永久允许按动作隔离；预览展示 skillId 与来源。
+ */
+const skillManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const action =
+    typeof ctx.rawInput['action'] === 'string' ? ctx.rawInput['action'].trim().toLowerCase() : '';
+  if (action === 'list') {
+    return null;
+  }
+  const skillId = typeof ctx.rawInput['skillId'] === 'string' ? ctx.rawInput['skillId'].trim() : '';
+  const sourceId =
+    typeof ctx.rawInput['sourceId'] === 'string' ? ctx.rawInput['sourceId'].trim() : '';
+  const verb =
+    action === 'install'
+      ? '安装'
+      : action === 'uninstall'
+        ? '卸载'
+        : action === 'enable'
+          ? '启用'
+          : action === 'disable'
+            ? '停用'
+            : action;
+  const previewAction = `${verb}技能 ${skillId || '(未知 id)'}${
+    action === 'install' && sourceId ? `（来源 ${sourceId}）` : ''
+  }`;
+  return {
+    scope: `${action}:${skillId || 'new'}`,
+    reason: '需要修改已安装技能',
+    riskLevel: 'high',
+    previewAction: previewAction.slice(0, 200),
+    always: [`${action}:*`],
+  };
+};
+
+/**
+ * `schedule_manage` 的权限派生。
+ *
+ * - `list` / `history` 只读免审批；
+ * - 变更动作（add/update/remove/enable/disable）默认 ask，scope 精确到
+ *   `action:jobId|new`，永久允许按动作隔离；预览展示调度表达式 / 时区 /
+ *   prompt 片段（用户批准前看到要定时执行的内容）。
+ */
+const scheduleManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const action =
+    typeof ctx.rawInput['action'] === 'string' ? ctx.rawInput['action'].trim().toLowerCase() : '';
+  if (action === 'list' || action === 'history') {
+    return null;
+  }
+  const jobId = typeof ctx.rawInput['jobId'] === 'string' ? ctx.rawInput['jobId'].trim() : '';
+  const jobRecord =
+    ctx.rawInput['job'] && typeof ctx.rawInput['job'] === 'object'
+      ? (ctx.rawInput['job'] as Record<string, unknown>)
+      : null;
+  const kind =
+    jobRecord && typeof jobRecord['schedule_kind'] === 'string'
+      ? jobRecord['schedule_kind'].trim()
+      : '';
+  const scheduleDetail =
+    kind === 'cron' && typeof jobRecord?.['schedule_expr'] === 'string'
+      ? jobRecord['schedule_expr']
+      : kind === 'every' && typeof jobRecord?.['schedule_every'] === 'number'
+        ? `每 ${jobRecord['schedule_every']}ms`
+        : kind === 'at' && typeof jobRecord?.['schedule_at'] === 'number'
+          ? `at ${new Date(jobRecord['schedule_at']).toISOString()}`
+          : '';
+  const tz =
+    jobRecord && typeof jobRecord['schedule_tz'] === 'string'
+      ? jobRecord['schedule_tz'].trim()
+      : '';
+  const promptSnippet =
+    jobRecord && typeof jobRecord['prompt'] === 'string'
+      ? jobRecord['prompt'].trim().slice(0, 80)
+      : '';
+  // 执行环境也必须进预览：working_folder 决定 cron 会话的可访问路径范围，
+  // agent/model 决定以什么身份跑——用户批准前必须看得到（否则可被任务名掩护）。
+  const readDraftText = (field: string): string =>
+    jobRecord && typeof jobRecord[field] === 'string' ? jobRecord[field].trim() : '';
+  const environmentSnippet = [
+    readDraftText('working_folder') ? `工作区 ${readDraftText('working_folder')}` : '',
+    readDraftText('session_id') ? `会话 ${readDraftText('session_id')}` : '',
+    readDraftText('agent_id') ? `agent ${readDraftText('agent_id')}` : '',
+    readDraftText('model') ? `模型 ${readDraftText('model')}` : '',
+    readDraftText('delivery_mode') && readDraftText('delivery_mode') !== 'none'
+      ? `投递 ${readDraftText('delivery_mode')}${
+          readDraftText('delivery_target') ? `:${readDraftText('delivery_target')}` : ''
+        }`
+      : '',
+  ]
+    .filter((part) => part.length > 0)
+    .join('，');
+  const verb =
+    action === 'add'
+      ? '新建'
+      : action === 'update'
+        ? '修改'
+        : action === 'remove'
+          ? '删除'
+          : action === 'enable'
+            ? '启用'
+            : action === 'disable'
+              ? '停用'
+              : action;
+  const previewAction = `${verb}定时任务 ${jobId || '(新建)'}${
+    kind ? ` [${kind}${scheduleDetail ? ` ${scheduleDetail}` : ''}${tz ? ` ${tz}` : ''}]` : ''
+  }${promptSnippet ? `：${promptSnippet}` : ''}${
+    environmentSnippet ? `（${environmentSnippet}）` : ''
+  }`;
+  return {
+    scope: `${action}:${jobId || 'new'}`,
+    reason: '需要修改定时任务',
+    riskLevel: 'high',
+    previewAction: previewAction.slice(0, 240),
+    always: [`${action}:*`],
+  };
+};
+
+/**
+ * `agent_manage` 的权限派生。
+ *
+ * - `list` 只读免审批；
+ * - 变更动作（create/update/delete/reset）默认 ask，scope 精确到
+ *   `action:agentId|new`，永久允许按动作隔离；预览展示 Agent 标识与动作。
+ */
+const agentManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const action =
+    typeof ctx.rawInput['action'] === 'string' ? ctx.rawInput['action'].trim().toLowerCase() : '';
+  if (action === 'list') {
+    return null;
+  }
+  const agentId = typeof ctx.rawInput['agentId'] === 'string' ? ctx.rawInput['agentId'].trim() : '';
+  const agentRecord =
+    ctx.rawInput['agent'] && typeof ctx.rawInput['agent'] === 'object'
+      ? (ctx.rawInput['agent'] as Record<string, unknown>)
+      : null;
+  const label =
+    agentRecord && typeof agentRecord['label'] === 'string' ? agentRecord['label'].trim() : '';
+  const verb =
+    action === 'create'
+      ? '新建'
+      : action === 'update'
+        ? '修改'
+        : action === 'delete'
+          ? '删除'
+          : action === 'reset'
+            ? '恢复默认'
+            : action;
+  const previewAction = `${verb}自定义 Agent ${agentId || label || '(新建)'}`;
+  return {
+    scope: `${action}:${agentId || 'new'}`,
+    reason: '需要修改自定义 Agent',
+    riskLevel: 'high',
+    previewAction: previewAction.slice(0, 200),
+    always: [`${action}:*`],
+  };
+};
+
+/**
+ * `team_workspace_manage` 的权限派生。
+ *
+ * - `list` 只读免审批；
+ * - 变更动作（create/update/delete）默认 ask，scope 精确到 `action:workspaceId|new`，
+ *   永久允许按动作隔离；预览展示名称 / 可见性 / 成员数 / defaultWorkingRoot
+ *   （工作根路径是执行环境的一部分，必须让用户在批准前看到）。
+ */
+const teamWorkspaceManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const action =
+    typeof ctx.rawInput['action'] === 'string' ? ctx.rawInput['action'].trim().toLowerCase() : '';
+  if (action === 'list') {
+    return null;
+  }
+  const workspaceId =
+    typeof ctx.rawInput['workspaceId'] === 'string' ? ctx.rawInput['workspaceId'].trim() : '';
+  const workspaceRecord =
+    ctx.rawInput['workspace'] && typeof ctx.rawInput['workspace'] === 'object'
+      ? (ctx.rawInput['workspace'] as Record<string, unknown>)
+      : null;
+  const name =
+    workspaceRecord && typeof workspaceRecord['name'] === 'string'
+      ? workspaceRecord['name'].trim()
+      : '';
+  const visibility =
+    workspaceRecord && typeof workspaceRecord['visibility'] === 'string'
+      ? workspaceRecord['visibility'].trim()
+      : '';
+  const workingRoot =
+    workspaceRecord && typeof workspaceRecord['defaultWorkingRoot'] === 'string'
+      ? workspaceRecord['defaultWorkingRoot'].trim()
+      : '';
+  const roster = Array.isArray(workspaceRecord?.['defaultTeamRoster'])
+    ? (workspaceRecord['defaultTeamRoster'] as unknown[])
+    : null;
+  const verb =
+    action === 'create'
+      ? '新建'
+      : action === 'update'
+        ? '修改'
+        : action === 'delete'
+          ? '删除'
+          : action;
+  const details = [
+    visibility ? `可见性 ${visibility}` : '',
+    roster !== null ? `成员 ${roster.length} 个` : '',
+    workingRoot ? `工作根 ${workingRoot}` : '',
+  ]
+    .filter((part) => part.length > 0)
+    .join('，');
+  const previewAction = `${verb}团队工作区 ${workspaceId || name || '(新建)'}${
+    details ? `（${details}）` : ''
+  }`;
+  return {
+    scope: `${action}:${workspaceId || 'new'}`,
+    reason: '需要修改团队工作区',
+    riskLevel: 'high',
+    previewAction: previewAction.slice(0, 240),
+    always: [`${action}:*`],
+  };
+};
+
+function buildMcpManagePreviewAction(
+  action: string,
+  serverId: string,
+  serverRecord: Record<string, unknown> | null,
+): string {
+  const target = serverId || '(新 server)';
+  if (!serverRecord) {
+    return `MCP 管理 ${action} ${target}`;
+  }
+  const transport =
+    typeof serverRecord['transport'] === 'string' ? serverRecord['transport'].trim() : '';
+  if (transport === 'stdio') {
+    const command =
+      typeof serverRecord['command'] === 'string' ? serverRecord['command'].trim() : '';
+    const args = Array.isArray(serverRecord['args'])
+      ? serverRecord['args'].filter((value): value is string => typeof value === 'string')
+      : [];
+    const commandLine = [command, ...args].join(' ').trim().slice(0, 160);
+    return `MCP 管理 ${action} ${target} (stdio): ${commandLine}`.trim();
+  }
+  if (transport === 'sse') {
+    const url = typeof serverRecord['url'] === 'string' ? serverRecord['url'].trim() : '';
+    let safeUrl = url;
+    try {
+      const parsed = new URL(url);
+      safeUrl = `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      // 非法 URL 原样展示（执行层会用同一套 schema 报错，不会真的连接）。
+    }
+    return `MCP 管理 ${action} ${target} (sse): ${safeUrl}`.slice(0, 200);
+  }
+  return `MCP 管理 ${action} ${target}`;
+}
+
 const desktopAutomationPermissionDeriver: ToolPermissionDeriver = (ctx) => {
   const action =
     typeof ctx.rawInput.action === 'string' ? ctx.rawInput.action.trim().toLowerCase() : '';
@@ -691,6 +1031,12 @@ const TOOL_PERMISSION_DERIVERS: Readonly<Record<string, ToolPermissionDeriver>> 
   workspace_review_revert: workspaceReviewRevertPermissionDeriver,
   lsp_rename: lspRenamePermissionDeriver,
   mcp_call: mcpCallPermissionDeriver,
+  [MCP_MANAGE_SERVERS_TOOL_NAME]: mcpManageServersPermissionDeriver,
+  [MEMORY_MANAGE_TOOL_NAME]: memoryManagePermissionDeriver,
+  [SKILL_MANAGE_TOOL_NAME]: skillManagePermissionDeriver,
+  [SCHEDULE_MANAGE_TOOL_NAME]: scheduleManagePermissionDeriver,
+  [AGENT_MANAGE_TOOL_NAME]: agentManagePermissionDeriver,
+  [TEAM_WORKSPACE_MANAGE_TOOL_NAME]: teamWorkspaceManagePermissionDeriver,
   desktop_automation: desktopAutomationPermissionDeriver,
   desktop_control: desktopControlPermissionDeriver,
 };

@@ -263,6 +263,9 @@ function makeMapper(
     occurredAt: Date.now(),
     ...extra,
   });
+  // 元数据命名空间：路由显式 `providerMetadataKey`，未配置时回退 provider 字符串
+  // （对齐 opencode 参考库；此前网关硬编码读 `openai`）。
+  const providerMetadataKey = input.model.route.providerMetadataKey ?? String(input.model.provider);
 
   return (event) => {
     switch (event.type) {
@@ -313,15 +316,33 @@ function makeMapper(
             'reasoningEncryptedContent',
             'encryptedContent',
           );
+        // OpenAI Chat 家族：字段名与结构化条目随 `reasoning-end` 下发，
+        // 持久化后在后续轮次按同名写回（对齐参考库的 reasoningMetadata）。
+        const reasoningField = providerMetadataText(
+          event.providerMetadata,
+          providerMetadataKey,
+          'reasoningField',
+        );
+        const rawReasoningDetails =
+          event.providerMetadata?.[providerMetadataKey]?.['reasoningDetails'];
+        const reasoningDetails = Array.isArray(rawReasoningDetails)
+          ? rawReasoningDetails
+          : undefined;
         state.thinkingSignature = undefined;
         state.thinkingEncryptedContent = undefined;
         state.thinkingItemId = undefined;
         const providerMetadata =
-          signature === undefined && encryptedContent === undefined
+          signature === undefined &&
+          encryptedContent === undefined &&
+          reasoningField === undefined &&
+          reasoningDetails === undefined
             ? undefined
             : {
                 ...(signature === undefined ? {} : { signature }),
                 ...(encryptedContent === undefined ? {} : { encryptedContent }),
+                ...(reasoningField === undefined ? {} : { reasoningField }),
+                ...(reasoningDetails === undefined ? {} : { reasoningDetails }),
+                providerMetadataKey,
               };
         return [
           {
@@ -431,7 +452,7 @@ function makeMapper(
       case 'step-finish': {
         const serviceTier = providerMetadataText(
           event.providerMetadata,
-          'openai',
+          providerMetadataKey,
           'serviceTier',
           'service_tier',
         );
@@ -442,7 +463,7 @@ function makeMapper(
       case 'finish': {
         const serviceTier = providerMetadataText(
           event.providerMetadata,
-          'openai',
+          providerMetadataKey,
           'serviceTier',
           'service_tier',
         );
@@ -658,6 +679,7 @@ export function runUpstreamStream(input: RunUpstreamStreamInput): NativeUpstream
           ...(system === undefined ? {} : { system }),
           messages: transformedMessages,
           tools: effectiveTools === undefined ? [] : Object.values(effectiveTools),
+          ...(input.sessionId === undefined ? {} : { promptCacheKey: input.sessionId }),
           ...(resolvedGeneration === undefined ? {} : { generation: resolvedGeneration }),
           ...(providerOptions === undefined ? {} : { providerOptions }),
           ...(http === undefined ? {} : { http }),

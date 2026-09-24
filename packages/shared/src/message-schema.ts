@@ -181,6 +181,23 @@ export interface ReasoningContent {
    * assistant turn (`thinking ids found without signature` 400 error).
    */
   signature?: string;
+  /**
+   * OpenAI Chat 兼容网关的思维链字段名（`reasoning_content` / `reasoning` /
+   * `reasoning_text`）。历史回传时按同名写回，避免网关因字段名不匹配而丢弃
+   * 思维链上下文。
+   */
+  reasoningField?: string;
+  /**
+   * 结构化思维链条目（上游 `reasoning_details`）。部分兼容网关要求原样回传
+   * 才能续接工具回合。
+   */
+  reasoningDetails?: ReadonlyArray<unknown>;
+  /**
+   * `reasoningField` / `reasoningDetails` 的元数据命名空间（路由
+   * `providerMetadataKey`，未配置时按 `openai` 兜底）。持久化与回传都按它
+   * 读写，使不同 provider 的元数据互不混淆。
+   */
+  providerMetadataKey?: string;
 }
 
 export interface InputAudioContent {

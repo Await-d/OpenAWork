@@ -299,7 +299,7 @@ export function NetworkWaterfall({
         <WaterfallNotice
           icon={<WaterfallOffIcon />}
           title="未开始录制"
-          description="实时引擎不可用或未在录制网络流量。Tauri 原生窗口模式下无法监听页面网络，请在 Web 模式或开发者工具中查看。"
+          description="实时引擎不可用或未在录制网络流量。Tauri 原生窗口需依赖网关侧实时引擎采集，可先处理上方引擎提示；也可在 Web 模式或开发者工具中查看。"
         />
       ) : captureStatus === 'loading' ? (
         <WaterfallSkeleton />

@@ -26,7 +26,10 @@ export interface TransportPrepareInput<Body> {
   readonly endpoint: Endpoint<Body>;
   readonly auth: Auth;
   readonly encodeBody: (body: Body) => string;
-  readonly headers?: (input: { readonly request: LLMRequest }) => Record<string, string>;
+  readonly headers?: (input: {
+    readonly request: LLMRequest;
+    readonly body: Body;
+  }) => Record<string, string>;
 }
 
 export * as HttpTransport from './http.js';

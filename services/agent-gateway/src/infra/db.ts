@@ -1440,6 +1440,58 @@ export async function migrate(): Promise<void> {
     'CREATE INDEX IF NOT EXISTS idx_team_force_apply_events_user ON team_force_apply_events(user_id, applied_at DESC)',
   );
 
+  // ─── Cron 持久化（260924-定时任务持久化） ───
+  // 定时任务此前是纯内存实现（重启即丢）；本表是任务定义的唯一持久化真相源，
+  // 启动时由 `restoreCronJobsFromStore` 重新装载进 CronScheduler。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cron_jobs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      schedule_kind TEXT NOT NULL,
+      schedule_at INTEGER,
+      schedule_every INTEGER,
+      schedule_expr TEXT,
+      schedule_tz TEXT NOT NULL DEFAULT 'UTC',
+      prompt TEXT NOT NULL,
+      agent_id TEXT,
+      model TEXT,
+      working_folder TEXT,
+      session_id TEXT,
+      delivery_mode TEXT NOT NULL DEFAULT 'none',
+      delivery_target TEXT,
+      plugin_id TEXT,
+      plugin_chat_id TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      delete_after_run INTEGER NOT NULL DEFAULT 0,
+      max_iterations INTEGER NOT NULL DEFAULT 10,
+      last_fired_at INTEGER,
+      fire_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_cron_jobs_user_updated ON cron_jobs(user_id, updated_at DESC)',
+  );
+  // 执行历史：fireJob 在开始与结束各 upsert 一次（running → completed/failed）；
+  // 进程重启会把残留的 running 行标记为 failed（中断）。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cron_job_executions (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      status TEXT NOT NULL,
+      error TEXT,
+      session_id TEXT
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_cron_job_executions_job ON cron_job_executions(job_id, started_at DESC)',
+  );
+
   // ─── Phase B: Session 状态机 + Handoff 协议（260515-team-phase-b） ───
   // T-01: sessions 表扩展五个字段。注意 `team_parent_session_id` 故意区别于
   // 已有的 `parent_id`（后者是 V2 message-tree 父子，由 message-v2-projectors

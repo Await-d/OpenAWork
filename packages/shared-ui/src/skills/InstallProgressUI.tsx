@@ -134,9 +134,9 @@ export function InstallProgressUI({ skillName, steps, onCancel }: InstallProgres
             type="button"
             onClick={onCancel}
             style={{
-              background: 'rgba(248,113,113,0.15)',
+              background: color.complementMuted,
               color: color.danger,
-              border: '1px solid rgba(248,113,113,0.3)',
+              border: `1px solid ${color.complementBorder}`,
               borderRadius: 6,
               padding: '0.35rem 0.85rem',
               fontSize: 12,

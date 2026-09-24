@@ -31,6 +31,11 @@ interface InteractiveTerminalViewProps {
   /** 写失败 / 剪贴板失败的上报通道，接到宿主面板已有的 error 条。 */
   onWriteError?: (message: string) => void;
   /**
+   * 窗口标题上报（xterm `onTitleChange`，源是 pty 的 OSC 0/1/2 转义）；
+   * 宿主面板缓存后供 tab 标签使用。
+   */
+  onTitleChange?: (title: string | null) => void;
+  /**
    * 内容区右键菜单的**面板命令段**（新建 / 拆分 / 终止 / 重命名 / 关闭）。
    * 由 pane 提供：本组件只负责把它与剪贴板项拼在一起（见 useTerminalSession）。
    */
@@ -44,6 +49,7 @@ export function InteractiveTerminalView({
   terminal,
   inputEnabled,
   onWriteError,
+  onTitleChange,
   menuItems,
 }: InteractiveTerminalViewProps) {
   const session = useTerminalSession({
@@ -53,6 +59,7 @@ export function InteractiveTerminalView({
     terminal,
     inputEnabled,
     onWriteError,
+    onTitleChange,
     menuItems,
   });
 

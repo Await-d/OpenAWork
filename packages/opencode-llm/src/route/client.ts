@@ -9,6 +9,7 @@ import type { Transport, TransportRuntime } from './transport/index.js';
 import { WebSocketExecutor } from './transport/index.js';
 import type { Protocol } from './protocol.js';
 import { applyCachePolicy } from '../cache-policy.js';
+import { applyEffortUpdates } from '../effort-updates.js';
 import * as ProviderShared from '../protocols/shared.js';
 import type { LLMError, PreparedRequestOf, ProtocolID, ProviderOptions } from '../schema/index.js';
 import {
@@ -37,6 +38,20 @@ export interface RouteBody<Body> {
 export interface Route<Body, Prepared = unknown> {
   readonly id: string;
   readonly provider?: ProviderID;
+  /**
+   * 元数据命名空间（对齐 opencode 参考库）。
+   *
+   * 协议用它给 provider 元数据（思维链字段名 / 结构化条目 / usage 等）分组；
+   * 未配置时调用方回退到 `String(model.provider)`。
+   */
+  readonly providerMetadataKey?: string;
+  /**
+   * 路由是否支持原生「逐消息 effort 更新」（对齐 opencode 参考库）。
+   *
+   * 返回 false / 未配置时，`applyEffortUpdates` 会在编译期剥离
+   * `Message.effort(...)` 标记，避免把标记泄漏给上游。
+   */
+  readonly supportsEffortUpdates?: (request: LLMRequest) => boolean;
   readonly protocol: ProtocolID;
   readonly endpoint: Endpoint<Body>;
   readonly auth: AuthDef;
@@ -84,6 +99,8 @@ export interface RouteDefaultsInput {
 export interface RoutePatch<Body, Prepared> extends RouteDefaultsInput {
   readonly id?: string;
   readonly provider?: string | ProviderID;
+  readonly providerMetadataKey?: string;
+  readonly supportsEffortUpdates?: (request: LLMRequest) => boolean;
   readonly auth?: AuthDef;
   readonly transport?: Transport<Body, Prepared, unknown>;
   readonly endpoint?: EndpointPatch<Body>;
@@ -204,6 +221,10 @@ export interface MakeInput<Body, Frame, Event, State> {
   readonly id: string;
   /** Provider identity for route-owned model construction. */
   readonly provider?: string | ProviderID;
+  /** Metadata namespace for provider-scoped payloads (defaults to the provider string). */
+  readonly providerMetadataKey?: string;
+  /** Route-level opt-in for native per-message effort updates (see `applyEffortUpdates`). */
+  readonly supportsEffortUpdates?: (request: LLMRequest) => boolean;
   /** Semantic API contract — owns body construction, body schema, and parsing. */
   readonly protocol: Protocol<Body, Frame, Event, State>;
   /** Where the request is sent. */
@@ -213,7 +234,10 @@ export interface MakeInput<Body, Frame, Event, State> {
   /** Stream framing — bytes -> frames before `protocol.stream.event` decoding. */
   readonly framing: Framing<Frame>;
   /** Static / per-request headers added before `auth` runs. */
-  readonly headers?: (input: { readonly request: LLMRequest }) => Record<string, string>;
+  readonly headers?: (input: {
+    readonly request: LLMRequest;
+    readonly body: Body;
+  }) => Record<string, string>;
   /** Route/request defaults used when compiling requests for this route. */
   readonly defaults?: RouteDefaultsInput;
 }
@@ -223,6 +247,10 @@ export interface MakeTransportInput<Body, Prepared, Frame, Event, State> {
   readonly id: string;
   /** Provider identity for route-owned model construction. */
   readonly provider?: string | ProviderID;
+  /** Metadata namespace for provider-scoped payloads (defaults to the provider string). */
+  readonly providerMetadataKey?: string;
+  /** Route-level opt-in for native per-message effort updates (see `applyEffortUpdates`). */
+  readonly supportsEffortUpdates?: (request: LLMRequest) => boolean;
   /** Semantic API contract — owns body construction, body schema, and parsing. */
   readonly protocol: Protocol<Body, Frame, Event, State>;
   /** Where the request is sent. */
@@ -230,7 +258,10 @@ export interface MakeTransportInput<Body, Prepared, Frame, Event, State> {
   /** Per-request transport auth. Provider facades override this via `route.with(...)`. */
   readonly auth?: AuthDef;
   /** Static / per-request headers added before `auth` runs. */
-  readonly headers?: (input: { readonly request: LLMRequest }) => Record<string, string>;
+  readonly headers?: (input: {
+    readonly request: LLMRequest;
+    readonly body: Body;
+  }) => Record<string, string>;
   /** Runnable transport route. */
   readonly transport: Transport<Body, Prepared, Frame>;
   /** Route/request defaults used when compiling requests for this route. */
@@ -308,6 +339,8 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
       id: routeInput.id,
       provider:
         routeInput.provider === undefined ? undefined : ProviderID.make(routeInput.provider),
+      providerMetadataKey: routeInput.providerMetadataKey,
+      supportsEffortUpdates: routeInput.supportsEffortUpdates,
       protocol: protocol.id,
       endpoint: routeInput.endpoint,
       auth: routeInput.auth ?? Auth.none,
@@ -315,11 +348,30 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
       defaults: routeInput.defaults ?? {},
       body: protocol.body,
       with: (patch: RoutePatch<Body, Prepared>) => {
-        const { id, provider, auth, transport, endpoint, ...defaults } = patch;
+        const {
+          id,
+          provider,
+          providerMetadataKey,
+          supportsEffortUpdates,
+          auth,
+          transport,
+          endpoint,
+          ...defaults
+        } = patch;
+        const effectiveProvider = provider ?? routeInput.provider;
         return build({
           ...routeInput,
           id: id ?? routeInput.id,
           provider: provider ?? routeInput.provider,
+          // 命名空间优先级：补丁显式值 → 路由显式值 → provider 字符串。
+          // 与参考库的差异：路由显式设置的 key 是「粘性」的——provider 覆盖
+          // 不会改写它（参考库会改写；移植版网关的思维链元数据固定读取
+          // `openai`，改写会让 OpenAI 兼容家族丢失回传）。
+          providerMetadataKey:
+            providerMetadataKey ??
+            routeInput.providerMetadataKey ??
+            (effectiveProvider === undefined ? undefined : String(effectiveProvider)),
+          supportsEffortUpdates: supportsEffortUpdates ?? routeInput.supportsEffortUpdates,
           auth: auth ?? routeInput.auth,
           endpoint: endpoint ? Endpoint.merge(routeInput.endpoint, endpoint) : routeInput.endpoint,
           transport:
@@ -430,6 +482,8 @@ export function make<Body, Prepared, Frame, Event, State>(
   return makeFromTransport({
     id: input.id,
     provider: input.provider,
+    providerMetadataKey: input.providerMetadataKey,
+    supportsEffortUpdates: input.supportsEffortUpdates,
     protocol,
     endpoint: input.endpoint,
     auth: input.auth,
@@ -443,7 +497,7 @@ export function make<Body, Prepared, Frame, Event, State>(
 // validated provider body plus transport-private prepared data, but does not
 // execute transport.
 const compile = Effect.fn('LLM.compile')(function* (request: LLMRequest) {
-  const resolved = applyCachePolicy(resolveRequestOptions(request));
+  const resolved = applyEffortUpdates(applyCachePolicy(resolveRequestOptions(request)));
   const route = resolved.model.route;
 
   const body = yield* route.body

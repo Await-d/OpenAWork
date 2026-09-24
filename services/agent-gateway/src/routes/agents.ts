@@ -14,7 +14,8 @@ import {
 import { MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS } from '../provider/model-router.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 
-const AGENT_ROUTE_ERROR_MESSAGES = {
+/** 供 `agent_manage` 工具复用的错误文案与映射（与 HTTP 路由同源）。 */
+export const AGENT_ROUTE_ERROR_MESSAGES = {
   agentExists: '目标 Agent 已存在。',
   agentNotFound: '目标 Agent 不存在。',
   builtinDeleteForbidden: '内置 Agent 不允许删除。',
@@ -22,7 +23,7 @@ const AGENT_ROUTE_ERROR_MESSAGES = {
   updatePayloadRequired: '至少需要提供一个可更新字段。',
 } as const;
 
-function mapAgentCatalogError(error: unknown): { error: string; statusCode: number } {
+export function mapAgentCatalogError(error: unknown): { error: string; statusCode: number } {
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes('already exists')) {
@@ -66,7 +67,7 @@ const canonicalRoleSchema = z
   })
   .optional();
 
-const createManagedAgentSchema = z.object({
+export const createManagedAgentSchema = z.object({
   id: z.string().trim().min(1).max(120).optional(),
   label: z.string().trim().min(1).max(80),
   description: z.string().trim().max(400).optional().default(''),
@@ -80,7 +81,7 @@ const createManagedAgentSchema = z.object({
   enabled: z.boolean().optional().default(true),
 });
 
-const updateManagedAgentSchema = z
+export const updateManagedAgentSchema = z
   .object({
     label: z.string().trim().min(1).max(80).optional(),
     description: z.string().trim().max(400).optional(),

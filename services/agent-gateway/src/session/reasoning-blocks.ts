@@ -13,6 +13,15 @@ export interface ReasoningBlock {
    * subsequent turns so Anthropic accepts the thinking block.
    */
   signature?: string;
+  /**
+   * OpenAI Chat 兼容网关的思维链字段名（`reasoning_content` / `reasoning` /
+   * `reasoning_text`）。持久化后在后续轮次按同名写回上游。
+   */
+  reasoningField?: string;
+  /** 结构化思维链条目（上游 `reasoning_details`），部分网关要求原样回传。 */
+  reasoningDetails?: ReadonlyArray<unknown>;
+  /** 上述元数据的命名空间（路由 `providerMetadataKey`，缺省按 `openai` 处理）。 */
+  providerMetadataKey?: string;
 }
 
 const LEGACY_REASONING_BLOCK_KEY = 'legacy:0';
@@ -82,9 +91,33 @@ export function markReasoningBlockEnded(
     'itemId' | 'outputIndex' | 'summaryIndex' | 'occurredAt' | 'providerMetadata'
   >,
 ): ReasoningBlock[] {
-  if (previousBlocks.length === 0) return previousBlocks;
   const endedAt = chunk.occurredAt ?? Date.now();
   const signature = chunk.providerMetadata?.signature;
+  const reasoningField = chunk.providerMetadata?.reasoningField;
+  const reasoningDetails = chunk.providerMetadata?.reasoningDetails;
+  const providerMetadataKey = chunk.providerMetadata?.providerMetadataKey;
+  const hasOpenAIMeta =
+    (typeof reasoningField === 'string' && reasoningField.length > 0) ||
+    Array.isArray(reasoningDetails);
+  if (previousBlocks.length === 0) {
+    // OpenAI Chat 的「只有结构化条目、没有正文 delta」响应没有块可挂：
+    // 落一个占位块，让元数据能持久化并在后续轮次回传。
+    if (!hasOpenAIMeta) return previousBlocks;
+    return [
+      {
+        key: buildReasoningBlockKey(chunk),
+        text: '',
+        endedAt,
+        ...(typeof reasoningField === 'string' && reasoningField.length > 0
+          ? { reasoningField }
+          : {}),
+        ...(Array.isArray(reasoningDetails) ? { reasoningDetails } : {}),
+        ...(typeof providerMetadataKey === 'string' && providerMetadataKey.length > 0
+          ? { providerMetadataKey }
+          : {}),
+      },
+    ];
+  }
   const hasIdentity =
     (typeof chunk.itemId === 'string' && chunk.itemId.trim().length > 0) ||
     typeof chunk.outputIndex === 'number' ||
@@ -96,12 +129,33 @@ export function markReasoningBlockEnded(
     ...(typeof signature === 'string' && signature.length > 0 ? { signature } : {}),
   });
 
-  if (!hasIdentity) {
-    return previousBlocks.map((block) => (block.endedAt && !signature ? block : finalize(block)));
-  }
+  const result = (() => {
+    if (!hasIdentity) {
+      return previousBlocks.map((block) => (block.endedAt && !signature ? block : finalize(block)));
+    }
+    const targetKey = buildReasoningBlockKey(chunk);
+    return previousBlocks.map((block) => (block.key === targetKey ? finalize(block) : block));
+  })();
 
-  const targetKey = buildReasoningBlockKey(chunk);
-  return previousBlocks.map((block) => (block.key === targetKey ? finalize(block) : block));
+  // OpenAI Chat 家族的思维链元数据是「响应级」的：挂到第一个块上
+  // （与 native-message-bridge 的 index === 0 约定一致），避免多块时重复。
+  const first = result[0];
+  if (first === undefined || !hasOpenAIMeta) {
+    return result;
+  }
+  return [
+    {
+      ...first,
+      ...(typeof reasoningField === 'string' && reasoningField.length > 0
+        ? { reasoningField }
+        : {}),
+      ...(Array.isArray(reasoningDetails) ? { reasoningDetails } : {}),
+      ...(typeof providerMetadataKey === 'string' && providerMetadataKey.length > 0
+        ? { providerMetadataKey }
+        : {}),
+    },
+    ...result.slice(1),
+  ];
 }
 
 export function extractReasoningTexts(blocks: ReasoningBlock[]): string[] {
@@ -114,6 +168,12 @@ export interface ReasoningEntry {
   endedAt?: number;
   /** Anthropic extended-thinking signature (when present). */
   signature?: string;
+  /** OpenAI Chat 家族：思维链字段名（历史回传时按同名写回）。 */
+  reasoningField?: string;
+  /** OpenAI Chat 家族：结构化思维链条目（部分网关要求原样回传）。 */
+  reasoningDetails?: ReadonlyArray<unknown>;
+  /** 上述元数据的命名空间（路由 `providerMetadataKey`，缺省按 `openai` 处理）。 */
+  providerMetadataKey?: string;
 }
 
 /**
@@ -129,6 +189,15 @@ export function extractReasoningEntries(blocks: ReasoningBlock[]): ReasoningEntr
       endedAt: block.endedAt,
       ...(typeof block.signature === 'string' && block.signature.length > 0
         ? { signature: block.signature }
+        : {}),
+      ...(typeof block.reasoningField === 'string' && block.reasoningField.length > 0
+        ? { reasoningField: block.reasoningField }
+        : {}),
+      ...(Array.isArray(block.reasoningDetails)
+        ? { reasoningDetails: block.reasoningDetails }
+        : {}),
+      ...(typeof block.providerMetadataKey === 'string' && block.providerMetadataKey.length > 0
+        ? { providerMetadataKey: block.providerMetadataKey }
         : {}),
     }))
     .filter((entry) => entry.text.length > 0);

@@ -67,7 +67,6 @@ import {
   buildBackgroundTaskStatusMessage,
   buildTaskToolBackgroundMessage,
   buildTaskToolTerminalMessage,
-  collectDelegatedSessionText,
   extractLatestDelegatedSessionMessage,
 } from '../task/delegated-task-display.js';
 import {
@@ -144,6 +143,18 @@ import {
   type SshRemoteResolution,
 } from './ssh-remote-execution.js';
 import { callMcpToolForSession, listMcpToolsForSession } from '../mcp/mcp-runtime.js';
+import { mcpManageServersToolDefinition, runMcpManageServersTool } from '../mcp/mcp-admin-tools.js';
+import { memoryManageToolDefinition, runMemoryManageTool } from '../memory/memory-admin-tools.js';
+import { skillManageToolDefinition, runSkillManageTool } from '../skill/skill-admin-tools.js';
+import {
+  scheduleManageToolDefinition,
+  runScheduleManageTool,
+} from '../cron/schedule-admin-tools.js';
+import { agentManageToolDefinition, runAgentManageTool } from '../agent/agent-admin-tools.js';
+import {
+  teamWorkspaceManageToolDefinition,
+  runTeamWorkspaceManageTool,
+} from '../team/team-workspace-admin-tools.js';
 import { parseMcpCallRawInput, parseMcpListToolsRawInput } from '../mcp/mcp-tool-input.js';
 import { transitionToolToRunning } from '../message/message-store-v2.js';
 import {
@@ -285,6 +296,15 @@ import { createWebsearchTool, websearchTool } from './tool-aliases.js';
 import { readWebsearchPolicy, WEBSEARCH_POLICY_KEY } from '../provider/websearch-policy.js';
 import { readToolPathInput } from './tool-path-aliases.js';
 import { buildReadToolOutputResponse, readToolOutputToolDefinition } from './tool-output-tools.js';
+import {
+  resolveToolInvokeRequest,
+  TOOL_INVOKE_TOOL_NAME,
+  TOOL_SEARCH_TOOL_NAME,
+  toolSearchInputSchema,
+} from './tool-folding.js';
+import { readToolInvokeAllowlist } from '../session/tool-invoke-allowlist.js';
+import { readSpilledToolOutput } from './tool-output-spill.js';
+import { buildGatewayToolDefinitions } from './tool-definitions.js';
 import { buildToolResultContent, buildToolResultRunEvent } from './tool-result-contract.js';
 import {
   DEFAULT_UPSTREAM_RETRY_MAX_RETRIES,
@@ -539,6 +559,8 @@ export const TOOL_WHITELIST = new Set<string>([
   skillMcpToolDefinition.name,
   lookAtToolDefinition.name,
   'read_tool_output',
+  TOOL_SEARCH_TOOL_NAME,
+  TOOL_INVOKE_TOOL_NAME,
   'edit',
   // multi_edit 与 edit/write 同属文件编辑家族，之前漏登记（靠 register() 运行时补进
   // 实例白名单才没暴露问题）；静态表补齐，visible/whitelist/category 三者对齐。
@@ -566,6 +588,12 @@ export const TOOL_WHITELIST = new Set<string>([
   todoWriteTool.name,
   'mcp_list_tools',
   'mcp_call',
+  mcpManageServersToolDefinition.name,
+  memoryManageToolDefinition.name,
+  skillManageToolDefinition.name,
+  scheduleManageToolDefinition.name,
+  agentManageToolDefinition.name,
+  teamWorkspaceManageToolDefinition.name,
   desktopAutomationToolDefinition.name,
   desktopControlToolDefinition.name,
   computerUseToolDefinition.name,
@@ -1301,6 +1329,7 @@ export function syncParentTaskToolResult(input: {
       buildToolResultContent({
         toolCallId: input.parentToolReference.toolCallId,
         toolName: 'task',
+        sessionId: input.parentSessionId,
         clientRequestId: parentToolResultClientRequestId,
         output,
         isError: input.status === 'failed',
@@ -1444,6 +1473,22 @@ function buildPermissionRequestContext(
  * Hook errors are isolated inside the dispatcher (see
  * `plugin-host.ts`); a misbehaving plugin can't crash a tool call.
  */
+/**
+ * `tool_invoke` 的索引失效口径：解析内层工具名（解析失败回退外层名）。
+ * 只用于 `invalidateWorkspaceFileIndexForToolCall`，不做任何放行判定。
+ */
+function resolveInvokeEffectiveToolName(request: ToolCallRequest, sessionId: string): string {
+  const decision = resolveToolInvokeRequest({
+    toolName: request.toolName,
+    rawInput: request.rawInput,
+    allowlist: readToolInvokeAllowlist(sessionId, getSessionOwnerUserId(sessionId) ?? ''),
+    isToolEnabled: () => true,
+  });
+  return decision.kind === 'rewrite'
+    ? rewriteLegacyToolRequest(decision.toolName, decision.rawInput).toolName
+    : rewriteLegacyToolRequest(request.toolName, request.rawInput).toolName;
+}
+
 async function executeGatewayManagedTool(
   sandbox: ToolSandbox,
   sessionId: string,
@@ -2622,6 +2667,58 @@ async function executeGatewayManagedToolImpl(
       };
     }
 
+    if (request.toolName === TOOL_SEARCH_TOOL_NAME) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = toolSearchInputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const allowlist = new Set(readToolInvokeAllowlist(sessionId, userId));
+      const terms = parsed.data.query
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((term) => term.length > 0);
+      const matches = buildGatewayToolDefinitions()
+        .filter((tool) => allowlist.has(tool.function.name))
+        .filter((tool) => {
+          const name = tool.function.name.toLowerCase();
+          const description = (tool.function.description ?? '').toLowerCase();
+          return terms.some((term) => name.includes(term) || description.includes(term));
+        })
+        .slice(0, parsed.data.limit)
+        .map((tool) => ({
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: tool.function.parameters,
+        }));
+      return {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output:
+          matches.length > 0
+            ? JSON.stringify({ tools: matches }, null, 2)
+            : `No folded tool matched "${parsed.data.query}". Try a broader keyword (e.g. "lsp", "session", "mcp", "media").`,
+        isError: false,
+        durationMs: 0,
+      };
+    }
+
     if (request.toolName === readToolOutputToolDefinition.name) {
       const userId = getSessionOwnerUserId(sessionId);
       if (!userId) {
@@ -2685,21 +2782,25 @@ async function executeGatewayManagedToolImpl(
         };
       }
 
+      // 超限工具结果可能已把全文落盘（tool-output-spill）：优先用 spill 文件，
+      // 否则退回数据库里的截断输出。
+      const spilledOutput = readSpilledToolOutput(sessionId, resolvedStored.toolCallId);
+      const effectiveOutput = spilledOutput ?? resolvedStored.output;
       const serializedOutput = (() => {
-        if (typeof resolvedStored.output === 'string') {
-          return resolvedStored.output;
+        if (typeof effectiveOutput === 'string') {
+          return effectiveOutput;
         }
         try {
-          return JSON.stringify(resolvedStored.output);
+          return JSON.stringify(effectiveOutput);
         } catch {
-          return String(resolvedStored.output);
+          return String(effectiveOutput);
         }
       })();
 
       const sizeBytes = Buffer.byteLength(serializedOutput, 'utf8');
       const response = buildReadToolOutputResponse({
         toolCallId: resolvedStored.toolCallId,
-        output: resolvedStored.output,
+        output: effectiveOutput,
         isError: resolvedStored.isError,
         request: parsed.data,
         sizeBytes,
@@ -2708,12 +2809,18 @@ async function executeGatewayManagedToolImpl(
         !parsed.data.toolCallId && parsed.data.useLatestReferenced
           ? `已自动解析为最近一个被引用的大输出：${resolvedStored.toolCallId}。${response.note ? ` ${response.note}` : ''}`
           : response.note;
+      // 落盘取回时补一句来源说明，便于模型理解「这里能拿到超过持久化上限的全文」。
+      const noteParts = [
+        spilledOutput ? '（全文来自落盘文件）' : '',
+        latestReferenceNote ?? '',
+      ].filter((part) => part.length > 0);
+      const note = noteParts.length > 0 ? noteParts.join(' ') : undefined;
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
         output: {
           ...response,
-          note: latestReferenceNote,
+          note,
         },
         isError: false,
         durationMs: 0,
@@ -2795,6 +2902,246 @@ async function executeGatewayManagedToolImpl(
           toolCallId: request.toolCallId,
           toolName: request.toolName,
           output: err instanceof Error ? err.message : String(err),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === mcpManageServersToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = mcpManageServersToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runMcpManageServersTool({ userId, sessionId, input: parsed.data }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === memoryManageToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = memoryManageToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runMemoryManageTool({ userId, sessionId, input: parsed.data }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === skillManageToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = skillManageToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runSkillManageTool({ userId, sessionId, input: parsed.data }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === scheduleManageToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = scheduleManageToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runScheduleManageTool({ userId, sessionId, input: parsed.data }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === agentManageToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = agentManageToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runAgentManageTool({ userId, sessionId, input: parsed.data }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === teamWorkspaceManageToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = teamWorkspaceManageToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runTeamWorkspaceManageTool({ userId, sessionId, input: parsed.data }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
           isError: true,
           durationMs: 0,
         };
@@ -4341,7 +4688,10 @@ async function executeGatewayManagedToolImpl(
         sessionId: childSessionId,
         userId,
       });
-      const childDisplayText = collectDelegatedSessionText(childMessages);
+      // 默认只回摘要（对齐参考库 `SubagentCompletion.text` 口径：子代理最后
+      // 一条最终 assistant 文本），不再把整个子会话文本 + 工具输出拼进父会话
+      // 工具结果。需要逐条消息时显式传 full_session: true。
+      const childSummary = getChildSessionSummary(childSessionId, userId) || task.result || '';
       const latestChildMessage = extractLatestDelegatedSessionMessage(childMessages);
       const taskMessage =
         task.status === 'completed'
@@ -4349,8 +4699,7 @@ async function executeGatewayManagedToolImpl(
               agent: task.assignedAgent ?? 'task',
               completedAt: task.completedAt,
               description: task.title ?? task.id,
-              resultText:
-                childDisplayText || task.result || getChildSessionSummary(childSessionId, userId),
+              resultText: childSummary,
               sessionId: childSessionId,
               startedAt: task.startedAt,
               taskId: task.id,
@@ -4372,25 +4721,35 @@ async function executeGatewayManagedToolImpl(
         errorMessage: task.errorMessage,
         message: taskMessage,
         reason: readChildSessionTerminalReason(getSessionMetadata(childSessionId)),
-        result: childDisplayText || task.result || getChildSessionSummary(childSessionId, userId),
+        result: childSummary,
         sessionId: childSessionId,
         status: mapTaskStatusToToolOutputStatus(task.status),
         taskId: task.id,
         timeoutSource: readChildSessionTimeoutSource(getSessionMetadata(childSessionId)),
       });
-      const output = parsed.data.full_session
+      const formattedMessages = parsed.data.full_session
+        ? formatBackgroundOutputMessages({
+            includeThinking: parsed.data.include_thinking,
+            includeToolResults: parsed.data.include_tool_results,
+            limit: parsed.data.message_limit,
+            sinceMessageId: parsed.data.since_message_id,
+            thinkingMaxChars: parsed.data.thinking_max_chars,
+            userId,
+            sessionId: childSessionId,
+          })
+        : null;
+      const output = formattedMessages
         ? {
             ...baseOutput,
             ...(waitTimedOut ? { timedOut: true } : {}),
-            messages: formatBackgroundOutputMessages({
-              includeThinking: parsed.data.include_thinking,
-              includeToolResults: parsed.data.include_tool_results,
-              limit: parsed.data.message_limit,
-              sinceMessageId: parsed.data.since_message_id,
-              thinkingMaxChars: parsed.data.thinking_max_chars,
-              userId,
-              sessionId: childSessionId,
-            }),
+            ...(formattedMessages.omittedCount > 0
+              ? {
+                  messagesTruncated: true,
+                  omittedMessages: formattedMessages.omittedCount,
+                  note: `仅返回最近的消息（受 ${BACKGROUND_OUTPUT_MESSAGES_MAX_CHARS} 字符预算约束，更早的 ${formattedMessages.omittedCount} 条已省略）。`,
+                }
+              : {}),
+            messages: formattedMessages.messages,
           }
         : waitTimedOut
           ? `Timeout exceeded (${parsed.data.timeout}ms). Task still ${task.status}.\n\n${taskMessage}`
@@ -4824,6 +5183,24 @@ function stripThinkingBlocks(value: string): string {
   return value.replace(/`{3,}thinking\n[\s\S]*?`{3,}\n*/g, '').trim();
 }
 
+/**
+ * `background_output(full_session: true)` 的消息正文总字符预算。
+ *
+ * full_session 是显式 opt-in 的排查入口，但仍要有上限：历史上出现过单次
+ * 约 20 万字符的返回被父会话整段吃掉。超出预算时保留最近的消息并从最早
+ * 处淘汰，同时回传 `omittedMessages` 计数供模型判断是否还需要更早上下文。
+ */
+const BACKGROUND_OUTPUT_MESSAGES_MAX_CHARS = 50_000;
+
+/**
+ * `background_output(full_session: true)` 单条消息正文的字符上限。
+ *
+ * 总预算只能淘汰“更早”的消息；如果最新一条消息本身极大（例如子代理把整个
+ * 文件贴进回复），预算守卫会因“至少保留最新一条”而失效。这里对每条文本
+ * 再设硬上限，保证单条消息也不会失控。
+ */
+const BACKGROUND_OUTPUT_MESSAGE_MAX_TEXT_CHARS = 20_000;
+
 function formatBackgroundOutputMessages(input: {
   includeThinking: boolean;
   includeToolResults: boolean;
@@ -4832,7 +5209,8 @@ function formatBackgroundOutputMessages(input: {
   thinkingMaxChars: number;
   userId: string;
   sessionId: string;
-}) {
+}): { messages: unknown[]; omittedCount: number } {
+  const maxTextChars = Math.max(input.thinkingMaxChars, BACKGROUND_OUTPUT_MESSAGE_MAX_TEXT_CHARS);
   const messages = listSessionMessages({
     sessionId: input.sessionId,
     userId: input.userId,
@@ -4849,24 +5227,40 @@ function formatBackgroundOutputMessages(input: {
         : message.content.filter((part) => part.type !== 'tool_result'),
     }))
     .filter((message) => message.content.length > 0);
-  return filtered.slice(-input.limit).map((message) => ({
+  const formatted = filtered.slice(-input.limit).map((message) => ({
     id: message.id,
     role: message.role,
     createdAt: message.createdAt,
     content: message.content.map((part) => {
-      if (part.type !== 'text' || input.includeThinking) {
+      if (part.type !== 'text') {
         return part;
       }
-      const stripped = stripThinkingBlocks(part.text);
+      const stripped = input.includeThinking ? part.text : stripThinkingBlocks(part.text);
       return {
         ...part,
         text:
-          stripped.length > input.thinkingMaxChars
-            ? stripped.slice(0, input.thinkingMaxChars)
+          stripped.length > maxTextChars
+            ? `${stripped.slice(0, maxTextChars)}\n…[消息文本已截断，完整内容见子会话 sessionID: ${input.sessionId}]`
             : stripped,
       };
     }),
   }));
+
+  // 从最新一条往前保留，直到预算用尽；至少保留最新一条。
+  const kept: typeof formatted = [];
+  let totalChars = 0;
+  for (let index = formatted.length - 1; index >= 0; index -= 1) {
+    const entry = formatted[index];
+    if (!entry) continue;
+    const entryChars = JSON.stringify(entry).length;
+    if (kept.length > 0 && totalChars + entryChars > BACKGROUND_OUTPUT_MESSAGES_MAX_CHARS) {
+      break;
+    }
+    kept.unshift(entry);
+    totalChars += entryChars;
+  }
+
+  return { messages: kept, omittedCount: formatted.length - kept.length };
 }
 
 async function waitForTaskTerminalState(input: {
@@ -6263,10 +6657,12 @@ export class ToolSandbox {
       // 唯一的工具执行入口：agent 工具直接写盘，不经过 HTTP 路由，需在此按
       // 工具名补一次索引失效（含报错 / 取消路径）；只对可写工具生效，避免只读
       // 工具在长任务里强制下一次 `@` 查询全量重扫。
-      invalidateWorkspaceFileIndexForToolCall(
-        sessionId,
-        rewriteLegacyToolRequest(request.toolName, request.rawInput).toolName,
-      );
+      // `tool_invoke` 要按**内层工具**失效索引，否则写操作不会被下一次 `@` 看到。
+      const effectiveToolName =
+        request.toolName === TOOL_INVOKE_TOOL_NAME
+          ? resolveInvokeEffectiveToolName(request, sessionId)
+          : rewriteLegacyToolRequest(request.toolName, request.rawInput).toolName;
+      invalidateWorkspaceFileIndexForToolCall(sessionId, effectiveToolName);
     }
   }
 
@@ -6284,12 +6680,54 @@ export class ToolSandbox {
       ? { ...request, toolName: legacyRewrite.toolName, rawInput: legacyRewrite.rawInput }
       : request;
 
+    // `tool_invoke` 解包（对齐参考库在 `execute` 内调用折叠工具的执行形状）：
+    // 在最早的可用点把请求替换为**内层工具**，让后续的名称归一 / 静态白名单 /
+    // 会话启用 / 插件 hook / 权限阶梯 / 执行全部按内层工具走与直接调用完全相同的
+    // 路径——deny / ask / 审批 / team / channel / clarify 语义不降级。
+    // 内层工具必须在本会话的 `toolInvokeAllowlist` 内（该名单由网关按过滤后的
+    // 工具面写入），否则直接拒绝。
+    const invokeDecision = resolveToolInvokeRequest({
+      toolName: incomingRequest.toolName,
+      rawInput: incomingRequest.rawInput,
+      allowlist: readToolInvokeAllowlist(sessionId, getSessionOwnerUserId(sessionId) ?? ''),
+      isToolEnabled: (toolName) =>
+        isGatewayToolEnabledForSessionMetadata(toolName, getSessionMetadata(sessionId)),
+    });
+    if (invokeDecision.kind === 'reject') {
+      const result: ToolCallResult = {
+        toolCallId: request.toolCallId,
+        toolName: request.toolName,
+        output: invokeDecision.message,
+        isError: true,
+        durationMs: 0,
+      };
+      writeAuditLog({
+        sessionId,
+        category: 'tool',
+        sourceName: request.toolName,
+        requestId: request.toolCallId,
+        input: request.rawInput,
+        output: result.output,
+        isError: true,
+        durationMs: 0,
+      });
+      return result;
+    }
+    const invokeRequest: ToolCallRequest =
+      invokeDecision.kind === 'rewrite'
+        ? {
+            ...incomingRequest,
+            toolName: invokeDecision.toolName,
+            rawInput: invokeDecision.rawInput,
+          }
+        : incomingRequest;
+
     const dispatchedRequest = dispatchClaudeCodeTool(
-      incomingRequest.toolName,
-      (incomingRequest.rawInput &&
-      typeof incomingRequest.rawInput === 'object' &&
-      !Array.isArray(incomingRequest.rawInput)
-        ? incomingRequest.rawInput
+      invokeRequest.toolName,
+      (invokeRequest.rawInput &&
+      typeof invokeRequest.rawInput === 'object' &&
+      !Array.isArray(invokeRequest.rawInput)
+        ? invokeRequest.rawInput
         : {}) as Record<string, unknown>,
     );
     if (dispatchedRequest.kind === 'unsupported') {
@@ -6314,7 +6752,7 @@ export class ToolSandbox {
     }
 
     const normalizedRequest: ToolCallRequest = {
-      ...request,
+      ...invokeRequest,
       toolName: dispatchedRequest.normalized.canonicalName,
       rawInput: dispatchedRequest.normalized.normalizedFields,
     };

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
-import { db, sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
+import { db, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import {
   SkillRegistryClientImpl,
   RegistrySourceManager,
@@ -17,6 +17,14 @@ import {
   readResponseTextWithLimit,
   resolveHttpBodyLimitBytes,
 } from '../infra/http-body-limit.js';
+import {
+  rowToInstalledSkill,
+  setInstalledSkillEnabled,
+  tryRowToInstalledSkill,
+  uninstallSkillForUser,
+  upsertInstalledSkill,
+  type InstalledSkillRow,
+} from '../skill/skill-installed-store.js';
 
 const SKILLS_ERROR_MESSAGES = {
   installBodyInvalid: '缺少技能标识或请求参数无效。',
@@ -59,23 +67,6 @@ const registrySourceToggleBodySchema = z.object({
   enabled: z.boolean(),
 });
 
-interface InstalledSkillRow {
-  skill_id: string;
-  source_id: string;
-  manifest_json: string;
-  granted_permissions_json: string;
-  enabled: number;
-  installed_at: number;
-  updated_at: number;
-  latest_version_check_json?: string | null;
-}
-
-interface LatestVersionCheckRecord {
-  latestVersion: string | null;
-  checkedAt: number;
-  error: string | null;
-}
-
 interface RegistrySourceRow {
   id: string;
   name: string;
@@ -99,54 +90,6 @@ interface RegistrySourceSyncResult {
   entries: SkillEntry[];
   errorMessage?: string;
   fallbackToCache: boolean;
-}
-
-function rowToInstalledSkill(row: InstalledSkillRow) {
-  let latestVersion: string | null = null;
-  let latestVersionCheckedAt: number | null = null;
-  if (row.latest_version_check_json) {
-    try {
-      const parsed = JSON.parse(row.latest_version_check_json) as LatestVersionCheckRecord;
-      if (typeof parsed.latestVersion === 'string') latestVersion = parsed.latestVersion;
-      if (typeof parsed.checkedAt === 'number') latestVersionCheckedAt = parsed.checkedAt;
-    } catch {
-      // Corrupt JSON — leave both fields null and let the background
-      // checker overwrite on next run.
-    }
-  }
-  return {
-    skillId: row.skill_id,
-    sourceId: row.source_id,
-    manifest: JSON.parse(row.manifest_json) as unknown,
-    grantedPermissions: JSON.parse(row.granted_permissions_json) as unknown[],
-    enabled: row.enabled === 1,
-    installedAt: row.installed_at,
-    updatedAt: row.updated_at,
-    latestVersion,
-    latestVersionCheckedAt,
-  };
-}
-
-// Corrupt-row tolerance (§0.89/§0.90 class): `manifest_json` /
-// `granted_permissions_json` are persisted via `JSON.stringify`, but a crash
-// mid-write, a disk error, or a hand-edited DB can leave a column that is not
-// valid JSON. `/skills/installed` does `rows.map(rowToInstalledSkill)`, so a
-// single corrupt row would throw and 500 the WHOLE installed-skills list. This
-// variant returns `null` + warn so the list path can skip the bad row and the
-// rest still loads.
-function tryRowToInstalledSkill(
-  row: InstalledSkillRow,
-): ReturnType<typeof rowToInstalledSkill> | null {
-  try {
-    return rowToInstalledSkill(row);
-  } catch (error) {
-    console.warn(
-      `[skills] installed skill ${row.skill_id} JSON 解析失败，已跳过：${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return null;
-  }
 }
 
 function rowToSource(row: RegistrySourceRow) {
@@ -1700,7 +1643,8 @@ function builtinsToSkillEntries(): SkillEntry[] {
   }));
 }
 
-function createRegistryClient(userId: string): SkillRegistryClientImpl {
+/** 供 `skill_manage` 工具复用的注册源客户端工厂（与 HTTP 安装路径同源）。 */
+export function createRegistryClient(userId: string): SkillRegistryClientImpl {
   const userRows = getUserRegistrySourceRows(userId, true);
   const userSources: RegistrySource[] = userRows
     .filter((row) => !isReadonlySourceId(row.id))
@@ -1845,31 +1789,11 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
           manifestJson = JSON.stringify(record.manifest);
         }
 
-        const now = Date.now();
-        sqliteRun(
-          `INSERT INTO installed_skills (skill_id, user_id, source_id, manifest_json, granted_permissions_json, enabled, installed_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-           ON CONFLICT(skill_id, user_id) DO UPDATE SET
-             source_id = excluded.source_id,
-             manifest_json = excluded.manifest_json,
-             granted_permissions_json = excluded.granted_permissions_json,
-             updated_at = excluded.updated_at`,
-          [skillId, user.sub, sourceId, manifestJson, '[]', now, now],
-        );
+        const installed = upsertInstalledSkill(user.sub, { skillId, sourceId, manifestJson });
 
         step.succeed(undefined, { skillId });
         trackEvent(user.sub, 'skill_installed', { skillId, sourceId });
-        return reply.status(201).send(
-          rowToInstalledSkill({
-            skill_id: skillId,
-            source_id: sourceId,
-            manifest_json: manifestJson,
-            granted_permissions_json: '[]',
-            enabled: 1,
-            installed_at: now,
-            updated_at: now,
-          }),
-        );
+        return reply.status(201).send(installed);
       } catch (err) {
         const rawMessage = err instanceof Error ? err.message : String(err);
         const errorMessage =
@@ -1900,29 +1824,9 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      // Wrap the row removal + cascade cleanup in a single transaction so
-      // we never leave dangling selection / override rows pointing at a
-      // skill that no longer exists in `installed_skills`. The
-      // `chat_workspace_skill_configured` marker is *deliberately* kept
-      // intact: if the user explicitly configured a workspace and then
-      // uninstalls a skill, their choice ("explicitly configured this set")
-      // still holds — the resolver just observes a smaller selection.
-      sqliteTransaction(() => {
-        sqliteRun('DELETE FROM installed_skills WHERE skill_id = ? AND user_id = ?', [
-          skillId,
-          user.sub,
-        ]);
-        sqliteRun(
-          'DELETE FROM chat_workspace_skill_selections WHERE user_id = ? AND skill_id = ?',
-          [user.sub, skillId],
-        );
-        sqliteRun(
-          `DELETE FROM chat_session_skill_overrides
-           WHERE skill_id = ?
-             AND session_id IN (SELECT id FROM sessions WHERE user_id = ?)`,
-          [skillId, user.sub],
-        );
-      });
+      // 共享存储层在单事务内删除 installed_skills 与会话选择 / 覆盖残留
+      // （`chat_workspace_skill_configured` 标记有意保留，见 store 注释）。
+      uninstallSkillForUser(user.sub, skillId);
 
       step.succeed(undefined, { skillId });
       return reply.send({ removed: true, skillId });
@@ -1958,13 +1862,10 @@ export async function skillsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const enabled = bodyResult.data.enabled ?? existing.enabled === 1;
-    sqliteRun(
-      'UPDATE installed_skills SET enabled = ?, updated_at = ? WHERE skill_id = ? AND user_id = ?',
-      [enabled ? 1 : 0, Date.now(), skillId, user.sub],
-    );
+    const updated = setInstalledSkillEnabled(user.sub, skillId, enabled);
 
     step.succeed(undefined, { skillId, enabled });
-    return reply.send({ ...rowToInstalledSkill(existing), enabled });
+    return reply.send(updated ?? { ...rowToInstalledSkill(existing), enabled });
   };
 
   app.patch(

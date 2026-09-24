@@ -34,6 +34,18 @@ interface SessionTranscriptRow {
 
 const MAX_FORMATTED_TOOL_PART_CHARS = 8_000;
 
+/**
+ * 摘要视图下每条消息正文的字符上限。
+ *
+ * `session_read` 默认只回最近若干条消息，并把每条长消息折叠到这个长度，
+ * 避免一次调用把整段历史（历史上有单次 80 万字符的调用）灌进上下文。
+ * 需要完整文本时显式传 `full: true`。
+ */
+const SESSION_READ_MESSAGE_PREVIEW_CHARS = 600;
+
+/** `include_transcript` 的审计行上限，避免全量 audit_logs 一次性返回。 */
+const SESSION_READ_TRANSCRIPT_ROW_LIMIT = 200;
+
 const sessionListInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   from_date: z.string().optional(),
@@ -45,7 +57,10 @@ const sessionReadInputSchema = z.object({
   session_id: z.string().min(1),
   include_todos: z.boolean().optional().default(false),
   include_transcript: z.boolean().optional().default(false),
-  limit: z.number().int().min(1).max(500).optional(),
+  // 默认只回最近 20 条；需要更多时显式调大（上限 500）。
+  limit: z.number().int().min(1).max(500).optional().default(20),
+  // 默认折叠长消息（摘要视图）；显式传 true 才返回完整文本。
+  full: z.boolean().optional().default(false),
 });
 
 const sessionSearchInputSchema = z.object({
@@ -74,7 +89,8 @@ export const sessionListToolDefinition: ToolDefinition<typeof sessionListInputSc
 export const sessionReadToolDefinition: ToolDefinition<typeof sessionReadInputSchema, z.ZodString> =
   {
     name: 'session_read',
-    description: '读取 OpenAWork 会话的消息与历史。',
+    description:
+      '读取 OpenAWork 会话的消息与历史。默认返回最近 20 条消息并折叠长文本（摘要视图）；需要完整文本时传 full: true，需要更早的消息时调大 limit（上限 500）。',
     inputSchema: sessionReadInputSchema,
     outputSchema: z.string(),
     timeout: 30000,
@@ -296,17 +312,33 @@ export function runSessionReadTool(
   }
 
   const allMessages = listSessionMessagesV2({ sessionId: session.id, userId });
-  const messages = input.limit ? allMessages.slice(0, input.limit) : allMessages;
+  // 默认摘要视图：只取最近 limit 条，避免整段历史一次性灌入上下文。
+  const sliced = allMessages.length > input.limit ? allMessages.slice(-input.limit) : allMessages;
+  const firstShownIndex = allMessages.length - sliced.length;
   const lines = [
     `Session: ${session.id}`,
-    `Messages: ${allMessages.length}`,
+    `Messages: ${allMessages.length}${sliced.length < allMessages.length ? `（仅显示最近 ${sliced.length} 条；调大 limit 可取更早消息，上限 500）` : ''}`,
     `Date Range: ${formatDate(session.created_at)} to ${formatDate(session.updated_at)}`,
+    ...(input.full
+      ? []
+      : [
+          `提示：默认折叠长消息（每条约 ${SESSION_READ_MESSAGE_PREVIEW_CHARS} 字符）；需要完整文本时传 full: true。`,
+        ]),
     '',
   ];
 
-  messages.forEach((message, index) => {
-    lines.push(`[Message ${index + 1}] ${message.role} (${formatDate(message.createdAt)})`);
-    lines.push(formatMessageParts(message) || '(empty)');
+  sliced.forEach((message, index) => {
+    lines.push(
+      `[Message ${firstShownIndex + index + 1}/${allMessages.length}] ${message.role} (${formatDate(message.createdAt)})`,
+    );
+    const body = formatMessageParts(message);
+    lines.push(
+      body.length === 0
+        ? '(empty)'
+        : input.full
+          ? body
+          : truncateText(body, SESSION_READ_MESSAGE_PREVIEW_CHARS),
+    );
     lines.push('');
   });
 
@@ -320,14 +352,20 @@ export function runSessionReadTool(
   if (input.include_transcript) {
     lines.push('Transcript:');
     const transcriptRows = listSessionTranscriptRows(userId, session.id);
-    if (transcriptRows.length === 0) {
+    const visibleTranscriptRows = transcriptRows.slice(0, SESSION_READ_TRANSCRIPT_ROW_LIMIT);
+    if (visibleTranscriptRows.length === 0) {
       lines.push('(empty)');
     } else {
-      transcriptRows.forEach((row, index) => {
+      visibleTranscriptRows.forEach((row, index) => {
         lines.push(
           `${index + 1}. [${formatDate(row.created_at)}] ${row.tool_name} · ${row.is_error === 1 ? 'error' : 'ok'}${row.duration_ms !== null ? ` · ${row.duration_ms}ms` : ''} · ${row.request_id}`,
         );
       });
+      if (transcriptRows.length > visibleTranscriptRows.length) {
+        lines.push(
+          `…（仅显示前 ${visibleTranscriptRows.length} 条，共 ${transcriptRows.length} 条）`,
+        );
+      }
     }
     const runEvents = listSessionRunEvents(session.id);
     if (runEvents.length > 0) {

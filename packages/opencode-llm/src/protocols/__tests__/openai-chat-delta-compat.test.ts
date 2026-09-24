@@ -14,9 +14,12 @@ import { LLMRequest } from '../../schema/index.js';
  *   - `choice.usage` 被丢弃 → 用量统计缺失。
  */
 
-const makeRequest = () =>
+const makeRequest = (compatibility?: { readonly requireFinishReason?: boolean }) =>
   new LLMRequest({
-    model: Chat.route.model({ id: 'deepseek-v4.1-flash' }),
+    model: Chat.route.model({
+      id: 'deepseek-v4.1-flash',
+      ...(compatibility === undefined ? {} : { compatibility }),
+    }),
     system: [],
     messages: [],
     tools: [],
@@ -24,8 +27,8 @@ const makeRequest = () =>
 
 const decode = Schema.decodeUnknownSync(Chat.protocol.stream.event);
 
-const runFrames = async (frames: ReadonlyArray<unknown>) => {
-  let state = Chat.protocol.stream.initial(makeRequest());
+const runFrames = async (frames: ReadonlyArray<unknown>, request = makeRequest()) => {
+  let state = Chat.protocol.stream.initial(request);
   const allEvents: Array<Record<string, unknown>> = [];
   for (const frame of frames) {
     const [next, events] = await Effect.runPromise(
@@ -178,5 +181,116 @@ describe('OpenAI Chat 终态语义对齐', () => {
     expect(collect(byEnd, 'text-delta')).toBe('二');
     expect(byStop.some((event) => event.type === 'provider-error')).toBe(false);
     expect(byEnd.some((event) => event.type === 'provider-error')).toBe(false);
+  });
+
+  it('[DONE] 是终止哨兵：解码为哨兵、step 空操作、terminal 命中', async () => {
+    const done = decode('[DONE]');
+    expect(done).toBe('[DONE]');
+    expect(Chat.protocol.stream.terminal?.(done)).toBe(true);
+
+    const request = makeRequest();
+    const state = Chat.protocol.stream.initial(request);
+    const [next, events] = await Effect.runPromise(Chat.protocol.stream.step(state, done));
+    expect(events).toEqual([]);
+    expect(next).toEqual(state);
+
+    const normal = decode(JSON.stringify(chunk({ content: '正文' })));
+    expect(Chat.protocol.stream.terminal?.(normal)).toBe(false);
+  });
+
+  it('requireFinishReason=false：缺 finish_reason 时合成 stop 终态而不是报错', async () => {
+    // 参考库在此补一个合成 reason，让外层 requireTerminalEvent 仍能收到 finish；
+    // 移植版此前不发 finish，导致这条「关掉严格校验」的后路依然失败。
+    const events = await runFrames(
+      [chunk({ content: '被截断的正文' })],
+      makeRequest({ requireFinishReason: false }),
+    );
+
+    expect(collect(events, 'text-delta')).toBe('被截断的正文');
+    const finish = events.find((event) => event.type === 'finish');
+    expect(finish?.reason).toBe('stop');
+  });
+
+  it('requireFinishReason=false：存在未完成工具调用时合成 tool-calls 终态', async () => {
+    const events = await runFrames(
+      [
+        chunk({
+          tool_calls: [
+            {
+              index: 0,
+              id: 'call_1',
+              function: { name: 'lookup', arguments: '{"query":"上海"}' },
+            },
+          ],
+        }),
+      ],
+      makeRequest({ requireFinishReason: false }),
+    );
+
+    expect(events.some((event) => event.type === 'tool-call')).toBe(true);
+    const finish = events.find((event) => event.type === 'finish');
+    expect(finish?.reason).toBe('tool-calls');
+  });
+
+  it('顶层 error 体之后 onHalt 不再追加事件（避免终态之后仍有事件）', async () => {
+    const events = await runFrames([
+      { error: { message: 'rate limited', code: 'rate_limit_exceeded' } },
+    ]);
+
+    expect(events.filter((event) => event.type === 'provider-error')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'finish')).toHaveLength(0);
+  });
+});
+
+/**
+ * 思维链元数据对齐（对齐 opencode 参考库）。
+ *
+ * reasoning 事件必须携带 providerMetadata（`reasoningField` + 累计的
+ * `reasoningDetails`），并在 `reasoning-end` 上给出完整快照，供上层持久化后
+ * 在历史回传时按同一字段名写回。
+ */
+describe('OpenAI Chat 思维链元数据对齐', () => {
+  const metadataOf = (events: ReadonlyArray<Record<string, unknown>>, type: string) =>
+    events.filter((event) => event.type === type).map((event) => event.providerMetadata);
+
+  it('reasoning-delta / reasoning-end 携带字段名与累计结构化条目', async () => {
+    const details = [{ type: 'reasoning.text', text: '结构化细节' }];
+    const events = await runFrames([
+      chunk({ reasoning_content: '思考' }),
+      chunk({ reasoning_details: details }),
+      chunk({}, 'stop'),
+    ]);
+
+    expect(metadataOf(events, 'reasoning-delta')[0]).toEqual({
+      openai: { reasoningField: 'reasoning_content' },
+    });
+    const end = events.find((event) => event.type === 'reasoning-end');
+    expect(end?.providerMetadata).toEqual({
+      openai: {
+        reasoningField: 'reasoning_content',
+        reasoningDetails: details,
+      },
+    });
+  });
+
+  it('结构化条目无可提取文本时，随正文开启思维链块并在 end 下发 details', async () => {
+    const details = [{ type: 'reasoning.encrypted', data: 'opaque' }];
+    const events = await runFrames([
+      chunk({ reasoning_details: details, content: '正文' }, 'stop'),
+    ]);
+
+    expect(events.some((event) => event.type === 'reasoning-start')).toBe(true);
+    expect(collect(events, 'text-delta')).toBe('正文');
+    const end = events.find((event) => event.type === 'reasoning-end');
+    expect(end?.providerMetadata).toEqual({ openai: { reasoningDetails: details } });
+  });
+
+  it('整轮只有结构化条目时，finishEvents 仍补开并关闭思维链块', async () => {
+    const details = [{ type: 'reasoning.encrypted', data: 'opaque' }];
+    const events = await runFrames([chunk({ reasoning_details: details }, 'stop')]);
+
+    expect(events.some((event) => event.type === 'reasoning-start')).toBe(true);
+    const end = events.find((event) => event.type === 'reasoning-end');
+    expect(end?.providerMetadata).toEqual({ openai: { reasoningDetails: details } });
   });
 });

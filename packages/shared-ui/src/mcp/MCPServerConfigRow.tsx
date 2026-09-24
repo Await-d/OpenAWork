@@ -16,6 +16,87 @@ import {
   lockedInputStyle,
 } from './mcp-server-config-styles.js';
 
+export interface McpServerEditorFieldsProps {
+  server: MCPServerEntry;
+  onUpdate?: (id: string, entry: MCPServerEntry) => void;
+  setFormError: (message: string | null) => void;
+  /**
+   * 是否渲染 ID / 名称输入。完整配置行（`MCPServerConfigRow`）自带这两个字段，
+   * 保持默认 `false`；紧凑管理列表的行内编辑传 `true`，避免功能缺口。
+   */
+  showIdentity?: boolean;
+}
+
+/**
+ * MCP 服务器的可编辑字段（ID / 名称 / 传输方式 / 禁用工具 / 高级字段）。
+ *
+ * 从 `MCPServerConfigRow` 抽出，供「完整配置行」与紧凑管理列表的行内编辑复用，
+ * 保证两处的脱敏与内置桥接锁定语义完全一致。
+ */
+export function McpServerEditorFields({
+  server,
+  onUpdate,
+  setFormError,
+  showIdentity = false,
+}: McpServerEditorFieldsProps) {
+  const currentTransport = getMcpServerTransport(server);
+  const isEndpointLocked = isProtectedBuiltinMcpEndpoint(server);
+  const update = (patch: Partial<MCPServerEntry>) => {
+    onUpdate?.(server.id, sanitizeProtectedMcpEndpoint({ ...server, ...patch }));
+  };
+
+  return (
+    <>
+      {showIdentity ? (
+        <div style={gridStyle}>
+          <input
+            aria-label="MCP ID"
+            readOnly={isEndpointLocked}
+            value={server.id}
+            onChange={(event) => update({ id: event.target.value.trim() })}
+            style={isEndpointLocked ? lockedInputStyle : inputBase}
+          />
+          <input
+            aria-label="MCP 名称"
+            readOnly={isEndpointLocked}
+            value={server.name}
+            onChange={(event) => update({ name: event.target.value })}
+            style={isEndpointLocked ? lockedInputStyle : inputBase}
+          />
+        </div>
+      ) : null}
+      <div style={gridStyle}>
+        {isEndpointLocked ? (
+          <input
+            aria-label="MCP 内置桥接"
+            readOnly
+            value="运行时内置桥接，无需 command / url"
+            style={lockedInputStyle}
+          />
+        ) : (
+          <TransportEditor server={server} transport={currentTransport} onUpdate={update} />
+        )}
+        <input
+          aria-label="禁用工具"
+          placeholder="disabledTools，逗号分隔"
+          value={(server.disabledTools ?? []).join(', ')}
+          onChange={(event) => update({ disabledTools: splitMcpList(event.target.value) })}
+          style={inputBase}
+        />
+      </div>
+
+      {isEndpointLocked ? null : (
+        <ServerAdvancedFields
+          server={server}
+          transport={currentTransport}
+          onUpdate={update}
+          setFormError={setFormError}
+        />
+      )}
+    </>
+  );
+}
+
 interface MCPServerConfigRowProps {
   isLast: boolean;
   server: MCPServerEntry;
@@ -31,7 +112,6 @@ export function MCPServerConfigRow({
   onUpdate,
   setFormError,
 }: MCPServerConfigRowProps) {
-  const currentTransport = getMcpServerTransport(server);
   const isEndpointLocked = isProtectedBuiltinMcpEndpoint(server);
   const update = (patch: Partial<MCPServerEntry>) => {
     onUpdate?.(server.id, sanitizeProtectedMcpEndpoint({ ...server, ...patch }));
@@ -98,34 +178,7 @@ export function MCPServerConfigRow({
         </div>
       ) : null}
 
-      <div style={gridStyle}>
-        {isEndpointLocked ? (
-          <input
-            aria-label="MCP 内置桥接"
-            readOnly
-            value="运行时内置桥接，无需 command / url"
-            style={lockedInputStyle}
-          />
-        ) : (
-          <TransportEditor server={server} transport={currentTransport} onUpdate={update} />
-        )}
-        <input
-          aria-label="禁用工具"
-          placeholder="disabledTools，逗号分隔"
-          value={(server.disabledTools ?? []).join(', ')}
-          onChange={(event) => update({ disabledTools: splitMcpList(event.target.value) })}
-          style={inputBase}
-        />
-      </div>
-
-      {isEndpointLocked ? null : (
-        <ServerAdvancedFields
-          server={server}
-          transport={currentTransport}
-          onUpdate={update}
-          setFormError={setFormError}
-        />
-      )}
+      <McpServerEditorFields server={server} onUpdate={onUpdate} setFormError={setFormError} />
     </div>
   );
 }

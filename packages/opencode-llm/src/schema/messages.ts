@@ -1,6 +1,6 @@
 import { Schema } from 'effect';
 import { ToolContent, ToolFileContent, ToolTextContent } from '../external-schema-types.js';
-import { JsonSchema, MessageRole, ProviderMetadata } from './ids.js';
+import { JsonSchema, MessageRole, ProviderMetadata, ReasoningEffort } from './ids.js';
 import {
   CacheHint,
   CachePolicy,
@@ -47,6 +47,7 @@ export const MediaPart = Schema.Struct({
   mediaType: Schema.String,
   data: Schema.Union([Schema.String, Schema.Uint8Array]),
   filename: Schema.optional(Schema.String),
+  cache: Schema.optional(CacheHint),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 }).annotate({ identifier: 'LLM.Content.Media' });
 export type MediaPart = Schema.Schema.Type<typeof MediaPart>;
@@ -199,12 +200,21 @@ export const ReasoningPart = Schema.Struct({
 }).annotate({ identifier: 'LLM.Content.Reasoning' });
 export type ReasoningPart = Schema.Schema.Type<typeof ReasoningPart>;
 
+/** 思维链强度在此处变化（`previous` → `effort`）；`undefined` 表示模型默认值。 */
+export const EffortPart = Schema.Struct({
+  type: Schema.Literal('effort'),
+  effort: Schema.optional(ReasoningEffort),
+  previous: Schema.optional(ReasoningEffort),
+}).annotate({ identifier: 'LLM.Content.Effort' });
+export type EffortPart = Schema.Schema.Type<typeof EffortPart>;
+
 export const ContentPart = Schema.Union([
   TextPart,
   MediaPart,
   ToolCallPart,
   ToolResultPart,
   ReasoningPart,
+  EffortPart,
 ]).pipe(Schema.toTaggedUnion('type'));
 export type ContentPart = Schema.Schema.Type<typeof ContentPart>;
 
@@ -245,6 +255,20 @@ export namespace Message {
    */
   export const system = (content: SystemContentInput) => make({ role: 'system', content });
 
+  /**
+   * 标记「思维链强度在此处变化」（`previous` → `effort`，`undefined` 表示模型
+   * 默认值）。支持时序 effort 更新的路由（Anthropic Messages）会把它降级为
+   * 原生的 `output_config` 消息；其余路由在编译期剥离该标记。
+   */
+  export const effort = (input: {
+    readonly effort?: ReasoningEffort;
+    readonly previous?: ReasoningEffort;
+  }) =>
+    make({
+      role: 'system',
+      content: [{ type: 'effort', effort: input.effort, previous: input.previous }],
+    });
+
   export const tool = (result: ToolResultPart | Parameters<typeof ToolResultPart.make>[0]) =>
     make({ role: 'tool', content: ['type' in result ? result : ToolResultPart.make(result)] });
 }
@@ -270,6 +294,8 @@ export namespace ToolDefinition {
 export class ToolChoice extends Schema.Class<ToolChoice>('LLM.ToolChoice')({
   type: Schema.Literals(['auto', 'none', 'required', 'tool']),
   name: Schema.optional(Schema.String),
+  /** 禁止并行工具调用（Anthropic `disable_parallel_tool_use` / Responses `parallel_tool_calls`）。 */
+  disableParallelToolUse: Schema.optional(Schema.Boolean),
 }) {}
 
 export namespace ToolChoice {
@@ -312,6 +338,13 @@ export class LLMRequest extends Schema.Class<LLMRequest>('LLM.Request')({
   http: Schema.optional(HttpOptions),
   responseFormat: Schema.optional(ResponseFormat),
   cache: Schema.optional(CachePolicy),
+  /**
+   * 提示缓存键（对齐 opencode 参考库）。
+   *
+   * 仅在上游声明 `supportsPromptCacheKey` 时下发（OpenAI Chat 的
+   * `prompt_cache_key`）。OpenAI 限制 64 字符，超长会被截断。
+   */
+  promptCacheKey: Schema.optional(Schema.String),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
@@ -330,6 +363,7 @@ export namespace LLMRequest {
     http: request.http,
     responseFormat: request.responseFormat,
     cache: request.cache,
+    promptCacheKey: request.promptCacheKey,
     metadata: request.metadata,
   });
 

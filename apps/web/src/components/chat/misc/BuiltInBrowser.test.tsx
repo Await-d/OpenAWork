@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BrowserLiveStatus } from '@openAwork/web-client';
+import type { BrowserLiveCallbacks, BrowserLiveStatus } from '@openAwork/web-client';
 import { BuiltInBrowser } from './BuiltInBrowser.js';
 import { COMPOSER_INSERT_EVENT } from './browser/browser-clipboard.js';
 import {
@@ -24,6 +24,42 @@ const liveMocks = vi.hoisted(() => ({
   installBrowser: vi.fn(),
   getInstallStatus: vi.fn(),
 }));
+
+/**
+ * Tauri 原生 webview 的模块替身：Tauri 模式下 `useTauriWebview` 会动态 import
+ * 这些模块。测试只关心采集链路，这里让创建流程安静完成（不触发 created/error
+ * 回调），避免真实 Tauri API 在 jsdom 里抛错。
+ */
+const tauriMocks = vi.hoisted(() => {
+  class FakeWebview {
+    readonly close = vi.fn(async (): Promise<void> => undefined);
+    readonly setPosition = vi.fn(async (_position: unknown): Promise<void> => undefined);
+    readonly setSize = vi.fn(async (_size: unknown): Promise<void> => undefined);
+
+    once(_event: string, _handler: unknown): Promise<() => void> {
+      return Promise.resolve(() => undefined);
+    }
+  }
+  return { FakeWebview };
+});
+
+vi.mock('@tauri-apps/api/webview', () => ({ Webview: tauriMocks.FakeWebview }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ label: 'main' }) }));
+vi.mock('@tauri-apps/api/dpi', () => ({
+  LogicalPosition: class LogicalPosition {
+    constructor(
+      public readonly x: number,
+      public readonly y: number,
+    ) {}
+  },
+  LogicalSize: class LogicalSize {
+    constructor(
+      public readonly width: number,
+      public readonly height: number,
+    ) {}
+  },
+}));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async (): Promise<boolean> => true) }));
 
 vi.mock('@openAwork/web-client', () => ({
   HttpError: class HttpError extends Error {
@@ -396,5 +432,134 @@ describe('BuiltInBrowser', () => {
     expect(root.style.flexShrink).toBe('1');
     expect(root.style.minHeight).toBe('0px');
     expect(root.style.minWidth).toBe('0px');
+  });
+});
+
+interface FakeLiveConnectionEntry {
+  callbacks: BrowserLiveCallbacks;
+  connection: {
+    send: ReturnType<typeof vi.fn>;
+    readyState: number;
+    close: ReturnType<typeof vi.fn>;
+  };
+}
+
+/** 用假连接驱动实时通道（与 `use-browser-live-session.test.ts` 同一套形状）。 */
+function installFakeLiveConnections(): FakeLiveConnectionEntry[] {
+  const connections: FakeLiveConnectionEntry[] = [];
+  liveMocks.connect.mockImplementation(
+    (input: {
+      token: string;
+      callbacks: BrowserLiveCallbacks;
+    }): FakeLiveConnectionEntry['connection'] => {
+      const connection = { send: vi.fn(), readyState: 1, close: vi.fn() };
+      connections.push({ callbacks: input.callbacks, connection });
+      return connection;
+    },
+  );
+  return connections;
+}
+
+/**
+ * Tauri 原生窗口的采集链路。
+ *
+ * 原生 webview 无法注入脚本，画面与采集彻底分离：控制台 / 网络必须由网关侧
+ * CDP 引擎采集，导航则由 `useBrowserLiveNavigation` 把当前标签页 URL 下发到
+ * 远端采集页面。这里把这条链路端到端钉住，防止回归成「永远空控制台」。
+ */
+describe('BuiltInBrowser · Tauri 原生窗口采集', () => {
+  const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+
+  beforeEach(() => {
+    // `isTauriEnv()` 读 `__TAURI_INTERNALS__`，必须在 render 之前存在。
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+    // 让容器有非零矩形：`useTauriWebview` 会等待布局完成，jsdom 恒为 0 会走超时分支。
+    Element.prototype.getBoundingClientRect = (): DOMRect =>
+      ({
+        x: 0,
+        y: 0,
+        width: 800,
+        height: 600,
+        top: 0,
+        left: 0,
+        right: 800,
+        bottom: 600,
+        toJSON: () => ({}),
+      }) as DOMRect;
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  });
+
+  it('接入实时通道：导航下发给远端页面，控制台与网络照常入面板', async () => {
+    liveMocks.getStatus.mockResolvedValue({
+      available: true,
+      engine: 'chromium',
+      screencast: true,
+    } satisfies BrowserLiveStatus);
+    const connections = installFakeLiveConnections();
+    useAuthStore.setState({ accessToken: 'live-token', gatewayUrl: 'http://gateway.test' });
+
+    render(
+      <BuiltInBrowser
+        workspacePath="E:\\01.Projects\\OpenAWork"
+        previewUrl="https://example.test/app"
+      />,
+    );
+    // Tauri 模式必须走原生 webview 分支，不渲染 iframe。
+    expect(screen.queryByTitle('内置浏览器')).toBeNull();
+
+    fireEvent.click(screen.getByTitle(consoleTitleOpen));
+    await waitFor(() => expect(connections.length).toBe(1));
+    const entry = connections[0];
+    if (!entry) throw new Error('未建立实时连接');
+
+    act(() => {
+      entry.callbacks.onOpen?.();
+      entry.callbacks.onEnvelope({
+        ch: 'hello',
+        seq: 0,
+        ts: 1,
+        payload: { available: true, engine: 'chromium', screencast: true, viewport: null },
+      });
+    });
+
+    // 导航在挂载期已进待发队列，hello 后补发——远端页面才不会停在空白页。
+    await waitFor(() =>
+      expect(entry.connection.send).toHaveBeenCalledWith({
+        ch: 'control',
+        action: 'navigate',
+        url: 'https://example.test/app',
+      }),
+    );
+
+    act(() => {
+      entry.callbacks.onEnvelope({
+        ch: 'console',
+        seq: 1,
+        ts: 2,
+        payload: { level: 'error', text: 'tauri-boom', timestamp: 2 },
+      });
+      entry.callbacks.onEnvelope({
+        ch: 'network',
+        seq: 2,
+        ts: 3,
+        payload: {
+          phase: 'response',
+          requestId: 'req-1',
+          method: 'GET',
+          url: 'https://example.test/api/data',
+          status: 200,
+          statusText: 'OK',
+          durationMs: 12,
+        },
+      });
+    });
+
+    await waitFor(() => expect(screen.getAllByTestId('console-entry').length).toBe(2));
+    expect(screen.getByText(/tauri-boom/)).toBeTruthy();
+    expect(screen.getByText(/example\.test\/api\/data/)).toBeTruthy();
   });
 });

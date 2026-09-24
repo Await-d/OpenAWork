@@ -112,7 +112,10 @@ import {
   filterEnabledGatewayToolsForDialogueMode,
   filterEnabledGatewayToolsForSession,
 } from '../session/session-tool-visibility.js';
-import { resolveSessionRuntimePolicy } from '../session/session-runtime-policy.js';
+import {
+  resolveSessionRuntimePolicy,
+  isChannelManagedSessionMetadata,
+} from '../session/session-runtime-policy.js';
 import { resolveCanonicalName } from '../claude-code/claude-code-tool-surface.js';
 import {
   clearInFlightStreamRequest,
@@ -133,7 +136,13 @@ import {
 } from '../session/session-recovery.js';
 import { waitForSessionRecoveryRetry } from '../session/session-retry-policy.js';
 import { detectDelegateTaskError, buildRetryGuidance } from '../task/delegate-task-retry.js';
-import { truncateToolOutputUniversal } from '../tools/tool-output-truncator.js';
+import {
+  buildFoldedToolSurface,
+  isToolFoldingEnabled,
+  TOOL_INVOKE_TOOL_NAME,
+  TOOL_SEARCH_TOOL_NAME,
+} from '../tools/tool-folding.js';
+import { writeToolInvokeAllowlist } from '../session/tool-invoke-allowlist.js';
 import { normalizeToolArgumentsForStorage } from '../tools/tool-result-contract.js';
 import { detectEmptyTaskResponse } from '../task/empty-task-response-detector.js';
 import { buildDynamicOrchestratorPrompt } from '../agent/dynamic-agent-prompt-builder.js';
@@ -999,6 +1008,12 @@ const TOOLS_REQUIRING_NON_EMPTY_ARGS = new Set([
   'todowrite',
   'subtodowrite',
   'mcp_call',
+  'mcp_manage_servers',
+  'memory_manage',
+  'skill_manage',
+  'schedule_manage',
+  'agent_manage',
+  'team_workspace_manage',
 ]);
 
 function isMissingRequiredToolArguments(
@@ -1908,8 +1923,9 @@ export async function executeToolCalls(input: {
         })
       : [];
 
-    result.output = truncateToolOutputUniversal(toolCall.toolName, result.output);
-
+    // 注意：这里不再预截断 `result.output`。持久化归一（200k 字符，超限时把
+    // **全文**落盘）与客户端事件的归一都在各自的 build 函数里完成；提前截断会
+    // 让 spill 只能落盘截断后的内容（D 的保真要求）。
     appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -1918,6 +1934,7 @@ export async function executeToolCalls(input: {
         buildToolResultContent({
           toolCallId,
           toolName: toolCall.toolName,
+          sessionId: input.sessionId,
           clientRequestId: input.clientRequestId,
           output: result.output,
           isError: result.isError,
@@ -2499,7 +2516,6 @@ export async function handleStreamRequest(input: {
           // opencode's `insertReminders` → `sessions.updatePart()` flow).
           syntheticContext: {
             injectedPrompt,
-            capabilityContext,
             companionPrompt,
             thinkingLanguageHint,
           },
@@ -2675,13 +2691,39 @@ export async function handleStreamRequest(input: {
 
       const shouldDeferToolLoading =
         route.deferToolLoading === true || sessionMeta['deferToolLoading'] === true;
-      const enabledTools = shouldDeferToolLoading
+      const baseToolsForRound = shouldDeferToolLoading
         ? layerFilteredTools.map((tool) => ({
             ...tool,
             function: { ...tool.function, deferLoading: true },
           }))
         : layerFilteredTools;
-      const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
+
+      // ─── 工具折叠（对齐参考库 Code Mode 目录的模型可见面预算）────────────
+      // 普通 chat 会话启用；team / 渠道会话沿用完整工具面（这两类有各自显式
+      // 的工具清单与层级门控，折叠需要额外登记且收益有限）。
+      const foldedSurface =
+        isToolFoldingEnabled() &&
+        sessionRoleLayer === null &&
+        !isChannelManagedSessionMetadata(sessionMeta)
+          ? buildFoldedToolSurface(baseToolsForRound)
+          : undefined;
+      // 非折叠会话（team / 渠道 / 开关关闭）剥离折叠元工具，保持旧交互面；
+      // 折叠会话只保留直连工具（目录承载其余工具）。
+      const enabledTools = foldedSurface
+        ? foldedSurface.directTools
+        : baseToolsForRound.filter(
+            (tool) =>
+              tool.function.name !== TOOL_INVOKE_TOOL_NAME &&
+              tool.function.name !== TOOL_SEARCH_TOOL_NAME,
+          );
+      // 无论是否折叠都刷新 allowlist：名单始终等于「本轮实际可见工具名」，
+      // 防止会话在 chat ↔ team / channel 之间切换后残留过宽名单被 tool_invoke 越权。
+      const visibleToolNames = foldedSurface
+        ? foldedSurface.visibleNames
+        : enabledTools.map((tool) => tool.function.name);
+      writeToolInvokeAllowlist(input.sessionId, input.user.sub, visibleToolNames);
+      const toolCatalogPrompt = foldedSurface?.catalogPrompt ?? '';
+      const enabledToolNames = new Set(visibleToolNames);
       const turnFileDiffs = new Map<string, FileDiffContent>();
       const memoryBlock = buildMemoryBlockForSession(
         input.user.sub,
@@ -2819,7 +2861,7 @@ export async function handleStreamRequest(input: {
           compactionReservedTokens: compactionSettings.reserved,
           workspaceCtx,
           injectedPrompt,
-          capabilityContext,
+          capabilityCatalogPrompt: capabilityContext,
           lspGuidance,
           dialogueModePrompt,
           yoloModePrompt,
@@ -2830,6 +2872,7 @@ export async function handleStreamRequest(input: {
           pinnedSkillsPrompt,
           flatMcpToolsEnabled: flatMcpToolDefinitionsEnabled,
           teamInstructionStack,
+          toolCatalogPrompt,
           teamResumePrompt,
           teamStatusPrompt,
           syntheticContinuationPrompt,
@@ -3213,6 +3256,43 @@ export async function handleStreamRequest(input: {
             cascade.durationMs,
             cascade.timedOut ? '(timed out)' : '',
           );
+        }
+        // 父会话停止 = 整段断掉：级联作废子树里挂着的待审批 / 待回答交互。
+        // 子会话可能停在「等待审批」而且没有在途流（上面的 stop 无对象可停），
+        // 若不作废，父会话已停止、子会话却永远停在 paused——停止与审批互相卡住。
+        // 动态 import：避免 stream.ts ↔ permissions/questions 的静态循环依赖。
+        if (cascade.visitedDescendantSessionIds.length > 0) {
+          try {
+            const [
+              { cancelPendingPermissionRequestsForSession },
+              { cancelPendingQuestionRequestsForSession },
+              { reconcileSessionRuntime },
+            ] = await Promise.all([
+              import('./permissions.js'),
+              import('./questions.js'),
+              import('../session/session-runtime-reconciler.js'),
+            ]);
+            for (const descendantId of cascade.visitedDescendantSessionIds) {
+              cancelPendingPermissionRequestsForSession({
+                sessionId: descendantId,
+                userId: input.user.sub,
+              });
+              cancelPendingQuestionRequestsForSession({
+                sessionId: descendantId,
+                userId: input.user.sub,
+              });
+              await reconcileSessionRuntime({
+                sessionId: descendantId,
+                userId: input.user.sub,
+              });
+            }
+          } catch (interactionCleanupErr) {
+            console.warn(
+              '[STREAM_ABORT_CASCADE] descendant interaction cleanup failed —',
+              input.sessionId,
+              String(interactionCleanupErr),
+            );
+          }
         }
         // Surface the cascade as a structured payload on the `done`
         // chunk so the UI can render a meaningful toast instead of a

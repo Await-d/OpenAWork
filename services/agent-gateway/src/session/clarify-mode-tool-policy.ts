@@ -34,6 +34,9 @@ const CLARIFY_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   'look_at',
   'task',
   'Agent',
+  // 工具折叠入口：只读检索 + 经解包后按内层工具走完整权限阶梯。
+  'tool_search',
+  'tool_invoke',
 ]);
 
 export function isClarifyModeToolAllowed(toolName: string): boolean {

@@ -71,8 +71,8 @@ export interface BrowserLiveSession {
 }
 
 export interface UseBrowserLiveSessionOptions {
-  /** 是否启用通道；false 时完全不发请求（Tauri 原生 webview / fallback 场景）。 */
-  enabled: boolean;
+  /** 是否启用通道；缺省启用。false 时完全不发请求（调用方按场景显式关闭）。 */
+  enabled?: boolean;
   /** 测试注入点；缺省用 `createBrowserLiveClient`。 */
   clientFactory?: (baseUrl: string) => BrowserLiveClient;
 }
@@ -131,9 +131,9 @@ function toScreenshotFrame(payload: unknown): BrowserLiveScreenshotFrame | null 
 }
 
 export function useBrowserLiveSession({
-  enabled,
+  enabled = true,
   clientFactory = createBrowserLiveClient,
-}: UseBrowserLiveSessionOptions): BrowserLiveSession {
+}: UseBrowserLiveSessionOptions = {}): BrowserLiveSession {
   const token = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
 

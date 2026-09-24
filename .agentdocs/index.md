@@ -2,6 +2,94 @@
 
 ## 已完成的任务
 
+### ✅ 260924-插件技能MCP管理界面重构 - 设置插件 / 技能市场 / MCP 三处视觉+信息架构+代码拆分
+**状态**: ✅ 已交付并验证（2026-09-24，Full orchestration score +6，Mode B 串行）
+**归档位置**: [workflow/done/260924-插件技能MCP管理界面重构.md](workflow/done/260924-插件技能MCP管理界面重构.md)
+
+**成果总结**:
+- ✅ **设置 → 插件**：`plugins-tab-content.tsx` 1088 → 427 行，改为注册表驱动外壳（新增 `plugin-registry` / `plugin-nav` / `plugin-detail-header` / `plugin-tool-summary` / `image-generation-plugin-panel`）；每个插件重复的「Tool 状态 + 参数 chip + 执行边界」四卡结构删除，参数压成单行、长文案收敛为 `requirement`；导航 240→200px 且描述移入页头。
+- ✅ **MCP**：新增 `McpServerManager`（配置 + 运行状态合并单列表，行 = 状态点 + 名称/ID + 徽章 + 工具数 + 开关/重试/编辑/移除；编辑行内展开、新增按需展开）；`MCPServerList` / `MCPServerConfig*` 保持 props 兼容并抽出 `mcp-status-display` 与 `McpServerEditorFields`；设置侧 MCP 面板与 Web 搜索面板共用新列表，搜索面板 423 → 85 行（删 KPI 卡与路径卡）。
+- ✅ **技能**：`/skills` 删除 Hero 统计卡与「技能工作区」工具条卡，页头一行；已安装改单列紧凑列表 + 注册源折叠；`InstalledSkillsManager` 5 列表格 → 紧凑行（token 化、hover/focus、二次确认）；`SkillMarketHome` / `RegistrySourceManager` / `SkillDetailPage` / `InstallProgressUI` 去硬编码色值与卡片套卡片。
+- ✅ **同源数据流**：新增 `useInstalledSkills`（`/skills` 与设置内技能面板共用）与 `use-skills-api`（SkillsPage 876 → 510 行）；`skills-plugin-panel.tsx` 257 → 72 行；`SkillsPageSections.tsx` 删除。
+- ✅ **验证**：shared-ui 22 文件 / 175 例；apps/web 插件域 11 例；apps/web 全量 5280/5281（唯一失败为团队图谱布局并发假失败，隔离复跑全绿，与本任务无交集）；双端 typecheck、ESLint、Prettier、web 生产构建通过；真实 Chromium 三视口（375/768/1280）`verify-plugin-manager-3viewports.ts` **52 通过 / 0 失败**。
+- 📌 **踩坑沉淀**：harness 容器必须 `grid-template-columns: minmax(0, 1fr)`（否则 min-content 撑开轨道掩盖组件溢出）；`:focus-visible` 断言前必须先建立键盘模态；同名按钮导致测试选择器歧义。
+
+### ✅ 260924-团队工作区管理工具（team_workspace_manage，域四之二 / 四域顺延项）
+**状态**: ✅ 已交付（2026-09-24，Full orchestration score +4，Mode B 串行）；全量回归存在**外部在途阻塞**（非本任务）
+**归档位置**: [workflow/done/260924-团队工作区管理工具.md](workflow/done/260924-团队工作区管理工具.md)
+
+**成果总结**:
+- ✅ **存储层抽取**：新增 `team/team-workspace-store.ts`（row 映射 + list/get/create/update/delete + roster 归一），`routes/team.ts` 的 5 个 workspace handler 改为调用——路由与工具同源；**路由回归 15 例全绿**。
+- ✅ **工具**：`team_workspace_manage`（list/create/update/delete）；list 免审批、变更 ask（按动作隔离）；归属校验；审批预览展示名称/可见性/成员数/工作根。
+- ✅ **授权面校验**：roster 的 `skillIds` 必须命中内置/已安装技能，`mcpServerIds` 必须命中 `loadConfiguredMcpServersForUser` 合并列表；「输入非空但槽位未过校验」显式报错（新增 `countValidMemberSlots`，**拒绝静默回退默认编制**）。
+- ✅ **双重防线**：team/cron/channel 不可见 + 执行守卫拒绝；能力目录第六条提示。
+- ✅ **验证（本任务口径）**：模块 13 例 + 沙箱 4 例 + 路由回归 15 例 + 派生器/可见性增例全绿；双端 typecheck exit 0；ESLint/Prettier 通过。
+- ⚠️ **外部在途阻塞（非本任务）**：全量回归唯一失败文件为 `src/__tests__/message/tool-output-context-budget.test.ts`（5 例）——该文件只导入 `src/message/**`，而这些正是**另一会话的在途改动文件**（`message-to-model-messages.ts` / `message-v2-adapter.ts` 等，本任务从未触碰）；其余 **579 文件通过**。待其收敛后建议复跑全量确认整体绿。
+- 📌 **踩坑沉淀**：`routes/team.ts` 闭包内已有同名本地 `getTeamWorkspaceForUser`（返回原始 row），会遮蔽新导入的 store 函数——已改导入别名修复，教训写入「已知陷阱」。
+
+### ✅ 260924-自定义 Agent 管理工具（agent_manage，域四之一）- AI 在审批下维护自定义 Agent
+**状态**: ✅ 已交付并验证（2026-09-24，Full orchestration score +4，Mode B 串行）
+**归档位置**: [workflow/done/260924-自定义Agent管理工具.md](workflow/done/260924-自定义Agent管理工具.md)
+
+**成果总结**:
+- ✅ **工具**：`agent_manage`（list/create/update/delete/reset）；list 免审批、变更 ask（按动作隔离）；输出含 label/model/enabled/systemPrompt 预览。
+- ✅ **同源复用**：`routes/agents.ts` 导出 `createManagedAgentSchema` / `updateManagedAgentSchema` / `mapAgentCatalogError`，工具与 HTTP 路由共用校验与中文错误文案；内置 Agent 只允许改模型配置、不可删除（catalog 既有语义）。
+- ✅ **双重防线**：team / cron / channel 不可见 + 执行守卫拒绝；能力目录第五条提示。
+- ✅ **验证**：网关干净全量 **576 文件通过 + 1 skipped / 4487 用例通过 + 3 skipped（exit 0）**；agent 域 6 文件 / 117 例全绿（含路由回归）；双端 typecheck、ESLint、Prettier 全通过。
+- ⏸️ **团队工作区工具顺延**：`team_workspace_manage` 需先抽取 `team/team-workspace-store.ts` 并重构 `routes/team.ts` 5 个 handler，且 roster 的 skills / MCP 绑定是授权面（需逐项白名单校验）——已在「未完成」区登记为独立待办。
+
+### ✅ 260924-定时任务持久化与 schedule_manage（域三）- cron 重启不丢 + AI 审批下管理定时任务
+**状态**: ✅ 已交付并验证（2026-09-24，Full orchestration score +4，Mode B 串行）
+**归档位置**: [workflow/done/260924-定时任务持久化与工具.md](workflow/done/260924-定时任务持久化与工具.md)
+
+**成果总结**:
+- ✅ **持久化（B-1）**：新增 `cron_jobs` + `cron_job_executions`（按任务保留 200 条）；`cron/cron-store.ts` 提供任务 upsert/delete/装载、执行历史 upsert+裁剪、**重启中断标记**（残留 running → failed）；`CronScheduler` 增加可选 `CronSchedulerPersistence` 钩子 + `restoreJobs()`（既有单测零影响）；`index.ts` 新增 boot 步骤 `gateway.cron-restore`；`/cron/jobs/:id/history` 改读持久化历史（重启后可查）。
+- ✅ **工具（B-2）**：`schedule_manage`（list/add/update/remove/enable/disable/history）；list/history 免审批、变更 ask（按动作隔离）；归属校验只操作本人任务；**cron 会话禁止管理定时任务**（防自我复制），team/channel 拒绝；审批预览展示调度类型/表达式/时区/prompt 片段。
+- ✅ **模块环规避**：调度器改为动作执行时动态导入（静态导入会把 agent-handler → stream-runtime 拉进工具定义模块图并形成反向引用环）。
+- ✅ **验证**：网关干净全量 **574 文件通过 + 1 skipped / 4466 用例通过 + 3 skipped（exit 0）**；cron 域 13 文件 / 132 例全绿（含 B-1 13 例、B-2 14 例、既有回归）；agent-core permission 34 例绿；双端 typecheck、ESLint、Prettier 全通过。
+- 🔍 **复查修项（2026-09-24）**：① update 可静默改成「永不触发」（结果态调度一致性校验）已修；② add 接受过去 `at` / 过小 `every` 已修（未来时间 + ≥1000ms）；③ 删除任务留下孤儿执行历史已修（级联删除）；④ 审批预览补齐执行环境（working_folder/session_id/agent/model/投递）并对 working_folder 增加会话工作区校验；均已补回归。
+- ⚠️ **已知边界（v1）**：cron 表达式解析仍是「下一分钟」近似（原有行为）；过期 `at` 任务不自动清理（仅 `delete_after_run` 生效）。
+
+### ✅ 260924-技能管理工具（skill_manage）- 让产品内 Agent 在审批下安装/卸载/启停技能
+**状态**: ✅ 已交付并验证（2026-09-24，Full orchestration score +4，Mode B 串行）
+**归档位置**: [workflow/done/260924-技能管理工具.md](workflow/done/260924-技能管理工具.md)
+
+**成果总结**:
+- ✅ **前置重构**：新增共享存储层 `skill/skill-installed-store.ts`（安装 upsert / 卸载单事务级联清理 / 启停 / 列举 / 损坏行容错），`routes/skills.ts` 改为调用并导出 `createRegistryClient`——路由与工具同源，安装语义不复制；路由回归 12 例保持全绿。
+- ✅ **工具**：`skill_manage`（list/install/uninstall/enable/disable）；`list` 只读免审批（含启用态、声明权限、`hasMcp`），变更类走 **ask**，永久允许按动作隔离；安装仅支持已配置注册源，`github:` / `claude-marketplace:` 前缀 v1 引导设置页。
+- ✅ **安全面**：安装结果回传 `declaredPermissions` 与 `hasMcp`（内嵌 MCP = stdio 命令执行），供模型向用户交代；审批预览展示 skillId + 来源。
+- ✅ **双重防线**：team / cron / channel 不可见 + 执行守卫拒绝（与 MCP / 记忆共用可见性 helper）。
+- ✅ **验证**：网关干净全量 **570 文件通过 + 1 skipped / 4430 用例通过 + 3 skipped（exit 0）**；模块测试 10 例（真实内存 SQLite，仅注册源客户端 mock）+ 沙箱接线 4 例 + 路由回归 12 例 + 派生器/可见性增例全绿；双端 typecheck、ESLint、Prettier 全通过。
+- ⚠️ **已知边界（v1）**：不做技能搜索（路由四路合并抽取风险大）；github / Claude 市场来源不支持工具安装；不做注册源管理。
+
+### ✅ 260924-记忆管理工具（memory_manage）- 让产品内 Agent 在审批下维护用户长期记忆
+**状态**: ✅ 已交付并验证（2026-09-24，Full orchestration score +4，Mode B 串行）
+**归档位置**: [workflow/done/260924-记忆管理工具.md](workflow/done/260924-记忆管理工具.md)
+
+**成果总结**:
+- ✅ **工具**：`memory_manage`（list/add/update/delete）；`list` 只读免审批（search/type/enabled 过滤、长 value 截断），变更类走 **ask** 审批，永久允许按动作隔离（`<action>:.*`），审批预览展示 key/type/value 片段。
+- ✅ **安全**：写入前复用 `scanMemoryWriteContent`（与 `/memories` 路由同规），注入载荷拒绝且不落库；`source` 固定 `manual`（schema 不接受该字段，防伪造 auto_extracted/api）。
+- ✅ **唯一键预检**：`memories` 表 `(user_id, type, key) WHERE enabled=1` 唯一索引 → add/update 写库前用 `findEnabledMemoryByTypeAndKey` 预检并给出可读冲突提示。
+- ✅ **双重防线**：team / cron / channel 不可见 + 执行守卫拒绝（与 MCP 共用 `isSelfServiceManageToolEnabledForSessionMetadata` 判定 helper）。
+- ✅ **提示词**：能力目录注入通用化（MCP + 记忆两条提示，仅对可见会话）。
+- ✅ **验证**：网关干净全量 **568 文件通过 + 1 skipped / 4411 用例通过 + 3 skipped（exit 0）**；模块测试用**真实内存 SQLite**（不 mock 业务链路）14 例 + 沙箱接线 4 例 + 派生器/可见性增例 5 例全绿；双端 typecheck、ESLint、Prettier 全通过。
+- 🔍 **复查修项（2026-09-24）**：① `update {enabled:true}` 撞键预检遗漏（只在改 type/key 时检查 → SQLite 约束错误裸抛）已修；② `add` 的 `enabled:false` 被静默忽略已修——`CreateMemoryInput` 支持创建停用态（唯一索引下「先建再停」不可行）；均已补回归。
+- ⚠️ **已知边界（v1）**：不写团队知识记忆（`teamWorkspaceId`）；记忆设置（`/memories/settings`）仍由设置页管理；不做自动抽取触发。
+
+### ✅ 260924-MCP自助管理工具 - 让产品内 Agent 在审批下添加/修改 MCP
+**状态**: ✅ 已交付并验证（2026-09-24，Full orchestration score +4，Mode B 串行）
+**归档位置**: [workflow/done/260924-MCP自助管理工具.md](workflow/done/260924-MCP自助管理工具.md)
+
+**成果总结**:
+- ✅ **工具**：新增 `mcp_manage_servers`（list/add/update/remove/enable/disable），复用 `mcpServerConfigSchema` 同规校验；写 `user_settings.mcp_servers` 后立即 `retryMcpConnectionForUser` 探活，**下一轮即可用扁平 MCP 工具**。
+- ✅ **权限**：新增 `mcp_manage` 类别（默认 ask）；`list` 只读免审批；永久允许按动作隔离（`<action>:*`），避免一次「永久允许」放行全部 MCP 管理动作。
+- ✅ **内置保护**：system builtin（websearch / grep_app）禁止模型覆盖端点（只能启停 / disabledTools）；protected virtual-adapter（codegraph / git_bash / lsp / omo）只落管理字段，端点由 runtime 提供。
+- ✅ **密钥双向脱敏**：list 不回显 url/headers/env；连接错误统一把 URL 折叠为 origin+pathname（防 query 中的 API Key 回流会话历史）；内置条目构造不落 runtime 注入的 header（如 `EXA_API_KEY`）。
+- ✅ **双重防线**：team / cron / channel 会话既不可见（`session-tool-visibility`）也在执行层被守卫拒绝——**team 后台会话即使被权限层自动免审批仍会被拒**（沙箱接线测试锁定）。
+- ✅ **提示词**：未新增系统提示词章节（避免模式提示词预算回归），改为能力目录注入一行指引，且仅对工具可见的会话生效。
+- ✅ **验证**：网关干净全量 **566 文件通过 + 1 skipped / 4388 用例通过 + 3 skipped（exit 0）**；agent-core 48 文件 / 589 用例全绿；双端 typecheck exit 0；改动文件 ESLint 0 error、Prettier 全通过；新增测试 33 例（模块 19 + 沙箱接线 4 + 派生器 5 + 可见性 4 + 注册表 1）。
+- ⚠️ **已知边界（v1）**：OAuth 交互授权不自动化；模型不能覆盖 system builtin 端点；team/cron/channel 不可用；`always` 永久允许只覆盖同动作类型。
+
 ### ✅ 260923-子代理数量限制设置页可调 - 并发/累计/嵌套深度用户级可调（保存即生效）
 **状态**: ✅ 已交付（2026-09-23，Lightweight 模式串行实现）；网关 4355 用例、web 5243 用例全绿
 **复杂度**: Lightweight（score +3；无并行收益，串行实现 + workflow 跟踪）
@@ -376,6 +464,28 @@
 
 > 本节保留「未完成 / 阻塞」任务，以及**已完成但细节量大、不重复搬入上方登记区**的任务明细。已完成条目的权威登记见上方「已完成的任务」。
 
+### 🟡 260924-插件系统v2完整集成方案 - 从 V1 风格 hook bus 升级为对齐 opencode v2.0.15 的完整插件平台
+**状态**: 🟡 方案阶段，**待 Gate 0 决策**（D-1..D-9 九项，未决前不进入 P1）
+**复杂度**: Full orchestration（score +6；执行方式 P0 后按阶段选择 Mode A/B）
+**开始日期**: 2026-09-24（规划）
+**方案文档**: [workflow/260924-插件系统v2完整集成方案.md](workflow/260924-插件系统v2完整集成方案.md)
+**运行计划**: `.agentdocs/runtime/260924-插件系统v2完整集成方案/master_plan.md`（临时目录）
+**目标**: 将 `runtime/plugin-host.ts`（346 行，5 hook，`OPENAWORK_PLUGINS` env-only）升级为参考库 v2.0.15 形态：插件定义（id/effect/setup）、域化 hook（5 域 18 事件，首批对齐 tool/session/permission）、Effect/Promise 双 API、生命周期（Scope/dispose/前缀 diff/失败降级/supervisor）、能力域（storage/event/tool.transform/配置变换）、声明式发现 + 目录发现 + 热重载、安装与 Web 管理面、内置插件迁移。
+**关键差距**: ① 插件不能注册工具（最大能力缺口，参考库 `tool.transform` 可 add/update/remove）；② 无声明式配置/目录发现/安装/热重载（无 fs 监听与 npm 安装基础设施）；③ 无生命周期（加载即永久）；④ 无插件存储与事件订阅；⑤ 权限 hook 为 deny-only（本仓安全设计，D-2 决策是否放开三值）。
+**可复用基础**: Effect 4.0.0-rc.117（gateway + opencode-llm 已同源）、Service/Layer 范式（`v2-runtime/services/*`）、sync-event 总线 + BusService、`user_settings` KV 表、skill-registry 安装范式（HTTP+解压）、dynamic-tool-loader 缓存失效模式、5 个 hook 落点已就位（tool-sandbox/stream/stream-runner）。
+**分阶段路线**: P0 Gate 0（9 项决策）→ P1 SDK 包 + 宿主内核（旧插件 shim 零破坏）→ P2 能力域（storage/event/tool.transform/配置变换）→ P3 发现与加载（声明式配置/目录发现/热重载/supervisor/状态诊断）→ P4 安装与管理（安装机制/管理 API/Web UI）→ P5 内部插件化与生态（内置工具组迁移/示例/迁移指南）。
+**风险要点**: 宿主重构行为回归（P1 验收要求"零插件时逐字节一致"）；sidecar 二进制内 `import()`/`bun add` 可行性（T-18/T-24 前置验证）；`tool.transform` 与工具折叠/权限链路冲突（强制走 6 处登记 + guard 测试）。
+**边界**: 不做 TUI 插件（无形态）、RPC 跨进程插件（D-7 暂缓）、Provider 裸 Key/权限放宽（永不做）。
+**关联**: 与 `260921-opencode-v2能力对齐`（工具维度）、`260924-AI自助管理扩展四域`（管理工具）为三条独立线；Web 面板（T-27）需在 `260924-插件技能MCP管理界面重构`（已完成，见上方登记）的数据驱动外壳上扩展。
+
+### 🟢 260924-AI自助管理扩展（四域）- 技能安装 / 定时任务 / 记忆 / 自定义 Agent·团队模板（总览）
+**状态**: ✅ **四域全部交付归档**（含顺延项 `team_workspace_manage`，2026-09-24）；本条目保留为总览，子任务权威登记见上方「已完成的任务」
+**复杂度**: Full orchestration（批次 score +5；四域共享热点文件 → 串行，一域一验收）
+**开始日期**: 2026-09-24（规划）
+**方案文档**: [workflow/260924-AI自助管理扩展四域.md](workflow/260924-AI自助管理扩展四域.md)
+**已完成子任务**: [记忆管理工具](workflow/done/260924-记忆管理工具.md) · [技能管理工具](workflow/done/260924-技能管理工具.md) · [定时任务持久化与工具](workflow/done/260924-定时任务持久化与工具.md) · [自定义 Agent 管理工具](workflow/done/260924-自定义Agent管理工具.md) · [团队工作区管理工具](workflow/done/260924-团队工作区管理工具.md)
+**目标**: 复用 MCP 工具范式（9 件清单：工具名常量 / 管理模块 / 权限类别 / 派生器 / 白名单 / 可见性 / 沙箱分支 / 能力目录提示 / 测试四件套），按「记忆 → 技能安装 → 定时任务（先持久化）→ 自定义 Agent / 团队模板」逐个交付。
+
 ### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口
 **状态**: 🟢 **Phase 1/2 已交付并验证**（2026-09-21，多并发实施）；**Phase 3（CodeMode）未开始**
 **复杂度**: Full orchestration（score +6）
@@ -746,8 +856,23 @@
 
 - [2026-09-23] **不要并行跑网关与 web 的全量测试**：两者同时启动会让网关全量出现约 9 例偶发失败（资源竞争下的超时/竞态，报错点分散在 channels/handoff 等与改动无关的文件，看起来像真实回归）；单独重跑即全绿（564 文件 / 4355 用例）。判定「是否真回归」前先确认没有其它全量测试在并行跑，并优先用定向目录（`bunx vitest run src/__tests__/<dir>`）复现。
 - [2026-09-23] **改动错误提示文案会打破既有断言**：`subagent-depth.test.ts` 曾断言深度错误消息包含 `subagent_depth` 键名；设置页化后文案改为「设置页 → 子代理」，该断言即失败。改错误消息时同步 grep 全仓断言（`grep -rn "<消息片段>" src/__tests__ src/verification`）。
+- [2026-09-24] **后台全量测试运行期间编辑源码 = 混合状态假失败**：vitest 在运行中会持续 transform 新改的文件，实测出现「新测试文件 + 旧源码」的组合导致 1 例失败（报错内容与源码不一致、定向复跑即绿）。判定「是否真回归」前必须确认该轮测试启动后**没有任何文件改动**；改动后应重新起一轮干净全量，不要把混合状态的失败当作回归证据。
+- [2026-09-24] **`createManagedAgentForUser` 省略 id 时自动派生唯一 id**：同 label 重复创建不会报「已存在」（会得到 `label-1` 后缀的新 Agent），`Agent already exists` 只在显式 `id` 冲突时触发；给模型/测试写重复检测时必须用显式 id。
+- [2026-09-24] **向大文件引入同名导入前先 grep 闭包内本地声明**：`routes/team.ts` 闭包内已有本地 `getTeamWorkspaceForUser`（返回原始 row），把新导入的 store 同名函数**整体遮蔽**——get handler 一度返回 snake_case 原始行（`defaultTeamRoster` 丢失），被路由回归立刻抓到。大文件重构时导入一律先确认闭包内无同名声明，必要时用 `import { fn as alias }`。
+- [2026-09-24] **`tool-sandbox-test-support.ts` 的 db mock 是显式键列表**：新增任何 `infra/db` 导出（如本次 F5 修复引入的 `sqliteTransaction`）都必须在共享桩与各测试文件的 `vi.mock('../../infra/db.js')` 工厂里同步补键，否则调用点会在**全量**回归才炸（定向跑没覆盖该文件时会被漏掉）——凡改动 `cron-store` / 其它共享 store 的 db 调用面，先 grep `sqliteTransaction|sqliteRunWithRowId` 的 mock 清单。
+- [2026-09-24] **cron 任务的调度一致性必须在「结果态」校验**：`scheduleJob` 对缺字段（kind=cron 无 expr / kind=at 无时间）**静默 return**，任务会「存在但永不触发」；自助工具的 update 必须在合并现有字段后校验最终配置（只在调度/启用字段被改动时触发，避免只改名被误伤），add 还要拒绝过去的 `at` 与过小的 `every`。另：删除 cron 任务必须显式级联删除 `cron_job_executions`（该表无 job 外键，孤儿行不可达且不再被裁剪）；任务审批预览必须展示执行环境（working_folder/session_id/agent/model/投递），否则可用无害任务名掩护扩大工作区或换执行身份。
+- [2026-09-24] **唯一索引下的「停用记忆」只能在创建时写入**：`memories` 的 `(user_id,type,key) WHERE enabled=1` 部分唯一索引意味着同键的停用记忆与启用记忆可以共存，但「先创建（enabled=1）再停用」在启用记忆存在时必然撞索引——`CreateMemoryInput` 因此支持 `enabled:false` 直接创建停用态；同理，`update {enabled:true}` 必须无条件做撞键预检（不能只在改 type/key 时），否则把 SQLite 约束错误抛给模型。
+- [2026-09-24] **memories 表有部分唯一索引，自助写入必须先预检**：`(user_id, type, key) WHERE enabled = 1`（`idx_memories_user_type_key`）——同 type+key 的启用记忆只能有一条；直接 `createMemory` 撞键会抛原始 SQLite 约束错误。自助管理工具须先 `findEnabledMemoryByTypeAndKey` 预检并给可读提示（改 key/重新启用同理）。另：`createMemory`/`updateMemory` **不做安全扫描**（只有 `upsertExtractedMemories` 与路由层扫），任何新写入入口都必须显式调用 `scanMemoryWriteContent`。
+- [2026-09-24] **harness 容器必须 `grid-template-columns: minmax(0, 1fr)`**：`.viewport` 用默认 `auto` 轨道会被子元素 min-content 撑开（本次实测 375 视口被撑到 442px），把「组件内部不收缩」伪装成「无问题」。组件级布局验收必须让轨道严格等于容器宽，组件溢出才会体现为自身 `scrollWidth > clientWidth`（`verify-plugin-manager-3viewports.ts` 首次运行即因此漏报）。
+- [2026-09-24] **`:focus-visible` 计算样式断言必须先建立键盘模态**：指针交互（含 harness 里的点击）之后脚本 `focus()` 不触发 `:focus-visible`，焦点环读到 `none/0px`；断言前先 `keyboard.press('Tab')` 再 focus（与 `sub-agent-run-list` harness 同口径）。
+- [2026-09-24] **同一视图内两个按钮同名会让 `getByText` 命中歧义**：`McpServerManager` 头部「+ 添加服务器」开关与表单提交按钮同名时，测试取到的是被禁用的提交按钮（点击超时）。现提交按钮改「+ 确认添加」，头部开关加 `data-mcp-add-toggle`，测试选择器一律按 data 属性锚定。
 
 ### 架构决策
+
+- [2026-09-24] **管理面（技能 / MCP / 插件）重构的三条硬约束**：① 数据流收敛为单一 hook（`apps/web/src/hooks/skills/use-installed-skills.ts` 与既有 `use-mcp-servers.ts`），`/skills` 与设置内面板共用，禁止再复制「加载 / 乐观更新 / 回滚 / 重载」逻辑；② shared-ui 组件**先保 props 兼容再谈视觉重写**（`InstalledSkillsManager` / `MCPServerList` / `MCPServerConfig` 既有消费者零改动，`chat-right-panel` 的只读状态列表行为不变）；③ 「配置 + 状态」双卡片一律合并为单列表（`McpServerManager`：行 = 配置 + 状态 + 操作，编辑/新增按需展开），插件 Tool 参数不再逐项 chip 平铺而是一行文本，插件元数据集中在 `plugin-registry.tsx` 数据驱动。
+- [2026-09-24] **cron 持久化 = 可选 persistence 钩子 + 启动装载 + 中断标记**：`CronScheduler` 通过第 5 个可选构造参数注入 `CronSchedulerPersistence`（`upsertJob` / `deleteJob` / `recordExecution`），**不把 DB 依赖写进调度器**（既有超时/重入/历史裁剪单测零改动）；任务定义与执行历史分表（`cron_jobs` / `cron_job_executions`，历史按任务保留 200 条），fireJob 在开始与结束各 upsert 一次（running → completed/failed），重启时 `restoreCronJobsFromStore` 先标记残留 running 为中断再装载。**自助管理工具要拿调度器单例时用动态导入**——静态导入 `cron/router` 会把 `agent-handler → routes/stream-runtime` 拉进 `tool-definitions` 模块图，而 stream-runtime 反向引用工具定义，形成环。
+- [2026-09-24] **自助管理工具复用既有 HTTP 逻辑时的抽取边界**：优先抽取「纯落库 / 校验层」到共享模块（如 `skill/skill-installed-store.ts` 之于 `routes/skills.ts`），网络拉取与多路聚合逻辑留在路由并**导出工厂**（如 `createRegistryClient`）供工具复用；**禁止整段搬迁**大文件路由（2417 行 skills.ts 只动了落库语义，路由回归 12 例零变化）。工具侧 v1 对无法安全复用的来源（github: / claude-marketplace:）显式拒绝并引导设置页，好过复制一份实现。
+- [2026-09-24] **「AI 自助管理」类工具的统一范式（MCP 已落地，四域将复用）**：① 工具名常量独立为零依赖模块（策略层可引用，不引入 DB/连接池/zod 重依赖）；② 管理模块只写当前会话 owner 的配置、复用既有校验 schema、读-改-写同步完成后再 await 探活/刷新；③ agent-core 新增权限类别（默认 ask），**只读动作经派生器返回 null 免审批**，永久允许按动作隔离（`always: ['<action>:.*']`）；④ `TOOL_WHITELIST` + `MODEL_VISIBLE_GATEWAY_TOOLS` 登记（guard 测试强制分类）；⑤ 会话可见性隐藏 + 执行层守卫**双重防线**（team 后台会被权限层自动免审批，仅靠权限类别挡不住）；⑥ 敏感字段双向脱敏（回显侧白名单 + 错误文本折叠 URL query + 内置条目不落 runtime 注入的 header）。
 
 - [2026-09-23] **子代理数量限制 = 用户级可调（`subagent_limits`），判定每次派发读库**：同时运行 / 任务树累计 / 嵌套深度三项由 `services/agent-gateway/src/task/subagent-limits.ts` 统一读取与判定（默认 4 / 24 / 1，护栏 16 / 200 / 8，越界收敛到边界），设置页「连接 → 子代理」经 `PUT /settings/providers` 的 `subagentLimits` 字段写入 ⇒ **保存即生效、无需重启**（不要在启动期缓存）；历史键 `subagent_depth` 仅作深度回落来源；嵌套深度只由 `checkSubagentDepthAllowed` 一处判定（与它叠加的链深 4 校验已删除）；前端护栏常量在 `apps/web/src/pages/settings/shared/settings-page-helpers.ts`，与网关 `provider/provider-config.ts` 的 `SUBAGENT_LIMITS_GUARDRAILS` **必须成对维护**（改一处先 grep 另一处）。
 
@@ -975,3 +1100,4 @@
 - 2026-09-21: **纠正两处待办误判并沉淀记忆**——经实证，`opencode-llm` error 模块「Effect 4.0 迁移」与 `skill-registry` 「签名校验」**均不是待办**（详见「已知陷阱补充」2026-09-21 条）；据此在「架构决策」新增 2 条（放弃/延后签名流水线 + 记录技能安装链路的真实短板），避免后续会话据 TODO 字面量再次将其列为 P0
 - 2026-09-22: **子代理对标 opencode 改造（已交付）沉淀记忆**——「架构决策」新增 4 条（单通道交付 = synthetic + 显式唤醒 / 本仓原先无「不落用户轮跑一轮」能力及解法 / synthetic 角色契约含 `description`+`metadata` 与可见性规则 / **Web 渲染注入内容时扩群组协议而非扩 `ChatMessage.role`**）；「已知陷阱」新增 9 条（web vitest mock `shared-ui`、`shared` 的 `dist` 解析与 CI 构建顺序、TS interface 无隐式索引签名、zod `.transform()` 使 `.shape` 失效、内部键守卫两处盲区、验收脚本全局计数断言假失败、`check:fastify-alignment` 判定机制、`vi.fn` 初始实现决定推断类型、同文件编辑须串行）。方案见 `workflow/done/260922-子代理对标opencode改造方案.md` + 附录 A。
 - 2026-09-22: **该方案收口（T-32 + T-30 + 归档）**——① **T-32 补回自动唤醒预算**（关闭开放问题 Q3 / 风险 R-12）：T-31 删除旧计数器后唤醒路径**无任何上限**，而唤醒是事件驱动的，被唤醒的父会话若再委派后台子代理即形成**无界自激**；新增 `task/task-wake-budget.ts`（上限 10，与旧值一致），由 `deliverTaskCompletion` 在**真正要唤醒时**消费，耗尽则**只投递不唤醒**（通知已落库 ⇒ 不丢信息），`routes/stream.ts` 仅在**非网关内部请求**时重置计数。② **T-30 三视口验收以组件级真实浏览器通过**（真实 Chromium，61 断言 × 3 视口）：新建可复现资产 `apps/web/harness/`；**推翻了此前「组件级也不可行」的判定**——该判定把「需要桌面端浏览器工具」当成了必要条件，实际仓库自带 Playwright + Chromium。③ **方案归档** → `workflow/done/`，`AGENTS.md` 架构说明新增「子代理结果交付（单通道）」条目。④ **收口自查又发现 1 处真实问题（SR-11）并修**：两条验收脚本断言全过但退出码 1——同步唤醒启动的父会话后台流与脚本收尾竞态（关库后 flush 报 `Database has closed`）；已按 `verify-task-tool-auto-run` 既有隔离手法（父会话 `state_status='paused'`）修复，并沉淀为已知陷阱。**唯一未覆盖**：端到端变体（`AI_API_KEY` 为空的环境阻塞，非待办）。
+- 2026-09-24: **插件/技能/MCP 管理界面重构（已交付）沉淀记忆**——「架构决策」新增 1 条（管理面重构三条硬约束：单一数据 hook / shared-ui props 先兼容后重写 / 配置+状态合并单列表）；「已知陷阱补充」新增 3 条（harness 容器必须 `minmax(0, 1fr)`、`:focus-visible` 断言需先建立键盘模态、同名按钮导致选择器歧义）。方案与三视口验收见 `workflow/done/260924-插件技能MCP管理界面重构.md` + `apps/web/harness/verify-plugin-manager-3viewports.ts`（52 断言 × 3 视口）。

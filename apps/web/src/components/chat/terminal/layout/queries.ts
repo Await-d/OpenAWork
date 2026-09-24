@@ -58,6 +58,17 @@ export function enumeratePanes(layout: TerminalLayout): readonly TerminalPaneNod
   return panes;
 }
 
+/**
+ * 「树外终端」（存活但不在树里，例如 agent 新起的终端）的宿主 pane：DFS 首个 pane。
+ *
+ * 这是渲染与写入两侧共享的 SSOT：`TerminalSplitView` 按它把树外终端渲染成宿主组
+ * tab 条的**末尾** tab；用户在宿主组上做插入类操作（新建 / 点选 / 拖入）时，也必须
+ * 按同一规则先把它们并入树，否则树内下标与可见下标错位（新 tab 会落在托管终端前面）。
+ */
+export function resolveOrphanHostPaneId(layout: TerminalLayout): string | null {
+  return enumeratePanes(layout)[0]?.id ?? null;
+}
+
 /** 树里出现的所有 terminalId（去重集合）。 */
 export function layoutTerminalIds(layout: TerminalLayout): Set<string> {
   const ids = new Set<string>();

@@ -270,3 +270,83 @@ NODE_PATH=packages/browser-automation/node_modules \
   该缺陷；哨兵色值把「跟随变量」与「解析失败 / 被覆盖」区分开，与 `devtools-nav` 同一口径。
 - **focus 断言必须走键盘**：鼠标交互之后的脚本 `focus()` 不触发 `:focus-visible`，
   ring 计算值只能由 Tab 导航建立焦点后读取——否则会把「样式正确但没匹配」误判为缺陷。
+
+## 插件 / 技能 / MCP 管理面三视口验收（`plugin-manager-3viewports`）
+
+对应 260924「插件、技能、MCP 管理界面重构」：`InstalledSkillsManager`、
+`McpServerManager`、`SkillMarketHome` 三个核心列表组件（375 / 768 / 1280 三视口）。
+
+覆盖项：
+
+| 项             | 说明                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------ |
+| 渲染           | 三个面板均渲染（`data-openawork-installed-skills` / `-mcp-manager` / `-skill-market`）           |
+| 无横向溢出     | 每个面板 `scrollWidth <= clientWidth`（列表行在窄视口必须换行而不是撑破）                        |
+| 省略号         | 长技能名 `text-overflow: ellipsis` + 375 下真实裁剪（`scrollWidth > clientWidth`）               |
+| 语义色         | 开关轨道 = accent、更新版本号 = contrast、MCP 错误文案 = danger（真实计算值）                    |
+| 行内编辑       | 「编辑」展开 `禁用工具`，`完成` 收起                                                             |
+| 新增表单       | `+ 添加服务器` 展开/收起 `服务器名称` 输入（表单提交按钮为「+ 确认添加」，不与开关同名）         |
+| 开关交互       | 点击后 `role="switch"` 的 `aria-checked` 翻转                                                    |
+| focus ring     | 键盘模态下 `outline: 2px solid var(--accent)` + `outline-offset: 2px` + accent-subtle 阴影计算值 |
+| 新增按钮唯一性 | `data-mcp-add-toggle` 只落在面板头部按钮上，避免与表单提交按钮文案重名导致点击歧义               |
+
+### 运行
+
+```bash
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-plugin-manager-3viewports.ts
+```
+
+### 为什么需要它
+
+- **jsdom 没有布局引擎**：`min-width: 0` + `flex-wrap` 的换行行为、省略号是否真实裁剪，
+  以及统计信息/操作按钮混排是否溢出，只有真实排版能判定。
+- **focus 断言必须走键盘**：与 `sub-agent-run-list` 同一口径——指针交互之后脚本
+  `focus()` 不触发 `:focus-visible`，脚本先按一次 Tab 建立键盘模态再读取 ring 计算值。
+- **harness 容器必须用 `grid-template-columns: minmax(0, 1fr)`**：默认 `auto` 轨道会被
+  子元素 min-content 撑开，把「组件内部不收缩」伪装成「无问题」——首次运行即因此漏报，
+  改成 minmax(0,1fr) 后组件内部溢出才会体现为自身 `scrollWidth > clientWidth`。
+
+## 终端 tab 条验收（`terminal-tab-label`）
+
+对应 260924「终端新建位置与窗口标题」改动：`TerminalTabStrip` + `terminalTabLabel`
+在 375 / 768 / 1280 三视口下的标签与布局验收。渲染**真实组件与真实 CSS 链**
+（`.terminal-panel` → `.terminal-split` → `.terminal-pane` → `.terminal-panel__tab-strip`），
+右侧动作区用固定宽度占位（受力点：长标签不得把它挤出 pane）。
+
+覆盖项：
+
+| 项             | 说明                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| 渲染与 DOM 序  | 6 条夹具 tab 全渲染，DOM 顺序 = 旧 → 新                                                    |
+| 可见顺序       | 每个 tab `rect.x` 严格递增（新 tab 追加在右）                                              |
+| 标签文案       | 逐条断言优先级：自定义名 > agent 描述 > 窗口标题 > 命令 > `终端 N`；长标题 = 22 字符 + `…` |
+| 宽度上限       | tab ≤ 200px / 标签 ≤ 160px；**<768px 另有更紧的 media query**：148 / 108                   |
+| 不换行         | `white-space: nowrap` + `text-overflow: ellipsis` + `overflow: hidden`，标签单行高度       |
+| 宿主不被撑开   | tab 条 `scrollWidth ≤ clientWidth`（由自身横向滚动接管，而不是把宿主顶宽）                 |
+| 动作区可达     | 右侧固定宽动作区仍完整留在 pane 内（未被压缩 / 未被挤出）                                  |
+| 页面无横向溢出 | 文档 `scrollWidth ≤ 1280`                                                                  |
+
+### 运行
+
+```bash
+# 同样需要 Vite dev server 已在 127.0.0.1:5173 运行
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-terminal-tab-label.ts
+```
+
+三视口 45 断言全绿；截图写到 `/tmp/opencode/terminal-tab-label-<width>.png`。
+
+### 为什么需要它
+
+- **jsdom 没有布局引擎**：标签的「JS 截断（> 24 → 22 + `…`）」与「CSS 上限 + 省略号」
+  是两层防御，只有真实排版能证明它们叠加后既不换行、也不把 tab 与宿主撑开。
+- **上限是分视口的**：`terminal-panel.css` 在 `@media (max-width: 767px)` 里把 tab / 标签
+  上限收紧到 148 / 108 —— 断言必须带视口维度，否则「窄视口放宽上限」这类回归会漏报
+  （首轮探针就是把页面视口固定在 375，只测到窄视口那一档）。
+- **红→绿证据（实测）**：移除 `terminalTabLabel` 的标题截断 → 三视口各 2 条文案断言失败
+  （标签变成整条 `user@host: …`）；再把 tab / 标签的 `max-width` 一并移除 → tab 宽涨到
+  507px、标签 476px，宽度断言失败。两层防御各自都有守卫。
+- **顺序真相在 panel 层**：上游 `useSessionTerminals` 是「最新在前」，panel 层重排为
+  「旧 → 新」后才交给 tab 条 —— 这条语义由 `QuickTerminalPanel.test.tsx` 的面板级用例
+  守卫；本 harness 只验证 tab 条按传入顺序从左到右渲染。

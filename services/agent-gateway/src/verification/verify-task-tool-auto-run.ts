@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
-import { listSessionMessagesV2 as listSessionMessages } from '../message/message-v2-adapter.js';
+import {
+  appendSessionMessageV2,
+  listSessionMessagesV2 as listSessionMessages,
+} from '../message/message-v2-adapter.js';
 import { subscribeSessionRunEvents } from '../session/session-run-events.js';
 import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';
@@ -246,6 +249,16 @@ async function main(): Promise<void> {
                 typeof backgroundOutputResult.output === 'string' &&
                   backgroundOutputResult.output.includes('任务结果'),
                 'background_output should return a human-friendly result string by default',
+              );
+              assert(
+                typeof backgroundOutputResult.output === 'string' &&
+                  backgroundOutputResult.output.includes('子代理已经执行完成'),
+                'background_output default should surface the child final summary',
+              );
+              assert(
+                typeof backgroundOutputResult.output === 'string' &&
+                  backgroundOutputResult.output.length < 5_000,
+                'background_output default should stay a bounded summary (no full transcript dump)',
               );
 
               const backgroundOutputFullSessionResult = await sandbox.execute(
@@ -508,6 +521,51 @@ async function main(): Promise<void> {
                     event.status === 'done',
                 ),
                 'parent session should emit done task update',
+              );
+
+              // full_session 的单条超长消息也有硬上限（约 20k 字符），
+              // 防止“至少保留最新一条”让超大消息绕过总预算。
+              // 放在 resume 断言之后：它会额外追加一条子会话消息，不能扰动
+              // 上方基于消息下标 / 数量的断言。
+              appendSessionMessageV2({
+                sessionId: output.sessionId,
+                userId,
+                role: 'assistant',
+                content: [{ type: 'text', text: `超长正文:${'z'.repeat(60_000)}` }],
+                clientRequestId: `${parentSessionId}:oversized-child-message`,
+                status: 'final',
+              });
+              const oversizedFullSessionResult = await sandbox.execute(
+                {
+                  toolCallId: 'background-output-oversized',
+                  toolName: 'background_output',
+                  rawInput: { task_id: output.taskId, full_session: true },
+                },
+                new AbortController().signal,
+                parentSessionId,
+              );
+              assert(
+                oversizedFullSessionResult.isError === false,
+                'background_output with an oversized child message should succeed',
+              );
+              const oversizedOutput =
+                oversizedFullSessionResult.output &&
+                typeof oversizedFullSessionResult.output === 'object'
+                  ? (oversizedFullSessionResult.output as {
+                      messages?: Array<{ content?: Array<{ text?: string }> }>;
+                    })
+                  : null;
+              const oversizedText = (oversizedOutput?.messages ?? [])
+                .flatMap((message) => message.content ?? [])
+                .map((part) => part.text ?? '')
+                .join('\n');
+              assert(
+                oversizedText.includes('[消息文本已截断'),
+                'background_output full_session should cap oversized message text',
+              );
+              assert(
+                oversizedText.length < 60_000,
+                'background_output full_session should not return the oversized message verbatim',
               );
 
               const preservedResult = await sandbox.execute(

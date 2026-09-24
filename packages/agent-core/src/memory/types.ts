@@ -36,6 +36,14 @@ export interface CreateMemoryInput {
   workspaceRoot?: string | null;
   teamWorkspaceId?: string | null;
   roleLayers?: MemoryRoleLayer[] | null;
+  /**
+   * 创建时的启用态，缺省为 `true`。
+   *
+   * 允许直接创建停用记忆（`enabled: false`）是必要的：`memories` 表有
+   * `(user_id, type, key) WHERE enabled = 1` 唯一索引，「先创建启用再停用」在
+   * 同键已存在启用记忆时会直接撞索引，无法表达「同键的停用记忆」。
+   */
+  enabled?: boolean;
 }
 
 export interface UpdateMemoryInput {

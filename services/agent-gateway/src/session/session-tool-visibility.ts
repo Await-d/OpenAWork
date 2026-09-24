@@ -9,6 +9,12 @@ import {
   WEIXIN_CHANNEL_TOOL_NAMES,
 } from './channel-tool-visibility-policy.js';
 import { isClarifyModeToolAllowed } from './clarify-mode-tool-policy.js';
+import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../mcp/mcp-manage-tool-name.js';
+import { MEMORY_MANAGE_TOOL_NAME } from '../memory/memory-manage-tool-name.js';
+import { SKILL_MANAGE_TOOL_NAME } from '../skill/skill-manage-tool-name.js';
+import { SCHEDULE_MANAGE_TOOL_NAME } from '../cron/schedule-manage-tool-name.js';
+import { AGENT_MANAGE_TOOL_NAME } from '../agent/agent-manage-tool-name.js';
+import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../team/team-workspace-manage-tool-name.js';
 
 interface ChannelToolPermissionsLike {
   allowShell?: boolean;
@@ -131,6 +137,26 @@ function resolveChannelToolKey(toolName: string): string | null {
 
 function isChannelManagedSession(metadata: Record<string, unknown>): boolean {
   return metadata['source'] === 'channel';
+}
+
+/**
+ * 自助管理类工具（MCP / 记忆 / 技能）的会话可见性：个人会话（含 task 子代理）可见；
+ * team / cron / channel 会话不可见。
+ */
+function isSelfServiceManageToolEnabledForSessionMetadata(
+  metadata: Record<string, unknown>,
+): boolean {
+  const source = metadata['source'];
+  if (source === 'cron' || source === 'channel') {
+    return false;
+  }
+  if (typeof metadata['teamWorkspaceId'] === 'string') {
+    return false;
+  }
+  if (isRecord(metadata['teamRoleInstance'])) {
+    return false;
+  }
+  return true;
 }
 
 function areChannelLlmToolDeclarationsEnabled(metadata: Record<string, unknown>): boolean {
@@ -279,6 +305,20 @@ export function isGatewayToolEnabledForSessionMetadata(
   const dialogueMode = metadata['dialogueMode'];
   if (dialogueMode === 'clarify' && !isClarifyModeToolAllowed(toolName)) {
     return false;
+  }
+
+  // 自助管理类工具（mcp_manage_servers / memory_manage / skill_manage）：团队会话
+  // 后台免审批、cron 无人审批、渠道会话按最小授权——三类都不该让模型改用户级配置，
+  // 直接不可见。
+  if (
+    toolName === MCP_MANAGE_SERVERS_TOOL_NAME ||
+    toolName === MEMORY_MANAGE_TOOL_NAME ||
+    toolName === SKILL_MANAGE_TOOL_NAME ||
+    toolName === SCHEDULE_MANAGE_TOOL_NAME ||
+    toolName === AGENT_MANAGE_TOOL_NAME ||
+    toolName === TEAM_WORKSPACE_MANAGE_TOOL_NAME
+  ) {
+    return isSelfServiceManageToolEnabledForSessionMetadata(metadata);
   }
 
   if (isTaskToolName(toolName)) {

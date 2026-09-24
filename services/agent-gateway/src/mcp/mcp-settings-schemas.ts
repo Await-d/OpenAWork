@@ -118,6 +118,25 @@ export const mcpStatusQuerySchema = z.object({
 
 export type McpServerSettingsConfig = z.output<typeof mcpServerConfigSchema>;
 
+export type McpServerConfigParseResult =
+  { ok: true; server: McpServerSettingsConfig } | { ok: false; message: string };
+
+/**
+ * 单条 MCP server 配置解析（供 `mcp_manage_servers` 工具复用同一套 schema，
+ * 保证模型写入的配置与设置页 / `PUT /settings/mcp-servers` 完全同规）。
+ *
+ * 失败时返回首条 issue 的可读信息，避免把整个 ZodError 抛给模型。
+ */
+export function parseMcpServerConfigEntry(entry: unknown): McpServerConfigParseResult {
+  const parsed = mcpServerConfigSchema.safeParse(entry);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue && issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
+    return { ok: false, message: `${path}${issue?.message ?? 'MCP 配置校验失败'}` };
+  }
+  return { ok: true, server: parsed.data };
+}
+
 export function sanitizePersistedMcpServers(value: unknown): McpServerSettingsConfig[] {
   if (!Array.isArray(value)) {
     return [];

@@ -27,11 +27,11 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-beta.83",
+    "@effect/platform-node": "4.0.0-rc.117",
     "@smithy/eventstream-codec": "^4.2.14",
     "@smithy/util-utf8": "^4.2.2",
     "aws4fetch": "^1.0.20",
-    "effect": "4.0.0-beta.83",
+    "effect": "4.0.0-rc.117",
     "zod": "^4.4.3"
   },
   "devDependencies": {

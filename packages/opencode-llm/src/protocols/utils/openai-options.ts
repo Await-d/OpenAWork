@@ -110,4 +110,21 @@ export const instructions = (request: LLMRequest) => {
   return typeof value === 'string' ? value : undefined;
 };
 
+/**
+ * 对齐参考库：解析 `parallel_tool_calls`——显式配置优先，其次由
+ * `ToolChoice.disableParallelToolUse` 推导；两者都没有时不下发。
+ */
+export const parallelToolCalls = (request: LLMRequest): boolean | undefined => {
+  const configured = options(request)?.['parallelToolCalls'];
+  if (typeof configured === 'boolean') return configured;
+  const disabled = request.toolChoice?.disableParallelToolUse;
+  return disabled === undefined ? undefined : !disabled;
+};
+
+/** 对齐参考库：Responses 的 `max_tool_calls`（单次响应内工具调用上限）。 */
+export const maxToolCalls = (request: LLMRequest): number | undefined => {
+  const value = options(request)?.['maxToolCalls'];
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+};
+
 export * as OpenAIOptions from './openai-options.js';

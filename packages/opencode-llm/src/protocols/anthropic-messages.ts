@@ -22,6 +22,7 @@ import {
 } from '../schema/index.js';
 import { JsonObject, optionalArray, optionalNull, ProviderShared } from './shared.js';
 import { isContextOverflow } from '../provider-error.js';
+import { effortUpdate, resolveEffortUpdates } from '../effort-updates.js';
 import * as Cache from './utils/cache.js';
 import { Lifecycle } from './utils/lifecycle.js';
 import { ToolSchemaProjection } from './utils/tool-schema.js';
@@ -30,6 +31,8 @@ import { ToolStream } from './utils/tool-stream.js';
 const ADAPTER = 'anthropic-messages';
 export const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
 export const PATH = '/messages';
+// 对齐参考库：`Message.effort()` 标记未给出目标强度时的默认值。
+const DEFAULT_EFFORT = 'high';
 
 // =============================================================================
 // Request Body Schema
@@ -39,6 +42,32 @@ const AnthropicCacheControl = Schema.Struct({
   ttl: Schema.optional(Schema.Literals(['5m', '1h'])),
 });
 
+// SDK: MessageCreateParamsBase.service_tier {auto | standard_only}；按参考库的
+// knownString 语义接受任意字符串（已知值仅用于提示），不做闭集校验。
+const AnthropicServiceTier = Schema.String;
+
+// SDK OutputConfig {effort?: "low"|"medium"|"high"|"xhigh"|"max"|null, format?}
+const AnthropicJsonOutputFormat = Schema.Struct({
+  type: Schema.Literal('json_schema'),
+  schema: JsonObject,
+});
+const AnthropicOutputConfig = Schema.Struct({
+  effort: Schema.optional(Schema.String),
+  format: Schema.optional(Schema.NullOr(AnthropicJsonOutputFormat)),
+});
+
+// SDK Metadata {user_id?: string|null}
+const AnthropicMetadata = Schema.Struct({ user_id: optionalNull(Schema.String) });
+
+// SDK MessageCreateParamsContainer: ContainerParams|string; ContainerParams {id?, skills?}
+const AnthropicContainer = Schema.Union([
+  Schema.String,
+  Schema.Struct({
+    id: optionalNull(Schema.String),
+    skills: optionalNull(Schema.Array(JsonObject)),
+  }),
+]);
+
 const AnthropicTextBlock = Schema.Struct({
   type: Schema.tag('text'),
   text: Schema.String,
@@ -46,16 +75,66 @@ const AnthropicTextBlock = Schema.Struct({
 });
 type AnthropicTextBlock = Schema.Schema.Type<typeof AnthropicTextBlock>;
 
+// SDK: ImageBlockParam {source: Base64|URL|File, cache_control, transformations}
+const AnthropicBase64ImageSource = Schema.Struct({
+  type: Schema.tag('base64'),
+  media_type: Schema.String,
+  data: Schema.String,
+});
+const AnthropicURLImageSource = Schema.Struct({ type: Schema.tag('url'), url: Schema.String });
+const AnthropicFileImageSource = Schema.Struct({
+  type: Schema.tag('file'),
+  file_id: Schema.String,
+});
+const AnthropicImageSource = Schema.Union([
+  AnthropicBase64ImageSource,
+  AnthropicURLImageSource,
+  AnthropicFileImageSource,
+]);
+const AnthropicImageTransformations = Schema.Struct({
+  oversized_image: Schema.optional(Schema.Literals(['downsize', 'error'])),
+});
+
 const AnthropicImageBlock = Schema.Struct({
   type: Schema.tag('image'),
-  source: Schema.Struct({
-    type: Schema.tag('base64'),
-    media_type: Schema.String,
-    data: Schema.String,
-  }),
+  source: AnthropicImageSource,
   cache_control: Schema.optional(AnthropicCacheControl),
+  transformations: Schema.optional(AnthropicImageTransformations),
 });
 type AnthropicImageBlock = Schema.Schema.Type<typeof AnthropicImageBlock>;
+
+// SDK: DocumentBlockParam {source: Base64PDF|PlainText|URLPDF|FileDocument, cache_control, citations, context, title}
+const AnthropicBase64PDFSource = Schema.Struct({
+  type: Schema.tag('base64'),
+  media_type: Schema.Literal('application/pdf'),
+  data: Schema.String,
+});
+const AnthropicPlainTextSource = Schema.Struct({
+  type: Schema.tag('text'),
+  media_type: Schema.Literal('text/plain'),
+  data: Schema.String,
+});
+const AnthropicURLPDFSource = Schema.Struct({ type: Schema.tag('url'), url: Schema.String });
+const AnthropicFileDocumentSource = Schema.Struct({
+  type: Schema.tag('file'),
+  file_id: Schema.String,
+});
+const AnthropicDocumentSource = Schema.Union([
+  AnthropicBase64PDFSource,
+  AnthropicPlainTextSource,
+  AnthropicURLPDFSource,
+  AnthropicFileDocumentSource,
+]);
+
+const AnthropicDocumentBlock = Schema.Struct({
+  type: Schema.tag('document'),
+  source: AnthropicDocumentSource,
+  cache_control: Schema.optional(AnthropicCacheControl),
+  title: Schema.optional(Schema.String),
+  context: Schema.optional(Schema.String),
+  citations: Schema.optional(Schema.Struct({ enabled: Schema.Boolean })),
+});
+type AnthropicDocumentBlock = Schema.Schema.Type<typeof AnthropicDocumentBlock>;
 
 const AnthropicThinkingBlock = Schema.Struct({
   type: Schema.tag('thinking'),
@@ -112,13 +191,17 @@ const AnthropicServerToolResultBlock = Schema.Struct({
 });
 type AnthropicServerToolResultBlock = Schema.Schema.Type<typeof AnthropicServerToolResultBlock>;
 
-// Anthropic accepts either a plain string or an ordered array of text/image
-// blocks inside `tool_result.content`. The array form is required when a tool
-// returns image bytes (screenshot, image search, etc.) so they can be passed
-// to the model as proper image inputs instead of being JSON-stringified into
-// the prompt — which silently inflates context by megabytes and can push the
+// Anthropic accepts either a plain string or an ordered array of text/image/
+// document blocks inside `tool_result.content`. The array form is required when
+// a tool returns media bytes (screenshot, PDF, etc.) so they can be passed to
+// the model as proper content blocks instead of being JSON-stringified into the
+// prompt — which silently inflates context by megabytes and can push the
 // conversation over the model's token limit.
-const AnthropicToolResultContent = Schema.Union([AnthropicTextBlock, AnthropicImageBlock]);
+const AnthropicToolResultContent = Schema.Union([
+  AnthropicTextBlock,
+  AnthropicImageBlock,
+  AnthropicDocumentBlock,
+]);
 
 const AnthropicToolResultBlock = Schema.Struct({
   type: Schema.tag('tool_result'),
@@ -131,6 +214,7 @@ const AnthropicToolResultBlock = Schema.Struct({
 const AnthropicUserBlock = Schema.Union([
   AnthropicTextBlock,
   AnthropicImageBlock,
+  AnthropicDocumentBlock,
   AnthropicToolResultBlock,
 ]);
 type AnthropicUserBlock = Schema.Schema.Type<typeof AnthropicUserBlock>;
@@ -151,7 +235,12 @@ const AnthropicMessage = Schema.Union([
     role: Schema.Literal('assistant'),
     content: Schema.Array(AnthropicAssistantBlock),
   }),
-  Schema.Struct({ role: Schema.Literal('system'), content: Schema.Array(AnthropicTextBlock) }),
+  Schema.Struct({
+    role: Schema.Literal('system'),
+    content: Schema.Array(AnthropicTextBlock),
+    // 对齐参考库：时序 effort 更新的原生形态（content 为空 + output_config）。
+    output_config: Schema.optional(Schema.Struct({ effort: Schema.String })),
+  }),
 ]).pipe(Schema.toTaggedUnion('role'));
 type AnthropicMessage = Schema.Schema.Type<typeof AnthropicMessage>;
 
@@ -164,14 +253,39 @@ const AnthropicTool = Schema.Struct({
 type AnthropicTool = Schema.Schema.Type<typeof AnthropicTool>;
 
 const AnthropicToolChoice = Schema.Union([
-  Schema.Struct({ type: Schema.Literals(['auto', 'any']) }),
-  Schema.Struct({ type: Schema.tag('tool'), name: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literals(['auto', 'any']),
+    disable_parallel_tool_use: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
+    type: Schema.tag('tool'),
+    name: Schema.String,
+    disable_parallel_tool_use: Schema.optional(Schema.Boolean),
+  }),
 ]);
 
-const AnthropicThinking = Schema.Struct({
-  type: Schema.tag('enabled'),
-  budget_tokens: Schema.Number,
+const AnthropicThinkingDisplay = Schema.Literals(['summarized', 'omitted']);
+
+// SDK ThinkingBlockBinding {prefix_mismatch_behavior?: "error"|"drop_block"}
+const AnthropicThinkingBlockBinding = Schema.Struct({
+  prefix_mismatch_behavior: Schema.optional(Schema.Literals(['error', 'drop_block'])),
 });
+
+const AnthropicThinking = Schema.Union([
+  Schema.Struct({
+    type: Schema.tag('enabled'),
+    budget_tokens: Schema.Number,
+    display: Schema.optional(AnthropicThinkingDisplay),
+    block_binding: Schema.optional(AnthropicThinkingBlockBinding),
+  }),
+  // 对齐参考库：adaptive 思考由模型自行决定预算（无需 budget_tokens）。
+  Schema.Struct({
+    type: Schema.tag('adaptive'),
+    display: Schema.optional(AnthropicThinkingDisplay),
+    block_binding: Schema.optional(AnthropicThinkingBlockBinding),
+  }),
+  Schema.Struct({ type: Schema.tag('disabled') }),
+]);
 
 const AnthropicBodyFields = {
   model: Schema.String,
@@ -187,6 +301,14 @@ const AnthropicBodyFields = {
   stop_sequences: optionalArray(Schema.String),
   thinking: Schema.optional(AnthropicThinking),
   context_management: Schema.optional(AnthropicContextManagement),
+  // SDK 顶层透传（对齐参考库）：output_config / cache_control / container /
+  // inference_geo / metadata / service_tier，全部来自 providerOptions。
+  output_config: Schema.optional(AnthropicOutputConfig),
+  cache_control: Schema.optional(AnthropicCacheControl),
+  container: Schema.optional(Schema.NullOr(AnthropicContainer)),
+  inference_geo: Schema.optional(Schema.NullOr(Schema.String)),
+  metadata: Schema.optional(AnthropicMetadata),
+  service_tier: Schema.optional(AnthropicServiceTier),
 };
 const AnthropicMessagesBody = Schema.Struct(AnthropicBodyFields);
 export type AnthropicMessagesBody = Schema.Schema.Type<typeof AnthropicMessagesBody>;
@@ -343,10 +465,26 @@ const lowerTool = (
 
 const lowerToolChoice = (toolChoice: NonNullable<LLMRequest['toolChoice']>) =>
   ProviderShared.matchToolChoice('Anthropic Messages', toolChoice, {
-    auto: () => ({ type: 'auto' as const }),
+    auto: () => ({
+      type: 'auto' as const,
+      ...(toolChoice.disableParallelToolUse === undefined
+        ? {}
+        : { disable_parallel_tool_use: toolChoice.disableParallelToolUse }),
+    }),
     none: () => undefined,
-    required: () => ({ type: 'any' as const }),
-    tool: (name) => ({ type: 'tool' as const, name }),
+    required: () => ({
+      type: 'any' as const,
+      ...(toolChoice.disableParallelToolUse === undefined
+        ? {}
+        : { disable_parallel_tool_use: toolChoice.disableParallelToolUse }),
+    }),
+    tool: (name) => ({
+      type: 'tool' as const,
+      name,
+      ...(toolChoice.disableParallelToolUse === undefined
+        ? {}
+        : { disable_parallel_tool_use: toolChoice.disableParallelToolUse }),
+    }),
   });
 
 // Anthropic only accepts `[a-zA-Z0-9_-]` in tool ids; ids minted by other
@@ -395,43 +533,204 @@ const lowerServerToolResult = Effect.fn('AnthropicMessages.lowerServerToolResult
   } satisfies AnthropicServerToolResultBlock;
 });
 
-const lowerImage = Effect.fn('AnthropicMessages.lowerImage')(function* (part: MediaPart) {
+const fileIdFromMetadata = (metadata: MediaPart['metadata']): string | undefined => {
+  if (!ProviderShared.isRecord(metadata)) return undefined;
+  const anthropic = metadata['anthropic'];
+  if (ProviderShared.isRecord(anthropic)) {
+    if (typeof anthropic['file_id'] === 'string') return anthropic['file_id'];
+    if (typeof anthropic['fileId'] === 'string') return anthropic['fileId'];
+  }
+  if (typeof metadata['file_id'] === 'string') return metadata['file_id'];
+  if (typeof metadata['fileId'] === 'string') return metadata['fileId'];
+  return undefined;
+};
+
+const transformationsFromMetadata = (
+  metadata: MediaPart['metadata'],
+): AnthropicImageBlock['transformations'] | undefined => {
+  if (!ProviderShared.isRecord(metadata)) return undefined;
+  const anthropic = ProviderShared.isRecord(metadata['anthropic'])
+    ? metadata['anthropic']
+    : undefined;
+  const raw = anthropic?.['transformations'] ?? metadata['transformations'];
+  if (ProviderShared.isRecord(raw)) {
+    const value = raw['oversized_image'];
+    if (value === 'downsize' || value === 'error') return { oversized_image: value };
+  }
+  if (
+    anthropic !== undefined &&
+    (anthropic['oversized_image'] === 'downsize' || anthropic['oversized_image'] === 'error')
+  )
+    return { oversized_image: anthropic['oversized_image'] };
+  return undefined;
+};
+
+const documentTitleFromPart = (part: MediaPart): string | undefined => {
+  if (ProviderShared.isRecord(part.metadata)) {
+    const anthropic = part.metadata['anthropic'];
+    if (ProviderShared.isRecord(anthropic) && typeof anthropic['title'] === 'string')
+      return anthropic['title'];
+    if (typeof part.metadata['title'] === 'string') return part.metadata['title'];
+  }
+  if (typeof part.filename === 'string' && part.filename.length > 0) return part.filename;
+  return undefined;
+};
+
+const documentContextFromMetadata = (metadata: MediaPart['metadata']): string | undefined => {
+  if (!ProviderShared.isRecord(metadata)) return undefined;
+  const anthropic = ProviderShared.isRecord(metadata['anthropic'])
+    ? metadata['anthropic']
+    : undefined;
+  if (anthropic !== undefined && typeof anthropic['context'] === 'string')
+    return anthropic['context'];
+  if (typeof metadata['context'] === 'string') return metadata['context'];
+  return undefined;
+};
+
+const citationsFromMetadata = (
+  metadata: MediaPart['metadata'],
+): AnthropicDocumentBlock['citations'] | undefined => {
+  if (!ProviderShared.isRecord(metadata)) return undefined;
+  const raw = ProviderShared.isRecord(metadata['anthropic'])
+    ? (metadata['anthropic']['citations'] ?? metadata['citations'])
+    : metadata['citations'];
+  if (ProviderShared.isRecord(raw) && typeof raw['enabled'] === 'boolean')
+    return { enabled: raw['enabled'] };
+  return undefined;
+};
+
+const isHttpUrl = (value: string) => /^https?:\/\//i.test(value.trim());
+
+/** Anthropic Messages 支持的媒体：图片 + PDF 文档（对齐参考库）。 */
+const ANTHROPIC_MEDIA_MIMES = new Set<string>([...ProviderShared.IMAGE_MIMES, 'application/pdf']);
+
+/**
+ * 对齐参考库 `lowerMedia`：图片 / PDF 文档统一降级为 provider-native 内容块。
+ *
+ * 支持 base64、HTTP URL、`file_id` 直传（Anthropic Files API）与
+ * `text/plain` 文本文档，并透传 `transformations` / `title` / `context` /
+ * `citations` 元数据。此前只支持 base64 图片，非图片媒体会直接报错。
+ */
+const lowerMedia = Effect.fn('AnthropicMessages.lowerMedia')(function* (
+  part: MediaPart,
+  breakpoints?: Cache.Breakpoints,
+) {
+  const mime = part.mediaType.toLowerCase();
+  const cacheControlValue = breakpoints ? cacheControl(breakpoints, part.cache) : undefined;
+  const cacheField = cacheControlValue === undefined ? {} : { cache_control: cacheControlValue };
+  const transformations = transformationsFromMetadata(part.metadata);
+  const documentFields = {
+    ...(documentTitleFromPart(part) === undefined
+      ? {}
+      : { title: documentTitleFromPart(part) as string }),
+    ...(documentContextFromMetadata(part.metadata) === undefined
+      ? {}
+      : { context: documentContextFromMetadata(part.metadata) as string }),
+    ...(citationsFromMetadata(part.metadata) === undefined
+      ? {}
+      : { citations: citationsFromMetadata(part.metadata) as { enabled: boolean } }),
+  };
+
+  // SDK file sources: {type:"file", file_id} — Files API 直传。
+  const fileId = fileIdFromMetadata(part.metadata);
+  if (fileId !== undefined) {
+    if (mime.startsWith('image/'))
+      return {
+        type: 'image' as const,
+        source: { type: 'file' as const, file_id: fileId },
+        ...cacheField,
+        ...(transformations === undefined ? {} : { transformations }),
+      } satisfies AnthropicImageBlock;
+    if (mime === 'application/pdf')
+      return {
+        type: 'document' as const,
+        source: { type: 'file' as const, file_id: fileId },
+        ...cacheField,
+        ...documentFields,
+      } satisfies AnthropicDocumentBlock;
+    return yield* invalid(`Anthropic Messages does not support media type ${part.mediaType}`);
+  }
+
+  // SDK URL sources: {type:"url", url} — 图片 / PDF 直链。
+  const rawString = typeof part.data === 'string' ? part.data.trim() : undefined;
+  if (rawString !== undefined && isHttpUrl(rawString) && !rawString.startsWith('data:')) {
+    if (mime.startsWith('image/'))
+      return {
+        type: 'image' as const,
+        source: { type: 'url' as const, url: rawString },
+        ...cacheField,
+        ...(transformations === undefined ? {} : { transformations }),
+      } satisfies AnthropicImageBlock;
+    if (mime === 'application/pdf')
+      return {
+        type: 'document' as const,
+        source: { type: 'url' as const, url: rawString },
+        ...cacheField,
+        ...documentFields,
+      } satisfies AnthropicDocumentBlock;
+    return yield* invalid(`Anthropic Messages does not support media type ${part.mediaType}`);
+  }
+
+  // SDK PlainTextSource: {type:"text", media_type:"text/plain", data}
+  if (mime === 'text/plain') {
+    const textData =
+      typeof part.data !== 'string'
+        ? Buffer.from(part.data).toString('utf8')
+        : part.data.startsWith('data:')
+          ? (() => {
+              const comma = part.data.indexOf(',');
+              const payload = comma >= 0 ? part.data.slice(comma + 1) : part.data;
+              return part.data.includes(';base64')
+                ? Buffer.from(payload, 'base64').toString('utf8')
+                : decodeURIComponent(payload);
+            })()
+          : part.data;
+    return {
+      type: 'document' as const,
+      source: { type: 'text' as const, media_type: 'text/plain' as const, data: textData },
+      ...cacheField,
+      ...documentFields,
+    } satisfies AnthropicDocumentBlock;
+  }
+
   const media = yield* ProviderShared.validateMedia(
     'Anthropic Messages',
     part,
-    new Set<string>(ProviderShared.IMAGE_MIMES),
+    ANTHROPIC_MEDIA_MIMES,
   );
+  if (media.mime === 'application/pdf')
+    return {
+      type: 'document' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: 'application/pdf' as const,
+        data: media.base64,
+      },
+      ...cacheField,
+      ...documentFields,
+    } satisfies AnthropicDocumentBlock;
   return {
     type: 'image' as const,
-    source: {
-      type: 'base64' as const,
-      media_type: media.mime,
-      data: media.base64,
-    },
+    source: { type: 'base64' as const, media_type: media.mime, data: media.base64 },
+    ...cacheField,
+    ...(transformations === undefined ? {} : { transformations }),
   } satisfies AnthropicImageBlock;
 });
 
-// Tool results may carry structured text/images. Keep media as provider-native
-// content instead of JSON-stringifying base64 into a prompt string.
+// Tool results may carry structured text/images/documents. Keep media as
+// provider-native content instead of JSON-stringifying base64 into a prompt string.
 const lowerToolResultContentItem = Effect.fn('AnthropicMessages.lowerToolResultContentItem')(
   function* (item: ToolContent) {
     if (item.type === 'text')
       return { type: 'text' as const, text: item.text } satisfies AnthropicTextBlock;
     // Type guard ensures item is file type here
     if (item.type !== 'file') throw new Error('Unexpected content type');
-    const media = yield* ProviderShared.validateToolFile(
-      'Anthropic Messages',
-      item,
-      new Set<string>(ProviderShared.IMAGE_MIMES),
-    );
-    return {
-      type: 'image' as const,
-      source: {
-        type: 'base64' as const,
-        media_type: media.mime,
-        data: media.base64,
-      },
-    } satisfies AnthropicImageBlock;
+    return yield* lowerMedia({
+      type: 'media',
+      mediaType: item.mime,
+      data: item.uri,
+      filename: item.name,
+    });
   },
 );
 
@@ -510,6 +809,17 @@ const lowerMessages = Effect.fn('AnthropicMessages.lowerMessages')(function* (
 
   for (const [index, message] of request.messages.entries()) {
     if (message.role === 'system') {
+      // 对齐参考库：时序 effort 标记降级为原生 `output_config` 消息
+      // （任意位置都合法，因此不受文本 system 更新的位置规则约束）。
+      const update = effortUpdate(message);
+      if (update !== undefined) {
+        messages.push({
+          role: 'system',
+          content: [],
+          output_config: { effort: update.effort ?? DEFAULT_EFFORT },
+        });
+        continue;
+      }
       if (splitsLocalToolResults(request.messages, index))
         return yield* invalid(
           'Anthropic Messages system updates cannot split a local tool call from its tool result',
@@ -547,7 +857,7 @@ const lowerMessages = Effect.fn('AnthropicMessages.lowerMessages')(function* (
           continue;
         }
         if (part.type === 'media') {
-          content.push(yield* lowerImage(part));
+          content.push(yield* lowerMedia(part, breakpoints));
           continue;
         }
         return yield* ProviderShared.unsupportedContent('Anthropic Messages', 'user', [
@@ -632,6 +942,48 @@ const lowerMessages = Effect.fn('AnthropicMessages.lowerMessages')(function* (
 
 const anthropicOptions = (request: LLMRequest) => request.providerOptions?.anthropic;
 
+/**
+ * 对齐参考库：SDK 顶层透传字段（`output_config` / `cache_control` /
+ * `container` / `inference_geo` / `metadata` / `service_tier`）。
+ * 同时接受 snake_case 与 camelCase 拼写，优先 snake_case；字段校验走
+ * Schema，非法值在边界报错而不是发到上游。
+ */
+const lowerPassthroughOptions = Effect.fn('AnthropicMessages.lowerPassthroughOptions')(function* (
+  request: LLMRequest,
+) {
+  const raw = anthropicOptions(request);
+  if (!ProviderShared.isRecord(raw)) return undefined;
+  const input = {
+    service_tier: raw['service_tier'] ?? raw['serviceTier'],
+    metadata: raw['metadata'],
+    container: raw['container'],
+    inference_geo: raw['inference_geo'] ?? raw['inferenceGeo'],
+    cache_control: raw['cache_control'] ?? raw['cacheControl'],
+    output_config: raw['output_config'] ?? raw['outputConfig'],
+  };
+  const decoded = yield* ProviderShared.validateWith(
+    Schema.decodeUnknownEffect(
+      Schema.Struct({
+        service_tier: Schema.optional(AnthropicServiceTier),
+        metadata: Schema.optional(AnthropicMetadata),
+        container: Schema.optional(Schema.NullOr(AnthropicContainer)),
+        inference_geo: Schema.optional(Schema.NullOr(Schema.String)),
+        cache_control: Schema.optional(AnthropicCacheControl),
+        output_config: Schema.optional(AnthropicOutputConfig),
+      }),
+    ),
+  )(input);
+  const result = {
+    ...(decoded.service_tier === undefined ? {} : { service_tier: decoded.service_tier }),
+    ...(decoded.metadata === undefined ? {} : { metadata: decoded.metadata }),
+    ...(decoded.container === undefined ? {} : { container: decoded.container }),
+    ...(decoded.inference_geo === undefined ? {} : { inference_geo: decoded.inference_geo }),
+    ...(decoded.cache_control === undefined ? {} : { cache_control: decoded.cache_control }),
+    ...(decoded.output_config === undefined ? {} : { output_config: decoded.output_config }),
+  };
+  return Object.keys(result).length === 0 ? undefined : result;
+});
+
 const lowerContextManagement = Effect.fn('AnthropicMessages.lowerContextManagement')(function* (
   request: LLMRequest,
 ) {
@@ -645,17 +997,89 @@ const lowerContextManagement = Effect.fn('AnthropicMessages.lowerContextManageme
 
 const lowerThinking = Effect.fn('AnthropicMessages.lowerThinking')(function* (request: LLMRequest) {
   const thinking = anthropicOptions(request)?.thinking;
-  if (!ProviderShared.isRecord(thinking) || thinking.type !== 'enabled') return undefined;
+  if (!ProviderShared.isRecord(thinking)) return undefined;
+  const display = thinking['display'];
+  const thinkingDisplay: { readonly display?: 'summarized' | 'omitted' } =
+    display === 'summarized' || display === 'omitted' ? { display } : {};
+  // 对齐参考库：`block_binding` 透传（默认值由 applyThinkingBindingDefault 注入）。
+  const blockBindingInput = thinking['block_binding'];
+  const blockBinding = ProviderShared.isRecord(blockBindingInput)
+    ? yield* ProviderShared.validateWith(Schema.decodeUnknownEffect(AnthropicThinkingBlockBinding))(
+        blockBindingInput,
+      )
+    : undefined;
+  const thinkingFields = {
+    ...thinkingDisplay,
+    ...(blockBinding === undefined ? {} : { block_binding: blockBinding }),
+  };
+  // 对齐参考库：`adaptive` / `disabled` 原样下发（网关对部分模型使用
+  // adaptive；此前只认 enabled，导致 adaptive 被静默丢弃）。
+  if (thinking['type'] === 'adaptive') return { type: 'adaptive' as const, ...thinkingFields };
+  if (thinking['type'] === 'disabled') return { type: 'disabled' as const };
+  if (thinking['type'] !== 'enabled') return undefined;
   const budget =
-    typeof thinking.budgetTokens === 'number'
-      ? thinking.budgetTokens
-      : typeof thinking.budget_tokens === 'number'
-        ? thinking.budget_tokens
+    typeof thinking['budgetTokens'] === 'number'
+      ? thinking['budgetTokens']
+      : typeof thinking['budget_tokens'] === 'number'
+        ? thinking['budget_tokens']
         : undefined;
   if (budget === undefined)
     return yield* invalid('Anthropic thinking provider option requires budgetTokens');
-  return { type: 'enabled' as const, budget_tokens: budget };
+  return { type: 'enabled' as const, budget_tokens: budget, ...thinkingFields };
 });
+
+// 对齐参考库：接受网关命名空间与 Vertex 后缀，不把快照日期当 minor 版本。
+const claudeVersion = (id: string) => {
+  const match =
+    /(?:^|[./])claude-(?<family>[a-z]+)-(?<major>\d+)(?:[.-](?<minor>\d{1,2}))?(?:$|[-:@])/.exec(
+      id.toLowerCase(),
+    )?.groups;
+  if (!match) return undefined;
+  return {
+    family: match['family'] ?? '',
+    major: Number(match['major']),
+    minor: Number(match['minor'] ?? 0),
+  };
+};
+
+const supportsThinkingBlockBinding = (model: LLMRequest['model']) => {
+  const override = model.compatibility?.supportsThinkingBlockBinding;
+  if (override !== undefined) return override;
+  const version = claudeVersion(model.id);
+  return (
+    version !== undefined && (version.major > 5 || (version.major === 5 && version.minor >= 1))
+  );
+};
+
+const supportsEffortUpdates = (model: LLMRequest['model']) => {
+  const override = model.compatibility?.supportsEffortUpdates;
+  if (override !== undefined) return override;
+  const version = claudeVersion(model.id);
+  if (version === undefined) return false;
+  if (version.family === 'opus') return version.major >= 5;
+  if (version.family !== 'fable' && version.family !== 'mythos') return false;
+  return version.major > 5 || (version.major === 5 && version.minor >= 1);
+};
+
+/**
+ * 对齐参考库：支持的模型默认下发 `block_binding.prefix_mismatch_behavior =
+ * 'drop_block'`（未显式配置 thinking 时补 adaptive），避免上游前缀变化导致
+ * thinking 块报错；`disabled` 原样返回。
+ */
+const applyThinkingBindingDefault = (
+  model: LLMRequest['model'],
+  thinking: Schema.Schema.Type<typeof AnthropicThinking> | undefined,
+): Schema.Schema.Type<typeof AnthropicThinking> | undefined => {
+  if (thinking?.type === 'disabled') return thinking;
+  if (!supportsThinkingBlockBinding(model)) return thinking;
+  return {
+    ...(thinking ?? { type: 'adaptive' as const }),
+    block_binding: {
+      prefix_mismatch_behavior: 'drop_block' as const,
+      ...thinking?.block_binding,
+    },
+  };
+};
 
 const fromRequest = Effect.fn('AnthropicMessages.fromRequest')(function* (request: LLMRequest) {
   const toolChoice = request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined;
@@ -685,7 +1109,21 @@ const fromRequest = Effect.fn('AnthropicMessages.fromRequest')(function* (reques
           text: part.text,
           cache_control: cacheControl(breakpoints, part.cache),
         }));
-  const messages = yield* lowerMessages(request, breakpoints);
+  // 对齐参考库：时序 effort 更新——顶层 effort 冻结在首个标记的 `previous`，
+  // 标记消息由 lowerMessages 降级为原生 `output_config`；最后一个标记与请求
+  // 的 effort 不一致（回退 / 分叉历史）时剥离全部标记。
+  const passthroughOptions = (yield* lowerPassthroughOptions(request)) ?? {};
+  const requestedOutputConfig = passthroughOptions.output_config;
+  const { output_config: _outputConfig, ...passthrough } = passthroughOptions;
+  const rawEffort = anthropicOptions(request)?.['effort'];
+  const requestedEffort =
+    requestedOutputConfig?.effort ?? (typeof rawEffort === 'string' ? rawEffort : undefined);
+  const effortUpdates = resolveEffortUpdates(request, requestedEffort);
+  const messages = yield* lowerMessages(effortUpdates.request, breakpoints);
+  const outputConfig =
+    effortUpdates.effort === undefined && requestedOutputConfig?.format === undefined
+      ? undefined
+      : { effort: effortUpdates.effort, format: requestedOutputConfig?.format };
   const contextManagement = yield* lowerContextManagement(request);
   if (breakpoints.dropped > 0) {
     yield* Effect.logWarning(
@@ -704,8 +1142,10 @@ const fromRequest = Effect.fn('AnthropicMessages.fromRequest')(function* (reques
     top_p: generation?.topP,
     top_k: generation?.topK,
     stop_sequences: generation?.stop,
-    thinking: yield* lowerThinking(request),
+    thinking: applyThinkingBindingDefault(request.model, yield* lowerThinking(request)),
+    ...(outputConfig === undefined ? {} : { output_config: outputConfig }),
     ...(contextManagement === undefined ? {} : { context_management: contextManagement }),
+    ...passthrough,
   };
 });
 
@@ -1162,17 +1602,48 @@ export const protocol = Protocol.make({
 export const route = Route.make({
   id: ADAPTER,
   provider: 'anthropic',
+  providerMetadataKey: 'anthropic',
   protocol,
-  endpoint: Endpoint.path(PATH, { baseURL: DEFAULT_BASE_URL }),
+  // 对齐参考库：原生 Anthropic 走 beta 端点（`?beta=true`），
+  // 中转/兼容端点保持普通路径。
+  endpoint: Endpoint.path(
+    (input) => (input.request.model.provider === 'anthropic' ? `${PATH}?beta=true` : PATH),
+    { baseURL: DEFAULT_BASE_URL },
+  ),
   auth: Auth.none,
   framing: Framing.sse,
-  headers: ({ request }) => ({
-    'anthropic-version': '2023-06-01',
-    ...(anthropicOptions(request)?.contextManagement !== undefined &&
-    ProviderShared.supportsAnthropicContextManagement(request)
-      ? { 'anthropic-beta': 'context-management-2025-06-27' }
-      : {}),
-  }),
+  // 对齐参考库：支持原生逐消息 effort 更新的模型保留 `Message.effort` 标记；
+  // 其余模型由 `applyEffortUpdates` 在编译期剥离标记。
+  supportsEffortUpdates: (request) => supportsEffortUpdates(request.model),
+  headers: ({ request, body }) => {
+    // 对齐参考库 `requiredBetaHeaders`：beta 由请求体决定。
+    // 官方端点始终请求 interleaved thinking（API 对不支持的模型会忽略）；
+    // 中转/兼容端点保持不主动下发 beta，避免严格网关拒绝。
+    const official = ProviderShared.isAnthropicOfficialBaseUrl(
+      request.model.route.endpoint.baseURL,
+    );
+    const betas = official ? ['interleaved-thinking-2025-05-14'] : [];
+    if (body.context_management !== undefined && body.context_management.edits.length > 0)
+      betas.push('context-management-2025-06-27');
+    // 时序 effort 更新（原生 `output_config` system 消息）需要 mid-conversation beta。
+    if (
+      body.messages.some(
+        (message) => message.role === 'system' && message.output_config !== undefined,
+      )
+    )
+      betas.push('mid-conversation-output-config-2026-07-01');
+    // 对齐参考库：block binding 需要对应 beta；disabled 不请求。
+    if (
+      body.thinking !== undefined &&
+      body.thinking.type !== 'disabled' &&
+      body.thinking.block_binding !== undefined
+    )
+      betas.push('thinking-binding-controls-2026-08-01');
+    return {
+      'anthropic-version': '2023-06-01',
+      ...(betas.length === 0 ? {} : { 'anthropic-beta': betas.join(',') }),
+    };
+  },
 });
 
 export * as AnthropicMessages from './anthropic-messages.js';

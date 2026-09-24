@@ -133,6 +133,7 @@ describe('OpenAI upstream parameter forwarding', () => {
                 model,
                 modelId: 'gpt-5.4',
                 messages: [OpenCodeLLM.Message.user('ping')],
+                sessionId: 'session-cache-fixture',
                 providerType,
                 upstreamProtocol,
                 openaiFastMode: true,
@@ -163,6 +164,16 @@ describe('OpenAI upstream parameter forwarding', () => {
         });
         expect(JSON.parse(requestBody ?? 'null')).not.toHaveProperty('openaiFastMode');
         expect(JSON.parse(requestBody ?? 'null')).not.toHaveProperty('fast');
+        // 原生 OpenAI 支持 prompt_cache_key（会话级缓存亲和）——chat 走协议侧
+        // compatibility 开关 + request.promptCacheKey，responses 走既有的
+        // providerOptions 生产者；custom 中转保持关闭。
+        if (providerType === 'openai') {
+          expect(JSON.parse(requestBody ?? 'null')).toMatchObject({
+            prompt_cache_key: 'session-cache-fixture',
+          });
+        } else {
+          expect(JSON.parse(requestBody ?? 'null')).not.toHaveProperty('prompt_cache_key');
+        }
       } finally {
         const closed = once(server, 'close');
         server.close();

@@ -78,7 +78,7 @@ describe('Anthropic context-management projection', () => {
     });
     expect(preparedJson(prepared)).toHaveProperty('context_management', contextManagement);
     expect(prepared.request.headers['anthropic-beta']).toBe(
-      'prompt-caching-2024-07-31,context-management-2025-06-27',
+      'prompt-caching-2024-07-31,interleaved-thinking-2025-05-14,context-management-2025-06-27',
     );
   });
 
@@ -135,6 +135,7 @@ describe('Anthropic context-management projection', () => {
     [
       'Anthropic relay',
       AnthropicMessages.route.with({ endpoint: { baseURL: 'https://relay.example/v1' } }),
+      undefined,
     ],
     [
       'MiMo relay',
@@ -142,6 +143,7 @@ describe('Anthropic context-management projection', () => {
         provider: 'mimo',
         endpoint: { baseURL: 'https://api.xiaomimimo.com/anthropic/v1' },
       }),
+      undefined,
     ],
     [
       'custom route on the official host',
@@ -149,8 +151,10 @@ describe('Anthropic context-management projection', () => {
         provider: 'custom',
         endpoint: { baseURL: 'https://api.anthropic.com/v1' },
       }),
+      // 官方端点保留 interleaved beta，但不应出现 context-management。
+      'interleaved-thinking-2025-05-14',
     ],
-  ])('does not project the option for %s', async (_name, route) => {
+  ])('does not project the option for %s', async (_name, route, expectedBeta) => {
     const model = route.model({ id: 'claude-opus-5' });
     const request = requestFor(model, { contextManagement });
     const body = await Effect.runPromise(AnthropicMessages.protocol.body.from(request));
@@ -158,7 +162,7 @@ describe('Anthropic context-management projection', () => {
 
     expect(body).not.toHaveProperty('context_management');
     expect(preparedJson(prepared)).not.toHaveProperty('context_management');
-    expect(prepared.request.headers['anthropic-beta']).toBeUndefined();
+    expect(prepared.request.headers['anthropic-beta']).toBe(expectedBeta);
   });
 
   it('does not project an absent option on the official route', async () => {
@@ -168,7 +172,8 @@ describe('Anthropic context-management projection', () => {
     const prepared = await Effect.runPromise(model.route.prepareTransport(body, request));
 
     expect(preparedJson(prepared)).not.toHaveProperty('context_management');
-    expect(prepared.request.headers['anthropic-beta']).toBeUndefined();
+    // 官方端点始终带 interleaved-thinking beta（对齐参考库）。
+    expect(prepared.request.headers['anthropic-beta']).toBe('interleaved-thinking-2025-05-14');
   });
 
   it.each([

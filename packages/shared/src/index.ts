@@ -1178,6 +1178,18 @@ export interface StreamThinkingEndChunk {
      * (without it Anthropic rejects the assistant turn).
      */
     signature?: string;
+    /**
+     * OpenAI Chat 兼容网关的思维链字段名（`reasoning_content` / `reasoning` /
+     * `reasoning_text`）。持久化后在后续轮次按同名写回上游。
+     */
+    reasoningField?: string;
+    /** 结构化思维链条目（上游 `reasoning_details`），部分网关要求原样回传。 */
+    reasoningDetails?: ReadonlyArray<unknown>;
+    /**
+     * 上述元数据的命名空间（路由 `providerMetadataKey`，未配置时回退 provider
+     * 字符串）。持久化与回传都按它读写，使不同 provider 的元数据互不混淆。
+     */
+    providerMetadataKey?: string;
   };
 }
 

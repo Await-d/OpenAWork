@@ -6,7 +6,10 @@ import {
   filterEnabledGatewayToolsForDialogueMode,
   filterEnabledGatewayToolsForSession,
 } from '../session/session-tool-visibility.js';
-import { resolveSessionRuntimePolicy } from '../session/session-runtime-policy.js';
+import {
+  resolveSessionRuntimePolicy,
+  isChannelManagedSessionMetadata,
+} from '../session/session-runtime-policy.js';
 import { isTerminatedChildSession } from '../session/child-session-terminal-guard.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
@@ -40,6 +43,13 @@ import {
 } from './stream-system-prompts.js';
 import { calculateTokenUsageCost, KeywordDetectorImpl } from '@openAwork/agent-core';
 import { buildCapabilityContext } from './capabilities.js';
+import {
+  buildFoldedToolSurface,
+  isToolFoldingEnabled,
+  TOOL_INVOKE_TOOL_NAME,
+  TOOL_SEARCH_TOOL_NAME,
+} from '../tools/tool-folding.js';
+import { writeToolInvokeAllowlist } from '../session/tool-invoke-allowlist.js';
 import { filterPluginControlledToolsForUser } from '../tools/plugin-tool-settings.js';
 import {
   type ApprovedPermissionResumePayload,
@@ -348,13 +358,35 @@ async function continueFromApprovedToolResult(input: {
   }
   const shouldDeferToolLoading =
     route.deferToolLoading === true || sessionMeta['deferToolLoading'] === true;
-  const enabledTools = shouldDeferToolLoading
+  const baseToolsForRound = shouldDeferToolLoading
     ? toolsForSession.map((tool) => ({
         ...tool,
         function: { ...tool.function, deferLoading: true },
       }))
     : toolsForSession;
-  const enabledToolNames = new Set(enabledTools.map((tool) => tool.function.name));
+
+  // 工具折叠（与 stream.ts 同一实现）：team / 渠道会话沿用完整工具面。
+  const foldedSurface =
+    isToolFoldingEnabled() &&
+    roleLayerForTools === null &&
+    !isChannelManagedSessionMetadata(sessionMeta)
+      ? buildFoldedToolSurface(baseToolsForRound)
+      : undefined;
+  // 非折叠会话剥离折叠元工具；无论是否折叠都刷新 allowlist（= 本轮可见工具名），
+  // 防止会话切换形态后残留过宽名单被 tool_invoke 越权。
+  const enabledTools = foldedSurface
+    ? foldedSurface.directTools
+    : baseToolsForRound.filter(
+        (tool) =>
+          tool.function.name !== TOOL_INVOKE_TOOL_NAME &&
+          tool.function.name !== TOOL_SEARCH_TOOL_NAME,
+      );
+  const visibleToolNames = foldedSurface
+    ? foldedSurface.visibleNames
+    : enabledTools.map((tool) => tool.function.name);
+  writeToolInvokeAllowlist(input.sessionId, input.userId, visibleToolNames);
+  const toolCatalogPrompt = foldedSurface?.catalogPrompt ?? '';
+  const enabledToolNames = new Set(visibleToolNames);
   const turnFileDiffs = new Map<string, FileDiffContent>();
   const abortController = new AbortController();
   const taskRuntimeGuardContext = createTaskRuntimeGuardContext(sessionContext.metadataJson);
@@ -505,6 +537,7 @@ async function continueFromApprovedToolResult(input: {
             buildToolResultContent({
               toolCallId: initialToolResult.toolCallId,
               toolName: initialToolResult.toolName,
+              sessionId: input.sessionId,
               clientRequestId: input.payload.clientRequestId,
               output: initialToolResult.output,
               isError: initialToolResult.isError,
@@ -642,12 +675,13 @@ async function continueFromApprovedToolResult(input: {
           compactionReservedTokens: compactionSettings.reserved,
           workspaceCtx,
           injectedPrompt,
-          capabilityContext,
+          capabilityCatalogPrompt: capabilityContext,
           lspGuidance,
           dialogueModePrompt,
           yoloModePrompt,
           companionPrompt,
           flatMcpToolsEnabled,
+          toolCatalogPrompt,
           memoryBlock,
           teamInstructionStack,
           teamResumePrompt,
@@ -789,14 +823,18 @@ async function continueFromApprovedToolResult(input: {
           // Session memory extraction (Layer 1 compaction support).
           // Fire-and-forget: extracts key session info for use by
           // Session Memory Compact during future compaction rounds.
+          // 默认关闭（对齐参考库 v2.0.15：不存在该机制）；需要时用
+          // OPENAWORK_ENABLE_SESSION_MEMORY_EXTRACTION=1 显式开启。
           try {
-            const { extractSessionMemory } =
+            const { extractSessionMemory, isSessionMemoryExtractionEnabled } =
               await import('../compaction/session-memory-extractor.js');
-            void extractSessionMemory({
-              sessionId: input.sessionId,
-              userId: input.userId,
-              route,
-            });
+            if (isSessionMemoryExtractionEnabled()) {
+              void extractSessionMemory({
+                sessionId: input.sessionId,
+                userId: input.userId,
+                route,
+              });
+            }
           } catch {
             // Intentionally silent — session memory extraction is best-effort
           }
@@ -921,8 +959,42 @@ export async function resumeApprovedPermissionRequest(input: {
     return;
   }
 
-  let resumeResult: { pendingInteraction: boolean; statusCode: number };
+  // 先解析阻塞调用（纯函数、不产生副作用），确保后续注册的清理路径
+  // 一旦进入 try/finally 就不会被中间的解析异常跳过。
   const blockedCalls = resolveBlockedCalls(input.payload);
+
+  // 运行线程必须在执行被批准的工具之前注册：工具执行期间（可能持续数秒）续跑
+  // 已经在发布 terminal_* / tool_result 事件，但 `/stream/active`（以及 `/status`
+  // 的 activeStream 投影）只有看到运行线程才会报告活跃流。若不在这里注册，客户端
+  // 在批准后约 100ms 发起的 attach 会拿到「无活跃流」并放弃重试，续跑输出在界面上
+  // 永远接不上（表现为「批准后卡住」）。`continueFromApprovedToolResult` 内部仍会
+  // upsert / 清理同一线程（语义一致）；本层心跳覆盖「工具执行完成 → 模型轮注册
+  // 线程」之间的空档。
+  const resumeRuntimeThreadStartedAt = Date.now();
+  upsertSessionRuntimeThread({
+    clientRequestId: input.payload.clientRequestId,
+    heartbeatAtMs: resumeRuntimeThreadStartedAt,
+    sessionId: input.sessionId,
+    startedAtMs: resumeRuntimeThreadStartedAt,
+    userId: input.userId,
+  });
+  const resumeRuntimeThreadHeartbeat = setInterval(() => {
+    // Best-effort liveness ping：瞬时 SQLite 错误不得逃逸成未捕获异常。
+    try {
+      touchSessionRuntimeThread({
+        clientRequestId: input.payload.clientRequestId,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      });
+    } catch (err) {
+      console.warn(
+        '[stream-runtime] resume runtime-thread heartbeat failed',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }, SESSION_RUNTIME_THREAD_HEARTBEAT_MS);
+
+  let resumeResult: { pendingInteraction: boolean; statusCode: number };
   try {
     const sandbox = createDefaultSandbox([], { userId: input.userId });
     const executionContext = createStreamExecutionContext(
@@ -1010,6 +1082,13 @@ export async function resumeApprovedPermissionRequest(input: {
       userId: input.userId,
     });
     throw error;
+  } finally {
+    clearInterval(resumeRuntimeThreadHeartbeat);
+    clearSessionRuntimeThread({
+      clientRequestId: input.payload.clientRequestId,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
   }
 }
 

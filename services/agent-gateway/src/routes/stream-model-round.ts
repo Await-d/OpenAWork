@@ -28,6 +28,7 @@ import {
   parsePercentageOverride,
 } from '../compaction/compaction-parity-contract.js';
 import { microcompactMessages } from '../compaction/microcompact.js';
+import { boundInlineImages } from '../message/image-request-budget.js';
 import { stripMediaPayloadsForEstimate } from '../compaction/media-payload-estimate.js';
 import { classifyUpstreamError } from '../provider/retry-classify.js';
 import {
@@ -753,8 +754,16 @@ function buildAssistantContent(
   // Store reasoning as a separate part so it can be reconstructed
   // as a reasoning item for the Responses API in multi-turn conversations.
   const reasoningEntries = extractReasoningEntries(state.assistantThinkingBlocks);
+  // OpenAI Chat 家族的占位块（text 为空）会被 `extractReasoningEntries`
+  // 过滤掉，这里单独取回，保证元数据仍然落库。
+  const openAIReasoningMetaBlock = state.assistantThinkingBlocks.find(
+    (block) =>
+      (typeof block.reasoningField === 'string' && block.reasoningField.length > 0) ||
+      Array.isArray(block.reasoningDetails),
+  );
   if (
     reasoningEntries.length > 0 ||
+    openAIReasoningMetaBlock !== undefined ||
     Boolean(reasoningItemId) ||
     Boolean(state.reasoningEncryptedContent) ||
     Boolean(state.reasoningSummary) ||
@@ -770,6 +779,21 @@ function buildAssistantContent(
           : {}),
         ...(state.reasoningSummary ? { summary: state.reasoningSummary } : {}),
         ...(state.responseId ? { responseId: state.responseId } : {}),
+        ...(openAIReasoningMetaBlock === undefined
+          ? {}
+          : {
+              ...(typeof openAIReasoningMetaBlock.reasoningField === 'string' &&
+              openAIReasoningMetaBlock.reasoningField.length > 0
+                ? { reasoningField: openAIReasoningMetaBlock.reasoningField }
+                : {}),
+              ...(Array.isArray(openAIReasoningMetaBlock.reasoningDetails)
+                ? { reasoningDetails: openAIReasoningMetaBlock.reasoningDetails }
+                : {}),
+              ...(typeof openAIReasoningMetaBlock.providerMetadataKey === 'string' &&
+              openAIReasoningMetaBlock.providerMetadataKey.length > 0
+                ? { providerMetadataKey: openAIReasoningMetaBlock.providerMetadataKey }
+                : {}),
+            }),
       });
     } else {
       reasoningEntries.forEach((entry, index) => {
@@ -780,6 +804,15 @@ function buildAssistantContent(
           ...(typeof entry.endedAt === 'number' ? { endedAt: entry.endedAt } : {}),
           ...(typeof entry.signature === 'string' && entry.signature.length > 0
             ? { signature: entry.signature }
+            : {}),
+          ...(typeof entry.reasoningField === 'string' && entry.reasoningField.length > 0
+            ? { reasoningField: entry.reasoningField }
+            : {}),
+          ...(Array.isArray(entry.reasoningDetails)
+            ? { reasoningDetails: entry.reasoningDetails }
+            : {}),
+          ...(typeof entry.providerMetadataKey === 'string' && entry.providerMetadataKey.length > 0
+            ? { providerMetadataKey: entry.providerMetadataKey }
             : {}),
           ...(index === 0 && reasoningItemId ? { itemId: reasoningItemId } : {}),
           ...(index === 0 && state.reasoningEncryptedContent
@@ -842,8 +875,16 @@ function buildOrderedAssistantContent(
     Boolean(state.reasoningEncryptedContent) ||
     Boolean(state.reasoningSummary) ||
     Boolean(state.responseId);
+  // OpenAI Chat 家族：只有结构化条目、没有 delta 的思维链会落成占位块
+  // （见 markReasoningBlockEnded），这里必须补一个内容条目，否则元数据
+  // 在持久化时丢失。
+  const openAIReasoningMetaBlock = state.assistantThinkingBlocks.find(
+    (block) =>
+      (typeof block.reasoningField === 'string' && block.reasoningField.length > 0) ||
+      Array.isArray(block.reasoningDetails),
+  );
   const hasReasoningSegment = state.contentSegments.some((segment) => segment.kind === 'reasoning');
-  if (hasResponsesMeta && !hasReasoningSegment) {
+  if ((hasResponsesMeta || openAIReasoningMetaBlock !== undefined) && !hasReasoningSegment) {
     content.push({
       type: 'reasoning',
       text: '',
@@ -853,6 +894,21 @@ function buildOrderedAssistantContent(
         : {}),
       ...(state.reasoningSummary ? { summary: state.reasoningSummary } : {}),
       ...(state.responseId ? { responseId: state.responseId } : {}),
+      ...(openAIReasoningMetaBlock === undefined
+        ? {}
+        : {
+            ...(typeof openAIReasoningMetaBlock.reasoningField === 'string' &&
+            openAIReasoningMetaBlock.reasoningField.length > 0
+              ? { reasoningField: openAIReasoningMetaBlock.reasoningField }
+              : {}),
+            ...(Array.isArray(openAIReasoningMetaBlock.reasoningDetails)
+              ? { reasoningDetails: openAIReasoningMetaBlock.reasoningDetails }
+              : {}),
+            ...(typeof openAIReasoningMetaBlock.providerMetadataKey === 'string' &&
+            openAIReasoningMetaBlock.providerMetadataKey.length > 0
+              ? { providerMetadataKey: openAIReasoningMetaBlock.providerMetadataKey }
+              : {}),
+          }),
     });
     reasoningMetadataAttached = true;
   }
@@ -877,6 +933,23 @@ function buildOrderedAssistantContent(
       const startedAt = segment.startedAt ?? block?.startedAt;
       const endedAt = segment.endedAt ?? block?.endedAt;
       const shouldAttachMeta = !reasoningMetadataAttached && hasResponsesMeta;
+      // OpenAI Chat 家族：字段名 / 结构化条目是响应级元数据，挂在第一个
+      // 思维链内容条目上（与 `markReasoningBlockEnded` 的约定一致）。
+      const openAIReasoningField =
+        typeof block?.reasoningField === 'string' && block.reasoningField.length > 0
+          ? block.reasoningField
+          : undefined;
+      const openAIReasoningDetails = Array.isArray(block?.reasoningDetails)
+        ? block.reasoningDetails
+        : undefined;
+      const openAIReasoningKey =
+        typeof block?.providerMetadataKey === 'string' && block.providerMetadataKey.length > 0
+          ? block.providerMetadataKey
+          : undefined;
+      const hasOpenAIReasoningMeta =
+        openAIReasoningField !== undefined ||
+        openAIReasoningDetails !== undefined ||
+        openAIReasoningKey !== undefined;
       // Skip orphan reasoning segments — i.e. a `thinking_start` was emitted
       // but the wire stream got cut to a tool_use (or finished early)
       // before any `thinking_delta` arrived AND no Responses-API metadata
@@ -886,7 +959,7 @@ function buildOrderedAssistantContent(
       // client renders them as a stray "Thinking:" header with no body.
       // Real content (text non-empty) and the metadata-carrying placeholder
       // both still emit below.
-      if (text.trim().length === 0 && !shouldAttachMeta) {
+      if (text.trim().length === 0 && !shouldAttachMeta && !hasOpenAIReasoningMeta) {
         continue;
       }
       const signature = block?.signature;
@@ -896,6 +969,11 @@ function buildOrderedAssistantContent(
         ...(typeof startedAt === 'number' ? { startedAt } : {}),
         ...(typeof endedAt === 'number' ? { endedAt } : {}),
         ...(typeof signature === 'string' && signature.length > 0 ? { signature } : {}),
+        ...(openAIReasoningField === undefined ? {} : { reasoningField: openAIReasoningField }),
+        ...(openAIReasoningDetails === undefined
+          ? {}
+          : { reasoningDetails: openAIReasoningDetails }),
+        ...(openAIReasoningKey === undefined ? {} : { providerMetadataKey: openAIReasoningKey }),
         ...(shouldAttachMeta && reasoningItemId ? { itemId: reasoningItemId } : {}),
         ...(shouldAttachMeta && state.reasoningEncryptedContent
           ? { encryptedContent: state.reasoningEncryptedContent }
@@ -1094,7 +1172,11 @@ export async function runModelRound(input: {
   compactionReservedTokens?: number;
   workspaceCtx: string | null;
   injectedPrompt?: string | null;
-  capabilityContext?: string | null;
+  /**
+   * 能力目录（instructions 式）：注入 stable system 段，不再挂到最新用户消息。
+   * 字节在会话内稳定（缓存友好）；能力变化时下一轮整段刷新。
+   */
+  capabilityCatalogPrompt?: string | null;
   lspGuidance?: string | null;
   dialogueModePrompt?: string | null;
   yoloModePrompt?: string | null;
@@ -1114,6 +1196,11 @@ export async function runModelRound(input: {
    * 由调用方在 round 起始前 await `buildTeamInstructionStack(...)` 取得。
    */
   teamInstructionStack?: string | null;
+  /**
+   * 工具折叠目录（仅折叠启用时非空）：注入 stable system 段，对齐参考库把
+   * Code Mode 目录放进 instructions 的做法。目录字节在会话内稳定，便于缓存。
+   */
+  toolCatalogPrompt?: string | null;
   teamResumePrompt?: string | null;
   teamStatusPrompt?: string | null;
   syntheticContinuationPrompt?: string;
@@ -1235,7 +1322,18 @@ export async function runModelRound(input: {
     largestToolResultChars: microcompactResult.metrics.largestResultChars,
     microcompactTrigger: microcompactResult.trigger,
   });
-  const unifiedMessages = microcompactResult.messages;
+
+  // ── Layer 0.6: Request-level inline image budget (opencode parity) ──
+  // 参考库 `boundImages`：请求内联图片超过 25 MiB 时，从最早开始淘汰到
+  // 15 MiB，防止单次历史回放把请求体撑爆（也避免图片相关的用量突刺）。
+  const imageBudgetResult = boundInlineImages(microcompactResult.messages);
+  if (imageBudgetResult.removedCount > 0) {
+    input.wl.succeed(input.wl.start('context.image-budget'), undefined, {
+      imagesRemoved: imageBudgetResult.removedCount,
+      imageBytesRemoved: imageBudgetResult.removedBytes,
+    });
+  }
+  const unifiedMessages = imageBudgetResult.messages;
 
   // Apply thinking language hint to conversation
   const thinkingUserHint =
@@ -1250,10 +1348,10 @@ export async function runModelRound(input: {
     ? applyThinkingLanguageHintToUnifiedMessages(unifiedMessages, thinkingUserHint)
     : unifiedMessages;
 
-  // Apply synthetic request context (injectedPrompt, capabilityContext, companionPrompt)
+  // Apply synthetic request context (injectedPrompt, companionPrompt)
+  // 能力目录已改走 stable system 槽位（instructions 式），不再进 user 消息。
   const syntheticContext: SyntheticRequestContext = {
     injectedPrompt: input.injectedPrompt,
-    capabilityContext: input.capabilityContext,
     companionPrompt: input.companionPrompt,
   };
   // Apply synthetic context using UnifiedMessage-aware helper
@@ -1285,6 +1383,8 @@ export async function runModelRound(input: {
     commandContext: input.commandContext,
     pinnedSkillsPrompt: input.pinnedSkillsPrompt,
     teamInstructionStack: input.teamInstructionStack,
+    toolCatalogPrompt: input.toolCatalogPrompt,
+    capabilityCatalogPrompt: input.capabilityCatalogPrompt,
   });
 
   const memoryContent = input.memoryBlock ?? '<user-memory />\n当前会话无持久化记忆。';
@@ -1343,7 +1443,7 @@ export async function runModelRound(input: {
       protocol: input.route.upstreamProtocol,
       messageCount: allUnifiedMessages.length,
       injectedPromptActive: !!input.injectedPrompt,
-      capabilityContextActive: !!input.capabilityContext,
+      capabilityContextActive: !!input.capabilityCatalogPrompt,
       lspGuidanceActive: !!input.lspGuidance,
       dialogueModeActive: !!input.dialogueModePrompt,
       yoloModeActive: !!input.yoloModePrompt,

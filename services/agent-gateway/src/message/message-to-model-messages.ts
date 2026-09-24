@@ -107,6 +107,18 @@ export interface AssistantReasoning {
   /** Response ID from Responses API, used as previous_response_id for caching. */
   responseId?: string;
   /**
+   * OpenAI Chat 家族：上游思维链字段名（`reasoning_content` / `reasoning` /
+   * `reasoning_text`），回传时按同名写回，避免网关丢弃思维链上下文。
+   */
+  reasoningField?: string;
+  /** OpenAI Chat 家族：结构化思维链条目（上游 `reasoning_details`）。 */
+  reasoningDetails?: ReadonlyArray<unknown>;
+  /**
+   * `reasoningField` / `reasoningDetails` 的元数据命名空间（路由
+   * `providerMetadataKey`，缺省按 `openai` 处理）。
+   */
+  providerMetadataKey?: string;
+  /**
    * Per-block reasoning entries — used when the upstream produced
    * multiple reasoning blocks (e.g. Anthropic adaptive thinking) and we
    * need to preserve per-block metadata (notably `signature`) instead of
@@ -792,6 +804,27 @@ function buildAssistantParts(
     .map((p) => p.itemId ?? p.metadata?.['itemId'])
     .find((v): v is string => typeof v === 'string' && v.length > 0);
 
+  // OpenAI Chat 家族：字段名 / 结构化条目按路由 `providerMetadataKey`
+  // （存量行缺省 `openai`）命名空间存放，回传时交给 bridge 还原成 providerMetadata。
+  const openAIReasoningKey = reasoningParts
+    .map((p) => p.metadata?.['providerMetadataKey'])
+    .find((v): v is string => typeof v === 'string' && v.length > 0);
+  const openAIReasoningNamespace = openAIReasoningKey ?? 'openai';
+  const openAIReasoningField = reasoningParts
+    .map(
+      (p) =>
+        (p.metadata?.[openAIReasoningNamespace] as { reasoningField?: unknown } | undefined)
+          ?.reasoningField,
+    )
+    .find((v): v is string => typeof v === 'string' && v.length > 0);
+  const openAIReasoningDetails = reasoningParts
+    .map(
+      (p) =>
+        (p.metadata?.[openAIReasoningNamespace] as { reasoningDetails?: unknown } | undefined)
+          ?.reasoningDetails,
+    )
+    .find((v): v is ReadonlyArray<unknown> => Array.isArray(v));
+
   // Per-block reasoning. Anthropic extended-thinking signatures are
   // attached per-block under `metadata.anthropic.signature` (or
   // `metadata.bedrock.signature` for Bedrock-hosted Claude); collapse
@@ -831,13 +864,28 @@ function buildAssistantParts(
 
   const reasoning: AssistantReasoning | undefined =
     trimmedReasoningText.length > 0 ||
-    (!differentModel && (itemId || responseId || encryptedContent || summary))
+    (!differentModel &&
+      (itemId ||
+        responseId ||
+        encryptedContent ||
+        summary ||
+        openAIReasoningField ||
+        openAIReasoningDetails))
       ? {
           ...(trimmedReasoningText.length > 0 ? { text: trimmedReasoningText } : {}),
           ...(!differentModel && itemId ? { itemId } : {}),
           ...(!differentModel && responseId ? { responseId } : {}),
           ...(!differentModel && encryptedContent ? { encryptedContent } : {}),
           ...(!differentModel && summary ? { summary } : {}),
+          ...(!differentModel && openAIReasoningField
+            ? { reasoningField: openAIReasoningField }
+            : {}),
+          ...(!differentModel && openAIReasoningDetails
+            ? { reasoningDetails: openAIReasoningDetails }
+            : {}),
+          ...(!differentModel && openAIReasoningKey
+            ? { providerMetadataKey: openAIReasoningKey }
+            : {}),
           ...(!differentModel && hasSignedBlock && reasoningBlocks.length > 0
             ? { blocks: reasoningBlocks }
             : {}),

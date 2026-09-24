@@ -45,7 +45,14 @@ import {
   splitPane as applySplitPane,
 } from './layout/mutations.js';
 import { normalizeLayout } from './layout/normalize.js';
-import { countPanes, createPane, enumeratePanes } from './layout/queries.js';
+import {
+  countPanes,
+  createPane,
+  enumeratePanes,
+  findPane,
+  layoutTerminalIds,
+  resolveOrphanHostPaneId,
+} from './layout/queries.js';
 import {
   MAX_PANES,
   type TerminalDropTarget,
@@ -237,8 +244,17 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   // Show only currently-live terminals as tabs; closed ones live in the
   // top-bar history popover (SessionTerminalsPanel) where the user can
   // delete them.
+  //
+  // 显示顺序 = `startedAtMs` 升序（旧 → 新，新建的终端追加在**右侧**）：与 VS Code
+  // 一致，也与分屏树的 `insertTerminalIntoPane`（缺省追加到末尾）同一条口径。
+  // 上游 `useSessionTerminals` 是「最新在前」（历史单 tab 条时代的排序），直接拿来
+  // 渲染会让新建终端插到最左边（且分屏物化后顺序翻转）—— 这是「新建 tab 位置不对」
+  // 的根因，显示层统一按创建时间排序。
   const activeTerminals = useMemo(
-    () => terminals.filter((t) => ACTIVE_STATUSES.has(t.status)),
+    () =>
+      terminals
+        .filter((t) => ACTIVE_STATUSES.has(t.status))
+        .sort((a, b) => a.startedAtMs - b.startedAtMs),
     [terminals],
   );
   const liveTerminalIds = useMemo(
@@ -266,10 +282,18 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   const [tabDrag, setTabDrag] = useState<TerminalTabDragState | null>(null);
   // 内容区右键「重命名」请求（瞬态，不持久化）：发起方在终端内容子树，消费方在目标 pane。
   const [renameRequest, setRenameRequest] = useState<TerminalRenameRequest | null>(null);
+  /**
+   * 窗口标题缓存（xterm `onTitleChange`，源是 pty 的 OSC 0/1/2 转义）：tab 标签在
+   * 用户不重命名时优先显示真实窗口名（vim / npm / ssh…），而不是 `终端 1`。
+   *
+   * 只活在面板内（瞬态，不落盘）：同一终端切 tab / 分屏移动会反复挂载 xterm，标题
+   * 必须在挂载之外存活，非 active tab 才能显示同一个名字。
+   */
+  const [terminalTitles, setTerminalTitles] = useState<Record<string, string>>({});
 
   // Reset the user's tab pick when the session or workspace changes —
   // a stale id from a different session would silently fall through to
-  // the persisted/first-fallback path, but keeping it around is misleading.
+  // the persisted/latest-fallback path, but keeping it around is misleading.
   // 顺带清掉 T-12 拖拽预览与重命名请求：瞬态态跨会话没有任何意义。
   useEffect(() => {
     setPendingActive(null);
@@ -277,7 +301,7 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     setRenameRequest(null);
   }, [sessionId, wsKey]);
 
-  // 隐式 pane（无分屏）的 active 解析：用户显式点选 > workspace 持久化 > 第一个。
+  // 隐式 pane（无分屏）的 active 解析：用户显式点选 > workspace 持久化 > 最新一个。
   const implicitActiveId = useMemo(() => {
     if (pendingActive && activeTerminals.some((t) => t.terminalId === pendingActive)) {
       return pendingActive;
@@ -285,7 +309,9 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     if (persistedActiveId && activeTerminals.some((t) => t.terminalId === persistedActiveId)) {
       return persistedActiveId;
     }
-    return activeTerminals[0]?.terminalId ?? null;
+    // 显示顺序是「旧 → 新」，缺省激活**最新**的那个（与历史行为一致：新建的终端
+    // 拿到焦点；位置由排序决定，不受这里影响）。
+    return activeTerminals.at(-1)?.terminalId ?? null;
   }, [pendingActive, persistedActiveId, activeTerminals]);
 
   // Persist the resolved active id so a refresh restores the same tab.
@@ -340,6 +366,61 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     setTerminalLayoutForSession(sessionKey, normalizeLayout(next, ids, { maxPanes: MAX_PANES }));
   };
 
+  /**
+   * 宿主组托管的「树外终端」：存活但不在布局树里（例如 agent 新起的终端），由
+   * `TerminalSplitView` 渲染成 DFS 首个 pane tab 条的**末尾** tab。顺序即可见顺序
+   * （`activeTerminals` 已是旧 → 新）。
+   */
+  const hostedTerminalIds = useMemo(() => {
+    if (layout === null) return [] as string[];
+    const inTree = layoutTerminalIds(layout);
+    return activeTerminals
+      .filter((terminal) => !inTree.has(terminal.terminalId))
+      .map((terminal) => terminal.terminalId);
+  }, [layout, activeTerminals]);
+
+  /**
+   * 把宿主组的树外终端按可见顺序并入树（一次落盘的物化）。
+   *
+   * 为什么需要：树内下标把托管终端算在外面，而它们的 tab 渲染在宿主组末尾。新建 /
+   * 点选 / 拖入这类「按可见位置插入」的动作若不先物化，新 tab 会落在托管终端**前面**
+   * （可见位置错位）。用户主动操作属于允许落盘的路径。
+   */
+  const materializeHostedTerminals = (base: TerminalLayout, paneId: string): TerminalLayout => {
+    if (base === null || resolveOrphanHostPaneId(base) !== paneId) return base;
+    let next: TerminalLayout = base;
+    for (const terminalId of hostedTerminalIds) {
+      next = insertTerminalIntoPane(next, paneId, terminalId);
+    }
+    return next;
+  };
+
+  /** 窗口标题上报：只在此处收敛空值 / 去重，避免每次 OSC 都触发一次全树渲染。 */
+  const handleTerminalTitleChange = (terminalId: string, title: string | null): void => {
+    const next = title?.trim() ?? '';
+    setTerminalTitles((previous) => {
+      if (next.length === 0) {
+        if (!(terminalId in previous)) return previous;
+        const { [terminalId]: _removed, ...rest } = previous;
+        return rest;
+      }
+      if (previous[terminalId] === next) return previous;
+      return { ...previous, [terminalId]: next };
+    });
+  };
+
+  const terminalTitleMap = useMemo(() => new Map(Object.entries(terminalTitles)), [terminalTitles]);
+
+  // 终端列表变化（关闭 / 会话切换）时收敛标题缓存：死终端的标题不会再被读取，
+  // 留着只会在会话切换后与新 id 混在一起。
+  useEffect(() => {
+    const liveIds = new Set(terminals.map((terminal) => terminal.terminalId));
+    setTerminalTitles((previous) => {
+      const kept = Object.entries(previous).filter(([terminalId]) => liveIds.has(terminalId));
+      return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept);
+    });
+  }, [terminals]);
+
   const createTerminalInPane = async (paneId: string, shellProfileId?: string): Promise<void> => {
     if (!sessionId || !token || busyPaneId !== null) return;
     setBusyPaneId(paneId);
@@ -354,11 +435,16 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
       });
       const newTerminalId = result.terminal.terminalId;
       if (layout === null) {
-        // 隐式 pane 还没有树节点：新终端天然是它的 tab，只需把激活位切过去。
+        // 隐式 pane 还没有树节点：新终端天然是它的 tab（上游按 startedAtMs 升序
+        // 渲染，新终端在末尾），只需把激活位切过去。
         setPendingActive(newTerminalId);
         setActiveIdForWs(workspacePath, newTerminalId);
       } else {
-        layoutState.insertTerminal(paneId, newTerminalId);
+        // 目标组可能托管着树外终端（渲染在条末尾）：先按可见顺序物化，新终端才能
+        // 落到**可见末尾**，而不是插在托管终端前面。
+        const materialized = materializeHostedTerminals(layout, paneId);
+        const next = insertTerminalIntoPane(materialized, paneId, newTerminalId);
+        if (next !== layout) commitLayout(next, [newTerminalId]);
       }
       setActivePaneId(paneId);
       onReload();
@@ -421,6 +507,14 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     // 物化成 id 仍为 IMPLICIT_PANE_ID 的单 pane 树，此时必须走树内激活路径。
     if (layout === null) {
       setPendingActive(terminalId);
+      return;
+    }
+    // 点选的是宿主组的树外终端：先按可见顺序把托管终端物化进树（保住它们在条上的
+    // 位置），再按**可见下标**重排 + 激活；否则下标会因托管终端错位、一点击就重排。
+    if (hostedTerminalIds.includes(terminalId)) {
+      const materialized = materializeHostedTerminals(layout, paneId);
+      const next = insertTerminalIntoPane(materialized, paneId, terminalId, index);
+      if (next !== layout) commitLayout(next, [terminalId]);
       return;
     }
     // 显式 pane：组内终端 = 切换 active（按可视索引原位保留）；游离终端 = 先并入该组再激活。
@@ -486,22 +580,43 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     }
     if (target.kind === 'tab-strip') {
       if (tabStripPaneId === undefined) return;
+      // 宿主组的可见下标含托管终端（渲染在条末尾），与 createTerminalInPane 同一条
+      // 「先物化、再按可见下标插入」的路径。
+      if (hostedTerminalIds.length > 0 && resolveOrphanHostPaneId(layout) === tabStripPaneId) {
+        const materialized = materializeHostedTerminals(layout, tabStripPaneId);
+        const next = insertTerminalIntoPane(materialized, tabStripPaneId, terminalId, target.index);
+        if (next !== layout) commitLayout(next, [terminalId]);
+        return;
+      }
       layoutState.insertTerminal(tabStripPaneId, terminalId, target.index);
       return;
+    }
+    if (target.kind === 'pane-center') {
+      // 「并进该组末尾」在宿主组同样取**可见末尾**：托管终端渲染在树内终端之后，
+      // 直接走 hook 的 append 会插在它们前面（与 create / select / drop-strip 同一口径）。
+      if (hostedTerminalIds.length > 0 && resolveOrphanHostPaneId(layout) === target.paneId) {
+        const materialized = materializeHostedTerminals(layout, target.paneId);
+        const next = insertTerminalIntoPane(materialized, target.paneId, terminalId);
+        if (next !== layout) commitLayout(next, [terminalId]);
+        return;
+      }
     }
     layoutState.moveTerminal(terminalId, target, nextUniquePaneId(layout, terminalId));
   };
 
   const mergeOthersIntoPane = (paneId: string): void => {
     if (layout === null) return;
-    const pane = enumeratePanes(layout).find((candidate) => candidate.id === paneId);
-    if (pane === undefined) return;
+    // 宿主组先把托管终端按可见顺序物化，再算「其他终端」：否则合并进来的 tab 会插在
+    // 托管终端前面（与 + / 点选 / 拖拽同一条「可见末尾」口径）。
+    const materialized = materializeHostedTerminals(layout, paneId);
+    const pane = findPane(materialized, paneId);
+    if (pane === null) return;
     const owned = new Set(pane.terminalIds);
     const otherIds = activeTerminals
       .map((terminal) => terminal.terminalId)
       .filter((terminalId) => !owned.has(terminalId));
     if (otherIds.length === 0) return;
-    let next: TerminalLayout = layout;
+    let next: TerminalLayout = materialized;
     for (const terminalId of otherIds) {
       next = insertTerminalIntoPane(next, paneId, terminalId);
     }
@@ -728,7 +843,15 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     clearRenameRequest: () => {
       setRenameRequest(null);
     },
-    view: { gatewayUrl, token, sessionId, inputEnabled, onWriteError: setWriteError },
+    view: {
+      gatewayUrl,
+      token,
+      sessionId,
+      inputEnabled,
+      onWriteError: setWriteError,
+      terminalTitles: terminalTitleMap,
+      onTerminalTitleChange: handleTerminalTitleChange,
+    },
     actions: paneActions,
   };
 

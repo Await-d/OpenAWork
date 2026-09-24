@@ -142,6 +142,8 @@ export function formatGatewayStreamErrorMessage(
 export function describeSseConnectionFailure(input: {
   gatewayUrl: string;
   sessionId: string;
+  opened?: boolean;
+  attempts?: number;
 }): string {
   let gateway = input.gatewayUrl;
   try {
@@ -149,7 +151,10 @@ export function describeSseConnectionFailure(input: {
   } catch {
     // 配置页会自行校验地址；这里保留输入值使连接错误仍可定位。
   }
-  return `连接在收到 SSE 响应前中断。Gateway：${gateway}；会话：${input.sessionId}。浏览器没有提供底层失败原因。`;
+  const phase = input.opened ? '流式传输过程中' : '收到 SSE 响应前';
+  const retryNote =
+    input.attempts && input.attempts > 0 ? `已自动重连 ${input.attempts} 次仍未成功。` : '';
+  return `连接在${phase}中断。Gateway：${gateway}；会话：${input.sessionId}。${retryNote}浏览器没有提供底层失败原因。`;
 }
 
 interface ActiveStreamSnapshot {
@@ -240,6 +245,39 @@ export function resolveChatWsLivenessAction(input: {
 }): 'ping' | 'reconnect' {
   const timeout = input.livenessTimeoutMs ?? CHAT_WS_CLIENT_LIVENESS_TIMEOUT_MS;
   return input.msSinceLastServerActivity > timeout ? 'reconnect' : 'ping';
+}
+
+/**
+ * SSE 回退的有界重试预算。EventSource 对非 200 响应（401/404/409）不会自动
+ * 重连；网络类错误虽然浏览器会自行重连，但 URL 里的 token 与 afterSeq 都是
+ * 旧值。因此统一由客户端做「刷新 token → 带最新游标重开」的退避重试，避免
+ * 一次瞬时抖动（网关重启、休眠唤醒、token 轮换）就向用户抛「SSE 连接异常」。
+ */
+export const SSE_FALLBACK_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+
+/** 打开 SSE 回退前，access token 距过期不足该阈值就先刷新，避免 401 硬失败。 */
+export const SSE_TOKEN_REFRESH_MARGIN_MS = 60_000;
+
+/**
+ * 解析打开 SSE 回退时应使用的最新 token。
+ *
+ * `stream()` 闭包里的 token 是用户点击发送那一刻的值；长回合（思考 / 工具执行
+ * 超过 access token 有效期）中 WS 掉线回退 SSE 时它可能已经过期，而 EventSource
+ * 对 401 是硬失败（不重连），表现为「连接在收到 SSE 响应前中断」。
+ * 因此回退打开前统一从认证 store 取最新 token，临近过期先走单飞刷新。
+ */
+export async function resolveFreshStreamToken(fallbackToken: string | null): Promise<string> {
+  const authState = useAuthStore.getState();
+  const currentToken = authState.accessToken ?? fallbackToken ?? '';
+  if (!authState.refreshToken) {
+    return currentToken;
+  }
+  const expiresAt = authState.tokenExpiresAt;
+  if (expiresAt !== null && expiresAt - Date.now() > SSE_TOKEN_REFRESH_MARGIN_MS) {
+    return currentToken;
+  }
+  await authState.refreshAccessToken();
+  return useAuthStore.getState().accessToken ?? currentToken;
 }
 
 function classifyAttachStreamError(input: {
@@ -809,6 +847,16 @@ export function useGatewayClient(token: string | null): GatewayClient {
   // matches, preventing stale fallback attempts from racing with a
   // newer stream or attach flow.
   const streamGenerationRef = useRef(0);
+  // SSE 回退的有界重连定时器。跨 stream() 生命周期持有，确保新消息 / attach
+  // 接管时能取消上一条流遗留的重试，而不是让旧闭包静默重开连接。
+  const sseRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearSseRetryTimer = useCallback(() => {
+    if (sseRetryTimerRef.current !== null) {
+      clearTimeout(sseRetryTimerRef.current);
+      sseRetryTimerRef.current = null;
+    }
+  }, []);
 
   const syncActiveRequest = useCallback((snapshot: ActiveStreamSnapshot | null) => {
     activeRequestRef.current = snapshot;
@@ -832,6 +880,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         closeExistingTransports: () => {
           streamGenerationRef.current += 1;
           console.log('[ATTACH] closeExistingTransports gen:', streamGenerationRef.current);
+          clearSseRetryTimer();
           wsRef.current?.close();
           sseRef.current?.close();
           wsRef.current = null;
@@ -857,7 +906,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         token: token ?? '',
       });
     },
-    [token],
+    [clearSseRetryTimer, token],
   );
 
   const stopStream = useCallback(async (): Promise<boolean> => {
@@ -866,6 +915,8 @@ export function useGatewayClient(token: string | null): GatewayClient {
       return false;
     }
 
+    // 用户已明确停止：取消待触发的 SSE 自动重连，避免停止后又被重试拉活。
+    clearSseRetryTimer();
     stopRequestedRef.current = true;
     const gatewayUrl = useAuthStore.getState().gatewayUrl;
     const sessionsClient = createSessionsClient(gatewayUrl);
@@ -888,7 +939,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
     }
 
     return stopped;
-  }, [syncActiveRequest, token]);
+  }, [clearSseRetryTimer, syncActiveRequest, token]);
 
   const getActiveStreamSessionId = useCallback((): string | null => {
     return activeStreamSessionId;
@@ -931,9 +982,13 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       wsRef.current?.close();
       sseRef.current?.close();
+      clearSseRetryTimer();
 
       let settled = false;
       let fallbackStarted = false;
+      // SSE 回退的有界重连状态（见 SSE_FALLBACK_RETRY_DELAYS_MS 注释）。
+      let sseAttempt = 0;
+      let sseOpened = false;
       const deliveredEventIds = new Set<string>();
       // §0.153: chat-WS half-open liveness probe state (scoped to this stream).
       let livenessTimer: ReturnType<typeof setInterval> | null = null;
@@ -947,6 +1002,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       const cleanup = () => {
         stopLivenessProbe();
+        clearSseRetryTimer();
         wsRef.current?.close();
         sseRef.current?.close();
         wsRef.current = null;
@@ -1020,84 +1076,138 @@ export function useGatewayClient(token: string | null): GatewayClient {
           );
           return;
         }
-        console.log('[STREAM] startSse fallback initiated for session', sessionId);
         fallbackStarted = true;
-        const requestedAfterSeq =
-          activeRequestRef.current?.clientRequestId === clientRequestId
-            ? activeRequestRef.current.lastSeq
-            : 0;
-        if (activeRequestRef.current) {
-          syncActiveRequest({
-            ...activeRequestRef.current,
-            transport: 'sse',
-          });
-        }
-        const params = new URLSearchParams({
-          ...(agentId ? { agentId } : {}),
-          ...(dialogueMode ? { dialogueMode } : {}),
-          ...(displayMessage ? { displayMessage } : {}),
-          ...(inputParts ? { inputParts: JSON.stringify(inputParts) } : {}),
-          message,
-          model,
-          ...(providerId ? { providerId } : {}),
-          clientRequestId,
-          afterSeq: String(requestedAfterSeq),
-          token: token ?? '',
-          webSearchEnabled: webSearchEnabled ? '1' : '0',
-          yoloMode: yoloMode ? '1' : '0',
-          ...(thinkingEnabled !== undefined
-            ? { thinkingEnabled: thinkingEnabled ? '1' : '0' }
-            : {}),
-          ...(reasoningEffort ? { reasoningEffort } : {}),
-        });
-        const es = new EventSource(
-          `${gatewayUrl}/sessions/${sessionId}/stream/sse?${params.toString()}`,
-        );
-        sseRef.current = es;
-        es.onmessage = (event) => {
-          const chunk = safeParseGatewayEventData<StreamChunk | RunEvent>({
-            rawData: event.data as string,
-            invalidCode: 'SSE_INVALID_PAYLOAD',
-            invalidMessage: STREAM_CLIENT_ERROR_MESSAGES.sseInvalidPayload,
-            onError: (code, message) => {
-              if (!settled && streamGenerationRef.current === streamGeneration) {
-                settled = true;
-                cleanup();
-                callbacks.onError(code, message);
-              }
-            },
-          });
-          if (!chunk) {
+        void (async () => {
+          // 回退打开前取最新 token（必要时单飞刷新），避免长回合里闭包 token
+          // 过期导致 EventSource 401 硬失败——那会直接抛「SSE 连接异常」。
+          const sseToken = await resolveFreshStreamToken(token);
+          // token 解析（可能包含一次刷新网络往返）期间流可能已被接管 / 停止：
+          // 快照被清空或已指向别的 clientRequestId 时不得再打开回退连接，
+          // 否则停止后的会话会被重新拉活、并从头重放已展示的事件。
+          if (
+            settled ||
+            streamGenerationRef.current !== streamGeneration ||
+            activeRequestRef.current?.clientRequestId !== clientRequestId
+          ) {
             return;
           }
-          handleChunk(chunk);
-        };
-        es.onerror = () => {
           console.log(
-            '[STREAM] SSE onerror: settled=',
-            settled,
-            'gen=',
-            streamGeneration,
-            'current=',
-            streamGenerationRef.current,
-            'stopReq=',
-            stopRequestedRef.current,
+            '[STREAM] startSse fallback initiated for session',
+            sessionId,
+            'attempt=',
+            sseAttempt,
           );
-          if (!settled && streamGenerationRef.current === streamGeneration) {
-            const wasStopRequested = stopRequestedRef.current;
-            settled = true;
-            cleanup();
-            if (wasStopRequested) {
+          const requestedAfterSeq =
+            activeRequestRef.current?.clientRequestId === clientRequestId
+              ? activeRequestRef.current.lastSeq
+              : 0;
+          if (activeRequestRef.current) {
+            syncActiveRequest({
+              ...activeRequestRef.current,
+              transport: 'sse',
+            });
+          }
+          const params = new URLSearchParams({
+            ...(agentId ? { agentId } : {}),
+            ...(dialogueMode ? { dialogueMode } : {}),
+            ...(displayMessage ? { displayMessage } : {}),
+            ...(inputParts ? { inputParts: JSON.stringify(inputParts) } : {}),
+            message,
+            model,
+            ...(providerId ? { providerId } : {}),
+            clientRequestId,
+            afterSeq: String(requestedAfterSeq),
+            token: sseToken,
+            webSearchEnabled: webSearchEnabled ? '1' : '0',
+            yoloMode: yoloMode ? '1' : '0',
+            ...(thinkingEnabled !== undefined
+              ? { thinkingEnabled: thinkingEnabled ? '1' : '0' }
+              : {}),
+            ...(reasoningEffort ? { reasoningEffort } : {}),
+          });
+          const es = new EventSource(
+            `${gatewayUrl}/sessions/${sessionId}/stream/sse?${params.toString()}`,
+          );
+          sseRef.current = es;
+          es.onopen = () => {
+            sseOpened = true;
+          };
+          es.onmessage = (event) => {
+            const chunk = safeParseGatewayEventData<StreamChunk | RunEvent>({
+              rawData: event.data as string,
+              invalidCode: 'SSE_INVALID_PAYLOAD',
+              invalidMessage: STREAM_CLIENT_ERROR_MESSAGES.sseInvalidPayload,
+              onError: (code, message) => {
+                if (!settled && streamGenerationRef.current === streamGeneration) {
+                  settled = true;
+                  cleanup();
+                  callbacks.onError(code, message);
+                }
+              },
+            });
+            if (!chunk) {
+              return;
+            }
+            handleChunk(chunk);
+          };
+          es.onerror = () => {
+            console.log(
+              '[STREAM] SSE onerror: settled=',
+              settled,
+              'gen=',
+              streamGeneration,
+              'current=',
+              streamGenerationRef.current,
+              'stopReq=',
+              stopRequestedRef.current,
+              'attempt=',
+              sseAttempt,
+            );
+            if (settled || streamGenerationRef.current !== streamGeneration) {
+              return;
+            }
+            if (stopRequestedRef.current) {
+              settled = true;
+              cleanup();
               callbacks.onDone('cancelled');
               return;
             }
+            // 统一由下面的退避重试接管重连：浏览器对已关闭的 EventSource
+            // 不会再自动重连，而重连必须携带新 token 与最新 afterSeq 游标
+            // （网关支持按 clientRequestId + afterSeq 重放，不会重复执行）。
+            es.close();
+            if (sseRef.current === es) {
+              sseRef.current = null;
+            }
+            // 同一次失败的连接可能派发多次 onerror（浏览器重连尝试）；已排期
+            // 重试时直接忽略，避免覆盖定时器引用造成重复重连。
+            if (sseRetryTimerRef.current !== null) {
+              return;
+            }
+            const retryDelay = SSE_FALLBACK_RETRY_DELAYS_MS[sseAttempt];
+            if (retryDelay !== undefined) {
+              sseAttempt += 1;
+              sseRetryTimerRef.current = setTimeout(() => {
+                sseRetryTimerRef.current = null;
+                fallbackStarted = false;
+                startSse();
+              }, retryDelay);
+              return;
+            }
+            settled = true;
+            cleanup();
             callbacks.onError(
               'SSE_ERROR',
               'SSE 连接异常。',
-              describeSseConnectionFailure({ gatewayUrl, sessionId }),
+              describeSseConnectionFailure({
+                attempts: sseAttempt,
+                gatewayUrl,
+                opened: sseOpened,
+                sessionId,
+              }),
             );
-          }
-        };
+          };
+        })();
       };
 
       try {
@@ -1225,7 +1335,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         startSse();
       }
     },
-    [syncActiveRequest, token],
+    [clearSseRetryTimer, syncActiveRequest, token],
   );
 
   return useMemo(

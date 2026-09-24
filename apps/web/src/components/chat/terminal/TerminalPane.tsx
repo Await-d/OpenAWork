@@ -502,6 +502,12 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
 
   const activeTerminal =
     terminals.find((terminal) => terminal.terminalId === activeTerminalId) ?? null;
+  /**
+   * tab 显示标签（与 `TerminalTabStrip` 同一口径，含窗口标题）：重命名预填必须与
+   * 用户看到的文案逐字一致，否则「改个名字」会先看到标签跳变成另一个名字。
+   */
+  const tabLabelFor = (terminal: SessionTerminalView, index: number): string =>
+    terminalTabLabel(terminal, index, view.terminalTitles.get(terminal.terminalId));
   const isActivePane = activePaneId === paneId;
   const sessionReady = Boolean(view.sessionId && view.token);
   const busy = busyPaneId !== null;
@@ -545,7 +551,7 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
     const index = terminals.findIndex(
       (terminal) => terminal.terminalId === activeTerminal.terminalId,
     );
-    startRename(activeTerminal.terminalId, terminalTabLabel(activeTerminal, Math.max(index, 0)));
+    startRename(activeTerminal.terminalId, tabLabelFor(activeTerminal, Math.max(index, 0)));
   };
 
   // 内容区右键「重命名」：请求由面板层转发，只有目标 pane 且终端仍在本组时才消费。
@@ -557,7 +563,7 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
     );
     const target = index < 0 ? undefined : terminals[index];
     if (target === undefined) return;
-    startRename(target.terminalId, terminalTabLabel(target, index));
+    startRename(target.terminalId, tabLabelFor(target, index));
     clearRenameRequest();
   }, [renameRequest, paneId, terminals, clearRenameRequest]);
 
@@ -641,6 +647,7 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
           paneId={paneId}
           terminals={terminals}
           activeId={activeTerminalId}
+          terminalTitles={view.terminalTitles}
           renamingId={renamingId}
           renameValue={renameValue}
           drag={tabDragGesture.binding}
@@ -703,6 +710,7 @@ export function TerminalPane({ paneId, terminals, activeTerminalId }: TerminalPa
             terminal={activeTerminal}
             inputEnabled={view.inputEnabled(activeTerminal)}
             onWriteError={view.onWriteError}
+            onTitleChange={(title) => view.onTerminalTitleChange(activeTerminal.terminalId, title)}
             menuItems={paneMenuItems}
           />
         ) : (

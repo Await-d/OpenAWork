@@ -395,7 +395,7 @@ export function BrowserInspectorPanel({
               title="实时引擎不可用"
               description={
                 unavailableHint ??
-                '当前环境无法连接调试浏览器（Tauri 原生窗口模式下不提供实时引擎）。请在 Web 模式或支持 CDP 的环境中查看页面结构。'
+                '当前环境不提供页面结构检查（Tauri 原生窗口的页面由系统 webview 渲染，无法在页面中拾取元素）。请在 Web 模式或支持 CDP 的环境中查看页面结构。'
               }
               testId="inspector-unavailable-notice"
             />

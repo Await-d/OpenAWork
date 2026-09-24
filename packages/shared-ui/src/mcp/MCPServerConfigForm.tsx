@@ -192,7 +192,7 @@ export function MCPServerConfigForm({ onAdd, formError, setFormError }: MCPServe
           padding: 'var(--spacing-2, 8px) var(--spacing-4, 16px)',
         }}
       >
-        + 添加服务器
+        + 确认添加
       </button>
     </div>
   );

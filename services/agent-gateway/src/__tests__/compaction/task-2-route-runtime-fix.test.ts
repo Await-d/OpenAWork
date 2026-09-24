@@ -130,7 +130,7 @@ async function startUpstreamStub(): Promise<void> {
         url: request.url ?? '',
       });
 
-      if (request.url?.endsWith('/messages')) {
+      if (request.url?.split('?')[0]?.endsWith('/messages')) {
         writeAnthropicSse(response);
         return;
       }
@@ -374,7 +374,7 @@ describe('任务 2 真实 route runtime 微压缩', () => {
 
     expect(result.stopReason).toBe('end_turn');
     expect(sseStopCount).toBe(1);
-    expect(capturedRequests[0]?.url).toBe('/messages');
+    expect(capturedRequests[0]?.url).toBe('/messages?beta=true');
     expect(requestBody).not.toContain(COMPACTED_REFERENCE_MARKER);
     expect(requestBody).toContain('persisted tool output 0');
   });

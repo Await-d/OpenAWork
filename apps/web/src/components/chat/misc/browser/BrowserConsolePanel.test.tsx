@@ -445,17 +445,28 @@ describe('BrowserConsolePanel 空态文案', () => {
     expect(screen.getByText(/日志由网关侧实时引擎采集/)).toBeTruthy();
   });
 
-  it('Tauri 原生窗口模式优先展示模式说明', () => {
+  it('Tauri 原生窗口在实时引擎可用时沿用采集说明并标记采集来源', () => {
     renderEmptyState({ tauriMode: true, liveAvailable: true });
 
-    expect(screen.getByText(/Tauri 原生窗口模式下无法监听页面控制台与网络/)).toBeTruthy();
+    expect(screen.getByText(/日志由网关侧实时引擎采集/)).toBeTruthy();
+    expect(screen.queryByText(/Tauri 原生窗口/)).toBeNull();
+    expect(screen.getByTestId('console-capture-badge')).toBeTruthy();
   });
 
-  it('已有日志但被过滤掉时提示过滤条件无匹配', () => {
-    renderEmptyState({ logs: [makeErrorEntry()], liveAvailable: true });
+  it('Tauri 原生窗口在引擎不可用时说明采集依赖网关侧引擎', () => {
+    renderEmptyState({ tauriMode: true, liveAvailable: false });
+
+    expect(screen.getByText(/Tauri 原生窗口本身无法注入采集/)).toBeTruthy();
+    expect(screen.getByText(/改用浏览器\(Web\)模式查看/)).toBeTruthy();
+    expect(screen.queryByTestId('console-capture-badge')).toBeNull();
+  });
+
+  it('已有日志但被过滤掉时提示过滤条件无匹配（Tauri 下同样优先）', () => {
+    renderEmptyState({ logs: [makeErrorEntry()], tauriMode: true, liveAvailable: true });
 
     fireEvent.click(screen.getByRole('button', { name: '警告' }));
 
     expect(screen.getByText('当前过滤条件下无匹配')).toBeTruthy();
+    expect(screen.queryByText(/Tauri 原生窗口/)).toBeNull();
   });
 });

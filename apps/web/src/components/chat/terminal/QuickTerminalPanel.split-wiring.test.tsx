@@ -356,6 +356,97 @@ describe('T-12：drop 的落盘接线（panel 层 commit）', () => {
     expect(hook.moveTerminal).not.toHaveBeenCalled();
   });
 
+  it('宿主组的 tab-strip：托管终端先物化，落点按可见下标而不是 hook.insertTerminal', () => {
+    hook.layout = makePane('p1', ['t1']);
+    const { container } = renderPanel([
+      makeTerminal({ terminalId: 't1', startedAtMs: 1_700_000_000_000 }),
+      makeTerminal({ terminalId: 'o1', startedAtMs: 1_700_000_100_000 }),
+    ]);
+    stubRect(container.querySelector('.terminal-pane[data-pane-id="p1"]'), {
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 300,
+    });
+    stubRect(container.querySelector('[data-testid="terminal-tab-strip"][data-pane-id="p1"]'), {
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 28,
+    });
+    stubRect(container.querySelector('[data-terminal-id="t1"]'), {
+      x: 4,
+      y: 3,
+      width: 96,
+      height: 22,
+    });
+    stubRect(container.querySelector('[data-terminal-id="o1"]'), {
+      x: 104,
+      y: 3,
+      width: 96,
+      height: 22,
+    });
+
+    const tabEl = container.querySelector('[data-terminal-id="t1"]');
+    if (!tabEl) throw new Error('t1 tab 未渲染');
+    // 指针落在 o1 右半 → index=1（移除 t1 后的槽位，也就是可见末端）。
+    dragTab(tabEl, { x: 180, y: 14 });
+
+    expect(useUIStateStore.getState().terminalLayoutBySession['__default__']).toEqual(
+      makePane('p1', ['o1', 't1'], 't1'),
+    );
+    expect(hook.insertTerminal).not.toHaveBeenCalled();
+  });
+
+  it('宿主组的 pane-center：托管终端先物化，被拖终端落在可见末尾（不走 hook.moveTerminal）', () => {
+    hook.layout = makePane('p1', ['t1']);
+    const { container } = renderPanel([
+      makeTerminal({ terminalId: 't1', startedAtMs: 1_700_000_000_000 }),
+      makeTerminal({ terminalId: 'o1', startedAtMs: 1_700_000_100_000 }),
+      makeTerminal({ terminalId: 'o2', startedAtMs: 1_700_000_200_000 }),
+    ]);
+    stubRect(container.querySelector('.terminal-pane[data-pane-id="p1"]'), {
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 300,
+    });
+    stubRect(container.querySelector('[data-testid="terminal-tab-strip"][data-pane-id="p1"]'), {
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 28,
+    });
+    stubRect(container.querySelector('[data-terminal-id="t1"]'), {
+      x: 4,
+      y: 3,
+      width: 96,
+      height: 22,
+    });
+    stubRect(container.querySelector('[data-terminal-id="o1"]'), {
+      x: 104,
+      y: 3,
+      width: 96,
+      height: 22,
+    });
+    stubRect(container.querySelector('[data-terminal-id="o2"]'), {
+      x: 204,
+      y: 3,
+      width: 96,
+      height: 22,
+    });
+
+    const tabEl = container.querySelector('[data-terminal-id="t1"]');
+    if (!tabEl) throw new Error('t1 tab 未渲染');
+    // 组中心（strip 之下、避开四边 75px 命中带）→ pane-center。
+    dragTab(tabEl, { x: 200, y: 150 });
+
+    expect(useUIStateStore.getState().terminalLayoutBySession['__default__']).toEqual(
+      makePane('p1', ['o1', 'o2', 't1'], 't1'),
+    );
+    expect(hook.moveTerminal).not.toHaveBeenCalled();
+  });
+
   it('pane-edge：走 hook.moveTerminal 且新 pane id 已去重', () => {
     hook.layout = makeSplit('split-p2', 'row', [
       makePane('p1', ['t1', 't2']),
@@ -404,6 +495,8 @@ describe('T-12：drop 的落盘接线（panel 层 commit）', () => {
 
   it('隐式单组（layout === null）：组内重排物化单 pane 树并持久化新顺序', () => {
     hook.layout = null;
+    // 固定激活位（t1）：本用例断言重排，激活继承不随「缺省激活最新终端」的回落漂移。
+    useUIStateStore.setState({ quickTerminalActiveIdByWorkspace: { [WORKSPACE]: 't1' } });
     const { container } = renderPanel([
       makeTerminal({ terminalId: 't1' }),
       makeTerminal({ terminalId: 't2' }),
@@ -447,6 +540,8 @@ describe('T-12：drop 的落盘接线（panel 层 commit）', () => {
 
   it('隐式单组的 index 与已物化路径同口径：拖到末个 tab 右半 → 顺序与「移除后再插入」一致', () => {
     hook.layout = null;
+    // 同上：固定激活位，断言只覆盖顺序语义。
+    useUIStateStore.setState({ quickTerminalActiveIdByWorkspace: { [WORKSPACE]: 't1' } });
     const { container } = renderPanel([
       makeTerminal({ terminalId: 't1' }),
       makeTerminal({ terminalId: 't2' }),

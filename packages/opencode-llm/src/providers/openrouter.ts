@@ -1,7 +1,6 @@
 import { Effect, Schema } from 'effect';
 import { Route, type RouteDefaultsInput } from '../route/client.js';
 import { Endpoint } from '../route/endpoint.js';
-import { Framing } from '../route/framing.js';
 import { Protocol } from '../route/protocol.js';
 import { AuthOptions, type ProviderAuthOption } from '../route/auth-options.js';
 import { ProviderID, type ModelID, type ProviderOptions } from '../schema/index.js';
@@ -69,8 +68,10 @@ export const route = Route.make({
   id: ADAPTER,
   provider: profile.provider,
   protocol,
+  // 对齐参考库：OpenRouter 使用独立元数据命名空间；网关按路由 key 读写。
+  providerMetadataKey: 'openrouter',
   endpoint: Endpoint.path('/chat/completions', { baseURL: profile.baseURL }),
-  framing: Framing.sse,
+  framing: OpenAIChat.framing,
 });
 
 export const routes = [route];

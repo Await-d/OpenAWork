@@ -245,12 +245,65 @@ export class ModelCompatibility extends Schema.Class<ModelCompatibility>('LLM.Mo
    */
   reasoningField: Schema.optional(Schema.String),
   /**
+   * 要求每条 assistant 历史消息都带上思维链字段（即使为空）。
+   *
+   * 对齐 opencode 参考库；未显式配置时由协议按 DeepSeek 系模型 / 网关
+   * （provider、baseURL、模型名）自动推断。
+   */
+  requireReasoning: Schema.optional(Schema.Boolean),
+  /**
    * 流必须以 `finish_reason` 收尾（对齐 opencode 参考库，默认 true）。
    *
    * 缺失即视为「响应在终态事件前结束」（incomplete-stream），协议层产出
    * provider-error 而非静默收尾——否则上游截断会被当成正常结束。
    */
   requireFinishReason: Schema.optional(Schema.Boolean),
+  /**
+   * 输出额度字段名（对齐 opencode 参考库）。
+   *
+   * 原生 OpenAI 新模型（o 系 / GPT-5）只接受 `max_completion_tokens`；
+   * DeepSeek / Moonshot / Together / ZAI / Nvidia / Cerebras 等兼容网关
+   * 仍只认 `max_tokens`。未配置时由协议按 provider / baseURL 自动探测。
+   */
+  maxTokensField: Schema.optional(Schema.Literals(['max_tokens', 'max_completion_tokens'])),
+  /**
+   * 工具结果之后必须桥接一条 assistant 消息（对齐 opencode 参考库）。
+   *
+   * Mistral 系网关不接受「tool 消息紧跟 tool 消息」的历史形态；
+   * 未配置时按模型名（mistral / devstral / codestral / pixtral / mixtral）
+   * 自动推断。
+   */
+  requireAssistantAfterTool: Schema.optional(Schema.Boolean),
+  /** 上游支持 `store` 字段（对齐 opencode 参考库，未配置时按 provider / baseURL 探测）。 */
+  supportsStore: Schema.optional(Schema.Boolean),
+  /** 上游支持 `stream_options.include_usage`（对齐 opencode 参考库，默认 true）。 */
+  supportsUsageInStreaming: Schema.optional(Schema.Boolean),
+  /** 上游支持工具定义上的 `strict` 字段（对齐 opencode 参考库，未配置时自动探测）。 */
+  supportsStrictMode: Schema.optional(Schema.Boolean),
+  /**
+   * 上游支持 `prompt_cache_key`（对齐 opencode 参考库，默认关闭）。
+   *
+   * 显式开启后协议会把 `LLMRequest.promptCacheKey` 下发为 `prompt_cache_key`；
+   * 严格网关会对未知字段 400，因此不做默认推断。
+   */
+  supportsPromptCacheKey: Schema.optional(Schema.Boolean),
+  /**
+   * 上游支持 thinking block binding（对齐 opencode 参考库）。
+   *
+   * 未配置时按 Claude 版本推断（>= 5.1）；命中后协议默认下发
+   * `thinking.block_binding.prefix_mismatch_behavior = 'drop_block'`，
+   * 并请求 `thinking-binding-controls-2026-08-01` beta。
+   */
+  supportsThinkingBlockBinding: Schema.optional(Schema.Boolean),
+  /** 上游支持时序 effort 更新（对齐 opencode 参考库，未配置时按 Claude 版本推断）。 */
+  supportsEffortUpdates: Schema.optional(Schema.Boolean),
+  /**
+   * ZAI / Zhipu 的流式工具调用开关（对齐 opencode 参考库）。
+   *
+   * 命中后协议在有可用工具时下发 `tool_stream: true`（GLM 4.5 系列除外，
+   * 由 `detectZaiToolStream` 推断）。
+   */
+  zaiToolStream: Schema.optional(Schema.Boolean),
 }) {}
 
 export namespace ModelCompatibility {

@@ -83,7 +83,7 @@ iframeWindow.document.head.appendChild(script);
 - **可用性探测**：`probeLiveBrowserAvailability()` 只做可执行文件路径解析 + 磁盘校验，不启动浏览器。候选顺序为：环境变量覆盖（`OPENAWORK_BROWSER_PATH` 优先，其次 `CHROME_PATH`）→ Playwright managed chromium → 系统浏览器（Chrome / Chromium / Edge / Brave / Vivaldi / Opera；每族先扫 `PATH`，Windows 遵循 `PATHEXT`，再回退到按平台枚举的安装路径）。覆盖值不可用**不会中断搜索**，只会继续往后找；全部落空才报 `browser-missing`。完整顺序与 token 含义见 [`docs/browser-preview.md`](../browser-preview.md)。
 - **失败原因**：`browser-missing`（未找到浏览器）/ `browser-outdated`（managed 修订目录残缺）/ `probe-failed`。前端会把这些 reason 翻译成可操作的中文提示（`describeBrowserLiveUnavailable`）。
 - **会话生命周期**：一个用户最多一条 live session，用引用计数表示当前 WS 订阅者数量；计数归零后保温 `BROWSER_LIVE_IDLE_TTL_MS`（默认 120000ms）再真正关闭浏览器。
-- **Tauri 原生 webview 模式**无法采集控制台与网络，请在 Web 模式或系统开发者工具中查看。
+- **Tauri 原生 webview 模式**：画面由系统 webview 渲染，控制台与网络改由网关侧实时引擎采集——需要引擎可用（桌面端 sidecar 默认注入 `DESKTOP_AUTOMATION=1`，仅受调试浏览器是否安装影响），且采集页面是独立页面实例，与窗口内页面不共享 cookie / 登录态、交互也不同步。引擎不可用时按顶部横幅提示处理，或改用 Web 模式查看；元素拾取 / 截图 / 实时画面仍只在 Web 模式可用。
 
 ## 相关文件
 

@@ -167,6 +167,46 @@ export function shouldPollSessionRuntime(options: {
   );
 }
 
+export type SessionStopCapability = 'none' | 'precise' | 'best_effort' | 'observe_only';
+
+/**
+ * 主操作按钮的停止能力判定（chat 页的唯一裁决处）。
+ *
+ * 关键不变量：等待审批 / 等待回答的暂停（`remoteSessionBusyState === 'paused'`）
+ * 一律返回 `'none'`——主按钮必须呈现专属等待态（「待处理」+ 时钟图标），不能
+ * 退化成停止按钮，否则用户会误以为会话已停止。暂停时若想取消本次运行，走审批卡 /
+ * 问题面板的拒绝入口，而不是把停止按钮当作默认动作。
+ */
+export function resolveSessionStopCapability(input: {
+  canStopCurrentSessionStream: boolean;
+  currentSessionId: string | null;
+  remoteSessionBusyState: 'running' | 'paused' | null;
+  sessionStateStatus: SessionStateStatus | null | undefined;
+  streaming: boolean;
+}): SessionStopCapability {
+  if (input.streaming || input.canStopCurrentSessionStream) {
+    return 'precise';
+  }
+
+  // 待审批 / 待回答优先于 status：`remoteSessionBusyState === 'paused'` 既覆盖
+  // 「网关状态 paused」也覆盖「仍有 pending 交互」——后者可能伴随 status 仍是
+  // running 的瞬态（如批量审批续跑中）。此时会话的主状态必须与状态条
+  // 「等待审批 / 等待回答」保持一致，不能退化成停止按钮。
+  if (input.remoteSessionBusyState === 'paused') {
+    return 'none';
+  }
+
+  if (input.currentSessionId && input.sessionStateStatus === 'running') {
+    return 'best_effort';
+  }
+
+  if (input.remoteSessionBusyState !== null) {
+    return 'observe_only';
+  }
+
+  return 'none';
+}
+
 export function flattenSessionTodoLanes(todoLanes: SessionTodoLanes): SessionTodoItem[] {
   return [
     ...todoLanes.main.map((todo) => ({ ...todo, lane: 'main' as const })),

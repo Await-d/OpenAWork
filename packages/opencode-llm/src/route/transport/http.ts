@@ -145,7 +145,7 @@ const stripContextManagementBeta = (value: string) =>
     .join(',');
 
 const requestHeaders = <Body>(input: JsonRequestInput<Body>) => {
-  const routeHeaders = input.headers?.({ request: input.request }) ?? {};
+  const routeHeaders = input.headers?.({ request: input.request, body: input.body }) ?? {};
   const customHeaders = input.request.http?.headers ?? {};
   const routeBeta = routeHeaders['anthropic-beta'];
   const customBeta = customHeaders['anthropic-beta'];

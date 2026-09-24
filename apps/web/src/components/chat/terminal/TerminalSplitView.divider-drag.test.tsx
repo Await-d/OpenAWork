@@ -140,6 +140,8 @@ function renderHarness(options: HarnessOptions = {}) {
       sessionId: 'session-1',
       inputEnabled: () => true,
       onWriteError: vi.fn(),
+      terminalTitles: new Map(),
+      onTerminalTitleChange: vi.fn(),
     },
     actions,
   };

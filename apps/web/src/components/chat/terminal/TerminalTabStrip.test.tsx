@@ -59,7 +59,7 @@ describe('TerminalTabStrip', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('标签优先级：自定义名 > 描述 > 终端 N > 命令前三个词', () => {
+  it('标签优先级：自定义名 > 描述 > 窗口标题 > 终端 N > 命令前三个词', () => {
     renderStrip({
       terminals: [
         makeTerminal({ terminalId: 'named', name: '构建产物' }),
@@ -69,16 +69,37 @@ describe('TerminalTabStrip', () => {
           command: 'npm run build',
           description: '安装依赖',
         }),
+        makeTerminal({ terminalId: 'titled', toolName: 'quick_terminal', command: 'bash' }),
         makeTerminal({ terminalId: 'plain', toolName: 'quick_terminal', command: 'bash' }),
         makeTerminal({ terminalId: 'command', toolName: 'bash', command: 'npm run dev -- --host' }),
+        makeTerminal({ terminalId: 'titled-command', toolName: 'bash', command: 'npm run dev' }),
       ],
       activeId: 'named',
+      terminalTitles: new Map([
+        ['named', 'vim'],
+        ['described', 'vim'],
+        ['titled', 'vim README.md'],
+        ['titled-command', 'zsh'],
+      ]),
     });
 
     expect(screen.getByRole('button', { name: '构建产物' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '安装依赖' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '终端 3' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'vim README.md' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '终端 4' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'npm run dev' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'zsh' })).toBeTruthy();
+  });
+
+  it('窗口标题过长时按同一口径截断（24 → 22 + 省略号）', () => {
+    const longTitle = 'user@host: ~/projects/openAwork/packages/agent-core';
+    renderStrip({
+      terminals: [makeTerminal({ terminalId: 'titled' })],
+      activeId: 'titled',
+      terminalTitles: new Map([['titled', longTitle]]),
+    });
+
+    expect(screen.getByRole('button', { name: `${longTitle.slice(0, 22)}…` })).toBeTruthy();
   });
 
   it('激活 tab 暴露 data-active 与 aria-current，单击回调选中', () => {

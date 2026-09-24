@@ -84,6 +84,8 @@ interface HarnessProps {
   paneCount?: number;
   maxPanes?: number;
   preferredSplitDirection?: TerminalSplitDirection;
+  /** 窗口标题缓存（terminalId → OSC 标题），注入后 tab 标签优先显示它。 */
+  terminalTitles?: ReadonlyMap<string, string>;
 }
 
 function renderSplit(props: HarnessProps) {
@@ -95,6 +97,7 @@ function renderSplit(props: HarnessProps) {
     paneCount = 1,
     maxPanes = 4,
     preferredSplitDirection = 'row',
+    terminalTitles = new Map<string, string>(),
   } = props;
   const actions = makeActions();
   const setActivePaneId = vi.fn();
@@ -123,6 +126,8 @@ function renderSplit(props: HarnessProps) {
             sessionId: 'session-1',
             inputEnabled: () => true,
             onWriteError: vi.fn(),
+            terminalTitles,
+            onTerminalTitleChange: vi.fn(),
           },
           actions,
         } satisfies TerminalLayoutContextValue
@@ -173,6 +178,19 @@ describe('无分屏（隐式 pane）', () => {
     expect(screen.getByTestId('terminal-view-t2')).toBeTruthy();
     expect(screen.queryByTestId('terminal-view-t1')).toBeNull();
     expect(screen.getByTestId('terminal-tab-t1')).toBeTruthy();
+  });
+
+  it('tab 标签读取窗口标题缓存（panel 层 → pane → tab 条透传）', () => {
+    renderSplit({
+      layout: null,
+      terminals: [makeTerminal({ terminalId: 't1' }), makeTerminal({ terminalId: 't2' })],
+      implicitActiveTerminalId: 't1',
+      terminalTitles: new Map([['t2', 'vim README.md']]),
+    });
+
+    // t2 注入标题 → 显示标题；t1 无标题 → 回落 `终端 1`。
+    expect(screen.getByRole('button', { name: 'vim README.md' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '终端 1' })).toBeTruthy();
   });
 });
 

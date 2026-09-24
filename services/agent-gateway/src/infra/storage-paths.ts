@@ -102,6 +102,14 @@ export function resolveGatewayFileBackupsDir(): string {
 }
 
 /**
+ * 工具输出全文落盘目录（超限工具结果的 spill；`read_tool_output` 由此取回全文）。
+ * 对齐参考库 `tool-output.ts` 的「full content saved to file」语义。
+ */
+export function resolveGatewayToolOutputsDir(): string {
+  return join(resolveGatewayDataDir(), 'tool-outputs');
+}
+
+/**
  * Cache root for the `repo_clone` / `repo_overview` tools (P1-SCOUT).
  *
  * Children paths are organised as `<host>/<owner>/<repo>` so the same

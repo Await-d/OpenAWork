@@ -109,6 +109,7 @@ import { ensurePluginsLoaded } from './runtime/plugin-host.js';
 import { shutdownTeamRuntimeTelemetry } from './team/team-runtime-telemetry.js';
 import { shutdownTelemetry } from './telemetry/telemetry-service.js';
 import { migrateTelemetryDb, cleanupStaleDedupEntries } from './telemetry/telemetry-db.js';
+import { pruneStaleSpilledToolOutputs } from './tools/tool-output-spill.js';
 
 // 方案 5：加载所有内置 provider 插件
 import './provider/plugins/index.js';
@@ -409,6 +410,14 @@ try {
   migrateTelemetryDb();
   cleanupStaleDedupEntries();
 
+  // 工具输出 spill 目录兜底清理（会话删除是主路径；这里处理长期未删会话）。
+  // fire-and-forget：磁盘清理失败不阻塞启动。
+  void pruneStaleSpilledToolOutputs().catch((error: unknown) => {
+    console.warn(
+      `[gateway] tool-output spill 清理失败（忽略）：${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+
   // v2-runtime boot — only initialises the drizzle handle + Effect
   // service layer when `OPENAWORK_RUNTIME[_STORAGE]=v2` is set. When
   // the flags are off this is a no-op, so the legacy stack keeps
@@ -683,6 +692,18 @@ try {
   // 端口仍可能被占用一段时间。listen 之后注册可保证绑定成功后才进入监视循环。
   startParentProcessWatch();
   bootLogger.flush(bootContext, 200);
+
+  // 260924：cron 持久化恢复——把 `cron_jobs` 装回调度器，并把上次进程残留的
+  // running 执行标记为中断（网关重启中断）。与其它恢复扫描同批次、listen 之后执行。
+  step = bootLogger.start('gateway.cron-restore');
+  try {
+    const { restoreCronJobsFromStore } = await import('./cron/cron-store.js');
+    const cronRestore = restoreCronJobsFromStore(cronScheduler);
+    bootLogger.succeed(step, undefined, cronRestore);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bootLogger.fail(step, message);
+  }
 
   // T-26：单通道交付的重启恢复扫描——补偿「父会话繁忙时留库待消费」的通知。
   // 放在 listen 之后：投递/唤醒可能触发模型执行，不应拖延服务就绪。

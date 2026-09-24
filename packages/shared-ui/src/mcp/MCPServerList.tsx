@@ -1,5 +1,6 @@
 import { color as clr } from '../tokens.js';
 import type { CSSProperties } from 'react';
+import { MCP_STATUS_COLOR, MCP_STATUS_LABEL } from './mcp-status-display.js';
 
 export type MCPServerStatus = {
   id: string;
@@ -46,21 +47,9 @@ export interface MCPServerListProps {
   style?: CSSProperties;
 }
 
-const STATUS_COLOR: Record<MCPServerStatus['status'], string> = {
-  connected: clr.success,
-  connecting: clr.contrast,
-  disabled: 'var(--fg-subtle)',
-  disconnected: 'var(--fg-muted)',
-  error: clr.danger,
-};
+const STATUS_COLOR = MCP_STATUS_COLOR;
 
-const STATUS_LABEL: Record<MCPServerStatus['status'], string> = {
-  connected: '已连接',
-  connecting: '连接中…',
-  disabled: '已禁用',
-  disconnected: '已断开',
-  error: '错误',
-};
+const STATUS_LABEL = MCP_STATUS_LABEL;
 
 export function MCPServerList({ servers, onRetry, style }: MCPServerListProps) {
   return (

@@ -31,7 +31,7 @@ import {
 import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
 import { resolveRatioFromPointer, type Rect } from './layout/drop-target.js';
 import { clampRatio } from './layout/normalize.js';
-import { enumeratePanes, layoutTerminalIds } from './layout/queries.js';
+import { layoutTerminalIds, resolveOrphanHostPaneId } from './layout/queries.js';
 import {
   MAX_RATIO,
   MIN_RATIO,
@@ -78,7 +78,8 @@ export function TerminalSplitView({
   const orphanIds = terminals
     .filter((terminal) => !inTree.has(terminal.terminalId))
     .map((terminal) => terminal.terminalId);
-  const hostPaneId = enumeratePanes(layout)[0]?.id ?? null;
+  // 托管组 = DFS 首个 pane（规则与写入侧共享，见 resolveOrphanHostPaneId）。
+  const hostPaneId = resolveOrphanHostPaneId(layout);
 
   const resolveTerminals = (pane: TerminalPaneNode): SessionTerminalView[] => {
     const ids = pane.id === hostPaneId ? [...pane.terminalIds, ...orphanIds] : pane.terminalIds;

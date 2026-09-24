@@ -7,6 +7,7 @@ import type {
   ToolResultContent,
 } from '@openAwork/shared';
 import { matchesToolOutputReference } from '../message/tool-output-reference.js';
+import { spillToolOutput } from './tool-output-spill.js';
 
 export interface StoredToolResult {
   attachments?: InputImageContent[];
@@ -26,6 +27,12 @@ export interface StoredToolResult {
 export interface ToolResultPayloadInput {
   toolCallId: string;
   toolName: string;
+  /**
+   * 所属会话。提供且输出超过持久化上限时，**全文**会落盘到
+   * `<dataDir>/tool-outputs/<sessionId>/<toolCallId>.txt`，由
+   * `read_tool_output` 取回（对齐参考库的 full-content-to-file 语义）。
+   */
+  sessionId?: string;
   clientRequestId?: string;
   output: unknown;
   isError: boolean;
@@ -66,10 +73,21 @@ export function stringifyToolResultOutput(output: unknown): string {
   }
 }
 
-export function normalizeToolResultOutputForStorage(output: unknown): unknown {
+export function normalizeToolResultOutputForStorage(
+  output: unknown,
+  spill?: { sessionId: string; toolCallId: string },
+): unknown {
   const serialized = stringifyToolResultOutput(output);
   if (serialized.length <= MAX_STORED_TOOL_OUTPUT_CHARS) {
     return output;
+  }
+  if (spill) {
+    // 超限时把全文落盘；模型侧仍只看到有界预览 + 取回提示（read_tool_output）。
+    spillToolOutput({
+      sessionId: spill.sessionId,
+      toolCallId: spill.toolCallId,
+      content: serialized,
+    });
   }
   return serialized.slice(0, MAX_STORED_TOOL_OUTPUT_CHARS) + STORED_TOOL_OUTPUT_TRUNCATION_NOTICE;
 }
@@ -101,7 +119,10 @@ function normalizeFileDiffsForStorage(
 }
 
 export function buildToolResultContent(input: ToolResultPayloadInput): ToolResultContent {
-  const output = normalizeToolResultOutputForStorage(input.output);
+  const output = normalizeToolResultOutputForStorage(
+    input.output,
+    input.sessionId ? { sessionId: input.sessionId, toolCallId: input.toolCallId } : undefined,
+  );
   const rawOutput = stringifyToolResultOutput(output);
   const fileDiffs = normalizeFileDiffsForStorage(input.fileDiffs);
   return {

@@ -32,6 +32,15 @@ import {
   stopInFlightStreamRequest,
 } from './stream-cancellation.js';
 import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
+import { markPermissionNotificationsReadForSession } from '../session/notification-store.js';
+import {
+  cancelPendingPermissionRequestsByClientRequest,
+  cancelPendingPermissionRequestsForSession,
+} from './permissions.js';
+import {
+  cancelPendingQuestionRequestsByClientRequest,
+  cancelPendingQuestionRequestsForSession,
+} from './questions.js';
 import { installWsHeartbeat } from './ws-heartbeat.js';
 
 export const STREAM_PLUGIN_ERROR_MESSAGES = {
@@ -182,7 +191,25 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         userId: user.sub,
       });
-      return reply.status(200).send({ stopped });
+      // 停止 = 这一回合整段断掉：连带作废本回合的待审批 / 待回答交互。
+      // 只中止流、不清理 pending 时，reconcile 会因为 pending 交互把会话永久
+      // 留在 paused（现象：停止后审批卡仍挂着，停止与审批互相卡住）。
+      const cancelledPermissions = cancelPendingPermissionRequestsByClientRequest({
+        clientRequestId: body.data.clientRequestId,
+        sessionId,
+        userId: user.sub,
+      });
+      const cancelledQuestions = cancelPendingQuestionRequestsByClientRequest({
+        clientRequestId: body.data.clientRequestId,
+        sessionId,
+        userId: user.sub,
+      });
+      if (cancelledPermissions > 0) {
+        markPermissionNotificationsReadForSession({ sessionId, userId: user.sub });
+      }
+      // 作废交互后把状态收敛回真实值：无在途流 + 无 pending ⇒ idle。
+      await reconcileSessionRuntime({ sessionId, userId: user.sub });
+      return reply.status(200).send({ stopped, cancelledPermissions, cancelledQuestions });
     },
   );
 
@@ -238,14 +265,25 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         userId: user.sub,
       });
-      if (!stopped) {
-        // No in-flight request found — the stream may have ended without
-        // cleaning up state_status. Run the reconciler to reset stale
-        // running/paused state back to idle so the frontend can recover.
-        await reconcileSessionRuntime({ sessionId, userId: user.sub });
+      // 整会话停止：连带作废该会话全部待审批 / 待回答交互。否则 reconcile 会因为
+      // pending 交互把会话留在 paused——「停止」与「审批」互相卡住。
+      const cancelledPermissions = cancelPendingPermissionRequestsForSession({
+        sessionId,
+        userId: user.sub,
+      });
+      const cancelledQuestions = cancelPendingQuestionRequestsForSession({
+        sessionId,
+        userId: user.sub,
+      });
+      if (cancelledPermissions > 0) {
+        markPermissionNotificationsReadForSession({ sessionId, userId: user.sub });
       }
+      // No in-flight request found — the stream may have ended without cleaning
+      // up state_status；有在途流时刚停止的流也已结算。两种情况都在这里把
+      // 状态收敛回真实值（无在途流 + 无 pending ⇒ idle），前端可直接恢复。
+      await reconcileSessionRuntime({ sessionId, userId: user.sub });
 
-      return reply.status(200).send({ stopped });
+      return reply.status(200).send({ stopped, cancelledPermissions, cancelledQuestions });
     },
   );
 

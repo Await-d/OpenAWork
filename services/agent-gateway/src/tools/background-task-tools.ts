@@ -63,7 +63,7 @@ export const backgroundOutputToolDefinition: ToolDefinition<
 > = {
   name: 'background_output',
   description:
-    '获取后台任务输出。传 full_session=true 可以返回会话消息并支持过滤。后台任务完成时系统会主动通知，block=true 极少使用。Timeout 取值是**毫秒 ms**，不是秒。',
+    '获取后台任务输出。默认只回任务状态与**子代理最终总结**（摘要视图，明显更省上下文）；需要逐条消息时显式传 full_session=true（返回最近的消息，受字符预算约束，可配合 message_limit / include_tool_results / since_message_id 过滤）。后台任务完成时系统会主动通知，block=true 极少使用。Timeout 取值是**毫秒 ms**，不是秒。',
   inputSchema: backgroundOutputInputSchema,
   outputSchema: z.unknown(),
   timeout: 30000,

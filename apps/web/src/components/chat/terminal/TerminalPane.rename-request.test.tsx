@@ -80,7 +80,9 @@ function makeActions(): TerminalPaneActions {
   };
 }
 
-function renderHarness(options: { activeTerminalId?: string } = {}) {
+function renderHarness(
+  options: { activeTerminalId?: string; terminalTitles?: ReadonlyMap<string, string> } = {},
+) {
   const actions = makeActions();
   const activeTerminalId = options.activeTerminalId ?? 't1';
   const terminals = [
@@ -111,6 +113,8 @@ function renderHarness(options: { activeTerminalId?: string } = {}) {
         sessionId: 'session-1',
         inputEnabled: () => true,
         onWriteError: vi.fn(),
+        terminalTitles: options.terminalTitles ?? new Map<string, string>(),
+        onTerminalTitleChange: vi.fn(),
       },
       actions,
     };
@@ -166,6 +170,16 @@ describe('内容区右键「重命名」请求通道', () => {
     const input = within(pane1).getByRole('textbox', { name: '重命名终端' });
     expect((input as HTMLInputElement).value).toBe('终端 1');
     expect(screen.getByTestId('pending-request').textContent).toBe('none');
+  });
+
+  it('窗口标题存在时按标题预填（与 tab 显示逐字一致）', () => {
+    renderHarness({ terminalTitles: new Map([['t1', 'vim README.md']]) });
+    const pane1 = screen.getByTestId('terminal-pane-p1');
+
+    fireEvent.click(within(pane1).getByTestId('terminal-menu-terminal-rename'));
+
+    const input = within(pane1).getByRole('textbox', { name: '重命名终端' });
+    expect((input as HTMLInputElement).value).toBe('vim README.md');
   });
 
   it('请求属于其他 pane：本 pane 不进入重命名，由目标 pane 消费', () => {

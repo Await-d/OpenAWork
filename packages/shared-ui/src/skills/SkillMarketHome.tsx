@@ -1,5 +1,5 @@
-import { color } from '../tokens.js';
-import type { CSSProperties } from 'react';
+import { color, font, radius, spacing } from '../tokens.js';
+import type { CSSProperties, ReactNode } from 'react';
 import { useState } from 'react';
 
 export interface MarketSkill {
@@ -31,110 +31,99 @@ export interface SkillMarketHomeProps {
   onSelect: (id: string) => void;
 }
 
-const s: Record<string, CSSProperties> = {
-  root: {
-    background: 'var(--bg-base)',
-    minHeight: '100%',
-    fontFamily: 'system-ui, sans-serif',
-    color: 'var(--fg-default)',
-    padding: '1.5rem',
-  },
-  header: { marginBottom: '1.5rem' },
-  title: { margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--fg-default)' },
-  subtitle: { margin: '0.25rem 0 0', fontSize: 12, color: 'var(--fg-muted)' },
-  tabs: { display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: '1.5rem' },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-    gap: '1rem',
-  },
-  card: {
-    background: 'var(--bg-overlay)',
-    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    borderRadius: 10,
-    padding: '1rem',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 8,
-    cursor: 'pointer',
-  },
-  cardName: { fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' },
-  cardDesc: { fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5, flexGrow: 1 },
-  tag: {
-    fontSize: 10,
-    padding: '1px 5px',
-    borderRadius: 3,
-    background: 'rgba(99,102,241,0.15)',
-    color: 'var(--accent)',
-    fontWeight: 500,
-  },
-  section: { marginBottom: '1.5rem' },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: 600,
-    color: 'var(--fg-muted)',
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0.8,
-    marginBottom: '0.75rem',
-  },
-  footer: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '0.75rem',
-    flexWrap: 'wrap' as const,
-    marginTop: '1.25rem',
-    paddingTop: '1rem',
-    borderTop: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-  },
-  pageMeta: { fontSize: 12, color: 'var(--fg-muted)' },
-  pager: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const },
+/**
+ * 技能市场内容区（无面板外壳——由页面决定承载表面）。
+ *
+ * 与旧版差异：
+ *   - 删除自带 padding/minHeight/背景，避免「卡片套卡片」；
+ *   - `categories` 为空时不再渲染只有一个「全部」的分类行；
+ *   - 卡片加了独立的「详情 / 安装」按钮，键盘可达（旧版整卡可点但不可聚焦）；
+ *   - 颜色/圆角/间距全部走 token。
+ */
+const styles = `
+[data-openawork-skill-market] .skm-card {
+  transition: border-color 120ms ease, background 120ms ease;
+}
+[data-openawork-skill-market] .skm-card:hover {
+  border-color: var(--border-emphasis);
+  background: var(--bg-surface);
+}
+[data-openawork-skill-market] .skm-card:focus-within {
+  border-color: var(--accent-border);
+}
+[data-openawork-skill-market] :where(button, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+[data-openawork-skill-market] .skm-ghost-btn {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: ${radius.sm}px;
+  color: ${color.fgDefault};
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
+}
+[data-openawork-skill-market] .skm-ghost-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: ${color.fgStrong};
+}
+[data-openawork-skill-market] .skm-install-btn {
+  background: ${color.accentMuted};
+  border: 1px solid ${color.accentBorder};
+  border-radius: ${radius.sm}px;
+  color: ${color.accent};
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  transition: background 100ms ease, color 100ms ease;
+}
+[data-openawork-skill-market] .skm-install-btn:hover:not(:disabled) {
+  background: ${color.accent};
+  color: ${color.fgOnAccent};
+}
+[data-openawork-skill-market] .skm-install-btn:disabled {
+  background: transparent;
+  border-color: var(--border-default);
+  color: ${color.fgSubtle};
+  cursor: not-allowed;
+}
+`;
+
+const searchInputStyle: CSSProperties = {
+  background: color.bgOverlay,
+  border: `1px solid ${color.borderDefault}`,
+  borderRadius: radius.sm,
+  boxSizing: 'border-box',
+  color: color.fgDefault,
+  flex: '1 1 200px',
+  fontSize: 12,
+  height: 30,
+  minWidth: 0,
+  padding: `0 ${spacing[2] + 2}px`,
 };
 
-function tabBtn(active: boolean): CSSProperties {
-  return {
-    padding: '0.3rem 0.75rem',
-    fontSize: 12,
-    borderRadius: 6,
-    cursor: 'pointer',
-    fontWeight: 500,
-    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    background: active ? 'var(--bg-raised)' : 'transparent',
-    boxShadow: active ? 'var(--shadow-sm)' : 'none',
-    color: active ? 'var(--fg-strong)' : 'var(--fg-muted)',
-  };
-}
+const gridStyle: CSSProperties = {
+  display: 'grid',
+  gap: spacing[3],
+  gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+};
 
-function installBtn(): CSSProperties {
-  return {
-    background: 'rgba(99,102,241,0.15)',
-    color: 'var(--accent)',
-    border: '1px solid rgba(99,102,241,0.3)',
-    borderRadius: 6,
-    padding: '0.3rem 0.75rem',
-    fontSize: 12,
-    cursor: 'pointer',
-    fontWeight: 600,
-    alignSelf: 'flex-start' as const,
-  };
-}
-
-function pagerBtn(active: boolean, disabled = false): CSSProperties {
-  return {
-    minWidth: 34,
-    height: 34,
-    padding: '0 0.8rem',
-    borderRadius: 8,
-    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    background: active ? 'var(--bg-raised)' : 'transparent',
-    boxShadow: active ? 'var(--shadow-sm)' : 'none',
-    color: active ? 'var(--fg-strong)' : 'var(--fg-default)',
-    fontSize: 12,
-    fontWeight: active ? 700 : 600,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.45 : 1,
-  };
-}
+const cardStyle: CSSProperties = {
+  background: color.bgOverlay,
+  border: `1px solid ${color.borderSubtle}`,
+  borderRadius: radius.lg,
+  boxSizing: 'border-box',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: spacing[2],
+  padding: spacing[3],
+};
 
 function buildVisiblePages(currentPage: number, totalPages: number): number[] {
   if (totalPages <= 5) {
@@ -152,11 +141,35 @@ function buildVisiblePages(currentPage: number, totalPages: number): number[] {
   return [1, currentPage - 1, currentPage, currentPage + 1, totalPages];
 }
 
+function ToolbarButton({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={active ? 'skm-install-btn' : 'skm-ghost-btn'}
+      disabled={disabled}
+      onClick={onClick}
+      style={disabled ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function SkillMarketHome({
   skills,
   categories,
-  title = '技能市场',
-  subtitle = '发现并安装适合你 AI 工作流的技能',
+  title,
+  subtitle,
   loading,
   error,
   onSearch,
@@ -167,38 +180,33 @@ export function SkillMarketHome({
   onInstall,
   onSelect,
 }: SkillMarketHomeProps) {
-  const [active, setActive] = useState('All');
+  const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const allCats = ['All', ...categories];
-  const filtered = active === 'All' ? skills : skills.filter((sk) => sk.category === active);
+  const filtered =
+    activeCategory === 'All' ? skills : skills.filter((sk) => sk.category === activeCategory);
   const featured = skills.filter((sk) => sk.verified).slice(0, 3);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const visiblePages = buildVisiblePages(currentPage, totalPages);
   const rangeStart = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const rangeEnd = total === 0 ? 0 : Math.min(total, currentPage * pageSize);
-  const showFeatured = currentPage === 1 && searchQuery.trim().length === 0 && active === 'All';
+  const showFeatured =
+    currentPage === 1 && searchQuery.trim().length === 0 && activeCategory === 'All';
+  const showCategoryRow = categories.length > 0;
 
   function handleSearch() {
-    onSearch?.(searchQuery, active === 'All' ? undefined : active);
+    onSearch?.(searchQuery, activeCategory === 'All' ? undefined : activeCategory);
   }
 
   function handleCatChange(cat: string) {
-    setActive(cat);
+    setActiveCategory(cat);
     onSearch?.(searchQuery, cat === 'All' ? undefined : cat);
   }
 
   if (loading) {
     return (
-      <div
-        style={{
-          ...s.root,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: 200,
-        }}
-      >
-        <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>加载中...</span>
+      <div style={{ color: color.fgMuted, fontSize: 12, padding: `${spacing[6]}px 0` }}>
+        加载中…
       </div>
     );
   }
@@ -206,26 +214,32 @@ export function SkillMarketHome({
   if (error) {
     return (
       <div
-        style={{
-          ...s.root,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: 200,
-        }}
+        role="alert"
+        style={{ color: color.danger, fontSize: 12, lineHeight: 1.6, padding: `${spacing[4]}px 0` }}
       >
-        <span style={{ fontSize: 12, color: color.danger }}>{error}</span>
+        {error}
       </div>
     );
   }
 
   return (
-    <div style={s.root}>
-      <div style={s.header}>
-        <h1 style={s.title}>{title}</h1>
-        <p style={s.subtitle}>{subtitle}</p>
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: '1.5rem' }}>
+    <div data-openawork-skill-market="true" style={{ display: 'grid', gap: spacing[4] }}>
+      <style>{styles}</style>
+
+      {title ? (
+        <div>
+          <h2 style={{ color: color.fgStrong, fontSize: 14, fontWeight: 700, margin: 0 }}>
+            {title}
+          </h2>
+          {subtitle ? (
+            <p style={{ color: color.fgMuted, fontSize: 12, lineHeight: 1.6, margin: '2px 0 0' }}>
+              {subtitle}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: spacing[2] }}>
         <input
           type="text"
           value={searchQuery}
@@ -233,92 +247,92 @@ export function SkillMarketHome({
           onKeyDown={(e) => {
             if (e.key === 'Enter') handleSearch();
           }}
-          placeholder="搜索技能..."
-          style={{
-            flex: 1,
-            background: 'var(--bg-overlay)',
-            border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-            borderRadius: 7,
-            padding: '0.4rem 0.75rem',
-            color: 'var(--fg-default)',
-            fontSize: 12,
-            outline: 'none',
-          }}
+          placeholder="搜索技能…"
+          aria-label="搜索技能"
+          style={searchInputStyle}
         />
-        <button
-          type="button"
-          onClick={handleSearch}
-          style={{
-            padding: '0.4rem 1rem',
-            borderRadius: 7,
-            background: 'var(--accent)',
-            color: color.fgOnAccent,
-            fontSize: 12,
-            fontWeight: 600,
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
+        <button type="button" className="skm-install-btn" onClick={handleSearch}>
           搜索
         </button>
       </div>
 
-      {showFeatured && featured.length > 0 && (
-        <div style={s.section}>
-          <div style={s.sectionTitle}>精选</div>
-          <div style={s.grid}>
+      {showCategoryRow ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {allCats.map((cat) => (
+            <ToolbarButton
+              key={cat}
+              active={activeCategory === cat}
+              onClick={() => handleCatChange(cat)}
+            >
+              {cat === 'All' ? '全部' : cat}
+            </ToolbarButton>
+          ))}
+        </div>
+      ) : null}
+
+      {showFeatured && featured.length > 0 ? (
+        <div style={{ display: 'grid', gap: spacing[2] }}>
+          <div
+            style={{
+              color: color.fgMuted,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 0.6,
+            }}
+          >
+            精选
+          </div>
+          <div style={gridStyle}>
             {featured.map((sk) => (
               <SkillCard key={sk.id} skill={sk} onInstall={onInstall} onSelect={onSelect} />
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
-      <div style={s.tabs}>
-        {allCats.map((cat) => (
-          <button
-            key={cat}
-            type="button"
-            style={tabBtn(active === cat)}
-            onClick={() => handleCatChange(cat)}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
-      <div style={s.grid}>
+      <div style={gridStyle}>
         {filtered.map((sk) => (
           <SkillCard key={sk.id} skill={sk} onInstall={onInstall} onSelect={onSelect} />
         ))}
-        {filtered.length === 0 && (
-          <div style={{ color: 'var(--fg-muted)', fontSize: 12 }}>该分类下暂无技能。</div>
-        )}
       </div>
 
-      <div style={s.footer}>
-        <div style={s.pageMeta}>
+      {filtered.length === 0 ? (
+        <div style={{ color: color.fgMuted, fontSize: 12, padding: `${spacing[4]}px 0` }}>
+          {searchQuery.trim() ? '没有匹配的技能。' : '该分类下暂无技能。'}
+        </div>
+      ) : null}
+
+      <div
+        style={{
+          alignItems: 'center',
+          borderTop: `1px solid ${color.borderSubtle}`,
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: spacing[3],
+          justifyContent: 'space-between',
+          paddingTop: spacing[3],
+        }}
+      >
+        <div style={{ color: color.fgMuted, fontSize: 11 }}>
           显示 {rangeStart}-{rangeEnd} / 共 {total} 个技能
         </div>
-        {totalPages > 1 && (
-          <div style={s.pager}>
-            <button
-              type="button"
-              style={pagerBtn(false, currentPage === 1)}
+        {totalPages > 1 ? (
+          <div style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <ToolbarButton
               disabled={currentPage === 1}
               onClick={() => onPageChange?.(currentPage - 1)}
             >
               上一页
-            </button>
+            </ToolbarButton>
             {visiblePages.map((page, index) => {
               const previous = visiblePages[index - 1];
               const showGap = previous !== undefined && page - previous > 1;
               return (
-                <div key={page} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {showGap && <span style={s.pageMeta}>…</span>}
+                <div key={page} style={{ alignItems: 'center', display: 'flex', gap: 6 }}>
+                  {showGap ? <span style={{ color: color.fgMuted, fontSize: 11 }}>…</span> : null}
                   <button
                     type="button"
-                    style={pagerBtn(currentPage === page)}
+                    className={currentPage === page ? 'skm-install-btn' : 'skm-ghost-btn'}
                     onClick={() => onPageChange?.(page)}
                   >
                     {page}
@@ -326,16 +340,14 @@ export function SkillMarketHome({
                 </div>
               );
             })}
-            <button
-              type="button"
-              style={pagerBtn(false, currentPage === totalPages)}
+            <ToolbarButton
               disabled={currentPage === totalPages}
               onClick={() => onPageChange?.(currentPage + 1)}
             >
               下一页
-            </button>
+            </ToolbarButton>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -350,56 +362,106 @@ function SkillCard({
   onInstall: (id: string) => void;
   onSelect: (id: string) => void;
 }) {
+  const installable = skill.installable !== false;
   return (
     <article
-      style={{
-        ...s.card,
-        textAlign: 'left',
-        width: '100%',
-        cursor: 'pointer',
-        boxSizing: 'border-box' as const,
-      }}
+      className="skm-card"
+      data-skm-card={skill.id}
+      style={cardStyle}
       onClick={() => onSelect(skill.id)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onSelect(skill.id);
-      }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={s.cardName}>{skill.name}</div>
-        {skill.verified && (
-          <span style={{ fontSize: 10, color: color.success, fontWeight: 700 }}>✓ 已验证</span>
-        )}
+      <div style={{ alignItems: 'flex-start', display: 'flex', gap: spacing[2] }}>
+        <div
+          style={{
+            color: color.fgStrong,
+            flex: 1,
+            fontFamily: font.sans,
+            fontSize: 12,
+            fontWeight: 600,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={skill.name}
+        >
+          {skill.name}
+        </div>
+        {skill.verified ? (
+          <span style={{ color: color.success, flexShrink: 0, fontSize: 10, fontWeight: 700 }}>
+            ✓ 已验证
+          </span>
+        ) : null}
       </div>
-      <div style={s.cardDesc}>{skill.description}</div>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' as const }}>
+
+      <div
+        style={{
+          color: color.fgMuted,
+          display: '-webkit-box',
+          fontSize: 12,
+          lineHeight: 1.5,
+          minHeight: 36,
+          overflow: 'hidden',
+          WebkitBoxOrient: 'vertical',
+          WebkitLineClamp: 2,
+        }}
+      >
+        {skill.description}
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
         {skill.tags.slice(0, 3).map((t) => (
-          <span key={t} style={s.tag}>
+          <span
+            key={t}
+            style={{
+              background: color.auxSubtle,
+              borderRadius: radius.xs,
+              color: color.aux,
+              fontSize: 10,
+              padding: '1px 6px',
+            }}
+          >
             {t}
           </span>
         ))}
       </div>
+
       <div
         style={{
-          display: 'flex',
-          justifyContent: 'space-between',
           alignItems: 'center',
-          marginTop: 4,
+          display: 'flex',
+          gap: spacing[2],
+          justifyContent: 'space-between',
+          marginTop: 'auto',
         }}
       >
-        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+        <span style={{ color: color.fgSubtle, fontSize: 11 }}>
           {(skill.downloads ?? 0).toLocaleString()} 次安装
         </span>
-        <button
-          type="button"
-          style={installBtn()}
-          disabled={skill.installable === false}
-          onClick={(e) => {
-            e.stopPropagation();
-            onInstall(skill.id);
-          }}
-        >
-          {skill.installable === false ? '仅浏览' : (skill.actionLabel ?? '安装')}
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            className="skm-ghost-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(skill.id);
+            }}
+          >
+            详情
+          </button>
+          <button
+            type="button"
+            className="skm-install-btn"
+            disabled={!installable}
+            title={installable ? undefined : '该来源暂不支持在产品内安装'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onInstall(skill.id);
+            }}
+          >
+            {installable ? (skill.actionLabel ?? '安装') : '仅浏览'}
+          </button>
+        </div>
       </div>
     </article>
   );

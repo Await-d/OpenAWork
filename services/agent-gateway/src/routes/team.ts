@@ -22,10 +22,18 @@ import {
 } from '../session/session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
 import {
-  cloneDefaultTeamRoster,
   normalizeTeamWorkspaceDefaultRoster,
   parseTeamWorkspaceDefaultRosterJson,
 } from '../team/team-default-roster-store.js';
+import {
+  createTeamWorkspace,
+  deleteTeamWorkspace,
+  getTeamWorkspaceForUser as getTeamWorkspaceRecordForUser,
+  listTeamWorkspacesForUser,
+  mapWorkspaceRow,
+  updateTeamWorkspace,
+  type TeamWorkspaceRow,
+} from '../team/team-workspace-store.js';
 import { getAllLatencyStats } from '../handoff/bus/latency-monitor.js';
 import { getTeamEventsBusStats } from '../handoff/bus/team-events-bus.js';
 import { mergeRuntimeTaskGroups } from '../team/team-runtime-task-groups.js';
@@ -367,18 +375,6 @@ interface MemberRow {
   avatar_url: string | null;
   status: string;
   created_at: string;
-}
-
-interface TeamWorkspaceRow {
-  created_at: string;
-  default_working_root: string | null;
-  default_team_roster_json: string | null;
-  description: string | null;
-  id: string;
-  name: string;
-  updated_at: string;
-  user_id: string;
-  visibility: 'open' | 'closed' | 'private';
 }
 
 interface TaskRow {
@@ -765,18 +761,6 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         : metadata['teamWorkspaceId'] != null;
     });
   };
-
-  const mapWorkspaceRow = (row: TeamWorkspaceRow) => ({
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    visibility: row.visibility,
-    defaultWorkingRoot: row.default_working_root,
-    defaultTeamRoster: parseTeamWorkspaceDefaultRosterJson(row.default_team_roster_json),
-    createdByUserId: row.user_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  });
 
   const readRuntimeSessionRoleInstance = (metadataJson: string) => {
     const metadata = parseSessionMetadataJson(metadataJson);
@@ -2162,18 +2146,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const rowsStep = child('query');
-      const rows = sqliteAll<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
-         FROM team_workspaces
-         WHERE user_id = ?
-         ORDER BY updated_at DESC, created_at DESC
-        LIMIT 200`,
-        [user.sub],
-      );
-      rowsStep.succeed(undefined, { count: rows.length });
-      step.succeed(undefined, { count: rows.length });
+      const workspaces = listTeamWorkspacesForUser(user.sub);
+      rowsStep.succeed(undefined, { count: workspaces.length });
+      step.succeed(undefined, { count: workspaces.length });
 
-      return reply.send(rows.map(mapWorkspaceRow));
+      return reply.send(workspaces);
     },
   );
 
@@ -2188,14 +2165,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
 
       const queryStep = child('query');
-      const row = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
-         FROM team_workspaces
-         WHERE user_id = ? AND id = ?
-         LIMIT 1`,
-        [user.sub, teamWorkspaceId],
-      );
-      if (!row) {
+      const workspace = getTeamWorkspaceRecordForUser(user.sub, teamWorkspaceId);
+      if (!workspace) {
         queryStep.fail('workspace not found');
         step.fail('workspace not found');
         return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
@@ -2203,7 +2174,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       queryStep.succeed();
       step.succeed(undefined, { teamWorkspaceId });
 
-      return reply.send(mapWorkspaceRow(row));
+      return reply.send(workspace);
     },
   );
 
@@ -2217,55 +2188,10 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const body = parseBody(createWorkspaceSchema, request.body);
       parseStep.succeed();
 
-      const teamWorkspaceId = randomUUID();
-      const defaultTeamRoster = normalizeTeamWorkspaceDefaultRoster(
-        body.defaultTeamRoster ?? cloneDefaultTeamRoster(),
-      );
-      sqliteRun(
-        `INSERT INTO team_workspaces (
-          id,
-          user_id,
-          name,
-          description,
-          visibility,
-          default_working_root,
-          default_team_roster_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          teamWorkspaceId,
-          user.sub,
-          body.name,
-          body.description ?? null,
-          body.visibility,
-          body.defaultWorkingRoot ?? null,
-          JSON.stringify(defaultTeamRoster),
-        ],
-      );
+      const workspace = createTeamWorkspace(user.sub, body);
+      step.succeed(undefined, { teamWorkspaceId: workspace.id });
 
-      const created = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
-         FROM team_workspaces
-         WHERE user_id = ? AND id = ?
-         LIMIT 1`,
-        [user.sub, teamWorkspaceId],
-      );
-      step.succeed(undefined, { teamWorkspaceId });
-
-      return reply.status(201).send(
-        created
-          ? mapWorkspaceRow(created)
-          : {
-              id: teamWorkspaceId,
-              name: body.name,
-              description: body.description ?? null,
-              visibility: body.visibility,
-              defaultWorkingRoot: body.defaultWorkingRoot ?? null,
-              defaultTeamRoster,
-              createdByUserId: user.sub,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            },
-      );
+      return reply.status(201).send(workspace);
     },
   );
 
@@ -2283,59 +2209,14 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       const body = parseBody(updateWorkspaceSchema, request.body);
       parseStep.succeed();
 
-      const existing = sqliteGet<{ id: string }>(
-        `SELECT id FROM team_workspaces WHERE user_id = ? AND id = ? LIMIT 1`,
-        [user.sub, teamWorkspaceId],
-      );
-      if (!existing) {
+      const workspace = updateTeamWorkspace(user.sub, teamWorkspaceId, body);
+      if (!workspace) {
         step.fail('workspace not found');
-        return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
-      }
-
-      const updates: string[] = [];
-      const params: Array<string | null> = [];
-      if (body.name !== undefined) {
-        updates.push('name = ?');
-        params.push(body.name);
-      }
-      if (body.description !== undefined) {
-        updates.push('description = ?');
-        params.push(body.description ?? null);
-      }
-      if (body.visibility !== undefined) {
-        updates.push('visibility = ?');
-        params.push(body.visibility);
-      }
-      if (body.defaultWorkingRoot !== undefined) {
-        updates.push('default_working_root = ?');
-        params.push(body.defaultWorkingRoot ?? null);
-      }
-      if (body.defaultTeamRoster !== undefined) {
-        updates.push('default_team_roster_json = ?');
-        params.push(JSON.stringify(normalizeTeamWorkspaceDefaultRoster(body.defaultTeamRoster)));
-      }
-      updates.push("updated_at = datetime('now')");
-
-      sqliteRun(`UPDATE team_workspaces SET ${updates.join(', ')} WHERE user_id = ? AND id = ?`, [
-        ...params,
-        user.sub,
-        teamWorkspaceId,
-      ]);
-
-      const updated = sqliteGet<TeamWorkspaceRow>(
-        `SELECT id, user_id, name, description, visibility, default_working_root, default_team_roster_json, created_at, updated_at
-         FROM team_workspaces
-         WHERE user_id = ? AND id = ?
-         LIMIT 1`,
-        [user.sub, teamWorkspaceId],
-      );
-      if (!updated) {
-        step.fail('workspace not found after update');
         return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
       step.succeed(undefined, { teamWorkspaceId });
 
-      return reply.send(mapWorkspaceRow(updated));
+      return reply.send(workspace);
     },
   );
 
@@ -2349,21 +2230,11 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       });
       const user = request.user as JwtPayload;
 
-      const existing = sqliteGet<{ id: string }>(
-        `SELECT id FROM team_workspaces WHERE user_id = ? AND id = ? LIMIT 1`,
-        [user.sub, teamWorkspaceId],
-      );
-      if (!existing) {
+      const removed = deleteTeamWorkspace(user.sub, teamWorkspaceId);
+      if (!removed) {
         step.fail('workspace not found');
         return reply.status(404).send(teamRouteErrorPayload('team_workspace_not_found'));
       }
-
-      // 仅删除 team_workspaces 行；session 数据保留（仍然按 metadata_json
-      // 中的 teamWorkspaceId 孤立存在），符合\"删除工作区不破坏历史会话\"的保守策略。
-      sqliteRun(`DELETE FROM team_workspaces WHERE user_id = ? AND id = ?`, [
-        user.sub,
-        teamWorkspaceId,
-      ]);
 
       step.succeed(undefined, { teamWorkspaceId });
       return reply.status(204).send();

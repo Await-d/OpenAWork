@@ -1,6 +1,10 @@
 /**
  * `BuiltInBrowser` 的实时引擎接线：把 `/browser-live` 的下行事件喂进既有控制台状态。
  *
+ * 通道对两种引擎都启用：Web 端由它承载画面与采集；Tauri 原生窗口的画面仍是系统
+ * webview（`CdpLiveEngine` 不挂载），但控制台 / 网络同样由网关侧 CDP 采集——没有
+ * 这条通道，桌面端永远只能看到空控制台。
+ *
  * 是否让 live 视图接管内容区不在这里判断——那是能力矩阵（`computeEngineCapability`
  * 的 `liveView`）的职责，宿主统一从那里取值，避免同一条件散落多处。
  *
@@ -30,8 +34,6 @@ import type { BrowserInstallController } from './use-browser-install.js';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 
 export interface UseBrowserLiveWiringOptions {
-  /** 非 Tauri（网页端）才启用实时通道；Tauri 保留原生 webview 分支。 */
-  enabled: boolean;
   /** 控制台日志入口（宿主负责按 tab 隔离）。 */
   appendLog: (entry: ConsoleEntry) => void;
   /** 网络阶段补丁入口（宿主按 networkId 归并到对应 tab）。 */
@@ -48,11 +50,10 @@ export interface BrowserLiveWiring {
 }
 
 export function useBrowserLiveWiring({
-  enabled,
   appendLog,
   upsertNetwork,
 }: UseBrowserLiveWiringOptions): BrowserLiveWiring {
-  const session = useBrowserLiveSession({ enabled });
+  const session = useBrowserLiveSession();
   const { subscribe } = session;
   const token = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
@@ -62,12 +63,12 @@ export function useBrowserLiveWiring({
   // 惰性客户端：只有真正点「安装」时才需要，避免仅渲染提示条也构造连接器。
   const lazyClientRef = useRef<{ baseUrl: string; client: BrowserLiveClient } | null>(null);
   const installClient = useMemo((): BrowserLiveClient | null => {
-    if (!enabled || !token) return null;
+    if (!token) return null;
     if (lazyClientRef.current?.baseUrl !== gatewayUrl) {
       lazyClientRef.current = { baseUrl: gatewayUrl, client: createBrowserLiveClient(gatewayUrl) };
     }
     return lazyClientRef.current.client;
-  }, [enabled, token, gatewayUrl]);
+  }, [token, gatewayUrl]);
 
   const availability = session.availability;
   const install = useBrowserInstall({
@@ -78,8 +79,6 @@ export function useBrowserLiveWiring({
   });
 
   useEffect(() => {
-    if (!enabled) return;
-
     return subscribe((envelope) => {
       switch (envelope.ch) {
         case 'console': {
@@ -110,7 +109,7 @@ export function useBrowserLiveWiring({
           return;
       }
     });
-  }, [enabled, subscribe, appendLog, upsertNetwork]);
+  }, [subscribe, appendLog, upsertNetwork]);
 
   return {
     session,

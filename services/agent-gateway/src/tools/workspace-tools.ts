@@ -888,10 +888,11 @@ export const grepTool: ToolDefinition<typeof grepInputSchema, typeof grepOutputS
   // NOTE: keep in sync with `timeout` below — this used to say "60s 超时、
   // 输出上限 256KB", but the real timeout is 15000ms and output truncation
   // is handled post-execution by tool-output-truncator.ts's
-  // truncateToolOutput() using DEFAULT_MAX_CHARS (~200k chars, dynamically
-  // scaled down for smaller context windows), not a fixed 256KB byte cap.
+  // truncateToolOutput() using DEFAULT_MAX_CHARS (50k chars in the model
+  // view; the full result stays retrievable via read_tool_output), not a
+  // fixed 256KB byte cap.
   description:
-    '快速内容搜索工具（带安全限制：15s 超时、输出过长会自动截断，约 20 万字符，随模型上下文窗口动态调整）。',
+    '快速内容搜索工具（带安全限制：15s 超时、模型可见输出自动截断到约 5 万字符，超限部分仍保存在本会话可用 read_tool_output 取回）。',
   inputSchema: grepInputSchema,
   outputSchema: grepOutputSchema,
   timeout: 15000,

@@ -45,6 +45,28 @@ export interface SessionMemoryExtractorConfig {
   toolCallsBetweenUpdates: number;
   /** Maximum output tokens for the extraction LLM call. */
   maxOutputTokens: number;
+  /**
+   * Token budget for the incremental delta sent to the extraction call.
+   *
+   * Extraction only sends messages after `lastSessionMemoryMessageId`; a
+   * budget bounds the event where the delta grew much larger than the update
+   * threshold (the remainder is summarized by the following extraction, since
+   * the watermark only advances to the last selected message).
+   */
+  incrementalTokenBudget: number;
+}
+
+/** `enabled` 只走调用参数 / 环境变量，不进入默认阈值合并。 */
+export interface SessionMemoryExtractionOptions extends Partial<SessionMemoryExtractorConfig> {
+  /**
+   * 显式开启/关闭本次提取；缺省读环境变量（默认关闭）。
+   *
+   * 对齐参考库 opencode v2.0.15：参考库**没有**会话记忆提取这一层（其辅助
+   * LLM 调用只有 title / compaction / generate），该机制源自 Claude Code 的
+   * 分层压缩设计。默认关闭可消除这笔参考库不存在的额外调用；确需启用时设置
+   * `OPENAWORK_ENABLE_SESSION_MEMORY_EXTRACTION=1`，或在此显式传 true。
+   */
+  enabled?: boolean;
 }
 
 export const DEFAULT_EXTRACTOR_CONFIG: SessionMemoryExtractorConfig = {
@@ -52,7 +74,16 @@ export const DEFAULT_EXTRACTOR_CONFIG: SessionMemoryExtractorConfig = {
   minimumTokensBetweenUpdate: 15_000,
   toolCallsBetweenUpdates: 5,
   maxOutputTokens: 4_096,
+  incrementalTokenBudget: 20_000,
 };
+
+/** 会话记忆提取的总开关；默认关闭（对齐参考库「无此机制」）。 */
+export function isSessionMemoryExtractionEnabled(): boolean {
+  const raw = globalThis.process?.env?.['OPENAWORK_ENABLE_SESSION_MEMORY_EXTRACTION'];
+  if (typeof raw !== 'string') return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
 
 /**
  * Wall-clock timeout for the session-memory extraction upstream call.
@@ -184,8 +215,14 @@ export async function extractSessionMemory(input: {
   userId: string;
   route: ModelRouteConfig;
   signal?: AbortSignal;
-  config?: Partial<SessionMemoryExtractorConfig>;
+  config?: SessionMemoryExtractionOptions;
 }): Promise<{ success: boolean; error?: string }> {
+  // 默认关闭（对齐参考库）：只有显式传 enabled 或环境变量开启才执行。
+  const enabled = input.config?.enabled ?? isSessionMemoryExtractionEnabled();
+  if (!enabled) {
+    return { success: true };
+  }
+
   const config = { ...DEFAULT_EXTRACTOR_CONFIG, ...input.config };
 
   try {
@@ -208,9 +245,15 @@ export async function extractSessionMemory(input: {
     // Build the extraction prompt
     const userPrompt = buildExtractionUserPrompt(currentMemory);
 
-    // Build conversation context (recent messages only, capped at ~50K tokens)
-    const recentMessages = selectRecentMessagesForExtraction(messages, 50_000);
-    const conversationMessages: UnifiedMessage[] = recentMessages.map((msg) => {
+    // Build the conversation context: ONLY the delta since the last
+    // summarized message, capped at a token budget. Previously this re-sent
+    // up to 50K tokens of already-summarized history on every update.
+    const deltaMessages = selectIncrementalMessagesForExtraction({
+      messages,
+      lastMessageId: state.lastMessageId,
+      tokenBudget: config.incrementalTokenBudget,
+    });
+    const conversationMessages: UnifiedMessage[] = deltaMessages.map((msg) => {
       if (msg.role === 'user') {
         const text = msg.content
           .filter((c): c is Extract<typeof c, { type: 'text' }> => c.type === 'text')
@@ -293,10 +336,12 @@ export async function extractSessionMemory(input: {
     // Persist the updated memory
     writeSessionMemoryContent(input.sessionId, input.userId, updatedMemory);
 
-    // Update the last summarized message ID
-    const lastMessage = messages.at(-1);
-    if (lastMessage) {
-      writeLastSessionMemoryMessageId(input.sessionId, input.userId, lastMessage.id);
+    // Advance the watermark only to the last message that was actually sent
+    // to the extractor — if the delta exceeded the budget, the remaining
+    // messages are picked up by the next extraction instead of being skipped.
+    const lastExtractedMessage = deltaMessages.at(-1);
+    if (lastExtractedMessage) {
+      writeLastSessionMemoryMessageId(input.sessionId, input.userId, lastExtractedMessage.id);
     }
 
     return { success: true };
@@ -310,20 +355,62 @@ export async function extractSessionMemory(input: {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Select recent messages for extraction, capped at a token budget.
- * Walks backwards from the end to include the most recent context.
+ * Select the incremental delta for extraction.
+ *
+ * Only messages after the stored watermark are eligible — re-sending already
+ * summarized history was the single largest auxiliary-call waste in this
+ * module (up to 50K tokens per update). Semantics:
+ *
+ * - No watermark → start from the beginning of the session (first extraction).
+ * - Watermark not found in the current list (e.g. compacted away) → fall back
+ *   to a bounded tail window instead of resending the whole history.
+ * - Delta larger than the budget → take the OLDEST part of the delta; the
+ *   caller advances the watermark only to the last selected message, so the
+ *   next extraction picks up the remainder in order.
  */
-function selectRecentMessagesForExtraction(messages: Message[], tokenBudget: number): Message[] {
-  let totalTokens = 0;
-  const selected: Message[] = [];
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]!;
-    const msgTokens = estimateMessageTokens(msg);
-    if (totalTokens + msgTokens > tokenBudget) break;
-    totalTokens += msgTokens;
-    selected.unshift(msg);
+function selectIncrementalMessagesForExtraction(input: {
+  messages: Message[];
+  lastMessageId: string | null;
+  tokenBudget: number;
+}): Message[] {
+  const { messages, lastMessageId, tokenBudget } = input;
+  if (messages.length === 0) {
+    return [];
   }
 
+  const watermarkIndex = lastMessageId
+    ? messages.findIndex((message) => message.id === lastMessageId)
+    : -1;
+  // Watermark present but no longer in the list → bounded tail fallback.
+  if (lastMessageId && watermarkIndex < 0) {
+    return selectTailWithinBudget(messages, tokenBudget);
+  }
+
+  const startIndex = watermarkIndex + 1;
+  const selected: Message[] = [];
+  let totalTokens = 0;
+  for (let index = startIndex; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message) continue;
+    const tokens = estimateMessageTokens(message);
+    if (selected.length > 0 && totalTokens + tokens > tokenBudget) break;
+    selected.push(message);
+    totalTokens += tokens;
+  }
+
+  return selected;
+}
+
+/** Bounded tail window used when the watermark is unavailable. */
+function selectTailWithinBudget(messages: Message[], tokenBudget: number): Message[] {
+  let totalTokens = 0;
+  const selected: Message[] = [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    const tokens = estimateMessageTokens(message);
+    if (selected.length > 0 && totalTokens + tokens > tokenBudget) break;
+    selected.unshift(message);
+    totalTokens += tokens;
+  }
   return selected;
 }

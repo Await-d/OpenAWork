@@ -997,4 +997,135 @@ describe('message-v2 compatibility regressions', () => {
       },
     });
   });
+
+  it('replays OpenAI Chat reasoning field/details through the native message shape', () => {
+    const sessionId = 'session-reasoning-field';
+    const messageId = asMessageId('m-reasoning-field');
+    const details = [{ type: 'reasoning.text', text: '结构化思考' }];
+    const message: MessageWithParts = {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: asPartId('p-reasoning-field'),
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'reasoning',
+          text: '思考',
+          metadata: { openai: { reasoningField: 'reasoning', reasoningDetails: details } },
+          time: { start: 1, end: 2 },
+        },
+      ],
+    };
+
+    expect(toModelMessages([message])).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        reasoning: { text: '思考', reasoningField: 'reasoning', reasoningDetails: details },
+      },
+    ]);
+
+    const native = unifiedConversationToNativeMessages(toModelMessages([message]));
+    expect(native[0]?.content[0]).toMatchObject({
+      type: 'reasoning',
+      providerMetadata: {
+        openai: { reasoningField: 'reasoning', reasoningDetails: details },
+      },
+    });
+  });
+
+  it('replays a custom providerMetadataKey namespace (openrouter) end to end', () => {
+    const sessionId = 'session-reasoning-namespace';
+    const messageId = asMessageId('m-reasoning-namespace');
+    const details = [{ type: 'reasoning.text', text: '结构化思考' }];
+    const message: MessageWithParts = {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: asPartId('p-reasoning-namespace'),
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'reasoning',
+          text: '思考',
+          metadata: {
+            providerMetadataKey: 'openrouter',
+            openrouter: { reasoningField: 'reasoning', reasoningDetails: details },
+          },
+          time: { start: 1, end: 2 },
+        },
+      ],
+    };
+
+    expect(toModelMessages([message])).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        reasoning: {
+          text: '思考',
+          reasoningField: 'reasoning',
+          reasoningDetails: details,
+          providerMetadataKey: 'openrouter',
+        },
+      },
+    ]);
+
+    const native = unifiedConversationToNativeMessages(toModelMessages([message]));
+    expect(native[0]?.content[0]).toMatchObject({
+      type: 'reasoning',
+      providerMetadata: {
+        openrouter: { reasoningField: 'reasoning', reasoningDetails: details },
+      },
+    });
+  });
+
+  it('drops OpenAI Chat reasoning metadata when replaying against a different model', () => {
+    const sessionId = 'session-reasoning-field-cross-model';
+    const messageId = asMessageId('m-reasoning-field-cross-model');
+    const details = [{ type: 'reasoning.text', text: '结构化思考' }];
+    const message: MessageWithParts = {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: 1 },
+        finish: 'stop',
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        providerID: 'deepseek',
+        modelID: 'deepseek-chat',
+      },
+      parts: [
+        {
+          id: asPartId('p-reasoning-field-cross-model'),
+          sessionID: sessionId,
+          messageID: messageId,
+          type: 'reasoning',
+          text: '思考',
+          metadata: { openai: { reasoningField: 'reasoning', reasoningDetails: details } },
+          time: { start: 1, end: 2 },
+        },
+      ],
+    };
+
+    const [unified] = toModelMessages([message], {
+      currentModel: { providerID: 'openai', modelID: 'gpt-5' },
+    });
+    expect(unified).toEqual({ role: 'assistant', content: null, reasoning: { text: '思考' } });
+  });
 });

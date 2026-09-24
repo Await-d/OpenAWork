@@ -37,6 +37,7 @@ import { InstallBrowserProgress } from './browser/InstallBrowserProgress.js';
 import { DEFAULT_DEVICE_PRESET_ID } from './browser/device-presets.js';
 import { useEngineCapability } from './browser/hooks/use-engine-capability.js';
 import { useBrowserLiveWiring } from './browser/hooks/use-browser-live-wiring.js';
+import { useBrowserLiveNavigation } from './browser/hooks/use-browser-live-navigation.js';
 import { useBrowserInspector } from './browser/hooks/use-browser-inspector.js';
 import { useBrowserPreviewShortcutsWiring } from './browser/hooks/use-browser-preview-shortcuts-wiring.js';
 import { useTauriWebview } from './browser/hooks/use-tauri-webview.js';
@@ -586,9 +587,10 @@ export function BuiltInBrowser({
   // 拾取意图：工具栏与检查器的「在页面中拾取」都下发 `pick`（结果进 composer），
   // 检查器的「获取完整样式」则下发 `node.styles`（只读样式，不写 composer）。
   const [pickIntent, setPickIntent] = useState<'composer' | 'styles'>('composer');
-  // 实时引擎接线（可用性 + 事件 → 既有控制台状态）；Tauri 保留原生 webview 分支。
+  // 实时引擎接线（可用性 + 事件 → 既有控制台状态）。Tauri 原生窗口同样接入：
+  // 画面仍是系统 webview，控制台 / 网络由网关侧 CDP 采集（见
+  // `useBrowserLiveNavigation` 的导航同步）。
   const liveWiring = useBrowserLiveWiring({
-    enabled: !isTauri,
     appendLog: appendLogToActiveTab,
     upsertNetwork: upsertNetworkExchange,
   });
@@ -630,6 +632,15 @@ export function BuiltInBrowser({
     enabled: !hidden && Boolean(workspacePath),
     workspacePath: workspacePath ?? null,
     onChange: () => setRefreshKey((value) => value + 1),
+  });
+  // Tauri 原生窗口没有 `CdpLiveEngine` 来同步 URL：由这个 hook 把当前标签页的
+  // 地址 / 刷新信号下发给远端采集页面，否则采集到的永远是空白页。不可见时不下发
+  // （不为没人在看的预览白白拉起采集页面），重新可见时补发。
+  useBrowserLiveNavigation({
+    session: liveWiring.session,
+    enabled: isTauri && !hidden,
+    url: activeUrl,
+    refreshKey,
   });
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -710,9 +721,10 @@ export function BuiltInBrowser({
   const warnCount = consoleLogs.filter((l) => l.level === 'warn').length;
   const problemCount = countErrorDigestProblems(consoleLogs);
 
-  // 网络瀑布视图的空态文案据此区分：Tauri 原生窗口没有实时引擎；建连中展示骨架屏。
+  // 网络瀑布视图的空态文案据此区分：引擎声明不可用 → 未开始录制；建连中 → 骨架屏。
+  // Tauri 原生窗口与 Web 模式共用同一条采集通道，判定不再按平台分叉。
   const livePhase = liveWiring.session.phase;
-  const networkCaptureStatus: NetworkCaptureStatus = isTauri
+  const networkCaptureStatus: NetworkCaptureStatus = liveUnavailable
     ? 'unavailable'
     : livePhase === 'connecting' || livePhase === 'reconnecting'
       ? 'loading'

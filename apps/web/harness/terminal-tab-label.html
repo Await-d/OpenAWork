@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>终端 tab 条验收（标签截断 / 可见顺序）</title>
+    <style>
+      /*
+       * 页面 chrome（背景 / 字体）与终端组件消费的 token 兜底值。
+       *
+       * 与 notice 系列 harness 不同：**颜色不是本 harness 的断言对象**，这里给
+       * 组件 token 填上暗色主题的近似值，只是为了让截图可读、间距（--spacing-*）
+       * 与尺寸（--terminal-panel-header-height 由组件 CSS 自带）真实生效。
+       * 布局断言的期望值一律从真实排版推导（见 verify 脚本），不写死像素。
+       */
+      :root {
+        --spacing-1: 4px;
+        --spacing-2: 8px;
+        --bg-base: #0b0f16;
+        --bg-overlay: #0f141d;
+        --bg-raised: #141b26;
+        --bg-hover: rgba(255, 255, 255, 0.06);
+        --fg-default: #c8d1e0;
+        --fg-muted: #8b97a8;
+        --fg-strong: #e6ecf5;
+        --accent: #5cd4c0;
+        --border-subtle: rgba(255, 255, 255, 0.06);
+        --border-emphasis: rgba(255, 255, 255, 0.14);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+        --dur-micro: 120ms;
+        --ease-micro: ease-out;
+      }
+      body {
+        margin: 0;
+        background: #080b12;
+        color: #c8d1e0;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      .viewport {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 8px 0;
+      }
+      .viewport-label {
+        font-size: 11px;
+        color: #4d5b6e;
+        padding: 0 8px 4px;
+      }
+      /* 右侧动作区替身：固定宽度、不可压缩 —— 长标签若撑破宿主，它会被挤出 pane。 */
+      .harness-actions {
+        display: flex;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        width: 96px;
+        height: 22px;
+        color: #4d5b6e;
+        font-size: 11px;
+        letter-spacing: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/terminal-tab-label-entry.tsx"></script>
+  </body>
+</html>

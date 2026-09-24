@@ -162,6 +162,8 @@ export type { MCPServerConfigProps, MCPServerEntry } from './mcp/MCPServerConfig
 export { toPersistedMcpServers } from './mcp/mcp-server-config-utils.js';
 export { MCPServerList } from './mcp/MCPServerList.js';
 export type { MCPServerListProps, MCPServerStatus } from './mcp/MCPServerList.js';
+export { McpServerManager } from './mcp/McpServerManager.js';
+export type { McpServerManagerProps } from './mcp/McpServerManager.js';
 export { ModelCostDisplay } from './models/ModelCostDisplay.js';
 export type { ModelCostDisplayProps } from './models/ModelCostDisplay.js';
 export { ProviderUpdateBadge } from './models/ProviderUpdateBadge.js';

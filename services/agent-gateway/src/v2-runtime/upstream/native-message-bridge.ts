@@ -57,7 +57,17 @@ const openAIReasoningMetadata = (
   if (typeof reasoning.summary === 'string' && reasoning.summary.length > 0) {
     metadata.summary = reasoning.summary;
   }
-  return Object.keys(metadata).length === 0 ? undefined : { openai: metadata };
+  // OpenAI Chat 家族：思维链字段名 + 结构化条目（历史回传时按同名写回）。
+  if (typeof reasoning.reasoningField === 'string' && reasoning.reasoningField.length > 0) {
+    metadata.reasoningField = reasoning.reasoningField;
+  }
+  if (Array.isArray(reasoning.reasoningDetails) && reasoning.reasoningDetails.length > 0) {
+    metadata.reasoningDetails = reasoning.reasoningDetails;
+  }
+  // 命名空间：路由 `providerMetadataKey`（缺省 `openai`），与协议侧读写一致。
+  return Object.keys(metadata).length === 0
+    ? undefined
+    : { [reasoning.providerMetadataKey ?? 'openai']: metadata };
 };
 
 const userMessage = (message: UserMessageUnified): Message => {

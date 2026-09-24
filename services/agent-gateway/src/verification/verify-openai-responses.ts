@@ -45,7 +45,11 @@ interface MonthlyUsageSnapshot {
   outputTokens: number;
 }
 
-const RESPONSES_PORT = 3311;
+/**
+ * 本地假上游端口。可用 `OPENAWORK_VERIFICATION_RESPONSES_PORT` 覆盖，
+ * 避免与并发运行的其它验收脚本（仓库支持多会话并行）抢占同一端口。
+ */
+const RESPONSES_PORT = Number(process.env['OPENAWORK_VERIFICATION_RESPONSES_PORT'] ?? 3311);
 const OPENAI_PROVIDER_ID = 'openai';
 const OPENAI_ALIAS_MODEL = 'team-model-alias';
 const DISABLED_TOOL_NAME = 'fake_tool';

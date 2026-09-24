@@ -150,6 +150,81 @@ describe('reasoning-blocks', () => {
     ]);
   });
 
+  it('records OpenAI Chat reasoningField/reasoningDetails on the first block only', () => {
+    const details = [{ type: 'reasoning.text', text: '结构化思考' }];
+    const blocks = [
+      { key: 'legacy:0', text: '第一段' },
+      { key: 'legacy:1', text: '第二段' },
+    ];
+
+    const next = markReasoningBlockEnded(blocks, {
+      occurredAt: 1700000020000,
+      providerMetadata: {
+        reasoningField: 'reasoning_content',
+        reasoningDetails: details,
+        providerMetadataKey: 'openrouter',
+      },
+    });
+
+    expect(next[0]).toMatchObject({
+      key: 'legacy:0',
+      reasoningField: 'reasoning_content',
+      reasoningDetails: details,
+      providerMetadataKey: 'openrouter',
+    });
+    // 响应级元数据只挂在第一个块上，避免多块重复回传。
+    expect(next[1]?.reasoningField).toBeUndefined();
+    expect(next[1]?.reasoningDetails).toBeUndefined();
+  });
+
+  it('extractReasoningEntries surfaces OpenAI Chat metadata when present', () => {
+    const details = [{ type: 'reasoning.encrypted', data: 'opaque' }];
+    const entries = extractReasoningEntries([
+      {
+        key: 'a',
+        text: '内容',
+        reasoningField: 'reasoning',
+        reasoningDetails: details,
+        providerMetadataKey: 'openrouter',
+      },
+      { key: 'b', text: '另一段' },
+    ]);
+
+    expect(entries).toEqual([
+      {
+        text: '内容',
+        startedAt: undefined,
+        endedAt: undefined,
+        reasoningField: 'reasoning',
+        reasoningDetails: details,
+        providerMetadataKey: 'openrouter',
+      },
+      { text: '另一段', startedAt: undefined, endedAt: undefined },
+    ]);
+  });
+
+  it('creates a placeholder block when only OpenAI Chat metadata arrives without deltas', () => {
+    const details = [{ type: 'reasoning.encrypted', data: 'opaque' }];
+    const next = markReasoningBlockEnded([], {
+      occurredAt: 1700000030000,
+      providerMetadata: { reasoningField: 'reasoning_content', reasoningDetails: details },
+    });
+
+    expect(next).toEqual([
+      {
+        key: 'legacy:0',
+        text: '',
+        endedAt: 1700000030000,
+        reasoningField: 'reasoning_content',
+        reasoningDetails: details,
+      },
+    ]);
+  });
+
+  it('does not create a placeholder block without OpenAI Chat metadata', () => {
+    expect(markReasoningBlockEnded([], { occurredAt: 1700000030000 })).toEqual([]);
+  });
+
   it('closes every still-open block when the end chunk has no identity hint', () => {
     const blocks = [
       { key: 'legacy:0', text: '第一段思考' },

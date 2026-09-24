@@ -42,6 +42,16 @@ interface ActiveJob {
   kind: 'timeout' | 'interval';
 }
 
+/**
+ * 调度器持久化钩子（可选）。由 `cron-store` 提供实现；缺省时不落库，
+ * 既有单测（超时 / 重入 / 历史裁剪）保持无 DB 依赖。
+ */
+export interface CronSchedulerPersistence {
+  upsertJob(job: CronJobRecord): void;
+  deleteJob(id: string): void;
+  recordExecution(job: CronJobRecord, exec: CronExecutionRecord): void;
+}
+
 function parseCronExpression(expr: string, tz: string): number {
   void tz;
   const parts = expr.trim().split(/\s+/);
@@ -72,21 +82,25 @@ export class CronScheduler {
   private handler: CronJobHandler;
   private jobTimeoutMs: number;
   private executionHistoryMax: number;
+  private persistence: CronSchedulerPersistence | undefined;
 
   constructor(
     handler: CronJobHandler,
     maxConcurrent = 3,
     jobTimeoutMs = DEFAULT_CRON_JOB_TIMEOUT_MS,
     executionHistoryMax = DEFAULT_CRON_EXECUTION_HISTORY_MAX,
+    persistence?: CronSchedulerPersistence,
   ) {
     this.handler = handler;
     this.maxConcurrent = maxConcurrent;
     this.jobTimeoutMs = jobTimeoutMs;
     this.executionHistoryMax = executionHistoryMax;
+    this.persistence = persistence;
   }
 
   addJob(job: CronJobRecord): void {
     this.jobs.set(job.id, job);
+    this.persistence?.upsertJob(job);
     if (job.enabled) this.scheduleJob(job);
   }
 
@@ -95,6 +109,7 @@ export class CronScheduler {
     if (!existing) return;
     const updated = { ...existing, ...patch, id, updated_at: Date.now() };
     this.jobs.set(id, updated);
+    this.persistence?.upsertJob(updated);
     this.cancelJob(id);
     if (updated.enabled) this.scheduleJob(updated);
   }
@@ -102,6 +117,18 @@ export class CronScheduler {
   removeJob(id: string): void {
     this.cancelJob(id);
     this.jobs.delete(id);
+    this.persistence?.deleteJob(id);
+  }
+
+  /**
+   * 启动装载：把持久化的任务定义放回调度器，但**不**触发 persistence 回写
+   * （避免每次启动对全表做无意义 upsert）。只对 enabled 任务建定时器。
+   */
+  restoreJobs(jobs: readonly CronJobRecord[]): void {
+    for (const job of jobs) {
+      this.jobs.set(job.id, job);
+      if (job.enabled) this.scheduleJob(job);
+    }
   }
 
   cancelJob(id: string): void {
@@ -207,9 +234,11 @@ export class CronScheduler {
     if (this.executionHistoryMax > 0 && this.executions.length > this.executionHistoryMax) {
       this.executions.splice(0, this.executions.length - this.executionHistoryMax);
     }
+    this.persistence?.recordExecution(job, exec);
 
     const updated = { ...job, last_fired_at: Date.now(), fire_count: job.fire_count + 1 };
     this.jobs.set(job.id, updated);
+    this.persistence?.upsertJob(updated);
 
     try {
       await this.runHandlerWithTimeout(updated);
@@ -223,6 +252,7 @@ export class CronScheduler {
       // Release the per-job slot last so it is freed even if the handler
       // threw — otherwise the job would be permanently wedged in-flight.
       this.inFlightJobs.delete(job.id);
+      this.persistence?.recordExecution(job, exec);
 
       if (job.delete_after_run && job.schedule_kind === 'at') {
         this.removeJob(job.id);

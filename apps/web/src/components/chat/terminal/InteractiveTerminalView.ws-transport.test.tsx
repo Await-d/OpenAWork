@@ -138,6 +138,9 @@ vi.mock('@xterm/xterm', () => {
     onSelectionChange() {
       return { dispose: (): void => undefined };
     }
+    onTitleChange() {
+      return { dispose: (): void => undefined };
+    }
     attachCustomKeyEventHandler(): void {}
   }
   return { Terminal };

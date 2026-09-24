@@ -4,8 +4,12 @@
  * Ported from oh-my-opencode's tool-output-truncator hook.
  * Truncates excessively long tool outputs to prevent context window overflow.
  *
- * In oh-my-opencode this was a tool.execute.after hook using a dynamic truncator.
- * In OpenAWork it's a simpler character-based truncation applied in executeToolCalls.
+ * Model-view caps are aligned with opencode v2.0.15 `tool-output.ts`
+ * (`MAX_LINES = 2_000` / `MAX_BYTES = 50 KiB`, head-keep + truncation marker):
+ * a single tool result must not dominate the context window. Outputs above the
+ * cap are truncated in the model view only — the (larger, up to
+ * `STORAGE_DEFAULT_MAX_CHARS`) result stays in session storage and can be
+ * paged back with `read_tool_output`.
  *
  * Enhanced with dynamic truncation support: when the effective context window
  * is known to be smaller than the preset (e.g. relay supports 200K but preset
@@ -17,26 +21,46 @@ import {
   hasDiscoveredLowerContextWindow,
 } from '../compaction/context-window-resolver.js';
 
-/** Default max output length in characters (~50k tokens ≈ ~200k chars) */
-const DEFAULT_MAX_CHARS = 200_000;
-
-/** Web fetch tools get more aggressive truncation (~10k tokens ≈ ~40k chars) */
-const WEBFETCH_MAX_CHARS = 40_000;
-
-/** MCP tool calls return arbitrary payloads (incl. blobs); cap them tighter than default. */
-const MCP_CALL_MAX_CHARS = 80_000;
-
-/** Git diff payloads can grow with binary or refactor noise; cap below the universal limit. */
-const WORKSPACE_REVIEW_DIFF_MAX_CHARS = 60_000;
-const DESKTOP_AUTOMATION_MAX_CHARS = 24_000;
-const DESKTOP_CONTROL_MAX_CHARS = 8_000;
+/**
+ * 模型视图：单个工具结果保留的最大行数（对齐参考库 `MAX_LINES`）。
+ */
+const MAX_LINES = 2_000;
 
 /**
- * Universal fallback max chars applied to ALL tool outputs regardless of name.
- * This is a safety net to prevent any single tool output from overflowing the
- * context window. Set to ~50k tokens ≈ ~200k chars.
+ * 模型视图：默认字节预算（对齐参考库 `MAX_BYTES = 50 KiB`）。
+ *
+ * 用字节而非字符是有意为之：参考库按 UTF-8 字节记账，中文内容下
+ * 「50k 字符」会比参考库宽约 3 倍；按字节对齐后中英文的请求体上限一致。
  */
-const UNIVERSAL_MAX_CHARS = 200_000;
+const DEFAULT_MAX_BYTES = 50 * 1024;
+
+/** Web fetch tools get a more aggressive byte budget (~40 KiB). */
+const WEBFETCH_MAX_BYTES = 40_000;
+
+/** MCP tool calls return arbitrary payloads (incl. blobs); keep the default budget. */
+const MCP_CALL_MAX_BYTES = 50 * 1024;
+
+/** Git diff payloads can grow with binary or refactor noise; cap below the storage limit. */
+const WORKSPACE_REVIEW_DIFF_MAX_BYTES = 60_000;
+const DESKTOP_AUTOMATION_MAX_BYTES = 24_000;
+const DESKTOP_CONTROL_MAX_BYTES = 8_000;
+
+/** Universal model-view fallback byte budget applied to ALL tools. */
+const UNIVERSAL_MAX_BYTES = 50 * 1024;
+
+/**
+ * Storage ceiling for the persisted tool result (pre-persist truncation).
+ *
+ * This is intentionally larger than the model-view ceiling: "超限落盘" means
+ * the model sees a bounded preview plus a `read_tool_output` pointer, while
+ * the complete（上限 200k 字符）result stays in the session so later rounds
+ * can page it back without re-running the tool. Storage keeps the historical
+ * **char** accounting (DB size semantics), not the model-view byte budget.
+ */
+const STORAGE_DEFAULT_MAX_CHARS = 200_000;
+
+/** MCP payloads keep the legacy 80k storage ceiling (model view is 50 KiB). */
+const MCP_CALL_STORAGE_MAX_CHARS = 80_000;
 
 /** Reference context window for the default limits above (1M tokens). */
 const REFERENCE_CONTEXT_WINDOW = 1_000_000;
@@ -62,45 +86,66 @@ const TRUNCATABLE_TOOLS = new Set([
   'desktop_control',
 ]);
 
-const TOOL_SPECIFIC_MAX_CHARS: Record<string, number> = {
-  webfetch: WEBFETCH_MAX_CHARS,
-  web_fetch: WEBFETCH_MAX_CHARS,
-  mcp_call: MCP_CALL_MAX_CHARS,
-  workspace_review_diff: WORKSPACE_REVIEW_DIFF_MAX_CHARS,
-  desktop_automation: DESKTOP_AUTOMATION_MAX_CHARS,
-  desktop_control: DESKTOP_CONTROL_MAX_CHARS,
+const TOOL_SPECIFIC_MAX_BYTES: Record<string, number> = {
+  webfetch: WEBFETCH_MAX_BYTES,
+  web_fetch: WEBFETCH_MAX_BYTES,
+  mcp_call: MCP_CALL_MAX_BYTES,
+  workspace_review_diff: WORKSPACE_REVIEW_DIFF_MAX_BYTES,
+  desktop_automation: DESKTOP_AUTOMATION_MAX_BYTES,
+  desktop_control: DESKTOP_CONTROL_MAX_BYTES,
+};
+
+/** Storage ceilings mirror the legacy per-tool caps（char 口径）；only the fallback is larger. */
+const TOOL_SPECIFIC_STORAGE_MAX_CHARS: Record<string, number> = {
+  webfetch: WEBFETCH_MAX_BYTES,
+  web_fetch: WEBFETCH_MAX_BYTES,
+  mcp_call: MCP_CALL_STORAGE_MAX_CHARS,
+  workspace_review_diff: WORKSPACE_REVIEW_DIFF_MAX_BYTES,
+  desktop_automation: DESKTOP_AUTOMATION_MAX_BYTES,
+  desktop_control: DESKTOP_CONTROL_MAX_BYTES,
 };
 
 const TRUNCATION_NOTICE = `
 
+[输出已截断 — 原始输出超过最大长度。更长/完整的结果仍保存在本会话中：可用 read_tool_output 并传入该调用的 toolCallId 分页读取；也可以用更精确的搜索模式或路径范围缩小结果。]
+
+[Output truncated — it exceeded the maximum length. The full (or longer) result is still stored in this session: page it back with read_tool_output using this tool call's toolCallId, or narrow the query with a more precise search pattern / path range.]`;
+
+const STORAGE_TRUNCATION_NOTICE = `
+
 [输出已截断 — 原始输出超过最大长度。使用更精确的搜索模式或路径范围来获取完整结果。]`;
 
-function getToolMaxChars(toolName: string): number {
+function getToolMaxBytes(toolName: string): number {
   const normalized = toolName.toLowerCase();
   return TRUNCATABLE_TOOLS.has(normalized)
-    ? (TOOL_SPECIFIC_MAX_CHARS[normalized] ?? DEFAULT_MAX_CHARS)
-    : UNIVERSAL_MAX_CHARS;
+    ? (TOOL_SPECIFIC_MAX_BYTES[normalized] ?? DEFAULT_MAX_BYTES)
+    : UNIVERSAL_MAX_BYTES;
+}
+
+function getToolStorageMaxChars(toolName: string): number {
+  const normalized = toolName.toLowerCase();
+  return TOOL_SPECIFIC_STORAGE_MAX_CHARS[normalized] ?? STORAGE_DEFAULT_MAX_CHARS;
 }
 
 /**
- * Get the dynamic max chars for a tool, scaled by the effective context window.
+ * Get the dynamic max bytes for a tool, scaled by the effective context window.
  *
  * When the effective context window is smaller than the reference (1M), all
  * limits are scaled down proportionally. For example:
- * - 1M context → 200K max chars (default)
- * - 200K context → 40K max chars (scaled to 20%)
- * - 400K context → 80K max chars (scaled to 40%)
+ * - 1M context → 50 KiB max bytes (default)
+ * - 200K context → 10 KiB max bytes (scaled to 20%)
+ * - 400K context → 20 KiB max bytes (scaled to 40%)
  *
  * This prevents a single tool output from consuming too large a fraction of
  * the available context when the actual limit is lower than expected.
  */
-function getToolMaxCharsDynamic(
+function getToolMaxBytesDynamic(
   toolName: string,
   userId?: string,
   modelId?: string,
   presetContextWindow?: number,
 ): number {
-  const baseMax = getToolMaxChars(toolName);
+  const baseMax = getToolMaxBytes(toolName);
 
   // If we don't have enough info for dynamic scaling, use the static limit
   if (!userId || !modelId) return baseMax;
@@ -137,26 +182,65 @@ function safeSerializeOutput(output: unknown): string {
 }
 
 /**
- * Truncate tool output if it exceeds the maximum allowed length.
- * Returns the (possibly truncated) output string.
+ * Take a UTF-8-safe head of `text` limited to `maxBytes` bytes.
+ *
+ * 与参考库的区别（有意为之）：参考库逐行累加、遇到首个超预算的行直接跳出，
+ * 单行超长内容会整行丢失；这里退化为按字节安全截断该行，保留最有用的头部。
  */
-export function truncateToolOutput(toolName: string, output: string): string {
-  const maxChars = getToolMaxChars(toolName);
-
-  if (output.length <= maxChars) return output;
-
-  return output.slice(0, maxChars) + TRUNCATION_NOTICE;
+function utf8SafeHead(text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return '';
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= maxBytes) return text;
+  let end = maxBytes;
+  // 回退到完整 UTF-8 边界，避免截出半个多字节字符。
+  while (end > 0 && (buf[end]! & 0b1100_0000) === 0b1000_0000) {
+    end -= 1;
+  }
+  return buf.subarray(0, end).toString('utf8');
 }
 
 /**
- * Truncate tool output for both string and object types.
- * Object outputs are serialized to JSON for size checking; if oversized, the
- * serialized form is truncated and returned as a string.
- * This is the primary entry point for tool output truncation in executeToolCalls.
+ * Head-keep by line count + byte budget（对齐参考库 2000 行 / 50 KiB 语义）。
+ */
+function truncateByLinesAndBytes(
+  output: string,
+  maxBytes: number,
+): { text: string; truncated: boolean } {
+  const lines = output.split('\n');
+  // 与参考库一致：尾随换行不计入行数。
+  if (output.endsWith('\n')) lines.pop();
+  const lineLimited = lines.length > MAX_LINES ? lines.slice(0, MAX_LINES).join('\n') : output;
+  const text = utf8SafeHead(lineLimited, maxBytes);
+  return { text, truncated: text !== output };
+}
+
+/**
+ * Truncate tool output if it exceeds the maximum allowed size.
+ * Returns the (possibly truncated) output string.
+ *
+ * Model-view only: the truncated form is what the model reads from history.
+ * Storage keeps the larger pre-persist form (see `truncateToolOutputUniversal`).
+ */
+export function truncateToolOutput(toolName: string, output: string): string {
+  const maxBytes = getToolMaxBytes(toolName);
+  const result = truncateByLinesAndBytes(output, maxBytes);
+  return result.truncated ? result.text + TRUNCATION_NOTICE : output;
+}
+
+/**
+ * Pre-persist (storage) truncation for both string and object types.
+ *
+ * Applied once in `executeToolCalls` before the tool result is written to the
+ * session transcript. Uses the storage ceiling (200k chars by default), NOT
+ * the model-view ceiling — the model-facing cap is enforced when the round
+ * renders history via `truncateToolOutput`, which keeps the full result
+ * retrievable through `read_tool_output`.
  */
 export function truncateToolOutputUniversal(toolName: string, output: unknown): unknown {
   if (typeof output === 'string') {
-    return truncateToolOutput(toolName, output);
+    const maxChars = getToolStorageMaxChars(toolName);
+    if (output.length <= maxChars) return output;
+    return output.slice(0, maxChars) + STORAGE_TRUNCATION_NOTICE;
   }
 
   if (output === null || output === undefined) {
@@ -165,14 +249,14 @@ export function truncateToolOutputUniversal(toolName: string, output: unknown): 
 
   // Object/array output — serialize and check size
   const serialized = safeSerializeOutput(output);
-  const maxChars = getToolMaxChars(toolName);
+  const maxChars = getToolStorageMaxChars(toolName);
 
   if (serialized.length <= maxChars) {
     return output;
   }
 
   // Truncate the serialized form
-  return serialized.slice(0, maxChars) + TRUNCATION_NOTICE;
+  return serialized.slice(0, maxChars) + STORAGE_TRUNCATION_NOTICE;
 }
 
 /**
@@ -191,16 +275,14 @@ export function truncateToolOutputDynamic(
   output: string,
   context: { userId: string; modelId: string; presetContextWindow?: number },
 ): string {
-  const maxChars = getToolMaxCharsDynamic(
+  const maxBytes = getToolMaxBytesDynamic(
     toolName,
     context.userId,
     context.modelId,
     context.presetContextWindow,
   );
-
-  if (output.length <= maxChars) return output;
-
-  return output.slice(0, maxChars) + TRUNCATION_NOTICE;
+  const result = truncateByLinesAndBytes(output, maxBytes);
+  return result.truncated ? result.text + TRUNCATION_NOTICE : output;
 }
 
 /**
@@ -221,16 +303,12 @@ export function truncateToolOutputDynamicUniversal(
   }
 
   const serialized = safeSerializeOutput(output);
-  const maxChars = getToolMaxCharsDynamic(
+  const maxBytes = getToolMaxBytesDynamic(
     toolName,
     context.userId,
     context.modelId,
     context.presetContextWindow,
   );
-
-  if (serialized.length <= maxChars) {
-    return output;
-  }
-
-  return serialized.slice(0, maxChars) + TRUNCATION_NOTICE;
+  const result = truncateByLinesAndBytes(serialized, maxBytes);
+  return result.truncated ? result.text + TRUNCATION_NOTICE : output;
 }

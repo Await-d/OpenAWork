@@ -25,6 +25,7 @@ interface FakeTerminalState {
   dataHandlers: Array<(data: string) => void>;
   scrollHandlers: Array<() => void>;
   selectionHandlers: Array<() => void>;
+  titleHandlers: Array<(title: string) => void>;
   selection: string;
   keyHandler: ((event: KeyboardEvent) => boolean) | null;
   disposeCount: number;
@@ -60,6 +61,7 @@ vi.mock('@xterm/xterm', () => {
       dataHandlers: [],
       scrollHandlers: [],
       selectionHandlers: [],
+      titleHandlers: [],
       selection: '',
       keyHandler: null,
       disposeCount: 0,
@@ -116,6 +118,10 @@ vi.mock('@xterm/xterm', () => {
     }
     onSelectionChange(handler: () => void) {
       this.state.selectionHandlers.push(handler);
+      return { dispose: (): void => undefined };
+    }
+    onTitleChange(handler: (title: string) => void) {
+      this.state.titleHandlers.push(handler);
       return { dispose: (): void => undefined };
     }
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void {
@@ -263,6 +269,7 @@ describe('InteractiveTerminalView', () => {
   function renderView(
     terminal: SessionTerminalView = makeTerminalView(),
     menuItems?: TerminalContextMenuItem[],
+    onTitleChange?: (title: string | null) => void,
   ) {
     render(
       <InteractiveTerminalView
@@ -272,6 +279,7 @@ describe('InteractiveTerminalView', () => {
         terminal={terminal}
         inputEnabled
         menuItems={menuItems}
+        onTitleChange={onTitleChange}
       />,
     );
   }
@@ -294,6 +302,22 @@ describe('InteractiveTerminalView', () => {
 
     expect(state.resets).toBe(1);
     expect(state.written).toContain('history');
+  });
+
+  it('xterm 窗口标题（OSC 0/1/2）上报宿主；空标题按 null 上报', () => {
+    const onTitleChange = vi.fn();
+    renderView(makeTerminalView(), undefined, onTitleChange);
+    const state = lastTerminal();
+
+    act(() => {
+      for (const handler of state.titleHandlers) handler('vim README.md');
+    });
+    expect(onTitleChange).toHaveBeenLastCalledWith('vim README.md');
+
+    act(() => {
+      for (const handler of state.titleHandlers) handler('');
+    });
+    expect(onTitleChange).toHaveBeenLastCalledWith(null);
   });
 
   it('output 按 seq 去重并使用增量 data', async () => {

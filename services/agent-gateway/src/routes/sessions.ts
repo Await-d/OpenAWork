@@ -48,6 +48,7 @@ import {
 } from '../session/session-file-backup-store.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildFileDiff } from '../tools/file-diff-format.js';
+import { deleteSpilledToolOutputsForSession } from '../tools/tool-output-spill.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
 import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
@@ -84,6 +85,9 @@ import {
 import { filterSessionsByPath } from '../session/session-path-filter.js';
 import { listSessionTodoLanes, listSessionTodos } from '../tools/todo-tools.js';
 import { terminateChildSession } from '../tools/tool-sandbox.js';
+import { cancelPendingPermissionRequestsForSession } from './permissions.js';
+import { cancelPendingQuestionRequestsForSession } from './questions.js';
+import { markPermissionNotificationsReadForSession } from '../session/notification-store.js';
 import { stopDirectChildSessions } from '../session/stop-child-sessions.js';
 import { resetDoomLoopHistory } from '../session/doom-loop-detector.js';
 import { clearExternalAccessTracking } from '../workspace/external-directory-guard.js';
@@ -1127,6 +1131,9 @@ async function deleteSessionTree(input: {
       // The session row is gone — drop its cached owner so later writes do
       // not resolve a stale user_id through the owner cache.
       invalidateSessionOwnerCache(session.id);
+
+      // 工具输出 spill 目录（超限结果的全文落盘）随会话树一起清理。
+      deleteSpilledToolOutputsForSession(session.id);
 
       backupStoragePaths.push(...candidatePaths);
       await taskStore.deleteGraph(taskGraphProjectRoot, session.id);
@@ -3456,8 +3463,34 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           taskId,
           userId: user.sub,
         });
+        // 任务取消 = 子会话整段断掉：连带作废它的待审批 / 待回答交互。
+        // 只终止流而不清 pending 时，下一次 `reconcileSessionStateStatus` 会因为
+        // pending 交互把已终止的子会话重新掰回 paused（与 `stopChildSessions` 同因）。
+        let cancelledPermissions = 0;
+        let cancelledQuestions = 0;
+        if (result.terminated) {
+          cancelledPermissions = cancelPendingPermissionRequestsForSession({
+            sessionId: childSessionId,
+            userId: user.sub,
+          });
+          cancelledQuestions = cancelPendingQuestionRequestsForSession({
+            sessionId: childSessionId,
+            userId: user.sub,
+          });
+        }
+        if (cancelledPermissions > 0) {
+          markPermissionNotificationsReadForSession({
+            sessionId: childSessionId,
+            userId: user.sub,
+          });
+        }
         step.succeed(undefined, { cancelled: result.terminated, stopped: result.stopped });
-        return reply.send({ cancelled: result.terminated, stopped: result.stopped });
+        return reply.send({
+          cancelled: result.terminated,
+          stopped: result.stopped,
+          cancelledPermissions,
+          cancelledQuestions,
+        });
       }
 
       taskManager.cancelTask(taskEntry.graph, taskId);

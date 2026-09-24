@@ -19,16 +19,30 @@ import type { SessionTerminalView } from '../../conversation-runtime/terminals/t
 import { CloseIcon } from './TerminalIcons.js';
 
 /**
- * tab 显示标签的优先级：用户自定义名 > agent 描述 > 命令前三个词 > `终端 N`。
+ * tab 显示标签的优先级：用户自定义名 > agent 描述 > 窗口标题 > 命令前三个词 > `终端 N`。
+ *
+ * 窗口标题来自 shell / TUI 自己设置的窗口名（pty 里的 OSC 0/1/2 转义，经 xterm
+ * `onTitleChange` 上报），用户在不重命名时就能看到真实进程名（`vim README.md` /
+ * `npm run dev` / `ssh host`…），而不是位置味的 `终端 1`。描述排在标题前是因为
+ * agent 终端的中文摘要比同一台机器上高度重复的 `user@host: ~/dir` 更有辨识度。
+ *
  * 抽成导出函数是因为「⋯ → 重命名」需要和 tab 上显示的文案完全一致地预填。
  */
-export function terminalTabLabel(term: SessionTerminalView, index: number): string {
+export function terminalTabLabel(
+  term: SessionTerminalView,
+  index: number,
+  windowTitle?: string | null,
+): string {
   if (term.name && term.name.trim().length > 0) {
     return term.name.trim();
   }
   if (term.description && term.description.trim().length > 0) {
     const desc = term.description.trim();
     return desc.length > 24 ? `${desc.slice(0, 22)}…` : desc;
+  }
+  const title = windowTitle?.trim();
+  if (title !== undefined && title.length > 0) {
+    return title.length > 24 ? `${title.slice(0, 22)}…` : title;
   }
   if (term.toolName === 'quick_terminal') {
     return `终端 ${index + 1}`;
@@ -63,6 +77,11 @@ export interface TerminalTabStripProps {
   terminals: readonly SessionTerminalView[];
   activeId: string | null;
   /**
+   * 窗口标题缓存（terminalId → OSC 标题）；缺省 = 无标题，标签按既有优先级回落。
+   * 由 pane 从面板级环境透传（见 `TerminalViewEnvironment.terminalTitles`）。
+   */
+  terminalTitles?: ReadonlyMap<string, string>;
+  /**
    * 所属 pane（分屏时是该组 id；无分屏的单组由调用方传隐式 pane 常量）。
    * 只做 DOM 标注（`data-pane-id`），供命中判定 / 测试定位用。
    */
@@ -89,6 +108,7 @@ export interface TerminalTabStripProps {
 export function TerminalTabStrip({
   terminals,
   activeId,
+  terminalTitles,
   paneId,
   renamingId,
   renameValue,
@@ -123,7 +143,7 @@ export function TerminalTabStrip({
       ) : (
         terminals.map((term, index) => {
           const isActive = term.terminalId === activeId;
-          const label = terminalTabLabel(term, index);
+          const label = terminalTabLabel(term, index, terminalTitles?.get(term.terminalId));
           const isRenaming = renamingId === term.terminalId;
           return (
             <div

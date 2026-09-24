@@ -17,6 +17,12 @@ import {
 } from '../skill/skill-selection-context.js';
 import { BUILTIN_MCP_IDS } from '../mcp/builtin-mcps.js';
 import { loadConfiguredMcpServersForUser } from '../mcp/mcp-runtime.js';
+import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../mcp/mcp-manage-tool-name.js';
+import { MEMORY_MANAGE_TOOL_NAME } from '../memory/memory-manage-tool-name.js';
+import { SKILL_MANAGE_TOOL_NAME } from '../skill/skill-manage-tool-name.js';
+import { SCHEDULE_MANAGE_TOOL_NAME } from '../cron/schedule-manage-tool-name.js';
+import { AGENT_MANAGE_TOOL_NAME } from '../agent/agent-manage-tool-name.js';
+import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../team/team-workspace-manage-tool-name.js';
 import {
   normalizeChannelCapabilityContextPromptInjections,
   parseChannelPromptInjections,
@@ -405,8 +411,11 @@ export function buildCapabilityContext(
     ...metadataSections,
     ...(options?.sections ?? {}),
   });
-  const section = (kind: CapabilityDescriptor['kind'], title: string, callableOnly = false) => {
-    const items = capabilities.filter((cap) => {
+  const filterItems = (
+    kind: CapabilityDescriptor['kind'],
+    callableOnly = false,
+  ): CapabilityDescriptor[] =>
+    capabilities.filter((cap) => {
       if (cap.kind !== kind) return false;
       if (cap.enabled === false) return false;
       if (callableOnly && cap.callable !== true) return false;
@@ -424,6 +433,8 @@ export function buildCapabilityContext(
       }
       return true;
     });
+
+  const renderDetailedSection = (title: string, items: CapabilityDescriptor[]): string => {
     if (items.length === 0) return '';
     return `## ${title}\n${items
       .map((item) => {
@@ -435,22 +446,80 @@ export function buildCapabilityContext(
       .join('\n')}`;
   };
 
+  const visibleToolItems = filterItems('tool', true);
+  // Skills 的触发说明已由 `Skill` 工具描述承载（effective 清单 + 描述 + 标签）。
+  // 工具可见时只列名称，避免同一批描述在能力目录里再展开一遍（此前约 14k 字符/轮）。
+  const skillToolVisible = visibleToolItems.some((item) => item.label === 'Skill');
+  const skillItems = filterItems('skill');
+  const skillsSection =
+    skillItems.length === 0
+      ? ''
+      : skillToolVisible
+        ? [
+            '## 系统 Skills',
+            `- 本轮可用技能清单与触发说明见 \`Skill\` 工具描述：${skillItems
+              .map((item) => item.label)
+              .join('、')}`,
+          ].join('\n')
+        : renderDetailedSection('系统 Skills', skillItems);
+
+  // 工具只列名称：参数与说明以本轮 tools 列表为准。此前把 80+ 个工具的完整
+  // 描述在能力目录里二次展开（约 30k 字符/轮），是本目录最大的一处重复开销。
+  const toolsSection =
+    visibleToolItems.length === 0
+      ? ''
+      : [
+          '## 聊天可调用工具（仅名称）',
+          `- ${visibleToolItems.map((item) => item.label).join(', ')}`,
+        ].join('\n');
+
   const sectionsText = [
-    sections.agents ? section('agent', '系统 Agents') : '',
-    sections.skills ? section('skill', '系统 Skills') : '',
-    sections.mcps ? section('mcp', '系统 MCP Servers') : '',
-    sections.tools ? section('tool', '聊天可调用工具', true) : '',
-    sections.commands ? section('command', '系统 Commands') : '',
+    sections.agents ? renderDetailedSection('系统 Agents', filterItems('agent')) : '',
+    sections.skills ? skillsSection : '',
+    sections.mcps ? renderDetailedSection('系统 MCP Servers', filterItems('mcp')) : '',
+    sections.tools ? toolsSection : '',
+    sections.commands ? renderDetailedSection('系统 Commands', filterItems('command')) : '',
   ].filter((part) => part.length > 0);
 
   if (sectionsText.length === 0) {
     return '';
   }
 
+  // 自助管理类工具提示：仅在工具对当前会话可见且「聊天可调用工具」区块启用时注入，
+  // 避免 team / cron / channel 会话看到不可用工具的使用指引。
+  const isToolVisible = (toolName: string): boolean =>
+    Boolean(sections.tools) &&
+    capabilities.some(
+      (cap) => cap.kind === 'tool' && cap.callable === true && cap.label === toolName,
+    );
+  const managementHints = [
+    isToolVisible(MCP_MANAGE_SERVERS_TOOL_NAME)
+      ? `需要新增、修改、启停或移除 MCP 服务器时，使用 \`${MCP_MANAGE_SERVERS_TOOL_NAME}\`；变更类操作会请求用户批准，写入后立即生效。`
+      : '',
+    isToolVisible(MEMORY_MANAGE_TOOL_NAME)
+      ? `需要记住或维护用户的长期偏好 / 事实时，使用 \`${MEMORY_MANAGE_TOOL_NAME}\`；变更类操作会请求用户批准，写入后下一轮即时生效。`
+      : '',
+    isToolVisible(SKILL_MANAGE_TOOL_NAME)
+      ? `需要安装、卸载或启停技能时，使用 \`${SKILL_MANAGE_TOOL_NAME}\`；变更类操作会请求用户批准（仅支持注册源技能）。`
+      : '',
+    isToolVisible(SCHEDULE_MANAGE_TOOL_NAME)
+      ? `需要新建、修改或查看定时任务时，使用 \`${SCHEDULE_MANAGE_TOOL_NAME}\`；变更类操作会请求用户批准，任务与执行历史重启后仍保留。`
+      : '',
+    isToolVisible(AGENT_MANAGE_TOOL_NAME)
+      ? `需要新建、修改或查看自定义 Agent 时，使用 \`${AGENT_MANAGE_TOOL_NAME}\`；变更类操作会请求用户批准（内置 Agent 仅允许改模型配置）。`
+      : '',
+    isToolVisible(TEAM_WORKSPACE_MANAGE_TOOL_NAME)
+      ? `需要新建、修改或查看团队工作区时，使用 \`${TEAM_WORKSPACE_MANAGE_TOOL_NAME}\`；变更类操作会请求用户批准，roster 的能力绑定必须是已安装技能 / 已配置 MCP。`
+      : '',
+  ].filter((hint) => hint.length > 0);
+
   return [
-    '以下是当前系统的能力目录。只有“聊天可调用工具”会在本轮作为模型可调用 tool 暴露；其余条目用于描述系统能力、命令入口、已安装技能以及参考目录能力，不应被视为本轮可直接调用的 tool。',
+    '以下是当前系统的能力目录。“聊天可调用工具”只列名称、按本轮工具面实际可调用（直接暴露，或经可折叠工具目录 `tool_search` / `tool_invoke` 访问）；参数与说明以本轮 tools 列表或可折叠目录为准。“系统 Skills”同理以 `Skill` 工具描述为准；其余条目用于描述系统能力、命令入口、已安装技能以及参考目录能力，不应被视为本轮可直接调用的 tool。',
     ...sectionsText,
-  ].join('\n\n');
+    ...managementHints,
+  ]
+    .filter((part) => part.length > 0)
+    .join('\n\n');
 }
 
 export async function capabilitiesRoutes(app: FastifyInstance): Promise<void> {

@@ -13,22 +13,22 @@ const settingsClientMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@openAwork/shared-ui', () => ({
-  MCPServerConfig: ({
+  McpServerManager: ({
     servers,
+    statuses = [],
     title,
     showAddForm = true,
   }: {
     servers: Array<{ id: string }>;
+    statuses?: Array<{ id: string }>;
     title?: string;
     showAddForm?: boolean;
   }) => (
     <div>
       {title ?? 'MCP 配置表单'}:{servers.map((server) => server.id).join(',')}
+      {statuses.length > 0 ? <span> 状态:{statuses.map((s) => s.id).join(',')}</span> : null}
       {showAddForm ? <span>显示新增</span> : <span>隐藏新增</span>}
     </div>
-  ),
-  MCPServerList: ({ servers }: { servers: Array<{ id: string }> }) => (
-    <div>MCP 状态列表:{servers.map((server) => server.id).join(',')}</div>
   ),
 }));
 
@@ -46,7 +46,7 @@ vi.mock('@openAwork/web-client', () => ({
 }));
 
 vi.mock('./skills-plugin-panel.js', () => ({
-  SkillsPluginPanel: () => <div>管理已安装的 Agent 技能，控制每条技能是否对当前账号启用。</div>,
+  SkillsPluginPanel: () => <div>技能管理面板</div>,
 }));
 
 vi.mock('../connection/websearch-section.js', () => ({
@@ -134,7 +134,7 @@ describe('PluginsTabContent', () => {
     renderPluginsTab('/settings/plugins?plugin=skills');
 
     await waitFor(() => {
-      expect(screen.getByText(/管理已安装的 Agent 技能/)).toBeTruthy();
+      expect(screen.getByText('技能管理面板')).toBeTruthy();
     });
   });
 
@@ -144,8 +144,9 @@ describe('PluginsTabContent', () => {
     await waitFor(() => {
       expect(screen.getAllByText('MCP 服务器').length).toBeGreaterThan(0);
     });
-    expect(screen.getByText('MCP 配置表单:codegraph')).toBeTruthy();
-    expect(screen.getByText('MCP 状态列表:codegraph')).toBeTruthy();
+    // 配置与运行状态合并进同一个管理列表，且排除搜索 MCP。
+    expect(screen.getByText(/MCP 配置表单:codegraph/)).toBeTruthy();
+    expect(screen.getByText(/状态:codegraph/)).toBeTruthy();
     expect(screen.queryByText(/open_websearch/)).toBeNull();
   });
 
@@ -155,8 +156,8 @@ describe('PluginsTabContent', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Web 搜索').length).toBeGreaterThan(0);
     });
-    expect(screen.getByText('搜索 MCP 配置:open_websearch,websearch')).toBeTruthy();
-    expect(screen.getByText('MCP 状态列表:open_websearch,websearch')).toBeTruthy();
+    expect(screen.getByText(/搜索 MCP:open_websearch,websearch/)).toBeTruthy();
+    expect(screen.getByText(/状态:open_websearch,websearch/)).toBeTruthy();
     expect(screen.getByText('隐藏新增')).toBeTruthy();
     expect(screen.getByText('Web 搜索策略')).toBeTruthy();
   });
@@ -165,10 +166,10 @@ describe('PluginsTabContent', () => {
     renderPluginsTab('/settings/plugins?plugin=desktop-automation');
 
     await waitFor(() => {
-      expect(screen.getByText(/控制 Agent 是否获得桌面端专属的浏览器自动化工具/)).toBeTruthy();
+      expect(screen.getByText(/为 Agent 提供网页导航、点击、填写与截图 Tool/)).toBeTruthy();
     });
     expect(screen.getByText('desktop_automation')).toBeTruthy();
-    expect(screen.getByText('启用插件')).toBeTruthy();
+    expect(screen.getByRole('switch', { name: '启用插件' })).toBeTruthy();
   });
 
   it('切换 desktop-automation 开关会保存 desktopAutomation.enabled 且不影响 desktopControl', async () => {

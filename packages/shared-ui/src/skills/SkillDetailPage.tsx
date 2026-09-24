@@ -1,4 +1,4 @@
-import { color } from '../tokens.js';
+import { color, font, radius, spacing } from '../tokens.js';
 import type { CSSProperties } from 'react';
 import type { MarketSkill } from './SkillMarketHome.js';
 
@@ -17,199 +17,214 @@ export interface SkillDetailPageProps {
   isInstalled?: boolean;
 }
 
+const styles = `
+[data-openawork-skill-detail] .skd-btn {
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+[data-openawork-skill-detail] .skd-btn--ghost:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: ${color.fgStrong};
+}
+[data-openawork-skill-detail] .skd-btn--primary:hover:not(:disabled) {
+  background: ${color.accentHover};
+}
+[data-openawork-skill-detail] :where(button):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+`;
+
 const s: Record<string, CSSProperties> = {
   root: {
-    background: 'var(--bg-base)',
-    minHeight: '100%',
-    fontFamily: 'system-ui, sans-serif',
-    color: 'var(--fg-default)',
+    color: color.fgDefault,
+    display: 'grid',
+    fontFamily: font.sans,
+    gap: spacing[3],
     maxWidth: 860,
+    minHeight: '100%',
   },
   topBar: {
     display: 'flex',
     alignItems: 'center',
-    padding: '1rem 1.5rem 0',
   },
   backBtn: {
-    background: 'transparent',
-    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    color: 'var(--fg-muted)',
-    fontSize: 12,
-    cursor: 'pointer',
-    padding: '0.35rem 0.75rem',
-    borderRadius: 6,
-    display: 'flex',
     alignItems: 'center',
+    background: 'transparent',
+    border: `1px solid ${color.borderDefault}`,
+    borderRadius: radius.sm,
+    color: color.fgMuted,
+    cursor: 'pointer',
+    display: 'flex',
+    fontSize: 12,
     gap: 5,
-    transition: 'border-color 0.15s, color 0.15s',
+    padding: '4px 10px',
   },
   hero: {
-    padding: '1.5rem 1.5rem 1.25rem',
-    borderBottom: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+    borderBottom: `1px solid ${color.borderSubtle}`,
+    paddingBottom: spacing[4],
   },
   heroInner: {
-    display: 'flex',
     alignItems: 'flex-start',
+    display: 'flex',
+    gap: spacing[4],
     justifyContent: 'space-between',
-    gap: '1rem',
   },
   iconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    background: 'linear-gradient(135deg, rgba(99,102,241,0.25) 0%, rgba(139,92,246,0.15) 100%)',
-    border: '1px solid rgba(99,102,241,0.3)',
-    display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 22,
+    background: `linear-gradient(135deg, ${color.accentMuted} 0%, ${color.auxMuted} 100%)`,
+    border: `1px solid ${color.accentBorder}`,
+    borderRadius: radius.lg,
+    display: 'flex',
     flexShrink: 0,
+    fontSize: 22,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
   },
-  titleGroup: { flex: 1 },
+  titleGroup: { flex: 1, minWidth: 0 },
   title: {
-    margin: 0,
-    fontSize: 20,
-    fontWeight: 700,
-    color: 'var(--fg-default)',
-    lineHeight: 1.2,
-    display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap' as const,
+    color: color.fgStrong,
+    display: 'flex',
+    flexWrap: 'wrap',
+    fontSize: 18,
+    fontWeight: 700,
+    gap: spacing[2],
+    lineHeight: 1.25,
+    margin: 0,
   },
   verifiedBadge: {
-    fontSize: 11,
+    background: color.successMuted,
+    border: `1px solid ${color.successBorder}`,
+    borderRadius: radius.xs,
     color: color.success,
+    fontSize: 11,
     fontWeight: 600,
-    background: 'rgba(52,211,153,0.12)',
-    border: '1px solid rgba(52,211,153,0.3)',
-    borderRadius: 4,
     padding: '1px 6px',
   },
   desc: {
-    margin: '0.35rem 0 0',
+    color: color.fgMuted,
     fontSize: 13,
-    color: 'var(--fg-muted)',
     lineHeight: 1.6,
+    margin: '6px 0 0',
   },
   metaRow: {
+    color: color.fgMuted,
     display: 'flex',
-    gap: '1.25rem',
-    flexWrap: 'wrap' as const,
-    marginTop: '0.75rem',
+    flexWrap: 'wrap',
     fontSize: 12,
-    color: 'var(--fg-muted)',
+    gap: spacing[4],
+    marginTop: spacing[2],
   },
   metaItem: {
-    display: 'flex',
     alignItems: 'center',
+    display: 'flex',
     gap: 4,
   },
   tagRow: {
     display: 'flex',
+    flexWrap: 'wrap',
     gap: 5,
-    flexWrap: 'wrap' as const,
-    marginTop: '0.65rem',
+    marginTop: spacing[2],
   },
   tag: {
+    background: color.auxSubtle,
+    border: `1px solid ${color.auxBorder}`,
+    borderRadius: radius.xs,
+    color: color.aux,
     fontSize: 10,
-    padding: '2px 7px',
-    borderRadius: 4,
-    background: 'rgba(99,102,241,0.12)',
-    color: 'var(--accent)',
     fontWeight: 500,
-    border: '1px solid rgba(99,102,241,0.2)',
+    padding: '1px 6px',
   },
   installBtn: {
-    background: 'var(--accent)',
-    color: color.fgOnAccent,
+    background: color.accent,
     border: 'none',
-    borderRadius: 8,
-    padding: '0.6rem 1.4rem',
-    fontSize: 13,
+    borderRadius: radius.md,
+    color: color.fgOnAccent,
     cursor: 'pointer',
-    fontWeight: 600,
-    whiteSpace: 'nowrap' as const,
     flexShrink: 0,
-    transition: 'opacity 0.15s',
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '8px 18px',
+    whiteSpace: 'nowrap',
   },
   installedBadge: {
-    display: 'flex',
     alignItems: 'center',
-    gap: 5,
-    background: 'rgba(52,211,153,0.1)',
-    border: '1px solid rgba(52,211,153,0.3)',
+    background: color.successMuted,
+    border: `1px solid ${color.successBorder}`,
+    borderRadius: radius.md,
     color: color.success,
-    borderRadius: 8,
-    padding: '0.5rem 1rem',
+    display: 'flex',
+    flexShrink: 0,
     fontSize: 12,
     fontWeight: 600,
-    whiteSpace: 'nowrap' as const,
-    flexShrink: 0,
+    gap: 5,
+    padding: '6px 14px',
+    whiteSpace: 'nowrap',
   },
   body: {
-    padding: '1.25rem 1.5rem',
+    display: 'grid',
+    gap: spacing[5],
   },
-  section: { marginBottom: '1.5rem' },
+  section: { display: 'grid', gap: spacing[2] },
   sectionTitle: {
+    color: color.fgMuted,
     fontSize: 11,
     fontWeight: 700,
-    color: 'var(--fg-muted)',
-    textTransform: 'uppercase' as const,
-    letterSpacing: 1,
-    marginBottom: '0.6rem',
+    letterSpacing: 0.8,
   },
   card: {
-    background: 'var(--bg-overlay)',
-    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    borderRadius: 10,
-    padding: '1rem',
+    background: color.bgOverlay,
+    border: `1px solid ${color.borderSubtle}`,
+    borderRadius: radius.lg,
+    padding: spacing[4],
   },
   readme: {
+    color: color.fgDefault,
     fontSize: 13,
-    color: 'var(--fg-default)',
     lineHeight: 1.75,
-    whiteSpace: 'pre-wrap' as const,
+    whiteSpace: 'pre-wrap',
   },
   permRow: {
-    display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    padding: '0.45rem 0',
+    display: 'flex',
     fontSize: 12,
+    gap: spacing[2],
+    padding: '6px 0',
   },
   permBadge: {
-    fontSize: 10,
-    padding: '1px 5px',
-    borderRadius: 3,
-    fontWeight: 700,
-    background: 'rgba(250,204,21,0.12)',
+    background: color.contrastMuted,
+    border: `1px solid ${color.contrastBorder}`,
+    borderRadius: radius.xs,
     color: color.contrast,
-    border: '1px solid rgba(250,204,21,0.2)',
+    fontSize: 10,
+    fontWeight: 700,
+    padding: '1px 5px',
   },
   infoGrid: {
     display: 'grid',
+    gap: spacing[3],
     gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-    gap: '0.75rem',
   },
   infoCell: {
-    background: 'var(--bg-overlay)',
-    border: '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
-    borderRadius: 8,
-    padding: '0.65rem 0.85rem',
+    background: color.bgOverlay,
+    border: `1px solid ${color.borderSubtle}`,
+    borderRadius: radius.md,
+    padding: '8px 12px',
   },
   infoCellLabel: {
+    color: color.fgMuted,
     fontSize: 10,
     fontWeight: 700,
-    color: 'var(--fg-muted)',
-    textTransform: 'uppercase' as const,
     letterSpacing: 0.8,
     marginBottom: 3,
   },
   infoCellValue: {
+    color: color.fgDefault,
     fontSize: 13,
     fontWeight: 600,
-    color: 'var(--fg-default)',
   },
 };
 
@@ -231,54 +246,60 @@ export function SkillDetailPage({
   isInstalled = false,
 }: SkillDetailPageProps) {
   const emoji = CATEGORY_EMOJI[skill.category] ?? '✦';
-  const hasPermissions = (skill.permissions?.length ?? 0) > 0;
+  const permissions = skill.permissions ?? [];
+  const hasPermissions = permissions.length > 0;
 
   return (
-    <div style={s.root}>
+    <div data-openawork-skill-detail="true" style={s.root}>
+      <style>{styles}</style>
+
       <div style={s.topBar}>
-        <button type="button" style={s.backBtn} onClick={onBack}>
+        <button type="button" className="skd-btn skd-btn--ghost" style={s.backBtn} onClick={onBack}>
           ← 技能市场
         </button>
       </div>
 
       <div style={s.hero}>
         <div style={s.heroInner}>
-          <div style={{ display: 'flex', gap: '0.85rem', flex: 1, minWidth: 0 }}>
-            <div style={s.iconWrap}>{emoji}</div>
+          <div style={{ display: 'flex', gap: spacing[3], flex: 1, minWidth: 0 }}>
+            <div aria-hidden style={s.iconWrap}>
+              {emoji}
+            </div>
             <div style={s.titleGroup}>
               <h1 style={s.title}>
                 {skill.name}
-                {skill.verified && <span style={s.verifiedBadge}>✓ 已验证</span>}
+                {skill.verified ? <span style={s.verifiedBadge}>✓ 已验证</span> : null}
               </h1>
-              {skill.description && <p style={s.desc}>{skill.description}</p>}
+              {skill.description ? <p style={s.desc}>{skill.description}</p> : null}
               <div style={s.metaRow}>
                 <span style={s.metaItem}>v{skill.version}</span>
-                {skill.author && <span style={s.metaItem}>👤 {skill.author}</span>}
-                {skill.license && <span style={s.metaItem}>⚖️ {skill.license}</span>}
-                {skill.downloads > 0 && (
+                {skill.author ? <span style={s.metaItem}>👤 {skill.author}</span> : null}
+                {skill.license ? <span style={s.metaItem}>⚖️ {skill.license}</span> : null}
+                {skill.downloads > 0 ? (
                   <span style={s.metaItem}>⬇️ {skill.downloads.toLocaleString()} 次</span>
-                )}
+                ) : null}
               </div>
-              {(skill.tags ?? []).length > 0 && (
+              {(skill.tags ?? []).length > 0 ? (
                 <div style={s.tagRow}>
-                  {(skill.tags ?? []).map((t) => (
-                    <span key={t} style={s.tag}>
-                      {t}
+                  {(skill.tags ?? []).map((tag) => (
+                    <span key={tag} style={s.tag}>
+                      {tag}
                     </span>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 
           {isInstalled ? (
             <div style={s.installedBadge}>
-              <span>✓</span>
+              <span aria-hidden>✓</span>
               <span>已安装</span>
             </div>
           ) : (
             <button
               type="button"
+              className="skd-btn skd-btn--primary"
               style={
                 skill.installable === false
                   ? { ...s.installBtn, opacity: 0.5, cursor: 'not-allowed' }
@@ -294,7 +315,7 @@ export function SkillDetailPage({
       </div>
 
       <div style={s.body}>
-        <div style={{ ...s.section, ...s.infoGrid }}>
+        <div style={s.infoGrid}>
           <div style={s.infoCell}>
             <div style={s.infoCellLabel}>版本</div>
             <div style={s.infoCellValue}>v{skill.version}</div>
@@ -303,68 +324,60 @@ export function SkillDetailPage({
             <div style={s.infoCellLabel}>分类</div>
             <div style={s.infoCellValue}>{skill.category}</div>
           </div>
-          {skill.license && (
+          {skill.license ? (
             <div style={s.infoCell}>
               <div style={s.infoCellLabel}>许可</div>
               <div style={s.infoCellValue}>{skill.license}</div>
             </div>
-          )}
-          {skill.author && (
+          ) : null}
+          {skill.author ? (
             <div style={s.infoCell}>
               <div style={s.infoCellLabel}>作者</div>
               <div style={s.infoCellValue}>{skill.author}</div>
             </div>
-          )}
+          ) : null}
         </div>
 
-        {hasPermissions && (
+        {hasPermissions ? (
           <div style={s.section}>
             <div style={s.sectionTitle}>所需权限</div>
             <div style={s.card}>
-              {skill.permissions?.map((perm, i) => (
+              {permissions.map((perm, index) => (
                 <div
                   key={perm}
                   style={{
                     ...s.permRow,
                     borderBottom:
-                      i < (skill.permissions?.length ?? 0) - 1
-                        ? '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))'
-                        : 'none',
+                      index < permissions.length - 1 ? `1px solid ${color.borderSubtle}` : 'none',
                   }}
                 >
                   <span style={s.permBadge}>PERM</span>
-                  <span
-                    style={{
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      color: 'var(--fg-muted)',
-                    }}
-                  >
+                  <span style={{ color: color.fgMuted, fontFamily: font.mono, fontSize: 12 }}>
                     {perm}
                   </span>
                 </div>
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
-        {skill.readme && (
+        {skill.readme ? (
           <div style={s.section}>
             <div style={s.sectionTitle}>说明文档</div>
             <div style={s.card}>
               <div style={s.readme}>{skill.readme}</div>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {skill.changelog && (
+        {skill.changelog ? (
           <div style={s.section}>
             <div style={s.sectionTitle}>更新日志</div>
             <div style={s.card}>
               <div style={{ ...s.readme, fontSize: 12 }}>{skill.changelog}</div>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

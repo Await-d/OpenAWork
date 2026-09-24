@@ -1,6 +1,5 @@
 import { Route, type RouteRoutedModelInput } from '../route/client.js';
 import { Endpoint } from '../route/endpoint.js';
-import { Framing } from '../route/framing.js';
 import * as OpenAIChat from './openai-chat.js';
 
 const ADAPTER = 'openai-compatible-chat';
@@ -17,8 +16,10 @@ export type OpenAICompatibleChatModelInput = RouteRoutedModelInput;
 export const route = Route.make({
   id: ADAPTER,
   protocol: OpenAIChat.protocol,
+  // 对齐参考库：OpenAI 兼容家族统一用 `openai` 命名空间。
+  providerMetadataKey: 'openai',
   endpoint: Endpoint.path('/chat/completions'),
-  framing: Framing.sse,
+  framing: OpenAIChat.framing,
 });
 
 export * as OpenAICompatibleChat from './openai-compatible-chat.js';

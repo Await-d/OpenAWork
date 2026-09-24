@@ -185,6 +185,24 @@ export function v2ToV1Message(withParts: MessageWithParts): Message {
               : typeof sigBedrock === 'string' && sigBedrock.length > 0
                 ? sigBedrock
                 : undefined;
+        // OpenAI Chat 家族：思维链字段名 / 结构化条目存放在路由
+        // `providerMetadataKey` 命名空间下（存量行缺省 `openai`），读路径必须
+        // 回传 key 与内容，否则重放时元数据静默丢失。
+        const openAIReasoningKey =
+          typeof part.metadata?.['providerMetadataKey'] === 'string' &&
+          part.metadata['providerMetadataKey'].length > 0
+            ? part.metadata['providerMetadataKey']
+            : 'openai';
+        const openAIReasoningMeta = part.metadata?.[openAIReasoningKey] as
+          { reasoningField?: unknown; reasoningDetails?: unknown } | undefined;
+        const openAIReasoningField =
+          typeof openAIReasoningMeta?.reasoningField === 'string' &&
+          openAIReasoningMeta.reasoningField.length > 0
+            ? openAIReasoningMeta.reasoningField
+            : undefined;
+        const openAIReasoningDetails = Array.isArray(openAIReasoningMeta?.reasoningDetails)
+          ? openAIReasoningMeta.reasoningDetails
+          : undefined;
         content.push({
           type: 'reasoning',
           text: part.text,
@@ -198,6 +216,11 @@ export function v2ToV1Message(withParts: MessageWithParts): Message {
             : {}),
           ...(part.metadata?.['summary'] ? { summary: part.metadata['summary'] as string } : {}),
           ...(signature ? { signature } : {}),
+          ...(openAIReasoningField === undefined ? {} : { reasoningField: openAIReasoningField }),
+          ...(openAIReasoningDetails === undefined
+            ? {}
+            : { reasoningDetails: openAIReasoningDetails }),
+          ...(openAIReasoningKey === 'openai' ? {} : { providerMetadataKey: openAIReasoningKey }),
           ...(typeof part.time?.start === 'number' ? { startedAt: part.time.start } : {}),
           ...(typeof part.time?.end === 'number' ? { endedAt: part.time.end } : {}),
         });
@@ -695,7 +718,12 @@ export function appendSessionMessageV2(input: {
         type: 'reasoning',
         text: c.text,
         time: { start: startedAt, ...(typeof endedAt === 'number' ? { end: endedAt } : {}) },
-        ...(c.itemId || c.encryptedContent || c.summary || c.signature
+        ...(c.itemId ||
+        c.encryptedContent ||
+        c.summary ||
+        c.signature ||
+        c.reasoningField ||
+        c.reasoningDetails
           ? {
               metadata: {
                 ...(c.itemId ? { itemId: c.itemId } : {}),
@@ -705,6 +733,18 @@ export function appendSessionMessageV2(input: {
                 // (anthropic.signature) so the bridge can replay it on
                 // subsequent turns without losing the namespace.
                 ...(c.signature ? { anthropic: { signature: c.signature } } : {}),
+                // OpenAI Chat 家族：思维链字段名 + 结构化条目，按路由
+                // `providerMetadataKey`（缺省 `openai`）持久化，回传时由
+                // bridge 还原成同名 providerMetadata。
+                ...(c.reasoningField || c.reasoningDetails
+                  ? {
+                      [c.providerMetadataKey ?? 'openai']: {
+                        ...(c.reasoningField ? { reasoningField: c.reasoningField } : {}),
+                        ...(c.reasoningDetails ? { reasoningDetails: c.reasoningDetails } : {}),
+                      },
+                    }
+                  : {}),
+                ...(c.providerMetadataKey ? { providerMetadataKey: c.providerMetadataKey } : {}),
               },
             }
           : {}),
@@ -775,6 +815,7 @@ export function appendSessionMessageV2(input: {
       const toolResultContent = buildToolResultContent({
         toolCallId: c.toolCallId,
         toolName: c.toolName ?? c.toolCallId,
+        sessionId: input.sessionId,
         ...(c.clientRequestId ? { clientRequestId: c.clientRequestId } : {}),
         output: c.output,
         isError: c.isError,

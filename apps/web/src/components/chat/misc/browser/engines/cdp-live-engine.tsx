@@ -35,6 +35,7 @@ import type {
 } from '@openAwork/shared';
 
 import { resolveDevicePreset, type BrowserDevicePreset } from '../device-presets.js';
+import { NAVIGABLE_URL_PATTERN } from '../browser-url.js';
 import { useCdpLivePick, type CdpLivePickFeedback } from '../hooks/use-cdp-live-pick.js';
 import type { BrowserLivePhase, BrowserLiveSession } from '../hooks/use-browser-live-session.js';
 
@@ -43,9 +44,6 @@ const FRAME_ACK_FALLBACK_MS = 500;
 
 /** 设备尺寸 / UA 下发的防抖窗口：拖拽面板大小时不逐帧打 socket。 */
 export const DEVICE_SYNC_DEBOUNCE_MS = 200;
-
-/** 可导航的地址（about:blank 之类的占位页无需下发 navigate）。 */
-const NAVIGABLE_URL_PATTERN = /^https?:\/\//i;
 
 export interface LiveRect {
   left: number;

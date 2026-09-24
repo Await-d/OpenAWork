@@ -24,7 +24,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z, type ZodTypeAny } from 'zod';
 import type { ToolDefinition } from '@openAwork/agent-core';
-import { truncateToolOutput } from './tool-output-truncator.js';
+import { truncateToolOutputUniversal } from './tool-output-truncator.js';
 import type { GatewayToolDefinition } from './tool-definitions.js';
 
 /** Shape of a user-defined tool exported from a workspace tool module. */
@@ -227,8 +227,9 @@ async function loadToolModule(
         const result = await exportValue.execute(parsed, ctx);
         const output = typeof result === 'string' ? result : result.output;
 
-        // Apply truncation
-        return truncateToolOutput(toolName, output);
+        // 落盘用存储上限（200k）；模型视图的 50k 上限在渲染历史时统一施加，
+        // 这样超限部分仍可经 read_tool_output 取回。
+        return truncateToolOutputUniversal(toolName, output);
       },
     });
   }

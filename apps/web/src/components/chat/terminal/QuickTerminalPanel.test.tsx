@@ -152,6 +152,13 @@ function renderedTerminalIds(): string[] {
     .sort();
 }
 
+/** 首条 tab 条的**可见顺序**（DOM 序即渲染顺序）。 */
+function tabOrder(): Array<string | null> {
+  return Array.from(
+    screen.getByTestId('terminal-tab-strip').querySelectorAll('[data-terminal-id]'),
+  ).map((element) => element.getAttribute('data-terminal-id'));
+}
+
 function persistedLayout(): TerminalLayout {
   // 缺桶与「显式 null」在读取端语义一致，统一成 null 便于断言。
   return useUIStateStore.getState().terminalLayoutBySession['__default__'] ?? null;
@@ -272,6 +279,89 @@ describe('QuickTerminalPanel', () => {
     expect(screen.getByTestId('terminal-view').getAttribute('data-terminal-id')).toBe('t-new');
   });
 
+  it('tab 顺序 = 创建时间升序：上游「最新在前」也不会让新终端插到最左边', () => {
+    renderPanel([
+      makeTerminal({ terminalId: 't-new', startedAtMs: 1_700_000_100_000 }),
+      makeTerminal({ terminalId: 't-old', startedAtMs: 1_700_000_000_000 }),
+    ]);
+
+    expect(tabOrder()).toEqual(['t-old', 't-new']);
+  });
+
+  it('＋ 新建（隐式单组）：新终端追加在可见右侧，而不是最左', async () => {
+    const { onReload, view } = renderPanel([makeTerminal({ terminalId: 't-old' })]);
+
+    fireEvent.click(screen.getByRole('button', { name: '新建终端' }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledTimes(1));
+
+    // 上游同步后新终端进入列表（上游顺序是「最新在前」，显示层必须重排）。
+    view.rerender(
+      panelElement([
+        makeTerminal({ terminalId: 't-new', startedAtMs: 1_700_000_100_000 }),
+        makeTerminal({ terminalId: 't-old', startedAtMs: 1_700_000_000_000 }),
+      ]),
+    );
+
+    expect(tabOrder()).toEqual(['t-old', 't-new']);
+    expect(screen.getByTestId('terminal-tab-t-new').getAttribute('data-active')).toBe('true');
+  });
+
+  it('宿主组托管的树外终端：＋ 新建先按可见顺序物化，新 tab 落在可见末尾', async () => {
+    useUIStateStore.setState({
+      terminalLayoutBySession: { __default__: makePane('p1', ['t1']) },
+    });
+    renderPanel([
+      makeTerminal({ terminalId: 'o2', startedAtMs: 1_700_000_200_000 }),
+      makeTerminal({ terminalId: 't1', startedAtMs: 1_700_000_000_000 }),
+      makeTerminal({ terminalId: 'o1', startedAtMs: 1_700_000_100_000 }),
+    ]);
+
+    // 可见顺序：t1（树内）→ o1 → o2（树外，渲染在宿主组末尾）。
+    expect(tabOrder()).toEqual(['t1', 'o1', 'o2']);
+
+    const pane1 = screen.getByTestId('terminal-pane-p1');
+    fireEvent.click(within(pane1).getByRole('button', { name: '新建终端' }));
+
+    await waitFor(() => {
+      expect(persistedLayout()).toEqual(makePane('p1', ['t1', 'o1', 'o2', 't-new'], 't-new'));
+    });
+  });
+
+  it('点选宿主组的树外终端：先物化，位置不变且成为 active', () => {
+    useUIStateStore.setState({
+      terminalLayoutBySession: { __default__: makePane('p1', ['t1']) },
+    });
+    renderPanel([
+      makeTerminal({ terminalId: 't1', startedAtMs: 1_700_000_000_000 }),
+      makeTerminal({ terminalId: 'o1', startedAtMs: 1_700_000_100_000 }),
+      makeTerminal({ terminalId: 'o2', startedAtMs: 1_700_000_200_000 }),
+    ]);
+
+    fireEvent.click(screen.getByTestId('terminal-tab-o2'));
+
+    expect(persistedLayout()).toEqual(makePane('p1', ['t1', 'o1', 'o2'], 'o2'));
+  });
+
+  it('宿主组「合并到分屏」：先物化托管终端，合并结果落在可见末尾', () => {
+    useUIStateStore.setState({
+      terminalLayoutBySession: {
+        __default__: makeSplit('s1', 'row', [makePane('p1', ['t1']), makePane('p2', ['t2'])]),
+      },
+    });
+    renderPanel([
+      makeTerminal({ terminalId: 'o1', startedAtMs: 1_700_000_200_000 }),
+      makeTerminal({ terminalId: 't1', startedAtMs: 1_700_000_000_000 }),
+      makeTerminal({ terminalId: 't2', startedAtMs: 1_700_000_100_000 }),
+    ]);
+
+    const pane1 = screen.getByTestId('terminal-pane-p1');
+    fireEvent.click(within(pane1).getByRole('button', { name: '更多终端操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /合并到分屏/ }));
+
+    // o1 先并入 p1，p2 的 t2 再按可见顺序追加 → p1 独占（p2 清空后上提）。
+    expect(persistedLayout()).toEqual(makePane('p1', ['t1', 'o1', 't2'], 't2'));
+  });
+
   it('⋯ → 清屏：向当前终端写入 Ctrl+L（\\x0c）', async () => {
     renderPanel([makeTerminal()]);
     openMoreMenu();
@@ -290,6 +380,10 @@ describe('QuickTerminalPanel', () => {
   });
 
   it('⋯ → 关闭其他终端：只关闭非激活终端并 reload', async () => {
+    // 固定激活位（terminal-1）：本用例断言「保留 active、关闭其余」，不覆盖回落选择。
+    useUIStateStore.setState({
+      quickTerminalActiveIdByWorkspace: { [WORKSPACE]: 'terminal-1' },
+    });
     const { onReload } = renderPanel([
       makeTerminal(),
       makeTerminal({ terminalId: 'terminal-2' }),

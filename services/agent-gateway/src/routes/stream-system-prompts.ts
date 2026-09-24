@@ -369,6 +369,18 @@ export interface SystemPromptChainInput {
    * / round 起始时计算。空字符串视为未启用团队上下文。
    */
   teamInstructionStack?: string | null;
+  /**
+   * 工具折叠目录（仅折叠启用时非空）。对齐参考库把 Code Mode 目录放进
+   * instructions 的做法，注入 stable 段；目录在会话内字节稳定。
+   */
+  toolCatalogPrompt?: string | null;
+  /**
+   * 能力目录（agents / skills / MCP / 工具名 / commands）。
+   *
+   * 对齐参考库 instructions 的形状：注入 stable 段而不是挂在每条用户消息上，
+   * 让同一会话内的字节保持稳定（缓存友好），能力变化时下一轮整段刷新。
+   */
+  capabilityCatalogPrompt?: string | null;
 }
 
 /**
@@ -409,6 +421,10 @@ export function buildSystemPromptChain(input: SystemPromptChainInput): string[] 
     input.pinnedSkillsPrompt ?? '',
     // Slot 12: 260515-team-phase-a · 7 层团队指令栈
     input.teamInstructionStack ?? '',
+    // Slot 13: 工具折叠目录（对齐参考库 instructions 中的 Code Mode 目录）
+    input.toolCatalogPrompt ?? '',
+    // Slot 14: 能力目录（instructions 式；stable 段字节稳定）
+    input.capabilityCatalogPrompt ?? '',
   ];
 
   // Filter out empty strings (slots with no content and no placeholder)
@@ -452,6 +468,10 @@ export function buildTwoPartSystemPrompts(input: SystemPromptChainInput): {
     input.pinnedSkillsPrompt ?? '',
     // 260515-team-phase-a · 7 层团队指令栈（含 cache-breaker tag）
     input.teamInstructionStack ?? '',
+    // 工具折叠目录（对齐参考库 instructions 中的 Code Mode 目录）
+    input.toolCatalogPrompt ?? '',
+    // 能力目录（instructions 式；stable 段字节稳定）
+    input.capabilityCatalogPrompt ?? '',
   ];
 
   const dynamicSlots: string[] = [

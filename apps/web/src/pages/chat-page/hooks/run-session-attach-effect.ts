@@ -1284,10 +1284,28 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         }
 
         case 'no_active_stream': {
-          // 网关已权威确认「没有活跃流」：这是正常终态而非断连，绝不能弹出
-          // 「自动重连中」横幅。保留 attachAttemptedSessionRef 标记（attach 调用前
-          // 已设置），避免 effect 立即重复 attach。
-          cancelAttachRetry();
+          // 网关此刻没有活跃流，但会话状态仍为 running：典型场景是权限批准后的
+          // 续跑正在执行被批准的工具 / 模型轮尚未注册运行线程，或运行线程刚被
+          // 清理。此时若按「正常终态」直接放弃，续跑输出永远接不上、界面表现为
+          // 「批准后卡住」——改为有界重试，等活跃流出现后再 attach。会话真正
+          // 结束（idle + 无恢复流）时 disposition 会转入 terminal 并取消重试，
+          // 因此重试天然有界，不会形成空转循环。
+          if (sessionStateStatus === 'running') {
+            scheduleAttachRetry({
+              sessionId: sid,
+              delayMs: 1000,
+              beforeRetry: () => {
+                if (getActiveSessionId() !== sid) {
+                  return 'abort';
+                }
+
+                attachAttemptedSessionRef.current = null;
+                return 'proceed';
+              },
+            });
+          } else {
+            cancelAttachRetry();
+          }
           setStreamError(null);
           void loadCurrentSessionSnapshot(sid, {
             expectedSessionViewEpoch: attachSessionViewEpoch,
