@@ -5,6 +5,7 @@ import type {
   SettingsDiagnosticRecord,
   SettingsDevLogRecord,
 } from '../state/settings-types.js';
+import { redactSecrets, redactUrl } from './devtools-redact.js';
 import { stringifyDetails } from './devtools-workbench-primitives.js';
 
 export interface TroubleshootBundleInput {
@@ -48,6 +49,9 @@ function codeBlock(value: unknown): string {
  * 构建「排障上下文」Markdown：一次性汇总环境信息、数据源状态、全部诊断记录、
  * 全部错误日志与 Worker 异常，便于直接粘贴给 AI 或同事排查。
  *
+ * 诊断与日志的 `input` / `output` 会先经 `redactSecrets` 脱敏（密钥名、headers
+ * 子树、带凭据的 URL），网关地址经 `redactUrl` 处理——排障包会被外发，不得携带凭据。
+ *
  * 纯函数（无 React / 无 IO），单测覆盖格式稳定性。
  */
 export function buildTroubleshootBundleMarkdown(input: TroubleshootBundleInput): string {
@@ -65,7 +69,7 @@ export function buildTroubleshootBundleMarkdown(input: TroubleshootBundleInput):
     `- 构建时间：${input.buildTime}`,
     `- Git：${input.gitBranch} @ ${input.gitHash}`,
     `- 平台：${input.platform}`,
-    `- 网关地址：${input.gatewayUrl}`,
+    `- 网关地址：${redactUrl(input.gatewayUrl)}`,
     `- User-Agent：${input.userAgent}`,
     '',
     '## 概览',
@@ -110,11 +114,11 @@ export function buildTroubleshootBundleMarkdown(input: TroubleshootBundleInput):
         '',
         '输入：',
         '',
-        codeBlock(diagnostic.input),
+        codeBlock(redactSecrets(diagnostic.input)),
         '',
         '输出 / 错误：',
         '',
-        codeBlock(diagnostic.output),
+        codeBlock(redactSecrets(diagnostic.output)),
         '',
       );
     });
@@ -137,11 +141,11 @@ export function buildTroubleshootBundleMarkdown(input: TroubleshootBundleInput):
         '',
         '输入：',
         '',
-        codeBlock(log.input),
+        codeBlock(redactSecrets(log.input)),
         '',
         '输出：',
         '',
-        codeBlock(log.output),
+        codeBlock(redactSecrets(log.output)),
         '',
       );
     });

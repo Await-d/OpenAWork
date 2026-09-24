@@ -95,6 +95,44 @@ describe('buildTroubleshootBundleMarkdown', () => {
     expect(markdown).not.toContain('idle-worker');
   });
 
+  it('诊断与日志载荷中的凭据被脱敏（排障包可外发）', () => {
+    const markdown = buildTroubleshootBundleMarkdown(
+      baseInput({
+        gatewayUrl: 'https://user:pass@gateway.example.com',
+        diagnostics: [
+          {
+            filePath: 'providers.json',
+            message: '保存失败',
+            severity: 'error',
+            input: {
+              apiKey: 'sk-live-secret',
+              headers: { Authorization: 'Bearer abc' },
+            },
+            output: { endpoint: 'https://user:pass@api.example.com/v1', ok: false },
+          },
+        ],
+        errorLogs: [
+          {
+            level: 'error',
+            message: 'MCP 连接失败',
+            source: 'gateway',
+            timestamp: Date.parse('2026-09-22T21:28:00.000Z'),
+            input: { client_secret: 'oauth-secret' },
+            output: { ok: false },
+          },
+        ],
+      }),
+    );
+
+    expect(markdown).not.toContain('sk-live-secret');
+    expect(markdown).not.toContain('Bearer abc');
+    expect(markdown).not.toContain('oauth-secret');
+    expect(markdown).not.toContain('user:pass');
+    expect(markdown).toContain('- 网关地址：***');
+    expect(markdown).toContain('"apiKey": "***"');
+    expect(markdown).toContain('"ok": false');
+  });
+
   it('数据源状态表转义竖线，避免破坏表格结构', () => {
     const sourceStates = createInitialDevtoolsSourceStates();
     const markdown = buildTroubleshootBundleMarkdown(
