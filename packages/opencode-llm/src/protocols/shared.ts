@@ -370,13 +370,15 @@ export const sseFraming = (
         }),
     ),
     // Some OpenAI-compatible proxies serialize an empty flush as a bare
-    // `data: null`, between events or after `[DONE]`. No protocol has a null
-    // event, so it carries nothing and must not abort the stream.
+    // `data: null`, and Vertex AI partner models (e.g. `xai/grok-4.6`) send
+    // their keepalive as `data: : keepalive` while reasoning. No protocol has
+    // such an event, so they carry nothing and must not abort the stream.
     Stream.filter(
       (event) =>
         event.data.length > 0 &&
         (event.data !== '[DONE]' || options?.includeDone === true) &&
-        event.data !== 'null',
+        event.data !== 'null' &&
+        event.data !== ': keepalive',
     ),
     Stream.map((event) => {
       if (event.event === 'message') return event.data;

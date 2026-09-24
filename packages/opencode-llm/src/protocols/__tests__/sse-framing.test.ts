@@ -91,4 +91,15 @@ describe('sseFraming', () => {
 
     expect(frames).toEqual(['{"delta":"a"}', '[DONE]']);
   });
+
+  it('忽略 Vertex 合作模型的 `data: : keepalive` 心跳', async () => {
+    const frames = await framesOfChunks([
+      'data: : keepalive\n\n',
+      'data: {"delta":"a"}\n\n',
+      'data: : keepalive\n\n',
+      'data: {"delta":"b"}\n\n',
+    ]);
+
+    expect(frames).toEqual(['{"delta":"a"}', '{"delta":"b"}']);
+  });
 });
