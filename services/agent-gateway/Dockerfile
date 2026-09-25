@@ -52,6 +52,7 @@ COPY packages/mcp-client/package.json ./packages/mcp-client/
 COPY packages/opencode-llm/package.json ./packages/opencode-llm/
 COPY packages/pairing/package.json ./packages/pairing/
 COPY packages/platform-adapter/package.json ./packages/platform-adapter/
+COPY packages/plugin-sdk/package.json ./packages/plugin-sdk/
 COPY packages/resources/package.json ./packages/resources/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/skill-registry/package.json ./packages/skill-registry/
@@ -72,6 +73,7 @@ COPY packages/mcp-client ./packages/mcp-client
 COPY packages/opencode-llm ./packages/opencode-llm
 COPY packages/pairing ./packages/pairing
 COPY packages/platform-adapter ./packages/platform-adapter
+COPY packages/plugin-sdk ./packages/plugin-sdk
 COPY packages/resources ./packages/resources
 COPY packages/shared ./packages/shared
 COPY packages/skill-registry ./packages/skill-registry
