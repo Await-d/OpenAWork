@@ -10,11 +10,11 @@ vi.mock('../../infra/db.js', () => ({
 }));
 
 import {
-  filterPluginControlledToolsForUser,
   isDesktopAutomationPluginEnabledForUser,
   isDesktopControlPluginEnabledForUser,
   readPluginSettingsForUser,
 } from '../../tools/plugin-tool-settings.js';
+import { filterPluginControlledToolsForUser } from '../../plugin/builtin-groups.js';
 
 function tool(name: string): GatewayToolDefinition {
   return {

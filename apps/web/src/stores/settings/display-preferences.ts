@@ -247,12 +247,15 @@ type DisplayPreferenceValues = Omit<
 const DISPLAY_PREFERENCES_STORAGE_KEY = 'openAwork-display-preferences';
 
 /**
- * 工具类别折叠默认值——所有类别默认折叠（false）。
- * 用户可在设置中按类别开启默认展开。
+ * 工具类别折叠默认值。
+ *
+ * - `fileEdit` 默认 **展开**：对齐参考实现（opencode）的文件卡——编辑 / 写入的
+ *   内容变更直接可见，不要求用户先点开卡片；用户可在设置中单独关闭。
+ * - 其余类别默认折叠，由全局开关 + 类别开关控制。
  */
 const DEFAULT_TOOL_EXPAND_OVERRIDES: ToolExpandOverrides = {
   bash: false,
-  fileEdit: false,
+  fileEdit: true,
   fileRead: false,
   mcp: false,
   skill: false,
@@ -397,7 +400,20 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
     }),
     {
       name: DISPLAY_PREFERENCES_STORAGE_KEY,
-      version: 7,
+      version: 8,
+      migrate: (persistedState, version) => {
+        const state = persistedState as Partial<DisplayPreferenceValues> | undefined;
+        if (!state) return state;
+        if (version < 8) {
+          // v8：文件编辑 / 写入默认直接展示内容变更（对齐参考实现 opencode 的文件卡）。
+          // 旧版本默认值是 false，这里一次性升级为 true；用户仍可在设置中单独关闭。
+          return {
+            ...state,
+            toolExpandedOverrides: { ...state.toolExpandedOverrides, fileEdit: true },
+          };
+        }
+        return state;
+      },
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         showMessageTimestamps: s.showMessageTimestamps,

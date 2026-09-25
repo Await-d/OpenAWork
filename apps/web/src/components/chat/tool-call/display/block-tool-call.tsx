@@ -1,5 +1,6 @@
 import {
   BashTerminalCard,
+  FileTypeIcon,
   resolveToolCallCardDisplayData,
   resolveToolVisualStatus,
   type ToolCallCardProps,
@@ -16,7 +17,6 @@ import { CopyBtn } from '../shared/copy-btn.js';
 import { extractErrorSummary } from '../shared/extract-error-summary.js';
 import { ExpandableOutput } from '../shared/expandable-output.js';
 import { formatElapsed } from '../shared/format.js';
-import { extractFilePath } from '../shared/input-paths.js';
 import { naturalLanguageSummary } from '../shared/natural-language-summary.js';
 import { SearchStateBadge, type SearchVisualState } from '../shared/search-state-badge.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
@@ -43,6 +43,16 @@ const WEB_MARKDOWN_COMPONENTS: Components = {
     ) : null,
 };
 
+/**
+ * 参数区不再展示的工具：其内容预览（目录树 / 成功确认 / 路径清单）已经把入参
+ * 表达出来，重复铺参数只会增加噪声（bash / diff 类在渲染分支里单独处理）。
+ */
+const HIDE_PARAMS_TOOLS = new Set([
+  'list',
+  'workspace_create_directory',
+  'workspace_review_revert',
+]);
+
 export function BlockToolCall({
   approvalActions,
   pendingPermissionRequestId,
@@ -53,6 +63,7 @@ export function BlockToolCall({
   status,
   isError,
   durationMs,
+  embedded = false,
 }: {
   approvalActions?: ToolCallCardProps['approvalActions'];
   pendingPermissionRequestId?: string;
@@ -63,6 +74,11 @@ export function BlockToolCall({
   status?: ToolCallCardProps['status'];
   isError?: boolean;
   durationMs?: number;
+  /**
+   * 嵌在 batch 子行展开区里渲染：外层行已提供标题 / 状态 / 摘要，
+   * 这里隐藏 header 并直接渲染内容本体（不再需要二次点击）。
+   */
+  embedded?: boolean;
 }) {
   const normalized = toolName.trim().toLowerCase();
   const visualState = resolveToolVisualStatus({
@@ -101,12 +117,11 @@ export function BlockToolCall({
     shouldAutoExpand: shouldExpandByDefault,
     shouldExpandByDefault,
   });
+  // embedded：外层 batch 子行就是唯一的 disclosure，嵌套卡直接展开内容。
+  const effectiveOpen = embedded || open;
   const [webImageLightboxOpen, setWebImageLightboxOpen] = useState(false);
 
   const webResults = webSummary?.searchResults ?? [];
-
-  const filePath = extractFilePath(input);
-  // filePath is kept for potential future use and passed to diff views
 
   const displayData = useMemo(
     () =>
@@ -114,9 +129,35 @@ export function BlockToolCall({
         toolName,
         input,
         output,
-        includeOutputDetails: open,
+        includeOutputDetails: effectiveOpen,
       }),
-    [toolName, input, output, open],
+    [toolName, input, output, effectiveOpen],
+  );
+
+  // 单条 bash 的真·实时输出：网关把滚动 stdout 以「单元素 subTools」形态写进
+  // `_batchProgress`（与 batch 子行同一条数据通道），这里把它合成为终端卡的
+  // live 输出；工具结算后 `_batchProgress` 消失，自动回到最终 output。
+  const liveBashOutputText = useMemo(() => {
+    if (!isBashLike || output !== undefined) return undefined;
+    const progress = input['_batchProgress'];
+    if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return undefined;
+    const subTools = (progress as Record<string, unknown>).subTools;
+    if (!Array.isArray(subTools) || subTools.length !== 1) return undefined;
+    const entry = subTools[0];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return undefined;
+    const record = entry as Record<string, unknown>;
+    if (record.status !== 'running') return undefined;
+    const partial = record.partialOutput;
+    if (typeof partial !== 'string' || partial.length === 0) return undefined;
+    return partial;
+  }, [isBashLike, input, output]);
+
+  const bashView = useMemo(
+    () =>
+      displayData.bashView && liveBashOutputText !== undefined
+        ? { ...displayData.bashView, mode: 'live' as const, output: liveBashOutputText }
+        : displayData.bashView,
+    [displayData.bashView, liveBashOutputText],
   );
 
   const title = useMemo(
@@ -153,91 +194,108 @@ export function BlockToolCall({
 
   return (
     <div className="tool-call-block" data-tool-status={visualState}>
-      {/* Header — click to toggle */}
-      <button
-        type="button"
-        className="tool-call-block-header"
-        onClick={toggleOpen}
-        aria-expanded={open}
-      >
-        <ToolIcon kind={kind} toolName={toolName} status={visualState} size={14} />
-        <span className="tool-call-block-title" data-tool-category={getToolCategory(toolName)}>
-          {colorizeSummary(title)}
-        </span>
-        {diffSummary && visualState === 'completed' && !open && (
-          <span className="tool-call-block-diff-summary">{diffSummary}</span>
-        )}
-        {searchVisualState && <SearchStateBadge state={searchVisualState} />}
-        {hasBashOutput &&
-          displayData.bashView?.exitCode !== undefined &&
-          visualState !== 'running' && (
-            <span
-              className="tool-call-block-exit-code"
-              data-exit-ok={displayData.bashView.exitCode === 0 ? 'true' : undefined}
-            >
-              退出码 {displayData.bashView.exitCode}
+      {/* Header — click to toggle（embedded 时外层行就是 disclosure，不渲染） */}
+      {!embedded && (
+        <button
+          type="button"
+          className="tool-call-block-header"
+          onClick={toggleOpen}
+          aria-expanded={open}
+        >
+          <ToolIcon kind={kind} toolName={toolName} status={visualState} size={14} />
+          <span className="tool-call-block-title" data-tool-category={getToolCategory(toolName)}>
+            {colorizeSummary(title)}
+          </span>
+          {diffSummary && visualState === 'completed' && !open && (
+            <span className="tool-call-block-diff-summary">{diffSummary}</span>
+          )}
+          {searchVisualState && <SearchStateBadge state={searchVisualState} />}
+          {hasBashOutput &&
+            displayData.bashView?.exitCode !== undefined &&
+            displayData.bashView.exitCode !== 0 &&
+            visualState !== 'running' && (
+              <span className="tool-call-block-exit-code">
+                退出码 {displayData.bashView.exitCode}
+              </span>
+            )}
+          {visualState === 'completed' && !open && collapsedSummary && (
+            <span className="tool-call-block-collapsed-summary">
+              {colorizeSummary(collapsedSummary)}
             </span>
           )}
-        {visualState === 'completed' && !open && collapsedSummary && (
-          <span className="tool-call-block-collapsed-summary">
-            {colorizeSummary(collapsedSummary)}
-          </span>
-        )}
-        {errorSummary && (
-          <span className="tool-call-error-summary" title={errorSummary}>
-            {errorSummary}
-          </span>
-        )}
-        {visualState === 'running' && <span className="tool-call-block-running-hint">执行中…</span>}
-        {visualState !== 'running' && durationMs != null && durationMs > 0 && (
-          <span
-            className="tool-call-block-elapsed"
-            data-duration-tier={
-              durationMs >= 10_000 ? 'slow' : durationMs >= 1_000 ? 'normal' : 'fast'
-            }
-          >
-            {formatElapsed(durationMs)}
-          </span>
-        )}
-        <span className="tool-call-block-chevron">{open ? '▾' : '▸'}</span>
-      </button>
+          {errorSummary && (
+            <span className="tool-call-error-summary" title={errorSummary}>
+              {errorSummary}
+            </span>
+          )}
+          {visualState === 'running' && (
+            <span className="tool-call-block-running-hint">执行中…</span>
+          )}
+          {visualState !== 'running' && durationMs != null && durationMs > 0 && (
+            <span
+              className="tool-call-block-elapsed"
+              data-duration-tier={
+                durationMs >= 10_000 ? 'slow' : durationMs >= 1_000 ? 'normal' : 'fast'
+              }
+            >
+              {formatElapsed(durationMs)}
+            </span>
+          )}
+          <span className="tool-call-block-chevron">{open ? '▾' : '▸'}</span>
+        </button>
+      )}
 
       {/* Expanded details */}
-      {open && (
+      {effectiveOpen && (
         <ToolCardExpansionProvider>
-          <div className="tool-call-block-body">
-            {/* Diff view */}
+          <div className="tool-call-block-body" data-embedded={embedded ? 'true' : undefined}>
+            {/* Diff view —— 文件头（图标 + 目录/文件名 + +N/-M）+ diff 本体，
+                对齐参考实现 opencode 的文件卡：内容变更直接可见，不再依赖内部头部。 */}
             {hasDiff && (
               <div className="tool-call-block-diff">
                 {displayData.diffView?.files && displayData.diffView?.files.length > 1 ? (
                   <div className="tool-call-block-diff-multi">
                     {displayData.diffView?.files.map((file, i) => (
-                      <UnifiedCodeDiff
-                        key={i}
-                        beforeText={file.beforeText}
-                        afterText={file.afterText}
-                        chrome="minimal"
-                        filePath={file.filePath}
-                        maxHeight={240}
-                      />
+                      <div className="tool-call-block-diff-file" key={i}>
+                        <FileChangeHeader filePath={file.filePath} summary={file.summary} />
+                        <UnifiedCodeDiff
+                          beforeText={file.beforeText}
+                          afterText={file.afterText}
+                          chrome="minimal"
+                          hideHeader
+                          filePath={file.filePath}
+                          maxHeight={240}
+                        />
+                      </div>
                     ))}
                   </div>
                 ) : (
-                  <UnifiedCodeDiff
-                    beforeText={displayData.diffView?.beforeText}
-                    afterText={displayData.diffView?.afterText}
-                    chrome="minimal"
-                    diffText={displayData.diffView?.diffText}
-                    filePath={displayData.diffView?.filePath}
-                    maxHeight={320}
-                  />
+                  <>
+                    <FileChangeHeader
+                      filePath={displayData.diffView?.filePath}
+                      summary={diffSummary}
+                    />
+                    <UnifiedCodeDiff
+                      beforeText={displayData.diffView?.beforeText}
+                      afterText={displayData.diffView?.afterText}
+                      chrome="minimal"
+                      hideHeader
+                      diffText={displayData.diffView?.diffText}
+                      filePath={displayData.diffView?.filePath}
+                      maxHeight={320}
+                    />
+                  </>
                 )}
               </div>
             )}
 
             {/* Bash terminal output */}
-            {hasBashOutput && displayData.bashView && (
-              <BashTerminalCard compact={!open} view={displayData.bashView} />
+            {hasBashOutput && bashView && (
+              <BashTerminalCard
+                compact={!effectiveOpen}
+                running={visualState === 'running' || liveBashOutputText !== undefined}
+                view={bashView}
+              />
             )}
 
             {/* Web tool output */}
@@ -364,16 +422,20 @@ export function BlockToolCall({
               </div>
             )}
 
-            {/* Raw parameters — open with the card so a single click reveals
-              everything; still manually collapsible via the summary. */}
-            {Object.keys(input).length > 0 && (
-              <details className="tool-call-block-params" open>
-                <summary>参数 ({Object.keys(input).length})</summary>
-                <div className="tool-call-block-params-body">
-                  <ToolInputPreview toolName={toolName} input={input} kind={kind} />
-                </div>
-              </details>
-            )}
+            {/* 参数抽屉：主要内容（终端块 / 文件卡 / 目录树 / 成功确认）已经表达了
+                入参的这几类工具不再展示参数区；其余工具保持一次点击看全。 */}
+            {Object.keys(input).length > 0 &&
+              !embedded &&
+              !hasBashOutput &&
+              !hasDiff &&
+              !HIDE_PARAMS_TOOLS.has(normalized) && (
+                <details className="tool-call-block-params" open>
+                  <summary>参数 ({Object.keys(input).length})</summary>
+                  <div className="tool-call-block-params-body">
+                    <ToolInputPreview toolName={toolName} input={input} kind={kind} />
+                  </div>
+                </details>
+              )}
           </div>
         </ToolCardExpansionProvider>
       )}
@@ -410,4 +472,52 @@ function resolveBashOutputText(output: unknown): string | undefined {
     if (typeof value === 'string' && value.trim().length > 0) return value;
   }
   return undefined;
+}
+
+/**
+ * 文件变更头（对齐参考实现 opencode 的文件卡）：文件图标 + 目录（弱化）+ 文件名 +
+ * `+N / -M`。diff 本体由调用方紧跟其后渲染。
+ */
+function FileChangeHeader({ filePath, summary }: { filePath?: string; summary?: string }) {
+  const path = filePath ?? '';
+  const { dir, name } = splitFilePath(path);
+  const counts = parseDiffCounts(summary);
+  return (
+    <div className="tool-call-file-header">
+      {path ? <FileTypeIcon path={path} size={14} /> : null}
+      {dir ? (
+        <span className="tool-call-file-dir" title={path}>
+          {dir}
+        </span>
+      ) : null}
+      <span className="tool-call-file-name" title={path}>
+        {name || 'Diff'}
+      </span>
+      {counts ? (
+        <span className="tool-call-file-stats">
+          {counts.added > 0 ? <span data-kind="added">+{counts.added}</span> : null}
+          {counts.removed > 0 ? <span data-kind="removed">-{counts.removed}</span> : null}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function splitFilePath(path: string): { dir: string; name: string } {
+  const normalized = path.replaceAll('\\', '/');
+  const index = normalized.lastIndexOf('/');
+  if (index < 0) return { dir: '', name: normalized };
+  return { dir: normalized.slice(0, index + 1), name: normalized.slice(index + 1) };
+}
+
+/** 从 `path · +N / -M` 形式的 summary 取增删行数（解析不到返回 null）。 */
+function parseDiffCounts(summary: string | undefined): { added: number; removed: number } | null {
+  if (!summary) return null;
+  const added = /\+(\d+)/.exec(summary);
+  const removed = /-(\d+)/.exec(summary);
+  if (!added && !removed) return null;
+  return {
+    added: Number.parseInt(added?.[1] ?? '0', 10),
+    removed: Number.parseInt(removed?.[1] ?? '0', 10),
+  };
 }

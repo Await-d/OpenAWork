@@ -127,6 +127,33 @@ describe('OpenAI Chat delta 兼容字段对齐', () => {
     expect(finish?.usage?.reasoningTokens).toBe(3);
   });
 
+  it('DeepSeek 顶层 prompt_cache_hit_tokens 映射为缓存读（与 cached_tokens 等价）', async () => {
+    const events = await runFrames([
+      chunk({}, 'stop', {
+        usage: {
+          prompt_tokens: 1_000,
+          completion_tokens: 20,
+          total_tokens: 1_020,
+          // DeepSeek 官方 API 口径：自动上下文命中的 token 数。
+          prompt_cache_hit_tokens: 900,
+        },
+      }),
+    ]);
+
+    const finish = events.find((event) => event.type === 'finish') as
+      | {
+          usage?: {
+            inputTokens?: number;
+            nonCachedInputTokens?: number;
+            cacheReadInputTokens?: number;
+          };
+        }
+      | undefined;
+    expect(finish?.usage?.inputTokens).toBe(1_000);
+    expect(finish?.usage?.cacheReadInputTokens).toBe(900);
+    expect(finish?.usage?.nonCachedInputTokens).toBe(100);
+  });
+
   it('content 数组形态仍按正文拼接（既有行为保持）', async () => {
     const events = await runFrames([
       chunk(

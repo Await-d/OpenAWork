@@ -60,8 +60,12 @@ export type { FileStatusPanelProps, FileChange, FileChangeStatus } from './file/
 export { FileChangeReviewPanel } from './file/FileChangeReviewPanel.js';
 export { ToolDiffCollection } from './tools/ToolDiffCollection.js';
 export type { ToolDiffCollectionProps, ToolDiffFileView } from './tools/ToolDiffCollection.js';
-export { UnifiedCodeDiff } from './tools/UnifiedCodeDiff.js';
-export type { UnifiedCodeDiffProps, UnifiedCodeDiffSummary } from './tools/UnifiedCodeDiff.js';
+export { UnifiedCodeDiff, detectLanguage, highlightCodeLines } from './tools/UnifiedCodeDiff.js';
+export type {
+  DiffToken,
+  UnifiedCodeDiffProps,
+  UnifiedCodeDiffSummary,
+} from './tools/UnifiedCodeDiff.js';
 export { FileSearch } from './file/FileSearch.js';
 export type { FileSearchProps, FileSearchResult, FileSearchMode } from './file/FileSearch.js';
 export { ProviderSettings } from './models/ProviderSettings.js';

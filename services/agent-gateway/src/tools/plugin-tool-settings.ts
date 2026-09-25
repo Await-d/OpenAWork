@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { sqliteGet } from '../infra/db.js';
-import type { GatewayToolDefinition } from './tool-definitions.js';
 
 export const PLUGIN_SETTINGS_KEY = 'plugin_settings';
 
@@ -70,26 +69,7 @@ export function isDesktopAutomationPluginEnabledForUser(userId: string): boolean
   return readPluginSettingsForUser(userId).desktopAutomation?.enabled === true;
 }
 
-export function filterPluginControlledToolsForUser(
-  tools: readonly GatewayToolDefinition[],
-  userId: string,
-): GatewayToolDefinition[] {
-  const settings = readPluginSettingsForUser(userId);
-  return tools.filter((tool) => {
-    const toolName = tool.function.name;
-    if (toolName === 'generate_image') {
-      return settings.imageGeneration?.enabled === true;
-    }
-    if (toolName === 'desktop_control' || toolName === 'computer_use') {
-      // computer_use 与 desktop_control 同属「系统桌面控制」插件（G2）：
-      // 若不在此过滤，插件关闭时模型仍能看到该工具，只能靠调用时的沙箱门控拒绝。
-      return settings.desktopControl?.enabled === true;
-    }
-    if (toolName === 'desktop_automation') {
-      // desktop_automation 是独立于「系统桌面控制」的浏览器自动化插件：
-      // 用户开关关闭时必须让模型完全看不到该工具，与 desktop_control 保持同一范式。
-      return settings.desktopAutomation?.enabled === true;
-    }
-    return true;
-  });
-}
+// Tool-surface filtering moved to the plugin platform
+// (`src/plugin/builtin-groups.ts`): the built-in groups are now internal
+// plugins whose gates key on the plugin id, while this module stays the
+// storage/reader for `/settings/plugins`.

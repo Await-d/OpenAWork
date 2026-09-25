@@ -15,6 +15,7 @@
 
 import { sqliteRun } from '../infra/db.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
+import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';
 
 const DEFAULT_PERMISSION_DECISION_LOG_MAX_ROWS = 20_000;
 export const PERMISSION_DECISION_LOG_PRUNE_CHECK_INTERVAL = 200;
@@ -44,15 +45,8 @@ function resolveRetention(): number {
 function prune(limit: number): void {
   // Order by the autoincrement id: created_at is second-precision (same-second
   // rows tie), while id is monotonic and uniquely identifies "the most recent N".
-  sqliteRun(
-    `DELETE FROM permission_decision_logs
-      WHERE id NOT IN (
-        SELECT id FROM permission_decision_logs
-         ORDER BY id DESC
-         LIMIT ?
-      )`,
-    [limit],
-  );
+  // 走主键边界删除，避免 `id NOT IN (...)` 全表物化。
+  deleteRowsBeyondMostRecent({ table: 'permission_decision_logs', idColumn: 'id', limit });
 }
 
 function maybePrune(): void {

@@ -11,7 +11,10 @@
  *      and silently skips broken plugins.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   _registerPluginForTest,
   _resetPluginsForTest,
@@ -20,6 +23,17 @@ import {
   dispatchToolExecuteBefore,
   ensurePluginsLoaded,
 } from '../../runtime/plugin-host.js';
+
+// Isolate the plugin loader from the developer's real gateway data dir:
+// `ensurePluginsLoaded` reads `<dataDir>/openawork.json` and discovers
+// `<dataDir>/plugins/*`, so tests must not point at the live location.
+const ORIGINAL_DATA_DIR = process.env['OPENAWORK_DATA_DIR'];
+process.env['OPENAWORK_DATA_DIR'] = mkdtempSync(join(tmpdir(), 'openawork-plugin-host-test-'));
+
+afterAll(() => {
+  if (ORIGINAL_DATA_DIR === undefined) delete process.env['OPENAWORK_DATA_DIR'];
+  else process.env['OPENAWORK_DATA_DIR'] = ORIGINAL_DATA_DIR;
+});
 
 describe('plugin-host', () => {
   beforeEach(() => {

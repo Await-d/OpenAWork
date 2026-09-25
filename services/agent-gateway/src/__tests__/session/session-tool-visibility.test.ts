@@ -8,6 +8,7 @@ import {
 import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../../mcp/mcp-manage-tool-name.js';
 import { MEMORY_MANAGE_TOOL_NAME } from '../../memory/memory-manage-tool-name.js';
 import { SKILL_MANAGE_TOOL_NAME } from '../../skill/skill-manage-tool-name.js';
+import { PLUGIN_MANAGE_TOOL_NAME } from '../../plugin/plugin-manage-tool-name.js';
 import { SCHEDULE_MANAGE_TOOL_NAME } from '../../cron/schedule-manage-tool-name.js';
 import { AGENT_MANAGE_TOOL_NAME } from '../../agent/agent-manage-tool-name.js';
 import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../../team/team-workspace-manage-tool-name.js';
@@ -145,6 +146,39 @@ describe('skill_manage 会话可见性', () => {
     ).toBe(false);
     expect(
       isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, { dialogueMode: 'clarify' }),
+    ).toBe(false);
+  });
+});
+
+describe('plugin_manage 会话可见性', () => {
+  it('个人会话可见（含 task 子代理）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(PLUGIN_MANAGE_TOOL_NAME, { source: 'desktop' }),
+    ).toBe(true);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(PLUGIN_MANAGE_TOOL_NAME, { createdByTool: 'task' }),
+    ).toBe(true);
+  });
+
+  it('team / cron / channel / clarify 均不可见', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(PLUGIN_MANAGE_TOOL_NAME, { teamWorkspaceId: 'ws-1' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(PLUGIN_MANAGE_TOOL_NAME, {
+        teamRoleInstance: { role: 'executor' },
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(PLUGIN_MANAGE_TOOL_NAME, { source: 'cron' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(PLUGIN_MANAGE_TOOL_NAME, { source: 'channel' }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(PLUGIN_MANAGE_TOOL_NAME, {
+        dialogueMode: 'clarify',
+      }),
     ).toBe(false);
   });
 });

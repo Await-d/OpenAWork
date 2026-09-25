@@ -341,6 +341,80 @@ describe('tool permission derivers · skill_manage', () => {
   });
 });
 
+describe('tool permission derivers · plugin_manage', () => {
+  it('list / search / source_list：只读免审批（返回 null）', () => {
+    expect(buildToolPermissionRequestContext(ctx('plugin_manage', { action: 'list' }))).toBeNull();
+    expect(
+      buildToolPermissionRequestContext(ctx('plugin_manage', { action: 'search' })),
+    ).toBeNull();
+    expect(
+      buildToolPermissionRequestContext(ctx('plugin_manage', { action: 'source_list' })),
+    ).toBeNull();
+  });
+
+  it('install：scope=install:repo，always 按动作隔离，预览含来源与「无沙箱」提示', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('plugin_manage', {
+        action: 'install',
+        repo: 'acme/plugins',
+        ref: 'v1',
+        path: 'plugins/echo',
+      }),
+    );
+    expect(out).toMatchObject({
+      scope: 'install:acme/plugins',
+      riskLevel: 'high',
+      always: ['install:*'],
+    });
+    expect(out?.previewAction).toContain('安装插件');
+    expect(out?.previewAction).toContain('acme/plugins@v1');
+    expect(out?.previewAction).toContain('无沙箱');
+  });
+
+  it('install（市场条目）：scope 用 sourceId/name', () => {
+    const out = buildToolPermissionRequestContext(
+      ctx('plugin_manage', { action: 'install', sourceId: 'acme/plugins', name: 'echo' }),
+    );
+    expect(out?.scope).toBe('install:acme/plugins/echo');
+    expect(out?.previewAction).toContain('echo');
+    expect(out?.previewAction).toContain('acme/plugins');
+  });
+
+  it('uninstall / enable / disable / reload / source_*：scope 与预览动词正确', () => {
+    const uninstall = buildToolPermissionRequestContext(
+      ctx('plugin_manage', { action: 'uninstall', installId: 'demo' }),
+    );
+    expect(uninstall).toMatchObject({ scope: 'uninstall:demo', always: ['uninstall:*'] });
+    expect(uninstall?.previewAction).toContain('目录与存储数据将删除');
+
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('plugin_manage', { action: 'disable', pluginId: 'demo.plugin' }),
+      ),
+    ).toMatchObject({ scope: 'disable:demo.plugin', always: ['disable:*'] });
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('plugin_manage', { action: 'enable', pluginId: 'demo.plugin' }),
+      )?.previewAction,
+    ).toContain('启用插件');
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('plugin_manage', { action: 'reload', installId: 'demo' }),
+      )?.previewAction,
+    ).toContain('重载插件');
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('plugin_manage', { action: 'source_add', repo: 'acme/plugins' }),
+      )?.previewAction,
+    ).toContain('添加插件市场来源');
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('plugin_manage', { action: 'source_remove', sourceId: 'acme/plugins' }),
+      )?.previewAction,
+    ).toContain('移除插件市场来源');
+  });
+});
+
 describe('tool permission derivers · schedule_manage', () => {
   it('list / history：只读免审批（返回 null）', () => {
     expect(

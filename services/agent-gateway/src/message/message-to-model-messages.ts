@@ -22,6 +22,7 @@ import type {
   FilePart,
 } from './message-v2-schema.js';
 import { parseCompactionMarkerText } from '../compaction/compaction-marker.js';
+import { buildMicrocompactedToolOutputReference } from './tool-output-reference.js';
 import { projectToolOutput } from './tool-output-model-view.js';
 import { DEFAULT_TOOL_CONTEXT_POLICY } from '../compaction/tool-context-policy.js';
 import { readStoredToolResultContent } from '../tools/tool-result-contract.js';
@@ -181,7 +182,6 @@ export interface ToModelMessagesOptions {
   readonly currentModel?: { providerID: string; modelID: string };
 }
 
-const COMPACTED_TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared]';
 const LEGACY_COMPACTION_MARKER_SOURCES = ['openAwork', 'openawork_internal'] as const;
 const LEGACY_COMPACTION_MARKER_TYPE = 'compaction_marker';
 
@@ -579,10 +579,9 @@ export function toModelMessages(
           // Skip attachments when the tool result has been compacted to
           // a placeholder — replaying images alongside a stub provides no
           // value and only inflates the prompt.
-          const attachments =
-            output === COMPACTED_TOOL_RESULT_PLACEHOLDER
-              ? undefined
-              : completedPart.state.attachments;
+          const attachments = completedPart.state.time.compacted
+            ? undefined
+            : completedPart.state.attachments;
           pushToolResult(part.callID, part.tool, output, attachments);
         } else if (part.state.status === 'error') {
           const errorPart = part as ToolPart & {
@@ -932,12 +931,14 @@ function resolveToolOutput(
     };
   },
 ): string {
-  // Persistent compaction flag — set by future `SessionCompaction.prune`
-  // (opencode parity). Once a tool part has been pruned, every subsequent
-  // render returns the same placeholder so the upstream prefix stays
-  // byte-identical across rounds (Anthropic / OpenAI prompt-cache friendly).
+  // Persistent compaction flag (set when microcompact pruned this result).
+  // Returns the **byte-identical** reference that the prune round produced —
+  // both sides call `buildMicrocompactedToolOutputReference`, so the message
+  // bytes never change twice (once at prune, once when the persisted flag
+  // starts applying). Changing this string without changing microcompact's
+  // would reintroduce a prompt-cache invalidation on every prune.
   if (part.state.time.compacted) {
-    return COMPACTED_TOOL_RESULT_PLACEHOLDER;
+    return buildMicrocompactedToolOutputReference(part.callID);
   }
 
   const stored = readStoredToolResultContent(part.state.metadata);

@@ -34,4 +34,31 @@ describe('useDisplayPreferencesStore', () => {
 
     expect(useDisplayPreferencesStore.getState().themeMode).toBe('dark');
   });
+
+  it('旧版本持久化状态升级到 v8 时把 fileEdit 类别升级为默认展开', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          toolCallsExpandedByDefault: false,
+          toolExpandedOverrides: {
+            bash: false,
+            fileEdit: false,
+            fileRead: false,
+            mcp: false,
+            skill: false,
+            web: false,
+            batch: false,
+            other: false,
+          },
+        },
+        version: 7,
+      }),
+    );
+
+    const { useDisplayPreferencesStore } = await import('./display-preferences.js');
+
+    // v8：文件编辑 / 写入默认直接展示内容变更（对齐参考实现）。
+    expect(useDisplayPreferencesStore.getState().toolExpandedOverrides.fileEdit).toBe(true);
+  });
 });

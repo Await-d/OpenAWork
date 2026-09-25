@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toModelMessages } from '../../message/message-to-model-messages.js';
+import { buildMicrocompactedToolOutputReference } from '../../message/tool-output-reference.js';
 import type { MessageWithParts } from '../../message/message-v2-schema.js';
 import { makeMessageId, makePartId } from '../../message/message-v2-schema.js';
 
@@ -77,6 +78,24 @@ describe('工具结果正常模型投影', () => {
       expect(JSON.stringify(overMessage)).toContain(overCap.replaceAll('\n', '\\n'));
     },
   );
+
+  it('已持久化剪枝的工具结果使用与渲染期一致的引用字节（缓存前缀不二次改写）', () => {
+    const message = fixture('bash', 'x'.repeat(500), 'completed', 'call-compacted-1');
+    const tool = message.parts[0];
+    if (tool?.type !== 'tool' || tool.state.status !== 'completed') {
+      throw new Error('fixture invalid');
+    }
+    tool.state.time = { ...tool.state.time, compacted: Date.now() };
+
+    const content =
+      toModelMessages([message]).find((entry) => entry.role === 'tool')?.content ?? '';
+
+    // 与 microcompact 渲染期引用同源；且不再返回旧的 '[Old tool result content cleared]'
+    // ——同一批消息被改写两次会连续打断 prompt-cache。
+    expect(content).toBe(buildMicrocompactedToolOutputReference('call-compacted-1'));
+    expect(content).toContain('"microcompacted":true');
+    expect(content).not.toContain('Old tool result content cleared');
+  });
 
   it('参数化 Data URI 会被移除，上限内的普通文本不因调用 ID 被截断', () => {
     const secret = 'SECRET_TOKEN_AT_END';

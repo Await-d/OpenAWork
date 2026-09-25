@@ -198,6 +198,30 @@ describe('ChatConversationView — 基础骨架', () => {
     );
   });
 
+  it('内容列最大宽度随可用宽度自适应（clamp），窄容器下限仍是基准宽度', () => {
+    render(<ChatConversationView {...createViewProps({ contentMaxWidth: 1024 })} />);
+
+    expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe(
+      'clamp(1024px, 88%, 1536px)',
+    );
+  });
+
+  it('split 布局先把基线抬高 1.5 倍，再套同一套自适应 clamp 规则', () => {
+    useDisplayPreferencesStore.setState({ messageLayout: 'split' });
+
+    render(<ChatConversationView {...createViewProps({ contentMaxWidth: 1024 })} />);
+
+    expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe(
+      'clamp(1536px, 88%, 2304px)',
+    );
+  });
+
+  it('contentMaxWidth 为 fluid 时内容列保持铺满容器', () => {
+    render(<ChatConversationView {...createViewProps({ contentMaxWidth: 'fluid' })} />);
+
+    expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe('100%');
+  });
+
   it('topBar / beforeMessages / afterMessages 三个 slot 都挂在预期位置', () => {
     render(
       <ChatConversationView

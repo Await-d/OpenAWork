@@ -1546,9 +1546,16 @@ async function buildSessionRecoveryReadModel(input: {
       },
       filterVisibleSessionMessages(
         mergeRuntimeSafeSessionMessages({
+          // 子会话消息同样跟随父请求的 turnLimit：`/recovery` 只把子会话当预览，
+          // 未加限时每个子会话都要全量读消息（N 个子会话 × 全历史），大任务树
+          // 上会成为同步阻塞。需要子会话完整转录的入口走 `/sessions/:id`。
           legacyMessages: listSessionMessagesV2({
             sessionId: session.id,
             userId: input.userId,
+            turnLimit:
+              typeof input.messageLimit === 'number' && input.messageLimit > 0
+                ? input.messageLimit
+                : undefined,
           }),
           runtimeMessages: listRuntimeSafeSessionMessagesV2({
             sessionId: session.id,

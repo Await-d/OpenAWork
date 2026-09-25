@@ -121,6 +121,7 @@ export const DEFERRED_TOOL_NAMES: ReadonlySet<string> = new Set([
   // 自助管理
   'memory_manage',
   'skill_manage',
+  'plugin_manage',
   'schedule_manage',
   'agent_manage',
   // 媒体

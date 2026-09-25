@@ -74,6 +74,13 @@ export interface UseSessionTerminalsResult {
 
 const ACTIVE_STATUSES: ReadonlySet<SessionTerminalStatus> = new Set(['running', 'tmux-spawned']);
 
+/**
+ * `terminal_output` 状态更新合并窗口。高输出命令/终端会让同一终端每 ~100ms
+ * 产生一条 `terminal_output` 运行事件，逐条更新 ChatPage 顶层 state 会让整页
+ * 持续重渲染；同一窗口内只保留该终端最新一条。
+ */
+export const TERMINAL_OUTPUT_STATE_FLUSH_MS = 250;
+
 /** Reconcile cadence while at least one terminal is still active. */
 const ACTIVE_RECONCILE_INTERVAL_MS = 5_000;
 /** Reconcile cadence when nothing is running (still catches missed starts). */
@@ -169,6 +176,51 @@ export function useSessionTerminals(
   // tell "an imperative reload was requested" apart from "the identity
   // changed", so a session switch never fires a second, redundant sync.
   const handledReloadNonceRef = useRef(0);
+  // `terminal_output` 合并窗口的待处理块（同一终端只保留最新一条）与定时器。
+  // 终端的实时数据面走各自的 WS/SSE 流，这里只负责列表/卡片状态，故可以合帧。
+  const pendingOutputChunksRef = useRef(new Map<string, StreamTerminalOutputChunk>());
+  const outputFlushTimerRef = useRef<number | null>(null);
+
+  const flushPendingTerminalOutput = useCallback(() => {
+    if (outputFlushTimerRef.current !== null) {
+      window.clearTimeout(outputFlushTimerRef.current);
+      outputFlushTimerRef.current = null;
+    }
+    const pending = [...pendingOutputChunksRef.current.values()];
+    pendingOutputChunksRef.current.clear();
+    if (pending.length === 0) {
+      return;
+    }
+    setTerminalsById((previous) => {
+      let next: Record<string, SessionTerminalView> | null = null;
+      for (const chunk of pending) {
+        const existing = (next ?? previous)[chunk.terminalId];
+        if (!existing) {
+          continue;
+        }
+        if (next === null) {
+          next = { ...previous };
+        }
+        next[chunk.terminalId] = {
+          ...existing,
+          outputTail: chunk.outputTail,
+          outputBytesTotal: Math.max(existing.outputBytesTotal, chunk.outputBytesTotal),
+          lastActivityMs: Math.max(existing.lastActivityMs, chunk.occurredAt ?? Date.now()),
+        };
+      }
+      return next ?? previous;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (outputFlushTimerRef.current !== null) {
+        window.clearTimeout(outputFlushTimerRef.current);
+        outputFlushTimerRef.current = null;
+      }
+      pendingOutputChunksRef.current.clear();
+    };
+  }, []);
 
   // shell profile 列表是宿主级的，与会话无关：刻意不依赖 currentSessionId，
   // 否则每次切会话都会重取一份内容完全相同的列表。
@@ -335,6 +387,22 @@ export function useSessionTerminals(
         return;
       }
 
+      if (event.type === 'terminal_output') {
+        // 合并窗口：同一终端只保留最新一条，窗口结束统一更新一次 state。
+        const outEvent = event as StreamTerminalOutputChunk;
+        pendingOutputChunksRef.current.set(outEvent.terminalId, outEvent);
+        if (outputFlushTimerRef.current === null) {
+          outputFlushTimerRef.current = window.setTimeout(() => {
+            outputFlushTimerRef.current = null;
+            flushPendingTerminalOutput();
+          }, TERMINAL_OUTPUT_STATE_FLUSH_MS);
+        }
+        return;
+      }
+
+      // started / exited 立即生效：先冲掉待处理输出，避免旧 tail 覆盖新状态。
+      flushPendingTerminalOutput();
+
       setTerminalsById((previous) => {
         if (event.type === 'terminal_started') {
           const startedEvent = event as StreamTerminalStartedChunk;
@@ -368,20 +436,6 @@ export function useSessionTerminals(
           };
           return { ...previous, [startedEvent.terminalId]: next };
         }
-        if (event.type === 'terminal_output') {
-          const outEvent = event as StreamTerminalOutputChunk;
-          const existing = previous[outEvent.terminalId];
-          if (!existing) return previous;
-          return {
-            ...previous,
-            [outEvent.terminalId]: {
-              ...existing,
-              outputTail: outEvent.outputTail,
-              outputBytesTotal: outEvent.outputBytesTotal,
-              lastActivityMs: outEvent.occurredAt ?? Date.now(),
-            },
-          };
-        }
         // terminal_exited
         const exitEvent = event as StreamTerminalExitedChunk;
         const existing = previous[exitEvent.terminalId];
@@ -398,7 +452,7 @@ export function useSessionTerminals(
         };
       });
     },
-    [currentSessionId],
+    [currentSessionId, flushPendingTerminalOutput],
   );
 
   const killTerminal = useCallback(

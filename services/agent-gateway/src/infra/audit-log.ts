@@ -1,5 +1,6 @@
 import { sqliteRun } from './db.js';
 import { isSqliteMalformedError } from './sqlite-error-utils.js';
+import { deleteRowsBeyondMostRecent } from './sqlite-retention.js';
 
 export type AuditErrorCategory = 'tool' | 'llm' | 'stream' | 'route';
 
@@ -110,15 +111,9 @@ function resolveAuditLogRetention(): number {
 function pruneAuditLogs(limit: number): void {
   // Sort by the autoincrement id: created_at is second-precision so same-second
   // rows tie, while id is monotonic and uniquely identifies "the most recent N".
-  sqliteRun(
-    `DELETE FROM audit_logs
-      WHERE id NOT IN (
-        SELECT id FROM audit_logs
-         ORDER BY id DESC
-         LIMIT ?
-      )`,
-    [limit],
-  );
+  // 走主键边界删除，避免 `id NOT IN (...)` 全表物化（数百 MB 表上会同步阻塞
+  // 事件循环数百 ms；prune 在写路径上，每 200 次写入触发一次）。
+  deleteRowsBeyondMostRecent({ table: 'audit_logs', idColumn: 'id', limit });
 }
 
 function maybePruneAuditLogs(): void {

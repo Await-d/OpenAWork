@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>插件市场三视口验收</title>
+    <style>
+      body {
+        margin: 0;
+        background: #080b12;
+        color: #c8d1e0;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      #root {
+        padding: 0;
+      }
+      .viewport {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        box-sizing: border-box;
+        display: grid;
+        gap: 16px;
+        /* minmax(0,1fr)：让轨道严格等于容器宽，组件内部若不收缩会体现为自身
+           scrollWidth > clientWidth，而不是把轨道撑开（那会掩盖真实问题）。 */
+        grid-template-columns: minmax(0, 1fr);
+        padding: 8px 8px 20px;
+      }
+      .viewport-label {
+        font-size: 11px;
+        color: #4d5b6e;
+      }
+      /*
+       * 应用暗色主题 token 快照（与 apps/web/src/index.css 一致的关键值）。
+       * 组件本身不定义这些变量，靠这里提供真实解析环境。
+       */
+      .themed {
+        --bg-base: #080b12;
+        --bg-raised: #0d1119;
+        --bg-overlay: #121721;
+        --bg-surface: #171d29;
+        --bg-elevated: #232d40;
+        --bg-hover: #232d40;
+        --fg-strong: #f1f4f8;
+        --fg-default: #c8d1e0;
+        --fg-muted: #7b8a9e;
+        --fg-subtle: #4d5b6e;
+        --fg-on-accent: #052e22;
+        --accent: #5cd4c0;
+        --accent-hover: #6fe0cd;
+        --accent-muted: rgba(92, 212, 192, 0.14);
+        --accent-subtle: rgba(92, 212, 192, 0.07);
+        --accent-border: rgba(92, 212, 192, 0.3);
+        --contrast: #f0b429;
+        --contrast-muted: rgba(240, 180, 41, 0.14);
+        --contrast-border: rgba(240, 180, 41, 0.3);
+        --complement: #f06b7e;
+        --complement-subtle: rgba(240, 107, 126, 0.07);
+        --complement-muted: rgba(240, 107, 126, 0.14);
+        --danger: #f06b7e;
+        --danger-muted: rgba(240, 107, 126, 0.14);
+        --danger-border: rgba(240, 107, 126, 0.3);
+        --success: #3dd49a;
+        --success-muted: rgba(61, 212, 154, 0.14);
+        --success-border: rgba(61, 212, 154, 0.3);
+        --aux: #8b9cf5;
+        --aux-muted: rgba(139, 156, 245, 0.14);
+        --aux-border: rgba(139, 156, 245, 0.3);
+        --border-subtle: hsla(215, 20%, 50%, 0.07);
+        --border-default: hsla(215, 18%, 50%, 0.12);
+        --border-emphasis: hsla(215, 16%, 55%, 0.2);
+        --switch-track-off: hsla(215, 16%, 55%, 0.3);
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.2);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/plugin-market-3viewports-entry.tsx"></script>
+  </body>
+</html>

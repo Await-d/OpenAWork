@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@openAwork/shared-ui', () => ({
   BashTerminalCard: () => null,
+  FileTypeIcon: () => null,
   resolveToolCallCardDisplayData: () => ({
     displayToolName: 'webfetch',
     summary: 'webfetch',

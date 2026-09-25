@@ -6,6 +6,7 @@ import { ToolIcon } from '../display/tool-icon';
 import { formatElapsed } from '../shared/format.js';
 import { extractFilePath } from '../shared/input-paths.js';
 import { buildGenericInputSummary, summarizeMcpCallInput } from '../shared/input-summary.js';
+import { buildPartialBashOutput } from '../shared/partial-bash-output.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
 import { ToolCardExpansionProvider } from '../shared/tool-card-expansion.js';
 import { looksLikePendingPermissionOutput } from '../../../../utils/permission/pending-permission-state.js';
@@ -106,24 +107,10 @@ export function parseBatchOutputString(output: string): unknown {
 }
 
 /**
- * Build a BashExecutionResult-shaped synthetic output from partialOutput so
- * BashTerminalCard renders the live, growing stdout while the sub-tool is
- * still running. We mark `mode: 'live'` and leave `exitCode` unset — the
- * card uses these signals to skip the "exit code 0" footer + render a
- * spinner-friendly header.
+ * 把流式 bash 的部分输出合成为 `BashExecutionResult` 形状的 live 视图。
+ * 实现见 `../shared/partial-bash-output.ts`（与单条 bash 的实时输出共用）。
  */
-export function buildPartialBashOutput(
-  input: Record<string, unknown>,
-  partialOutput: string,
-): Record<string, unknown> {
-  const command = typeof input.command === 'string' ? (input.command as string) : '';
-  return {
-    command,
-    output: partialOutput,
-    mode: 'live',
-    truncated: false,
-  };
-}
+export { buildPartialBashOutput } from '../shared/partial-bash-output.js';
 
 /**
  * Renderer for a single batch sub-call row. The actual nested ToolCallDisplay
@@ -138,6 +125,8 @@ type RenderToolCallDisplay = (props: {
   isError: boolean;
   kind?: ToolCallCardProps['kind'];
   durationMs?: number;
+  /** 子行展开区里的嵌套渲染：隐藏嵌套卡自身 header，直接给内容。 */
+  embedded?: boolean;
 }) => React.ReactNode;
 
 function BatchSubCallRow({
@@ -229,6 +218,7 @@ function BatchSubCallRow({
               status: childStatus,
               isError: childIsError,
               kind,
+              embedded: true,
               ...(result?.durationMs != null ? { durationMs: result.durationMs } : {}),
             })}
           </div>
@@ -429,6 +419,24 @@ export function BatchToolCallCard({
           <span className="tool-call-batch-elapsed">{formatElapsed(wallClockMs)}</span>
         )}
       </div>
+      {/* 进度条只在运行中显示：完成后它会被误读成一条分隔线，终态信息由
+          「N/M 完成」「N 失败」承担。 */}
+      {!allDone && totalCount > 0 && (
+        <div
+          className="tool-call-batch-progress-track"
+          role="progressbar"
+          aria-label="批量子任务进度"
+          aria-valuemin={0}
+          aria-valuemax={totalCount}
+          aria-valuenow={progressCompleted}
+        >
+          <span
+            className="tool-call-batch-progress-fill"
+            data-has-error={errorCount > 0 ? 'true' : undefined}
+            style={{ width: `${Math.round((progressCompleted / totalCount) * 100)}%` }}
+          />
+        </div>
+      )}
       {subCalls.length > 0 && (
         <div className="tool-call-batch-children">
           {subCalls.map((sub) => (

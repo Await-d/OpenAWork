@@ -10,7 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { useSessionTerminals } from './use-session-terminals.js';
+import { TERMINAL_OUTPUT_STATE_FLUSH_MS, useSessionTerminals } from './use-session-terminals.js';
 
 const SESSION_ID = 'session-test';
 const TOKEN = 'test-token';
@@ -61,34 +61,99 @@ describe('useSessionTerminals.applyRunEvent', () => {
     expect(result.current.terminals[0]?.command).toBe('echo hi');
   });
 
-  it('updates outputTail on terminal_output for an existing terminal', () => {
-    const { result } = renderHook(() =>
-      useSessionTerminals({ currentSessionId: SESSION_ID, gatewayUrl: GATEWAY, token: TOKEN }),
-    );
+  it('coalesces terminal_output within the merge window and keeps the latest chunk', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useSessionTerminals({ currentSessionId: SESSION_ID, gatewayUrl: GATEWAY, token: TOKEN }),
+      );
 
-    act(() => {
-      result.current.applyRunEvent({
-        type: 'terminal_started',
-        terminalId: 'term_b',
-        sessionId: SESSION_ID,
-        toolName: 'bash',
-        kind: 'foreground',
-        command: 'sleep 1; echo done',
-        cwd: '/tmp',
-        startedAtMs: 1_700_000_000_000,
+      act(() => {
+        result.current.applyRunEvent({
+          type: 'terminal_started',
+          terminalId: 'term_b',
+          sessionId: SESSION_ID,
+          toolName: 'bash',
+          kind: 'foreground',
+          command: 'sleep 1; echo done',
+          cwd: '/tmp',
+          startedAtMs: 1_700_000_000_000,
+        });
       });
-    });
-    act(() => {
-      result.current.applyRunEvent({
-        type: 'terminal_output',
-        terminalId: 'term_b',
-        outputTail: 'partial line',
-        outputBytesTotal: 12,
+      act(() => {
+        result.current.applyRunEvent({
+          type: 'terminal_output',
+          terminalId: 'term_b',
+          outputTail: 'partial line',
+          outputBytesTotal: 12,
+          occurredAt: 1_700_000_000_100,
+        });
+        result.current.applyRunEvent({
+          type: 'terminal_output',
+          terminalId: 'term_b',
+          outputTail: 'partial line 2',
+          outputBytesTotal: 24,
+          occurredAt: 1_700_000_000_150,
+        });
       });
-    });
 
-    expect(result.current.terminals[0]?.outputTail).toBe('partial line');
-    expect(result.current.terminals[0]?.outputBytesTotal).toBe(12);
+      // 合并窗口内不更新 state —— 这是把 ChatPage 重渲染从 ~10/s 降下来的关键。
+      expect(result.current.terminals[0]?.outputTail).toBe('');
+      expect(result.current.terminals[0]?.outputBytesTotal).toBe(0);
+
+      act(() => {
+        vi.advanceTimersByTime(TERMINAL_OUTPUT_STATE_FLUSH_MS);
+      });
+
+      // 同一窗口内只保留最新一条。
+      expect(result.current.terminals[0]?.outputTail).toBe('partial line 2');
+      expect(result.current.terminals[0]?.outputBytesTotal).toBe(24);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flushes pending terminal_output before terminal_exited applies', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useSessionTerminals({ currentSessionId: SESSION_ID, gatewayUrl: GATEWAY, token: TOKEN }),
+      );
+
+      act(() => {
+        result.current.applyRunEvent({
+          type: 'terminal_started',
+          terminalId: 'term_d',
+          sessionId: SESSION_ID,
+          toolName: 'bash',
+          kind: 'foreground',
+          command: 'true',
+          cwd: '/tmp',
+          startedAtMs: 1_700_000_000_000,
+        });
+        result.current.applyRunEvent({
+          type: 'terminal_output',
+          terminalId: 'term_d',
+          outputTail: 'final tail',
+          outputBytesTotal: 10,
+          occurredAt: 1_700_000_000_100,
+        });
+        result.current.applyRunEvent({
+          type: 'terminal_exited',
+          terminalId: 'term_d',
+          status: 'exited',
+          exitCode: 0,
+          endedAtMs: 1_700_000_000_200,
+        });
+      });
+
+      // exited 立即生效，且先冲掉待处理输出（tail/bytes 不丢）。
+      expect(result.current.terminals[0]?.status).toBe('exited');
+      expect(result.current.terminals[0]?.outputTail).toBe('final tail');
+      expect(result.current.terminals[0]?.outputBytesTotal).toBe(10);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('flips status and decrements runningCount on terminal_exited', () => {

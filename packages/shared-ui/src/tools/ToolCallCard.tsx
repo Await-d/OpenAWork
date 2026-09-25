@@ -1617,7 +1617,11 @@ export function ToolCallCard({
             marginTop: hasDetails ? 4 : 0,
           }}
         >
-          <BashTerminalCard compact={!effectiveOpen} view={bashView} />
+          <BashTerminalCard
+            compact={!effectiveOpen}
+            running={normalizedStatus === 'running'}
+            view={bashView}
+          />
         </div>
       )}
 

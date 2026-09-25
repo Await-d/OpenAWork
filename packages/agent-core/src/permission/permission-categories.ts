@@ -101,6 +101,13 @@ export const PERMISSION_CATEGORIES: PermissionCategoryMeta[] = [
     supportsPatterns: true,
   },
   {
+    id: 'plugin_manage',
+    label: '插件管理',
+    description: '安装、卸载或启停网关插件（默认需用户批准）',
+    defaultAction: 'ask',
+    supportsPatterns: true,
+  },
+  {
     id: 'schedule_manage',
     label: '定时任务管理',
     description: '新建、修改、启停或删除定时任务（默认需用户批准）',

@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "/tmp/openawork-plugin-sdk.typecheck.tsbuildinfo"
+  }
+}

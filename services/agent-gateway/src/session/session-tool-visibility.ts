@@ -12,6 +12,7 @@ import { isClarifyModeToolAllowed } from './clarify-mode-tool-policy.js';
 import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../mcp/mcp-manage-tool-name.js';
 import { MEMORY_MANAGE_TOOL_NAME } from '../memory/memory-manage-tool-name.js';
 import { SKILL_MANAGE_TOOL_NAME } from '../skill/skill-manage-tool-name.js';
+import { PLUGIN_MANAGE_TOOL_NAME } from '../plugin/plugin-manage-tool-name.js';
 import { SCHEDULE_MANAGE_TOOL_NAME } from '../cron/schedule-manage-tool-name.js';
 import { AGENT_MANAGE_TOOL_NAME } from '../agent/agent-manage-tool-name.js';
 import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../team/team-workspace-manage-tool-name.js';
@@ -314,6 +315,7 @@ export function isGatewayToolEnabledForSessionMetadata(
     toolName === MCP_MANAGE_SERVERS_TOOL_NAME ||
     toolName === MEMORY_MANAGE_TOOL_NAME ||
     toolName === SKILL_MANAGE_TOOL_NAME ||
+    toolName === PLUGIN_MANAGE_TOOL_NAME ||
     toolName === SCHEDULE_MANAGE_TOOL_NAME ||
     toolName === AGENT_MANAGE_TOOL_NAME ||
     toolName === TEAM_WORKSPACE_MANAGE_TOOL_NAME

@@ -329,6 +329,9 @@ export function resolveEffectiveSkills(input: ResolveEffectiveSkillsInput): Effe
   }
 
   // BUILTIN always appended at the end, never subject to selection filtering.
+  // 注意：非内置项的顺序是**优先级语义**（PUT /skills/selection 的 items 顺序，
+  // 见 skill-selection-routes 测试），不要按 skillId 排序——顺序由持久化的
+  // 选择列表决定，本身已是确定性的。
   const result: EffectiveSkill[] = [];
   for (const entry of resolved.values()) {
     if (builtinIds.has(entry.skillId)) continue; // defensive: do not double-emit

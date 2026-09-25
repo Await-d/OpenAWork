@@ -1,6 +1,20 @@
-import { describe, expect, it } from 'vitest';
-import { microcompactMessages } from '../../compaction/microcompact.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isMicrocompactEnabled, microcompactMessages } from '../../compaction/microcompact.js';
 import type { UnifiedMessage } from '../../message/message-to-model-messages.js';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe('isMicrocompactEnabled（生产默认关闭，对齐参考库）', () => {
+  it('默认 false；OPENAWORK_ENABLE_MICROCOMPACT=1 时为 true', () => {
+    expect(isMicrocompactEnabled()).toBe(false);
+    vi.stubEnv('OPENAWORK_ENABLE_MICROCOMPACT', '1');
+    expect(isMicrocompactEnabled()).toBe(true);
+    vi.stubEnv('OPENAWORK_ENABLE_MICROCOMPACT', '0');
+    expect(isMicrocompactEnabled()).toBe(false);
+  });
+});
 
 function user(content: string): UnifiedMessage {
   return { role: 'user', content };

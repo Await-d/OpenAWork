@@ -2694,57 +2694,58 @@
   text-align: center;
 }
 
-.chat-markdown .hljs-comment,
-.chat-markdown .hljs-quote {
+/* hljs 语义色（markdown 代码块 + 工具卡 diff 共用同一套 token）。 */
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-comment,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-quote {
   color: var(--hl-comment);
   font-style: italic;
 }
 
-.chat-markdown .hljs-keyword,
-.chat-markdown .hljs-selector-tag,
-.chat-markdown .hljs-literal,
-.chat-markdown .hljs-name,
-.chat-markdown .hljs-strong,
-.chat-markdown .hljs-symbol,
-.chat-markdown .hljs-meta {
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-keyword,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-selector-tag,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-literal,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-name,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-strong,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-symbol,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-meta {
   color: var(--hl-keyword);
   font-weight: 600;
 }
 
-.chat-markdown .hljs-attr,
-.chat-markdown .hljs-attribute,
-.chat-markdown .hljs-variable,
-.chat-markdown .hljs-template-variable,
-.chat-markdown .hljs-type,
-.chat-markdown .hljs-selector-class,
-.chat-markdown .hljs-selector-attr,
-.chat-markdown .hljs-selector-pseudo,
-.chat-markdown .hljs-class .hljs-title {
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-attr,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-attribute,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-variable,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-template-variable,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-type,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-selector-class,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-selector-attr,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-selector-pseudo,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-class .hljs-title {
   color: var(--hl-type);
 }
 
-.chat-markdown .hljs-number,
-.chat-markdown .hljs-deletion {
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-number,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-deletion {
   color: var(--hl-number);
 }
 
-.chat-markdown .hljs-string,
-.chat-markdown .hljs-regexp,
-.chat-markdown .hljs-bullet,
-.chat-markdown .hljs-addition {
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-string,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-regexp,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-bullet,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-addition {
   color: var(--hl-string);
 }
 
-.chat-markdown .hljs-title,
-.chat-markdown .hljs-section,
-.chat-markdown .hljs-title.function_,
-.chat-markdown .hljs-built_in,
-.chat-markdown .hljs-tag {
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-title,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-section,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-title.function_,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-built_in,
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-tag {
   color: var(--hl-function);
   font-weight: 500;
 }
 
-.chat-markdown .hljs-emphasis {
+:is(.chat-markdown, .tool-call-block-diff, .file-content-pre) .hljs-emphasis {
   font-style: italic;
 }
 

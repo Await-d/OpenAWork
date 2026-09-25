@@ -11,6 +11,7 @@
 import { sqliteGet, sqliteRun, sqliteTransaction, sqliteAll } from '../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
+import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';
 
 // ─── BusEvent (Real-time Publish) ───
 // Inspired by opencode's BusEvent: after SyncEvent is persisted,
@@ -150,15 +151,8 @@ function resolveEventLogRetention(): number {
 function pruneEventLog(limit: number): void {
   // Order by the implicit rowid: it is monotonic with insertion order and
   // unique, so "most recent N" is unambiguous even though the PK is a UUID.
-  sqliteRun(
-    `DELETE FROM event_log
-      WHERE rowid NOT IN (
-        SELECT rowid FROM event_log
-         ORDER BY rowid DESC
-         LIMIT ?
-      )`,
-    [limit],
-  );
+  // 走 rowid 边界删除，避免 `rowid NOT IN (...)` 对 100MB+ 表做全表物化。
+  deleteRowsBeyondMostRecent({ table: 'event_log', idColumn: 'rowid', limit });
 }
 
 function maybePruneEventLog(): void {

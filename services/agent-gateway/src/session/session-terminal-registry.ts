@@ -110,6 +110,12 @@ interface LiveTerminalState {
   totalBytes: number;
   /** Last legacy cumulative snapshot text; drives prefix-based delta extraction. */
   lastCumulativeText: string;
+  /**
+   * 有待落库的输出进度（字节数 / tail / 最近活动时间）。PTY 输出可能以每秒
+   * 数千块到达，逐块同步写 SQLite 会占满事件循环；这里改成「攒到节流窗口再写」
+   * （`flushEmit` 内），低延迟的 `notifyImmediateOutput` 分支仍保持逐块投递。
+   */
+  pendingPersist: boolean;
   /** Replay buffer holding the last TERMINAL_OUTPUT_RING_BYTES bytes. */
   ring: ByteChunkBuffer;
   /** Small buffer holding the last TERMINAL_OUTPUT_TAIL_BYTES bytes. */
@@ -412,6 +418,7 @@ export function registerTerminal(input: RegisterTerminalInput): SessionTerminalR
     pendingDelta: '',
     totalBytes: 0,
     lastCumulativeText: '',
+    pendingPersist: false,
     ring: createByteChunkBuffer(),
     tail: createByteChunkBuffer(),
     trailingTimer: null,
@@ -513,35 +520,51 @@ function appendDeltaInternal(terminalId: string, state: LiveTerminalState, delta
     outputBytesTotal: state.totalBytes,
   });
 
-  const now = Date.now();
+  // 逐块同步写库会在高输出 PTY（yes / cat 大文件 / 构建日志）上把事件循环
+  // 占满（每个数据块一次 `sqliteRun`）。改为标记待落库，由节流窗口
+  // （`flushEmit`，≤OUTPUT_EMIT_THROTTLE_MS）统一写一次；退出时由
+  // `markTerminalExited` 写最终值。
+  state.pendingPersist = true;
+
+  scheduleEmit(terminalId, state);
+}
+
+/** 把节流窗口内累积的输出进度落一次库（幂等、可重入）。 */
+function persistTerminalProgress(terminalId: string, state: LiveTerminalState): void {
+  if (!state.pendingPersist) {
+    return;
+  }
+  state.pendingPersist = false;
   sqliteRun(
     `UPDATE session_terminals
        SET output_bytes_total = MAX(output_bytes_total, ?),
            output_tail = ?,
            last_activity_ms = ?
      WHERE terminal_id = ?`,
-    [state.totalBytes, byteChunkText(state.tail), now, terminalId],
+    [state.totalBytes, byteChunkText(state.tail), Date.now(), terminalId],
   );
-
-  scheduleEmit(terminalId, state);
 }
 
 function flushEmit(terminalId: string, state: LiveTerminalState): void {
   if (state.closed) return;
-  if (state.pendingDelta.length === 0 && state.totalBytes === state.lastEmittedBytes) return;
-  state.lastEmitMs = Date.now();
-  state.lastEmittedBytes = state.totalBytes;
-  const chunk: StreamTerminalOutputChunk = {
-    type: 'terminal_output',
-    terminalId,
-    seq: state.totalBytes,
-    data: state.pendingDelta,
-    outputTail: byteChunkText(state.tail),
-    outputBytesTotal: state.totalBytes,
-    occurredAt: state.lastEmitMs,
-  };
-  state.pendingDelta = '';
-  emitRunEvent(state.sessionId, state.clientRequestId, chunk);
+  const hasNewOutput = state.pendingDelta.length > 0 || state.totalBytes !== state.lastEmittedBytes;
+  if (hasNewOutput) {
+    state.lastEmitMs = Date.now();
+    state.lastEmittedBytes = state.totalBytes;
+    const chunk: StreamTerminalOutputChunk = {
+      type: 'terminal_output',
+      terminalId,
+      seq: state.totalBytes,
+      data: state.pendingDelta,
+      outputTail: byteChunkText(state.tail),
+      outputBytesTotal: state.totalBytes,
+      occurredAt: state.lastEmitMs,
+    };
+    state.pendingDelta = '';
+    emitRunEvent(state.sessionId, state.clientRequestId, chunk);
+  }
+  // 与广播同频落库：无论本窗口是否有新广播，都把待写进度写一次。
+  persistTerminalProgress(terminalId, state);
 }
 
 function scheduleEmit(terminalId: string, state: LiveTerminalState): void {
@@ -636,6 +659,11 @@ export function markTerminalExited(input: MarkTerminalExitedInput): void {
   if (input.finalSnapshot !== undefined) {
     finalBytes = Buffer.byteLength(input.finalSnapshot, 'utf-8');
     finalTail = tailUtf8(input.finalSnapshot, TERMINAL_OUTPUT_TAIL_BYTES);
+  } else if (state) {
+    // 输出进度是「节流落库」的：退出时用内存态补写最终值，避免 DB 里的
+    // output_tail / output_bytes_total 停在最后一个节流窗口。
+    finalBytes = state.totalBytes;
+    finalTail = byteChunkText(state.tail);
   }
 
   sqliteRun(
@@ -663,6 +691,7 @@ export function markTerminalExited(input: MarkTerminalExitedInput): void {
 
   if (state) {
     state.closed = true;
+    state.pendingPersist = false;
     if (state.trailingTimer) {
       clearTimeout(state.trailingTimer);
       state.trailingTimer = null;
@@ -752,7 +781,19 @@ export function getTerminal(terminalId: string, userId: string): SessionTerminal
     'SELECT * FROM session_terminals WHERE terminal_id = ? AND user_id = ?',
     [terminalId, userId],
   );
-  return row ? rowToRecord(row) : null;
+  if (!row) return null;
+  const record = rowToRecord(row);
+  const state = liveTerminals.get(terminalId);
+  if (!state) {
+    return record;
+  }
+  // 输出进度是节流落库的（见 `appendDeltaInternal`）：读取时用内存态覆盖这两个
+  // 字段，保证调用方拿到的始终是最新值（DB 行最多滞后一个节流窗口）。
+  return {
+    ...record,
+    outputBytesTotal: Math.max(record.outputBytesTotal, state.totalBytes),
+    outputTail: byteChunkText(state.tail) || record.outputTail,
+  };
 }
 
 export interface KillTerminalResult {

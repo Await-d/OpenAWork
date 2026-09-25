@@ -65,6 +65,7 @@ import {
   subscribeSessionRunEvents,
 } from '../session/session-run-events.js';
 import { deriveRunEventBookend } from '../session/run-event-envelope.js';
+import { buildSingleToolPartialOutputWriter } from './single-tool-live-output.js';
 import {
   collectFileDiffsFromToolOutput,
   mergeFileDiffs,
@@ -84,7 +85,7 @@ import {
 import type { SandboxExecutionContext } from '../tools/tool-sandbox.js';
 import { cancelDescendantSessionStreams } from '../session/cancel-descendant-streams.js';
 import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
-import { filterPluginControlledToolsForUser } from '../tools/plugin-tool-settings.js';
+import { filterPluginControlledToolsForUser } from '../plugin/builtin-groups.js';
 import { buildFlatMcpToolDefinitions } from '../mcp/mcp-flat-tool-defs.js';
 import { listMcpToolsForSession } from '../mcp/mcp-runtime.js';
 import { isFlatMcpToolsDisabled } from '../mcp/mcp-tool-naming.js';
@@ -108,6 +109,7 @@ import { parseSessionMetadataJson } from '../session/session-workspace-metadata.
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { resolveUnboundSessionWorkspaceFallback } from '../workspace/workspace-safety.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
+import { resolveFrozenWorkspaceContext } from '../session/workspace-context-snapshot.js';
 import {
   filterEnabledGatewayToolsForDialogueMode,
   filterEnabledGatewayToolsForSession,
@@ -143,6 +145,10 @@ import {
   TOOL_SEARCH_TOOL_NAME,
 } from '../tools/tool-folding.js';
 import { writeToolInvokeAllowlist } from '../session/tool-invoke-allowlist.js';
+import {
+  persistSessionRouteSelection,
+  resolveEffectiveThinkingSelection,
+} from '../session/session-route-selection.js';
 import { normalizeToolArgumentsForStorage } from '../tools/tool-result-contract.js';
 import { detectEmptyTaskResponse } from '../task/empty-task-response-detector.js';
 import { buildDynamicOrchestratorPrompt } from '../agent/dynamic-agent-prompt-builder.js';
@@ -994,8 +1000,9 @@ function buildMissingToolArgumentsMessage(toolName: string, workingDirectory?: s
  * 需要校验非空参数的关键工具集合。
  * 这些工具如果被空参数调用（rawInput 为空对象或 normalizedInputText 为空），
  * 会直接返回错误提示，避免发到 sandbox 层再失败浪费往返。
+ * 导出供守卫测试锁定「自助管理类工具必须登记」（新增管理工具时同步补全）。
  */
-const TOOLS_REQUIRING_NON_EMPTY_ARGS = new Set([
+export const TOOLS_REQUIRING_NON_EMPTY_ARGS = new Set([
   'list',
   'bash',
   'write',
@@ -1011,6 +1018,7 @@ const TOOLS_REQUIRING_NON_EMPTY_ARGS = new Set([
   'mcp_manage_servers',
   'memory_manage',
   'skill_manage',
+  'plugin_manage',
   'schedule_manage',
   'agent_manage',
   'team_workspace_manage',
@@ -1792,6 +1800,14 @@ export async function executeToolCalls(input: {
           : isEnabledToolName(canonicalToolName, input.enabledToolNames)
             ? await sandbox.execute(request, input.signal, input.sessionId, {
                 ...input.executionContext,
+                // 单条可流式工具（bash）的实时输出：与 batch 子行复用同一份
+                // `tool_progress` / `_batchProgress` 数据通道。
+                onPartialOutput: buildSingleToolPartialOutputWriter({
+                  toolCallId,
+                  toolName: toolCall.toolName,
+                  clientRequestId: input.clientRequestId,
+                  writeChunk: input.writeChunk,
+                }),
                 onBatchProgress: (subTools, completedCount, totalCount) => {
                   input.writeChunk({
                     type: 'tool_progress',
@@ -2161,21 +2177,50 @@ export async function handleStreamRequest(input: {
       roleLayer: input.sessionContext.roleLayer,
       userId: input.user.sub,
     });
-    // 团队模板思考模式配置：将 session metadata 中的 thinking 字段
-    // 合并到 requestData，确保 runModelRound 中的 shouldApplyThinkingConfig 能正确读取。
+    // 统一解析生效档位：team 权威绑定 > 请求显式值 > 会话 metadata 回退。
+    // 回退是「唤醒轮（`continueSessionFromHistory`，空 requestData）与正常轮
+    // 前缀一致」的前提——否则 stable system 段的 `thinkingLanguagePrompt` 槽位
+    // 会在两轮之间翻转，整段历史 prompt-cache 被反复打断。
     const sessionSelection = parseSessionProviderSelection(input.sessionContext.metadataJson);
     const hasAuthoritativeTeamModel =
       (isTeamRoleLayer(input.sessionContext.roleLayer) ||
         hasTeamDefinition(input.sessionContext.metadataJson)) &&
       Boolean(sessionSelection.providerId && sessionSelection.modelId);
-    if (hasAuthoritativeTeamModel) {
-      if (sessionSelection.thinkingEnabled !== undefined) {
-        requestData.thinkingEnabled = sessionSelection.thinkingEnabled;
-      }
-      if (sessionSelection.reasoningEffort) {
-        requestData.reasoningEffort =
-          sessionSelection.reasoningEffort as StreamRequest['reasoningEffort'];
-      }
+    const effectiveThinking = resolveEffectiveThinkingSelection({
+      ...(requestData.thinkingEnabled !== undefined
+        ? { requestDataThinkingEnabled: requestData.thinkingEnabled }
+        : {}),
+      ...(requestData.reasoningEffort !== undefined
+        ? { requestDataReasoningEffort: requestData.reasoningEffort }
+        : {}),
+      ...(sessionSelection.thinkingEnabled !== undefined
+        ? { sessionThinkingEnabled: sessionSelection.thinkingEnabled }
+        : {}),
+      ...(sessionSelection.reasoningEffort !== undefined
+        ? { sessionReasoningEffort: sessionSelection.reasoningEffort }
+        : {}),
+      hasAuthoritativeTeamModel,
+    });
+    if (effectiveThinking.thinkingEnabled !== undefined) {
+      requestData.thinkingEnabled = effectiveThinking.thinkingEnabled;
+    }
+    if (effectiveThinking.reasoningEffort !== undefined) {
+      requestData.reasoningEffort =
+        effectiveThinking.reasoningEffort as StreamRequest['reasoningEffort'];
+    }
+    // 正常用户轮把解析结果按会话持久化（唤醒轮只读不写）：后续唤醒 / 自动续跑
+    // 才能解析出与正常轮一致的模型与档位。`'default'` 占位模型不落库。
+    if (!input.continueFromHistory) {
+      persistSessionRouteSelection(input.sessionId, input.user.sub, {
+        ...(route.model && route.model !== 'default' ? { modelId: route.model } : {}),
+        ...(route.providerId ? { providerId: route.providerId } : {}),
+        ...(requestData.thinkingEnabled !== undefined
+          ? { thinkingEnabled: requestData.thinkingEnabled }
+          : {}),
+        ...(requestData.reasoningEffort !== undefined
+          ? { reasoningEffort: requestData.reasoningEffort }
+          : {}),
+      });
     }
     wl.succeed(stepRoute, undefined, {
       downgradeReason: route.downgradeReason ?? 'none',
@@ -2238,9 +2283,22 @@ export async function handleStreamRequest(input: {
 
   let workspaceCtx: Awaited<ReturnType<typeof buildWorkspaceContext>>;
   try {
-    workspaceCtx = await buildWorkspaceContext(input.sessionContext.metadataJson, {
+    // 会话级冻结（对齐参考库 instructions 基线语义）：避免工作区内容变化（新增
+    // 根级文件 / 编辑 AGENTS.md 等）打断 stable system 前缀的 prompt-cache。
+    // 回退开关：OPENAWORK_DISABLE_WORKSPACE_CTX_FREEZE=1。
+    workspaceCtx = await resolveFrozenWorkspaceContext({
       sessionId: input.sessionId,
       userId: input.user.sub,
+      workspacePath: resolveSessionWorkspacePath({
+        metadataJson: input.sessionContext.metadataJson,
+        sessionId: input.sessionId,
+        userId: input.user.sub,
+      }),
+      build: () =>
+        buildWorkspaceContext(input.sessionContext.metadataJson, {
+          sessionId: input.sessionId,
+          userId: input.user.sub,
+        }),
     });
   } catch (error) {
     return failReservation(error);
@@ -2496,6 +2554,14 @@ export async function handleStreamRequest(input: {
           ? detectThinkingLanguageHintFromText(requestData.message)
           : null;
 
+      // 用户长期记忆块：在写用户消息时就一并快照（与 thinking hint 同理）。
+      // 挂到用户消息而非 system 尾段——记忆会被自动提取/管理工具更新，挂在
+      // system 尾段会让「system + 全部历史」的 prompt-cache 前缀整段失效。
+      const memoryBlock = buildMemoryBlockForSession(
+        input.user.sub,
+        input.sessionContext.metadataJson,
+      );
+
       // 唤醒请求不落用户轮：输入（合成通知）已在历史中，且对模型表现为 user 轮。
       if (!input.continueFromHistory) {
         persistStreamUserMessage({
@@ -2516,6 +2582,7 @@ export async function handleStreamRequest(input: {
           // opencode's `insertReminders` → `sessions.updatePart()` flow).
           syntheticContext: {
             injectedPrompt,
+            memoryBlock,
             companionPrompt,
             thinkingLanguageHint,
           },
@@ -2725,10 +2792,6 @@ export async function handleStreamRequest(input: {
       const toolCatalogPrompt = foldedSurface?.catalogPrompt ?? '';
       const enabledToolNames = new Set(visibleToolNames);
       const turnFileDiffs = new Map<string, FileDiffContent>();
-      const memoryBlock = buildMemoryBlockForSession(
-        input.user.sub,
-        input.sessionContext.metadataJson,
-      );
 
       // 260515-team-phase-a · T-06：构建 7 层团队指令栈
       const teamWorkspaceIdForStack =

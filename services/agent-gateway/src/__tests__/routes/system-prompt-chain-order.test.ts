@@ -98,6 +98,13 @@ describe('buildTwoPartSystemPrompts · stable / dynamic 分段', () => {
     );
   });
 
+  it('stable 段包含并行调用纪律（对齐参考库 Prefer parallelizing independent tool calls）', () => {
+    const { stable } = buildTwoPartSystemPrompts(INPUT);
+    expect(stable).toContain('同一条回复里一起发出');
+    expect(stable).toContain('batch');
+    expect(stable).toContain('tool_search');
+  });
+
   it('dynamicAgent / startWork / command 进 dynamic 段（每轮可变）', () => {
     const { stable, dynamic } = buildTwoPartSystemPrompts(INPUT);
     expect(dynamic).toContain('<<DYNAMIC_AGENT>>');

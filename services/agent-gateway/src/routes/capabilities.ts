@@ -20,6 +20,7 @@ import { loadConfiguredMcpServersForUser } from '../mcp/mcp-runtime.js';
 import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../mcp/mcp-manage-tool-name.js';
 import { MEMORY_MANAGE_TOOL_NAME } from '../memory/memory-manage-tool-name.js';
 import { SKILL_MANAGE_TOOL_NAME } from '../skill/skill-manage-tool-name.js';
+import { PLUGIN_MANAGE_TOOL_NAME } from '../plugin/plugin-manage-tool-name.js';
 import { SCHEDULE_MANAGE_TOOL_NAME } from '../cron/schedule-manage-tool-name.js';
 import { AGENT_MANAGE_TOOL_NAME } from '../agent/agent-manage-tool-name.js';
 import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../team/team-workspace-manage-tool-name.js';
@@ -501,6 +502,9 @@ export function buildCapabilityContext(
       : '',
     isToolVisible(SKILL_MANAGE_TOOL_NAME)
       ? `需要安装、卸载或启停技能时，使用 \`${SKILL_MANAGE_TOOL_NAME}\`；变更类操作会请求用户批准（仅支持注册源技能）。`
+      : '',
+    isToolVisible(PLUGIN_MANAGE_TOOL_NAME)
+      ? `需要安装、卸载或启停插件时，使用 \`${PLUGIN_MANAGE_TOOL_NAME}\`（search 搜索市场、source_add 添加 GitHub 来源）；安装会从 GitHub 下载并以网关权限执行，变更类操作会请求用户批准且没有沙箱，务必向用户说明来源。`
       : '',
     isToolVisible(SCHEDULE_MANAGE_TOOL_NAME)
       ? `需要新建、修改或查看定时任务时，使用 \`${SCHEDULE_MANAGE_TOOL_NAME}\`；变更类操作会请求用户批准，任务与执行历史重启后仍保留。`

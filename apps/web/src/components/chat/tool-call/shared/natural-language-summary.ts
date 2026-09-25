@@ -6,6 +6,8 @@
  * 例：已编辑了文件 / 已运行了命令 / 已查看 4 个文件 / 已调用 MCP 工具
  */
 
+import { parseDirectoryListing } from './directory-listing.js';
+
 /**
  * 后台任务读数的任务信息。
  *
@@ -74,16 +76,88 @@ function readBackgroundOutputText(output: unknown): string {
   return '';
 }
 
+/** 读取输入里的目标路径（read 工具支持 filePath / path / file_path 三种拼写）。 */ function readTargetPath(
+  input: Record<string, unknown>,
+): string | undefined {
+  for (const key of ['filePath', 'path', 'file_path'] as const) {
+    const value = input[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return undefined;
+}
+
+/** 读取输出里的文件路径（网关 read 输出契约的 `path`）。 */
+function readOutputPath(output: unknown): string | undefined {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return undefined;
+  const value = (output as Record<string, unknown>).path;
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/** list 输出里的条目计数（`visitedEntries`）。 */
+function readVisitedCount(output: unknown): number | undefined {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return undefined;
+  const value = (output as Record<string, unknown>).visitedEntries;
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * `:12-61` 形式的读取行区间（无信息时返回空串）。
+ * 输出携带精确的 `lineStart/lineEnd` 时优先；运行中退回输入的 `offset` / `limit`；
+ * read 命中目录（文本清单形态）时行区间没有意义，返回空串。
+ */
+function formatReadRange(input: Record<string, unknown>, output: unknown): string {
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    const record = output as Record<string, unknown>;
+    if (typeof record.content === 'string' && parseDirectoryListing(record.content) !== null) {
+      return '';
+    }
+    const lineStart = typeof record.lineStart === 'number' ? record.lineStart : undefined;
+    const lineEnd = typeof record.lineEnd === 'number' ? record.lineEnd : undefined;
+    if (lineStart !== undefined && lineEnd !== undefined) return `:${lineStart}-${lineEnd}`;
+  }
+  const offset = typeof input.offset === 'number' && input.offset > 0 ? input.offset : undefined;
+  const limit = typeof input.limit === 'number' && input.limit > 0 ? input.limit : undefined;
+  if (offset === undefined && limit === undefined) return '';
+  const start = offset ?? 1;
+  return limit !== undefined ? `:${start}-${start + limit - 1}` : `:${start}-`;
+}
+
+/** 摘要展示选项。 */
+export interface NaturalLanguageSummaryOptions {
+  /**
+   * 摘要里省略路径与行区间。
+   *
+   * 用于 read 的**展开态**：路径与行范围已经在预览的 meta 行里（带「点击预览」），
+   * 摘要再显示一遍会让同一个路径出现两次（用户口径：两处合成一处，且保留 meta 的点击预览）。
+   */
+  omitPath?: boolean;
+}
+
 export function naturalLanguageSummary(
   toolName: string,
   input: Record<string, unknown>,
   output?: unknown,
+  options: NaturalLanguageSummaryOptions = {},
 ): string {
   const n = toolName.trim().toLowerCase();
 
   // ── 文件读取 ──
-  if (n === 'read') return '已查看了文件';
-  if (n === 'list') return '已列举了目录';
+  // 查看类工具直接给出「读了哪个文件、读的是哪几行」：路径 + `:行区间`
+  // （优先用输出里的精确 lineStart/lineEnd，运行中则用输入的 offset/limit 估算）。
+  if (n === 'read') {
+    // 展开态下路径/行区间已经在预览的 meta 行里（带点击预览），摘要不再重复展示。
+    if (options.omitPath) return '已查看了文件';
+    const path = readTargetPath(input) ?? readOutputPath(output);
+    if (!path) return '已查看了文件';
+    return `已查看了 ${path}${formatReadRange(input, output)}`;
+  }
+  if (n === 'list') {
+    // 目录工具：路径直接进摘要（界面上要能一眼看到列的是哪个目录）。
+    const path = readTargetPath(input) ?? readOutputPath(output);
+    const visited = readVisitedCount(output);
+    if (!path) return '已列举了目录';
+    return visited !== undefined ? `已列举了目录 ${path}（${visited} 项）` : `已列举了目录 ${path}`;
+  }
   if (n === 'grep') return '已搜索了内容';
   if (n === 'glob') return '已搜索了文件';
   if (n === 'codesearch') return '已搜索了代码';
@@ -100,8 +174,14 @@ export function naturalLanguageSummary(
   if (n === 'edit' || n === 'multi_edit' || n === 'hash_edit') return '已编辑了文件';
   if (n === 'patch') return '已应用了补丁';
   if (n === 'ast_grep_replace') return '已执行了 AST 替换';
-  if (n === 'workspace_create_directory') return '已创建了目录';
-  if (n === 'workspace_review_revert') return '已还原了文件';
+  if (n === 'workspace_create_directory') {
+    const path = readTargetPath(input) ?? readOutputPath(output);
+    return path ? `已创建了目录 ${path}` : '已创建了目录';
+  }
+  if (n === 'workspace_review_revert') {
+    const path = readTargetPath(input) ?? readOutputPath(output);
+    return path ? `已还原了文件 ${path}` : '已还原了文件';
+  }
 
   // ── Shell 执行 ──
   if (n === 'bash' || n === 'interactive_bash') return '已运行了命令';
@@ -130,6 +210,13 @@ export function naturalLanguageSummary(
   if (n === 'skill') {
     const skillId = typeof input.skillId === 'string' ? input.skillId.trim() : '';
     return skillId ? `执行了 ${skillId}` : '执行了技能';
+  }
+
+  // ── 提问 ──
+  if (n === 'question' || n === 'askuserquestion') {
+    const questions = input.questions;
+    const count = Array.isArray(questions) ? questions.length : 0;
+    return count > 0 ? `已向用户提问（${count} 题）` : '已向用户提问';
   }
 
   // ── 待办 ──

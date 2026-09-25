@@ -134,6 +134,7 @@ import {
   dispatchToolExecuteBefore,
   type PermissionEvaluateEvent,
 } from '../runtime/plugin-host.js';
+import { executePluginTool, getPluginToolRegistry } from '../plugin/tool-registry.js';
 import {
   classifySshRemoteToolPolicy,
   executeSshRemoteTool,
@@ -146,6 +147,7 @@ import { callMcpToolForSession, listMcpToolsForSession } from '../mcp/mcp-runtim
 import { mcpManageServersToolDefinition, runMcpManageServersTool } from '../mcp/mcp-admin-tools.js';
 import { memoryManageToolDefinition, runMemoryManageTool } from '../memory/memory-admin-tools.js';
 import { skillManageToolDefinition, runSkillManageTool } from '../skill/skill-admin-tools.js';
+import { pluginManageToolDefinition, runPluginManageTool } from '../plugin/plugin-admin-tools.js';
 import {
   scheduleManageToolDefinition,
   runScheduleManageTool,
@@ -591,6 +593,7 @@ export const TOOL_WHITELIST = new Set<string>([
   mcpManageServersToolDefinition.name,
   memoryManageToolDefinition.name,
   skillManageToolDefinition.name,
+  pluginManageToolDefinition.name,
   scheduleManageToolDefinition.name,
   agentManageToolDefinition.name,
   teamWorkspaceManageToolDefinition.name,
@@ -1593,6 +1596,14 @@ async function executeGatewayManagedToolImpl(
   const rawInput = request.rawInput as Record<string, unknown>;
 
   try {
+    // v2 plugin platform: dispatch plugin-contributed tools. Permission
+    // gating already ran upstream — plugin tools are not mapped to a
+    // built-in category, so the ladder resolves them to `custom` (ask).
+    const pluginTool = getPluginToolRegistry().get(request.toolName);
+    if (pluginTool) {
+      return executePluginTool({ tool: pluginTool, request, sessionId, signal });
+    }
+
     if (request.toolName === todoWriteTool.name) {
       const parsed = todoWriteInputSchema.safeParse(rawInput);
       if (!parsed.success) {
@@ -3014,6 +3025,46 @@ async function executeGatewayManagedToolImpl(
           toolCallId: request.toolCallId,
           toolName: request.toolName,
           output: await runSkillManageTool({ userId, sessionId, input: parsed.data }),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    if (request.toolName === pluginManageToolDefinition.name) {
+      const userId = getSessionOwnerUserId(sessionId);
+      if (!userId) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: `Session owner not found for session ${sessionId}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const parsed = pluginManageToolDefinition.inputSchema.safeParse(rawInput ?? {});
+      if (!parsed.success) {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      try {
+        return {
+          toolCallId: request.toolCallId,
+          toolName: request.toolName,
+          output: await runPluginManageTool({ userId, sessionId, input: parsed.data }),
           isError: false,
           durationMs: 0,
         };
@@ -6645,6 +6696,16 @@ export class ToolSandbox {
     }
   }
 
+  /**
+   * v2 plugin platform: add a plugin-contributed tool name to the
+   * whitelist. Execution routes through the plugin registry in
+   * `executeGatewayManagedToolImpl`; the plugin's JSON Schema input is
+   * validated by the plugin itself (no zod definition here).
+   */
+  registerPluginToolName(name: string): void {
+    this.whitelist.add(name);
+  }
+
   async execute(
     request: ToolCallRequest,
     signal: AbortSignal,
@@ -7253,6 +7314,13 @@ export function createDefaultSandbox(
     allowedTools: [...allowedTools, ...TOOL_WHITELIST],
     defaultTimeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
   });
+  // v2 plugin platform: plugin-contributed tool names join the whitelist;
+  // execution dispatches to the plugin executor inside
+  // `executeGatewayManagedToolImpl`. Sandboxes are rebuilt every turn, so
+  // plugin tool changes take effect on the next turn.
+  for (const entry of getPluginToolRegistry().listDefinitions()) {
+    sandbox.registerPluginToolName(entry.definition.name);
+  }
   // P2-WEBSEARCH: when we know the caller, swap in the factory
   // variant that consults `user_settings.websearch_policy` and falls
   // back to the legacy single-provider path otherwise. The resolver

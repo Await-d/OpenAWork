@@ -38,6 +38,20 @@ vi.mock('@openAwork/web-client', () => ({
     putPlugins: settingsClientMocks.putPlugins,
     getWebsearch: vi.fn(async () => ({ providers: [], rolloutMode: 'sequential' })),
   }),
+  createPluginsClient: () => ({
+    list: vi.fn(async () => []),
+    install: vi.fn(async () => null),
+    remove: vi.fn(async () => undefined),
+    reload: vi.fn(async () => ({ reloaded: true })),
+    disable: vi.fn(async () => undefined),
+    enable: vi.fn(async () => ({ enabled: true })),
+    listMarketSources: vi.fn(async () => []),
+    addMarketSource: vi.fn(async () => null),
+    removeMarketSource: vi.fn(async () => undefined),
+    searchMarket: vi.fn(async () => ({ entries: [], failedSources: [] })),
+    getMarketEntry: vi.fn(async () => null),
+    installFromGithub: vi.fn(async () => null),
+  }),
   refreshAccessToken: vi.fn(async () => ({
     accessToken: 'refreshed-token',
     refreshToken: 'refresh-token',
@@ -160,6 +174,29 @@ describe('PluginsTabContent', () => {
     expect(screen.getByText(/状态:open_websearch,websearch/)).toBeTruthy();
     expect(screen.getByText('隐藏新增')).toBeTruthy();
     expect(screen.getByText('Web 搜索策略')).toBeTruthy();
+  });
+
+  it('根据 plugin=market 直达插件市场', async () => {
+    renderPluginsTab('/settings/plugins?plugin=market');
+
+    await waitFor(() => {
+      expect(screen.getByText(/从 GitHub 源浏览并一键安装插件/)).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('市场里还没有可安装的插件')).toBeTruthy();
+    });
+  });
+
+  it('根据 plugin=third-party 直达已安装插件管理面', async () => {
+    renderPluginsTab('/settings/plugins?plugin=third-party');
+
+    await waitFor(() => {
+      expect(screen.getByText(/管理网关级插件平台/)).toBeTruthy();
+    });
+    expect(screen.getByText('安装新插件')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText('还没有安装第三方插件')).toBeTruthy();
+    });
   });
 
   it('根据 plugin=desktop-automation 直达浏览器自动化管理面', async () => {

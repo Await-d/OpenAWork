@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FileContentPreview 宽度验收（超长行 / 行号栏 / meta 换行）</title>
+    <style>
+      /*
+       * 本 harness 的断言对象是几何（内容列不横向溢出、行号栏在滚动时保持可见），
+       * 颜色不是断言对象；真实 token 由 `src/index.css` 提供，这里只补页面 chrome。
+       */
+      body {
+        margin: 0;
+        padding: 12px;
+        background: #080b12;
+      }
+      .harness-root {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .harness-pane {
+        box-sizing: border-box;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 6px;
+        padding: 10px 12px;
+      }
+      .harness-pane-label {
+        font-size: 11px;
+        letter-spacing: 1px;
+        color: #4d5b6e;
+        padding-bottom: 6px;
+      }
+      .harness-case-title {
+        font-size: 11px;
+        color: #4d5b6e;
+        padding: 2px 0 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/file-content-preview-width-entry.tsx"></script>
+  </body>
+</html>

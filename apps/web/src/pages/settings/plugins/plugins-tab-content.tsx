@@ -10,6 +10,7 @@ import { useMcpServers } from '../connection/use-mcp-servers.js';
 import { ImageGenerationPluginPanel } from './image-generation-plugin-panel.js';
 import { McpPluginPanel } from './mcp-plugin-panel.js';
 import { PluginDetailHeader } from './plugin-detail-header.js';
+import { PluginMarketPanel } from './plugin-market-panel.js';
 import { PluginNav } from './plugin-nav.js';
 import { PluginToolSummary } from './plugin-tool-summary.js';
 import { PLUGIN_REGISTRY, findPluginDefinition, type PluginId } from './plugin-registry.js';
@@ -20,6 +21,7 @@ import type {
   PluginSettings,
 } from './plugin-settings-types.js';
 import { SkillsPluginPanel } from './skills-plugin-panel.js';
+import { ThirdPartyPluginsPanel } from './third-party-plugins-panel.js';
 import { WebsearchPluginPanel } from './websearch-plugin-panel.js';
 
 export type {
@@ -42,8 +44,10 @@ function normalizePluginId(value: string | null): PluginId {
     case 'desktop-automation':
     case 'desktop-control':
     case 'image-generation':
+    case 'market':
     case 'mcp':
     case 'skills':
+    case 'third-party':
     case 'websearch':
       return value;
     default:
@@ -343,6 +347,22 @@ export function PluginsTabContent({
           <>
             <PluginDetailHeader definition={selectedDefinition} />
             <SkillsPluginPanel />
+          </>
+        );
+
+      case 'third-party':
+        return (
+          <>
+            <PluginDetailHeader definition={selectedDefinition} />
+            <ThirdPartyPluginsPanel gatewayUrl={gatewayUrl} token={token} />
+          </>
+        );
+
+      case 'market':
+        return (
+          <>
+            <PluginDetailHeader definition={selectedDefinition} />
+            <PluginMarketPanel gatewayUrl={gatewayUrl} token={token} />
           </>
         );
 

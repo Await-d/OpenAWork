@@ -273,6 +273,10 @@ export async function loadDynamicToolsForWorkspace(
     }
   }
 
+  // 确定性排序：工具数组是 prompt-cache 前缀的一部分，`readdir` 的文件顺序与
+  // 模块导出顺序不稳定会让每轮 tools 字节漂移 → 缓存整段失效。
+  allEntries.sort((left, right) => left.name.localeCompare(right.name));
+
   // Enforce limit
   const limitedEntries = allEntries.slice(0, MAX_TOOLS_PER_WORKSPACE);
   if (allEntries.length > MAX_TOOLS_PER_WORKSPACE) {

@@ -99,10 +99,19 @@ export function buildFlatMcpToolDefinitions(
   const definitions: GatewayToolDefinition[] = [];
   const routeMap = new Map<string, { serverId: string; toolName: string }>();
 
-  for (const catalog of catalogs) {
-    if (catalog.status !== 'connected') continue;
+  // 确定性排序：工具数组是 prompt-cache 前缀的一部分，MCP 目录顺序（连接完成
+  // 顺序 / 上游 listTools 返回顺序）不稳定会让每轮 tools 字节漂移 → 缓存整段
+  // 失效。server 按 id、工具按 name 排序后渲染，保证同一集合产出同一字节。
+  const sortedCatalogs = [...catalogs]
+    .filter((catalog) => catalog.status === 'connected')
+    .sort((left, right) => left.serverId.localeCompare(right.serverId));
 
-    for (const tool of catalog.tools) {
+  for (const catalog of sortedCatalogs) {
+    const sortedTools = [...catalog.tools].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+
+    for (const tool of sortedTools) {
       const flatName = flatMcpToolName(catalog.serverId, tool.name);
       if (routeMap.has(flatName)) {
         // Collision — the first registration wins. In practice this

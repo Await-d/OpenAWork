@@ -63,6 +63,7 @@ import {
   CHAT_SCROLL_BOTTOM_PADDING,
   CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
 } from './render/chat-page-utils.js';
+import { resolveResponsiveContentMaxWidth } from '../layout/conversation-layout-state.js';
 import type { ChatImageGenerationReferenceArtifact } from '../../../components/chat/image/ChatImageGenerationControls.js';
 import HistoryEditInlineEditor from './views/history-edit-dialog.js';
 import RetryModeDialog from './views/retry-mode-dialog.js';
@@ -384,6 +385,12 @@ const CONVERSATION_STREAM_STYLE: CSSProperties = {
   transition: 'none',
 };
 
+/**
+ * split 布局下每条消息只占内容列的 65%，左右分列要各自达到 unified 下的可用行宽，
+ * 内容列基线需抬到约 1/0.65 ≈ 1.5 倍。基线抬高后仍走同一套「随可用宽度自适应」规则。
+ */
+const SPLIT_CONTENT_COLUMN_WIDTH_FACTOR = 1.5;
+
 const SKELETON_BOTTOM_SPACER_STYLE: CSSProperties = {
   height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
   flexShrink: 0,
@@ -656,16 +663,30 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     minHeight: 0,
     scrollPaddingBottom: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
   };
-  const resolvedContentMaxWidth =
+  // 内容列最大宽度 = 「随可用宽度自适应」的 clamp（见 resolveResponsiveContentMaxWidth）：
+  // 窄容器与固定上限时代一致，宽容器按 88% 比例加宽至基准的 1.5 倍封顶。
+  const baseContentMaxWidthPx: number | null =
     contentMaxWidth === 'fluid'
-      ? '100%'
-      : (contentMaxWidth ?? (compact ? '100%' : editorMode ? 820 : 1024));
+      ? null
+      : typeof contentMaxWidth === 'number'
+        ? contentMaxWidth
+        : compact
+          ? null
+          : editorMode
+            ? 820
+            : 1024;
 
-  // split 布局下内容区域增宽 15%，为左右分列留出更多空间
-  const effectiveContentMaxWidth =
-    messageLayout === 'split' && resolvedContentMaxWidth !== '100%'
-      ? `calc(${resolvedContentMaxWidth}px * 1.5)`
-      : resolvedContentMaxWidth;
+  const contentColumnBaselinePx =
+    baseContentMaxWidthPx === null
+      ? null
+      : messageLayout === 'split'
+        ? Math.round(baseContentMaxWidthPx * SPLIT_CONTENT_COLUMN_WIDTH_FACTOR)
+        : baseContentMaxWidthPx;
+
+  const effectiveContentMaxWidth: CSSProperties['maxWidth'] =
+    contentColumnBaselinePx === null
+      ? '100%'
+      : resolveResponsiveContentMaxWidth(contentColumnBaselinePx);
 
   const shouldCenterContent = centerContent ?? !compact;
   const scrollRegionClassName = showWelcome

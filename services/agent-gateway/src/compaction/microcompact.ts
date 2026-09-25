@@ -20,7 +20,7 @@
  */
 
 import type { UnifiedMessage } from '../message/message-to-model-messages.js';
-import { buildToolOutputReferenceIdentity } from '../message/tool-output-reference.js';
+import { buildMicrocompactedToolOutputReference } from '../message/tool-output-reference.js';
 import {
   DEFAULT_TOOL_CONTEXT_POLICY,
   resolveToolContextPolicy,
@@ -68,6 +68,27 @@ export const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
   compactableTools: DEFAULT_COMPACTABLE_TOOLS,
   protectedTools: DEFAULT_PROTECTED_TOOLS,
 };
+
+/**
+ * 生产链路是否启用每轮微压缩 —— **默认关闭**（对齐参考库 opencode v2.0.15）。
+ *
+ * 参考库没有每轮剪枝：工具结果在**写时**截断（2000 行 / 50 KiB，全文落盘），
+ * 历史保持**只追加**，只在接近上下文上限时整体压缩一次。本仓此前的 microcompact
+ * 会在每轮滑窗改写**历史靠前**的工具结果字节，导致：
+ *   - 每次剪枝都会打断 prompt-cache 前缀（子代理等工具密集场景实测连续多轮
+ *     0 命中）；
+ *   - 剪枝边界随轮次滑动 → 缓存命中率在 10%~90% 之间来回跳。
+ *
+ * 因此默认关闭；确需「延迟压缩」节省上下文时用 `OPENAWORK_ENABLE_MICROCOMPACT=1`
+ * 显式开启（此时请接受缓存命中率的代价）。单元测试仍可直接给
+ * `microcompactMessages(..., { enabled: true })` 覆盖来验证机制本身。
+ */
+export function isMicrocompactEnabled(): boolean {
+  const raw = globalThis.process?.env?.['OPENAWORK_ENABLE_MICROCOMPACT'];
+  if (typeof raw !== 'string') return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
 
 // ─── Result Type ─────────────────────────────────────────────────────────────
 
@@ -175,13 +196,9 @@ function collectCompactableToolResults(
     if (outputLength <= MICROCOMPACT_CLEARED_PLACEHOLDER.length + 10) continue;
 
     if (msg.content.startsWith('[tool_output_reference] {"microcompacted":true,')) continue;
-    const reference = `[tool_output_reference] ${JSON.stringify({
-      microcompacted: true,
-      ...buildToolOutputReferenceIdentity(msg.toolCallId),
-      retrievalTool: 'read_tool_output',
-      preview: msg.content.slice(0, 80),
-      ...(imageCount > 0 ? { omittedImageCount: imageCount } : {}),
-    })}`;
+    // 引用形态与持久化标记（`time.compacted`）共享同一构造函数：两侧必须逐字节
+    // 一致，否则同一批消息会在剪枝轮与下一轮被改写两次，打断 prompt-cache。
+    const reference = buildMicrocompactedToolOutputReference(msg.toolCallId);
     candidates.push({
       messageIndex: i,
       toolCallId: msg.toolCallId,

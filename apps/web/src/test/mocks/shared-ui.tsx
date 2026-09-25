@@ -29,3 +29,11 @@ export {
   SUBAGENT_TOOL_NAMES,
 } from '../../../../../packages/shared-ui/src/tools/subagent-tool-names.js';
 export type { SubagentToolName } from '../../../../../packages/shared-ui/src/tools/subagent-tool-names.js';
+
+// diff / 文件预览共用的高亮工具是纯函数（无副作用）：转发真实实现，
+// `FileContentPreview` 会直接调用它们（组件本身仍由 shared-ui-inline mock 替身）。
+export {
+  detectLanguage,
+  highlightCodeLines,
+} from '../../../../../packages/shared-ui/src/tools/UnifiedCodeDiff.js';
+export type { DiffToken } from '../../../../../packages/shared-ui/src/tools/UnifiedCodeDiff.js';

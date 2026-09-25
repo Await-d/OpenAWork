@@ -153,6 +153,10 @@ const OpenAIChatUsage = Schema.Struct({
   prompt_tokens: Schema.optional(Schema.Number),
   completion_tokens: Schema.optional(Schema.Number),
   total_tokens: Schema.optional(Schema.Number),
+  // DeepSeek 官方 API 用顶层 `prompt_cache_hit_tokens` 上报自动上下文缓存的
+  // 命中量（不在 `prompt_tokens_details.cached_tokens` 里）。漏读会让直连
+  // DeepSeek 的会话在 UI/usage 事件里永远显示 0% 命中（实测台账全 0）。
+  prompt_cache_hit_tokens: optionalNull(Schema.Number),
   prompt_tokens_details: optionalNull(
     Schema.Struct({
       cached_tokens: Schema.optional(Schema.Number),
@@ -991,7 +995,10 @@ const mapUsage = (
   providerMetadataKey: string,
 ): Usage | undefined => {
   if (!usage) return undefined;
-  const cached = usage.prompt_tokens_details?.cached_tokens;
+  // 兼容两种上报口径：OpenAI 的 `prompt_tokens_details.cached_tokens` 与
+  // DeepSeek 的顶层 `prompt_cache_hit_tokens`（后者缺失时才回退）。
+  const cached =
+    usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? undefined;
   const reasoning = usage.completion_tokens_details?.reasoning_tokens;
   const nonCached = ProviderShared.subtractTokens(usage.prompt_tokens, cached);
   return new Usage({

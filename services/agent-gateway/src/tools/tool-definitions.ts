@@ -15,6 +15,10 @@ import { codesearchToolDefinition } from './codesearch-tools.js';
 import { subTodoReadTool, subTodoWriteTool, todoReadTool, todoWriteTool } from './todo-tools.js';
 import { webfetchTool } from './web-tools.js';
 import { toolInvokeDefinition, toolSearchDefinition } from './tool-folding.js';
+import {
+  buildPluginGatewayToolDefinitions,
+  getPluginToolRegistry,
+} from '../plugin/tool-registry.js';
 import { createEditTool } from './edit-tools.js';
 import { createMultiEditTool } from './multi-edit-tool.js';
 import { batchToolDefinition } from './batch-tools.js';
@@ -91,6 +95,7 @@ import { CHANNEL_TOOL_DEFINITIONS } from './channel-tools.js';
 import { mcpManageServersToolDefinition } from '../mcp/mcp-admin-tools.js';
 import { memoryManageToolDefinition } from '../memory/memory-admin-tools.js';
 import { skillManageToolDefinition } from '../skill/skill-admin-tools.js';
+import { pluginManageToolDefinition } from '../plugin/plugin-admin-tools.js';
 import { scheduleManageToolDefinition } from '../cron/schedule-admin-tools.js';
 import { agentManageToolDefinition } from '../agent/agent-admin-tools.js';
 import { teamWorkspaceManageToolDefinition } from '../team/team-workspace-admin-tools.js';
@@ -222,6 +227,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   mcpManageServersToolDefinition,
   memoryManageToolDefinition,
   skillManageToolDefinition,
+  pluginManageToolDefinition,
   scheduleManageToolDefinition,
   agentManageToolDefinition,
   teamWorkspaceManageToolDefinition,
@@ -238,6 +244,13 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   toolSearchDefinition,
 ] as const;
 
+// v2 plugin platform: built-in tool names are reserved. A plugin tool
+// must not shadow them — the sandbox would route the name to the
+// built-in executor and the plugin tool would silently never run.
+getPluginToolRegistry().setReservedNames(
+  MODEL_VISIBLE_GATEWAY_TOOLS.flatMap((tool) => [tool.name, getVisibleToolName(tool.name)]),
+);
+
 export interface BuildGatewayToolDefinitionsContext {
   /**
    * When provided, the `skill` tool's description is rendered to enumerate
@@ -251,7 +264,7 @@ export interface BuildGatewayToolDefinitionsContext {
 export function buildGatewayToolDefinitions(
   ctx: BuildGatewayToolDefinitionsContext = {},
 ): GatewayToolDefinition[] {
-  return MODEL_VISIBLE_GATEWAY_TOOLS.map((tool) => {
+  const builtin = MODEL_VISIBLE_GATEWAY_TOOLS.map((tool) => {
     let description = tool.description;
     if (tool.name === 'skill' && ctx.effectiveSkills !== undefined) {
       // Re-render description by spinning a transient skillTool with the
@@ -271,6 +284,10 @@ export function buildGatewayToolDefinitions(
       },
     };
   });
+  // v2 plugin platform: plugin-contributed tools are appended after the
+  // built-ins. Name collisions are rejected at registration time, so the
+  // two lists never overlap.
+  return [...builtin, ...buildPluginGatewayToolDefinitions()];
 }
 
 export function forEachDefaultGatewayTool(
@@ -1823,6 +1840,49 @@ function buildParameters(tool: GatewayToolLike): GatewayToolDefinition['function
             type: 'string',
             description: 'install 时可指定注册源 id；省略时由注册源解析。',
           },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      };
+    case 'plugin_manage':
+      return {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: [
+              'list',
+              'search',
+              'source_list',
+              'install',
+              'uninstall',
+              'enable',
+              'disable',
+              'reload',
+              'source_add',
+              'source_remove',
+            ],
+            description:
+              '管理动作：list 已安装插件；search 搜索市场；source_list/source_add/source_remove 市场来源；install 安装；uninstall 卸载；enable/disable 启停；reload 重载。',
+          },
+          query: { type: 'string', description: 'search 的关键字（可选）。' },
+          sourceId: {
+            type: 'string',
+            description: '市场条目来源 id（owner/repo，install 与 source_remove 用）。',
+          },
+          name: { type: 'string', description: '市场条目插件名（install 与 sourceId 配套）。' },
+          repo: {
+            type: 'string',
+            description:
+              'GitHub 仓库（owner/repo 或 owner/repo@ref）；install 直装与 source_add 用。',
+          },
+          path: { type: 'string', description: '仓库内插件路径（install，可选）。' },
+          ref: { type: 'string', description: '分支 / tag（install 与 source_add，可选）。' },
+          installId: {
+            type: 'string',
+            description: '已安装插件目录名（uninstall / reload 必填）。',
+          },
+          pluginId: { type: 'string', description: '插件 id（enable / disable 必填）。' },
         },
         required: ['action'],
         additionalProperties: false,

@@ -58,6 +58,20 @@ describe('injectSyntheticRequestContextUnified', () => {
     expect(result[0]!.content).toBe('hello');
   });
 
+  it('用户记忆块随用户消息注入（不挂 system 尾段，记忆更新不打断历史缓存）', () => {
+    const messages: UnifiedMessage[] = [{ role: 'user', content: 'remember this' }];
+    const result = injectSyntheticRequestContextUnified(messages, {
+      injectedPrompt: null,
+      capabilityContext: null,
+      companionPrompt: null,
+      memoryBlock: '<user-memory>\n- 用户偏好：中文\n</user-memory>',
+    });
+
+    expect(result[0]!.content).toContain('<user-memory>');
+    expect(result[0]!.content).toContain('用户偏好：中文');
+    expect(result[0]!.content).toContain('remember this');
+  });
+
   it('only modifies the latest user message even when several user messages exist', () => {
     const messages: UnifiedMessage[] = [
       { role: 'user', content: 'first' },

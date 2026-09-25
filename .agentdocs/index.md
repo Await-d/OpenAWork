@@ -2,6 +2,44 @@
 
 ## 已完成的任务
 
+### ✅ 260924-AI插件管理工具（plugin_manage）- 模型在审批下安装/卸载/启停插件与市场管理
+
+**状态**: ✅ **全部交付并归档**（2026-09-24，Full orchestration score +5，Mode B 串行）
+**归档位置**: [workflow/done/260924-AI插件管理工具.md](workflow/done/260924-AI插件管理工具.md)
+**落地**: 共享逻辑抽取（`plugin/market-install.ts` 的 `installPluginFromGitHub` + `plugin/lifecycle-ops.ts` 的卸载/启停/重载，路由与工具同源零漂移）+ `plugin/plugin-admin-tools.ts`（**`plugin_manage`**，10 action：list/search/source_list/install/uninstall/enable/disable/reload/source_add/source_remove）+ 9 件套登记（权限类别 `plugin_manage` 默认 ask / `tool-category-map` 映射 / MODEL_VISIBLE + 参数描述 / TOOL_WHITELIST + 执行分支 / 权限派生器（只读免审批、变更 `scope=action:target` + `always=[action:*]`、install 预览含来源与「无沙箱」）/ 会话可见性（team·cron·channel·clarify 不可见 + 执行守卫双保险）/ 能力目录提示 / 折叠清单）+ `docs/plugins/README.md`「AI 自助管理」节。
+**验证**: 模块单测 9 例（含 mock zipball 安装→激活→卸载全链路）+ 沙箱接线 5 例（install/disable/uninstall ask pending、只读免审批、yolo 归一、team 守卫）+ 派生器 4 例 + 可见性 2 例；**全量插件域 26 文件 / 256 测试全绿**；typecheck 0 / ESLint 0。
+**安全**: install 仅市场来源（GitHub zipball，bounded + zip 炸弹/zip-slip 防护），**不接受模型直传本地路径**；guarded 内置插件不可停用；与 `mcp_manage_servers` / `skill_manage` 完全同构，无新增权限放宽。
+
+### ✅ 260924-插件市场与在线安装 - GitHub 源 + 预览 + 一键安装（插件平台在线化）
+
+**状态**: ✅ **全部交付并归档**（2026-09-25，Full orchestration score +6，Mode B 串行）
+**归档位置**: [workflow/done/260924-插件市场与在线安装.md](workflow/done/260924-插件市场与在线安装.md)
+**落地**: `plugin/sources-store.ts`（`plugin_sources` 表 + `owner/repo` 归一/去重）+ `plugin/github-fetch.ts`（流式 bounded 下载 + **解压前 zip 炸弹拒绝** + **zip-slip 防护**的子树提取）+ `plugin/marketplace.ts`（`openawork-plugins.json` 清单 + TTL 缓存 + 聚合搜索 + 404 根目录单插件回退）+ `routes/plugins.ts` 市场/安装路由（`/plugins/market*`、`POST /plugins/install/github`）+ web-client 6 个市场方法 + Web UI「插件市场」（`?plugin=market`：搜索/来源管理/详情 README/一键安装**信任确认**）+ `docs/plugins/README.md` 在线安装节 + harness `plugin-market-3viewports`。
+**验证**: 网关插件域 **12 文件 / 73 测试全绿**（市场单元 9 + 路由 3 新增）；web 插件设置 **5 文件 / 29 测试全绿**（市场视图 8 + 深链 1 新增）；**真实 Chromium 三视口 58 断言全过**；网关 typecheck 0 / web 我方文件 0；ESLint 0；Prettier 通过。
+**关键修复**: harness 375 视口抓到「失败源提示长 URL 不换行导致横向溢出」→ `overflowWrap: 'anywhere'`（确认文案/描述/仓库链接同类加固）。
+**边界**: 仅 GitHub 源（HTTPS）；npm / zip 直传仍不做；私有仓库暂不支持；插件仍无沙箱（安装前显式信任确认）。
+
+### ✅ 260924-插件系统v2完整集成方案 - 从 V1 风格 hook bus 升级为对齐 opencode v2.0.15 的完整插件平台
+
+**状态**: ✅ **P0-P5 全部交付并归档**（2026-09-24）；**遗留：桌面 sidecar e2e 留待发布前**
+**归档位置**: [workflow/done/260924-插件系统v2完整集成方案.md](workflow/done/260924-插件系统v2完整集成方案.md)
+**落地**: `packages/plugin-sdk/`（`@openAwork/plugin-sdk`，Promise 主入口 + `/effect` 子路径）+ `services/agent-gateway/src/plugin/`（14 模块：hooks/registry/context/loader/config/source/watcher/state-store/storage/events/tool-registry/supervisor/installer/builtin-groups）+ `runtime/plugin-host.ts` 兼容适配层（旧签名不变、5 调用点零改动、V1 shim）+ `routes/plugins.ts` 管理 API + web-client `createPluginsClient` + Web UI「已安装插件」（`?plugin=third-party`）+ `docs/plugins/`（开发指南/迁移指南/3 示例）+ `harness/third-party-plugins-3viewports`（真实 Chromium）。
+**能力**: 域化 hook（tool/session/permission，权限 hook 保持 deny-only）、插件注册工具（默认 `custom`(ask)）、事件订阅、插件级存储、声明式配置（`openawork.json`）+ 目录发现 + 热重载（digest 去重）、安装/重载/停用/启用/卸载（guarded 守卫）、内置工具组 → guarded 内部插件（T-29）。
+**验证**: 网关插件域 **20 文件 / 123 测试全绿**（含存量 hook 回归 41 例逐字节保持）；Web 插件设置 **4 文件 / 20 测试**；**真实 Chromium 三视口 64 断言全过**；sidecar `import()` spike 通过；typecheck / ESLint 0 error。
+**明确不做**: T-14 配置变换域（无消费者，不做投机基建）、T-15 参考库权限事件字段对齐（权限语义已分叉，无兼容收益）、npm/zip 安装；TUI/RPC 插件按 D-7 边界排除；Provider 裸 Key/权限放宽永不做。
+**记忆同步**: 已写入本文件「项目记忆 → 插件平台 v2」块（架构决策 / 安全边界 / 陷阱 10 条）。
+
+### ✅ 260924-工具展开可视化优化 - Bash 终端观感 / 文件编辑直接可见 / 批量调用子行展开（对齐 opencode v2.0.15）
+
+**目标**：三类工具卡「点击展开」后的可视化，对齐参考实现 `temp/opencode-v2.0.15`（session-ui 的 shell / edit / write 渲染）。
+
+**落地**：
+- **统一展开面板**：`.tool-call-block-body` / `.tool-call-batch-child-detail` 从「左竖线 + 缩进」升级为有背景 / 圆角 / 内边距的面板（batch 子行用引用块形态）。
+- **Bash**：单终端面板（命令行 `$` + 完整多行 `pre-wrap` + cwd + 复制图标 → 输出区 stderr danger 左线 + stdout，max-height 288）＋ `running` 等待态（「运行中，等待输出…」+ 闪烁光标）＋ batch 子工具实时输出自动贴底；移除 badge 汇总与「显示全部/较少」按钮（对齐参考的干净终端块）。
+- **文件编辑 / 写入**：文件卡头 = 文件图标 + 目录（弱化、左侧截断）+ 文件名（强调）+ `+N / -M`（成功/危险色）；`UnifiedCodeDiff` 新增 `hideHeader`；diff 直接可见；`fileEdit` 类别**默认展开**（persist v7→v8 一次性迁移，设置页可单独关闭）。
+- **批量调用**：子行 chevron 常驻（展开态旋转 + accent）；修 `--text-1` 未定义 token；运行中 4px 进度条（失败转 danger）；子行展开以 `embedded` 渲染嵌套卡（隐藏自身 header，inline 卡隐藏整行且不展示入参）。
+- **验证**：`harness/tool-expansion`（5 用例 × 三视口 + 运行态）**57/57 全绿**（基线 18 条红）；web 534 文件 / 5296 测试、shared-ui 22 文件 / 175 测试、两包 typecheck、prettier 全过。
+
 ### ✅ 260924-插件技能MCP管理界面重构 - 设置插件 / 技能市场 / MCP 三处视觉+信息架构+代码拆分
 **状态**: ✅ 已交付并验证（2026-09-24，Full orchestration score +6，Mode B 串行）
 **归档位置**: [workflow/done/260924-插件技能MCP管理界面重构.md](workflow/done/260924-插件技能MCP管理界面重构.md)
@@ -464,20 +502,6 @@
 
 > 本节保留「未完成 / 阻塞」任务，以及**已完成但细节量大、不重复搬入上方登记区**的任务明细。已完成条目的权威登记见上方「已完成的任务」。
 
-### 🟡 260924-插件系统v2完整集成方案 - 从 V1 风格 hook bus 升级为对齐 opencode v2.0.15 的完整插件平台
-**状态**: 🟡 方案阶段，**待 Gate 0 决策**（D-1..D-9 九项，未决前不进入 P1）
-**复杂度**: Full orchestration（score +6；执行方式 P0 后按阶段选择 Mode A/B）
-**开始日期**: 2026-09-24（规划）
-**方案文档**: [workflow/260924-插件系统v2完整集成方案.md](workflow/260924-插件系统v2完整集成方案.md)
-**运行计划**: `.agentdocs/runtime/260924-插件系统v2完整集成方案/master_plan.md`（临时目录）
-**目标**: 将 `runtime/plugin-host.ts`（346 行，5 hook，`OPENAWORK_PLUGINS` env-only）升级为参考库 v2.0.15 形态：插件定义（id/effect/setup）、域化 hook（5 域 18 事件，首批对齐 tool/session/permission）、Effect/Promise 双 API、生命周期（Scope/dispose/前缀 diff/失败降级/supervisor）、能力域（storage/event/tool.transform/配置变换）、声明式发现 + 目录发现 + 热重载、安装与 Web 管理面、内置插件迁移。
-**关键差距**: ① 插件不能注册工具（最大能力缺口，参考库 `tool.transform` 可 add/update/remove）；② 无声明式配置/目录发现/安装/热重载（无 fs 监听与 npm 安装基础设施）；③ 无生命周期（加载即永久）；④ 无插件存储与事件订阅；⑤ 权限 hook 为 deny-only（本仓安全设计，D-2 决策是否放开三值）。
-**可复用基础**: Effect 4.0.0-rc.117（gateway + opencode-llm 已同源）、Service/Layer 范式（`v2-runtime/services/*`）、sync-event 总线 + BusService、`user_settings` KV 表、skill-registry 安装范式（HTTP+解压）、dynamic-tool-loader 缓存失效模式、5 个 hook 落点已就位（tool-sandbox/stream/stream-runner）。
-**分阶段路线**: P0 Gate 0（9 项决策）→ P1 SDK 包 + 宿主内核（旧插件 shim 零破坏）→ P2 能力域（storage/event/tool.transform/配置变换）→ P3 发现与加载（声明式配置/目录发现/热重载/supervisor/状态诊断）→ P4 安装与管理（安装机制/管理 API/Web UI）→ P5 内部插件化与生态（内置工具组迁移/示例/迁移指南）。
-**风险要点**: 宿主重构行为回归（P1 验收要求"零插件时逐字节一致"）；sidecar 二进制内 `import()`/`bun add` 可行性（T-18/T-24 前置验证）；`tool.transform` 与工具折叠/权限链路冲突（强制走 6 处登记 + guard 测试）。
-**边界**: 不做 TUI 插件（无形态）、RPC 跨进程插件（D-7 暂缓）、Provider 裸 Key/权限放宽（永不做）。
-**关联**: 与 `260921-opencode-v2能力对齐`（工具维度）、`260924-AI自助管理扩展四域`（管理工具）为三条独立线；Web 面板（T-27）需在 `260924-插件技能MCP管理界面重构`（已完成，见上方登记）的数据驱动外壳上扩展。
-
 ### 🟢 260924-AI自助管理扩展（四域）- 技能安装 / 定时任务 / 记忆 / 自定义 Agent·团队模板（总览）
 **状态**: ✅ **四域全部交付归档**（含顺延项 `team_workspace_manage`，2026-09-24）；本条目保留为总览，子任务权威登记见上方「已完成的任务」
 **复杂度**: Full orchestration（批次 score +5；四域共享热点文件 → 串行，一域一验收）
@@ -843,6 +867,21 @@
 
 ## 项目记忆
 
+### 插件平台 v2（2026-09-24）
+
+- **架构决策**：插件平台对齐 opencode v2.0.15——SDK 包 `packages/plugin-sdk/`（`@openAwork/plugin-sdk`，Promise 主入口 + `/effect` 子路径，`define` 是可选类型糖，运行时只要求 `{id, setup|effect}` 形状）；网关侧 `services/agent-gateway/src/plugin/`（hooks 注册表 / registry 生命周期 / loader 加载 + 热重载 / storage / events / tool-registry / config / source / watcher / installer / supervisor）；`runtime/plugin-host.ts` 是**兼容适配层**（旧导出签名不变，调用点零改动）。
+- **安全边界（不可回退）**：`permission.evaluate` 保持 **deny-only**（插件只能降级，永不授权——D-2）；插件工具不映射权限类别 → 落 `custom`(ask)，**永不进免审批名单**；hook 抛错只 warn、不中断回合（`PluginHooksRegistry.trigger` 隔离）。
+- **单用户部署前提（2026-09-24 用户澄清）**：本仓按**单用户**部署设计——`user_settings` 的 per-user 字段即全局开关，"没有多用户"。凡遇"per-user 语义 vs 全局机制"的取舍（如内置工具组迁移），按单用户等价处理，不引入每用户策略层。
+- **内置工具组迁移（T-29 已完成）**：`plugin/builtin-groups.ts` 把 3 个可迁移组（image-generation / desktop-control 含 computer_use / desktop-automation）注册为 **guarded 内部插件**（`source: 'internal'`、`GET /plugins` 可见、配置不可移除）；门控链 `isBuiltinToolAllowedForUser` 在插件平台按插件 id 组合（fail-closed），`filterPluginControlledToolsForUser` 由 `tools/plugin-tool-settings.ts` 移至该模块（stream/stream-runtime 改引）；存储 `user_settings.plugin_settings` 与 `/settings/plugins` UI 契约**不变**，逐请求读取保持"改完即生效"。`mcp`/`skills`/`websearch` 是资源导航面板（非开关语义），不迁移。
+- **陷阱：局部 mock 模块会打穿新增导入方**——`tool-sandbox-desktop-screenshot.test.ts` 曾用 `vi.mock('plugin-tool-settings.js', () => ({ isDesktopControlPluginEnabledForUser }))` 只给一个导出；当插件模块新增对同模块其他导出的导入时，整个导入链在收集期报 "No … export is defined on the mock"。修法：改用 `importOriginal` 部分 mock（`{ ...actual, 覆盖项 }`）。扩展被广泛导入的模块导出时，先 grep 其 `vi.mock` 使用点。
+- **新增自助管理工具（mcp/skill/memory/schedule/agent/plugin）的完整登记点含 `routes/stream.ts`**：除 9 件套外，还必须在 `TOOLS_REQUIRING_NON_EMPTY_ARGS` 登记（空参数提前拦截）；已导出该集合并有守卫测试（`stream-error-contracts.test.ts`），未来新增工具漏登记会红。
+- **加载/配置语义**：来源按 配置 `openawork.json`（`plugins` 数组：字符串 / `{package,options}` / `-target` 移除 / `*`·`prefix.*` 启用）→ 目录发现 `<dataDir>/plugins/*` → env `OPENAWORK_PLUGINS` 合并，逐 entrypoint 去重；配置 `add` 总是加载，移除只过滤发现/env 来源，精确名可"救援"被批量移除的本地候选（`["-*","keep-me"]`）；`guarded` 插件豁免移除。
+- **热重载机制**：`fs.watch`（`persistent:false`）+ 200ms 防抖 + SHA-256 digest 去重；重载用 **`import('<file-url>?v=<ts>')` cache-bust**（已在 Node 与 Vitest 实测绕过 ESM 模块缓存），失败源保留追踪可修复后重试；V1 插件 id 用"首个空闲 `v1:<source>` 槽位"，卸载后同 id 复用保证重载幂等。
+- **陷阱：监听器必须 await**——hot reload 的 watcher listener 若用 `void asyncFn()` 包装，`flushForTest`/生产回调无法等待重载完成（测试表现为断言拿到旧行为）；listener 类型应为 `() => void | Promise<void>` 且 `await`。
+- **陷阱：新建 workspace 包要补消费方三套 tsconfig**——`tsconfig.json`（源码 paths）、`tsconfig.typecheck.json`（references）、`tsconfig.build.json`（dist paths + references）缺一即 `tsc -b` 把源码纳入消费方项目（TS6059/TS6307），且配置不完整时一次性降级会把编译产物吐到新包 `src/`（同 opencode-llm 历史坑，需清理）。
+- **陷阱：插件测试必须隔离 `OPENAWORK_DATA_DIR`**——loader 会读 `<dataDir>/openawork.json` 与 `<dataDir>/plugins/*`，不加隔离的测试会读到开发者真实数据目录；测试内设置后需在 `afterAll` 恢复（vitest 同进程 env 会跨文件泄漏）。
+- **安装面现状**：支持**本地目录 / 单文件**安装（staging + rename 原子落位、install id 消毒、plugins 根约束、`force` 覆盖）；**npm / zip 未支持**（网关无归档依赖；npm 安装需运行时包管理器）；`bun build --compile` 二进制运行时 `import('file://...')` 已 spike 验证可用。
+
 ### 已知陷阱补充
 
 - [2026-09-23] **「后台任务」视图必须过滤 `foreground` 终端**：`SessionTerminalSummary.kind` 有三值——`foreground`（**阻塞式** `bash` 调用 + 用户交互终端 `quick_terminal`）、`background`（`run_bash_in_background`）、`tmux`（`interactive_bash`）；三者都会写 `session_terminals`。不过滤的后果：后台任务面板/左侧浮动栏/composer 胶囊把用户自己开着的终端算成「后台命令在跑」（实测真实会话 3 个终端全部 foreground，含 2 个交互终端）。过滤点唯一：`apps/web/src/pages/chat-page/panels/background-task-model.ts` 的 `buildBackgroundTaskRows`（`kind` 缺失时不隐藏，兼容旧网关）。
@@ -872,6 +911,13 @@
 - [2026-09-24] **同一视图内两个按钮同名会让 `getByText` 命中歧义**：`McpServerManager` 头部「+ 添加服务器」开关与表单提交按钮同名时，测试取到的是被禁用的提交按钮（点击超时）。现提交按钮改「+ 确认添加」，头部开关加 `data-mcp-add-toggle`，测试选择器一律按 data 属性锚定。
 
 ### 架构决策
+
+- [2026-09-25] **同一元素的内外层同时写 inline style 会互相覆盖（复查抓到）**：`BashTerminalCard` 的输出面板设了 `--fg-default` / 13px，但真正承载文本的 `ShellTextPane` 内部又写死 `muted` / `fontSize: 11` → 「终端观感」的文字颜色与字号被抵消。**改样式先确认「文本最终由哪个节点承载」**，把字号/颜色写在承载节点上（ANSI 片段仍各自覆盖颜色、stderr 仍走危险色）。
+- [2026-09-25] **工具卡「内容优先」的两条 UI 口径**：① **read 的路径只显示一处**——折叠态在摘要（`已查看了 <路径>:起-止`），展开态只在预览 meta 行（可点击跳转 + 复制），摘要退成 `已查看了文件`（`naturalLanguageSummary` 的 `options.omitPath`，`InlineToolCall` 在预览可见时启用）；**不要为了"信息全"把同一路径铺两遍**，也**不要**把 meta 的点击预览动作合掉。② **提问类工具（question / askuserquestion）不渲染「参数」等分区标签**——问答对自带问题文本（`QuestionAnswerPreview`），参数区只是重复；摘要固定 `已向用户提问（N 题）`，不要再回退成 `已执行了 <英文工具名>`。同类口径：bash / diff / 目录类（`list` / `workspace_create_directory` / `workspace_review_revert`）也不渲染参数区（`HIDE_PARAMS_TOOLS`）。
+- [2026-09-25] **read 预览 = 语法高亮 + 300 行上限**：`highlightCodeLines` / `detectLanguage` 已从 `UnifiedCodeDiff` 提升为 shared-ui 公共导出，`FileContentPreview` 与 diff 共用同一套 `hljs-*` 配色（CSS 选择器 `:is(.chat-markdown, .tool-call-block-diff, .file-content-pre)`）；展开态一次最多渲染 300 行（`MAX_RENDERED_FILE_LINES`），超出用「显示全部（N 行）」显式放开——千行文件不再整段铺进 DOM。
+- [2026-09-24] **bash = 终端观感 / 查看类工具（read）= 路径 + 行范围 + 预览**：① bash 卡加回 `$` 提示符（`data-tool-card-bash-prompt`）、命令与输出**同一底色**、输出用 `--fg-default`（保留 ANSI 彩色）、运行中末尾跟**块光标**（`data-tool-card-terminal-live-cursor`）——要和 `tool_progress` 单元素实时通道合起来才是「实时终端」观感；② `naturalLanguageSummary('read')` 输出 `已查看了 <path>:<起>-<止>`（优先输出里的 `lineStart/lineEnd`，运行中退回输入的 `offset/limit`），`InlineToolCall` 对 read **不渲染参数区**（用户口径：界面上只要路径 + 预览；预览自带 `起–止 / 总行数 行` 徽标，三个字段来自网关 read 输出契约 `workspace-tools.ts` 的 `applyLineWindow`）。
+- [2026-09-24] **工具卡「展开可视化」对齐参考实现 opencode（v2.0.16）的五条口径**：① **展开体不叠面板**——参考的 `tool-collapsible` 只给 `padding-inline-start: 12px`，没有背景 / 边框 / 圆角，表面由内部块承担；② **shell = 单终端块**（命令段 13px mono/440/行高 20 + 结果段 muted + 55% 分层底色 + hairline 分隔 + 右上角悬停显示的复制图标），不放 badge 汇总 / 行数 / mode 之类的 meta；③ **文件编辑 = 文件卡**（文件图标 + 目录弱化 + 文件名强调 + `+N/-M`）+ diff **直接可见**（`fileEdit` 类别默认展开，persist v8 迁移），diff 无列头、无逐行描边、靠行底色区分（`data-diff-row` 是测试钩子）；④ **bash / diff 类工具的入参区直接不渲染**、退出码徽标只在非 0 时显示；⑤ **diff 要「像 pierre」**：用已在依赖树里的 `lowlight`（highlight.js 的 hast 封装，不引 pierre）做整段高亮按行拆 token（`span.hljs-*`，unified 与 **split 两侧**都高亮；主题复用 `--hl-*`，CSS 选择器 `:is(.chat-markdown, .tool-call-block-diff)` 共用），hunk 折叠为「⋯ 第 N 行起 / ⋯ N 行未变更」（`parseUnifiedDiffRows` 保留原始 `@@` 头以便按 new 侧区间计算），diff 容器自带表面（0.5px 边框 + 72% `--bg-overlay`），超长 diff 用「600 行渲染上限 + 展开全部」轻量替代虚拟化。落点：`apps/web/src/components/chat/tool-call/{display,cards,css}`、`packages/shared-ui/src/tools/{tool-call-card-bash-terminal,UnifiedCodeDiff}`、`apps/web/harness/verify-tool-expansion.ts`（111 断言）。
+- [2026-09-24] **单条 bash 的实时 stdout = 复用 `tool_progress` 的单元素 `subTools` 通道（已落地）**：`routes/single-tool-live-output.ts` 的 `buildSingleToolPartialOutputWriter` 把滚动输出写成 `tool_progress`（`index:0` / `status:'running'` / `partialOutput` / `totalCount:1`），前端 `applyStreamToolProgress` → `_batchProgress` → 终端卡渲染（与 batch 子行同源，**不新增协议事件**）。接入点：`stream.ts` 的 `executeToolCalls` 单条路径 + `stream-runtime.ts` 的 `resumeApprovedPermissionRequest`（批准恢复无 WS/SSE，走 `publishSessionRunEvent`）。节流在 `bash-tools.ts`（80ms + 尾包），网关不二次缓冲；结算后 `_batchProgress` 消失、自动回到最终 output。
 
 - [2026-09-24] **管理面（技能 / MCP / 插件）重构的三条硬约束**：① 数据流收敛为单一 hook（`apps/web/src/hooks/skills/use-installed-skills.ts` 与既有 `use-mcp-servers.ts`），`/skills` 与设置内面板共用，禁止再复制「加载 / 乐观更新 / 回滚 / 重载」逻辑；② shared-ui 组件**先保 props 兼容再谈视觉重写**（`InstalledSkillsManager` / `MCPServerList` / `MCPServerConfig` 既有消费者零改动，`chat-right-panel` 的只读状态列表行为不变）；③ 「配置 + 状态」双卡片一律合并为单列表（`McpServerManager`：行 = 配置 + 状态 + 操作，编辑/新增按需展开），插件 Tool 参数不再逐项 chip 平铺而是一行文本，插件元数据集中在 `plugin-registry.tsx` 数据驱动。
 - [2026-09-24] **cron 持久化 = 可选 persistence 钩子 + 启动装载 + 中断标记**：`CronScheduler` 通过第 5 个可选构造参数注入 `CronSchedulerPersistence`（`upsertJob` / `deleteJob` / `recordExecution`），**不把 DB 依赖写进调度器**（既有超时/重入/历史裁剪单测零改动）；任务定义与执行历史分表（`cron_jobs` / `cron_job_executions`，历史按任务保留 200 条），fireJob 在开始与结束各 upsert 一次（running → completed/failed），重启时 `restoreCronJobsFromStore` 先标记残留 running 为中断再装载。**自助管理工具要拿调度器单例时用动态导入**——静态导入 `cron/router` 会把 `agent-handler → routes/stream-runtime` 拉进 `tool-definitions` 模块图，而 stream-runtime 反向引用工具定义，形成环。
@@ -966,6 +1012,8 @@
 - [2026-09-23] **通知行与工具卡摘要的「位置/归属」三条 UI 口径**：① **通知行必须复用消息行的列结构**（`chat-message-row--notice` + `.chat-message-avatar-spacer` 占位 28px），横向偏移交给 `.chat-message-row` 的 `gap`——写死 40px 缩进会在 ≤640px（gap 收窄为 10px）时错位；实测修复前通知文本比消息正文左移 40px（`left=486` vs `526`），修复后两者盒子对齐（`526/526`）。② **通知行的上下留白必须对称**：原先 `padding: 12px 0 4px` 让文字偏向下一条消息（实测上 28px / 下 21px，观感「靠近下半区域」），改为两侧同取 `spacing[2]`（`8px 0`）后为 24 / 25（余下 1px 来自相邻群组自身结构）；`estimateGroupHeight` 的兜底估值同步改为 `16 + 8 + 8 + 8`（总量不变，虚拟列表行为不变）。③ **`background_output` 的折叠摘要带出任务名与读取时刻的任务状态**（`已读取了后台输出 · <任务名>（已完成/运行中/…）`）：任务名与状态都从工具输出的两种模板解析（完成 → `描述：X` 行；未完成 → `| 描述 | X |` + `| 状态 | **running** |` 表格行，见 `services/agent-gateway/src/task/delegated-task-display.ts`），解析不到时保持旧文案而不猜归属。**这条同时消解「先读取再提示已完成」的观感**：读取卡自带读取时刻的状态，通知行只是同一结算事件的系统记录；实测读取卡出现在通知之前，是因为它所属 assistant 消息的时间戳是**该轮起点**（模型 `block=true` 等待时轮起点早于结算），不是因果倒置。落点 `natural-language-summary.ts` 的 `resolveBackgroundTaskReadInfo`（5 例测试），调用方 `block-tool-call.tsx` / `inline-tool-call.tsx` 需把 `output` 一并传入。
 
 ### 编码约定
+- **新增 `@openAwork/shared-ui` 公共导出后要同步测试替身**：`apps/web` 的 vitest 把该包 alias 到 `src/test/mocks/shared-ui.tsx`（全局桩），另有若干测试文件用局部 `vi.mock('@openAwork/shared-ui', ...)` 工厂；新增导出若被 web 源码在 render 路径里调用（如 `detectLanguage` / `highlightCodeLines`），必须在**全局桩 + 每个局部工厂**里补齐（纯函数按仓库惯例转发真实实现），否则全量测试才会以 `xxx is not a function` 暴露（定点文件往往恰好没跑到）
+- **CSS 变量必须来自已定义 token**：`--text-1`（历史遗留的未定义变量，`batch.css` / `shared.css` / `previews.css` 曾引用，浏览器静默回退成继承色）已**全量修正为 `--fg-strong`**；同类还有 `--brand`（未定义，导致 `param-list-num` 整条 `color-mix` 声明被丢弃）→ 已改为 `--hl-number` 混色。新样式一律用 `--fg-strong` / `--fg-default` / `--fg-muted`，遇到未定义 token 顺手收口
 - 所有提示词使用中文编写
 - 提示词文件命名: `<tool-name>-prompt.ts`
 - 导出常量命名: `<TOOL>_USAGE_GUIDE` 和 `<TOOL>_TOOLS_LIST`
@@ -973,6 +1021,8 @@
 - 遵循统一的导出规范，便于维护和扩展
 
 ### 已知陷阱
+- [2026-09-25] **工具输出的「存储形态」是 JSON 字符串，结构化预览必须先在入口还原**：`normalizeToolResultOutputForStorage` 会把超过上限的输出序列化成 JSON 字符串（刷新历史消息时前端拿到的就是这种形态），而 `ToolOutputPreview` 的领域提取器只认对象 → `list` 目录树 / `read` 文件内容等会**静默退化成一段 JSON 文本**（harness 表现为等不到 `.tool-call-tree`）。修法：在 `ToolOutputPreview` 入口统一 `parseStoredJsonOutput`（只对 `{`/`[` 开头且能 parse 的字符串还原，普通文本不动）；**新增领域预览时不要再各自写解析**。同源的另一条：`read` 命中目录时网关返回 `dir <名>` / `file <名>` 文本清单（套 `applyLineWindow` 信封），必须走 `shared/directory-listing.ts` 的 `parseDirectoryListing` 判定（清单渲染 + 摘要不带行区间），不能按「文件 N 行 + 行号」渲染。同源口径：`SuccessConfirmPreview` 不透传英文工具名（改用 `naturalLanguageSummary` 的中文动作 + 路径），参数区对 `list` / `workspace_create_directory` / `workspace_review_revert` 统一隐藏（`HIDE_PARAMS_TOOLS`）。
+- [2026-09-24] **`embedded` 渲染要同步改「compact 派生」而不是只改 body 条件**：batch 子行展开后嵌套 `BlockToolCall` 用 `effectiveOpen = embedded || open` 渲染 body，但 `BashTerminalCard` 仍按 `compact={!open}`（`open` 仍是 state=false）→ 终端被 `ShellTextPane` 折成 5 行/420 字符，实时输出既看不全也不触发滚动贴底（harness 的 `scrollHeight === clientHeight` 抓到的就是这个）。修法：`compact={!effectiveOpen}`。**推论**：任何「状态派生量」改了渲染门槛后，要把同一份派生量传给下游组件，别让它继续读原始 state。
 - [2026-09-22] **跨运行时的错误措辞差异会让「错误容忍」形同虚设（bun 迁移遗留，已修）**：`tool-sandbox.ts` 的 `isIgnorableChildFinalizeError` 负责吞掉「后台终结算器晚于 `closeDb()`」的关库竞态，但它只匹配 `database is not open`（迁移前运行时的措辞）与 `ERR_INVALID_STATE`，而 **bun:sqlite 实际抛 `RangeError: Cannot use a closed database`** → 该容忍在 bun 下**完全失效**：本该被吞掉的竞态变成 unhandled rejection、进程退出码 1（现象：`verify-task-cancel-route` **断言全过**却以 1 退出）。已把新措辞纳入匹配。**推论**：凡按「错误文案」判定的容忍 / 重试 / 降级逻辑，**迁移运行时后必须用真实抛错验证一次**，不能假定措辞不变。
 - [2026-09-22] **验收脚本会污染开发者真实目录（已修）**：未绑定工作区的会话，任务图会回退到平台文档目录 `~/Documents/OpenAWork/.agentdocs/tasks/`；验收脚本的 `WORKSPACE_ROOT` 常是 `/tmp/...` 这类**不像仓库**的临时目录 → 回退被真实触发，测试产物写进**开发者本机文档目录**（实测 7 个文件）。危害不止污染：固定 `sessionId` 的用例会**读到上一次运行的任务图** → 跨运行 flaky。修法：`run-with-test-env.ts` 与 `src/__tests__/setup/test-env.ts` 都把 `XDG_DOCUMENTS_DIR` 指向一次性临时目录（回退路径仍被真实执行，只是落点被沙箱化 + 用后清理）；读文件系统的脚本还须把会话 `metadata.workingDirectory` 绑定到脚本自己的 `WORKSPACE_ROOT`，否则断言与产物不在同一路径、`waitFor` 必然超时。
 - [2026-09-22] **验收脚本里「父会话空闲」会让同步唤醒与脚本收尾竞态**：单通道交付在父会话空闲时**同步唤醒**（`deliverTaskCompletion` → `continueSessionFromHistory`），唤醒产生的**后台流**可能比脚本活得久——脚本关掉测试库后，该流 flush 运行事件时报 `Database has closed` / `Cannot use a closed database`，**断言其实已全过（日志有 `: ok`）但退出码为 1**。判定要点：先看日志里有没有 `: ok`，有则属**收尾竞态而非断言失败**。处置：与唤醒无关的脚本把父会话插入为 `state_status='paused'`（唤醒按设计「留库待消费」，通知照常注入、断言不受影响），见 `verify-task-tool-auto-run.ts` 既有手法；唤醒本身由 `verify-task-job-wake.ts` 专门验收。**不要**靠放宽断言或忽略退出码来"修"。

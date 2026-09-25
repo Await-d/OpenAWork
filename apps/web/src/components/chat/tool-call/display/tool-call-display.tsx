@@ -26,6 +26,11 @@ export interface ToolCallDisplayProps {
   toolCallId?: string;
   pendingPermissionRequestId?: string;
   /**
+   * 嵌在 batch 子行展开区里渲染：外层行已经提供标题 / 状态 / 摘要，
+   * 嵌套卡只渲染内容本体（block 卡隐藏 header，inline 卡隐藏整行）。
+   */
+  embedded?: boolean;
+  /**
    * tool result 的图片附件通道（`StreamToolResultChunk.attachments`）。
    *
    * 目前只有 `computer_use` 消费它（最终截图不在 output 里）；其余卡片忽略。
@@ -131,6 +136,7 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
         output={props.output}
         status={props.status}
         isError={props.isError}
+        embedded={props.embedded === true}
       />
     );
   }
@@ -146,6 +152,7 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
       status={props.status}
       isError={props.isError}
       durationMs={props.durationMs}
+      embedded={props.embedded === true}
     />
   );
 }

@@ -38,9 +38,14 @@ vi.mock('../../infra/db.js', () => ({
   sqliteRunWithRowId: vi.fn(() => 1),
 }));
 
-vi.mock('../../tools/plugin-tool-settings.js', () => ({
-  isDesktopControlPluginEnabledForUser: vi.fn(() => true),
-}));
+vi.mock('../../tools/plugin-tool-settings.js', async (importOriginal) => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- typeof import() 是 vitest mock 常见模式
+  const actual = await importOriginal<typeof import('../../tools/plugin-tool-settings.js')>();
+  return {
+    ...actual,
+    isDesktopControlPluginEnabledForUser: vi.fn(() => true),
+  };
+});
 
 vi.mock('../../tools/desktop-screenshot-artifact.js', () => ({
   createDesktopScreenshotArtifactToolResult: mocks.createDesktopScreenshotArtifactToolResultMock,

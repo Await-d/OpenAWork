@@ -7,7 +7,16 @@ import { listWorkspaceReviewChanges } from './workspace-review.js';
 interface WorkspaceReconcileSnapshotEntry {
   change: WorkspaceReviewChange;
   currentContent: string;
-  headContent: string;
+  /**
+   * 该路径是否存在「可读的 HEAD 版本」语义（原 `headContent` 是否可能非空）。
+   *
+   * 快照阶段**刻意不读** HEAD 内容：`git show` 是逐文件子进程，而 POSIX 上
+   * `uv_spawn` 在主线程同步执行——脏工作区（几百～几千个变更文件）时每个 bash
+   * 命令前后各一轮，会在事件循环上累计数百 ms～数秒的硬阻塞（整个网关/UI 卡死）。
+   * HEAD 内容改为在 `collectWorkspaceReconcileDiffs` 里仅对「一侧缺失」的候选
+   * 路径按需读取（通常只有命令新增/删除的那几个文件）。
+   */
+  canReadHead: boolean;
 }
 
 export type WorkspaceReconcileSnapshot = ReadonlyMap<string, WorkspaceReconcileSnapshotEntry>;
@@ -18,9 +27,7 @@ export async function captureWorkspaceReconcileSnapshot(
   const changes = await listWorkspaceReviewChanges(workspaceRoot);
   const entries = await Promise.all(
     changes.map(async (change) => {
-      const headPath = change.oldPath ?? change.path;
-      const headContent =
-        change.status === 'added' ? '' : await readGitHeadContent(workspaceRoot, headPath);
+      const canReadHead = change.status !== 'added';
       const currentContent =
         change.status === 'deleted'
           ? ''
@@ -30,7 +37,7 @@ export async function captureWorkspaceReconcileSnapshot(
         {
           change,
           currentContent,
-          headContent,
+          canReadHead,
         } satisfies WorkspaceReconcileSnapshotEntry,
       ] as const;
     }),
@@ -46,11 +53,40 @@ export async function collectWorkspaceReconcileDiffs(input: {
   const diffs: FileDiffContent[] = [];
   const candidatePaths = new Set<string>([...input.before.keys(), ...input.after.keys()]);
 
+  // 预取需要 HEAD 基线的路径：仅「一侧缺失且该侧可读 HEAD」（命令新增 / 删除
+  // 文件；命令只改内容时为 0 个）。并发上限避免 spawn 风暴在事件循环上硬阻塞。
+  const headPathsNeeded = new Set<string>();
+  const headPathFor = (entry: WorkspaceReconcileSnapshotEntry | undefined): string | undefined => {
+    if (!entry || !entry.canReadHead) {
+      return undefined;
+    }
+    return entry.change.oldPath ?? entry.change.path;
+  };
   for (const path of candidatePaths) {
     const beforeEntry = input.before.get(path);
     const afterEntry = input.after.get(path);
-    const beforeContent = beforeEntry?.currentContent ?? afterEntry?.headContent ?? '';
-    const afterContent = afterEntry?.currentContent ?? beforeEntry?.headContent ?? '';
+    if (!beforeEntry) {
+      const needed = headPathFor(afterEntry);
+      if (needed !== undefined) headPathsNeeded.add(needed);
+    }
+    if (!afterEntry) {
+      const needed = headPathFor(beforeEntry);
+      if (needed !== undefined) headPathsNeeded.add(needed);
+    }
+  }
+  const headContents = await readGitHeadContentsBounded(input.workspaceRoot, [...headPathsNeeded]);
+
+  for (const path of candidatePaths) {
+    const beforeEntry = input.before.get(path);
+    const afterEntry = input.after.get(path);
+    // 一侧缺失（命令新增 / 删除）时才用按需读取的 HEAD 内容作为对侧基线，
+    // 语义与旧实现的 `headContent` 兜底一致，但快照阶段不再逐文件 `git show`。
+    const beforeContent = beforeEntry
+      ? beforeEntry.currentContent
+      : readBatchedHeadContent(headContents, headPathFor(afterEntry));
+    const afterContent = afterEntry
+      ? afterEntry.currentContent
+      : readBatchedHeadContent(headContents, headPathFor(beforeEntry));
 
     if (
       beforeContent === afterContent &&
@@ -124,6 +160,45 @@ async function readGitHeadContent(workspaceRoot: string, relativePath: string): 
   } catch {
     return '';
   }
+}
+
+/** 批量读取时每个 `git show` 子进程的并发上限：避免 spawn 风暴阻塞事件循环。 */
+const HEAD_CONTENT_READ_CONCURRENCY = 8;
+
+async function readGitHeadContentsBounded(
+  workspaceRoot: string,
+  relativePaths: readonly string[],
+): Promise<Map<string, string>> {
+  const contents = new Map<string, string>();
+  if (relativePaths.length === 0) {
+    return contents;
+  }
+
+  const queue = [...relativePaths];
+  const workers = Array.from(
+    { length: Math.min(HEAD_CONTENT_READ_CONCURRENCY, queue.length) },
+    async () => {
+      for (;;) {
+        const next = queue.shift();
+        if (next === undefined) {
+          return;
+        }
+        contents.set(next, await readGitHeadContent(workspaceRoot, next));
+      }
+    },
+  );
+  await Promise.all(workers);
+  return contents;
+}
+
+function readBatchedHeadContent(
+  contents: ReadonlyMap<string, string>,
+  headPath: string | undefined,
+): string {
+  if (headPath === undefined) {
+    return '';
+  }
+  return contents.get(headPath) ?? '';
 }
 
 function countAddedLines(before: string, after: string): number {

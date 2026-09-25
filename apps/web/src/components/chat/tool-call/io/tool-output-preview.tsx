@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   DiagnosticsPreview,
   extractDiagnosticsFromOutput,
@@ -88,9 +89,18 @@ import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expan
  * Order matters: the shape-matched MCP and skill/question branches must run
  * before the generic text/JSON fallbacks or those envelopes get dumped raw.
  */
-export function ToolOutputPreview({ toolName, output }: { toolName: string; output: unknown }) {
+export function ToolOutputPreview({
+  toolName,
+  output: rawOutput,
+}: {
+  toolName: string;
+  output: unknown;
+}) {
   const normalized = toolName.trim().toLowerCase();
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
+  // 存储层会把超大工具输出序列化成 JSON 字符串（刷新后的历史消息就是这个形态）。
+  // 先尝试还原成对象，让各领域预览器按结构化输出渲染；解析失败时保持原字符串。
+  const output = useMemo(() => parseStoredJsonOutput(rawOutput), [rawOutput]);
   const isTodoFamily =
     normalized === 'todoread' ||
     normalized === 'subtodoread' ||
@@ -275,4 +285,21 @@ export function ToolOutputPreview({ toolName, output }: { toolName: string; outp
       defaultExpanded={shouldExpandByDefault}
     />
   );
+}
+
+/**
+ * 存储层（`normalizeToolResultOutputForStorage`）会把超过体积上限的工具输出
+ * 序列化成 JSON 字符串——刷新历史消息时前端拿到的就是这种形态。
+ * 这里把「看起来像 JSON 对象/数组」的字符串还原成对象，避免结构化预览
+ * （目录树 / 文件内容 / 诊断……）退化成一段 JSON 文本。
+ */
+function parseStoredJsonOutput(output: unknown): unknown {
+  if (typeof output !== 'string') return output;
+  const trimmed = output.trim();
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return output;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return output;
+  }
 }

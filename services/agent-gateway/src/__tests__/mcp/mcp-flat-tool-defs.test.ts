@@ -38,6 +38,29 @@ describe('buildFlatMcpToolDefinitions', () => {
     delete process.env['OPENAWORK_DISABLE_MCP_FLAT_TOOLS'];
   });
 
+  it('对同一集合的输出字节确定：server/tool 顺序不影响结果（prompt-cache 前缀稳定）', () => {
+    const tool = (name: string) => ({
+      name,
+      description: name,
+      inputSchema: { type: 'object', properties: {} },
+    });
+    const forward = buildFlatMcpToolDefinitions([
+      makeCatalog({ serverId: 'alpha', serverName: 'Alpha', tools: [tool('b'), tool('a')] }),
+      makeCatalog({ serverId: 'beta', serverName: 'Beta', tools: [tool('c')] }),
+    ]);
+    const reversed = buildFlatMcpToolDefinitions([
+      makeCatalog({ serverId: 'beta', serverName: 'Beta', tools: [tool('c')] }),
+      makeCatalog({ serverId: 'alpha', serverName: 'Alpha', tools: [tool('a'), tool('b')] }),
+    ]);
+
+    expect(JSON.stringify(forward.definitions)).toBe(JSON.stringify(reversed.definitions));
+    expect(forward.definitions.map((entry) => entry.function.name)).toEqual([
+      'mcp__alpha__a',
+      'mcp__alpha__b',
+      'mcp__beta__c',
+    ]);
+  });
+
   it('emits a tool definition per tool of every connected server', () => {
     const result = buildFlatMcpToolDefinitions([
       makeCatalog({

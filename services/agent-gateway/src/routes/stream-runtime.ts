@@ -13,6 +13,7 @@ import {
 import { isTerminatedChildSession } from '../session/child-session-terminal-guard.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
+import { resolveFrozenWorkspaceContext } from '../session/workspace-context-snapshot.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
   approveToolPermission,
@@ -50,7 +51,7 @@ import {
   TOOL_SEARCH_TOOL_NAME,
 } from '../tools/tool-folding.js';
 import { writeToolInvokeAllowlist } from '../session/tool-invoke-allowlist.js';
-import { filterPluginControlledToolsForUser } from '../tools/plugin-tool-settings.js';
+import { filterPluginControlledToolsForUser } from '../plugin/builtin-groups.js';
 import {
   type ApprovedPermissionResumePayload,
   type BlockedToolCallResumeEntry,
@@ -74,6 +75,7 @@ import {
   streamRequestSchema,
 } from './stream.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
+import { buildSingleToolPartialOutputWriter } from './single-tool-live-output.js';
 import { publishTeamUsageEvent } from './stream-team-events.js';
 import {
   clearInFlightStreamRequest,
@@ -259,9 +261,19 @@ async function continueFromApprovedToolResult(input: {
     requestData,
     userId: input.userId,
   });
-  const workspaceCtx = await buildWorkspaceContext(sessionContext.metadataJson, {
+  const workspaceCtx = await resolveFrozenWorkspaceContext({
     sessionId: input.sessionId,
     userId: input.userId,
+    workspacePath: resolveSessionWorkspacePath({
+      metadataJson: sessionContext.metadataJson,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    }),
+    build: () =>
+      buildWorkspaceContext(sessionContext.metadataJson, {
+        sessionId: input.sessionId,
+        userId: input.userId,
+      }),
   });
   const sessionMeta = parseSessionMetadataJson(sessionContext.metadataJson);
   const runtimePolicy = resolveSessionRuntimePolicy(sessionMeta);
@@ -1011,6 +1023,14 @@ export async function resumeApprovedPermissionRequest(input: {
       toolName: string;
     }> = [];
 
+    // 批准恢复路径没有打开的 WS/SSE：走 publish（持久化 + 广播），attach 订阅者
+    // 才能收到实时事件（与 continueFromApprovedToolResult 内同一口径）。
+    const writeResumeChunk = (chunk: RunEvent) => {
+      publishSessionRunEvent(input.sessionId, chunk, {
+        clientRequestId: input.payload.clientRequestId,
+      });
+    };
+
     for (const [index, call] of blockedCalls.entries()) {
       // V2: Transition ToolPart from pending → running before executing
       approveToolPermission({
@@ -1028,7 +1048,16 @@ export async function resumeApprovedPermissionRequest(input: {
         },
         new AbortController().signal,
         input.sessionId,
-        executionContext,
+        {
+          ...executionContext,
+          // 被批准的 bash 同样实时推送 stdout（与正常轮同一条数据通道）。
+          onPartialOutput: buildSingleToolPartialOutputWriter({
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
+            clientRequestId: input.payload.clientRequestId,
+            writeChunk: writeResumeChunk,
+          }),
+        },
       );
 
       if (toolResult.pendingPermissionRequestId) {

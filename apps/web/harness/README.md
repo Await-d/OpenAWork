@@ -307,6 +307,72 @@ NODE_PATH=packages/browser-automation/node_modules \
   子元素 min-content 撑开，把「组件内部不收缩」伪装成「无问题」——首次运行即因此漏报，
   改成 minmax(0,1fr) 后组件内部溢出才会体现为自身 `scrollWidth > clientWidth`。
 
+## 已安装插件管理面三视口验收（`third-party-plugins-3viewports`）
+
+对应 260924「插件系统 v2 完整集成」T-27：`ThirdPartyPluginsView`（设置 → 插件 →
+已安装插件）在 375 / 768 / 1280 三视口下的视觉与交互验收。
+
+覆盖项：
+
+| 项           | 说明                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------- |
+| 渲染         | 列表五行（活跃 / 超长 id / 失败 / 已停用 / 外部加载）+ 空态均渲染                                         |
+| 无横向溢出   | 列表与空态的 `scrollWidth <= clientWidth`                                                                 |
+| 省略号       | 超长插件 id `text-overflow: ellipsis` + 375 下真实裁剪                                                    |
+| 语义色       | 活跃状态点 = success、失败状态点 = danger、**已停用状态点 = fg-subtle**、失败原因 = danger、徽章色正确    |
+| 外部加载形态 | 无 `installId` 的行不显示「重载 / 卸载」                                                                  |
+| 启停         | 已停用行只有「启用」（无重载/停用）；停用点击回调记录 `disable:<pluginId>`                                |
+| focus ring   | 键盘模态下安装按钮 `outline: 2px solid var(--accent)` + accent-subtle 阴影（按钮初始 disabled，先填路径） |
+| 卸载二次确认 | 首次点击「卸载」不触发回调、出现「确认卸载」，确认后回调记录 `remove:<installId>`                         |
+| 安装表单     | 输入路径提交 → 回调记录 `install:<path>:false`，成功后输入清空                                            |
+
+### 运行
+
+```bash
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-third-party-plugins-3viewports.ts
+```
+
+### 为什么需要它
+
+- **jsdom 没有布局引擎**：安装表单的 `flex-wrap` 换行、超长插件 id 的截断、长错误
+  信息的换行是否撑破容器，只有真实排版能判定。
+- **断言的是展示层**（`ThirdPartyPluginsView`，纯 props + 本地 UI 状态）——数据加载与
+  操作接线由容器 `ThirdPartyPluginsPanel` 承担，jsdom 组件测试覆盖（13 例）。
+- **按钮初始 disabled**：安装按钮在输入为空时不可聚焦，focus ring 断言必须先填入
+  路径（首次运行即因此漏报）。
+
+## 插件市场三视口验收（`plugin-market-3viewports`）
+
+对应 260924「插件市场与在线安装」：`PluginMarketView`（设置 → 插件 → 插件市场）在
+375 / 768 / 1280 三视口下的视觉与交互验收。
+
+覆盖项：
+
+| 项         | 说明                                                                                                |
+| ---------- | --------------------------------------------------------------------------------------------------- |
+| 渲染       | 条目三行（普通 / 超长 repo / 根目录单插件回退）+ 空态均渲染                                         |
+| 无横向溢出 | 市场与空态的 `scrollWidth <= clientWidth`（**首轮即抓到**失败源提示长 URL 不换行导致的 375 溢出）   |
+| 省略号     | 超长 repo 行 `text-overflow: ellipsis` + 375 下真实裁剪                                             |
+| 语义色     | 版本徽章 = accent、失败来源提示 = contrast（真实计算值）                                            |
+| 信任确认   | 点击「安装」出现确认文案（含「无沙箱」与来源 repo）；「确认安装」后回调记录 `install:<entryId>`     |
+| 详情       | 「详情」打开详情卡（README 渲染）→「关闭」回调并隐藏                                                |
+| 来源管理   | 「来源（n）」展开面板；添加表单提交记录 `add:<repo>:<ref>`；「移除」记录 `remove-source:<sourceId>` |
+| focus ring | 键盘模态下搜索按钮 `outline: 2px solid var(--accent)` + accent-subtle 阴影                          |
+
+### 运行
+
+```bash
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-plugin-market-3viewports.ts
+```
+
+### 为什么需要它
+
+- **jsdom 没有布局引擎**：长 URL 的换行、超长 repo 的截断、窄视口下的横向溢出只有真实排版能判定。
+- **信任确认是安全交互**：确认文案必须在真实渲染中可见（含来源与「无沙箱」提示），而不是只在单测里断言函数被调用。
+- **断言的是展示层**（`PluginMarketView`，纯 props + 本地 UI 状态）——数据接线由容器 `PluginMarketPanel` 承担，jsdom 组件测试覆盖。
+
 ## 终端 tab 条验收（`terminal-tab-label`）
 
 对应 260924「终端新建位置与窗口标题」改动：`TerminalTabStrip` + `terminalTabLabel`
@@ -350,3 +416,150 @@ NODE_PATH=packages/browser-automation/node_modules \
 - **顺序真相在 panel 层**：上游 `useSessionTerminals` 是「最新在前」，panel 层重排为
   「旧 → 新」后才交给 tab 条 —— 这条语义由 `QuickTerminalPanel.test.tsx` 的面板级用例
   守卫；本 harness 只验证 tab 条按传入顺序从左到右渲染。
+
+## 对话内容列宽度自适应验收（`chat-content-width`）
+
+对应 `pages/chat-page/layout/conversation-layout-state.ts` 的
+`resolveResponsiveContentMaxWidth`（策略本体）与 `conversation/ChatConversationView.tsx`
+的内容列 `maxWidth` 接线（接线由 `ChatConversationView.test.tsx` 守卫）。
+渲染的是与组件一致的内联样式链：滚动区（padding + flex column）→ 内容列
+（`width:100%` + `maxWidth: clamp(基准, 88%, 1.5×基准)` + `margin:0 auto`）。
+
+覆盖项（5 个**固定宽度容器**，页面视口 1900；期望值由夹具按规则独立重算）：
+
+| 项               | 说明                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| clamp 声明       | 真实引擎保留 `clamp(基准px, 88%, 1.5×基准px)`，三个组件逐项对齐（含窄容器下「渲染宽恒等于容器」的盲区用例） |
+| 渲染宽度（下限） | 容器 900 / 基准 1024：窄于下限 → 铺满容器且不横向溢出                                                       |
+| 渲染宽度（比例） | 容器 1200 / 基准 1024：按 88% 加宽（1024 → 1134 容器下取 1024，1800 容器下取 1525.9）                       |
+| 渲染宽度（封顶） | 容器 1800 / 基准 1024 → 1536 封顶；容器 1600 / 基准 820 → 1230 封顶；基准 1536（split 抬高）仍按 88% 自适应 |
+| 居中             | 未占满容器时左右边距差 ≤ 1.5px（`margin: 0 auto` 真实生效）                                                 |
+| 页面不溢出       | 文档 `scrollWidth ≤ 1900`                                                                                   |
+
+### 运行
+
+```bash
+# 同样需要 Vite dev server 已在 127.0.0.1:5173 运行
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-chat-content-width.ts
+```
+
+21 断言全绿；截图写到 `/tmp/opencode/chat-content-width-<pane-id>.png`。
+
+### 为什么需要它
+
+- **jsdom 没有布局引擎**：`max-width: clamp(px, %, px)` 的解析值与真实渲染宽度
+  （`min(容器, clamp)`）、`margin: 0 auto` 的居中，只有真实引擎能判定；jsdom 只保留声明字符串。
+- **Chromium 的计算值不解析 clamp**：`getComputedStyle().maxWidth` 会**原样返回**
+  `clamp(...)` 数学函数（规范允许）——所以断言拆成两条：解析声明组件证明「声明被接受」，
+  比较渲染宽度证明「解析结果正确」。只做前者会漏掉解析错误，只做后者会在窄容器用例上失明。
+- **容器 ≠ 视口**：策略刻意用容器百分比而不是 `vw` / `vh`（分栏面板里视口单位会失真），
+  因此用例必须用**固定宽度容器**而不是三视口档位。
+- **红→绿证据（实测）**：把策略比例从 88 改成 60 → 5 条 clamp 声明断言 + 2 条渲染宽度断言
+  失败（`b1024-wide` 实际 1040.4px、`b820-wide` 实际 920.4px）；恢复 88 后 21/21 全绿。
+
+## 工具卡展开可视化验收（`tool-expansion`）
+
+对应 260924「工具展开可视化优化」：`BlockToolCall` / `BatchToolCallCard`（web）与
+`BashTerminalCard` / `UnifiedCodeDiff`（shared-ui），呈现口径对齐参考实现
+`temp/opencode-v2.0.16`（session-ui 的 shell / edit / write 渲染）。渲染真实链路
+（`ToolCallDisplay` 路由 → 各卡片 → 真实 `index.css` carbon 暗色 + `chat-message.css`），
+三视口（375 / 768 / 1280）+ 三个运行态用例，共 **183 断言**。
+
+覆盖项：
+
+| 用例              | 说明                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bash`            | **终端观感**（`$` 提示符 + 命令 + 同底色输出 + 运行中块光标）；展开体不叠面板；多行命令完整 `pre-wrap`；入参区不渲染；复制悬停显示；无横向溢出                     |
+| `edit`            | **默认展开**（不点击即可见变更）；文件卡头 = 图标 + 目录 + 文件名 + `+N`（成功色）；变更行自带底色且**无列头 / 无逐行描边**；**diff 带语法高亮**；入参区不渲染     |
+| `patch`           | unified diff：hunk 折叠为「⋯ 第 N 行起 / ⋯ N 行未变更」（不再铺原始 `@@`）；**逐行语法高亮**；入参区不渲染                                                         |
+| `write`           | 新建文件（`before=''`）：**全量新增**（无删除行 / 无幽灵 context 行）+ `+N` 统计 + 语法高亮；入参区不渲染                                                          |
+| `split-diff`      | split（并排）视图：**左右两侧都带语法高亮**（`span.hljs-*` 两侧均可命中）                                                                                          |
+| `read`            | 查看文件：**折叠**摘要 = 路径 + `:起-止` 行区间；**展开**只有预览 meta 一处路径（可点击预览 + `起–止 / 总行数 行` + 语法高亮行号内容），摘要不再重复路径，无参数区 |
+| `ask`             | 提问（askuserquestion）：摘要 = `已向用户提问（N 题）`；展开 = 问答对（问题 + 答案 chip），**无分区标签**                                                          |
+| `read-long`       | 长文件 read：默认只渲染 **300 行**（DOM 上限）+ 「显示全部（N 行）」入口；点击放开全部、可再收起                                                                   |
+| `list-dir`        | 列举目录：摘要 = **路径 + 条目数**；展开 = 树形预览（目录 `▾` + 计数、文件 `·`），**无参数区**                                                                     |
+| `list-dir-stored` | 刷新后的 **JSON 字符串形态**同样还原成目录树（存储层序列化不能把结构化预览降级成 JSON 文本）                                                                       |
+| `dir-read`        | read 命中目录：摘要不带行区间；展开 = **目录清单**（路径 + `N 项` + 目录/文件行），不是「文件 N 行 + 行号代码」                                                    |
+| `create-dir`      | 创建目录：摘要 = **路径**；展开 = 中文确认行（`已创建了目录 · <path>`，**不透传英文工具名**），无参数区                                                            |
+| `batch`           | 子行 chevron 可见（展开态旋转 + accent）；子行展开**只做 12px 缩进**、内容块自带表面；**嵌套卡不再重复 header**（embedded）；无横向溢出                            |
+| `bash-running`    | 执行中显示「运行中，等待输出…」+ 闪烁光标；命令仍完整显示                                                                                                          |
+| `bash-live`       | **单条 bash 真·实时输出**（网关 `tool_progress` 单元素通道 → `_batchProgress`）：自动贴底 + 运行中块光标 + 不展示入参                                              |
+| `batch-live`      | 子行实时输出（`_batchProgress.partialOutput`）自动贴底 + `data-terminal-running="true"`                                                                            |
+| 页面              | 各类卡片容器与文档均无横向溢出                                                                                                                                     |
+
+### 运行
+
+```bash
+# 同样需要 Vite dev server 已在 127.0.0.1:5173 运行
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-tool-expansion.ts
+```
+
+截图写到 `/tmp/opencode/tool-expansion-<width>-<case>.png`（`HARNESS_SHOT_SUFFIX=-before`
+可给文件名加后缀，用于前后对比）。
+
+### 为什么需要它
+
+- **jsdom 没有布局引擎**：展开体是否叠了面板、多行命令是否被压成一行、行底色是否覆盖整行、
+  chevron 是否可见、实时输出是否贴底、悬停显隐（`:hover` + transition）只有真实排版能判定。
+- **对齐参考实现（opencode v2.0.16）**：shell = 「命令段 + 结果段 + 滚动」的单终端块，
+  结果段弱化文字色；文件编辑 = 「文件卡头（图标 + 目录/文件名 + 增删统计）+ diff 直接可见」，
+  diff 无列头、靠行底色区分；展开内容只做 12px 缩进（**不是**面板）。默认展开（`fileEdit`
+  类别）与卡片头去重属于**行为契约**，必须由断言固化。
+- **「不展示入参」也是契约**：bash / diff 类工具的参数区被移除（对齐参考实现），
+  断言直接检查 `details.tool-call-block-params` 不存在，防止后续被顺手加回来。
+- **「真·实时」是端到端契约**：单条 bash 的滚动 stdout 由网关 `tool_progress` 单元素通道
+  推送（`_batchProgress` → 终端卡），运行中视口必须停在最新一行——这条链路只有真实引擎 +
+  真实事件注入能验证（harness 的 `bash-live` / `batch-live` 用例）。
+- **diff 对齐 = 高亮 + 折叠 + 上限**：参考实现的 diff 是 `@pierre/diffs`（语法高亮 + 行底色 +
+  「N 行未变更」折叠 + 虚拟化）；我们复用已在依赖树里的 `lowlight`（highlight.js 的 hast 封装）
+  做整段高亮按行拆 token（unified 与 split 两侧都高亮），用 new 侧行号区间折算 hunk 分隔条，
+  并用「600 行渲染上限 + 展开全部」轻量替代虚拟化——三件事都必须由真实引擎 / DOM 断言固化。
+- **bash = 终端，不是「命令块 + 结果块」**：提示符 `$`、命令与输出**同一底色**、输出用正常
+  前景色（保留 ANSI 颜色）、运行中在末尾跟一个**块光标**，配合网关的 `tool_progress` 单元素
+  通道就是「实时终端」观感——这几条（含 `data-terminal-running` / live cursor）都由断言固化。
+- **查看类工具（read）= 路径 + 行范围 + 预览**：摘要里直接给 `path:起-止`（运行中退回
+  `offset/limit` 估算），展开只留预览（`起–止 / 总行数 行` + 行号内容），**不渲染参数区**。
+- **红→绿证据（实测）**：改造前基线 **18 条失败**（展开面板透明 / 命令被截断 / diff 无背景 /
+  chevron `display:none` / 嵌套 header 重复）；对齐参考后 **129/129 全绿**。
+
+## FileContentPreview 宽度验收（`file-content-preview-width`）
+
+对应 `components/chat/tool-call/previews/file-content-preview.tsx` 与
+`tool-call/css/base.css` 的输出区布局（`.tool-call-inline-section`）。渲染真实链路：
+`InlineToolCall`（read、默认展开）→ `.tool-call-inline-output` → `.tool-call-inline-section`
+（「输出」标签 + 预览），固定宽度容器 375 / 768 / 1280，共 **112 断言**。
+
+覆盖项（每个宽度 × 4 个夹具：短行 / 超长单行 / 五行行号 / 截断标记）：
+
+| 项                       | 说明                                                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| 标签独立成行             | 「输出」标签位于预览上方；输出区为 column flow，不再与预览争同一行                                 |
+| 预览铺满可用宽度         | 预览宽度 = 输出区宽度（±1px）——修复前 1280 下短行预览仅 471px（输出区 1236px），宽度随内容长度漂移 |
+| 无横向溢出               | 输出区 / 卡片 / 容器 / meta 行 `scrollWidth <= clientWidth`                                        |
+| 超长行归属代码块整体滚动 | 超长行用例 `pre.scrollWidth > clientWidth`；单行不再自建「无滚动条、无省略号」的隐形滚动区         |
+| 行号栏吸附               | 滚到最右后最宽行的行号仍停在代码块左内侧（`sticky`；位置与未滚动时一致且不越出块边界）             |
+| 页面不横向溢出           | 文档 `scrollWidth <= 1400`                                                                         |
+
+### 运行
+
+```bash
+# 同样需要 Vite dev server 已在 127.0.0.1:5173 运行
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-file-content-preview-width.ts
+```
+
+截图写到 `/tmp/opencode/file-content-preview-width-<width>.png`。
+
+### 为什么需要它
+
+- **jsdom 没有布局引擎**：row flex + `flex-wrap: wrap` 里「预览按内容宽度还是铺满」完全由真实
+  排版决定（jsdom 的 rect 全是 0），单测发现不了「同一个卡片，短文件预览 471px、长文件预览
+  1236px」这类宽度漂移。
+- **逐行 `overflow-x: auto` 是隐形滚动区**：每行各自滚动时，真实浏览器里表现为「文字被硬裁切、
+  无滚动条、无省略号」；本 harness 把「横向溢出归属代码块自身 + 行号吸附」固化成断言。
+- **红→绿证据（实测）**：修复前 **31 条失败**（短行预览 471.5px vs 输出区 1236px；超长行
+  `pre.scrollWidth == clientWidth` 且逐行 `scrollWidth > clientWidth`）；把夹具升级为真实
+  可点击路径形态后，另暴露可点击路径按钮的 4px 横向溢出（`meta scrollWidth 335 > 331`，
+  并向上冒泡到消息卡片），一并修复；修复后 112/112 全绿。

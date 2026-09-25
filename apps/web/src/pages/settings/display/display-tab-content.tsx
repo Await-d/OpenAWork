@@ -674,7 +674,7 @@ function ReasoningToolSection() {
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 20,
-            marginBottom: globalExpand ? 12 : 0,
+            marginBottom: 12,
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
@@ -682,7 +682,8 @@ function ReasoningToolSection() {
               工具调用默认展开
             </div>
             <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-              开启后各工具卡片默认展开详情；关闭后全部折叠为摘要行。运行中和失败的工具始终自动展开。
+              开启后各工具卡片默认展开详情；关闭后除「文件编辑」外全部折叠为摘要行（文件编辑默认直接展示内容变更）。
+              运行中和失败的工具始终自动展开。
             </span>
           </div>
           <SettingsToggle
@@ -691,28 +692,26 @@ function ReasoningToolSection() {
             ariaLabel="工具调用默认展开"
           />
         </div>
-        {globalExpand && (
-          <div
-            style={{
-              borderTop: '1px solid var(--border-subtle)',
-              paddingTop: 8,
-            }}
-          >
-            <div style={SECTION_LIST}>
-              {TOOL_EXPAND_CATEGORIES.map((cat, i) => (
-                <ToolExpandRow
-                  key={cat}
-                  title={TOOL_EXPAND_CATEGORY_LABELS[cat]}
-                  description={TOOL_EXPAND_DESCRIPTIONS[cat]}
-                  expanded={overrides[cat] ?? false}
-                  onChange={(checked) => setOverride(cat, checked)}
-                  disabled={false}
-                  isLast={i === TOOL_EXPAND_CATEGORIES.length - 1}
-                />
-              ))}
-            </div>
+        <div
+          style={{
+            borderTop: '1px solid var(--border-subtle)',
+            paddingTop: 8,
+          }}
+        >
+          <div style={SECTION_LIST}>
+            {TOOL_EXPAND_CATEGORIES.map((cat, i) => (
+              <ToolExpandRow
+                key={cat}
+                title={TOOL_EXPAND_CATEGORY_LABELS[cat]}
+                description={TOOL_EXPAND_DESCRIPTIONS[cat]}
+                expanded={overrides[cat] ?? cat === 'fileEdit'}
+                onChange={(checked) => setOverride(cat, checked)}
+                disabled={!globalExpand && cat !== 'fileEdit'}
+                isLast={i === TOOL_EXPAND_CATEGORIES.length - 1}
+              />
+            ))}
           </div>
-        )}
+        </div>
       </div>
     </section>
   );

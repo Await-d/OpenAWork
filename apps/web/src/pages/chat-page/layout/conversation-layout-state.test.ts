@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveClassicConversationLayoutState,
   resolveFusionConversationLayoutState,
+  resolveResponsiveContentMaxWidth,
 } from './conversation-layout-state.js';
 
 describe('resolveClassicConversationLayoutState', () => {
@@ -38,5 +39,17 @@ describe('resolveFusionConversationLayoutState', () => {
       centerContent: true,
       contentMaxWidth: 820,
     });
+  });
+});
+
+describe('resolveResponsiveContentMaxWidth', () => {
+  it('基准宽度作下限、容器 88% 作中间值、基准 1.5 倍作上限', () => {
+    expect(resolveResponsiveContentMaxWidth(1024)).toBe('clamp(1024px, 88%, 1536px)');
+    expect(resolveResponsiveContentMaxWidth(820)).toBe('clamp(820px, 88%, 1230px)');
+    expect(resolveResponsiveContentMaxWidth(720)).toBe('clamp(720px, 88%, 1080px)');
+  });
+
+  it('上限取整，不出现小数 px', () => {
+    expect(resolveResponsiveContentMaxWidth(683)).toBe('clamp(683px, 88%, 1025px)');
   });
 });

@@ -73,7 +73,7 @@
 
 .tool-call-copy-btn:hover {
   background: var(--bg-surface);
-  color: var(--text-1);
+  color: var(--fg-strong);
 }
 
 /* Show copy button on parent hover */
@@ -337,7 +337,7 @@
 .tool-call-block-search-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-1);
+  color: var(--fg-strong);
   line-height: 1.35;
   display: flex;
   align-items: flex-start;
@@ -399,7 +399,7 @@
 
 .tool-search-results-toggle:hover {
   background: color-mix(in oklch, var(--bg-surface) 100%, transparent);
-  color: var(--text-1);
+  color: var(--fg-strong);
 }
 
 .tool-call-block-web-markdown {

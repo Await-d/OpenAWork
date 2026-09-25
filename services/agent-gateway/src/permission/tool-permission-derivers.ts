@@ -21,6 +21,7 @@ import { parseMcpCallRawInput } from '../mcp/mcp-tool-input.js';
 import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../mcp/mcp-manage-tool-name.js';
 import { MEMORY_MANAGE_TOOL_NAME } from '../memory/memory-manage-tool-name.js';
 import { SKILL_MANAGE_TOOL_NAME } from '../skill/skill-manage-tool-name.js';
+import { PLUGIN_MANAGE_TOOL_NAME } from '../plugin/plugin-manage-tool-name.js';
 import { SCHEDULE_MANAGE_TOOL_NAME } from '../cron/schedule-manage-tool-name.js';
 import { AGENT_MANAGE_TOOL_NAME } from '../agent/agent-manage-tool-name.js';
 import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../team/team-workspace-manage-tool-name.js';
@@ -695,6 +696,74 @@ const skillManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
 };
 
 /**
+ * `plugin_manage` 的权限派生。
+ *
+ * - 只读动作（list / search / source_list）返回 null 免审批；
+ * - 变更动作默认 ask，scope 精确到 `action:target`（target = repo /
+ *   installId / pluginId / sourceId），永久允许按动作隔离；
+ * - 审批预览：install 展示来源仓库/ref/路径并明示「插件将以网关权限执行
+ *   任意代码（无沙箱）」；uninstall 展示目录与数据删除；其余展示目标。
+ */
+const pluginManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const action =
+    typeof ctx.rawInput['action'] === 'string' ? ctx.rawInput['action'].trim().toLowerCase() : '';
+  if (action === 'list' || action === 'search' || action === 'source_list') {
+    return null;
+  }
+
+  const readText = (field: string): string =>
+    typeof ctx.rawInput[field] === 'string' ? ctx.rawInput[field].trim() : '';
+  const installId = readText('installId');
+  const pluginId = readText('pluginId');
+  const sourceId = readText('sourceId');
+  const name = readText('name');
+  const repo = readText('repo');
+  const ref = readText('ref');
+  const path = readText('path');
+
+  const target =
+    action === 'install'
+      ? repo || (sourceId && name ? `${sourceId}/${name}` : '') || 'new'
+      : action === 'uninstall' || action === 'reload'
+        ? installId || 'new'
+        : action === 'enable' || action === 'disable'
+          ? pluginId || 'new'
+          : action === 'source_add'
+            ? repo || 'new'
+            : sourceId || 'new';
+
+  const sourceLabel = [
+    repo.length > 0 ? repo : sourceId.length > 0 ? sourceId : '(来源未知)',
+    ref.length > 0 ? `@${ref}` : '',
+    path.length > 0 ? ` 路径 ${path}` : '',
+  ].join('');
+  const previewAction =
+    action === 'install'
+      ? `安装插件 ${name || repo || '(未知)'}（${sourceLabel}）——插件将以网关权限执行任意代码（无沙箱）`
+      : action === 'uninstall'
+        ? `卸载插件 ${installId || '(未知)'}（目录与存储数据将删除）`
+        : action === 'reload'
+          ? `重载插件 ${installId || '(未知)'}`
+          : action === 'enable'
+            ? `启用插件 ${pluginId || '(未知)'}`
+            : action === 'disable'
+              ? `停用插件 ${pluginId || '(未知)'}`
+              : action === 'source_add'
+                ? `添加插件市场来源 ${repo || '(未知)'}${ref ? `@${ref}` : ''}`
+                : action === 'source_remove'
+                  ? `移除插件市场来源 ${sourceId || '(未知)'}`
+                  : action;
+
+  return {
+    scope: `${action}:${target}`,
+    reason: '需要修改插件安装或市场配置',
+    riskLevel: 'high',
+    previewAction: previewAction.slice(0, 200),
+    always: [`${action}:*`],
+  };
+};
+
+/**
  * `schedule_manage` 的权限派生。
  *
  * - `list` / `history` 只读免审批；
@@ -1034,6 +1103,7 @@ const TOOL_PERMISSION_DERIVERS: Readonly<Record<string, ToolPermissionDeriver>> 
   [MCP_MANAGE_SERVERS_TOOL_NAME]: mcpManageServersPermissionDeriver,
   [MEMORY_MANAGE_TOOL_NAME]: memoryManagePermissionDeriver,
   [SKILL_MANAGE_TOOL_NAME]: skillManagePermissionDeriver,
+  [PLUGIN_MANAGE_TOOL_NAME]: pluginManagePermissionDeriver,
   [SCHEDULE_MANAGE_TOOL_NAME]: scheduleManagePermissionDeriver,
   [AGENT_MANAGE_TOOL_NAME]: agentManagePermissionDeriver,
   [TEAM_WORKSPACE_MANAGE_TOOL_NAME]: teamWorkspaceManagePermissionDeriver,

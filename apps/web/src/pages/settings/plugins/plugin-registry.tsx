@@ -1,7 +1,14 @@
 import type { ReactElement } from 'react';
 
 export type PluginId =
-  'desktop-automation' | 'desktop-control' | 'image-generation' | 'mcp' | 'skills' | 'websearch';
+  | 'desktop-automation'
+  | 'desktop-control'
+  | 'image-generation'
+  | 'market'
+  | 'mcp'
+  | 'skills'
+  | 'third-party'
+  | 'websearch';
 
 export interface PluginToolInfo {
   /** 工具名（monospace 展示）。 */
@@ -192,6 +199,36 @@ export const PLUGIN_REGISTRY: PluginDefinition[] = [
           <rect x="3" y="14" width="7" height="7" rx="1" />
           <rect x="14" y="14" width="7" height="7" rx="1" />
           <path d="M10 6.5h4M6.5 10v4M17.5 10v4M10 17.5h4" />
+        </>
+      </Icon>
+    ),
+  },
+  {
+    id: 'market',
+    label: '插件市场',
+    description: '从 GitHub 源浏览插件，预览详情并一键安装（zipball 下载 + 校验落位）。',
+    kind: 'resource',
+    icon: (
+      <Icon>
+        <>
+          <path d="M12 3v10" />
+          <path d="M8 9l4 4 4-4" />
+          <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+        </>
+      </Icon>
+    ),
+  },
+  {
+    id: 'third-party',
+    label: '已安装插件',
+    description: '管理网关级插件平台：安装、重载与卸载第三方插件。',
+    kind: 'resource',
+    icon: (
+      <Icon>
+        <>
+          <path d="M9 7V3M15 7V3" />
+          <path d="M6 7h12v4a6 6 0 0 1-12 0V7z" />
+          <path d="M12 17v4" />
         </>
       </Icon>
     ),

@@ -1,193 +1,89 @@
 /**
- * Plugin host (PR-D-Plugin) — opencode-style hook bus.
+ * Plugin host (compat façade) — v2 runtime.
  *
- * Inspiration: `@/temp/opencode/packages/plugin/src/index.ts`'s
- * `Hooks` interface. We expose a curated subset that matches the
- * surface area OpenAWork's stream + sandbox can hook today; the
- * remaining hooks (auth, provider, experimental) stay as documented
- * extension points. `permission.evaluate` is implemented as a
- * **deny-only post-adjudication** of the sandbox's built-in permission
- * ladder (see `PermissionEvaluateEvent`).
+ * The original PR-D-Plugin host lived here (env-driven V1 hook bus).
+ * It now delegates to `src/plugin/*`:
  *
- * **Architecture invariants** (do NOT regress these):
+ *   - `plugin/hooks.ts`     — domain-keyed hook registry (hot path)
+ *   - `plugin/registry.ts`  — plugin activation / lifecycle / inventory
+ *   - `plugin/v1-shim.ts`   — legacy `(input, output)` hook map adapter
+ *   - `packages/plugin-sdk` — plugin authoring surface (`define` + types)
  *
- *   1. Hooks operate on **mutable output objects**. Convention from
- *      opencode: the hook receives `(input, output)`, mutates
- *      `output` in place, and returns void. This keeps the call
- *      sites simple (`output.args = sanitise(output.args)`) and
- *      composable (multiple plugins can stack their changes
- *      naturally without async-pipe ceremony).
+ * The exported surface is kept byte-compatible with the original host so
+ * existing call sites (tool-sandbox, stream, stream-runner, generate) and
+ * tests keep working unchanged.
  *
- *   2. Hook errors NEVER break the main flow. Each plugin invocation
- *      is wrapped in try/catch + `console.warn`. A misbehaving
- *      plugin must not be able to crash a chat turn or bypass
- *      sandbox safety. If a plugin throws, its mutations to
- *      `output` are still applied up to the point of throw — same
- *      semantics as opencode.
+ * Loading rules (unchanged from the original host):
+ *   - Opt-in via `OPENAWORK_PLUGINS=path1.js,@scope/pkg,...`.
+ *   - Absolute / relative paths and bare package specifiers accepted.
+ *   - A failing plugin logs a warning but never blocks boot.
+ *   - No hot reload in this phase; adding/removing plugins restarts the
+ *     gateway (hot reload lands with the discovery phase).
  *
- *   3. Plugin loading is **opt-in via env**. We don't auto-load any
- *      paths; operators set `OPENAWORK_PLUGINS=path1.js,path2.js`
- *      explicitly. This avoids surprising production deployments
- *      that didn't audit a third-party plugin.
+ * Both plugin styles are accepted:
+ *   - V1 (legacy): `export default async function () { return { hooks } }`
+ *   - V2 (current): `export default define({ id, setup/effect })` from
+ *     `@openAwork/plugin-sdk` (Promise) or `@openAwork/plugin-sdk/effect`.
  *
- *   4. Each plugin is loaded once at module init via dynamic ESM
- *      `import()`. Hot-reload is intentionally NOT supported in this
- *      MVP — plugins inspect their config and short-circuit when
- *      they're disabled, but adding/removing plugins requires a
- *      gateway restart.
- *
- * **Trust model — read before writing a plugin or auditing one:**
- *
- *   Plugins run **inside the gateway's trust boundary**, with the
- *   same Node.js privileges as the gateway process itself
- *   (filesystem, network, environment variables, sqlite). They are
- *   NOT sandboxed.
- *
- *   In particular, `tool.execute.before` runs only after the sandbox
- *   has accepted the requested tool name. Its mutated `args` are then
- *   passed through workspace validation, permission context building,
- *   execution, and audit logging. It cannot create a new executable
- *   tool or skip the sandbox gates, but a malicious plugin can still
- *   change what an allowed tool is asked to do.
- *
- *   Consequences for operators:
- *     - `OPENAWORK_PLUGINS` MUST only point at code you control or
- *       have audited.
- *     - Don't load plugins from user-writable directories.
- *     - Treat plugin paths the same way you treat the gateway's own
- *       deployment artifacts.
+ * Trust model (unchanged): plugins run inside the gateway's trust
+ * boundary with the same Node privileges. `OPENAWORK_PLUGINS` must only
+ * point at code you control or have audited; plugins are NOT sandboxed.
  */
 
-import { pathToFileURL } from 'node:url';
-import { resolve as resolvePath } from 'node:path';
+import type { PermissionEvaluateEvent } from '@openAwork/plugin-sdk';
+import { getPluginHooks, _resetPluginHooksForTest } from '../plugin/hooks.js';
+import { getPluginRegistry, _resetPluginRegistryForTest } from '../plugin/registry.js';
+import {
+  loadPlugins,
+  startPluginHotReload,
+  type HotReloadHandle,
+  type TrackedPlugin,
+} from '../plugin/loader.js';
+import { registerBuiltinPluginGroups } from '../plugin/builtin-groups.js';
+import { _resetPluginSupervisorForTest } from '../plugin/supervisor.js';
+import { _resetPluginToolRegistryForTest } from '../plugin/tool-registry.js';
+import type {
+  PluginFactory,
+  V1ChatMessageInput,
+  V1ChatMessageOutput,
+  V1ChatParamsInput,
+  V1ChatParamsOutput,
+  V1PluginHooks,
+  V1ToolExecuteAfterInput,
+  V1ToolExecuteAfterOutput,
+  V1ToolExecuteBeforeInput,
+  V1ToolExecuteBeforeOutput,
+} from '../plugin/v1-shim.js';
+
+// -----------------------------------------------------------------
+// Legacy (V1) hook types — kept exported for existing call sites and
+// tests. They describe the two-argument callback convention.
+// -----------------------------------------------------------------
+
+export type ToolExecuteBeforeInput = V1ToolExecuteBeforeInput;
+export type ToolExecuteBeforeOutput = V1ToolExecuteBeforeOutput;
+export type ToolExecuteAfterInput = V1ToolExecuteAfterInput;
+export type ToolExecuteAfterOutput = V1ToolExecuteAfterOutput;
+export type ChatMessageInput = V1ChatMessageInput;
+export type ChatMessageOutput = V1ChatMessageOutput;
+export type ChatParamsInput = V1ChatParamsInput;
+export type ChatParamsOutput = V1ChatParamsOutput;
+
+export type { PermissionEvaluateEvent };
 
 /**
- * `tool.execute.before` — called immediately before a tool's
- * execution function runs. Plugins can mutate `output.args` to
- * sanitise / redact / inject defaults. The original
- * `request.rawInput` is replaced with `output.args` for the
- * downstream execution (matching opencode's contract).
+ * The V1 hook map shape. Mirrors the original host's `PluginHooks`
+ * interface; the v2 SDK expresses the same hooks as domain registrations
+ * on the plugin context (`ctx.tool.hook(...)` etc.).
  */
-export interface ToolExecuteBeforeInput {
-  tool: string;
-  sessionID: string;
-  callID: string;
-}
-
-export interface ToolExecuteBeforeOutput {
-  args: unknown;
-}
+export type PluginHooks = V1PluginHooks;
 
 /**
- * `tool.execute.after` — called once the tool returns (or throws).
- * Plugins can mutate the output text / title / metadata. Errors
- * thrown by the tool itself surface as `output.output` containing
- * the error string and `metadata.isError = true`.
- */
-export interface ToolExecuteAfterInput {
-  tool: string;
-  sessionID: string;
-  callID: string;
-  args: unknown;
-}
-
-export interface ToolExecuteAfterOutput {
-  title?: string;
-  output: unknown;
-  metadata: Record<string, unknown>;
-}
-
-/**
- * `chat.message` — called when a new user message is being
- * processed. Plugins can read but should not mutate (the parts
- * array is passed by reference but is treated as advisory in this
- * MVP — future revisions may allow rewriting).
- */
-export interface ChatMessageInput {
-  sessionID: string;
-  modelId?: string;
-  messageID?: string;
-}
-
-export interface ChatMessageOutput {
-  message: { role: string; content: unknown };
-  parts: unknown[];
-}
-
-/**
- * `chat.params` — called right before the gateway dispatches the
- * model request. Plugins can override sampling parameters (e.g.
- * coerce all GPT-5 calls to temperature 0 in a deterministic-test
- * environment).
- */
-export interface ChatParamsInput {
-  sessionID: string;
-  modelId: string;
-}
-
-export interface ChatParamsOutput {
-  temperature?: number;
-  topP?: number;
-  topK?: number;
-  maxOutputTokens?: number;
-  options: Record<string, unknown>;
-}
-
-/**
- * `permission.evaluate` — deny-only post-adjudication of a tool
- * permission decision (opencode v2.0.13 `permission.evaluate` parity).
- *
- * The sandbox dispatches this hook from the very end of
- * `ensurePermissionForTool`, i.e. AFTER the built-in ladder has settled:
- * tool-level / scope-level rules, the permission-mode shortcuts (`yolo`,
- * `auto-edit`, background team, reception read-only), channel policy,
- * workspace permanent rules and saved approvals (user grants, session
- * approvals, parent-session inheritance) — and before a pending request
- * would be persisted for the `ask` path.
- *
- * Plugins may ONLY downgrade the outcome: set `effect = 'deny'` (plus an
- * optional user-facing `message`). Any other value is ignored, so the hook
- * can never grant a permission, never bypass a rule-level `deny`, and the
- * sandbox's deny-first invariant still holds.
- */
-export interface PermissionEvaluateEvent {
-  sessionID: string;
-  toolName: string;
-  /** Resolved permission category, e.g. 'bash' | 'edit' | 'write' | 'mcp_call' | 'custom'. */
-  permission: string;
-  /**
-   * Concrete resource scope of this call (bash command, workspace-relative
-   * path, ...); `'*'` when the decision came from the tool-level wildcard.
-   */
-  scope: string;
-  /** Built-in verdict entering this hook: 'allow' = 放行 / 免审批, 'ask' = 将进入人工审批. */
-  decision: 'allow' | 'ask';
-  /** Deny-only: plugins may set `'deny'`; every other value is ignored. */
-  effect?: 'deny';
-  /** User-facing reason used when a `'deny'` effect is honoured. */
-  message?: string;
-}
-
-export interface PluginHooks {
-  'tool.execute.before'?: (
-    input: ToolExecuteBeforeInput,
-    output: ToolExecuteBeforeOutput,
-  ) => void | Promise<void>;
-  'tool.execute.after'?: (
-    input: ToolExecuteAfterInput,
-    output: ToolExecuteAfterOutput,
-  ) => void | Promise<void>;
-  'chat.message'?: (input: ChatMessageInput, output: ChatMessageOutput) => void | Promise<void>;
-  'chat.params'?: (input: ChatParamsInput, output: ChatParamsOutput) => void | Promise<void>;
-  'permission.evaluate'?: (event: PermissionEvaluateEvent) => void | Promise<void>;
-}
-
-/**
- * The shape a plugin module's default export must produce. Mirrors
- * opencode's `Plugin` type: an async factory that returns hooks.
+ * The shape a V1 plugin module's default export must produce: an async
+ * factory that returns hooks.
  *
  * ```ts
- * // plugin.js (ESM)
+ * // plugin.js (ESM, V1 style)
  * export default async function () {
  *   return {
  *     'tool.execute.before': async (input, output) => {
@@ -197,124 +93,84 @@ export interface PluginHooks {
  * }
  * ```
  */
-export type PluginFactory = (opts?: Record<string, unknown>) => Promise<PluginHooks> | PluginHooks;
+export type { PluginFactory };
 
-interface LoadedPlugin {
-  source: string;
-  hooks: PluginHooks;
-}
-
-const loadedPlugins: LoadedPlugin[] = [];
-let initialised = false;
-
-function isPluginFactory(value: unknown): value is PluginFactory {
-  return typeof value === 'function';
-}
-
-/**
- * Read the `OPENAWORK_PLUGINS` env list, dynamically import each
- * path, and stash the resulting hook objects. Idempotent — safe to
- * call from multiple module init paths (the test runner, the
- * gateway boot script, hot-reload drivers, ...).
- *
- * Each plugin path can be:
- *   - An absolute filesystem path (`/srv/openawork/plugins/x.js`).
- *   - A relative path (resolved against `process.cwd()`).
- *   - A node-style package specifier (`@scope/plugin`).
- *
- * Failures (file not found, factory threw, hook shape invalid)
- * log a warning but DO NOT block boot — gateway availability
- * always wins over plugin completeness.
- */
-export async function ensurePluginsLoaded(): Promise<void> {
-  if (initialised) return;
-  initialised = true;
-
-  const raw = globalThis.process?.env?.['OPENAWORK_PLUGINS'];
-  if (!raw) return;
-
-  const paths = raw
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  for (const spec of paths) {
-    try {
-      // Resolve `./relative` paths against cwd. Bare module
-      // specifiers and absolute paths pass through untouched.
-      const importTarget =
-        spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('/')
-          ? pathToFileURL(resolvePath(spec)).href
-          : spec;
-      const mod = (await import(importTarget)) as { default?: unknown };
-      const factory = mod.default;
-      if (!isPluginFactory(factory)) {
-        console.warn(`[plugin-host] Plugin at "${spec}" has no default export factory — skipping.`);
-        continue;
-      }
-      const hooks = await factory();
-      if (hooks && typeof hooks === 'object') {
-        loadedPlugins.push({ source: spec, hooks });
-      }
-    } catch (err) {
-      console.warn(
-        `[plugin-host] Failed to load plugin "${spec}": ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-}
-
-/**
- * Run a hook against every loaded plugin in registration order.
- * Each plugin sees the SAME arguments, so mutations compose (two-arg
- * hooks mutate `output` in place; single-event hooks mutate the event,
- * e.g. `permission.evaluate`). Hook errors are caught per-plugin so a
- * misbehaving plugin can't poison a downstream one.
- */
-async function dispatchHook<K extends keyof PluginHooks>(
-  hookName: K,
-  ...args: Parameters<NonNullable<PluginHooks[K]>>
-): Promise<void> {
-  for (const plugin of loadedPlugins) {
-    const fn = plugin.hooks[hookName] as unknown as
-      ((...hookArgs: Parameters<NonNullable<PluginHooks[K]>>) => void | Promise<void>) | undefined;
-    if (!fn) continue;
-    try {
-      await fn(...args);
-    } catch (err) {
-      console.warn(
-        `[plugin-host] Plugin "${plugin.source}" hook "${String(hookName)}" threw: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-}
+// -----------------------------------------------------------------
+// Dispatch — one function per hook, delegating to the domain registry.
+// -----------------------------------------------------------------
 
 export async function dispatchToolExecuteBefore(
   input: ToolExecuteBeforeInput,
   output: ToolExecuteBeforeOutput,
 ): Promise<void> {
-  await dispatchHook('tool.execute.before', input, output);
+  const hooks = getPluginHooks();
+  const event = {
+    tool: input.tool,
+    sessionID: input.sessionID,
+    callID: input.callID,
+    args: output.args,
+  };
+  await hooks.trigger('tool.execute.before', event);
+  output.args = event.args;
 }
 
 export async function dispatchToolExecuteAfter(
   input: ToolExecuteAfterInput,
   output: ToolExecuteAfterOutput,
 ): Promise<void> {
-  await dispatchHook('tool.execute.after', input, output);
+  const hooks = getPluginHooks();
+  const event = {
+    tool: input.tool,
+    sessionID: input.sessionID,
+    callID: input.callID,
+    args: input.args,
+    output: output.output,
+    metadata: output.metadata,
+    ...(output.title === undefined ? {} : { title: output.title }),
+  };
+  await hooks.trigger('tool.execute.after', event);
+  output.output = event.output;
+  output.metadata = event.metadata;
+  output.title = event.title;
 }
 
 export async function dispatchChatMessage(
   input: ChatMessageInput,
   output: ChatMessageOutput,
 ): Promise<void> {
-  await dispatchHook('chat.message', input, output);
+  const hooks = getPluginHooks();
+  const event = {
+    sessionID: input.sessionID,
+    message: output.message,
+    parts: output.parts,
+    ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
+    ...(input.messageID === undefined ? {} : { messageID: input.messageID }),
+  };
+  await hooks.trigger('session.prompt', event);
+  output.message = event.message;
+  output.parts = event.parts;
 }
 
 export async function dispatchChatParams(
   input: ChatParamsInput,
   output: ChatParamsOutput,
 ): Promise<void> {
-  await dispatchHook('chat.params', input, output);
+  const hooks = getPluginHooks();
+  const event = {
+    sessionID: input.sessionID,
+    modelId: input.modelId,
+    temperature: output.temperature,
+    topP: output.topP,
+    topK: output.topK,
+    maxOutputTokens: output.maxOutputTokens,
+    options: output.options,
+  };
+  await hooks.trigger('session.context', event);
+  output.temperature = event.temperature;
+  output.topP = event.topP;
+  output.topK = event.topK;
+  output.maxOutputTokens = event.maxOutputTokens;
+  output.options = event.options;
 }
 
 /**
@@ -324,7 +180,66 @@ export async function dispatchChatParams(
  * grant or widen one.
  */
 export async function dispatchPermissionEvaluate(event: PermissionEvaluateEvent): Promise<void> {
-  await dispatchHook('permission.evaluate', event);
+  await getPluginHooks().trigger('permission.evaluate', event);
+}
+
+// -----------------------------------------------------------------
+// Loading
+// -----------------------------------------------------------------
+
+let initialised = false;
+let hotReloadHandle: HotReloadHandle | undefined;
+let lastOutcome: Awaited<ReturnType<typeof loadPlugins>> | undefined;
+
+/**
+ * Resolve and activate the configured plugins (config file +
+ * `<dataDir>/plugins/*` discovery + `OPENAWORK_PLUGINS` env), then start
+ * hot reload for local sources. Idempotent — safe to call from multiple
+ * module init paths.
+ *
+ * Plugin paths can be absolute files, directories with a known
+ * entrypoint, relative paths (resolved against `process.cwd()`), or
+ * node-style package specifiers.
+ *
+ * Failures (file not found, factory threw, hook shape invalid) log a
+ * warning but DO NOT block boot — gateway availability always wins.
+ */
+export async function ensurePluginsLoaded(): Promise<void> {
+  if (initialised) return;
+  initialised = true;
+  await refreshPluginsFromDisk();
+}
+
+/**
+ * Re-scan plugin sources from disk and activate anything not yet active
+ * (management API: install / uninstall / manual reload). Already-active
+ * plugins are kept without re-running setup.
+ */
+export async function refreshPluginsFromDisk(): Promise<Awaited<ReturnType<typeof loadPlugins>>> {
+  stopPluginHotReload();
+  // Built-in groups are registered first so they always occupy their
+  // inventory slots (guarded internal plugins; config cannot remove them).
+  await registerBuiltinPluginGroups();
+  const outcome = await loadPlugins();
+  lastOutcome = outcome;
+  if (outcome.tracked.length > 0) {
+    hotReloadHandle = await startPluginHotReload(outcome);
+  }
+  for (const item of outcome.skipped) {
+    console.warn(`[plugin] skipped "${item.spec}": ${item.reason}`);
+  }
+  return outcome;
+}
+
+/** Sources the loader currently tracks (active or failed). */
+export function getTrackedPlugins(): readonly TrackedPlugin[] {
+  return lastOutcome?.tracked ?? [];
+}
+
+/** Stop the hot-reload watcher (gateway shutdown / tests). */
+export function stopPluginHotReload(): void {
+  hotReloadHandle?.stop();
+  hotReloadHandle = undefined;
 }
 
 // -----------------------------------------------------------------
@@ -334,13 +249,18 @@ export async function dispatchPermissionEvaluate(event: PermissionEvaluateEvent)
 // these from outside `__tests__`.
 // -----------------------------------------------------------------
 
-/** @internal Test only — register a synthetic plugin in-process. */
+/** @internal Test only — register a synthetic V1 plugin in-process. */
 export function _registerPluginForTest(source: string, hooks: PluginHooks): void {
-  loadedPlugins.push({ source, hooks });
+  getPluginRegistry().activateV1(source, hooks);
 }
 
 /** @internal Test only — clear all loaded plugins (and reset init flag). */
 export function _resetPluginsForTest(): void {
-  loadedPlugins.length = 0;
+  stopPluginHotReload();
+  _resetPluginHooksForTest();
+  _resetPluginRegistryForTest();
+  _resetPluginToolRegistryForTest();
+  _resetPluginSupervisorForTest();
   initialised = false;
+  lastOutcome = undefined;
 }

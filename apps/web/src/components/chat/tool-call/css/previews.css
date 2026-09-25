@@ -233,7 +233,7 @@
 }
 
 .tool-call-search-text {
-  color: var(--text-1);
+  color: var(--fg-strong);
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -281,7 +281,7 @@
 }
 
 .tool-call-tree-row[data-kind='dir'] .tool-call-tree-name {
-  color: var(--text-1);
+  color: var(--fg-strong);
   font-weight: 600;
 }
 
@@ -313,6 +313,15 @@
   flex-shrink: 0;
   font-size: 10px;
   color: var(--fg-muted);
+}
+
+/* 目录清单（read 命中目录）：复用树行样式，补足代码块容器里的内边距。 */
+[data-directory-listing='true'] .tool-call-tree-row {
+  padding: 1px 12px;
+}
+
+[data-directory-listing='true'] .file-content-pre {
+  padding: 5px 0;
 }
 
 /* ── workspace_review_status (git status) ── */
@@ -360,7 +369,7 @@
 .tool-call-review-path {
   flex: 1;
   min-width: 0;
-  color: var(--text-1);
+  color: var(--fg-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -467,7 +476,7 @@
 .tool-call-diagnostic-msg {
   flex: 1;
   min-width: 0;
-  color: var(--text-1);
+  color: var(--fg-strong);
   word-break: break-word;
   white-space: normal;
 }
@@ -491,7 +500,7 @@
 }
 
 .tool-call-confirm-text {
-  color: var(--text-1);
+  color: var(--fg-strong);
 }
 
 .tool-call-confirm-path {
@@ -529,8 +538,11 @@
 .file-content-path-clickable {
   border: none;
   background: transparent;
+  /* 命中区域向上下各扩 2px、向左扩 4px（负 margin 抵消，文本仍与代码块左对齐）；
+     右侧不越界——此前的 `-4px` 右负 margin 会让按钮盒超出容器 4px，
+     窄卡片下 meta 行产生 scrollWidth 溢出并向上冒泡到消息卡片。 */
   padding: 2px 4px; /* 增加点击区域 */
-  margin: -2px -4px;
+  margin: -2px 0 -2px -4px;
   border-radius: 3px;
   cursor: pointer;
   text-align: left;
@@ -581,16 +593,25 @@
   border-radius: 6px; /* 增大圆角 */
   border: 1px solid var(--border-subtle); /* 添加边框 */
   max-height: 400px; /* 增加最大高度 */
-  overflow-y: auto;
+  /* 横向溢出一并由代码块自身滚动（单条滚动条 + 行号吸附），
+     不再让每一行各自建一个隐形滚动区。 */
+  overflow: auto;
   display: flex;
   flex-direction: column;
 }
 
 .file-content-line {
-  display: grid;
-  grid-template-columns: auto 1fr;
+  /* 行随内容增宽（min-width: max-content），横向滚动交给 .file-content-pre；
+     内容短时仍被拉伸铺满代码块。grid 的 1fr 轨道会把行号栏固定成独立列，
+     但 grid item 的包含块是「单元格」，position: sticky 无法在横向滚动中移动，
+     因此这里用 flex（行本身是行号的包含块）。 */
+  display: flex;
+  align-items: flex-start;
   gap: 8px;
-  padding: 1px 12px; /* 增加内边距 */
+  /* 左侧内边距由行号栏承载（见 .file-content-line-num）：横滚时行号的
+     吸附底衬能一直盖到代码块左边缘，文字不会从行号左侧透出。 */
+  padding: 1px 12px 1px 0;
+  min-width: max-content;
   transition: background 0.1s ease;
 }
 
@@ -599,20 +620,36 @@
 }
 
 .file-content-line-num {
-  color: var(--fg-muted);
+  /* 行号吸附在代码块左侧：横向滚动时不被滚出可视区。
+     padding-right + 负 margin 让底色盖住与代码文本之间的间隙，
+     滚动时文字不会紧贴数字；padding-left 承担行的左内边距。 */
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  padding-left: 12px;
+  padding-right: 8px;
+  margin-right: -8px;
   user-select: none;
   text-align: right;
   white-space: pre;
-  opacity: 0.6; /* 稍微降低透明度 */
+  /* 只降文字不透明度，不用元素级 opacity——后者会让吸附底衬一起变半透明，
+     横向滚动时文字会从行号下面透出来。 */
+  color: color-mix(in srgb, var(--fg-muted) 60%, transparent);
   font-weight: 500;
+}
+
+.file-content-line:hover .file-content-line-num {
+  background: color-mix(in oklch, var(--accent) 8%, var(--bg-surface));
 }
 
 /* Clickable gutter line numbers: jump straight to that line in the editor. */
 .file-content-line-num-clickable {
   border: none;
-  background: transparent;
-  padding: 0;
-  margin: 0;
+  background: var(--bg-surface);
+  padding: 0 8px 0 12px;
+  margin: 0 -8px 0 0;
   font: inherit;
   cursor: pointer;
   transition:
@@ -623,7 +660,6 @@
 .file-content-line-num-clickable:hover,
 .file-content-line-num-clickable:focus-visible {
   color: var(--accent);
-  opacity: 1;
   text-decoration: underline;
   outline: none;
 }
@@ -631,7 +667,6 @@
 .file-content-line-text {
   color: var(--fg-default);
   white-space: pre;
-  overflow-x: auto;
 }
 
 /* ── GrepContentHitsPreview / GrepCountsPreview / FilePathListPreview ── */
@@ -801,7 +836,7 @@
 }
 
 .styled-path-name {
-  color: var(--text-1);
+  color: var(--fg-strong);
   font-weight: 500;
 }
 
@@ -1149,6 +1184,58 @@
   transform: scale(0.98);
 }
 
+/* ── BashTerminalCard 终端观感（shared-ui 组件渲染 data-* 钩子） ── */
+
+/* 复制按钮：悬停 / 聚焦时显示在终端块右上角（对齐参考实现的 bash-copy）。 */
+[data-tool-card-bash-copy='true'] {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  transition: opacity 140ms ease;
+}
+
+@media (hover: hover) {
+  [data-tool-card-bash-terminal]:not(:hover):not(:focus-within) [data-tool-card-bash-copy='true'] {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-tool-card-bash-copy='true'] {
+    transition: none;
+  }
+}
+
+/* 运行中光标：终端式闪烁块；reduced-motion 下静态半亮。 */
+[data-tool-card-terminal-cursor='true'] {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  flex-shrink: 0;
+  border-radius: 1px;
+  background: var(--accent);
+  animation: tool-terminal-cursor-blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes tool-terminal-cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.18;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-tool-card-terminal-cursor='true'] {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
 /* ── JSON Preview (syntax highlighted JSON output) ── */
 
 .json-preview {
@@ -1299,7 +1386,7 @@
 }
 
 .param-list-bool[data-bool='true'] {
-  color: color-mix(in oklch, var(--success) 80%, var(--text-1));
+  color: color-mix(in oklch, var(--success) 80%, var(--fg-strong));
 }
 
 .param-list-bool[data-bool='false'] {
@@ -1309,7 +1396,8 @@
 .param-list-num {
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: color-mix(in oklch, var(--brand) 70%, var(--text-1));
+  /* `--brand` 不是本仓的 token（历史遗留，声明会被整条丢弃）：数字用语法高亮色。 */
+  color: color-mix(in oklch, var(--hl-number) 70%, var(--fg-strong));
 }
 
 .param-list-str {

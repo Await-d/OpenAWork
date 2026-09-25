@@ -232,6 +232,12 @@ export async function migrate(): Promise<void> {
   // Created up-front: later migration steps (the legacy part-order repair)
   // read and write one-shot markers through get/setAppMetaValue.
   ensureAppMetaTable();
+  // Plugin storage (v2 plugin platform): per-plugin key/value JSON store.
+  ensurePluginStorageTable();
+  // Plugin enable/disable state (v2 plugin platform).
+  ensurePluginStateTable();
+  // Plugin market sources (v2 plugin platform).
+  ensurePluginSourcesTable();
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -390,6 +396,15 @@ export async function migrate(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+
+  // `audit_logs` 早先没有任何索引：`/settings/dev-logs` 的
+  // `JOIN sessions ... WHERE sessions.user_id = ? ORDER BY audit_logs.created_at DESC`
+  // 会全表扫描 + 临时排序（表可增长到数百 MB），而这是同步 SQLite，直接阻塞
+  // 事件循环。复合索引同时覆盖「按会话过滤 + 按时间倒序」两类读法。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_audit_logs_session_created ON audit_logs(session_id, created_at DESC)',
+  );
+  db.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_file_diffs (
@@ -1523,6 +1538,12 @@ export async function migrate(): Promise<void> {
     'CREATE INDEX IF NOT EXISTS idx_sessions_role_layer ON sessions(role_layer) WHERE role_layer IS NOT NULL',
   );
   db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_paused ON sessions(paused) WHERE paused = 1');
+  // 会话列表（`WHERE user_id = ? ORDER BY updated_at DESC LIMIT/OFFSET`，侧边栏与
+  // `/sessions` 路由）此前无索引可用：会话多时是全表扫描 + 临时排序（同步 SQLite，
+  // 阻塞事件循环）。复合索引让排序走索引顺序扫描，免去排序步骤。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_sessions_user_updated ON sessions(user_id, updated_at DESC)',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS team_role_session_instances (
@@ -1975,6 +1996,54 @@ function ensureAppMetaTable(): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+}
+
+/** Whether a plugin is enabled (1, default) or disabled (0) by the user. */
+function ensurePluginStateTable(): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_state (
+      plugin_id TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+}
+
+/**
+ * Plugin storage (v2 plugin platform).
+ *
+ * Scoped by `plugin_id` (not `user_id`): plugins are loaded per gateway
+ * process and mirror opencode's plugin-scoped KV. The `plugin:<id>:`
+ * namespace is expressed by the `plugin_id` column, so keys stay short.
+ */
+/** Plugin market sources: GitHub repos aggregated by the plugin market. */
+function ensurePluginSourcesTable(): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_sources (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      ref TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+}
+
+function ensurePluginStorageTable(): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_storage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plugin_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(plugin_id, key)
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_plugin_storage_plugin ON plugin_storage(plugin_id, key)');
 }
 
 /** 读取 app_meta 中的某个 key；表/行不存在时返回 undefined。 */

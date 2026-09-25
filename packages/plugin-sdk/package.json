@@ -1,0 +1,32 @@
+{
+  "name": "@openAwork/plugin-sdk",
+  "version": "1.2.2",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./effect": {
+      "import": "./dist/effect.js",
+      "types": "./dist/effect.d.ts"
+    }
+  },
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc -b tsconfig.build.json --force",
+    "typecheck": "tsc -b tsconfig.typecheck.json --emitDeclarationOnly --force",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint .",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.117"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.37"
+  }
+}

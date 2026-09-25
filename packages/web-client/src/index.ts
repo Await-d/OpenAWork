@@ -285,6 +285,21 @@ export type {
 export { createCronClient } from './infra/cron.js';
 export type { CronClient, CronJobRecord, CronJobsResponse } from './infra/cron.js';
 
+export { createPluginsClient } from './infra/plugins.js';
+export type {
+  GatewayPluginInfo,
+  GatewayPluginState,
+  PluginGithubInstallResponse,
+  PluginInstallResponse,
+  PluginListResponse,
+  PluginMarketDetail,
+  PluginMarketEntry,
+  PluginMarketListing,
+  PluginMarketSource,
+  PluginReloadResponse,
+  PluginsClient,
+} from './infra/plugins.js';
+
 export { createHealthClient, isGatewayHealthy } from './infra/health.js';
 export type { HealthClient } from './infra/health.js';
 

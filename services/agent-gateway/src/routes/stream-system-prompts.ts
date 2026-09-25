@@ -13,6 +13,21 @@ export const TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT =
   '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量直接传 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。只有在当前会话历史里确实出现了 [tool_output_reference] 且拿不到 toolCallId 时，才允许使用 useLatestReferenced=true。单纯复制/粘贴 UI 上的提示、命令或片段，不等于拥有当前会话里的引用依据。';
 
 /**
+ * 工具调用纪律（对齐参考库基础提示词的 `Prefer parallelizing independent
+ * tool calls.`）。
+ *
+ * 本仓的成本大头是「轮数 × 上下文」：把可并行的独立调用拆成多轮，会让同一段
+ * 历史被重复计入 input。这里显式要求同轮并行 / 用 `batch` 批量提交，并提醒
+ * 折叠工具先查目录再调用。
+ */
+export const HARNESS_TOOL_CALL_DISCIPLINE_SYSTEM_PROMPT = [
+  '工具调用纪律：',
+  '- 互不依赖的工具调用应尽量在**同一条回复里一起发出**（原生并行），或使用 `batch` 工具批量提交；不要为可并行的调用单开一轮。',
+  '- 只有下一步确实依赖上一步结果时才串行等待；信息收集阶段优先并行。',
+  '- 折叠工具（见「可折叠工具目录」）先用 `tool_search` 查准参数再 `tool_invoke`，不要凭记忆猜参数。',
+].join('\n');
+
+/**
  * 网络搜索 / 代码搜索 工具的路由策略。
  *
  * 系统同时存在三条网页搜索路径，目的不同，**必须**按下面规则路由，避免
@@ -233,6 +248,15 @@ const THINKING_LANGUAGE_PLACEHOLDER = '<thinking-language />\n当前未启用思
 export interface SyntheticRequestContext {
   injectedPrompt?: string | null;
   capabilityContext?: string | null;
+  /**
+   * 用户长期记忆块（`<user-memory>`）。
+   *
+   * 放在**最后一条用户消息**而不是 system 尾段：记忆会在对话中被
+   * `autoExtractMemoriesForRequest` / `memory_manage` 更新，若挂在 system
+   * 尾段，任何一次更新都会让「system + 全部历史」的 prompt-cache 前缀整段失效。
+   * 挂到用户消息上时，一次更新只会影响该消息之后的**新增后缀**（本来就要重算）。
+   */
+  memoryBlock?: string | null;
   companionPrompt?: string | null;
   /**
    * Per-turn thinking-language hint persisted as a *trailing* synthetic
@@ -307,6 +331,9 @@ export function buildSyntheticRequestContextBlock(input: SyntheticRequestContext
   }
   if (input.capabilityContext && input.capabilityContext.trim().length > 0) {
     parts.push(input.capabilityContext);
+  }
+  if (input.memoryBlock && input.memoryBlock.trim().length > 0) {
+    parts.push(input.memoryBlock);
   }
   if (input.companionPrompt && input.companionPrompt.trim().length > 0) {
     parts.push(input.companionPrompt);
@@ -410,8 +437,9 @@ export function buildSystemPromptChain(input: SystemPromptChainInput): string[] 
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     // Slot 8: YOLO mode prompt
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
-    // Slot 9: Tool output reference strategy + 网络/代码搜索 路由策略
+    // Slot 9: Tool output reference strategy + 工具调用纪律 + 网络/代码搜索 路由策略
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
+    HARNESS_TOOL_CALL_DISCIPLINE_SYSTEM_PROMPT,
     buildWebSearchRoutingSystemPrompt({
       flatMcpToolsEnabled: input.flatMcpToolsEnabled,
     }),
@@ -458,6 +486,7 @@ export function buildTwoPartSystemPrompts(input: SystemPromptChainInput): {
     input.dialogueModePrompt ?? DIALOGUE_MODE_PLACEHOLDER,
     input.yoloModePrompt ?? YOLO_MODE_PLACEHOLDER,
     TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT,
+    HARNESS_TOOL_CALL_DISCIPLINE_SYSTEM_PROMPT,
     buildWebSearchRoutingSystemPrompt({
       flatMcpToolsEnabled: input.flatMcpToolsEnabled,
     }),

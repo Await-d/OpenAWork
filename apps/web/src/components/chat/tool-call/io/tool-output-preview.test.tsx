@@ -342,3 +342,45 @@ describe('ToolOutputPreview 路由（codegraph / background_output）', () => {
     expect(container.querySelector('.bg-task')).not.toBeNull();
   });
 });
+
+describe('ToolOutputPreview — 存储形态（JSON 字符串）还原', () => {
+  it('list 的 JSON 字符串输出仍渲染目录树，而不是 JSON 文本', () => {
+    const payload = JSON.stringify({
+      path: '/workspace/apps/web',
+      depth: 1,
+      visitedEntries: 3,
+      nodes: [
+        { path: '/workspace/apps/web/src', name: 'src', type: 'directory' },
+        { path: '/workspace/apps/web/package.json', name: 'package.json', type: 'file' },
+        { path: '/workspace/apps/web/vite.config.ts', name: 'vite.config.ts', type: 'file' },
+      ],
+    });
+
+    const { container } = render(<ToolOutputPreview toolName="list" output={payload} />);
+
+    expect(container.querySelectorAll('.tool-call-tree-row').length).toBe(3);
+    expect(container.querySelector('.tool-call-tree-name')?.textContent).toBe('src');
+    expect(container.textContent).not.toContain('"nodes"');
+  });
+
+  it('read 的 JSON 字符串输出仍渲染文件内容预览', () => {
+    const payload = JSON.stringify({
+      path: 'src/a.ts',
+      content: 'const a = 1;',
+      lineStart: 1,
+      lineEnd: 1,
+      totalLines: 1,
+    });
+
+    const { container } = render(<ToolOutputPreview toolName="read" output={payload} />);
+
+    expect(container.querySelector('.file-content-path')?.textContent).toBe('src/a.ts');
+    expect(container.querySelectorAll('.file-content-line').length).toBe(1);
+  });
+
+  it('普通文本（非 JSON）保持原样，不误解析', () => {
+    const { container } = render(<ToolOutputPreview toolName="bash" output={'{not json\nline'} />);
+
+    expect(container.textContent).toContain('{not json');
+  });
+});

@@ -65,6 +65,9 @@ const BASE_TOOL_TO_CATEGORY = {
   memory_manage: 'memory_manage',
   // 技能管理（安装/卸载/启停）：默认 ask；只读 list 免审批。
   skill_manage: 'skill_manage',
+  // 插件管理（安装/卸载/启停/重载 + 市场来源管理）：默认 ask；只读
+  // list/search/source_list 免审批（见 tool-permission-derivers.ts）。
+  plugin_manage: 'plugin_manage',
   // 定时任务管理（新建/修改/启停/删除）：默认 ask；只读 list / history 免审批。
   schedule_manage: 'schedule_manage',
   // 自定义 Agent 管理（新建/修改/删除/恢复默认）：默认 ask；只读 list 免审批。

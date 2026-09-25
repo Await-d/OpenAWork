@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>对话内容列宽度自适应验收（clamp 真实解析 / 居中）</title>
+    <style>
+      /*
+       * 颜色不是本 harness 的断言对象；这里只提供暗色近似值让截图可读。
+       * 断言对象是几何：内容列宽 = min(容器, clamp(基准, 88%, 1.5×基准)) 与居中边距。
+       */
+      :root {
+        --bg-base: #0b0f16;
+        --bg-overlay: #0f141d;
+        --fg-default: #c8d1e0;
+        --fg-muted: #8b97a8;
+        --border-subtle: rgba(255, 255, 255, 0.08);
+        --accent: #5cd4c0;
+      }
+      body {
+        margin: 0;
+        padding: 12px;
+        background: #080b12;
+        color: #c8d1e0;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      .pane-row {
+        margin-bottom: 14px;
+      }
+      .pane-label {
+        font-size: 11px;
+        color: #4d5b6e;
+        padding-bottom: 4px;
+      }
+      /* 容器：固定宽度模拟「对话面板」（窗口 / 分栏后的真实可用宽度）。 */
+      .pane {
+        box-sizing: border-box;
+        border: 1px solid var(--border-subtle);
+        background: var(--bg-base);
+      }
+      .scroll-region {
+        background: #0a0e15;
+      }
+      .column-fill {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 96px;
+        border: 1px dashed rgba(92, 212, 192, 0.5);
+        color: var(--accent);
+        font-size: 12px;
+        letter-spacing: 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/chat-content-width-entry.tsx"></script>
+  </body>
+</html>

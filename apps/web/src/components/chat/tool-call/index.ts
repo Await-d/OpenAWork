@@ -13,8 +13,8 @@ export {
   BatchToolCallCard,
   batchSubInputSummary,
   batchSubVisualState,
-  buildPartialBashOutput,
 } from './cards/batch-tool-call-card.js';
+export { buildPartialBashOutput } from './shared/partial-bash-output.js';
 export { BlockToolCall } from './display/block-tool-call.js';
 export { GenerateImageToolCard } from './cards/generate-image-tool-card.js';
 export { ConvertMediaToolCard } from './cards/convert-media-tool-card.js';

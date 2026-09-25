@@ -28,6 +28,7 @@ export function InlineToolCall({
   output,
   status,
   isError,
+  embedded = false,
 }: {
   approvalActions?: ToolCallCardProps['approvalActions'];
   pendingPermissionRequestId?: string;
@@ -37,6 +38,11 @@ export function InlineToolCall({
   output?: unknown;
   status?: ToolCallCardProps['status'];
   isError?: boolean;
+  /**
+   * 嵌在 batch 子行展开区里渲染：外层行已提供工具名 / 摘要 / 状态，
+   * 这里隐藏整行 header，只渲染输出本体（入参不展示——用户口径：入参不重要）。
+   */
+  embedded?: boolean;
 }) {
   const normalized = toolName.trim().toLowerCase();
   const visualState = resolveToolVisualStatus({
@@ -115,35 +121,51 @@ export function InlineToolCall({
     return null;
   }, [isTodoFamily, input, output]);
 
+  // embedded：外层 batch 子行就是唯一的 disclosure，直接渲染输出面板。
+  const showInlineRow = !embedded;
+  const showOutputPanel = embedded || (expanded && canExpand);
+  // 查看类（read）/ 提问类（question）：内容本体（文件预览 / 问答对）已经把入参
+  // 表达出来，展开区不再出现「参数」等分区标签（用户口径：不要多余的分区提示）。
+  const hideParams =
+    normalized === 'read' || normalized === 'question' || normalized === 'askuserquestion';
+  // read 展开态：路径 + 行区间已经在预览的 meta 行里（带「点击预览」），摘要不再
+  // 重复展示同一个路径（用户口径：两处合成一处，且保留 meta 的点击预览）。
+  const summaryText =
+    normalized === 'read' && showOutputPanel
+      ? naturalLanguageSummary(toolName, input, output, { omitPath: true })
+      : summary;
+
   return (
     <div className="tool-call-inline-wrap" data-tool-status={visualState}>
-      <div
-        className="tool-call-inline"
-        data-tool-status={visualState}
-        {...(canExpand
-          ? {
-              role: 'button',
-              tabIndex: 0,
-              onClick: toggleExpanded,
-              style: { cursor: 'pointer' },
-            }
-          : {})}
-      >
-        <ToolIcon kind={kind} toolName={toolName} status={visualState} size={13} />
-        <span className="tool-call-inline-name" data-tool-category={getToolCategory(toolName)}>
-          {toolName}
-        </span>
-        <span className="tool-call-inline-summary">{colorizeSummary(summary)}</span>
-        {errorSummary && (
-          <span className="tool-call-error-summary" title={errorSummary}>
-            {errorSummary}
+      {showInlineRow && (
+        <div
+          className="tool-call-inline"
+          data-tool-status={visualState}
+          {...(canExpand
+            ? {
+                role: 'button',
+                tabIndex: 0,
+                onClick: toggleExpanded,
+                style: { cursor: 'pointer' },
+              }
+            : {})}
+        >
+          <ToolIcon kind={kind} toolName={toolName} status={visualState} size={13} />
+          <span className="tool-call-inline-name" data-tool-category={getToolCategory(toolName)}>
+            {toolName}
           </span>
-        )}
-        {canExpand && <span className="tool-call-inline-chevron">{expanded ? '▾' : '▸'}</span>}
-      </div>
-      {expanded && canExpand && (
+          <span className="tool-call-inline-summary">{colorizeSummary(summaryText)}</span>
+          {errorSummary && (
+            <span className="tool-call-error-summary" title={errorSummary}>
+              {errorSummary}
+            </span>
+          )}
+          {canExpand && <span className="tool-call-inline-chevron">{expanded ? '▾' : '▸'}</span>}
+        </div>
+      )}
+      {showOutputPanel && (
         <ToolCardExpansionProvider>
-          <div className="tool-call-inline-output">
+          <div className="tool-call-inline-output" data-embedded={embedded ? 'true' : undefined}>
             {isTodoFamily && todoFamilyTodos !== null ? (
               todoFamilyTodos.length === 0 ? (
                 <div className="tool-call-inline-empty">（暂无待办项）</div>
@@ -152,7 +174,7 @@ export function InlineToolCall({
               )
             ) : (
               <>
-                {hasInput && (
+                {hasInput && !embedded && !hideParams && (
                   <div className="tool-call-inline-section" data-inline-row="true">
                     <div className="tool-call-inline-section-label">参数</div>
                     <ToolInputPreview toolName={toolName} input={input} kind={kind} />
@@ -160,7 +182,6 @@ export function InlineToolCall({
                 )}
                 {hasOutput && (
                   <div className="tool-call-inline-section">
-                    <div className="tool-call-inline-section-label">输出</div>
                     <ToolOutputPreview toolName={toolName} output={output} />
                   </div>
                 )}

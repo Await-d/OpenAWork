@@ -25,6 +25,7 @@ let streamRoutes: typeof StreamRoutesPluginModule.streamRoutes;
 let STREAM_ERROR_MESSAGES: typeof StreamRoutesModule.STREAM_ERROR_MESSAGES;
 let STREAM_PLUGIN_ERROR_MESSAGES: typeof StreamRoutesPluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
 let buildSseClientDisconnectedAuditLog: typeof StreamRoutesPluginModule.buildSseClientDisconnectedAuditLog;
+let toolsRequiringNonEmptyArgs: typeof StreamRoutesModule.TOOLS_REQUIRING_NON_EMPTY_ARGS;
 let createStreamErrorChunk: typeof StreamRoutesModule.createStreamErrorChunk;
 let createStreamUpstreamRouteChunk: typeof StreamRoutesModule.createStreamUpstreamRouteChunk;
 let resolveStreamModelRoute: typeof StreamRoutesModule.resolveStreamModelRoute;
@@ -94,6 +95,7 @@ beforeAll(async () => {
   createStreamErrorChunk = streamModule.createStreamErrorChunk;
   createStreamUpstreamRouteChunk = streamModule.createStreamUpstreamRouteChunk;
   resolveStreamModelRoute = streamModule.resolveStreamModelRoute;
+  toolsRequiringNonEmptyArgs = streamModule.TOOLS_REQUIRING_NON_EMPTY_ARGS;
   const pluginModule = await import('../../routes/stream-routes-plugin.js');
   streamRoutes = pluginModule.streamRoutes;
   STREAM_PLUGIN_ERROR_MESSAGES = pluginModule.STREAM_PLUGIN_ERROR_MESSAGES;
@@ -462,5 +464,24 @@ describe('stream error contracts', () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+describe('stream · 自助管理工具空参数拦截登记守卫', () => {
+  it('全部自助管理工具均已登记（新增管理工具时必须同步补全）', () => {
+    const requiredSelfServiceTools = [
+      'mcp_manage_servers',
+      'memory_manage',
+      'skill_manage',
+      'plugin_manage',
+      'schedule_manage',
+      'agent_manage',
+      'team_workspace_manage',
+    ] satisfies string[];
+
+    const missing = requiredSelfServiceTools.filter(
+      (tool) => !toolsRequiringNonEmptyArgs.has(tool),
+    );
+    expect(missing).toEqual([]);
   });
 });

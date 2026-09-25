@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="carbon" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>工具卡展开可视化验收（Bash / 文件编辑 / 批量调用）</title>
+    <style>
+      /*
+       * 颜色与 token 由 entry 导入的真实 `src/index.css`（carbon 暗色）提供；
+       * 这里只放 harness 自己的页面骨架（不参与断言）。
+       */
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      .harness-root {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        padding: 16px;
+      }
+      .harness-case {
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md, 8px);
+        padding: 12px;
+        background: var(--bg-raised);
+      }
+      .harness-case-title {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--fg-muted);
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/tool-expansion-entry.tsx"></script>
+  </body>
+</html>

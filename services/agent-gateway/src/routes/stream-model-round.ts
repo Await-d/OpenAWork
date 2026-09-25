@@ -27,7 +27,7 @@ import {
   isCompactionThresholdReached,
   parsePercentageOverride,
 } from '../compaction/compaction-parity-contract.js';
-import { microcompactMessages } from '../compaction/microcompact.js';
+import { isMicrocompactEnabled, microcompactMessages } from '../compaction/microcompact.js';
 import { boundInlineImages } from '../message/image-request-budget.js';
 import { stripMediaPayloadsForEstimate } from '../compaction/media-payload-estimate.js';
 import { classifyUpstreamError } from '../provider/retry-classify.js';
@@ -1294,17 +1294,21 @@ export async function runModelRound(input: {
     },
   });
 
-  // ── Layer 0.5: Microcompact (Claude Code pattern) ──
-  // Clear stale tool_result outputs before sending to upstream.
-  // Zero LLM cost, delays full compaction trigger, keeps context lean.
-  // Operates on the rendered UnifiedMessage[] so DB data stays intact.
-  const microcompactResult = microcompactMessages(unifiedMessagesRaw, undefined, {
-    ...getMicrocompactTimeContext(messagesV2, input.requestData.teamTaskThreadId),
-    ...(input.route.contextWindow ? { contextWindowTokens: input.route.contextWindow } : {}),
-    ...(input.route.contextWindowOverride
-      ? { contextWindowOverrideTokens: input.route.contextWindowOverride }
-      : {}),
-  });
+  // ── Layer 0.5: Microcompact（默认关闭；`OPENAWORK_ENABLE_MICROCOMPACT=1` 开启）──
+  // 每轮剪枝会改写历史靠前的工具结果字节，打断 prompt-cache 前缀（子代理等
+  // 工具密集场景实测命中率 10%~90% 抖动、甚至连续 0 命中）。参考库没有该机制
+  // （写时截断 + 只追加历史 + 接近上限才压缩），故生产默认关闭。
+  const microcompactResult = microcompactMessages(
+    unifiedMessagesRaw,
+    { enabled: isMicrocompactEnabled() },
+    {
+      ...getMicrocompactTimeContext(messagesV2, input.requestData.teamTaskThreadId),
+      ...(input.route.contextWindow ? { contextWindowTokens: input.route.contextWindow } : {}),
+      ...(input.route.contextWindowOverride
+        ? { contextWindowOverrideTokens: input.route.contextWindowOverride }
+        : {}),
+    },
+  );
   if (microcompactResult.prunedToolCallIds.length > 0) {
     markToolPartsCompactedV2({
       sessionId: input.sessionId,
@@ -1348,10 +1352,12 @@ export async function runModelRound(input: {
     ? applyThinkingLanguageHintToUnifiedMessages(unifiedMessages, thinkingUserHint)
     : unifiedMessages;
 
-  // Apply synthetic request context (injectedPrompt, companionPrompt)
-  // 能力目录已改走 stable system 槽位（instructions 式），不再进 user 消息。
+  // Apply synthetic request context（injectedPrompt / 用户记忆 / companionPrompt）
+  // 能力目录走 stable system 槽位（instructions 式）；用户记忆挂在最后一条
+  // 用户消息上（记忆更新只影响新增后缀，不会让 system + 全部历史的缓存失效）。
   const syntheticContext: SyntheticRequestContext = {
     injectedPrompt: input.injectedPrompt,
+    memoryBlock: input.memoryBlock,
     companionPrompt: input.companionPrompt,
   };
   // Apply synthetic context using UnifiedMessage-aware helper
@@ -1367,9 +1373,9 @@ export async function runModelRound(input: {
   // segments line up with the 2 system-block cache breakpoints used by
   // Anthropic / OpenRouter / Bedrock renderers and the v2 runtime
   // applyCaching helper. Mixing dynamic content (orchestrator
-  // delegation tables, start-work boulder, slash-command instruction,
-  // memory block) into the stable prefix would invalidate the prefix
-  // hash on every round and tank cache hit rate.
+  // delegation tables, start-work boulder, slash-command instruction)
+  // into the stable prefix would invalidate the prefix hash on every
+  // round and tank cache hit rate.
   const { stable: stableSystemContent, dynamic: dynamicSystemContent } = buildTwoPartSystemPrompts({
     workspaceCtx: input.workspaceCtx,
     routeSystemPrompt: input.route.systemPrompt,
@@ -1387,7 +1393,6 @@ export async function runModelRound(input: {
     capabilityCatalogPrompt: input.capabilityCatalogPrompt,
   });
 
-  const memoryContent = input.memoryBlock ?? '<user-memory />\n当前会话无持久化记忆。';
   const channelPersonaPrompt = buildChannelPersonaPromptFromMetadata(
     input.sessionContext.metadataJson,
   );
@@ -1396,7 +1401,6 @@ export async function runModelRound(input: {
     channelPersonaPrompt,
     input.teamResumePrompt ?? null,
     input.teamStatusPrompt ?? null,
-    memoryContent,
   ]
     .filter((s): s is string => typeof s === 'string' && s.length > 0)
     .join('\n\n');

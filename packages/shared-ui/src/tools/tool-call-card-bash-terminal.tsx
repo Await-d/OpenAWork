@@ -1,5 +1,9 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { tokens, color } from '../tokens.js';
+
+/** 终端类内容的等宽字体栈（命令 / 输出共用）。 */
+const TERMINAL_MONO_FONT =
+  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 
 export interface BashTerminalView {
   command?: string;
@@ -609,16 +613,31 @@ function ShellTextPane({
   return (
     <div
       data-tool-card-terminal-stream={isDanger ? 'stderr' : 'stdout'}
-      style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        minWidth: 0,
+        // stderr 用左侧 danger 细线标记段边界（终端里 stderr 与 stdout 混排时
+        // 只靠文字颜色区分不够）。
+        ...(isDanger
+          ? {
+              borderLeft: `2px solid color-mix(in srgb, ${tokens.color.danger} 45%, transparent)`,
+              paddingLeft: 8,
+            }
+          : {}),
+      }}
     >
       <div
         style={{
           margin: 0,
           fontFamily:
             'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-          fontSize: 11,
-          lineHeight: 1.6,
-          color: isDanger ? tokens.color.danger : tokens.color.text,
+          // 与终端块（13px / 行高 20）一致：不再用 11px 把正文压小；
+          // 输出用正常前景色（ANSI 片段会各自覆盖），只有 stderr 走危险色。
+          fontSize: 13,
+          lineHeight: '20px',
+          color: isDanger ? tokens.color.danger : color.fgDefault,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
@@ -635,39 +654,40 @@ function ShellTextPane({
 
 export function BashTerminalCard({
   compact = false,
+  running = false,
   view,
 }: {
   compact?: boolean;
+  /**
+   * 工具仍在执行。为 true 时输出区显示「运行中，等待输出…」动画行，
+   * 并在输出增长时自动贴底（batch 子工具的 partialOutput 是滚动快照）。
+   */
+  running?: boolean;
   view: BashTerminalView;
 }) {
   const hasStdout = typeof view.stdout === 'string' && view.stdout.length > 0;
   const hasStderr = typeof view.stderr === 'string' && view.stderr.length > 0;
   const hasOutput = typeof view.output === 'string' && view.output.length > 0;
   const hasFailure = (view.exitCode !== undefined && view.exitCode !== 0) || hasStderr;
-  const shellSummaryBadges: { label: string; tone: 'default' | 'amber' | 'red' | 'blue' }[] = [
-    ...(view.summary?.mode ? [{ label: view.summary.mode, tone: 'default' as const }] : []),
-    ...(view.summary?.noisy ? [{ label: 'noise reduced', tone: 'amber' as const }] : []),
-    ...(typeof view.summary?.totalLines === 'number' && view.summary.totalLines > 0
-      ? [{ label: `${view.summary.totalLines} lines`, tone: 'default' as const }]
-      : []),
-    ...(typeof view.summary?.errorLikeLines === 'number' && view.summary.errorLikeLines > 0
-      ? [{ label: `${view.summary.errorLikeLines} error-like`, tone: 'red' as const }]
-      : []),
-    ...(typeof view.summary?.warningLikeLines === 'number' && view.summary.warningLikeLines > 0
-      ? [{ label: `${view.summary.warningLikeLines} warning-like`, tone: 'amber' as const }]
-      : []),
-  ];
   const combinedText = [view.stderr, view.stdout ?? view.output].filter(Boolean).join('\n\n');
-  const totalLineCount =
-    view.summary?.totalLines ?? (combinedText.length > 0 ? countTerminalLines(combinedText) : 0);
-  const tokenEstimate = Math.max(1, Math.ceil(combinedText.length / 4));
-  const isLong = combinedText.length > 1000;
-  // When the outer BlockToolCall is expanded (compact=false), default the
-  // terminal panel to fully expanded — opencode-style "show the whole
-  // command + output as soon as the card is open". The "显示较少" button
-  // below still lets users collapse very long output back to a tail.
-  const [expanded, setExpanded] = useState(!compact);
+  // 展开态默认显示全部内容（参考实现的终端观感：命令 + 结果 + 滚动）；
+  // compact（折叠摘要）时由 ShellTextPane 自行收尾。
+  const expanded = !compact;
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const outputScrollRef = useRef<HTMLDivElement | null>(null);
+  const showWaitingState = running && combinedText.length === 0;
+
+  // Live 输出自动贴底：运行中的终端视口必须停在最新一行。
+  useEffect(() => {
+    if (!running) {
+      return;
+    }
+    const container = outputScrollRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, [running, combinedText]);
 
   useEffect(() => {
     if (copyState === 'idle') {
@@ -696,216 +716,166 @@ export function BashTerminalCard({
   return (
     <div
       data-tool-card-bash-terminal="true"
+      data-terminal-running={running ? 'true' : undefined}
       style={{
+        position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        gap: 0,
-        padding: 0,
+        minWidth: 0,
       }}
     >
-      {view.command && (
-        <div
-          style={{
-            maxHeight: 160,
-            overflow: 'auto',
-            borderRadius: 6,
-            border: `1px solid ${tokens.color.borderSubtle}`,
-            background: `color-mix(in srgb, ${tokens.color.surface} 60%, transparent)`,
-            fontFamily:
-              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-            fontSize: 11,
-          }}
-        >
+      {/* 终端块：`$ 命令` + 同底色输出（终端观感），复制按钮悬停显示在右上角。 */}
+      <div
+        data-tool-card-bash-block="true"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          borderRadius: 6,
+          border: `0.5px solid ${tokens.color.borderSubtle}`,
+          background: tokens.color.bg,
+          overflow: 'hidden',
+        }}
+      >
+        {view.command && (
           <div
+            data-tool-card-bash-command-row="true"
             style={{
               display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              color: tokens.color.success,
+              alignItems: 'flex-start',
+              gap: 8,
+              padding: 12,
+              fontFamily: TERMINAL_MONO_FONT,
+              fontSize: 13,
+              fontWeight: 440,
+              lineHeight: '20px',
               minWidth: 0,
             }}
           >
+            {/* 终端提示符：和命令一起构成「$ command」的终端观感。 */}
             <span
-              style={{
-                color: tokens.color.success,
-                opacity: 0.6,
-                flexShrink: 0,
-                userSelect: 'none',
-              }}
+              data-tool-card-bash-prompt="true"
+              aria-hidden
+              style={{ flexShrink: 0, userSelect: 'none', color: color.success, fontWeight: 700 }}
             >
               $
             </span>
             <span
+              data-tool-card-bash-command="true"
               style={{
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                color: tokens.color.text,
                 flex: 1,
                 minWidth: 0,
+                color: tokens.color.text,
+                // 展开态完整显示多行命令（终端观感）；折叠态保持单行省略。
+                whiteSpace: compact ? 'nowrap' : 'pre-wrap',
+                wordBreak: 'break-word',
+                ...(compact ? { overflow: 'hidden', textOverflow: 'ellipsis' } : {}),
               }}
             >
               {compact ? compactTerminalText(view.command, 2, 180) : view.command}
             </span>
-            {view.cwd && (
-              <span
-                style={{
-                  flexShrink: 0,
-                  fontSize: 10,
-                  color: tokens.color.muted,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: 200,
-                }}
-                title={view.cwd}
-              >
-                {view.cwd}
-              </span>
-            )}
-            {combinedText.length > 0 && (
-              <button
-                type="button"
-                data-tool-card-bash-copy="true"
-                onClick={handleCopy}
-                style={{
-                  appearance: 'none',
-                  border: 'none',
-                  background: 'transparent',
-                  color:
-                    copyState === 'failed'
-                      ? tokens.color.danger
-                      : copyState === 'copied'
-                        ? tokens.color.success
-                        : tokens.color.muted,
-                  borderRadius: 4,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  padding: 0,
-                  flexShrink: 0,
-                }}
-              >
-                {copyState === 'idle' ? '复制' : copyState === 'copied' ? '已复制' : '复制失败'}
-              </button>
-            )}
           </div>
-        </div>
-      )}
+        )}
 
-      <div
-        data-tool-card-terminal-output-panel="true"
-        style={{
-          maxHeight: compact ? 220 : 288,
-          overflow: 'auto',
-          borderRadius: 6,
-          border: `1px solid ${tokens.color.borderSubtle}`,
-          background: `color-mix(in srgb, ${tokens.color.surface} 60%, transparent)`,
-          fontFamily:
-            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-          fontSize: 11,
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px' }}>
-          {shellSummaryBadges.length > 0 && (
+        <div
+          ref={outputScrollRef}
+          data-tool-card-terminal-output-panel="true"
+          style={{
+            maxHeight: compact ? 220 : 240,
+            overflow: 'auto',
+            padding: '0 12px 12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            fontFamily: TERMINAL_MONO_FONT,
+            fontSize: 13,
+            fontWeight: 440,
+            lineHeight: '20px',
+            // 终端输出用正常前景色（不是次级信息色）：和提示符/命令同处一个画面。
+            color: color.fgDefault,
+            minWidth: 0,
+          }}
+        >
+          {showWaitingState ? (
             <div
-              data-tool-card-bash-shell-summary="true"
+              data-tool-card-terminal-running="true"
               style={{
                 display: 'flex',
-                flexWrap: 'wrap',
                 alignItems: 'center',
                 gap: 6,
-                fontSize: 10,
+                color: tokens.color.muted,
+                lineHeight: '20px',
               }}
             >
-              {shellSummaryBadges.map((badge, i) => (
-                <span
-                  key={`${badge.label}-${i}`}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    borderRadius: 4,
-                    padding: '1px 6px',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    background:
-                      badge.tone === 'red'
-                        ? `color-mix(in srgb, ${tokens.color.danger} 10%, transparent)`
-                        : badge.tone === 'amber'
-                          ? `color-mix(in srgb, ${tokens.color.warning} 10%, transparent)`
-                          : badge.tone === 'blue'
-                            ? `color-mix(in srgb, ${tokens.color.info} 10%, transparent)`
-                            : `color-mix(in srgb, ${tokens.color.muted} 10%, transparent)`,
-                    color:
-                      badge.tone === 'red'
-                        ? tokens.color.danger
-                        : badge.tone === 'amber'
-                          ? tokens.color.warning
-                          : badge.tone === 'blue'
-                            ? tokens.color.info
-                            : tokens.color.muted,
-                  }}
-                >
-                  {badge.label}
-                </span>
-              ))}
+              <span data-tool-card-terminal-cursor="true" />
+              运行中，等待输出…
             </div>
-          )}
+          ) : (
+            <>
+              {hasStderr && (
+                <ShellTextPane
+                  compact={compact}
+                  content={view.stderr!}
+                  expanded={expanded || (!compact && hasFailure)}
+                  tone="danger"
+                />
+              )}
 
-          {hasStderr && (
-            <ShellTextPane
-              compact={compact}
-              content={view.stderr!}
-              expanded={expanded || (!compact && hasFailure)}
-              tone="danger"
-            />
+              {hasStdout ? (
+                <ShellTextPane
+                  compact={compact}
+                  content={view.stdout!}
+                  expanded={expanded}
+                  tone="default"
+                />
+              ) : hasOutput ? (
+                <ShellTextPane
+                  compact={compact}
+                  content={view.output!}
+                  expanded={expanded}
+                  tone="default"
+                />
+              ) : null}
+              {/* 运行中的块光标：跟在最后一行输出之后（真实终端观感）。 */}
+              {running && (
+                <div data-tool-card-terminal-live-cursor="true" style={{ lineHeight: '20px' }}>
+                  <span data-tool-card-terminal-cursor="true" />
+                </div>
+              )}
+            </>
           )}
-
-          {hasStdout ? (
-            <ShellTextPane
-              compact={compact}
-              content={view.stdout!}
-              expanded={expanded}
-              tone="default"
-            />
-          ) : hasOutput ? (
-            <ShellTextPane
-              compact={compact}
-              content={view.output!}
-              expanded={expanded}
-              tone="default"
-            />
-          ) : view.exitCode !== undefined ? null : null}
         </div>
       </div>
 
-      {isLong && !compact && (
+      {combinedText.length > 0 && (
         <button
           type="button"
-          data-tool-card-terminal-show-all="true"
-          onClick={() => setExpanded((previous) => !previous)}
+          data-tool-card-bash-copy="true"
+          onClick={handleCopy}
+          title={copyState === 'copied' ? '已复制' : '复制命令与输出'}
           style={{
             appearance: 'none',
-            border: 'none',
-            background: 'transparent',
-            padding: 0,
-            alignSelf: 'flex-start',
-            fontSize: 10,
-            color: tokens.color.muted,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 24,
+            height: 24,
+            border: `0.5px solid ${tokens.color.borderSubtle}`,
+            borderRadius: 4,
+            background: tokens.color.surface,
+            color:
+              copyState === 'failed'
+                ? tokens.color.danger
+                : copyState === 'copied'
+                  ? tokens.color.success
+                  : tokens.color.muted,
+            fontSize: 12,
+            lineHeight: 1,
             cursor: 'pointer',
-            transition: 'color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = tokens.color.text;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = tokens.color.muted;
+            padding: 0,
           }}
         >
-          {expanded
-            ? '显示较少'
-            : `显示全部（约 ${tokenEstimate} tokens，${totalLineCount} lines）`}
+          {copyState === 'copied' ? '✓' : copyState === 'failed' ? '✗' : '⧉'}
         </button>
       )}
     </div>

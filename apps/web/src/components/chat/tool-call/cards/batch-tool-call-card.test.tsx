@@ -6,7 +6,8 @@ import { useDisplayPreferencesStore } from '../../../../stores/settings/display-
 import { BatchToolCallCard } from './batch-tool-call-card.js';
 
 vi.mock('@openAwork/shared-ui', () => ({
-  resolveToolVisualStatus: () => 'completed',
+  resolveToolVisualStatus: ({ isError, status }: { isError?: boolean; status?: string }) =>
+    isError ? 'failed' : status === 'completed' ? 'completed' : 'running',
 }));
 
 vi.mock('../display/tool-icon.js', () => ({
@@ -143,5 +144,71 @@ describe('BatchToolCallCard', () => {
     expect(screen.getByText('1 待审批…')).toBeTruthy();
     expect(screen.queryByText('1 失败')).toBeNull();
     expect(screen.queryByText('1/1 完成')).toBeNull();
+  });
+
+  it('子行常驻可见的展开线索（chevron），展开态标记在按钮上', () => {
+    const view = render(
+      <BatchToolCallCard
+        input={{
+          tool_calls: [{ tool: 'read', parameters: { file_path: 'src/a.ts' } }],
+        }}
+        output={{ results: [{ tool: 'read', output: 'file content' }] }}
+        renderToolCallDisplay={() => <div data-testid="batch-detail" />}
+      />,
+    );
+
+    const row = view.container.querySelector('.tool-call-batch-child-row');
+    expect(view.container.querySelector('.tool-call-batch-child-chevron')).not.toBeNull();
+    expect(row?.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(row!);
+    expect(row?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('运行中的批次渲染进度条（完成 / 失败比例），终态移除', () => {
+    const running = render(
+      <BatchToolCallCard
+        input={{
+          tool_calls: [
+            { tool: 'read', parameters: {} },
+            { tool: 'read', parameters: {} },
+          ],
+        }}
+        output={{ results: [{ tool: 'read', status: 'running' }, { tool: 'read' }] }}
+        status="running"
+        renderToolCallDisplay={() => <div />}
+      />,
+    );
+
+    const bar = running.container.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute('aria-valuenow')).toBe('1');
+    expect(bar?.getAttribute('aria-valuemax')).toBe('2');
+    cleanup();
+
+    const done = render(
+      <BatchToolCallCard
+        input={{ tool_calls: [{ tool: 'read', parameters: {} }] }}
+        output={{ results: [{ tool: 'read' }] }}
+        status="completed"
+        renderToolCallDisplay={() => <div />}
+      />,
+    );
+    // 终态进度条会被误读成一条分隔线，信息由「N/M 完成」承担。
+    expect(done.container.querySelector('[role="progressbar"]')).toBeNull();
+  });
+
+  it('子行展开时把 embedded 透传给嵌套渲染器（嵌套卡不再重复 header）', () => {
+    const renderToolCallDisplay = vi.fn(() => <div data-testid="batch-detail" />);
+    render(
+      <BatchToolCallCard
+        input={{ tool_calls: [{ tool: 'bash', parameters: { command: 'ls' } }] }}
+        output={{ results: [{ tool: 'bash', status: 'completed' }] }}
+        renderToolCallDisplay={renderToolCallDisplay}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    expect(renderToolCallDisplay).toHaveBeenCalledWith(expect.objectContaining({ embedded: true }));
   });
 });

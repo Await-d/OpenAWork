@@ -34,6 +34,12 @@ export default defineConfig({
       '@openAwork/platform-adapter': fileURLToPath(
         new URL('../../packages/platform-adapter/src/index.ts', import.meta.url),
       ),
+      '@openAwork/plugin-sdk/effect': fileURLToPath(
+        new URL('../../packages/plugin-sdk/src/effect.ts', import.meta.url),
+      ),
+      '@openAwork/plugin-sdk': fileURLToPath(
+        new URL('../../packages/plugin-sdk/src/index.ts', import.meta.url),
+      ),
       '@openAwork/shared': fileURLToPath(
         new URL('../../packages/shared/src/index.ts', import.meta.url),
       ),

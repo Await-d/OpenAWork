@@ -2,6 +2,7 @@ import type { RequestContext, WorkflowStep } from '@openAwork/logger';
 import type { ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { sqliteAll, sqliteRun } from '../infra/db.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
+import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';
 
 interface RequestWorkflowLogRow {
   id: number;
@@ -63,16 +64,8 @@ function resolveRequestWorkflowLogRetention(): number {
 
 function pruneRequestWorkflowLogs(limit: number): void {
   // 用自增主键 id 排序：created_at 是 datetime('now') 秒级精度，同秒内多条会并列；
-  // id 单调唯一，能稳定区分「最近 N 行」。
-  sqliteRun(
-    `DELETE FROM request_workflow_logs
-      WHERE id NOT IN (
-        SELECT id FROM request_workflow_logs
-         ORDER BY id DESC
-         LIMIT ?
-      )`,
-    [limit],
-  );
+  // id 单调唯一，能稳定区分「最近 N 行」。走主键边界删除，避免全表物化。
+  deleteRowsBeyondMostRecent({ table: 'request_workflow_logs', idColumn: 'id', limit });
 }
 
 function maybePruneRequestWorkflowLogs(): void {
