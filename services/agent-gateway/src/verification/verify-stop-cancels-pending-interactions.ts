@@ -60,8 +60,8 @@ function insertPendingInteractions(input: {
 
   const notificationId = randomUUID();
   sqliteRun(
-    `INSERT INTO notifications (id, user_id, session_id, event_type, title, body, status)
-     VALUES (?, ?, ?, 'permission_asked', '权限申请', ?, 'unread')`,
+    `INSERT INTO notifications (id, user_id, session_id, event_type, kind, title, body, status)
+     VALUES (?, ?, ?, 'permission_asked', 'actionable', '权限申请', ?, 'unread')`,
     [notificationId, input.userId, input.sessionId, `requestId=${permissionId}\n请审批`],
   );
 
@@ -92,8 +92,8 @@ function assertInteractionsCleared(input: { fixture: PendingFixture; sessionId: 
     [input.fixture.notificationId],
   );
   assert(
-    notificationRow?.status === 'read',
-    `permission notification must be marked read after stop, got ${JSON.stringify(notificationRow)}`,
+    notificationRow?.status === 'expired',
+    `actionable permission notification must be expired after stop, got ${JSON.stringify(notificationRow)}`,
   );
 
   const permissionReplied = sqliteGet<{ id: number }>(
