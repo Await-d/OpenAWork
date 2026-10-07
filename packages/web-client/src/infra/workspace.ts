@@ -24,6 +24,7 @@ import {
   withQuery,
   fetchWithTimeout,
 } from '../gateway/http.js';
+import { normalizeWorkspacePathParam } from './workspace-path-param.js';
 
 export interface FileTreeNode {
   path: string;
@@ -298,12 +299,26 @@ export interface WorkspaceClient {
   ): Promise<SessionWorkspaceUpdateResponse>;
 }
 
+/**
+ * 所有工作区路由共用的查询参数构造。
+ *
+ * `path` 在此做最后一次绝对化兜底（见 workspace-path-param.ts）：调用方给的是
+ * 工作区相对路径时（`@` 提及 / 模型回复 / 工具输出）拼到 `workspaceRoot` 之下，
+ * 避免漏掉前端解析器的调用方直接吃到服务端 403。
+ */
 function buildPathParams(
   path: string,
   extra?: Record<string, string | number | undefined>,
 ): URLSearchParams {
   const params = new URLSearchParams();
-  params.set('path', path);
+  const workspaceRoot = extra?.['workspaceRoot'];
+  params.set(
+    'path',
+    normalizeWorkspacePathParam(
+      path,
+      workspaceRoot === undefined ? undefined : String(workspaceRoot),
+    ),
+  );
   if (extra) {
     for (const [key, value] of Object.entries(extra)) {
       if (value !== undefined) {

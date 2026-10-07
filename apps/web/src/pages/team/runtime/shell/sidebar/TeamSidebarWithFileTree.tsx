@@ -21,6 +21,7 @@ import {
   isValidFileTreeEntryName,
   joinFileTreePath,
 } from '../../../../../components/layout/file-tree/file-tree-actions.js';
+import { useOpenPathInSystem } from '../../../../../components/layout/file-tree/use-open-path-in-system.js';
 import { dispatchComposerReference } from '../../../../../utils/chat/composer-reference-events.js';
 import { getParentPath } from '../../../../../utils/workspace-path.js';
 import type {
@@ -205,6 +206,8 @@ export function TeamSidebarWithFileTree({
     y: number;
     target: FileTreeContextTarget;
   } | null>(null);
+  // 桌面端 + 本机网关才支持「在系统中打开」，否则菜单里不出现这一项。
+  const { canOpen, unavailableReason, openInSystem } = useOpenPathInSystem();
   const {
     applyCreatedEntry,
     applyDeletedEntry,
@@ -805,6 +808,9 @@ export function TeamSidebarWithFileTree({
             )}
             onClose={handleCloseContextMenu}
             onOpen={handleContextMenuOpen}
+            canOpenInSystem={canOpen}
+            unavailableReason={unavailableReason}
+            onOpenInSystem={canOpen ? () => openInSystem(contextMenu.target.path) : undefined}
             onCopyPath={handleCopyPath}
             onCopyRelativePath={handleCopyRelativePath}
             onReferenceInChat={handleReferenceInChat}

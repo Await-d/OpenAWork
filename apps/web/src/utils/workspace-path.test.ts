@@ -4,9 +4,12 @@ import {
   getRelativePath,
   getParentPath,
   getPathBasename,
+  hasDirectorySeparator,
+  isAbsolutePath,
   isPathWithinRoot,
   joinDirectoryPath,
   rebasePath,
+  resolvePathWithinRoot,
 } from './workspace-path.js';
 
 describe('workspace-path', () => {
@@ -46,5 +49,48 @@ describe('workspace-path', () => {
     expect(rebasePath('/workspace/demo/src/index.ts', '/workspace/demo', '/workspace/next')).toBe(
       '/workspace/next/src/index.ts',
     );
+  });
+
+  it('区分绝对路径与带目录的相对路径', () => {
+    expect(isAbsolutePath('/workspace/demo/src/index.ts')).toBe(true);
+    expect(isAbsolutePath('E:\\repo\\src\\index.ts')).toBe(true);
+    expect(isAbsolutePath('E:/repo/src/index.ts')).toBe(true);
+    expect(isAbsolutePath('\\\\host\\share\\index.ts')).toBe(true);
+    expect(isAbsolutePath('packages/web-client/src/index.ts')).toBe(false);
+    expect(isAbsolutePath('index.ts')).toBe(false);
+    expect(isAbsolutePath('')).toBe(false);
+
+    expect(hasDirectorySeparator('packages/web-client/src/index.ts')).toBe(true);
+    expect(hasDirectorySeparator('src\\index.ts')).toBe(true);
+    expect(hasDirectorySeparator('index.ts')).toBe(false);
+  });
+
+  it('把工作区相对路径拼成根下的绝对路径', () => {
+    expect(
+      resolvePathWithinRoot('packages/web-client/src/infra/plugins.ts', '/home/await/repo'),
+    ).toBe('/home/await/repo/packages/web-client/src/infra/plugins.ts');
+    expect(resolvePathWithinRoot('./src/index.ts', '/home/await/repo/')).toBe(
+      '/home/await/repo/src/index.ts',
+    );
+    expect(resolvePathWithinRoot('src/../lib/util.py', '/home/await/repo')).toBe(
+      '/home/await/repo/lib/util.py',
+    );
+    expect(resolvePathWithinRoot('.', '/home/await/repo')).toBe('/home/await/repo');
+  });
+
+  it('按根的系统分隔符拼接相对路径', () => {
+    expect(resolvePathWithinRoot('packages/web-client/src/index.ts', 'E:\\repo\\client')).toBe(
+      'E:\\repo\\client\\packages\\web-client\\src\\index.ts',
+    );
+    expect(resolvePathWithinRoot('src\\index.ts', 'E:\\repo\\client')).toBe(
+      'E:\\repo\\client\\src\\index.ts',
+    );
+  });
+
+  it('相对路径越出工作区根时返回 null', () => {
+    expect(resolvePathWithinRoot('../secret.txt', '/home/await/repo')).toBeNull();
+    expect(resolvePathWithinRoot('a/../../secret.txt', '/home/await/repo')).toBeNull();
+    expect(resolvePathWithinRoot('src/index.ts', '')).toBeNull();
+    expect(resolvePathWithinRoot('', '/home/await/repo')).toBeNull();
   });
 });

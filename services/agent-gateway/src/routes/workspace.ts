@@ -61,6 +61,7 @@ import { requireOwnedSshSession } from '../ssh/ssh-session-ownership.js';
 import { normalizeSshRemoteWorkingDirectory } from '../session/session-workspace-metadata.js';
 import { isPathInUserAllowlist } from '../workspace/user-workspace-allowlist.js';
 import { createWorkspaceRequestThrottle } from '../workspace/workspace-request-throttle.js';
+import { createPreviewConcurrencyGate } from '../workspace/preview-concurrency-gate.js';
 import {
   getWorkspaceReviewDiff,
   listWorkspaceReviewChanges,
@@ -131,6 +132,7 @@ const WORKSPACE_ERROR_MESSAGES = {
   deleteFailed: '删除文件或目录失败。',
   invalidReviewFilePath: '目标文件路径无效。',
   searchRateLimited: '文件搜索请求过于频繁，请稍后再试。',
+  previewBusy: '大文件预览请求过多或等待超时，请稍后重试。',
 } as const;
 
 const IGNORED = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.DS_Store']);
@@ -145,6 +147,37 @@ const MAX_DEPTH = 4;
  * 这类正常文件完全无法查看。
  */
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * 超过此体积的文件才计入预览并发预算。
+ *
+ * 小文件是绝大多数场景，让它们也排队只会平白增加延迟；真正会撑爆浏览器内存的
+ * 是「多个接近 10MB 上限的文件同时解码」。1MB 是权衡点：高于它才值得让用户等。
+ */
+const LARGE_PREVIEW_FILE_BYTES = 1 * 1024 * 1024;
+
+/** 单用户单工作区同时在飞的大文件预览数。2 × 10MB ≈ 20MB 峰值，可接受。 */
+const LARGE_PREVIEW_CONCURRENCY = 2;
+
+/** 单 key 排队上限，防止洪泛把排队本身变成新的内存问题。 */
+const LARGE_PREVIEW_QUEUE_LIMIT = 8;
+
+/** 排队等待上限，超时按 429 处理而不是无限期挂起。 */
+const LARGE_PREVIEW_QUEUE_TIMEOUT_MS = 8_000;
+
+/**
+ * SSH 预览的并发门控参数——**不带体积阈值**。
+ *
+ * `readFileBytes` 只在读取完成后才回报 `size`，读之前无法判断是否大文件，
+ * 所以这里对所有远端预览请求统一限流，不能像本地那样只拦大文件。
+ *
+ * 参数比本地宽松（4 并发 vs 2）：单次远端读取含网络往返 + 远端进程开销，
+ * 本就比本地慢得多，队列更容易被感知；同时 SSH 连接与远端带宽都有上限，
+ * 完全不限会让「同时点开多个远端文件」把连接打满。
+ */
+const SSH_PREVIEW_CONCURRENCY = 4;
+const SSH_PREVIEW_QUEUE_LIMIT = 12;
+const SSH_PREVIEW_QUEUE_TIMEOUT_MS = 10_000;
 const MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
@@ -167,6 +200,52 @@ export const workspaceFileSearchThrottle = createWorkspaceRequestThrottle({
   limit: WORKSPACE_FILE_SEARCH_RATE_LIMIT,
   windowMs: WORKSPACE_FILE_SEARCH_RATE_WINDOW_MS,
 });
+
+/**
+ * 大文件预览的并发门控。导出实例以便测试 reset，与
+ * `workspaceFileSearchThrottle` 保持同样的测试约定。
+ */
+export const largeFilePreviewGate = createPreviewConcurrencyGate({
+  limit: LARGE_PREVIEW_CONCURRENCY,
+  maxQueue: LARGE_PREVIEW_QUEUE_LIMIT,
+  acquireTimeoutMs: LARGE_PREVIEW_QUEUE_TIMEOUT_MS,
+});
+
+/**
+ * SSH 远端预览的并发门控。独立于 `largeFilePreviewGate`：无法预判体积，
+ * 因此对所有远端请求生效，且参数更宽松（见常量区注释）。
+ */
+export const sshFilePreviewGate = createPreviewConcurrencyGate({
+  limit: SSH_PREVIEW_CONCURRENCY,
+  maxQueue: SSH_PREVIEW_QUEUE_LIMIT,
+  acquireTimeoutMs: SSH_PREVIEW_QUEUE_TIMEOUT_MS,
+});
+
+/**
+ * 门控 key：按「用户 + 工作区」隔离，多用户之间互不影响。
+ *
+ * 弱化点（如实记录）：`workspaceRoot` 取的是**原始查询参数**而非验证后的规范
+ * 路径，所以同一工作区的不同拼写会落到不同 key。对照现有
+ * `workspaceFileSearchThrottle` 的 key 用法（同样是原始参数），且本门控的目标是
+ * 防止「正常使用下多个大文件同时解码」把浏览器内存打爆，而非防御定向绕过——
+ * 真要防后者需要按用户维度单 key 限流，但那会误伤多工作区并行的正常用户。
+ */
+function largePreviewKey(userId: string, workspaceRoot: string | undefined): string {
+  return `${userId}::${workspaceRoot ?? ''}`;
+}
+
+/**
+ * SSH 门控 key：按「用户 + 会话/连接」隔离。
+ *
+ * 用 `sessionId ?? sshConnectionId` 而非 workspaceRoot —— 一个远端连接下可能有
+ * 多个工作区，它们共享同一条 SSH 通道，正是需要互相让路的同一份资源。
+ */
+function sshPreviewKey(
+  userId: string,
+  identity: { sessionId?: string | undefined; sshConnectionId?: string | undefined },
+): string {
+  return `${userId}::ssh::${identity.sessionId ?? identity.sshConnectionId ?? ''}`;
+}
 
 function assertWorkspacePathSupportedByRequestHost(path: string): void {
   if (!isWorkspaceAbsolutePath(path)) {
@@ -806,6 +885,24 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
             step.fail('path outside remote workspace');
             return reply.status(403).send({ error: '目标路径超出当前工作区范围。' });
           }
+          // 远端读取无法预判体积，对所有 SSH 预览统一限并发（见 sshFilePreviewGate）。
+          const sshGate = await sshFilePreviewGate.acquire(
+            sshPreviewKey(user.sub, {
+              sessionId: parsed.sessionId,
+              sshConnectionId: parsed.sshConnectionId,
+            }),
+          );
+          if (!sshGate.ok) {
+            sshStep.fail('preview gate saturated');
+            step.fail('preview gate saturated');
+            return reply
+              .status(429)
+              .header(
+                'Retry-After',
+                String(Math.max(1, Math.ceil((sshGate.retryAfterMs ?? 1) / 1000))),
+              )
+              .send({ error: WORKSPACE_ERROR_MESSAGES.previewBusy });
+          }
           try {
             const file = await readRemoteTextFile(resolution.context, remotePath, MAX_FILE_BYTES);
             sshStep.succeed(undefined, { truncated: file.truncated });
@@ -820,6 +917,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
             sshStep.fail(previewError.message);
             step.fail(previewError.message);
             return reply.status(previewError.statusCode).send({ error: previewError.message });
+          } finally {
+            sshGate.release?.();
           }
         }
         // `local`：会话未绑定 SSH，继续走本地逻辑。
@@ -882,16 +981,34 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const readStep = child('read', undefined, { size: stat.size });
+      // 只有大文件计入并发预算：小文件不排队，避免给日常浏览平白增加延迟。
+      const needsGate = stat.size > LARGE_PREVIEW_FILE_BYTES;
+      const gateResult = needsGate
+        ? await largeFilePreviewGate.acquire(largePreviewKey(user.sub, parsed.workspaceRoot))
+        : { ok: true, release: undefined };
+      if (!gateResult.ok) {
+        readStep.fail('preview gate saturated');
+        step.fail('preview gate saturated');
+        return reply
+          .status(429)
+          .header(
+            'Retry-After',
+            String(Math.max(1, Math.ceil((gateResult.retryAfterMs ?? 1) / 1000))),
+          )
+          .send({ error: WORKSPACE_ERROR_MESSAGES.previewBusy });
+      }
+
       const fd = await fsp.open(safePath, 'r');
       try {
         const buffer = Buffer.alloc(stat.size);
         await fd.read(buffer, 0, buffer.length, 0);
         const content = buffer.toString('utf8');
-        readStep.succeed(undefined, { bytesRead: buffer.length });
+        readStep.succeed(undefined, { bytesRead: buffer.length, gated: needsGate });
         step.succeed(undefined, { bytesRead: buffer.length });
         return reply.send({ path: safePath, content, truncated: false });
       } finally {
         await fd.close();
+        gateResult.release?.();
       }
     },
   );
@@ -951,6 +1068,23 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
             step.fail('path outside remote workspace');
             return reply.status(403).send({ error: '目标路径超出当前工作区范围。' });
           }
+          const sshGate = await sshFilePreviewGate.acquire(
+            sshPreviewKey(user.sub, {
+              sessionId: parsed.sessionId,
+              sshConnectionId: parsed.sshConnectionId,
+            }),
+          );
+          if (!sshGate.ok) {
+            sshStep.fail('preview gate saturated');
+            step.fail('preview gate saturated');
+            return reply
+              .status(429)
+              .header(
+                'Retry-After',
+                String(Math.max(1, Math.ceil((sshGate.retryAfterMs ?? 1) / 1000))),
+              )
+              .send({ error: WORKSPACE_ERROR_MESSAGES.previewBusy });
+          }
           try {
             const file = await readRemoteBinaryFile(resolution.context, remotePath, MAX_FILE_BYTES);
             sshStep.succeed(undefined, { bytesRead: file.data.length });
@@ -964,6 +1098,8 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
             sshStep.fail(previewError.message);
             step.fail(previewError.message);
             return reply.status(previewError.statusCode).send({ error: previewError.message });
+          } finally {
+            sshGate.release?.();
           }
         }
         // `local`：会话未绑定 SSH，继续走本地逻辑。
@@ -1006,6 +1142,22 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
 
       const contentType = contentTypeForPath(safePath);
 
+      // 与文本端点同一套并发预算（见 largeFilePreviewGate 注释）。
+      const needsGate = stat.size > LARGE_PREVIEW_FILE_BYTES;
+      const gateResult = needsGate
+        ? await largeFilePreviewGate.acquire(largePreviewKey(user.sub, parsed.workspaceRoot))
+        : { ok: true, release: undefined };
+      if (!gateResult.ok) {
+        step.fail('preview gate saturated');
+        return reply
+          .status(429)
+          .header(
+            'Retry-After',
+            String(Math.max(1, Math.ceil((gateResult.retryAfterMs ?? 1) / 1000))),
+          )
+          .send({ error: WORKSPACE_ERROR_MESSAGES.previewBusy });
+      }
+
       const fd = await fsp.open(safePath, 'r');
       try {
         const buffer = Buffer.alloc(stat.size);
@@ -1019,6 +1171,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return reply.send(buffer);
       } finally {
         await fd.close();
+        gateResult.release?.();
       }
     },
   );

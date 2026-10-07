@@ -110,6 +110,19 @@ function ArtifactPreviewBody({ artifact, content, imageGallery }: ArtifactPrevie
     );
   }
 
+  if (artifact.type === 'mermaid') {
+    return (
+      <PreviewShell
+        title="Mermaid 图表预览"
+        note="与对话消息、.mmd 文件预览共用同一套图表渲染，配色跟随当前主题。"
+      >
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <FilePreviewPane path={buildArtifactVirtualPath(artifact)} content={content} />
+        </div>
+      </PreviewShell>
+    );
+  }
+
   if (artifact.type === 'svg') {
     return (
       <PreviewShell title="SVG 即时预览" note="直接在白底沙箱中渲染矢量内容，便于检查图标与图示。">

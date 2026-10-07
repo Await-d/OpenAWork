@@ -17,17 +17,11 @@
  * 1. 不给 `allow-same-origin` —— 预览内容处于不透明源（opaque origin），读不到
  *    宿主的 DOM / localStorage / cookie，也无法操作 `top`；
  * 2. 送入 iframe 前先经 `stripActivePreviewContent` 剥离脚本与事件处理器。
+ *
+ * 这两条约束曾经配有一段「隔离预览：…」的界面文案，但它会占掉预览框顶部一大块
+ * 高度且不含任何用户可操作信息，已从界面移除——行为约束以本注释为准。
  */
 export const PREVIEW_SANDBOX = 'allow-scripts';
-
-/**
- * 预览隔离说明文案。
- *
- * 旧文案写「用户脚本已移除」，但 iframe 实际带着 `allow-scripts`、剥离函数
- * 又可被 `<script/src=...>` 绕过——文案与行为相反会误导后续修复，故如实描述。
- */
-export const PREVIEW_ISOLATION_NOTE =
-  '隔离预览：脚本与事件处理器已剥离，运行环境无同源权限，外链将在新窗口打开。';
 
 /**
  * 剥离文档中的可执行内容。

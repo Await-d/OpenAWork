@@ -170,8 +170,11 @@ export function CloseConfirmDialog() {
           return;
         }
         unlisten = fn;
-        await tauriInvoke('mark_desktop_ui_ready').catch((err: unknown) => {
-          logger.warn('mark_desktop_ui_ready failed', err);
+        // 命令名 + 参数必须与 lib.rs 的 `mark_dialog_host_ready(channel)` 严格对齐：
+        // 调错名字时 `DialogHostReady.close` 永远置不了位，Rust 端判定「弹窗未就绪」，
+        // 于是每次点 X 都回落到系统原生 MessageDialog（表现为"自定义弹窗从没出现过"）。
+        await tauriInvoke('mark_dialog_host_ready', { channel: 'close' }).catch((err: unknown) => {
+          logger.warn('mark_dialog_host_ready(close) failed', err);
         });
       } catch (err) {
         logger.error('listen desktop:close-requested failed', err);

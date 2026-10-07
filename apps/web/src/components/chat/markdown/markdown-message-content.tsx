@@ -1,10 +1,12 @@
 import {
   Children,
+  createContext,
   Fragment,
   memo,
   type CSSProperties,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -26,7 +28,6 @@ import {
 import { extractMarkdownImageUrls } from './markdown-image-urls.js';
 import { tryOpenLinkPreview } from '../../../utils/preview/link-preview.js';
 import {
-  PREVIEW_ISOLATION_NOTE,
   PREVIEW_SANDBOX,
   stripActivePreviewContent,
 } from '../../../utils/file/sanitize-preview-html.js';
@@ -35,6 +36,7 @@ import { normalizeAssistantMarkdown } from './normalize-markdown.js';
 import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
 import { ChatMarkdownTable } from './chat-markdown-table.js';
 import { isMermaidFenceLanguage } from './mermaid-diagram-meta.js';
+import { getCodeFenceText as getCopyableCodeText } from './code-fence-text.js';
 import { useFoldDisabled, useMessageFoldActive } from './fold-policy.js';
 import { isFullHtmlDocument } from './markdown-html-document.js';
 import {
@@ -66,6 +68,25 @@ const COPY_FEEDBACK_MS = 1500;
 const REHYPE_KATEX_OPTIONS = {
   strict: (errorCode: string) => (errorCode === 'unicodeTextInMathMode' ? 'ignore' : 'warn'),
 } as const;
+
+/**
+ * 标记「当前 `code` 位于 `pre` 之内」，即它是围栏代码块而不是行内代码。
+ *
+ * 为什么不能只看 `className`：react-markdown **不会**给无语言标注的围栏
+ * （``` 换行直接内容）加 `language-*`，此时 `code` 拿到的 className 是
+ * undefined——和行内代码完全一样。只看 className 就会把
+ * ```
+ * OpenAWork/
+ * ├── apps/
+ * ```
+ * 这类无语言围栏渲染成 `inline-block` 的行内代码，换行被折叠成空格，
+ * ASCII 树形图 / 日志片段直接挤成一行（模型输出目录树、文件清单时很常见）。
+ *
+ * `pre` 组件先于 `code` 组件执行（React 自上而下渲染），所以它可以在
+ * 返回的子树里 provide 这个标记；`code` 执行时就能读到。Context 不产生
+ * DOM，因此流式 / 落定两条管线的 innerHTML 仍然一致。
+ */
+const PreBlockContext = createContext(false);
 
 type StaticPreviewKind = 'html' | 'css' | 'javascript' | 'svg';
 
@@ -306,13 +327,18 @@ const markdownComponents: Components = {
   ),
   // 正文图片接入统一查看器：单图放大，同段多图自动成集（见 markdown-image.tsx）。
   img: ({ src, alt, title }) => <MarkdownImage src={src} alt={alt} title={title} />,
-  pre: ({ children }) => <>{children}</>,
+  // 透传 children：真正的 <pre> 由各个代码块组件自己带（行内代码不该有 pre，
+  // 图表 / 静态预览也有各自的容器）。这里只把「我在 pre 内」这个事实传下去。
+  pre: ({ children }) => (
+    <PreBlockContext.Provider value={true}>{children}</PreBlockContext.Provider>
+  ),
   code: ({ children, className, ...props }) => {
+    const inPreBlock = useContext(PreBlockContext);
     const match = /language-([\w-]+)/.exec(className ?? '');
     const codeContent = normalizeCodeChildren(children);
 
-    if (!match && !className) {
-      // Inline code — `path/to/file.ts` is a common authoring pattern
+    if (!inPreBlock) {
+      // 行内代码 — `path/to/file.ts` is a common authoring pattern
       // in assistant replies. Tokenize so those refs stay clickable.
       // Inside backticks we accept bare filenames too (e.g.
       // `create_quotation.py`, `需求分析.md`) since the user has
@@ -381,10 +407,11 @@ const markdownComponents: Components = {
 const noMarkdownPreviewComponents: Components = {
   ...markdownComponents,
   code: ({ children, className, ...props }) => {
+    const inPreBlock = useContext(PreBlockContext);
     const match = /language-([\w-]+)/.exec(className ?? '');
     const codeContent = normalizeCodeChildren(children);
 
-    if (!match && !className) {
+    if (!inPreBlock) {
       // See `markdownComponents.code` — same inline-code tokenization
       // with bare-filename support.
       return (
@@ -574,27 +601,6 @@ function normalizeCodeChildren(children: ReactNode): ReactNode {
   return children;
 }
 
-function getCopyableCodeText(content: ReactNode): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content.map((item) => getCopyableCodeText(item)).join('');
-  }
-
-  if (!content || typeof content === 'boolean' || typeof content === 'number') {
-    return content == null ? '' : String(content);
-  }
-
-  if (typeof content === 'object' && 'props' in content) {
-    const props = content.props as { children?: ReactNode };
-    return getCopyableCodeText(props.children);
-  }
-
-  return '';
-}
-
 function isMarkdownLanguage(language: string | undefined): boolean {
   return language === 'markdown' || language === 'md';
 }
@@ -652,14 +658,21 @@ function shouldOpenStaticPreview(kind: StaticPreviewKind, language: string | und
   return DEFAULT_OPEN_STATIC_PREVIEW_KINDS.has(kind);
 }
 
-type TableCellAlign = 'left' | 'center' | 'right' | 'justify';
-
 /**
  * GFM 表格的列对齐（`:---` / `:---:` / `---:`）会被 react-markdown 放进
  * 单元格的 `style.textAlign`。这里归一化为 `data-align`，交给 CSS 统一处理，
  * 顺带避开已废弃的 `align` 属性。
  */
-function normalizeTableCellAlign(textAlign: string | undefined): TableCellAlign {
+type TableCellAlign = 'left' | 'center' | 'right' | 'justify';
+
+/**
+ * GFM 列对齐（`:---:` / `---:` / `:---`）归一化。
+ * react-markdown 会把对齐转成 `style.textAlign`，这里再落到 `data-align`。
+ *
+ * 导出给文件预览的 Markdown 表格渲染复用——两处必须一致，否则同一个表格在
+ * 消息里居中、在预览里却左对齐。
+ */
+export function normalizeTableCellAlign(textAlign: string | undefined): TableCellAlign {
   if (textAlign === 'center') {
     return 'center';
   }
@@ -904,7 +917,7 @@ function getPreviewTitle(previewKind: StaticPreviewKind): string {
   return 'HTML 预览';
 }
 
-function getPreviewNote(previewKind: StaticPreviewKind): string {
+function getPreviewNote(previewKind: StaticPreviewKind): string | null {
   if (previewKind === 'css') {
     return '当前使用固定示例骨架承载样式效果，便于安全观察布局、颜色和组件外观变化。';
   }
@@ -917,7 +930,9 @@ function getPreviewNote(previewKind: StaticPreviewKind): string {
     return '直接在白底沙箱中渲染矢量内容，便于检查图标与图示。';
   }
 
-  return PREVIEW_ISOLATION_NOTE;
+  // html：与文件预览保持一致，不再展示隔离说明——预览框紧贴在其下方，
+  // 长句文案只会挤占聊天区本就不多的可视高度。
+  return null;
 }
 
 function getPreviewSandbox(_previewKind: StaticPreviewKind): string {
@@ -1086,6 +1101,7 @@ function StaticPreviewCodeBlock({
 }) {
   const [previewOpen, setPreviewOpen] = useState(initiallyOpen);
   const copyableCode = getCopyableCodeText(codeContent).replace(/\n$/, '');
+  const previewNote = getPreviewNote(previewKind);
   const externalUrls = useMemo(() => extractExternalUrls(copyableCode), [copyableCode]);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [frameHeight, setFrameHeight] = useState(CHAT_PREVIEW_MIN_HEIGHT);
@@ -1169,7 +1185,7 @@ function StaticPreviewCodeBlock({
       </div>
       {previewOpen ? (
         <div className="chat-markdown-preview-panel">
-          <div className="chat-markdown-preview-note">{getPreviewNote(previewKind)}</div>
+          {previewNote && <div className="chat-markdown-preview-note">{previewNote}</div>}
           {externalUrls.length > 0 && (
             <div className="chat-markdown-preview-links">
               <span>外联地址</span>

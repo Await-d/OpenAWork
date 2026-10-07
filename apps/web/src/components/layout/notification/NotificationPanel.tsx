@@ -2,6 +2,7 @@ import { memo } from 'react';
 import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
 import type {
   NotificationRecord,
+  NotificationView,
   PendingPermissionRequest,
   PermissionDecision,
 } from '@openAwork/web-client';
@@ -10,19 +11,54 @@ import { RefreshIcon, CheckAllIcon, EmptyInboxIcon } from './notification-icons.
 
 export interface NotificationPanelProps {
   notifications: NotificationRecord[];
+  /**
+   * 待处理视图下被折叠掉的结果播报数。用于空态解释「刚收到的任务完成去哪了」——
+   * 否则空态看起来像消息丢了，用户会反复刷新。
+   */
+  hiddenInformationalCount?: number;
   permissionDetails: Record<string, PendingPermissionRequest>;
   sessionTitles: Record<string, string>;
   replyingIds: Set<string>;
   selectedScopes: Record<string, AlwaysScopeLevel['category']>;
   loading: boolean;
   position: { bottom: number; left: number };
+  view: NotificationView;
+  pendingActionableCount: number;
+  onViewChange: (view: NotificationView) => void;
   onOpen: (notification: NotificationRecord) => void;
   onDismiss: (notification: NotificationRecord) => void;
+  onArchive: (notification: NotificationRecord) => void;
+  onArchiveSession: (sessionId: string) => void;
   onMarkAllRead: () => void;
   onRefresh: () => void;
   onReply: (notification: NotificationRecord, decision: PermissionDecision) => void;
   onScopeChange: (id: string, category: AlwaysScopeLevel['category']) => void;
 }
+
+const VIEW_TABS: ReadonlyArray<{ key: NotificationView; label: string }> = [
+  { key: 'pending', label: '待处理' },
+  { key: 'all', label: '全部' },
+  { key: 'archived', label: '已归档' },
+];
+
+const VIEW_EMPTY_COPY: Readonly<Record<NotificationView, { title: string; hint: string }>> = {
+  pending: {
+    title: '全部处理完了',
+    hint: '没有待响应的权限请求或提问',
+  },
+  all: {
+    title: '暂无通知',
+    hint: 'Agent 的权限请求和任务更新会出现在这里',
+  },
+  archived: {
+    title: '归档为空',
+    hint: '忽略过的通知会留在这里，随时可以回溯',
+  },
+  expired: {
+    title: '没有已失效的通知',
+    hint: '会话停止或超过存活期的待办会归入这里',
+  },
+};
 
 interface DateGroup {
   key: string;
@@ -64,22 +100,38 @@ function groupNotificationsByDate(notifications: NotificationRecord[]): DateGrou
 
 function NotificationPanelImpl({
   notifications,
+  hiddenInformationalCount = 0,
   permissionDetails,
   sessionTitles,
   replyingIds,
   selectedScopes,
   loading,
   position,
+  view,
+  pendingActionableCount,
+  onViewChange,
   onOpen,
   onDismiss,
+  onArchive,
+  onArchiveSession,
   onMarkAllRead,
   onRefresh,
   onReply,
   onScopeChange,
 }: NotificationPanelProps) {
   const hasNotifications = notifications.length > 0;
-  const permCount = notifications.filter((n) => n.eventType === 'permission_asked').length;
+  const permCount = notifications.filter((n) => n.kind === 'actionable').length;
   const groups = groupNotificationsByDate(notifications);
+  // 有结果播报被折叠时，空态必须解释它们去了哪 —— 否则看起来像消息丢了，用户会反复刷新。
+  const emptyCopy: { title: string; hint: string } =
+    view === 'pending' && hiddenInformationalCount > 0
+      ? {
+          title: '没有待处理的请求',
+          hint: `${hiddenInformationalCount} 条任务结果已折叠，可在「全部」中查看`,
+        }
+      : VIEW_EMPTY_COPY[view];
+  // 只有「待处理」视图下「全部已读」才有意义——归档里的条目已读与否不影响任何待办。
+  const canMarkAllRead = view === 'pending' && hasNotifications;
 
   return (
     <div
@@ -127,27 +179,27 @@ function NotificationPanelImpl({
             通知中心
           </span>
           <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-            {hasNotifications ? (
-              <>
-                {notifications.length} 条未读
-                {permCount > 0 && (
-                  <span
-                    style={{
-                      marginLeft: 6,
-                      padding: '1px 5px',
-                      borderRadius: 999,
-                      fontSize: 9,
-                      fontWeight: 700,
-                      background: 'color-mix(in srgb, var(--warning) 15%, transparent)',
-                      color: 'var(--warning)',
-                    }}
-                  >
-                    {permCount} 待审批
-                  </span>
-                )}
-              </>
-            ) : (
-              '已全部清空'
+            {view === 'pending' && pendingActionableCount > 0
+              ? `${pendingActionableCount} 条待处理`
+              : view === 'archived'
+                ? '已忽略的通知'
+                : hasNotifications
+                  ? `${notifications.length} 条`
+                  : '暂无记录'}
+            {permCount > 0 && view === 'pending' && (
+              <span
+                style={{
+                  marginLeft: 6,
+                  padding: '1px 5px',
+                  borderRadius: 999,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  background: 'color-mix(in srgb, var(--warning) 15%, transparent)',
+                  color: 'var(--warning)',
+                }}
+              >
+                {permCount} 待响应
+              </span>
             )}
           </span>
         </div>
@@ -189,7 +241,7 @@ function NotificationPanelImpl({
           </button>
           <button
             type="button"
-            disabled={!hasNotifications}
+            disabled={!canMarkAllRead}
             onClick={onMarkAllRead}
             className="nc-header-btn"
             style={{
@@ -203,12 +255,12 @@ function NotificationPanelImpl({
               borderRadius: 8,
               border: '1px solid var(--border-subtle)',
               background: 'var(--bg-overlay)',
-              color: hasNotifications ? 'var(--fg-default)' : 'var(--fg-muted)',
-              cursor: hasNotifications ? 'pointer' : 'not-allowed',
+              color: canMarkAllRead ? 'var(--fg-default)' : 'var(--fg-muted)',
+              cursor: canMarkAllRead ? 'pointer' : 'not-allowed',
               transition: 'all 100ms cubic-bezier(0.4,0,0.2,1)',
             }}
             onMouseEnter={
-              hasNotifications
+              canMarkAllRead
                 ? (e) => {
                     e.currentTarget.style.color = 'var(--accent)';
                     e.currentTarget.style.borderColor = 'var(--border-emphasis)';
@@ -216,7 +268,7 @@ function NotificationPanelImpl({
                 : undefined
             }
             onMouseLeave={
-              hasNotifications
+              canMarkAllRead
                 ? (e) => {
                     e.currentTarget.style.color = 'var(--fg-default)';
                     e.currentTarget.style.borderColor = 'var(--border-subtle)';
@@ -228,6 +280,58 @@ function NotificationPanelImpl({
             全部已读
           </button>
         </div>
+      </div>
+
+      {/* ── View tabs ─────────────────────────────────────── */}
+      <div
+        role="tablist"
+        aria-label="通知视图"
+        style={{
+          display: 'flex',
+          gap: 2,
+          padding: '8px 8px 0',
+          flexShrink: 0,
+        }}
+      >
+        {VIEW_TABS.map((tab) => {
+          const active = tab.key === view;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => onViewChange(tab.key)}
+              className="nc-tab"
+              style={{
+                flex: 1,
+                height: 26,
+                borderRadius: 7,
+                border: '1px solid transparent',
+                background: active ? 'var(--bg-surface)' : 'transparent',
+                color: active ? 'var(--accent)' : 'var(--fg-muted)',
+                fontSize: 11,
+                fontWeight: active ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 120ms cubic-bezier(0.4,0,0.2,1)',
+              }}
+            >
+              {tab.label}
+              {tab.key === 'pending' && pendingActionableCount > 0 && (
+                <span
+                  style={{
+                    marginLeft: 4,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: active ? 'var(--accent)' : 'var(--warning)',
+                  }}
+                >
+                  {pendingActionableCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Notification list ────────────────────────── */}
@@ -274,7 +378,7 @@ function NotificationPanelImpl({
                   color: 'var(--fg-muted)',
                 }}
               >
-                暂无未读通知
+                {emptyCopy.title}
               </span>
               <span
                 style={{
@@ -284,7 +388,7 @@ function NotificationPanelImpl({
                   maxWidth: 240,
                 }}
               >
-                Agent 的权限请求和任务更新会出现在这里
+                {emptyCopy.hint}
               </span>
             </div>
           </div>
@@ -325,8 +429,11 @@ function NotificationPanelImpl({
                     replying={replyingIds.has(notification.id)}
                     selectedScope={selectedScopes[notification.id]}
                     index={index}
+                    view={view}
                     onOpen={onOpen}
                     onDismiss={onDismiss}
+                    onArchive={onArchive}
+                    onArchiveSession={onArchiveSession}
                     onReply={onReply}
                     onScopeChange={onScopeChange}
                   />
@@ -360,6 +467,14 @@ function NotificationPanelImpl({
         }
         .nc-header-btn:hover {
           background: var(--bg-surface) !important;
+        }
+        .nc-tab:hover {
+          color: var(--accent);
+        }
+        .nc-tab:focus-visible,
+        .nc-item-action:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
         }
         .nc-scroll-area::-webkit-scrollbar {
           width: 5px;

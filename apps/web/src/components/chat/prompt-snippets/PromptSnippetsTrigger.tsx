@@ -46,9 +46,10 @@ export function PromptSnippetsTrigger({
         className={`icon-btn${open ? ' active' : ''}`}
         style={{
           border: '1px solid var(--border-subtle)',
-          borderRadius: 8,
-          width: 26,
-          height: 26,
+          borderRadius: 6,
+          /* 与工具条其余图标按钮（.composer-toolbar-icon）对齐到紧凑规格。 */
+          width: 22,
+          height: 22,
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
@@ -66,8 +67,8 @@ export function PromptSnippetsTrigger({
       >
         <svg
           aria-hidden="true"
-          width="13"
-          height="13"
+          width="12"
+          height="12"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

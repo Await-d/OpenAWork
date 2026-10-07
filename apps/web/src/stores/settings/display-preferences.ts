@@ -189,6 +189,15 @@ export interface DisplayPreferencesStore {
   showComposerStatsBar: boolean;
   setShowComposerStatsBar: (v: boolean) => void;
 
+  /**
+   * 是否在输入框工具条展示语音输入（麦克风）入口。
+   *
+   * 只控制**入口显隐**，与 composer 内部的「正在录音」状态无关；关闭后录音
+   * 能力仍然保留，仅需从设置里重新打开。
+   */
+  showVoiceInputButton: boolean;
+  setShowVoiceInputButton: (v: boolean) => void;
+
   // ── 界面元素显隐 ──────────────────────────────────────────
 
   showCommandPaletteButton: boolean;
@@ -235,6 +244,7 @@ type DisplayPreferenceValues = Omit<
   | 'setToolExpandedOverride'
   | 'setDefaultDialogueMode'
   | 'setShowComposerStatsBar'
+  | 'setShowVoiceInputButton'
   | 'setShowCommandPaletteButton'
   | 'setShowGatewayStatusIndicator'
   | 'setShowTerminalButton'
@@ -282,6 +292,7 @@ const DEFAULTS: DisplayPreferenceValues = {
   toolExpandedOverrides: { ...DEFAULT_TOOL_EXPAND_OVERRIDES },
   defaultDialogueMode: 'coding',
   showComposerStatsBar: true,
+  showVoiceInputButton: true,
   showCommandPaletteButton: true,
   showGatewayStatusIndicator: true,
   showTerminalButton: true,
@@ -365,6 +376,10 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         set({ showComposerStatsBar: v });
         void persistToLocalStorage();
       },
+      setShowVoiceInputButton: (v) => {
+        set({ showVoiceInputButton: v });
+        void persistToLocalStorage();
+      },
       setShowCommandPaletteButton: (v) => {
         set({ showCommandPaletteButton: v });
         void persistToLocalStorage();
@@ -433,6 +448,7 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         toolExpandedOverrides: s.toolExpandedOverrides,
         defaultDialogueMode: s.defaultDialogueMode,
         showComposerStatsBar: s.showComposerStatsBar,
+        showVoiceInputButton: s.showVoiceInputButton,
         showCommandPaletteButton: s.showCommandPaletteButton,
         showGatewayStatusIndicator: s.showGatewayStatusIndicator,
         showTerminalButton: s.showTerminalButton,
@@ -480,6 +496,7 @@ function persistToLocalStorage() {
       toolExpandedOverrides: state.toolExpandedOverrides,
       defaultDialogueMode: state.defaultDialogueMode,
       showComposerStatsBar: state.showComposerStatsBar,
+      showVoiceInputButton: state.showVoiceInputButton,
       showCommandPaletteButton: state.showCommandPaletteButton,
       showGatewayStatusIndicator: state.showGatewayStatusIndicator,
       showTerminalButton: state.showTerminalButton,

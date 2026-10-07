@@ -1,9 +1,17 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import {
+  createContext,
+  lazy,
+  Suspense,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { Components } from 'react-markdown';
 import {
   buildPreviewDocument,
   getFilePreviewKind,
-  getPreviewNote,
   getPreviewSandbox,
   getPreviewTitle,
   isBinaryPreviewKind,
@@ -17,14 +25,29 @@ import {
   MarkdownImageProvider,
 } from '../../chat/markdown/markdown-image.js';
 import { extractMarkdownImageUrls } from '../../chat/markdown/markdown-image-urls.js';
+import { getCodeFenceText, getTrimmedCodeFenceText } from '../../chat/markdown/code-fence-text.js';
+import { ChatMarkdownTable } from '../../chat/markdown/chat-markdown-table.js';
+import { normalizeTableCellAlign } from '../../chat/markdown/markdown-message-content.js';
+import {
+  buildExportableSvg,
+  isMermaidFenceLanguage,
+} from '../../chat/markdown/mermaid-diagram-meta.js';
+import { useMarkdownThemeTokens } from '../../chat/markdown/use-markdown-theme.js';
 import { tryOpenLinkPreview } from '../../../utils/preview/link-preview.js';
+import { resolveSvgIntrinsicSize } from '../../../utils/svg/resolve-svg-intrinsic-size.js';
 import { sanitizeSvg } from '../../../utils/svg/sanitize-svg.js';
 import { OfficePreview } from '../../office-preview/OfficePreview.js';
+import { ChartPreview } from './ChartPreview.js';
+import { CopyButton } from './CopyButton.js';
+import { CsvPreview } from './CsvPreview.js';
+import { PreviewToolbar, ZoomControls } from './PreviewToolbar.js';
+import { TextPreview } from './TextPreview.js';
+import { usePreviewZoom } from './use-preview-zoom.js';
 import '../../office-preview/office-preview.css';
 
 /**
- * 文件内容预览：按类型分发到具体渲染器（Markdown / SVG / 图片 / JSON /
- * Office / 二进制提示 / iframe 沙箱）。
+ * 文件内容预览：按类型分发到具体渲染器（Markdown / 图表 / 矢量图 / 图片 /
+ * 表格 / 纯文本 / JSON / Office / 二进制提示 / iframe 沙箱）。
  *
  * 这里**不**处理右键菜单 —— 调用方用 `ContentContextMenuHost` 包住本组件，
  * 即可同时获得右键与键盘（菜单键 / Shift+F10）呼出的菜单，菜单项与锚点计算
@@ -79,11 +102,37 @@ export function FilePreviewPane({ content, path }: { content: string; path: stri
     );
   }
 
+  // Mermaid 图表源码（.mmd / .mermaid）
+  if (previewKind === 'chart') {
+    return (
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          padding: '14px 16px',
+          boxSizing: 'border-box',
+          background: 'var(--bg-overlay)',
+        }}
+      >
+        <ChartPreview
+          code={content}
+          fileName={path
+            .split('/')
+            .pop()
+            ?.replace(/\.[^.]+$/, '')}
+        />
+      </div>
+    );
+  }
+
   // SVG preview
   if (previewKind === 'svg') {
     return (
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <SvgPreview content={content} />
+        <SvgPreview content={content} path={path} />
       </div>
     );
   }
@@ -106,93 +155,61 @@ export function FilePreviewPane({ content, path }: { content: string; path: stri
     );
   }
 
+  // CSV / TSV — 首行表头 + 数据行表格
+  if (previewKind === 'table') {
+    return (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <CsvPreview content={content} delimiter={path.endsWith('.tsv') ? '\t' : ','} path={path} />
+      </div>
+    );
+  }
+
+  // 纯文本（txt / log / yaml / xml / sql …）— 行号 + 语法高亮
+  if (previewKind === 'text') {
+    return (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <TextPreview content={content} path={path} />
+      </div>
+    );
+  }
+
   // HTML / CSS / JS — iframe-based preview
+  // 预览类型标题条已移除：它只重复「这是 HTML/CSS/JS 预览」+ 隔离说明，占掉的
+  // 垂直空间比信息量重要得多。iframe 因此直接铺满面板，外边距压到 6px —— 留这一
+  // 圈只是为了让 iframe 的圆角与投影不被面板 overflow 裁掉。
   return (
     <div
+      data-testid="file-editor-preview-body"
       style={{
         flex: 1,
         minHeight: 0,
+        boxSizing: 'border-box',
         display: 'flex',
-        flexDirection: 'column',
+        padding: 6,
         background: 'var(--bg-base)',
         overflow: 'hidden',
       }}
     >
-      <div
-        data-testid="file-editor-preview-body"
+      <iframe
+        data-testid="file-editor-preview-frame"
+        title={getPreviewTitle(previewKind)}
+        sandbox={getPreviewSandbox(previewKind)}
+        referrerPolicy="no-referrer"
+        loading="lazy"
+        srcDoc={buildPreviewDocument(previewKind, content)}
         style={{
           flex: 1,
-          minHeight: 0,
-          padding: '10px 12px 12px',
-          boxSizing: 'border-box',
-          display: 'flex',
+          minHeight: 320,
+          width: '100%',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: 14,
+          // 沙箱 srcdoc 不继承宿主 CSS 变量：iframe 元素本身也用字面浅色纸底，
+          // 避免暗色主题下「近黑底 + 初始黑字」。
+          background: '#ffffff',
+          display: 'block',
+          boxShadow: '0 18px 36px var(--bg-base)',
         }}
-      >
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '10px 12px',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 12,
-              background: 'var(--bg-overlay)',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-              <span style={{ color: 'var(--fg-strong)', fontSize: 11, fontWeight: 700 }}>
-                {getPreviewTitle(previewKind)}
-              </span>
-              <span style={{ color: 'var(--fg-muted)', fontSize: 11, lineHeight: 1.6 }}>
-                {getPreviewNote(previewKind)}
-              </span>
-            </div>
-            <span
-              style={{
-                flexShrink: 0,
-                padding: '3px 8px',
-                borderRadius: 999,
-                background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
-                color: 'var(--accent)',
-                fontSize: 10,
-                fontWeight: 700,
-              }}
-            >
-              Live Preview
-            </span>
-          </div>
-          <iframe
-            data-testid="file-editor-preview-frame"
-            title={getPreviewTitle(previewKind)}
-            sandbox={getPreviewSandbox(previewKind)}
-            referrerPolicy="no-referrer"
-            loading="lazy"
-            srcDoc={buildPreviewDocument(previewKind, content)}
-            style={{
-              flex: 1,
-              minHeight: 320,
-              width: '100%',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 14,
-              // 沙箱 srcdoc 不继承宿主 CSS 变量：iframe 元素本身也用字面浅色纸底，
-              // 避免暗色主题下「近黑底 + 初始黑字」。
-              background: '#ffffff',
-              display: 'block',
-              boxShadow: '0 18px 36px var(--bg-base)',
-            }}
-          />
-        </div>
-      </div>
+      />
     </div>
   );
 }
@@ -242,6 +259,16 @@ function MarkdownRenderer({ content }: { content: string }) {
     </Suspense>
   );
 }
+
+/**
+ * 标记「当前 `code` 位于 `pre` 之内」，即围栏代码块而非行内代码。
+ *
+ * 与聊天侧同一个坑：react-markdown 不给**无语言标注**的围栏加
+ * `language-*`，此时 className 是 undefined，与行内代码无法区分。只看
+ * className 就会把 ASCII 树形图 / 日志片段渲染成 `inline-block` 行内代码，
+ * 换行被折叠成一团。`pre` 先于 `code` 执行，在子树里 provide 该标记即可。
+ */
+const PreBlockContext = createContext(false);
 
 const markdownPreviewComponents: Components = {
   h1: ({ children }) => (
@@ -296,8 +323,10 @@ const markdownPreviewComponents: Components = {
     </blockquote>
   ),
   code: ({ className, children, ...props }) => {
-    const isInline = !className;
-    if (isInline) {
+    const inPreBlock = useContext(PreBlockContext);
+    // 在 pre 内 = 围栏代码块；不在 pre 内 = 行内代码。仅看 className 会把
+    // 无语言围栏（无 language-* className）误判成行内代码。
+    if (!inPreBlock) {
       return (
         <code
           style={{
@@ -313,64 +342,58 @@ const markdownPreviewComponents: Components = {
         </code>
       );
     }
+
+    // 图表围栏走图表渲染器，与消息内渲染保持一致（含 ```flowchart 这类
+    // 直接把图表类型当语言名的写法）。
+    const language = /language-([\w-]+)/.exec(className ?? '')?.[1]?.toLowerCase();
+    if (isMermaidFenceLanguage(language)) {
+      return <ChartPreview code={getTrimmedCodeFenceText(children)} inline />;
+    }
+
+    // 围栏块自己包 <pre>：图表分支要独占这一层，外层 pre 因此改为直通。
+    // 工具栏只取语言与行数两项信息——文档预览是「读代码」的场景，行号槽会
+    // 挤占本就有限的宽度；需要逐行对照时左侧编辑器里有 Monaco + 行号。
+    const source = getCodeFenceText(children);
+    // react-markdown 会在围栏末尾补一个换行，算行数前去掉，否则恒多 1 行。
+    const lineCount = source.replace(/\n$/, '').split('\n').length;
     return (
-      <code className={className} {...props}>
-        {children}
-      </code>
+      <div className="oaw-code-block">
+        <div className="oaw-code-block-toolbar">
+          <div className="oaw-preview-toolbar-meta">
+            <span className="oaw-preview-label">{language ? language.toUpperCase() : 'CODE'}</span>
+            <span className="oaw-preview-badge">{lineCount} 行</span>
+          </div>
+          <div className="oaw-preview-actions">
+            <CopyButton text={source} label="复制代码" testId="file-editor-code-copy" />
+          </div>
+        </div>
+        <pre className="oaw-code-block-pre">
+          <code className={className} {...props}>
+            {children}
+          </code>
+        </pre>
+      </div>
     );
   },
   pre: ({ children }) => (
-    <pre
-      style={{
-        margin: '12px 0',
-        padding: '14px 16px',
-        borderRadius: 8,
-        background: 'var(--bg-base)',
-        border: '1px solid var(--border-subtle)',
-        overflow: 'auto',
-        fontSize: 12,
-        lineHeight: 1.5,
-        fontFamily: 'var(--font-mono, monospace)',
-      }}
-    >
-      {children}
-    </pre>
+    <PreBlockContext.Provider value={true}>{children}</PreBlockContext.Provider>
   ),
-  table: ({ children }) => (
-    <div style={{ overflowX: 'auto', margin: '12px 0' }}>
-      <table
-        style={{
-          borderCollapse: 'collapse',
-          width: '100%',
-          fontSize: 13,
-        }}
-      >
-        {children}
-      </table>
-    </div>
-  ),
-  th: ({ children }) => (
+  // 表格复用聊天侧同一个组件：sticky 表头、斑马纹、列对齐、列多时紧凑密度、
+  // 横向渐隐提示、复制 TSV / 下载 CSV 工具栏全部一致。此前的裸内联样式表格
+  // 缺这些，观感与消息里的表格差一截。
+  table: ({ node, children }) => <ChatMarkdownTable node={node}>{children}</ChatMarkdownTable>,
+  // th/td 只负责挂类名与列对齐，视觉全在 markdown-table.css 里。
+  th: ({ children, style }) => (
     <th
-      style={{
-        padding: '8px 12px',
-        borderBottom: '2px solid var(--border-default)',
-        textAlign: 'left',
-        fontWeight: 600,
-        fontSize: 12,
-        background: 'var(--bg-overlay)',
-      }}
+      className="chat-markdown-th"
+      data-align={normalizeTableCellAlign(style?.textAlign)}
+      scope="col"
     >
       {children}
     </th>
   ),
-  td: ({ children }) => (
-    <td
-      style={{
-        padding: '6px 12px',
-        borderBottom: '1px solid var(--border-subtle)',
-        fontSize: 12,
-      }}
-    >
+  td: ({ children, style }) => (
+    <td className="chat-markdown-td" data-align={normalizeTableCellAlign(style?.textAlign)}>
       {children}
     </td>
   ),
@@ -429,53 +452,110 @@ const MarkdownRendererInner = lazy(async () => {
 // ---------------------------------------------------------------------------
 // SVG Preview
 // ---------------------------------------------------------------------------
-function SvgPreview({ content }: { content: string }) {
+function SvgPreview({ content, path }: { content: string; path: string }) {
+  // 净化后才能量尺寸：脏 SVG 里可能有解析失败的片段，先净化再取 viewBox。
+  const sanitized = useMemo(() => sanitizeSvg(content), [content]);
+  const intrinsic = useMemo(() => resolveSvgIntrinsicSize(sanitized), [sanitized]);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const { zoom, zoomIn, zoomOut, resetZoom, fit } = usePreviewZoom(viewportRef, intrinsic);
+  const [showSource, setShowSource] = useState(false);
+  const tokens = useMarkdownThemeTokens();
+
+  const badge = intrinsic
+    ? `${Math.round(intrinsic.width)} × ${Math.round(intrinsic.height)}`
+    : `${content.length} 字符`;
+
+  const handleCopy = useCallback(() => {
+    void navigator.clipboard?.writeText(content).catch(() => undefined);
+  }, [content]);
+
+  const handleDownload = useCallback(() => {
+    const payload = buildExportableSvg(sanitized, tokens.bgRaised);
+    const blob = new Blob([payload], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${path.split('/').pop() ?? 'diagram'}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }, [sanitized, tokens.bgRaised, path]);
+
+  const canZoom = intrinsic !== null;
+
   return (
     <div
+      className="oaw-preview"
       data-testid="file-editor-svg-preview"
-      style={{
-        flex: 1,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-        background: 'var(--bg-overlay)',
-        overflow: 'auto',
-      }}
+      style={{ padding: 12, boxSizing: 'border-box', background: 'var(--bg-overlay)' }}
     >
-      <div
-        style={{
-          padding: '6px 10px',
-          borderRadius: 6,
-          background: 'var(--bg-base)',
-          border: '1px solid var(--border-subtle)',
-          marginBottom: 12,
-          fontSize: 10,
-          color: 'var(--fg-muted)',
-          fontWeight: 500,
-        }}
-      >
-        SVG 预览 · {content.length} 字符
-      </div>
-      <div
-        style={{
-          maxWidth: '100%',
-          maxHeight: 'calc(100% - 60px)',
-          overflow: 'auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 16,
-          borderRadius: 12,
-          border: '1px solid var(--border-subtle)',
-          background:
-            'repeating-conic-gradient(var(--bg-elevated) 0% 25%, var(--bg-base) 0% 50%) 50% / 16px 16px',
-        }}
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: 内容已由白名单净化器 sanitizeSvg 清洗
-        dangerouslySetInnerHTML={{ __html: sanitizeSvg(content) }}
-      />
+      <PreviewToolbar label="SVG" badge={badge}>
+        <button
+          type="button"
+          className="oaw-preview-btn"
+          aria-pressed={!showSource}
+          onClick={() => setShowSource((value) => !value)}
+        >
+          {showSource ? '查看图形' : '查看源码'}
+        </button>
+        {!showSource && canZoom && (
+          <ZoomControls
+            zoom={zoom}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            onReset={resetZoom}
+            onFit={fit}
+            label="矢量图缩放"
+          />
+        )}
+        {!showSource && (
+          <button type="button" className="oaw-preview-btn" onClick={handleDownload}>
+            下载 SVG
+          </button>
+        )}
+        <button type="button" className="oaw-preview-btn" onClick={handleCopy}>
+          复制源码
+        </button>
+      </PreviewToolbar>
+
+      {showSource ? (
+        <pre className="oaw-preview-source">{content}</pre>
+      ) : sanitized === '' ? (
+        <div className="oaw-preview-status">
+          该 SVG 无法解析或体积超出上限，已跳过渲染。可切换为源码查看原文。
+        </div>
+      ) : canZoom ? (
+        <div
+          ref={viewportRef}
+          className="oaw-preview-figure oaw-preview-figure--checker"
+          data-testid="file-editor-svg-figure"
+        >
+          <div
+            className="oaw-preview-canvas"
+            style={{ width: intrinsic.width * zoom, height: intrinsic.height * zoom }}
+          >
+            <div
+              className="oaw-preview-scaled"
+              style={{
+                width: intrinsic.width,
+                height: intrinsic.height,
+                transform: `scale(${zoom})`,
+              }}
+              // 内容已由白名单净化器 sanitizeSvg 清洗（剥离脚本、事件属性与外链）
+              dangerouslySetInnerHTML={{ __html: sanitized }}
+            />
+          </div>
+        </div>
+      ) : (
+        // 无 viewBox / width-height：按容器宽度自适应，不假装有固有尺寸。
+        <div
+          className="oaw-preview-figure oaw-preview-figure--fluid oaw-preview-figure--checker"
+          data-testid="file-editor-svg-figure"
+          // 内容已由白名单净化器 sanitizeSvg 清洗（剥离脚本、事件属性与外链）
+          dangerouslySetInnerHTML={{ __html: sanitized }}
+        />
+      )}
     </div>
   );
 }

@@ -120,6 +120,11 @@ interface ChatComposerProps {
   onComposerHover: (index: number) => void;
   onToggleVoice: () => void;
   onVoiceTranscript: (text: string) => void;
+  /**
+   * 录音完成回调。把 blob 交给调用方转成附件落库（与图片附件同一条管线），
+   * 不传则只做实时转写、不保留音频。
+   */
+  onVoiceRecordingComplete?: (blob: Blob) => void;
   /** 传入 overrideText 时以该文本入队，用于合并折叠的粘贴内容。 */
   onQueueMessage?: (overrideText?: string) => void | Promise<void>;
   onRemoveQueuedMessage: (id: string) => void;
@@ -235,6 +240,7 @@ export function ChatComposer({
   onComposerHover,
   onToggleVoice,
   onVoiceTranscript,
+  onVoiceRecordingComplete,
   onQueueMessage,
   onRemoveQueuedMessage,
   onRestoreQueuedMessage,
@@ -620,6 +626,7 @@ export function ChatComposer({
               <div className="composer-voice-panel">
                 <VoiceRecorder
                   onTranscript={onVoiceTranscript}
+                  onRecordingComplete={onVoiceRecordingComplete}
                   autoConfirm
                   style={{ marginBottom: 0 }}
                 />
@@ -657,9 +664,9 @@ export function ChatComposer({
               onRestoreQueuedMessage={onRestoreQueuedMessage}
             />
 
-            <div
-              className={`composer-input-area${isHomeVariant ? ' composer-input-area--home' : ''}`}
-            >
+            {/* 表面（背景 / 渐变 / 毛玻璃）统一由 .composer-shell 承载，
+                这里只负责纵向排布与行距，避免两层 padding 叠加出双层边缘。 */}
+            <div className="composer-input-area">
               <div style={{ position: 'relative' }}>
                 {pasteCollapsed && (
                   <PasteSnippetCard

@@ -121,6 +121,8 @@ const CHAT_SESSION_COMPOSER_EXTRAS: ConversationComposerExtras = {
   dialogueModeToggle: true,
   permissionMode: true,
   agentSwitch: true,
+  // 语音输入：走浏览器原生 Speech Recognition，组件内已做不支持时的降级提示。
+  voice: true,
 };
 
 /**

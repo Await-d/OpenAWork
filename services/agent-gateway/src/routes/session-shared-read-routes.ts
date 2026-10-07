@@ -63,7 +63,7 @@ import {
 import { logTeamAudit } from '../team/team-audit-store.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
-import { markPermissionNotificationsReadByRequestIds } from '../session/notification-store.js';
+import { markPermissionNotificationsActedByRequestIds } from '../session/notification-store.js';
 
 interface SessionRow {
   created_at: string;
@@ -599,7 +599,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       if (permissionRequest.status !== 'pending') {
         // 幂等收口：重复提交时仍把对应通知标为已读，避免前端通知中心残留。
         // 通知归属会话 owner，与成功路径一致使用 ownerUserId。
-        markPermissionNotificationsReadByRequestIds({
+        markPermissionNotificationsActedByRequestIds({
           requestIds: [body.requestId],
           sessionId,
           userId: sharedAccess.ownerUserId,
@@ -719,7 +719,7 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
-      markPermissionNotificationsReadByRequestIds({
+      markPermissionNotificationsActedByRequestIds({
         requestIds: [body.requestId, ...cascadedRequestIds],
         sessionId,
         userId: sharedAccess.ownerUserId,

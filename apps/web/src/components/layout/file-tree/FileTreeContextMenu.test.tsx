@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FileTreeContextMenu, { type FileTreeContextMenuProps } from './FileTreeContextMenu.js';
 
@@ -29,6 +29,7 @@ function renderMenu(overrides: Partial<FileTreeContextMenuProps> = {}) {
     relativePath: 'src/index.ts',
     canOpen: true,
     canCreateSession: true,
+    canOpenInSystem: true,
     onClose: vi.fn(),
     onOpen: vi.fn(),
     onCopyPath: vi.fn(),
@@ -73,5 +74,62 @@ describe('FileTreeContextMenu 视口内夹取', () => {
 
     expect(menu.style.maxHeight).toBe('calc(100vh - 16px)');
     expect(menu.style.overflowY).toBe('auto');
+  });
+});
+
+describe('FileTreeContextMenu 在系统中打开', () => {
+  it('文件项显示「用系统默认程序打开」', () => {
+    renderMenu({ targetType: 'file', onOpenInSystem: vi.fn() });
+
+    expect(screen.getByRole('menuitem', { name: '用系统默认程序打开' })).toBeTruthy();
+  });
+
+  it('目录项显示「在系统文件管理器中打开」', () => {
+    renderMenu({ targetType: 'directory', onOpenInSystem: vi.fn() });
+
+    expect(screen.getByRole('menuitem', { name: '在系统文件管理器中打开' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: '用系统默认程序打开' })).toBeNull();
+  });
+
+  it('根目录项同样提供该入口', () => {
+    renderMenu({ targetType: 'root', onOpenInSystem: vi.fn() });
+
+    expect(screen.getByRole('menuitem', { name: '在系统文件管理器中打开' })).toBeTruthy();
+  });
+
+  it('点击后调用回调并关闭菜单', () => {
+    const onOpenInSystem = vi.fn();
+    const onClose = vi.fn();
+    renderMenu({ targetType: 'directory', onOpenInSystem, onClose });
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '在系统文件管理器中打开' }));
+
+    expect(onOpenInSystem).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('能力不可用时仍然展示，但置灰禁用并说明原因', () => {
+    renderMenu({
+      targetType: 'directory',
+      canOpenInSystem: false,
+      unavailableReason: '当前连接的是远程网关：文件位于服务器，无法在本机打开',
+    });
+
+    const item = screen.getByRole('menuitem', { name: '在系统文件管理器中打开' });
+    expect(item.hasAttribute('disabled')).toBe(true);
+    expect(item.getAttribute('title')).toBe('当前连接的是远程网关：文件位于服务器，无法在本机打开');
+  });
+
+  it('能力可用时不带禁用提示', () => {
+    renderMenu({
+      targetType: 'directory',
+      canOpenInSystem: true,
+      unavailableReason: '不应出现',
+      onOpenInSystem: vi.fn(),
+    });
+
+    const item = screen.getByRole('menuitem', { name: '在系统文件管理器中打开' });
+    expect(item.hasAttribute('disabled')).toBe(false);
+    expect(item.getAttribute('title')).toBeNull();
   });
 });

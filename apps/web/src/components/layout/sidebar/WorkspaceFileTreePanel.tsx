@@ -15,6 +15,7 @@ import {
   isValidFileTreeEntryName,
   joinFileTreePath,
 } from '../file-tree/file-tree-actions.js';
+import { useOpenPathInSystem } from '../file-tree/use-open-path-in-system.js';
 import { FileTreeView, type FileTreeContextTarget } from './SidebarHelpers.js';
 import type { FileTreeNode } from '../../common/modal/WorkspacePickerModal.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
@@ -141,6 +142,8 @@ export function WorkspaceFileTreePanel({
   const [fileTreeContextMenu, setFileTreeContextMenu] = useState<FileTreeContextMenuState | null>(
     null,
   );
+  // 桌面端 + 本机网关才支持「在系统中打开」，否则菜单里不出现这一项。
+  const { canOpen, unavailableReason, openInSystem } = useOpenPathInSystem();
   const hasSelectedWorkspace = fileTreeRootPath !== null;
 
   const {
@@ -744,6 +747,9 @@ export function WorkspaceFileTreePanel({
               }
             }}
             onCopyPath={() => handleCopyFileTreePath(fileTreeContextMenu.path, '完整路径')}
+            canOpenInSystem={canOpen}
+            unavailableReason={unavailableReason}
+            onOpenInSystem={canOpen ? () => openInSystem(fileTreeContextMenu.path) : undefined}
             onCopyRelativePath={() => {
               const relativePath = getFileTreeRelativePath(
                 fileTreeRootPath,

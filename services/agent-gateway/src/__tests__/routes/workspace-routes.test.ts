@@ -34,6 +34,7 @@ let resetWorkspaceFileIndexCache: typeof WorkspaceFileIndexModule.__resetWorkspa
 let invalidateWorkspaceFileIndex: typeof WorkspaceFileIndexModule.invalidateWorkspaceFileIndex;
 let workspaceRoutes: typeof WorkspaceRoutesModule.workspaceRoutes;
 let workspaceFileSearchThrottle: typeof WorkspaceRoutesModule.workspaceFileSearchThrottle;
+let largeFilePreviewGate: typeof WorkspaceRoutesModule.largeFilePreviewGate;
 let workspaceFileSearchRateLimit: typeof WorkspaceRoutesModule.WORKSPACE_FILE_SEARCH_RATE_LIMIT;
 let setSshService: typeof SshServiceModule.setSshService;
 let resetSshServiceForTests: typeof SshServiceModule.__resetSshServiceForTests;
@@ -177,6 +178,7 @@ beforeAll(async () => {
   const workspaceRoutesModule = await import('../../routes/workspace.js');
   workspaceRoutes = workspaceRoutesModule.workspaceRoutes;
   workspaceFileSearchThrottle = workspaceRoutesModule.workspaceFileSearchThrottle;
+  largeFilePreviewGate = workspaceRoutesModule.largeFilePreviewGate;
   workspaceFileSearchRateLimit = workspaceRoutesModule.WORKSPACE_FILE_SEARCH_RATE_LIMIT;
   resetUserWorkspaceAllowlistCache = (await import('../../workspace/user-workspace-allowlist.js'))
     .__resetUserWorkspaceAllowlistCacheForTest;
@@ -213,6 +215,8 @@ beforeEach(() => {
   resetSshWorkspaceFileIndexCacheForTest();
   resetSshServiceForTests(null);
   workspaceFileSearchThrottle.reset();
+  // 门控是进程级状态：跨用例残留会让人为占位的槽位泄漏到其它用例。
+  largeFilePreviewGate.reset();
   seedUser(USER_ID);
   seedWorkspaceSession(projectRoot);
 });
@@ -309,6 +313,60 @@ describe('workspace routes', () => {
         error: '目标路径超出当前工作区范围。',
       });
     } finally {
+      await app.close();
+    }
+  });
+
+  it('大文件预览并发饱和时返回中文 429 与 Retry-After', async () => {
+    const filePath = join(projectRoot, 'big-2mb.txt');
+    writeFileSync(filePath, Buffer.alloc(2 * 1024 * 1024, 97));
+
+    const app = await buildApp();
+    // 确定性做法：直接占满门控槽位，而不是靠并发时序碰撞。
+    // key 形如 `${userId}::${parsed.workspaceRoot}`，此请求未带 workspaceRoot。
+    const held = [
+      await largeFilePreviewGate.acquire(`${USER_ID}::`),
+      await largeFilePreviewGate.acquire(`${USER_ID}::`),
+    ];
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/file?path=${encodeURIComponent(filePath)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(429);
+      expect(response.headers['retry-after']).toBeTruthy();
+      expect(response.json()).toMatchObject({
+        error: '大文件预览请求过多或等待超时，请稍后重试。',
+      });
+    } finally {
+      for (const slot of held) slot.release?.();
+      await app.close();
+    }
+  });
+
+  it('小文件不计入并发预算：槽位占满时仍可正常读取', async () => {
+    const filePath = join(projectRoot, 'small.txt');
+    writeFileSync(filePath, 'tiny');
+
+    const app = await buildApp();
+    const held = [
+      await largeFilePreviewGate.acquire(`${USER_ID}::`),
+      await largeFilePreviewGate.acquire(`${USER_ID}::`),
+    ];
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/file?path=${encodeURIComponent(filePath)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      // 大文件阈值是 1MB：小文件不该被大文件预算牵连。
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ content: 'tiny' });
+    } finally {
+      for (const slot of held) slot.release?.();
       await app.close();
     }
   });

@@ -389,3 +389,26 @@ describe('MarkdownMessageContent link preview', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 });
+
+describe('MarkdownMessageContent 无语言围栏代码块', () => {
+  // 复现：react-markdown 不给无语言围栏加 className，若只看 className 区分
+  // 行内/块级，这类代码块会被渲染成 inline-block <code>，换行被折叠成空格，
+  // ASCII 树形图 / 日志片段就挤成一行。
+  const TREE = ['OpenAWork/', '├── apps/', '│   └── web/'].join('\n');
+
+  it('按块级代码块渲染，保留原始换行', () => {
+    render(<MarkdownMessageContent content={'```\n' + TREE + '\n```'} />);
+
+    expect(document.querySelector('.chat-markdown-code-block')).toBeTruthy();
+    expect(document.querySelector('.chat-markdown-inline-code')).toBeNull();
+    const pre = document.querySelector('.chat-markdown-pre');
+    expect(pre?.textContent).toContain(TREE);
+  });
+
+  it('真正的行内代码仍走行内样式', () => {
+    render(<MarkdownMessageContent content="路径是 `apps/web/src/index.ts`。" />);
+
+    expect(document.querySelector('.chat-markdown-inline-code')).toBeTruthy();
+    expect(document.querySelector('.chat-markdown-code-block')).toBeNull();
+  });
+});

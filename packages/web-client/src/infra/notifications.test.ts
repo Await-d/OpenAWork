@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe('createNotificationsClient', () => {
-  it('list 成功时返回 notifications 列表', async () => {
+  it('list 成功时返回 notifications 列表与待处理计数', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
@@ -21,20 +21,73 @@ describe('createNotificationsClient', () => {
               title: '需要审批',
               body: 'bash 权限请求',
               eventType: 'permission_asked',
+              kind: 'actionable',
               sessionId: 'session-1',
               createdAt: '2026-05-26T00:00:00.000Z',
               readAt: null,
+              actedAt: null,
+              archivedAt: null,
+              expiresAt: null,
               status: 'unread',
             },
+          ],
+          pendingActionableCount: 1,
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createNotificationsClient('http://localhost:3000');
+    const result = await client.list('token-1', { view: 'pending' });
+
+    expect(result.notifications[0]?.id).toBe('notice-1');
+    expect(result.pendingActionableCount).toBe(1);
+  });
+
+  it('list 在网关未返回 pendingActionableCount 时退化为按 kind 推导', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          notifications: [
+            { id: 'notice-1', kind: 'actionable', status: 'unread' },
+            { id: 'notice-2', kind: 'informational', status: 'unread' },
           ],
         }),
       } as unknown as Response;
     }) as typeof fetch;
 
     const client = createNotificationsClient('http://localhost:3000');
-    const result = await client.list('token-1', { status: 'unread' });
+    const result = await client.list('token-1');
 
-    expect(result[0]?.id).toBe('notice-1');
+    expect(result.notifications).toHaveLength(2);
+    expect(result.pendingActionableCount).toBe(1);
+  });
+
+  it('list 会把 view 透传给网关', async () => {
+    const fetchMock = vi.fn(async () => {
+      return { ok: true, json: async () => ({ notifications: [] }) } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createNotificationsClient('http://localhost:3000');
+    await client.list('token-1', { view: 'archived', limit: 10 });
+
+    const url = String((fetchMock.mock.calls[0] as unknown as [string])[0]);
+    expect(url).toContain('view=archived');
+    expect(url).toContain('limit=10');
+  });
+
+  it('archiveMany 发送 sessionId', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      capturedBody = typeof init?.body === 'string' ? init.body : undefined;
+      return { ok: true, status: 204 } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const client = createNotificationsClient('http://localhost:3000');
+    await client.archiveMany('token-1', { sessionId: 'session-1' });
+
+    expect(JSON.parse(capturedBody ?? '{}')).toEqual({ sessionId: 'session-1' });
   });
 
   it('listPreferences 失败时会保留后端 error 文案', async () => {

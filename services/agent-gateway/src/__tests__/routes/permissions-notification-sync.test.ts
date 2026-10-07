@@ -135,7 +135,7 @@ afterAll(async () => {
 });
 
 describe('permissions reply notification sync', () => {
-  it('普通审批成功后会把对应 permission_asked 通知标记为已读', async () => {
+  it('普通审批成功后会把对应 permission_asked 通知标记为已处理', async () => {
     seedPendingPermissionRequest('perm-1');
     seedPermissionNotification('notif-perm-1', 'perm-1');
 
@@ -160,13 +160,13 @@ describe('permissions reply notification sync', () => {
         'SELECT status FROM notifications WHERE id = ? LIMIT 1',
         ['notif-perm-1'],
       );
-      expect(notification?.status).toBe('read');
+      expect(notification?.status).toBe('acted');
     } finally {
       await app.close();
     }
   });
 
-  it('重复提交已处理权限时返回 409，并把对应通知标记为已读', async () => {
+  it('重复提交已处理权限时返回 409，并把对应通知标记为已处理', async () => {
     seedPendingPermissionRequest('perm-already');
     seedPermissionNotification('notif-perm-already', 'perm-already');
     dbModule.sqliteRun(
@@ -196,13 +196,13 @@ describe('permissions reply notification sync', () => {
         'SELECT status FROM notifications WHERE id = ? LIMIT 1',
         ['notif-perm-already'],
       );
-      expect(notification?.status).toBe('read');
+      expect(notification?.status).toBe('acted');
     } finally {
       await app.close();
     }
   });
 
-  it('拒绝触发级联时，会把主请求和级联请求的通知一起标记为已读', async () => {
+  it('拒绝触发级联时，会把主请求和级联请求的通知一起标记为已处理', async () => {
     seedPendingPermissionRequest('perm-primary');
     seedPendingPermissionRequest('perm-secondary');
     seedPermissionNotification('notif-perm-primary', 'perm-primary');
@@ -230,8 +230,8 @@ describe('permissions reply notification sync', () => {
         [SESSION_ID],
       );
       expect(rows).toEqual([
-        { id: 'notif-perm-primary', status: 'read' },
-        { id: 'notif-perm-secondary', status: 'read' },
+        { id: 'notif-perm-primary', status: 'acted' },
+        { id: 'notif-perm-secondary', status: 'acted' },
       ]);
     } finally {
       await app.close();

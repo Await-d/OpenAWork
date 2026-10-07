@@ -1,4 +1,8 @@
+import { useCallback } from 'react';
 import type { FileDiffContent, ModifiedFilesSummaryContent } from '@openAwork/shared';
+import { useFileEditorContext } from '../../../App.js';
+import { PathPreviewPopover } from '../file-preview/path-preview-popover.js';
+import { usePathHoverPreview } from '../file-preview/use-path-hover-preview.js';
 
 const MAX_VISIBLE_FILES = 6;
 
@@ -15,6 +19,64 @@ function formatSourceLabel(sourceKind: FileDiffContent['sourceKind']): string | 
   if (sourceKind === 'manual_revert') return '回退';
   if (sourceKind === 'session_snapshot') return '快照';
   return null;
+}
+
+/**
+ * 修改摘要行里的文件路径。
+ *
+ * 与 markdown 行内引用、工具输出预览同构：点击经 `FileEditorContext` 打开编辑器，
+ * 悬浮给出内容片段。`file.file` 的形态不固定（工具写入时是工作区相对路径，
+ * reconcile / 快照来源可能是绝对路径），绝对化由 `openFile` 内部统一处理，这里
+ * 只负责把原始 token 原样传下去，错误提示才对得上用户看到的那个路径。
+ *
+ * 无 `FileEditorContext`（产物查看器等非聊天页）时降级为纯文本 span。
+ */
+function SummaryFilePath({ path }: { path: string }) {
+  const fileEditorRef = useFileEditorContext();
+  // `!= null`：context 为 null 时 `fileEditorRef?.current` 求值为 undefined，
+  // 而 `undefined !== null` 为 true，会渲染出点不动的死按钮。
+  const canOpen = fileEditorRef?.current != null && path.trim().length > 0;
+  const hover = usePathHoverPreview({ enabled: canOpen });
+
+  const handleClick = useCallback(() => {
+    fileEditorRef?.current?.(path);
+  }, [fileEditorRef, path]);
+
+  if (!canOpen) {
+    return (
+      <span className="chat-modified-summary-path" data-interactive="false" title={path}>
+        {path}
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <button
+        ref={hover.anchorRef}
+        type="button"
+        className="chat-modified-summary-path"
+        data-interactive="true"
+        onClick={handleClick}
+        onMouseEnter={hover.triggerHandlers.onMouseEnter}
+        onMouseLeave={hover.triggerHandlers.onMouseLeave}
+        onFocus={hover.triggerHandlers.onFocus}
+        onBlur={hover.triggerHandlers.onBlur}
+        title={`点击打开 ${path}`}
+      >
+        {path}
+      </button>
+      {hover.open && hover.anchorRef.current && (
+        <PathPreviewPopover
+          anchorEl={hover.anchorRef.current}
+          path={path}
+          line={null}
+          onMouseEnter={hover.panelHandlers.onMouseEnter}
+          onMouseLeave={hover.panelHandlers.onMouseLeave}
+        />
+      )}
+    </>
+  );
 }
 
 export function ModifiedFilesSummaryCard({ summary }: { summary: ModifiedFilesSummaryContent }) {
@@ -72,21 +134,7 @@ export function ModifiedFilesSummaryCard({ summary }: { summary: ModifiedFilesSu
               >
                 {formatStatusLabel(file.status)}
               </span>
-              <span
-                style={{
-                  color: 'var(--fg-strong)',
-                  fontSize: 12,
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  flex: 1,
-                  minWidth: 0,
-                }}
-                title={file.file}
-              >
-                {file.file}
-              </span>
+              <SummaryFilePath path={file.file} />
               {(sourceLabel || file.guaranteeLevel) && (
                 <span style={{ fontSize: 10, color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
                   {[sourceLabel, file.guaranteeLevel].filter(Boolean).join(' · ')}

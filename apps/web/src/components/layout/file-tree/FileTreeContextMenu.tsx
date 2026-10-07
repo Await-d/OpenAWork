@@ -183,6 +183,24 @@ const RenameIcon = () => (
   </svg>
 );
 
+const ExternalOpenIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    <polyline points="15 3 21 3 21 9" />
+    <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+);
+
 export interface FileTreeContextMenuProps {
   x: number;
   y: number;
@@ -193,6 +211,17 @@ export interface FileTreeContextMenuProps {
   canCreateSession: boolean;
   onClose: () => void;
   onOpen: () => void;
+  /**
+   * 在系统里打开该条目：目录交给文件管理器，文件交给系统默认程序。
+   *
+   * 菜单项**始终展示**；能力不可用时置灰禁用，并用 `unavailableReason`
+   * 说明原因（见 `useOpenPathInSystem`）——让用户知道这里点不动是环境
+   * 限制，而不是功能还没做。
+   */
+  canOpenInSystem: boolean;
+  /** 能力不可用时的 hover 提示；可用时可不传。 */
+  unavailableReason?: string;
+  onOpenInSystem?: () => void;
   onCopyPath: () => void;
   onCopyRelativePath: () => void;
   onReferenceInChat?: () => void;
@@ -233,12 +262,15 @@ function MenuItem({
   onClick,
   disabled = false,
   danger = false,
+  title,
 }: {
   label: string;
   icon: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   danger?: boolean;
+  /** hover 提示；主要用于解释「为什么这一项是禁用的」。 */
+  title?: string;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -246,6 +278,8 @@ function MenuItem({
       type="button"
       disabled={disabled}
       role="menuitem"
+      title={title}
+      aria-disabled={disabled || undefined}
       onMouseDown={(event) => event.preventDefault()}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -298,6 +332,9 @@ export default function FileTreeContextMenu({
   canCreateSession,
   onClose,
   onOpen,
+  canOpenInSystem,
+  unavailableReason,
+  onOpenInSystem,
   onCopyPath,
   onCopyRelativePath,
   onReferenceInChat,
@@ -398,6 +435,21 @@ export default function FileTreeContextMenu({
             }}
           />
         )}
+        {/*
+          目录交给文件管理器、文件交给系统默认程序——在系统侧本来就是同一个
+          动作（打开该路径），文案如实区分。入口始终展示：不可用时置灰并
+          说明原因，好过让用户猜这个功能是否存在。
+        */}
+        <MenuItem
+          label={targetType === 'file' ? '用系统默认程序打开' : '在系统文件管理器中打开'}
+          icon={<ExternalOpenIcon />}
+          disabled={!canOpenInSystem || !onOpenInSystem}
+          title={canOpenInSystem ? undefined : unavailableReason}
+          onClick={() => {
+            onOpenInSystem?.();
+            onClose();
+          }}
+        />
         <MenuItem
           label="复制完整路径"
           icon={<CopyIcon />}

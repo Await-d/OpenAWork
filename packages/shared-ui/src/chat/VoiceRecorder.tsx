@@ -58,6 +58,9 @@ export interface VoiceRecognitionResultLike {
 
 const BAR_HEIGHTS = [3, 6, 10, 7, 4, 8, 5, 9, 6, 4] as const;
 
+/** `MediaRecorder` 未给出mime 时的兜底容器，与 Chromium 主路径一致。 */
+const DEFAULT_RECORDING_MIME = 'audio/webm';
+
 export function resolveSpeechRecognitionConstructor(
   host: SpeechRecognitionHost | null | undefined,
 ): (new () => BrowserSpeechRecognition) | null {
@@ -181,9 +184,24 @@ export function VoiceRecorder({
   }, []);
 
   const recognitionSupported = recognitionConstructor !== null;
-  const unsupportedMessage = recognitionSupported
+  /**
+   * 录音与转写是两条独立链路：Firefox 等浏览器不提供 `SpeechRecognition`，
+   * 但 `MediaRecorder` 可用。只要调用方接了 `onRecordingComplete`，就仍应允许
+   * 录音（音频作为附件落库），代价是没有实时字幕。
+   */
+  const captureRequested = onRecordingComplete !== undefined;
+  const canCaptureAudio =
+    captureRequested &&
+    typeof MediaRecorder !== 'undefined' &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.mediaDevices?.getUserMedia === 'function';
+  /** 入口可用条件：能转写或能录音，任一成立即可。 */
+  const recordingAvailable = recognitionSupported || canCaptureAudio;
+  const unsupportedMessage = recordingAvailable
     ? null
-    : '当前浏览器不支持语音转写，请改用键盘输入。';
+    : captureRequested
+      ? '当前浏览器不支持录音，请改用键盘输入。'
+      : '当前浏览器不支持语音转写，请改用键盘输入。';
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -238,8 +256,25 @@ export function VoiceRecorder({
     };
   }, [clearTimer, disposeRecognition, stopMediaCapture]);
 
+  /** 进入录音态并启动计时。转写与纯录音两条链路共用。 */
+  const beginRecordingUi = useCallback(() => {
+    setStarting(false);
+    setRecording(true);
+    clearTimer();
+    timerRef.current = setInterval(() => {
+      setSeconds((currentSeconds) => currentSeconds + 1);
+    }, 1000);
+  }, [clearTimer]);
+
+  /** 退出录音态并清理计时。两条链路共用，重复调用无害。 */
+  const endRecordingUi = useCallback(() => {
+    setStarting(false);
+    setRecording(false);
+    clearTimer();
+  }, [clearTimer]);
+
   const start = useCallback(async () => {
-    if (!recognitionConstructor || starting || recording) {
+    if (!recordingAvailable || starting || recording) {
       return;
     }
 
@@ -251,14 +286,9 @@ export function VoiceRecorder({
     setSeconds(0);
     setStarting(true);
 
-    let recorderStream: MediaStream | null = null;
-
-    if (
-      onRecordingComplete &&
-      typeof navigator !== 'undefined' &&
-      navigator.mediaDevices?.getUserMedia &&
-      typeof MediaRecorder !== 'undefined'
-    ) {
+    // ─── 1. 录音链路（可选）：产出音频 blob，交给调用方落库 ───
+    if (canCaptureAudio && onRecordingComplete) {
+      let recorderStream: MediaStream;
       try {
         recorderStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch (error) {
@@ -276,15 +306,33 @@ export function VoiceRecorder({
         }
       };
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        onRecordingComplete(blob);
+        const blob = new Blob(chunksRef.current, {
+          type: recorder.mimeType || DEFAULT_RECORDING_MIME,
+        });
         mediaStreamRef.current?.getTracks().forEach((track) => {
           track.stop();
         });
         mediaStreamRef.current = null;
+        // 纯录音模式没有 recognition.onend 兜底，录音态收尾必须落在这里。
+        endRecordingUi();
+        // 误触（秒内起停）会产生空音频，此时不投递附件。
+        if (blob.size > 0) {
+          onRecordingComplete(blob);
+        }
       };
       recorder.start();
       mediaRef.current = recorder;
+    }
+
+    // ─── 2. 转写链路（可选）：实时字幕 ───
+    if (!recognitionConstructor) {
+      // 无 STT：录音已在上面启动，直接进入录音态。
+      if (mediaRef.current) {
+        beginRecordingUi();
+      } else {
+        setStarting(false);
+      }
+      return;
     }
 
     const recognition = new recognitionConstructor();
@@ -294,12 +342,7 @@ export function VoiceRecorder({
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
-      setStarting(false);
-      setRecording(true);
-      clearTimer();
-      timerRef.current = setInterval(() => {
-        setSeconds((currentSeconds) => currentSeconds + 1);
-      }, 1000);
+      beginRecordingUi();
     };
 
     recognition.onresult = (event) => {
@@ -313,9 +356,7 @@ export function VoiceRecorder({
 
     recognition.onerror = (event) => {
       recognitionErroredRef.current = true;
-      setStarting(false);
-      setRecording(false);
-      clearTimer();
+      endRecordingUi();
       stopMediaCapture();
 
       const message = resolveSpeechRecognitionErrorMessage(event.error);
@@ -325,9 +366,7 @@ export function VoiceRecorder({
     };
 
     recognition.onend = () => {
-      setStarting(false);
-      setRecording(false);
-      clearTimer();
+      endRecordingUi();
       stopMediaCapture();
       disposeRecognition('none');
 
@@ -353,18 +392,29 @@ export function VoiceRecorder({
     }
   }, [
     autoConfirm,
+    beginRecordingUi,
+    canCaptureAudio,
     clearTimer,
     disposeRecognition,
+    endRecordingUi,
     onRecordingComplete,
     onTranscript,
     recognitionConstructor,
     recording,
+    recordingAvailable,
     starting,
     stopMediaCapture,
   ]);
 
   const stop = useCallback(() => {
-    recognitionRef.current?.stop();
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+    // 纯录音模式没有 recognition 兜底，直接停 MediaRecorder，收尾走 recorder.onstop。
+    if (mediaRef.current && mediaRef.current.state !== 'inactive') {
+      mediaRef.current.stop();
+    }
   }, []);
 
   const toggle = useCallback(() => {
@@ -384,13 +434,22 @@ export function VoiceRecorder({
 
   const busy = starting || recording;
   const hasTranscript = transcript.trim().length > 0;
-  const showTranscriptPanel = busy || Boolean(isTranscribing) || hasTranscript;
+  /**
+   * 字幕面板只在有 STT 时才有意义：纯录音模式下 `transcript` 恒为空，展示
+   * 「识别结果会实时显示在这里」是误导，改由 hintText 说明录音去向。
+   */
+  const showTranscriptPanel =
+    recognitionSupported && (busy || Boolean(isTranscribing) || hasTranscript);
   const hintText = unsupportedMessage
     ? unsupportedMessage
     : starting
-      ? '正在启动语音识别…'
+      ? recognitionSupported
+        ? '正在启动语音识别…'
+        : '正在启动录音…'
       : recording
-        ? '正在识别语音…'
+        ? recognitionSupported
+          ? '正在识别语音…'
+          : '正在录音，停止后音频将作为附件加入输入框'
         : hasTranscript
           ? '识别完成，确认后将文本填入输入框'
           : '点击开始语音输入';
@@ -414,14 +473,14 @@ export function VoiceRecorder({
         <button
           type="button"
           onClick={toggle}
-          disabled={!recognitionSupported || starting}
+          disabled={!recordingAvailable || starting}
           aria-label={busy ? '停止语音输入' : '开始语音输入'}
           style={{
             width: 26,
             height: 26,
             borderRadius: 8,
             border: '1px solid var(--border-subtle)',
-            cursor: !recognitionSupported || starting ? 'not-allowed' : 'pointer',
+            cursor: !recordingAvailable || starting ? 'not-allowed' : 'pointer',
             background: busy
               ? 'color-mix(in oklch, var(--danger) 12%, transparent)'
               : 'var(--bg-overlay)',
@@ -430,7 +489,7 @@ export function VoiceRecorder({
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
-            opacity: !recognitionSupported ? 0.45 : 1,
+            opacity: !recordingAvailable ? 0.45 : 1,
             transition: 'opacity 150ms ease, background 150ms ease, color 150ms ease',
           }}
         >
@@ -540,7 +599,7 @@ export function VoiceRecorder({
             lineHeight: 1.5,
           }}
         >
-          浏览器未提供 Speech Recognition API，当前仅支持键盘输入。
+          浏览器未提供 Speech Recognition / MediaRecorder API，当前仅支持键盘输入。
         </div>
       )}
 

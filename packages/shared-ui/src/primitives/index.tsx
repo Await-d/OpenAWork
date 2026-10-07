@@ -167,10 +167,14 @@ export function PanelSection({
 
 type StatusColor = 'success' | 'warning' | 'danger' | 'info' | 'accent' | 'muted';
 
-export interface StatusPillProps {
-  label: string;
-  color: StatusColor;
-}
+/**
+ * 徽标内容二选一：
+ * - `label`：纯文本徽标（如「已连接」）
+ * - `children`：复合形态（如「当前值 3」中的强调数值）
+ */
+export type StatusPillProps = { color: StatusColor } & (
+  { label: string; children?: never } | { children: ReactNode; label?: never }
+);
 
 const pillColorMap: Record<StatusColor, { bg: string; fg: string; border: string }> = {
   success: { bg: color.successMuted, fg: color.success, border: color.successBorder },
@@ -184,6 +188,7 @@ const pillColorMap: Record<StatusColor, { bg: string; fg: string; border: string
 export function StatusPill({
   label,
   color: statusColor,
+  children,
   ...rest
 }: StatusPillProps & HTMLAttributes<HTMLSpanElement>) {
   const c = pillColorMap[statusColor];
@@ -193,6 +198,7 @@ export function StatusPill({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
+        gap: spacing[1],
         padding: `3px ${spacing[3]}px`,
         borderRadius: radius.pill,
         fontSize: 11,
@@ -203,7 +209,7 @@ export function StatusPill({
         whiteSpace: 'nowrap',
       }}
     >
-      {label}
+      {children ?? label}
     </span>
   );
 }

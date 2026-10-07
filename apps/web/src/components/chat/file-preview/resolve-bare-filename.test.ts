@@ -203,4 +203,124 @@ describe('resolveBareFilename', () => {
     expect(second).toBe('/workspace/demo/src/index.ts');
     expect(findByName).toHaveBeenCalledTimes(1);
   });
+
+  it('带目录的工作区相对路径直接拼到根下，不触发任何检索', async () => {
+    const { client, findByName, searchFileIndexResult } = createClientMock();
+
+    const resolved = await resolveBareFilename({
+      client,
+      token: 'token-test',
+      workspaceRoot: '/home/await/project/OpenAWork',
+      rawPath: 'packages/web-client/src/infra/plugins.ts',
+    });
+
+    expect(resolved).toBe('/home/await/project/OpenAWork/packages/web-client/src/infra/plugins.ts');
+    expect(findByName).not.toHaveBeenCalled();
+    expect(searchFileIndexResult).not.toHaveBeenCalled();
+  });
+
+  it('相对路径前缀 ./ 与 Windows 分隔符同样按根归一', async () => {
+    const { client } = createClientMock();
+
+    expect(
+      await resolveBareFilename({
+        client,
+        token: 'token-test',
+        workspaceRoot: '/home/await/repo/',
+        rawPath: './src/index.ts',
+      }),
+    ).toBe('/home/await/repo/src/index.ts');
+
+    expect(
+      await resolveBareFilename({
+        client,
+        token: 'token-test',
+        workspaceRoot: 'E:\\repo\\client',
+        rawPath: 'packages/web-client/src/index.ts',
+      }),
+    ).toBe('E:\\repo\\client\\packages\\web-client\\src\\index.ts');
+  });
+
+  it('相对路径越出工作区根时原样返回，交由网关裁决', async () => {
+    const { client, findByName } = createClientMock();
+
+    const resolved = await resolveBareFilename({
+      client,
+      token: 'token-test',
+      workspaceRoot: '/home/await/repo',
+      rawPath: '../secret.txt',
+    });
+
+    expect(resolved).toBe('../secret.txt');
+    expect(findByName).not.toHaveBeenCalled();
+  });
+
+  it('SSH 身份下的相对路径同样拼到远端根下（绝对远端路径网关可直接读取）', async () => {
+    const { client, findByName, searchFileIndexResult } = createClientMock();
+
+    const resolved = await resolveBareFilename({
+      client,
+      token: 'token-test',
+      workspaceRoot: '/home/await/projects/demo',
+      rawPath: 'src/create_quotation.py',
+      identity: REMOTE_SESSION_IDENTITY,
+    });
+
+    expect(resolved).toBe('/home/await/projects/demo/src/create_quotation.py');
+    expect(findByName).not.toHaveBeenCalled();
+    expect(searchFileIndexResult).not.toHaveBeenCalled();
+  });
+
+  it('绝对路径（含 Windows 盘符）原样返回，不做拼接也不检索', async () => {
+    const { client, findByName } = createClientMock();
+
+    expect(
+      await resolveBareFilename({
+        client,
+        token: 'token-test',
+        workspaceRoot: '/workspace/demo',
+        rawPath: '/workspace/demo/src/index.ts',
+      }),
+    ).toBe('/workspace/demo/src/index.ts');
+
+    expect(
+      await resolveBareFilename({
+        client,
+        token: 'token-test',
+        workspaceRoot: '/workspace/demo',
+        rawPath: 'E:\\repo\\client\\src\\index.ts',
+      }),
+    ).toBe('E:\\repo\\client\\src\\index.ts');
+
+    expect(findByName).not.toHaveBeenCalled();
+  });
+
+  it('无工作区根时相对路径原样返回，让网关给出可读错误', async () => {
+    const { client, findByName } = createClientMock();
+
+    const resolved = await resolveBareFilename({
+      client,
+      token: 'token-test',
+      workspaceRoot: null,
+      rawPath: 'packages/web-client/src/infra/plugins.ts',
+    });
+
+    expect(resolved).toBe('packages/web-client/src/infra/plugins.ts');
+    expect(findByName).not.toHaveBeenCalled();
+  });
+
+  it('~/ 开头的远端家目录路径原样透传，交给网关 SSH 分支解析', async () => {
+    const { client, findByName } = createClientMock();
+
+    const resolved = await resolveBareFilename({
+      client,
+      token: 'token-test',
+      workspaceRoot: '/home/await/projects/demo',
+      rawPath: '~/projects/demo/src/index.ts',
+      identity: REMOTE_SESSION_IDENTITY,
+    });
+
+    expect(resolved).toBe('~/projects/demo/src/index.ts');
+    expect(findByName).not.toHaveBeenCalled();
+  });
 });

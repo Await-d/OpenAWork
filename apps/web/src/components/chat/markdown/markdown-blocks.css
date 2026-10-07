@@ -1,0 +1,208 @@
+/**
+ * Markdown 表格 + 代码块工具栏的共用样式。
+ *
+ * 聊天页经 `chat-message.css` 顶部的 `@import` 获得；文件预览经
+ * `chat-markdown-table.tsx` 自带 import 获得——文件预览会渲染在产物页、
+ * 团队侧栏等没有加载聊天页样式表的位置，不能只挂在 chat-message.css 上。
+ *
+ * 新增这类共用样式：写在这里，让 chat-message.css @import 本文件，
+ * **不要**再在 chat-message.css 里留一份副本。
+ */
+
+.assistant-rich-content-copy,
+.chat-markdown-code-copy {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  color: var(--fg-default);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.assistant-rich-content-copy:hover,
+.chat-markdown-code-copy:hover {
+  background: color-mix(in oklch, var(--bg-overlay) 82%, var(--accent) 18%);
+  border-color: color-mix(in oklch, var(--accent) 24%, var(--border-default) 76%);
+  color: var(--fg-strong);
+}
+
+.chat-markdown-code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+}
+
+.chat-markdown-code-toolbar-meta,
+.chat-markdown-code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-markdown-code-label {
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-border);
+}
+
+.chat-markdown-code-copy[data-copied='true'] {
+  color: color-mix(in oklch, var(--success) 80%, var(--fg-strong) 20%);
+  border-color: color-mix(in oklch, var(--success) 40%, var(--border-default) 60%);
+  background: color-mix(in oklch, var(--success) 12%, transparent);
+}
+
+.chat-markdown-code-block[data-diagram-kind] > .chat-markdown-code-toolbar,
+.chat-markdown-table-toolbar {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.chat-markdown-table-shell {
+  position: relative;
+  margin: 2px 0;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--bg-overlay), var(--bg-surface));
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.chat-markdown-table-shell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--border-subtle), transparent);
+}
+
+.chat-markdown-table-meta {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-markdown-table-viewport {
+  position: relative;
+}
+
+.chat-markdown-table-wrap {
+  overflow: auto;
+  max-height: min(64vh, 560px);
+  overscroll-behavior-x: contain;
+}
+
+.chat-markdown-table-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.chat-markdown-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-markdown-table-wrap::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+}
+
+.chat-markdown-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+.chat-markdown-table-fade {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 30px;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in oklch, var(--bg-surface) 72%, transparent)
+  );
+}
+
+.chat-markdown-table {
+  width: 100%;
+  min-width: min(520px, 100%);
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+
+.chat-markdown-th,
+.chat-markdown-td {
+  min-width: 76px;
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+.chat-markdown-table-shell[data-density='compact'] .chat-markdown-th,
+.chat-markdown-table-shell[data-density='compact'] .chat-markdown-td {
+  min-width: 64px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.chat-markdown-th + .chat-markdown-th,
+.chat-markdown-td + .chat-markdown-td {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.chat-markdown-td {
+  color: var(--fg-default);
+  white-space: pre-wrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-markdown-table tbody tr:nth-child(even) .chat-markdown-td {
+  background: color-mix(in oklch, var(--bg-overlay) 76%, var(--bg-surface) 24%);
+}
+
+.chat-markdown-table tr:last-child .chat-markdown-td {
+  border-bottom: none;
+}
+
+.chat-markdown-table tr:hover .chat-markdown-td {
+  background: color-mix(in oklch, var(--bg-surface) 74%, var(--accent) 26%);
+}
+
+.chat-markdown-th[data-align='center'],
+.chat-markdown-td[data-align='center'] {
+  text-align: center;
+}
+
+.chat-markdown-th[data-align='right'],
+.chat-markdown-td[data-align='right'] {
+  text-align: right;
+}
+
+.chat-markdown-th[data-align='justify'],
+.chat-markdown-td[data-align='justify'] {
+  text-align: justify;
+}

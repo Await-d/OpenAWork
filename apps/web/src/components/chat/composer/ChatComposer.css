@@ -33,7 +33,7 @@
   padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--spacing-1);
   flex: 1;
   min-width: 0;
   position: relative;
@@ -46,14 +46,18 @@
   background: var(--accent-subtle);
 }
 
-/* 内层输入区：承载折叠卡片、textarea、优化弹层与工具条。 */
+/* 内层输入区：承载折叠卡片、textarea、优化弹层与工具条。
+   默认态背景透明，内边距必须归零：若这里再留 padding，就会与
+   .composer-shell 的 padding 叠加成「看不见的双层内缩」——文字与工具条
+   比边框多缩进一圈、四边inset 还不一致（此前上下 10px / 左右 12px），
+   观感发闷且不贴边。改由外壳统一提供 6px 内缩，行距 4px。 */
 .composer-input-area {
   border: none;
   border-radius: var(--radius-lg);
-  padding: 6px var(--spacing-2);
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--spacing-1);
   background: transparent;
   transition:
     border-color 220ms ease,
@@ -61,10 +65,6 @@
     padding 220ms ease,
     background 220ms ease,
     gap 220ms ease;
-}
-
-.composer-input-area--home {
-  background: linear-gradient(180deg, var(--bg-raised), var(--bg-overlay));
 }
 
 .composer-voice-panel {
@@ -295,6 +295,131 @@
   .composer-model-button__chevron {
     display: none;
   }
+}
+
+/* ── 统计信息栏 ─────────────────────────────────────────────
+   恒定单行：宽度不足时按优先级裁项（见 composer-stats-bar-fit.ts），
+   仍不足则进入紧凑模式隐藏标签文字。overflow-x 只作为极端情况兜底，
+   正常路径下统计栏永远不会换成两行，也不需要出现滚动条。 */
+
+.composer-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px var(--spacing-1) 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  user-select: none;
+}
+
+.composer-stats-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-stats-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition: color 200ms ease;
+  cursor: default;
+}
+
+.composer-stats-bar__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.composer-stats-bar__label {
+  font-weight: 400;
+}
+
+.composer-stats-bar__value {
+  font-weight: 600;
+}
+
+.composer-stats-bar__meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.composer-stats-bar__meter-track {
+  display: inline-block;
+  width: 36px;
+  height: 3px;
+  border-radius: 9999px;
+  background: var(--border-subtle);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.composer-stats-bar__meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 300ms ease;
+}
+
+.composer-stats-bar__meter-pct {
+  font-size: 9px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.composer-stats-bar__separator {
+  width: 1px;
+  height: 10px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.composer-stats-bar__note {
+  font-size: 9px;
+  color: var(--fg-subtle);
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+/* 紧凑模式：只留图标 + 数值，完整数值与百分比仍可悬停查看 tooltip。 */
+.composer-stats-bar--compact .composer-stats-bar__label,
+.composer-stats-bar--compact .composer-stats-bar__meter {
+  display: none;
+}
+
+/* ── 紧凑摘要（统计栏关闭时的降级形态） ──────────────────────── */
+
+.composer-stats-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding: 2px var(--spacing-1) 0;
+}
+
+.composer-stats-summary__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ── 工作区选择下拉（新建会话绑定工作目录） ─────────────────────

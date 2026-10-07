@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { UNBOUND_WORKSPACE_LABEL } from '../../../utils/session/session-grouping.js';
+import { useOpenPathInSystem } from '../file-tree/use-open-path-in-system.js';
 
 const PlusIcon = () => (
   <svg
@@ -122,21 +123,26 @@ function MenuItem({
   icon,
   onClick,
   disabled,
+  title,
 }: {
   label: string;
   icon: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  /** hover 提示；主要用于解释「为什么这一项是禁用的」。 */
+  title?: string;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
       type="button"
+      disabled={disabled}
+      aria-disabled={disabled || undefined}
+      title={title}
       onMouseDown={(e) => e.preventDefault()}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
-      disabled={disabled}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -184,6 +190,7 @@ export default function WorkspaceGroupMenu({
   onDelete,
 }: WorkspaceGroupMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const { canOpen: canOpenSystem, unavailableReason, openInSystem } = useOpenPathInSystem();
   const deleteLabel =
     sessionCount > 0
       ? workspacePath === null
@@ -239,14 +246,26 @@ export default function WorkspaceGroupMenu({
             <hr style={sepStyle} />
           </>
         )}
+        {/* 已从无效的 `window.open('file://' + path)`（在 WebView 里会被直接
+            拦掉，点了没反应）换成 Tauri IPC。入口始终展示：环境不支持时
+            置灰禁用并说明原因，而不是留一个会失败的活入口。 */}
         <MenuItem
-          label="在文件管理器中打开"
+          label="在系统文件管理器中打开"
           icon={<FolderIcon />}
+          disabled={!canOpenSystem || workspacePath === null}
+          title={
+            !canOpenSystem
+              ? unavailableReason
+              : workspacePath === null
+                ? '当前工作区没有关联本机目录'
+                : undefined
+          }
           onClick={() => {
-            if (workspacePath) window.open('file://' + workspacePath);
+            if (workspacePath) {
+              openInSystem(workspacePath);
+            }
             onClose();
           }}
-          disabled={!workspacePath}
         />
         {canDelete && onDelete && (
           <>

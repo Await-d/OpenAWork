@@ -83,6 +83,7 @@ export interface ConversationComposerExtras {
   dialogueModeToggle?: boolean;
   permissionMode?: boolean;
   agentSwitch?: boolean;
+  voice?: boolean;
 }
 
 /** 历史编辑提示。chat 用 truncate 重发，team 暂不支持（Phase 2a 只读模式）。 */
@@ -404,7 +405,7 @@ function buildComposerFeatures(
   const ex = extras ?? {};
   return {
     attachments: true, // 附件是基础能力，不通过 extras 控制
-    voice: false,
+    voice: ex.voice ?? false,
     modelPicker: true,
     modelSettings: true,
     webSearch: false,

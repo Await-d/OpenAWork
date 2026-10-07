@@ -204,7 +204,7 @@ describe('createWorkspaceClient mutation error handling', () => {
     );
   });
 
-  it('deleteEntry 会附带 sessionId 与 workspaceRoot 查询参数', async () => {
+  it('deleteEntry 会附带 sessionId 与 workspaceRoot 查询参数，并把相对路径绝对化', async () => {
     const fetchMock = vi.fn(async () => {
       return {
         ok: true,
@@ -226,7 +226,8 @@ describe('createWorkspaceClient mutation error handling', () => {
     }
     const [url] = firstCall;
     expect(String(url)).toContain('/workspace/entry?');
-    expect(String(url)).toContain('path=src%2Findex.ts');
+    // 网关的路径校验只接受绝对路径，客户端在 `buildPathParams` 统一兜底归一。
+    expect(String(url)).toContain('path=%2Fworkspace%2Fdemo%2Fsrc%2Findex.ts');
     expect(String(url)).toContain('sessionId=session-1');
     expect(String(url)).toContain('workspaceRoot=%2Fworkspace%2Fdemo');
   });
@@ -454,5 +455,53 @@ describe('createWorkspaceClient getFileIndexVersion', () => {
     await expect(client.getFileIndexVersion('token-1', '/workspace/demo')).rejects.toThrow(
       '认证失效或当前账号无权读取工作区文件索引。',
     );
+  });
+
+  it('readFile 把工作区相对路径归一到 workspaceRoot 之下再发出', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ content: 'ok' }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    await client.readFile('token-1', 'packages/web-client/src/infra/plugins.ts', {
+      workspaceRoot: '/home/await/project/OpenAWork',
+    });
+
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const [url] = firstCall;
+    const requestUrl = new URL(String(url));
+    expect(requestUrl.pathname).toBe('/workspace/file');
+    expect(requestUrl.searchParams.get('path')).toBe(
+      '/home/await/project/OpenAWork/packages/web-client/src/infra/plugins.ts',
+    );
+  });
+
+  it('readFileBinary 对越界相对路径原样透传，由网关拒绝', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = createWorkspaceClient('http://localhost:3000');
+    await client
+      .readFileBinary('token-1', '../secret.txt', { workspaceRoot: '/home/await/repo' })
+      .catch(() => undefined);
+
+    const firstCall = fetchMock.mock.calls[0] as [unknown, RequestInit?] | undefined;
+    if (!firstCall) {
+      throw new Error('expected fetch to be called');
+    }
+    const requestUrl = new URL(String(firstCall[0]));
+    expect(requestUrl.searchParams.get('path')).toBe('../secret.txt');
   });
 });

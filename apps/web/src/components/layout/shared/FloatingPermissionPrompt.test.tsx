@@ -152,18 +152,25 @@ describe('FloatingPermissionPrompt', () => {
 
   it('错过实时事件时会从未读通知恢复待审批弹层', async () => {
     mocks.subscribeSessionPendingPermission.mockImplementation(() => () => undefined);
-    mocks.createNotificationsList.mockResolvedValue([
-      {
-        id: 'notif-1',
-        title: '等待权限 · write',
-        body: 'requestId=perm-2\n写入工作区文件\nwrite /tmp/demo.md\nwrite:workspace\nhigh',
-        eventType: 'permission_asked',
-        sessionId: 'target-session-2',
-        status: 'unread',
-        readAt: null,
-        createdAt: '2026-07-16T07:30:45.000Z',
-      },
-    ]);
+    mocks.createNotificationsList.mockResolvedValue({
+      notifications: [
+        {
+          id: 'notif-1',
+          title: '等待权限 · write',
+          body: 'requestId=perm-2\n写入工作区文件\nwrite /tmp/demo.md\nwrite:workspace\nhigh',
+          eventType: 'permission_asked',
+          kind: 'actionable',
+          sessionId: 'target-session-2',
+          status: 'unread',
+          readAt: null,
+          actedAt: null,
+          archivedAt: null,
+          expiresAt: null,
+          createdAt: '2026-07-16T07:30:45.000Z',
+        },
+      ],
+      pendingActionableCount: 1,
+    });
     mocks.createPermissionsListPending.mockResolvedValue([
       {
         requestId: 'perm-2',
@@ -191,7 +198,7 @@ describe('FloatingPermissionPrompt', () => {
     await waitFor(() => {
       expect(mocks.createNotificationsList).toHaveBeenCalledWith('token-test', {
         limit: 20,
-        status: 'unread',
+        view: 'pending',
       });
     });
     expect(mocks.createPermissionsListPending).toHaveBeenCalledWith(

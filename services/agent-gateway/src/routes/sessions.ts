@@ -87,7 +87,7 @@ import { listSessionTodoLanes, listSessionTodos } from '../tools/todo-tools.js';
 import { terminateChildSession } from '../tools/tool-sandbox.js';
 import { cancelPendingPermissionRequestsForSession } from './permissions.js';
 import { cancelPendingQuestionRequestsForSession } from './questions.js';
-import { markPermissionNotificationsReadForSession } from '../session/notification-store.js';
+import { expireActionableNotificationsForSession } from '../session/notification-store.js';
 import { stopDirectChildSessions } from '../session/stop-child-sessions.js';
 import { resetDoomLoopHistory } from '../session/doom-loop-detector.js';
 import { clearExternalAccessTracking } from '../workspace/external-directory-guard.js';
@@ -3485,8 +3485,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
             userId: user.sub,
           });
         }
-        if (cancelledPermissions > 0) {
-          markPermissionNotificationsReadForSession({
+        if (cancelledPermissions > 0 || cancelledQuestions > 0) {
+          expireActionableNotificationsForSession({
             sessionId: childSessionId,
             userId: user.sub,
           });

@@ -13,9 +13,13 @@ function makeNotification(overrides?: Partial<NotificationRecord>): Notification
     title: '等待权限 · mcp_call',
     body: '需要调用 MCP 工具\n调用 open_websearch/fetch_web {"url":"https://example.com"}\nopen_websearch:fetch_web:fp-open_websearch\nhigh',
     eventType: 'permission_asked',
+    kind: 'actionable',
     sessionId: 'session-1',
     createdAt: '2026-07-16T10:00:00.000Z',
     readAt: null,
+    actedAt: null,
+    archivedAt: null,
+    expiresAt: null,
     status: 'unread',
     ...(overrides ?? {}),
   };
@@ -90,8 +94,11 @@ describe('NotificationItem', () => {
         replying={false}
         selectedScope="base"
         index={0}
+        view="pending"
         onOpen={vi.fn()}
         onDismiss={vi.fn()}
+        onArchive={vi.fn()}
+        onArchiveSession={vi.fn()}
         onReply={vi.fn()}
         onScopeChange={vi.fn()}
       />,
@@ -123,8 +130,11 @@ describe('NotificationItem', () => {
         replying={false}
         selectedScope={undefined}
         index={0}
+        view="pending"
         onOpen={vi.fn()}
         onDismiss={vi.fn()}
+        onArchive={vi.fn()}
+        onArchiveSession={vi.fn()}
         onReply={vi.fn()}
         onScopeChange={vi.fn()}
       />,
@@ -159,8 +169,11 @@ describe('NotificationItem', () => {
         replying={false}
         selectedScope="base"
         index={0}
+        view="pending"
         onOpen={vi.fn()}
         onDismiss={vi.fn()}
+        onArchive={vi.fn()}
+        onArchiveSession={vi.fn()}
         onReply={vi.fn()}
         onScopeChange={vi.fn()}
       />,

@@ -28,7 +28,11 @@ import { ChatConversationView, type ChatConversationViewProps } from './ChatConv
 
 afterEach(() => {
   cleanup();
-  useDisplayPreferencesStore.setState({ messageLayout: 'unified' });
+  useDisplayPreferencesStore.setState({
+    messageLayout: 'unified',
+    // 语音入口用例会改这个用户级偏好，必须复位避免污染同文件后续用例。
+    showVoiceInputButton: true,
+  });
 });
 
 function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -430,5 +434,31 @@ describe('ChatConversationView — 状态条 / 错误栏 / composer 分支', () 
 
     const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
     expect(textarea.placeholder).toBe('输入消息，交给 Agent 执行');
+  });
+
+  it('composerExtras.voice 为 true 时渲染语音输入入口', () => {
+    render(<ChatConversationView {...createViewProps({ composerExtras: { voice: true } })} />);
+
+    expect(screen.getByTitle('语音输入')).not.toBeNull();
+  });
+
+  it('未开启 composerExtras.voice 时不渲染语音输入入口', () => {
+    render(<ChatConversationView {...createViewProps({ composerExtras: { voice: false } })} />);
+
+    expect(screen.queryByTitle('语音输入')).toBeNull();
+  });
+
+  it('用户在设置里关闭语音输入后，即便页面允许也不展示入口', () => {
+    useDisplayPreferencesStore.setState({ showVoiceInputButton: false });
+    render(<ChatConversationView {...createViewProps({ composerExtras: { voice: true } })} />);
+
+    expect(screen.queryByTitle('语音输入')).toBeNull();
+  });
+
+  it('用户在设置里开启语音输入后，页面允许即展示入口', () => {
+    useDisplayPreferencesStore.setState({ showVoiceInputButton: true });
+    render(<ChatConversationView {...createViewProps({ composerExtras: { voice: true } })} />);
+
+    expect(screen.getByTitle('语音输入')).not.toBeNull();
   });
 });

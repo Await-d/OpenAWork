@@ -92,6 +92,61 @@ export function isPathWithinRoot(path: string, rootPath: string): boolean {
   );
 }
 
+/**
+ * 是否为绝对路径。
+ *
+ * 覆盖 POSIX（`/a/b`）、Windows 盘符（`C:\a`、`C:/a`）与 UNC（`\\host\share`）。
+ * 网关的 `validateWorkspacePath` 只接受绝对路径，前端在拼接工作区根之前必须
+ * 先用同一个口径判定，否则 `C:\repo\a.ts` 会被误当成相对路径再拼一次根。
+ */
+export function isAbsolutePath(path: string | null | undefined): boolean {
+  const trimmed = path?.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return trimmed.startsWith('/') || WINDOWS_ABSOLUTE_PATH_PATTERN.test(trimmed);
+}
+
+/** 是否包含目录分隔符（含反斜杠），用于区分「裸文件名」与「带目录的相对路径」。 */
+export function hasDirectorySeparator(path: string): boolean {
+  return path.includes('/') || path.includes('\\');
+}
+
+/**
+ * 把工作区相对路径拼成根下的绝对路径（`getRelativePath` 的逆运算）。
+ *
+ * `.` / 空段被丢弃，`..` 回退一级；一旦回退会越出根（例如 `../../etc/passwd`）
+ * 就返回 null，由调用方决定是拒绝还是回退到原始路径 —— 绝不在前端把工作区
+ * 边界当成可协商的参数。
+ */
+export function resolvePathWithinRoot(relativePath: string, rootPath: string): string | null {
+  const trimmedRoot = rootPath.trim();
+  const trimmedRelative = relativePath.trim();
+  if (!trimmedRoot || !trimmedRelative) {
+    return null;
+  }
+  const windows = isWindowsPath(trimmedRoot);
+  const root = trimTrailingSeparators(trimmedRoot, windows);
+  const rawSegments = (windows ? trimmedRelative.replaceAll('/', '\\') : trimmedRelative).split(
+    windows ? '\\' : '/',
+  );
+
+  const segments: string[] = [];
+  for (const segment of rawSegments) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  if (segments.length === 0) {
+    return root;
+  }
+  return joinDirectoryPath(root, segments.join(windows ? '\\' : '/'));
+}
+
 export function findContainingRoot(path: string, roots: readonly string[]): string | null {
   return roots.find((root) => isPathWithinRoot(path, root)) ?? null;
 }

@@ -1,4 +1,5 @@
 import type { ArtifactContentType, ArtifactRecord } from '@openAwork/artifacts';
+import { parseDelimitedPreview } from '../../../utils/file/parse-delimited-preview.js';
 
 const ARTIFACT_FILE_EXTENSION: Record<ArtifactContentType, string> = {
   code: 'txt',
@@ -65,7 +66,13 @@ export function getArtifactEditorLanguage(type: ArtifactContentType): string {
 
 export function canPreviewArtifact(type: ArtifactContentType): boolean {
   return (
-    type === 'html' || type === 'svg' || type === 'markdown' || type === 'csv' || type === 'image'
+    type === 'html' ||
+    type === 'svg' ||
+    type === 'markdown' ||
+    // mermaid 的虚拟扩展名是 `.mmd`，交给 FilePreviewPane 的 chart 分支渲染。
+    type === 'mermaid' ||
+    type === 'csv' ||
+    type === 'image'
   );
 }
 
@@ -92,22 +99,17 @@ export function buildArtifactDownloadName(
   return buildArtifactVirtualPath(artifact);
 }
 
+/** 产物侧 CSV 行上限：预览只是「快速核对字段」，25 行足够且不占版面。 */
+const ARTIFACT_CSV_PREVIEW_ROWS = 25;
+
+/**
+ * 产物 CSV 预览解析。实现已迁到 `utils/file/parse-delimited-preview.ts`
+ * （工作区 `.csv` 文件预览与产物预览共用同一份），这里保留 25 行的
+ * 产物侧行上限。
+ */
 export function parseCsvPreview(content: string): { headers: string[]; rows: string[][] } {
-  const parsedRows = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .slice(0, 25)
-    .map((line) => line.split(',').map((cell) => cell.trim()));
-  if (parsedRows.length === 0) {
-    return { headers: [], rows: [] };
-  }
-  const headers = parsedRows[0];
-  if (!headers) {
-    return { headers: [], rows: [] };
-  }
-  const bodyRows = parsedRows.slice(1);
-  return { headers, rows: bodyRows };
+  const { headers, rows } = parseDelimitedPreview(content, ',', ARTIFACT_CSV_PREVIEW_ROWS);
+  return { headers, rows };
 }
 
 export function buildSvgPreviewDocument(content: string): string {

@@ -7,14 +7,29 @@ import {
   fetchWithTimeout,
 } from '../gateway/http.js';
 
+/**
+ * 通知生命周期状态。`acted`（已处理）/ `archived`（用户忽略）/ `expired`（系统收口）
+ * 三者语义不同，见 gateway 的 notification-store。
+ */
+export type NotificationStatus = 'unread' | 'read' | 'acted' | 'archived' | 'expired';
+
+/** `actionable` 才会点亮铃铛红点；`informational` 只是结果播报。 */
+export type NotificationKind = 'actionable' | 'informational';
+
+export type NotificationView = 'pending' | 'all' | 'archived' | 'expired';
+
 export interface NotificationRecord {
+  actedAt: string | null;
+  archivedAt: string | null;
   body: string;
   createdAt: string;
   eventType: string;
+  expiresAt: string | null;
   id: string;
+  kind: NotificationKind;
   readAt: string | null;
   sessionId: string | null;
-  status: 'read' | 'unread';
+  status: NotificationStatus;
   title: string;
 }
 
@@ -28,17 +43,38 @@ export interface NotificationPreferenceRecord {
   updatedAt: string | null;
 }
 
+export interface NotificationsListResult {
+  /**
+   * 未读结果播报的完整记录（任务完成/失败）——仅 `view=pending` 时有值。
+   * 它们不在铃铛列表里占位，客户端只用它在页面隐藏时弹系统通知：
+   * 「不进铃铛」不等于「不告知」。
+   */
+  browserBroadcasts: NotificationRecord[];
+  notifications: NotificationRecord[];
+  /** 未处理的 actionable 待办数——铃铛红点应显示这个，而不是列表长度。 */
+  pendingActionableCount: number;
+}
+
 export interface NotificationsClient {
   list(
     token: string,
-    options?: { limit?: number; signal?: AbortSignal; status?: 'read' | 'unread' },
-  ): Promise<NotificationRecord[]>;
+    options?: {
+      limit?: number;
+      signal?: AbortSignal;
+      status?: NotificationStatus;
+      view?: NotificationView;
+    },
+  ): Promise<NotificationsListResult>;
   listPreferences(
     token: string,
     options?: { channel?: NotificationPreferenceChannel; signal?: AbortSignal },
   ): Promise<NotificationPreferenceRecord[]>;
   markAllRead(token: string): Promise<void>;
   markRead(token: string, notificationId: string): Promise<void>;
+  /** 忽略单条（不删除，保留可回溯）。 */
+  archive(token: string, notificationId: string): Promise<void>;
+  /** 批量忽略（例如整个会话）。 */
+  archiveMany(token: string, input: { eventTypes?: string[]; sessionId?: string }): Promise<void>;
   updatePreferences(
     token: string,
     input: {
@@ -124,6 +160,9 @@ export function createNotificationsClient(baseUrl: string): NotificationsClient 
   return {
     async list(token, options) {
       const params = new URLSearchParams();
+      if (options?.view) {
+        params.set('view', options.view);
+      }
       if (options?.status) {
         params.set('status', options.status);
       }
@@ -131,7 +170,11 @@ export function createNotificationsClient(baseUrl: string): NotificationsClient 
         params.set('limit', String(options.limit));
       }
       const suffix = params.toString();
-      const data = await performNotificationsRequest<{ notifications?: NotificationRecord[] }>({
+      const data = await performNotificationsRequest<{
+        browserBroadcasts?: NotificationRecord[];
+        notifications?: NotificationRecord[];
+        pendingActionableCount?: number;
+      }>({
         actionLabel: '读取通知列表',
         request: () =>
           fetchWithTimeout(`${baseUrl}/notifications${suffix ? `?${suffix}` : ''}`, {
@@ -139,7 +182,17 @@ export function createNotificationsClient(baseUrl: string): NotificationsClient 
             signal: options?.signal,
           }),
       });
-      return data.notifications ?? [];
+      const notifications = data.notifications ?? [];
+      // 老网关没有 pendingActionableCount 字段时退化为按 kind 推导，保证向后兼容。
+      const pendingActionableCount =
+        typeof data.pendingActionableCount === 'number'
+          ? data.pendingActionableCount
+          : notifications.filter((item) => item.kind === 'actionable').length;
+      return {
+        browserBroadcasts: data.browserBroadcasts ?? [],
+        notifications,
+        pendingActionableCount,
+      };
     },
 
     async markAllRead(token) {
@@ -162,6 +215,34 @@ export function createNotificationsClient(baseUrl: string): NotificationsClient 
           fetchWithTimeout(`${baseUrl}/notifications/${notificationId}/read`, {
             method: 'POST',
             headers: authHeader(token),
+          }),
+      });
+    },
+
+    async archive(token, notificationId) {
+      await performNotificationsRequest({
+        actionLabel: '忽略通知',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/notifications/${notificationId}/archive`, {
+            method: 'POST',
+            headers: authHeader(token),
+          }),
+      });
+    },
+
+    async archiveMany(token, input) {
+      await performNotificationsRequest({
+        actionLabel: '批量忽略通知',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/notifications/archive`, {
+            method: 'POST',
+            headers: { ...authHeader(token), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+              ...(input.eventTypes ? { eventTypes: input.eventTypes } : {}),
+            }),
           }),
       });
     },

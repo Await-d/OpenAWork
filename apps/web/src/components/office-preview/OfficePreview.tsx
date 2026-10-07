@@ -28,7 +28,7 @@ import {
 const DocxPreview = lazy(() => import('./DocxPreview.js'));
 const XlsxPreview = lazy(() => import('./XlsxPreview.js'));
 
-type OfficeKind = 'docx' | 'xlsx' | 'doc' | 'xls' | 'pptx' | 'pdf';
+type OfficeKind = 'docx' | 'xlsx' | 'doc' | 'xls' | 'ppt' | 'pptx' | 'pdf';
 
 function getOfficeKindFromPath(path: string): OfficeKind | null {
   const ext = path.split('.').pop()?.toLowerCase();
@@ -45,6 +45,11 @@ function getOfficeKindFromPath(path: string): OfficeKind | null {
       return 'doc';
     case 'xls':
       return 'xls';
+    // 旧版 .ppt 必须显式列出：`getFilePreviewKind` 把 ppt 归为 binary-office
+    // 并交给本组件，早期这里没有对应 case 走到 `return null`，预览面板会渲染
+    // 成空白（连提示都没有），比给出「请另存为 .pptx」更糟。
+    case 'ppt':
+      return 'ppt';
     default:
       return null;
   }
@@ -107,6 +112,8 @@ function UnsupportedKindNotice({ kind, path }: { kind: OfficeKind; path: string 
     switch (kind) {
       case 'pptx':
         return 'PowerPoint 演示文稿暂不支持在线渲染。请下载后用 PowerPoint / WPS / Keynote 打开。';
+      case 'ppt':
+        return '旧版 .ppt 二进制格式无法在浏览器中渲染。请用 Office 转换为 .pptx 后再预览。';
       case 'pdf':
         return 'PDF 在线预览正在规划中。请下载后用 PDF 阅读器打开。';
       case 'doc':

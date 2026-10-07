@@ -31,9 +31,10 @@ export interface ChatImageGenerationControlsProps {
 
 const iconButtonBaseStyle: React.CSSProperties = {
   border: '1px solid var(--border-subtle)',
-  borderRadius: 8,
-  width: 26,
-  height: 26,
+  borderRadius: 6,
+  /* toggle 变体只挂在输入框工具条上，尺寸对齐 .composer-toolbar-icon 的紧凑规格。 */
+  width: 22,
+  height: 22,
   flexShrink: 0,
   display: 'flex',
   alignItems: 'center',
@@ -101,8 +102,8 @@ export function ChatImageGenerationControls({
       >
         <svg
           aria-hidden="true"
-          width="13"
-          height="13"
+          width="12"
+          height="12"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

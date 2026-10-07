@@ -1,0 +1,389 @@
+/**
+ * 文件预览「表面」通用样式：工具栏、缩放画布、源码块、纯文本代码块、表格。
+ *
+ * 图表（Mermaid）与矢量图（SVG）共用同一套缩放 / 工具栏手感，因此样式按
+ * `.oaw-preview-*` 通用前缀组织；只有真正专属的部分（图表加载与错误态）
+ * 才单独成类。
+ *
+ * 这些类刻意不依赖 `chat-message.css`：文件预览会出现在产物页、团队侧栏等
+ * 没有加载聊天页样式表的位置。
+ */
+
+.oaw-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+}
+
+.oaw-preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.oaw-preview-toolbar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.oaw-preview-label {
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.oaw-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--accent) 32%, transparent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.oaw-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.oaw-preview-btn {
+  height: 22px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.oaw-preview-btn:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--bg-overlay) 82%, var(--accent) 18%);
+  border-color: color-mix(in oklch, var(--accent) 24%, var(--border-default) 76%);
+  color: var(--fg-strong);
+}
+
+.oaw-preview-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 16%, transparent);
+}
+
+.oaw-preview-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.oaw-preview-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+}
+
+.oaw-preview-zoom .oaw-preview-btn {
+  min-width: 22px;
+  padding: 0 6px;
+  justify-content: center;
+}
+
+.oaw-preview-zoom-value {
+  min-width: 46px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 缩放画布（图表 / SVG 共用）──────────────────────────────── */
+
+.oaw-preview-figure {
+  position: relative;
+  flex: 1;
+  min-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+/* SVG 常用透明画布，棋盘格底便于看清透明区域。 */
+.oaw-preview-figure--checker {
+  background: repeating-conic-gradient(var(--bg-elevated) 0% 25%, var(--bg-base) 0% 50%) 50% / 16px
+    16px;
+}
+
+.oaw-preview-canvas {
+  margin-inline: auto;
+}
+
+.oaw-preview-scaled {
+  transform-origin: 0 0;
+}
+
+.oaw-preview-scaled svg {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 拿不到固有尺寸时的兜底：按容器宽度自适应。 */
+.oaw-preview-figure--fluid {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.oaw-preview-figure--fluid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── 源码块 ──────────────────────────────────────────────────── */
+
+.oaw-preview-source {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  color: var(--fg-strong);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
+.oaw-preview-source--inline {
+  max-height: 60vh;
+}
+
+/* ── 纯文本预览（行号 + 语法高亮）─────────────────────────── */
+
+.oaw-preview-code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 0;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.oaw-preview-code-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.oaw-preview-code-line:hover {
+  background: color-mix(in oklch, var(--bg-overlay) 60%, transparent);
+}
+
+.oaw-preview-code-num {
+  flex-shrink: 0;
+  min-width: 3ch;
+  text-align: right;
+  color: var(--fg-subtle);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.oaw-preview-code-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-strong);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 表格预览（CSV / TSV）─────────────────────────────────── */
+
+.oaw-preview-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+}
+
+.oaw-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 480px;
+  font-size: 12px;
+}
+
+.oaw-preview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-default);
+  white-space: nowrap;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.oaw-preview-table td {
+  padding: 7px 12px;
+  color: var(--fg-strong);
+  border-bottom: 1px solid var(--border-subtle);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.oaw-preview-table tbody tr:hover td {
+  background: color-mix(in oklch, var(--accent) 6%, transparent);
+}
+
+/* ── 图表专属：加载 / 失败态 ────────────────────────────────── */
+
+.oaw-preview-status {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+.oaw-preview-status[data-load-failed='true'] {
+  color: color-mix(in oklch, var(--complement) 70%, var(--fg-muted) 30%);
+}
+
+.oaw-preview-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklch, var(--complement) 40%, var(--border-subtle));
+  background: color-mix(in oklch, var(--complement) 10%, var(--bg-base));
+  color: var(--fg-strong);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 40vh;
+  overflow: auto;
+  flex-shrink: 0;
+}
+
+/* ── 围栏代码块（Markdown 预览内的 ``` 块）────────────────── */
+
+.oaw-code-block {
+  margin: 12px 0;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+.oaw-code-block-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px 5px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+}
+
+.oaw-code-block-pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  color: var(--fg-strong);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* ── 语法高亮（lowlight 的 hljs-* 类 → 主题变量）───────────── */
+
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-comment,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-keyword,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-selector-tag,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-literal,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-name,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-strong,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-symbol,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-meta {
+  color: var(--hl-keyword);
+  font-weight: 600;
+}
+
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-attr,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-attribute,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-variable,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-template-variable,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-type,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-selector-class,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-selector-attr {
+  color: var(--hl-type);
+}
+
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-number {
+  color: var(--hl-number);
+}
+
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-string,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-regexp,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-bullet {
+  color: var(--hl-string);
+}
+
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-title,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-section,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-title.function_,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-built_in,
+:is(.oaw-preview-code, .oaw-code-block-pre) .hljs-tag {
+  color: var(--hl-function);
+  font-weight: 500;
+}

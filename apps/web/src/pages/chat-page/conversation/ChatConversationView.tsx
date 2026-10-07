@@ -96,6 +96,7 @@ export interface ConversationComposerExtras {
   dialogueModeToggle?: boolean;
   permissionMode?: boolean;
   agentSwitch?: boolean;
+  voice?: boolean;
 }
 
 export interface HistoryEditPromptInput {
@@ -425,7 +426,7 @@ function buildComposerFeatures(
   const ex = extras ?? {};
   return {
     attachments: true, // 附件是基础能力，不通过 extras 控制
-    voice: false,
+    voice: ex.voice ?? false,
     modelPicker: true,
     modelSettings: true,
     webSearch: webSearchAvailable,

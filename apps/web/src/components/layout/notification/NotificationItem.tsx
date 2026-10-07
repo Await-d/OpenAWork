@@ -3,10 +3,11 @@ import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
 import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
 import type {
   NotificationRecord,
+  NotificationView,
   PendingPermissionRequest,
   PermissionDecision,
 } from '@openAwork/web-client';
-import { getNotificationTypeMeta, NotificationTypeIcon, CloseIcon } from './notification-icons.js';
+import { getNotificationTypeMeta, NotificationTypeIcon } from './notification-icons.js';
 import { formatRelativeTime, formatAbsoluteTime } from './format-time.js';
 import {
   extractPermissionToolName,
@@ -339,6 +340,32 @@ function PermissionActions({
   );
 }
 
+// ── Secondary action row ───────────────────────────────────────
+
+/**
+ * 底部次级动作（标记已读 / 忽略 / 忽略此会话）。
+ * 刻意做成文字按钮而非右上角悬浮图标：图标只有 × 时，用户无法把「关掉」和
+ * 「处理掉」区分开，于是干脆不点——通知因此永远留在列表里。
+ */
+const SECONDARY_ACTION_STYLE: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 600,
+  padding: 0,
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--fg-muted)',
+  cursor: 'pointer',
+  borderRadius: 4,
+  transition: 'color 100ms',
+};
+
+const RESOLVED_STATUS_META: Readonly<Record<string, { label: string; color: string }>> = {
+  read: { label: '已读', color: 'var(--fg-muted)' },
+  acted: { label: '已处理', color: 'var(--success)' },
+  archived: { label: '已归档', color: 'var(--fg-muted)' },
+  expired: { label: '已失效', color: 'var(--fg-subtle, var(--fg-muted))' },
+};
+
 // ── Main component ─────────────────────────────────────────────
 
 export interface NotificationItemProps {
@@ -348,8 +375,11 @@ export interface NotificationItemProps {
   replying: boolean;
   selectedScope: AlwaysScopeLevel['category'] | undefined;
   index: number;
+  view: NotificationView;
   onOpen: (notification: NotificationRecord) => void;
   onDismiss: (notification: NotificationRecord) => void;
+  onArchive: (notification: NotificationRecord) => void;
+  onArchiveSession: (sessionId: string) => void;
   onReply: (notification: NotificationRecord, decision: PermissionDecision) => void;
   onScopeChange: (id: string, category: AlwaysScopeLevel['category']) => void;
 }
@@ -361,8 +391,11 @@ function NotificationItemImpl({
   replying,
   selectedScope,
   index,
+  view,
   onOpen,
   onDismiss,
+  onArchive,
+  onArchiveSession,
   onReply,
   onScopeChange,
 }: NotificationItemProps) {
@@ -370,6 +403,18 @@ function NotificationItemImpl({
   const isPermission = notification.eventType === 'permission_asked';
   const parsedDetail = isPermission ? buildPermissionDetail(notification, permDetail) : null;
   const createdDate = new Date(notification.createdAt);
+  // 归档视图是只读回溯视图：不再提供「标记已读 / 审批」等会改动待办态的动作。
+  const isArchivedView = view === 'archived';
+  // 已处理 / 已忽略的待办不再重复给出审批按钮（提交会 409）。
+  const isActionablePending =
+    notification.kind === 'actionable' && notification.status === 'unread' && !isArchivedView;
+  const resolvedMeta =
+    notification.status === 'unread' ? undefined : RESOLVED_STATUS_META[notification.status];
+  // 结果播报降级展示：类型徽章不再用高饱和底色，避免和真待办抢注意力。
+  const typeBadgeStyle = {
+    background: notification.kind === 'actionable' ? typeMeta.bg : 'transparent',
+    color: notification.kind === 'actionable' ? typeMeta.color : 'var(--fg-muted)',
+  };
 
   return (
     <div
@@ -387,10 +432,11 @@ function NotificationItemImpl({
         position: 'relative',
         display: 'flex',
         gap: 10,
-        padding: '10px 30px 10px 10px',
+        padding: '10px 12px 10px 10px',
         borderRadius: 10,
         border: '1px solid var(--border-subtle)',
         background: 'var(--bg-overlay)',
+        opacity: isArchivedView ? 0.72 : 1,
         cursor: 'pointer',
         transition:
           'border-color 150ms cubic-bezier(0.16,1,0.3,1), background 150ms cubic-bezier(0.16,1,0.3,1)',
@@ -435,22 +481,38 @@ function NotificationItemImpl({
             gap: 8,
           }}
         >
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 3,
-              fontSize: 9,
-              fontWeight: 700,
-              padding: '2px 7px',
-              borderRadius: 999,
-              background: typeMeta.bg,
-              color: typeMeta.color,
-              letterSpacing: '0.02em',
-              flexShrink: 0,
-            }}
-          >
-            {typeMeta.label}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: '2px 7px',
+                borderRadius: 999,
+                letterSpacing: '0.02em',
+                flexShrink: 0,
+                ...typeBadgeStyle,
+              }}
+            >
+              {typeMeta.label}
+            </span>
+            {resolvedMeta && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: 999,
+                  border: '1px solid var(--border-subtle)',
+                  color: resolvedMeta.color,
+                  flexShrink: 0,
+                }}
+              >
+                {resolvedMeta.label}
+              </span>
+            )}
           </span>
           <span
             style={{
@@ -620,57 +682,73 @@ function NotificationItemImpl({
         {/* Permission quick actions — only when we still have a live pending request.
             Resolved/expired permissions stay in the list until marked read, but
             must not re-offer decide buttons that will 409. */}
-        {isPermission && notification.sessionId && permDetail?.status === 'pending' && (
-          <PermissionActions
-            notificationId={notification.id}
-            replying={replying}
-            permDetail={permDetail}
-            selectedScope={selectedScope}
-            onScopeChange={onScopeChange}
-            onReply={onReply}
-            notification={notification}
-          />
+        {isPermission &&
+          notification.sessionId &&
+          permDetail?.status === 'pending' &&
+          isActionablePending && (
+            <PermissionActions
+              notificationId={notification.id}
+              replying={replying}
+              permDetail={permDetail}
+              selectedScope={selectedScope}
+              onScopeChange={onScopeChange}
+              onReply={onReply}
+              notification={notification}
+            />
+          )}
+
+        {/* 处理出口：只读归档视图不提供任何改动待办态的动作。 */}
+        {!isArchivedView && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              marginTop: 6,
+              paddingTop: 6,
+              borderTop: '1px solid var(--border-subtle)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismiss(notification);
+              }}
+              className="nc-item-action"
+              style={SECONDARY_ACTION_STYLE}
+            >
+              标记已读
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onArchive(notification);
+              }}
+              className="nc-item-action"
+              title="忽略这条通知（可在「已归档」中找回）"
+              style={SECONDARY_ACTION_STYLE}
+            >
+              忽略
+            </button>
+            {notification.sessionId && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onArchiveSession(notification.sessionId as string);
+                }}
+                className="nc-item-action"
+                title="忽略该会话的全部通知"
+                style={SECONDARY_ACTION_STYLE}
+              >
+                忽略此会话
+              </button>
+            )}
+          </div>
         )}
       </div>
-
-      {/* Dismiss button */}
-      <button
-        type="button"
-        title="标记已读"
-        aria-label="标记已读"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDismiss(notification);
-        }}
-        style={{
-          position: 'absolute',
-          top: 8,
-          right: 6,
-          width: 20,
-          height: 20,
-          borderRadius: 6,
-          border: 'none',
-          background: 'transparent',
-          color: 'var(--fg-muted)',
-          cursor: 'pointer',
-          display: 'grid',
-          placeItems: 'center',
-          opacity: 0.5,
-          transition: 'opacity 100ms, background 100ms',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.opacity = '1';
-          e.currentTarget.style.background = 'color-mix(in srgb, var(--danger) 10%, transparent)';
-          e.currentTarget.style.color = 'var(--danger)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.opacity = '0.5';
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.color = 'var(--fg-muted)';
-        }}
-      >
-        <CloseIcon size={11} />
-      </button>
     </div>
   );
 }

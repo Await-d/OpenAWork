@@ -38,6 +38,9 @@ export const TEAM_CONVERSATION_COMPOSER_EXTRAS: ConversationComposerExtras = {
   promptTemplate: true,
   commandPalette: true,
   agentSwitch: true,
+  // 语音输入暂不在 team 暴露：转写文本走团队分层派发管线，与 chat 的
+  // 单发文本路径不同，先保持关闭。
+  voice: false,
 };
 
 export function useTeamConversationViewComposerDispatch(input: { state: TeamConversationState }): {

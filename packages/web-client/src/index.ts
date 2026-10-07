@@ -15,11 +15,15 @@ export { createCommandsClient } from './session/commands.js';
 export type { CommandsClient, CommandsListResult } from './session/commands.js';
 export { createNotificationsClient } from './infra/notifications.js';
 export type {
+  NotificationKind,
   NotificationPreferenceChannel,
   NotificationPreferenceEventType,
   NotificationPreferenceRecord,
   NotificationRecord,
   NotificationsClient,
+  NotificationsListResult,
+  NotificationStatus,
+  NotificationView,
 } from './infra/notifications.js';
 export { createCapabilitiesClient } from './session/capabilities.js';
 export type {

@@ -209,6 +209,12 @@ export function DisplayTabContent() {
       checked: store.showComposerStatsBar,
       onChange: store.setShowComposerStatsBar,
     },
+    {
+      title: '语音输入',
+      description: '在输入框工具条显示麦克风入口，录音转写为文本并把音频作为附件保存',
+      checked: store.showVoiceInputButton,
+      onChange: store.setShowVoiceInputButton,
+    },
   ];
 
   const interfaceRows: SettingRowProps[] = [

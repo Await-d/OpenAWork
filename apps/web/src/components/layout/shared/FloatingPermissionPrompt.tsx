@@ -191,9 +191,9 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
         return;
       }
 
-      const notifications = await notificationsClient.list(accessToken, {
+      const { notifications } = await notificationsClient.list(accessToken, {
         limit: 20,
-        status: 'unread',
+        view: 'pending',
       });
       if (cancelled || pendingPermissionRef.current !== null) {
         return;

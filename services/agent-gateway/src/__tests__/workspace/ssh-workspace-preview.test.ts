@@ -37,6 +37,7 @@ let dbModule: typeof DbModule;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 let resetUserWorkspaceAllowlistCache: typeof UserWorkspaceAllowlistModule.__resetUserWorkspaceAllowlistCacheForTest;
 let workspaceRoutes: typeof WorkspaceRoutesModule.workspaceRoutes;
+let sshFilePreviewGate: typeof WorkspaceRoutesModule.sshFilePreviewGate;
 let setSshService: typeof SshServiceModule.setSshService;
 let resetSshServiceForTests: typeof SshServiceModule.__resetSshServiceForTests;
 let SshServiceCtor: typeof SshServiceModule.SshService;
@@ -165,6 +166,7 @@ beforeAll(async () => {
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
   workspaceRoutes = (await import('../../routes/workspace.js')).workspaceRoutes;
+  sshFilePreviewGate = (await import('../../routes/workspace.js')).sshFilePreviewGate;
   resetUserWorkspaceAllowlistCache = (await import('../../workspace/user-workspace-allowlist.js'))
     .__resetUserWorkspaceAllowlistCacheForTest;
   const sshServiceModule = await import('../../ssh/ssh-service.js');
@@ -188,6 +190,8 @@ beforeEach(() => {
   dbModule.sqliteRun('DELETE FROM users', []);
   resetUserWorkspaceAllowlistCache();
   resetSshServiceForTests(null);
+  // SSH 门控是进程级状态，跨用例残留会让下面「占满槽位」的断言互相干扰.
+  sshFilePreviewGate.reset();
   seedUser(USER_ID);
 });
 
@@ -224,6 +228,60 @@ describe('GET /workspace/file — SSH 远程预览', () => {
       expect(readFileBytes.mock.calls[0]?.[1]).toBe('/home/dev/remote-project/src/app.ts');
       expect(readFileBytes.mock.calls[0]?.[2]).toEqual({ maxBytes: MAX_FILE_BYTES });
     } finally {
+      await app.close();
+    }
+  });
+
+  it('SSH 预览并发饱和时返回中文 429 与 Retry-After', async () => {
+    seedSshSession(SSH_SESSION_ID, USER_ID);
+    registerSshService('connected');
+
+    const app = await buildApp();
+    // 确定性做法：预先占满门控槽位（key 形如 `${userId}::ssh::${sessionId}`），
+    // 不依赖并发时序碰撞。
+    const held: Array<{ release?: () => void }> = [];
+    for (let index = 0; index < 4; index += 1) {
+      held.push(await sshFilePreviewGate.acquire(`${USER_ID}::ssh::${SSH_SESSION_ID}`));
+    }
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent('src/app.ts')}` +
+          `&sessionId=${encodeURIComponent(SSH_SESSION_ID)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(429);
+      expect(response.headers['retry-after']).toBeTruthy();
+      expect(response.json()).toMatchObject({
+        error: '大文件预览请求过多或等待超时，请稍后重试。',
+      });
+    } finally {
+      for (const slot of held) slot.release?.();
+      await app.close();
+    }
+  });
+
+  it('SSH 门控槽位释放后预览恢复正常', async () => {
+    seedSshSession(SSH_SESSION_ID, USER_ID);
+    registerSshService('connected');
+
+    const app = await buildApp();
+    const held = await sshFilePreviewGate.acquire(`${USER_ID}::ssh::${SSH_SESSION_ID}`);
+    try {
+      held.release?.();
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent('src/app.ts')}` +
+          `&sessionId=${encodeURIComponent(SSH_SESSION_ID)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+    } finally {
+      held.release?.();
       await app.close();
     }
   });

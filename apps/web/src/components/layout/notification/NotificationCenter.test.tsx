@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   listPreferences: vi.fn(),
   markAllRead: vi.fn(),
   markRead: vi.fn(),
+  archive: vi.fn(),
+  archiveMany: vi.fn(),
   updatePreferences: vi.fn(),
   listPendingPermissions: vi.fn(),
   replyPermission: vi.fn(),
@@ -29,6 +31,8 @@ vi.mock('@openAwork/web-client', () => ({
     listPreferences: mocks.listPreferences,
     markAllRead: mocks.markAllRead,
     markRead: mocks.markRead,
+    archive: mocks.archive,
+    archiveMany: mocks.archiveMany,
     updatePreferences: mocks.updatePreferences,
   }),
   createPermissionsClient: () => ({
@@ -68,8 +72,30 @@ const LIVE_PENDING: PendingPermissionRequest = {
   createdAt: '2026-07-16T10:00:00.000Z',
 };
 
+/** 客户端 list() 返回 `{ notifications, pendingActionableCount, browserBroadcasts }`。 */
+function toListResult(
+  items: NotificationRecord[],
+  browserBroadcasts: NotificationRecord[] = [],
+): {
+  browserBroadcasts: NotificationRecord[];
+  notifications: NotificationRecord[];
+  pendingActionableCount: number;
+} {
+  return {
+    browserBroadcasts,
+    notifications: items,
+    pendingActionableCount: items.filter(
+      (item) => item.kind === 'actionable' && item.status === 'unread',
+    ).length,
+  };
+}
+
 describe('NotificationCenter', () => {
   let currentNotifications: NotificationRecord[];
+  /** 服务端 `view=pending` 不返回结果播报，只在 browserBroadcasts 里附带。 */
+  let currentBroadcasts: NotificationRecord[];
+  /** `view=all` / `view=archived` 返回的行（含 informational）。 */
+  let currentArchiveView: NotificationRecord[];
 
   beforeEach(() => {
     currentNotifications = [
@@ -78,17 +104,30 @@ describe('NotificationCenter', () => {
         title: '等待权限 · bash',
         body: 'requestId=perm-1\n需要执行工作区命令\n执行命令: git status -sb\ngit status -sb\nmedium',
         eventType: 'permission_asked',
+        kind: 'actionable',
         sessionId: 'session-1',
         createdAt: '2026-07-16T10:00:00.000Z',
         readAt: null,
+        actedAt: null,
+        archivedAt: null,
+        expiresAt: null,
         status: 'unread',
       },
     ];
+    currentBroadcasts = [];
+    currentArchiveView = [];
 
-    mocks.listNotifications.mockImplementation(async () => currentNotifications);
+    mocks.listNotifications.mockImplementation(
+      async (_token: string, options?: { view?: string }) =>
+        options?.view === 'pending'
+          ? toListResult(currentNotifications, currentBroadcasts)
+          : toListResult(currentArchiveView),
+    );
     mocks.listPreferences.mockResolvedValue([]);
     mocks.markAllRead.mockResolvedValue(undefined);
     mocks.markRead.mockResolvedValue(undefined);
+    mocks.archive.mockResolvedValue(undefined);
+    mocks.archiveMany.mockResolvedValue(undefined);
     mocks.updatePreferences.mockResolvedValue([]);
     // Default: keep the permission live so the notification is not auto-dismissed.
     mocks.listPendingPermissions.mockResolvedValue([LIVE_PENDING]);
@@ -150,9 +189,13 @@ describe('NotificationCenter', () => {
         title: '等待权限 · bash',
         body: '需要执行工作区命令\n执行命令: git status -sb\ngit status -sb\nmedium',
         eventType: 'permission_asked',
+        kind: 'actionable',
         sessionId: 'session-1',
         createdAt: '2026-07-16T10:00:00.000Z',
         readAt: null,
+        actedAt: null,
+        archivedAt: null,
+        expiresAt: null,
         status: 'unread',
       },
     ];
@@ -220,6 +263,114 @@ describe('NotificationCenter', () => {
     });
     await waitFor(() => {
       expect(screen.queryByText('等待权限 · bash')).toBeNull();
+    });
+  });
+
+  it('结果播报不占用铃铛：红点不亮、待处理列表不展示', async () => {
+    currentNotifications = [];
+    currentBroadcasts = [
+      {
+        id: 'notif-task',
+        title: '任务已完成 · build',
+        body: '构建完成',
+        eventType: 'task_update',
+        kind: 'informational',
+        sessionId: 'session-1',
+        createdAt: '2026-07-16T10:00:00.000Z',
+        readAt: null,
+        actedAt: null,
+        archivedAt: null,
+        expiresAt: null,
+        status: 'unread',
+      },
+    ];
+
+    render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
+
+    const trigger = await screen.findByTitle('通知中心');
+    fireEvent.click(trigger);
+
+    // 空态要解释被折叠的结果播报去了哪，否则看起来像消息丢了。
+    await screen.findByText('没有待处理的请求');
+    expect(screen.getByText(/1 条任务结果已折叠/)).toBeTruthy();
+    expect(screen.queryByText('任务已完成 · build')).toBeNull();
+    expect(trigger.textContent).not.toMatch(/1/);
+  });
+
+  it('切到「全部」后结果播报可回溯', async () => {
+    currentArchiveView = [
+      {
+        id: 'notif-task',
+        title: '任务已完成 · build',
+        body: '构建完成',
+        eventType: 'task_update',
+        kind: 'informational',
+        sessionId: 'session-1',
+        createdAt: '2026-07-16T10:00:00.000Z',
+        readAt: null,
+        actedAt: null,
+        archivedAt: null,
+        expiresAt: null,
+        status: 'unread',
+      },
+    ];
+
+    render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
+
+    const trigger = await screen.findByTitle('通知中心');
+    fireEvent.click(trigger);
+
+    fireEvent.click(await screen.findByRole('tab', { name: '全部' }));
+
+    await screen.findByText('任务已完成 · build');
+  });
+
+  it('忽略通知会立刻同步递减红点（不等下一轮轮询）', async () => {
+    render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
+
+    const trigger = await screen.findByTitle('通知中心');
+    fireEvent.click(trigger);
+
+    const archiveButton = await screen.findByRole('button', { name: '忽略' });
+    fireEvent.click(archiveButton);
+
+    await waitFor(() => {
+      expect(mocks.archive).toHaveBeenCalledWith('token-test', 'notif-1');
+    });
+    await waitFor(() => {
+      expect(trigger.textContent).not.toMatch(/1/);
+    });
+    expect(mocks.toast).toHaveBeenCalledWith('已忽略，可在「已归档」中找回', 'info');
+  });
+
+  it('忽略此会话会走批量归档接口', async () => {
+    render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
+
+    const trigger = await screen.findByTitle('通知中心');
+    fireEvent.click(trigger);
+
+    const archiveSessionButton = await screen.findByRole('button', { name: '忽略此会话' });
+    fireEvent.click(archiveSessionButton);
+
+    await waitFor(() => {
+      expect(mocks.archiveMany).toHaveBeenCalledWith('token-test', { sessionId: 'session-1' });
+    });
+  });
+
+  it('切换到已归档视图会带上对应 view 重新拉取', async () => {
+    render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
+
+    const trigger = await screen.findByTitle('通知中心');
+    fireEvent.click(trigger);
+
+    const archivedTab = await screen.findByRole('tab', { name: '已归档' });
+    fireEvent.click(archivedTab);
+
+    await waitFor(() => {
+      expect(mocks.listNotifications).toHaveBeenCalledWith(
+        'token-test',
+        expect.objectContaining({ view: 'archived' }),
+      );
     });
   });
 });

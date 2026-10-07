@@ -12,33 +12,44 @@
  * 语义与旧写法完全一致（含 N ≤ 0 时禁用、表中不足 N 行时不删任何行）。
  */
 import { sqliteRun } from './db.js';
+import type { SqliteBindableValue } from './sqlite-bind-params.js';
+
+export interface RetentionScope {
+  /**
+   * 过滤列名。只允许调用方传入字面量——不得拼接外部输入。
+   */
+  column: string;
+  value: string;
+}
 
 export function deleteRowsBeyondMostRecent(input: {
-  /**
-   * 物理表名。只允许调用方传入字面量——不得拼接外部输入。
-   */
   table: string;
-  /**
-   * 单调递增且唯一的排序列：`INTEGER PRIMARY KEY` 表用 `'id'`，
-   * UUID 主键 / 无 INTEGER PK 的表用 `'rowid'`。
-   */
   idColumn: 'id' | 'rowid';
-  /** 保留的最近行数；非正数视为禁用（不做任何删除）。 */
   limit: number;
+  /**
+   * 可选的等值过滤（如按 `user_id` 分区裁剪）。过滤条件同时作用于边界子查询与
+   * 外层删除，避免「边界取自 A 用户、删除落到 B 用户」的跨分区误删。
+   */
+  scope?: RetentionScope;
 }): void {
   if (!Number.isFinite(input.limit) || input.limit <= 0) {
     return;
   }
+
+  const scope = input.scope;
+  const scopeWhere = scope ? `AND ${scope.column} = ?` : '';
+  const scopeParams: SqliteBindableValue[] = scope ? [scope.value] : [];
 
   sqliteRun(
     `DELETE FROM ${input.table}
       WHERE ${input.idColumn} < (
         SELECT MIN(${input.idColumn}) FROM (
           SELECT ${input.idColumn} FROM ${input.table}
+           WHERE 1 = 1 ${scopeWhere}
            ORDER BY ${input.idColumn} DESC
            LIMIT ?
         )
-      )`,
-    [Math.floor(input.limit)],
+      )${scopeWhere}`,
+    [...scopeParams, Math.floor(input.limit), ...scopeParams],
   );
 }

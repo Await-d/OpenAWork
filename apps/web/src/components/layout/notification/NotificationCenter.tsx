@@ -12,6 +12,7 @@ import type {
   NotificationPreferenceEventType,
   NotificationPreferenceRecord,
   NotificationRecord,
+  NotificationView,
   PendingPermissionRequest,
   PermissionDecision,
 } from '@openAwork/web-client';
@@ -88,6 +89,14 @@ export default function NotificationCenter({
 
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  /**
+   * 铃铛红点只由「未处理的 actionable 待办」点亮。任务完成之类的结果播报
+   * （informational）不该红着脸催人——这是「用户不处理 ⇒ 通知永远赖着」
+   * 的体验根因：列表被无待办的信息塞满，红点失去指示意义。
+   */
+  const [pendingActionableCount, setPendingActionableCount] = useState(0);
+  const [browserBroadcasts, setBrowserBroadcasts] = useState<NotificationRecord[]>([]);
+  const [view, setView] = useState<NotificationView>('pending');
   const [loading, setLoading] = useState(false);
   const [preferences, setPreferences] = useState<NotificationPreferenceMap>(
     DEFAULT_NOTIFICATION_PREFERENCES,
@@ -106,10 +115,16 @@ export default function NotificationCenter({
    */
   const dismissedPermissionNotificationIdsRef = useRef<Set<string>>(new Set());
   const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
+  /** 轮询需要知道当前视图，否则用户在看归档时被 pending 数据覆盖。 */
+  const viewRef = useRef<NotificationView>('pending');
 
   useEffect(() => {
     preferencesRef.current = preferences;
   }, [preferences]);
+
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   // Close on outside click / Escape.
   useEffect(() => {
@@ -205,9 +220,11 @@ export default function NotificationCenter({
   }, [accessToken, gatewayUrl]);
 
   const loadNotifications = useCallback(
-    async (options?: { preferences?: NotificationPreferenceMap }) => {
+    async (options?: { preferences?: NotificationPreferenceMap; view?: NotificationView }) => {
       if (!accessToken) {
         setNotifications([]);
+        setPendingActionableCount(0);
+        setBrowserBroadcasts([]);
         return;
       }
       if (abortRef.current) return;
@@ -216,28 +233,32 @@ export default function NotificationCenter({
       abortRef.current = controller;
       setLoading(true);
       const effectivePreferences = options?.preferences ?? preferencesRef.current;
+      const effectiveView = options?.view ?? 'pending';
       try {
-        const next = await createNotificationsClient(gatewayUrl).list(accessToken, {
+        const result = await createNotificationsClient(gatewayUrl).list(accessToken, {
           limit: 30,
           signal: controller.signal,
-          status: 'unread',
+          view: effectiveView,
         });
         if (controller.signal.aborted) return;
         // 过滤掉本地已判定 stale / 刚处理完但仍可能短暂未读的 permission 通知，
         // 避免 markRead 与 list 之间的竞态把它们重新弹回列表。
-        const visible = next.filter(
+        const visible = result.notifications.filter(
           (item) => !dismissedPermissionNotificationIdsRef.current.has(item.id),
         );
         setNotifications(visible);
+        setPendingActionableCount(result.pendingActionableCount);
+        setBrowserBroadcasts(result.browserBroadcasts ?? []);
 
-        // Browser notification when page hidden — only for items still shown.
+        // Browser notification when page hidden. Iterates actionable 待办 + 结果播报：
+        // 播报不在铃铛里占位，但用户离开页面时仍必须被告知任务已完成。
         if (
           typeof window !== 'undefined' &&
           document.visibilityState === 'hidden' &&
           'Notification' in window &&
           Notification.permission === 'granted'
         ) {
-          visible.forEach((item) => {
+          [...visible, ...(result.browserBroadcasts ?? [])].forEach((item) => {
             if (seenIdsRef.has(item.id)) return;
             seenIdsRef.add(item.id);
             if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) return;
@@ -254,7 +275,9 @@ export default function NotificationCenter({
             });
           });
         } else {
-          visible.forEach((item) => seenIdsRef.add(item.id));
+          [...visible, ...(result.browserBroadcasts ?? [])].forEach((item) =>
+            seenIdsRef.add(item.id),
+          );
         }
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
@@ -262,6 +285,46 @@ export default function NotificationCenter({
       }
     },
     [accessToken, gatewayUrl, seenIdsRef],
+  );
+
+  /** 切换视图前必须掐断在途请求，否则它回来后会把旧视图数据写回当前视图。 */
+  const abortPendingLoad = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, []);
+
+  const handleViewChange = useCallback(
+    (next: NotificationView) => {
+      if (next === viewRef.current) return;
+      abortPendingLoad();
+      setView(next);
+      void loadNotifications({ view: next }).catch(() => undefined);
+    },
+    [abortPendingLoad, loadNotifications],
+  );
+
+  /**
+   * 本地移除通知并同步递减红点。
+   *
+   * 红点计数来自服务端且独立于列表，若只移除列表项，红点会一直显示旧数字直到下轮
+   * 轮询（15s）——用户已经处理完了，铃铛还亮着，这正是「通知处理不掉」的观感来源。
+   * 注意不在 setState updater 内改另一个 state（严格模式下 updater 会被重复调用）。
+   */
+  const dropNotificationsLocally = useCallback(
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      const targetIds = new Set(ids);
+      const actionableCount = notifications.filter(
+        (item) => targetIds.has(item.id) && item.kind === 'actionable',
+      ).length;
+      setNotifications((prev) => prev.filter((item) => !targetIds.has(item.id)));
+      if (actionableCount > 0) {
+        setPendingActionableCount((count) => Math.max(0, count - actionableCount));
+      }
+    },
+    [notifications],
   );
 
   // ── Actions ─────────────────────────────────────────────
@@ -272,7 +335,7 @@ export default function NotificationCenter({
       if (notification.eventType === 'permission_asked') {
         dismissedPermissionNotificationIdsRef.current.add(notification.id);
       }
-      setNotifications((prev) => prev.filter((item) => item.id !== notification.id));
+      dropNotificationsLocally([notification.id]);
       setOpen(false);
       try {
         await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
@@ -281,14 +344,14 @@ export default function NotificationCenter({
           dismissedPermissionNotificationIdsRef.current.delete(notification.id);
           permissionDetailsFetchedRef.current.delete(notification.id);
         }
-        void loadNotifications().catch(() => undefined);
+        void loadNotifications({ view: viewRef.current }).catch(() => undefined);
       }
       if (notification.sessionId) {
         preloadRoute('/chat');
         void navigate(`/chat/${notification.sessionId}`);
       }
     },
-    [accessToken, gatewayUrl, loadNotifications, navigate, preloadRoute],
+    [accessToken, gatewayUrl, dropNotificationsLocally, loadNotifications, navigate, preloadRoute],
   );
 
   const handleDismissNotification = useCallback(
@@ -297,7 +360,7 @@ export default function NotificationCenter({
       if (notification.eventType === 'permission_asked') {
         dismissedPermissionNotificationIdsRef.current.add(notification.id);
       }
-      setNotifications((prev) => prev.filter((item) => item.id !== notification.id));
+      dropNotificationsLocally([notification.id]);
       try {
         await createNotificationsClient(gatewayUrl).markRead(accessToken, notification.id);
       } catch {
@@ -305,7 +368,44 @@ export default function NotificationCenter({
           dismissedPermissionNotificationIdsRef.current.delete(notification.id);
           permissionDetailsFetchedRef.current.delete(notification.id);
         }
-        void loadNotifications().catch(() => undefined);
+        void loadNotifications({ view: viewRef.current }).catch(() => undefined);
+      }
+    },
+    [accessToken, gatewayUrl, dropNotificationsLocally, loadNotifications],
+  );
+
+  /**
+   * 忽略（归档）而非「标记已读」。标记已读会让条目凭空消失，用户不敢点；
+   * 归档则把它移出待办但留在归档视图里可回溯——这是「处理不掉」的人工出口。
+   */
+  const handleArchiveNotification = useCallback(
+    async (notification: NotificationRecord) => {
+      if (!accessToken) return;
+      const previous = notifications;
+      const previousCount = pendingActionableCount;
+      dropNotificationsLocally([notification.id]);
+      try {
+        await createNotificationsClient(gatewayUrl).archive(accessToken, notification.id);
+        toast('已忽略，可在「已归档」中找回', 'info');
+      } catch {
+        setNotifications(previous);
+        setPendingActionableCount(previousCount);
+        toast('忽略失败，请稍后重试', 'error');
+      }
+    },
+    [accessToken, gatewayUrl, dropNotificationsLocally, notifications, pendingActionableCount],
+  );
+
+  /** 忽略整个会话的通知：会话里的审批/提问常一次性攒好几条，逐条点太累。 */
+  const handleArchiveSession = useCallback(
+    async (sessionId: string) => {
+      if (!accessToken) return;
+      try {
+        await createNotificationsClient(gatewayUrl).archiveMany(accessToken, { sessionId });
+        void loadNotifications({ view: viewRef.current }).catch(() => undefined);
+        toast('已忽略该会话的通知，可在「已归档」中找回', 'success');
+      } catch {
+        toast('忽略失败，请稍后重试', 'error');
       }
     },
     [accessToken, gatewayUrl, loadNotifications],
@@ -314,14 +414,17 @@ export default function NotificationCenter({
   const handleMarkAllRead = useCallback(async () => {
     if (!accessToken) return;
     const previous = notifications;
+    const previousCount = pendingActionableCount;
     setNotifications([]);
+    setPendingActionableCount(0);
     try {
       await createNotificationsClient(gatewayUrl).markAllRead(accessToken);
     } catch {
       setNotifications(previous);
+      setPendingActionableCount(previousCount);
       toast('标记全部已读失败，请稍后重试', 'error');
     }
-  }, [accessToken, gatewayUrl, notifications]);
+  }, [accessToken, gatewayUrl, notifications, pendingActionableCount]);
 
   // ── Session title cache ────────────────────────────────
 
@@ -409,7 +512,7 @@ export default function NotificationCenter({
           }
           if (staleIds.length > 0) {
             staleIds.forEach((id) => dismissedPermissionNotificationIdsRef.current.add(id));
-            setNotifications((prev) => prev.filter((item) => !staleIds.includes(item.id)));
+            dropNotificationsLocally(staleIds);
             staleIds.forEach((id) => {
               void notificationsClient.markRead(accessToken, id).catch(() => {
                 // markRead 失败：允许后续轮询 / refresh 重新评估。
@@ -426,7 +529,7 @@ export default function NotificationCenter({
           });
         });
     });
-  }, [accessToken, gatewayUrl, notifications]);
+  }, [accessToken, dropNotificationsLocally, gatewayUrl, notifications]);
 
   // ── Quick permission reply ─────────────────────────────
 
@@ -506,11 +609,24 @@ export default function NotificationCenter({
     setSelectedScopes((prev) => ({ ...prev, [id]: category }));
   }, []);
 
+  /**
+   * 待处理视图只展示 actionable 待办——服务端 `view=pending` 已按 kind 收窄，
+   * 这里不重复过滤。任务完成 / 失败是结果播报，让它们占着铃铛只会稀释真正需要动手
+   * 的条目；它们完整保留在「全部 / 已归档」里可回溯，且页面隐藏时照常弹浏览器系统
+   * 通知（见 loadNotifications）——「不进铃铛」不等于「不告知」。
+   */
+  const visibleNotifications = notifications;
+
+  /** 被折叠的结果播报数——空态时告诉用户它们去了哪，否则空态看起来像消息丢了。 */
+  const hiddenInformationalCount = view === 'pending' ? browserBroadcasts.length : 0;
+
   // ── Initial fetch + polling ────────────────────────────
 
   useEffect(() => {
     if (!accessToken) {
       setNotifications([]);
+      setPendingActionableCount(0);
+      setBrowserBroadcasts([]);
       setPreferences(DEFAULT_NOTIFICATION_PREFERENCES);
       dismissedPermissionNotificationIdsRef.current.clear();
       permissionDetailsFetchedRef.current.clear();
@@ -523,10 +639,10 @@ export default function NotificationCenter({
     void (async () => {
       const next = await loadPreferences();
       if (cancelled) return;
-      await loadNotifications({ preferences: next });
+      await loadNotifications({ preferences: next, view: viewRef.current });
       if (cancelled) return;
       intervalId = window.setInterval(() => {
-        void loadNotifications().catch(() => undefined);
+        void loadNotifications({ view: viewRef.current }).catch(() => undefined);
       }, 15_000);
     })().catch(() => undefined);
 
@@ -552,13 +668,14 @@ export default function NotificationCenter({
       // broadcast a session-list refresh. Clear the per-item fetch cache so we
       // re-list pending permissions and drop any already-resolved entries.
       permissionDetailsFetchedRef.current.clear();
-      void loadNotifications().catch(() => undefined);
+      void loadNotifications({ view: viewRef.current }).catch(() => undefined);
     });
   }, [loadNotifications]);
 
   if (!accessToken) return null;
 
-  const unreadCount = notifications.length;
+  // 红点 = 未处理的 actionable 待办数（不含结果播报），上限显示 9+。
+  const unreadCount = pendingActionableCount;
 
   return (
     <div style={{ position: 'relative', width: '100%' }} ref={containerRef}>
@@ -568,7 +685,7 @@ export default function NotificationCenter({
         ref={triggerRef}
         onClick={() => {
           setOpen((previous) => !previous);
-          void loadNotifications().catch(() => undefined);
+          void loadNotifications({ view: viewRef.current }).catch(() => undefined);
         }}
         title="通知中心"
         className="nav-rail-btn"
@@ -656,17 +773,25 @@ export default function NotificationCenter({
         typeof document !== 'undefined' &&
         createPortal(
           <NotificationPanel
-            notifications={notifications}
+            notifications={visibleNotifications}
+            hiddenInformationalCount={hiddenInformationalCount}
             permissionDetails={permissionDetails}
             sessionTitles={sessionTitles}
             replyingIds={replyingIds}
             selectedScopes={selectedScopes}
             loading={loading}
             position={panelPos}
+            view={view}
+            pendingActionableCount={pendingActionableCount}
+            onViewChange={handleViewChange}
             onOpen={handleOpenNotification}
             onDismiss={handleDismissNotification}
+            onArchive={handleArchiveNotification}
+            onArchiveSession={handleArchiveSession}
             onMarkAllRead={() => void handleMarkAllRead()}
-            onRefresh={() => void loadNotifications().catch(() => undefined)}
+            onRefresh={() =>
+              void loadNotifications({ view: viewRef.current }).catch(() => undefined)
+            }
             onReply={handleQuickPermissionReply}
             onScopeChange={handleScopeChange}
           />,

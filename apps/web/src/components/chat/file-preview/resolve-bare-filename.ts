@@ -20,8 +20,8 @@
  *     workspace switching never reuses a stale resolution.
  *
  * Resolution rules:
- *   1. Path already looks complete (`/abs/...` or contains `/`) →
- *      return as-is. Saves one round-trip on the common case.
+ *   1. Path already absolute（`/abs/...`、`C:\...`、UNC）→ return as-is.
+ *      Saves one round-trip on the common case.
  *   1.5 SSH identity present (`sessionId` / `sshConnectionId`) → resolve
  *      the bare name against the SSH-aware file index
  *      (`searchFileIndexResult`) instead of `findByName`, and return the
@@ -32,15 +32,32 @@
  *      back to the raw name and never throws.
  *   2. No workspace root configured → return as-is so `readFile`
  *      surfaces a readable error.
- *   3. `findByName` (basename match, NOT content grep) within the
- *      active workspace root. Prefer the shortest path among hits
- *      so root-level files win over nested duplicates.
- *   4. No exact basename match → return the original; let `readFile`
+ *   3. **Relative path with a directory part**（`packages/web-client/src/…`，
+ *      `./src/a.ts`、`src\a.ts`）→ join it onto the active workspace root.
+ *      These come from `@` file mentions, model replies and tool output
+ *      (`/workspace/files/search` deliberately returns *relative* paths),
+ *      and they are already root-relative — so joining is exact and needs
+ *      no search round-trip. Previously any path containing `/` was
+ *      mistaken for a complete path and forwarded verbatim, which the
+ *      gateway rejected with 403「工作区路径不在允许范围内。」because
+ *      `validateWorkspacePath` only accepts absolute paths. A path that
+ *      escapes the root (`../..`) is returned untouched so the gateway
+ *      stays the single authority on the workspace boundary.
+ *   4. Bare filename（no directory separator）→ `findByName` (basename
+ *      match, NOT content grep) within the active workspace root. Prefer
+ *      the shortest path among hits so root-level files win over nested
+ *      duplicates.
+ *   5. No exact basename match → return the original; let `readFile`
  *      surface the 404 with the same token the user clicked.
  */
 
 import type { WorkspaceClient } from '@openAwork/web-client';
 import type { WorkspaceReadIdentity } from '../../../stores/ui/uiState.js';
+import {
+  hasDirectorySeparator,
+  isAbsolutePath,
+  resolvePathWithinRoot,
+} from '../../../utils/workspace-path.js';
 
 const resolutionCache = new Map<string, { resolved: string; ts: number }>();
 const inflight = new Map<string, Promise<string>>();
@@ -138,10 +155,18 @@ export interface ResolveBareFilenameInput {
 export async function resolveBareFilename(input: ResolveBareFilenameInput): Promise<string> {
   const { client, token, workspaceRoot, rawPath, identity } = input;
 
-  const isCompletePath = rawPath.startsWith('/') || rawPath.includes('/');
-  if (isCompletePath) return rawPath;
+  if (isAbsolutePath(rawPath)) return rawPath;
+  // `~/…` 是远端家目录相对路径：只有网关 SSH 分支的 `resolveRemotePath` 能解析，
+  // 前端一旦拼上工作区根就会指向一个不存在的目录，故原样透传。
+  if (rawPath.trim().startsWith('~/')) return rawPath;
   if (!workspaceRoot || workspaceRoot.trim().length === 0) return rawPath;
-  if (rawPath.length === 0) return rawPath;
+  if (rawPath.trim().length === 0) return rawPath;
+
+  // 带目录的相对路径已经锚定在工作区根上，直接拼接即可命中；只有裸文件名才需要
+  // 走检索（见文件头注释第 3 / 4 条）。
+  if (hasDirectorySeparator(rawPath)) {
+    return resolvePathWithinRoot(rawPath, workspaceRoot) ?? rawPath;
+  }
 
   const root = normalizeRoot(workspaceRoot);
   const isRemoteIdentity = Boolean(identity?.sessionId || identity?.sshConnectionId);

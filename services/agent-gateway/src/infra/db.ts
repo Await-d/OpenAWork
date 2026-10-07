@@ -335,16 +335,23 @@ export async function migrate(): Promise<void> {
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
       event_type TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'informational' CHECK(kind IN ('actionable', 'informational')),
       title TEXT NOT NULL,
       body TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'unread' CHECK(status IN ('unread', 'read')),
+      status TEXT NOT NULL DEFAULT 'unread'
+        CHECK(status IN ('unread', 'read', 'acted', 'archived', 'expired')),
+      dedupe_key TEXT,
+      expires_at TEXT,
       read_at TEXT,
+      acted_at TEXT,
+      archived_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
   );
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)',
   );
+  migrateNotificationsTable();
   db.exec(
     `CREATE TABLE IF NOT EXISTS notification_preferences (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2687,6 +2694,93 @@ function migrateSyncEventTables(): void {
 
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS uq_event_log_aggregate_seq ON event_log(aggregate_id, seq)',
+  );
+}
+
+/**
+ * notifications 的生命周期列（kind / expires_at / dedupe_key / acted_at / archived_at）
+ * 与扩大的 status 取值集只能在建表时写入——SQLite 不支持 ALTER 掉已有列上的 CHECK
+ * 约束，因此老库必须走「建新表 → 拷贝 → 删旧表」的重建迁移（与 session_todos 同套路）。
+ *
+ * 拷贝时按 event_type 反推 kind：permission_asked / question_asked 是真正需要用户响应的
+ * actionable 待办，其余（task_update 之类）是结果播报。老库没有 kind 列，只能这样补。
+ */
+function migrateNotificationsTable(): void {
+  const rows = db.prepare('PRAGMA table_info(notifications)').all() as Array<{ name: string }>;
+  if (rows.length === 0) {
+    createNotificationsTable();
+    return;
+  }
+
+  const names = new Set(rows.map((row) => row.name));
+  const lifecycleColumns = ['kind', 'dedupe_key', 'expires_at', 'acted_at', 'archived_at'];
+  if (lifecycleColumns.every((column) => names.has(column))) {
+    ensureNotificationIndexes();
+    return;
+  }
+
+  db.exec('ALTER TABLE notifications RENAME TO notifications_legacy');
+  createNotificationsTable();
+  db.exec(`
+    INSERT INTO notifications
+      (id, user_id, session_id, event_type, kind, title, body, status, dedupe_key,
+       expires_at, read_at, acted_at, archived_at, created_at)
+    SELECT
+      id, user_id, session_id, event_type,
+      CASE
+        WHEN event_type IN ('permission_asked', 'question_asked') THEN 'actionable'
+        ELSE 'informational'
+      END,
+      title, body, status,
+      NULL,
+      NULL,
+      read_at,
+      NULL,
+      NULL,
+      created_at
+    FROM notifications_legacy
+  `);
+  db.exec('DROP TABLE notifications_legacy');
+}
+
+function createNotificationsTable(): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'informational' CHECK(kind IN ('actionable', 'informational')),
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unread'
+        CHECK(status IN ('unread', 'read', 'acted', 'archived', 'expired')),
+      dedupe_key TEXT,
+      expires_at TEXT,
+      read_at TEXT,
+      acted_at TEXT,
+      archived_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  ensureNotificationIndexes();
+}
+
+function ensureNotificationIndexes(): void {
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_notifications_user_status ON notifications(user_id, status, created_at DESC)',
+  );
+  // 铃铛红点只关心「未读的 actionable 待办」，这条索引直接服务该查询。
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_notifications_actionable_pending ON notifications(user_id, kind, status, created_at DESC) WHERE kind = 'actionable' AND status = 'unread'",
+  );
+  // 未读区间内的去重键唯一：重试导致的重复 permission_asked / task_update 不会堆叠。
+  // 归档 / 已读 / 过期后同一 dedupe_key 允许再次入列，避免永久封死。
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_active_dedupe ON notifications(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND status = 'unread'",
   );
 }
 

@@ -32,7 +32,7 @@ import {
   stopInFlightStreamRequest,
 } from './stream-cancellation.js';
 import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
-import { markPermissionNotificationsReadForSession } from '../session/notification-store.js';
+import { expireActionableNotificationsForSession } from '../session/notification-store.js';
 import {
   cancelPendingPermissionRequestsByClientRequest,
   cancelPendingPermissionRequestsForSession,
@@ -204,8 +204,8 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         userId: user.sub,
       });
-      if (cancelledPermissions > 0) {
-        markPermissionNotificationsReadForSession({ sessionId, userId: user.sub });
+      if (cancelledPermissions > 0 || cancelledQuestions > 0) {
+        expireActionableNotificationsForSession({ sessionId, userId: user.sub });
       }
       // 作废交互后把状态收敛回真实值：无在途流 + 无 pending ⇒ idle。
       await reconcileSessionRuntime({ sessionId, userId: user.sub });
@@ -275,8 +275,8 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
         userId: user.sub,
       });
-      if (cancelledPermissions > 0) {
-        markPermissionNotificationsReadForSession({ sessionId, userId: user.sub });
+      if (cancelledPermissions > 0 || cancelledQuestions > 0) {
+        expireActionableNotificationsForSession({ sessionId, userId: user.sub });
       }
       // No in-flight request found — the stream may have ended without cleaning
       // up state_status；有在途流时刚停止的流也已结算。两种情况都在这里把

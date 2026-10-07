@@ -182,4 +182,10 @@ describe('TeamConversationLayout', () => {
 
     expect(screen.queryByRole('button', { name: /每次询问|编辑自动|免审批/ })).toBeNull();
   });
+
+  it('team 不渲染语音输入入口（composerExtras.voice = false）', () => {
+    render(<TeamConversationLayout {...createLayoutProps()} />);
+
+    expect(screen.queryByTitle('语音输入')).toBeNull();
+  });
 });

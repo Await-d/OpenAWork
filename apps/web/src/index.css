@@ -158,7 +158,7 @@
   --fg-default: #252b58;
   --fg-muted: #545b88;
   --fg-subtle: #7a82a8;
-  --fg-on-accent: #fff;
+  --fg-on-accent: #0a0c1f;
   --fg-on-contrast: #fff;
   --fg-on-complement: #fff;
 
@@ -246,7 +246,7 @@
   --fg-default: #b8bdcb;
   --fg-muted: #7a8194;
   --fg-subtle: #4a5168;
-  --fg-on-accent: #fff;
+  --fg-on-accent: #0a0c1f;
   --fg-on-contrast: #fff;
   --fg-on-complement: #fff;
 
@@ -257,11 +257,11 @@
   --accent-subtle: rgba(91, 108, 255, 0.07);
   --accent-border: rgba(91, 108, 255, 0.35);
 
-  --contrast: #5b6cff;
-  --contrast-hover: #6f7eff;
-  --contrast-muted: rgba(91, 108, 255, 0.14);
-  --contrast-subtle: rgba(91, 108, 255, 0.07);
-  --contrast-border: rgba(91, 108, 255, 0.35);
+  --contrast: #f0b429;
+  --contrast-hover: #f5c84d;
+  --contrast-muted: rgba(240, 180, 41, 0.14);
+  --contrast-subtle: rgba(240, 180, 41, 0.07);
+  --contrast-border: rgba(240, 180, 41, 0.35);
 
   --complement: #f06464;
   --complement-hover: #ff7878;
@@ -269,11 +269,11 @@
   --complement-subtle: rgba(240, 100, 100, 0.07);
   --complement-border: rgba(240, 100, 100, 0.3);
 
-  --aux: #5b6cff;
-  --aux-hover: #6f7eff;
-  --aux-muted: rgba(91, 108, 255, 0.14);
-  --aux-subtle: rgba(91, 108, 255, 0.07);
-  --aux-border: rgba(91, 108, 255, 0.35);
+  --aux: #38bdf8;
+  --aux-hover: #5cc9fa;
+  --aux-muted: rgba(56, 189, 248, 0.14);
+  --aux-subtle: rgba(56, 189, 248, 0.07);
+  --aux-border: rgba(56, 189, 248, 0.35);
 
   --success: #2cc28a;
   --success-muted: rgba(44, 194, 138, 0.14);
@@ -345,11 +345,11 @@
   --accent-subtle: rgba(74, 91, 230, 0.04);
   --accent-border: rgba(74, 91, 230, 0.3);
 
-  --contrast: #4a5be6;
-  --contrast-hover: #3a4cf0;
-  --contrast-muted: rgba(74, 91, 230, 0.08);
-  --contrast-subtle: rgba(74, 91, 230, 0.04);
-  --contrast-border: rgba(74, 91, 230, 0.3);
+  --contrast: #c97c0e;
+  --contrast-hover: #b0690a;
+  --contrast-muted: rgba(201, 124, 14, 0.08);
+  --contrast-subtle: rgba(201, 124, 14, 0.04);
+  --contrast-border: rgba(201, 124, 14, 0.3);
 
   --complement: #d83b3b;
   --complement-hover: #c52e2e;
@@ -357,11 +357,11 @@
   --complement-subtle: rgba(216, 59, 59, 0.04);
   --complement-border: rgba(216, 59, 59, 0.25);
 
-  --aux: #4a5be6;
-  --aux-hover: #3a4cf0;
-  --aux-muted: rgba(74, 91, 230, 0.08);
-  --aux-subtle: rgba(74, 91, 230, 0.04);
-  --aux-border: rgba(74, 91, 230, 0.3);
+  --aux: #0284c7;
+  --aux-hover: #0369a1;
+  --aux-muted: rgba(2, 132, 199, 0.08);
+  --aux-subtle: rgba(2, 132, 199, 0.04);
+  --aux-border: rgba(2, 132, 199, 0.3);
 
   --success: #1a9b6c;
   --success-muted: rgba(26, 155, 108, 0.08);
@@ -445,9 +445,9 @@
   --aux-muted: rgba(56, 189, 248, 0.14);
   --aux-subtle: rgba(56, 189, 248, 0.07);
   --aux-border: rgba(56, 189, 248, 0.35);
-  --success: #4ade80;
-  --success-muted: rgba(74, 222, 128, 0.14);
-  --success-border: rgba(74, 222, 128, 0.3);
+  --success: #5eead4;
+  --success-muted: rgba(94, 234, 212, 0.14);
+  --success-border: rgba(94, 234, 212, 0.3);
   --warning: var(--contrast);
   --warning-muted: var(--contrast-muted);
   --warning-border: var(--contrast-border);
@@ -495,7 +495,7 @@
   --fg-default: #2d3a32;
   --fg-muted: #5a6b60;
   --fg-subtle: #8a9a8e;
-  --fg-on-accent: #fff;
+  --fg-on-accent: #0a0c1f;
   --fg-on-contrast: #fff;
   --fg-on-complement: #fff;
   --accent: #16a34a;
@@ -519,9 +519,9 @@
   --aux-muted: rgba(2, 132, 199, 0.1);
   --aux-subtle: rgba(2, 132, 199, 0.05);
   --aux-border: rgba(2, 132, 199, 0.3);
-  --success: #16a34a;
-  --success-muted: rgba(22, 163, 74, 0.1);
-  --success-border: rgba(22, 163, 74, 0.28);
+  --success: #0d9488;
+  --success-muted: rgba(13, 148, 136, 0.1);
+  --success-border: rgba(13, 148, 136, 0.28);
   --warning: var(--contrast);
   --warning-muted: var(--contrast-muted);
   --warning-border: var(--contrast-border);
@@ -585,11 +585,11 @@
   --contrast-muted: rgba(192, 132, 252, 0.14);
   --contrast-subtle: rgba(192, 132, 252, 0.07);
   --contrast-border: rgba(192, 132, 252, 0.35);
-  --complement: #fb7185;
-  --complement-hover: #fc8c9e;
-  --complement-muted: rgba(251, 113, 133, 0.14);
-  --complement-subtle: rgba(251, 113, 133, 0.07);
-  --complement-border: rgba(251, 113, 133, 0.3);
+  --complement: #ef4444;
+  --complement-hover: #f87171;
+  --complement-muted: rgba(239, 68, 68, 0.14);
+  --complement-subtle: rgba(239, 68, 68, 0.07);
+  --complement-border: rgba(239, 68, 68, 0.3);
   --aux: #67e8f9;
   --aux-hover: #8af1ff;
   --aux-muted: rgba(103, 232, 249, 0.14);
@@ -659,11 +659,11 @@
   --contrast-muted: rgba(147, 51, 234, 0.1);
   --contrast-subtle: rgba(147, 51, 234, 0.05);
   --contrast-border: rgba(147, 51, 234, 0.3);
-  --complement: #e11d48;
-  --complement-hover: #be123c;
-  --complement-muted: rgba(225, 29, 72, 0.08);
-  --complement-subtle: rgba(225, 29, 72, 0.04);
-  --complement-border: rgba(225, 29, 72, 0.25);
+  --complement: #dc2626;
+  --complement-hover: #b91c1c;
+  --complement-muted: rgba(220, 38, 38, 0.08);
+  --complement-subtle: rgba(220, 38, 38, 0.04);
+  --complement-border: rgba(220, 38, 38, 0.25);
   --aux: #0891b2;
   --aux-hover: #0e7490;
   --aux-muted: rgba(8, 145, 178, 0.1);
@@ -945,7 +945,7 @@
   --fg-default: #3a201a;
   --fg-muted: #6a4a38;
   --fg-subtle: #9a7a68;
-  --fg-on-accent: #fff;
+  --fg-on-accent: #0a0c1f;
   --fg-on-contrast: #fff;
   --fg-on-complement: #06303a;
   --accent: #ea580c;
@@ -1045,9 +1045,9 @@
   --aux-muted: rgba(129, 140, 248, 0.14);
   --aux-subtle: rgba(129, 140, 248, 0.07);
   --aux-border: rgba(129, 140, 248, 0.35);
-  --success: #2dd4bf;
-  --success-muted: rgba(45, 212, 191, 0.14);
-  --success-border: rgba(45, 212, 191, 0.3);
+  --success: #4ade80;
+  --success-muted: rgba(74, 222, 128, 0.14);
+  --success-border: rgba(74, 222, 128, 0.3);
   --warning: var(--contrast);
   --warning-muted: var(--contrast-muted);
   --warning-border: var(--contrast-border);
@@ -1095,7 +1095,7 @@
   --fg-default: #1a3848;
   --fg-muted: #4a6878;
   --fg-subtle: #7a98a8;
-  --fg-on-accent: #fff;
+  --fg-on-accent: #0a0c1f;
   --fg-on-contrast: #fff;
   --fg-on-complement: #fff;
   --accent: #0891b2;
@@ -1119,9 +1119,9 @@
   --aux-muted: rgba(79, 70, 229, 0.1);
   --aux-subtle: rgba(79, 70, 229, 0.05);
   --aux-border: rgba(79, 70, 229, 0.3);
-  --success: #0d9488;
-  --success-muted: rgba(13, 148, 136, 0.1);
-  --success-border: rgba(13, 148, 136, 0.28);
+  --success: #16a34a;
+  --success-muted: rgba(22, 163, 74, 0.1);
+  --success-border: rgba(22, 163, 74, 0.28);
   --warning: var(--contrast);
   --warning-muted: var(--contrast-muted);
   --warning-border: var(--contrast-border);
@@ -1292,7 +1292,7 @@
   --fg-default: #2d3260;
   --fg-muted: #5a6088;
   --fg-subtle: #8890b0;
-  --fg-on-accent: #ffffff;
+  --fg-on-accent: #0a0c1f;
   --fg-on-contrast: #ffffff;
   --fg-on-complement: #ffffff;
 
@@ -2360,6 +2360,15 @@ textarea {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   background: color-mix(in oklch, var(--bg-surface) 75%, transparent);
+  /* 首页渐变由外壳统一承载：输入区不再自绘表面，消除「半透明外壳里
+     再套一张不透明卡片」的双层边缘——那正是两层 padding 叠加后发闷、
+     边框与内容不贴合的根源。用 background-image 叠在底色之上，
+     保留 light 模式覆盖的底色与毛玻璃。 */
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--bg-raised) 82%, transparent),
+    color-mix(in oklch, var(--bg-overlay) 82%, transparent)
+  );
 }
 [data-mode='light'] .composer-shell.composer-home-variant {
   background: color-mix(in oklch, var(--bg-raised) 70%, transparent);
@@ -2456,6 +2465,104 @@ textarea {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+/* ── 工具条紧凑规格 ─────────────────────────────────────────────
+   工具条要在同一行内容纳审批档位、功能开关、快捷提示词、代理、模型与主操作，
+   默认 26px 控件 + 6px 间距偏松。这里统一收敛：图标类与带文字胶囊 22px、
+   主操作 24px、间距 4px、图标 12px。主操作刻意保留更高一级，维持视觉主次。
+   全部以 .composer-toolbar 提高一档特异性，避免与 ChatComposer.css 中
+   同名基类规则（.composer-agent-chip / .composer-permission-trigger）互相覆盖。 */
+.composer-toolbar {
+  --composer-ctl-sm: 22px;
+  --composer-ctl-md: 24px;
+  --composer-ctl-gap: var(--spacing-1);
+  --composer-ctl-icon: 12px;
+  gap: var(--composer-ctl-gap);
+}
+
+.composer-toolbar .composer-toolbar-left,
+.composer-toolbar .composer-primary-actions {
+  gap: var(--composer-ctl-gap);
+}
+
+/* 图标类按钮：联网搜索 / 语音 / 附件 / 快捷提示词 / 提示词优化。 */
+.composer-toolbar .composer-toolbar-icon,
+.composer-toolbar .composer-optimize-button {
+  width: var(--composer-ctl-sm);
+  height: var(--composer-ctl-sm);
+  border-radius: var(--radius-sm);
+}
+.composer-toolbar .composer-toolbar-icon > svg,
+.composer-toolbar .composer-optimize-button > svg,
+.composer-toolbar .composer-model-button > svg:not(.composer-model-button__chevron) {
+  width: var(--composer-ctl-icon);
+  height: var(--composer-ctl-icon);
+}
+.composer-toolbar .composer-spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 1.4px;
+}
+
+/* 模型 / 思考等级：文字截断阈值同步收紧，长模型名不再挤占工具条。 */
+.composer-toolbar .composer-model-button {
+  height: var(--composer-ctl-sm);
+  max-width: 132px;
+  padding: 0 6px;
+  gap: 4px;
+  font-size: 11px;
+}
+.composer-toolbar .composer-model-button__chevron {
+  width: 9px;
+  height: 9px;
+}
+
+/* 代理胶囊。 */
+.composer-toolbar .composer-agent-chip {
+  height: var(--composer-ctl-sm);
+  max-width: 118px;
+  padding: 0 7px;
+  gap: 3px;
+  font-size: 10px;
+}
+
+/* 审批方式档位：标签同步限宽，避免长档位名撑开整条工具条。 */
+.composer-toolbar .composer-permission-trigger {
+  height: var(--composer-ctl-sm);
+  max-width: 164px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+.composer-toolbar .composer-permission-trigger__label {
+  max-width: 96px;
+}
+
+/* 追加 / 发送：主操作略高于其余控件，保持一级视觉权重。 */
+.composer-toolbar .composer-secondary-action,
+.composer-toolbar .composer-send-button {
+  height: var(--composer-ctl-md);
+  padding: 0 8px;
+  gap: 4px;
+  font-size: 10px;
+}
+
+/* 窄屏无空间显示文字时，模型按钮同样收敛为紧凑图标按钮。 */
+@media (max-width: 520px) {
+  .composer-toolbar .composer-model-button {
+    width: var(--composer-ctl-sm);
+    max-width: none;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .composer-toolbar .composer-permission-trigger {
+    max-width: 132px;
+  }
+
+  .composer-toolbar .composer-permission-trigger__label {
+    max-width: 72px;
+  }
 }
 
 /* ── 模型 / 思考等级控件 ────────────────────────────────────────
@@ -4389,7 +4496,10 @@ body.theme-transitioning *::after {
 /* 亮色主题下品牌渐变 — 给 logo / brand 标记一种极光感 */
 [data-mode='light'] [data-brand-mark] {
   background: linear-gradient(135deg, var(--aux), var(--chart-5));
-  color: var(--fg-on-accent);
+  /* 固定白字，不跟 --fg-on-accent：背景是 aux→chart-5 品牌渐变而非 accent 实心色，
+     部分主题（forest/light 的 aux、ocean/light 的 chart-5）明度足够高，
+     深墨字在其上不足 4.5:1。这里要的是"任意亮色主题下 logo 都可读"。 */
+  color: #fff;
 }
 
 /* 亮色主题下 active 导航项的渐变高亮线 */

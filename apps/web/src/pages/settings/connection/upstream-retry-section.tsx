@@ -1,3 +1,4 @@
+import { StatusPill } from '@openAwork/shared-ui';
 import { BP, SS, ST } from '../shared/settings-section-styles.js';
 import {
   SettingsSegmentedRow,
@@ -52,22 +53,10 @@ export function UpstreamRetrySection({
             <span style={{ whiteSpace: 'nowrap' }}>后台子代理</span>。
           </p>
         </div>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 8px',
-            borderRadius: 999,
-            background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-            color: 'var(--accent)',
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          当前值
+        <StatusPill color="accent">
+          当前值{' '}
           <span style={{ color: 'var(--fg-strong)', fontWeight: 700 }}>{savedMaxRetries}</span>
-        </div>
+        </StatusPill>
       </div>
 
       <SettingsSegmentedRow<RetryOptionValue>

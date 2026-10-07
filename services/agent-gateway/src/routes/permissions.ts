@@ -20,7 +20,7 @@ import {
   createPermissionRepliedEvent,
 } from '../session/session-permission-events.js';
 import { publishSessionRunEvent } from '../session/session-run-events.js';
-import { markPermissionNotificationsReadByRequestIds } from '../session/notification-store.js';
+import { markPermissionNotificationsActedByRequestIds } from '../session/notification-store.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { setPersistedSessionStateStatus } from './stream.js';
 import {
@@ -353,7 +353,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       if (permissionRequest.status !== 'pending') {
         // 幂等收口：重复提交时仍把对应通知标为已读，避免前端通知中心残留
         // 可点击的已处理权限项。
-        markPermissionNotificationsReadByRequestIds({
+        markPermissionNotificationsActedByRequestIds({
           requestIds: [body.requestId],
           sessionId,
           userId: user.sub,
@@ -536,7 +536,7 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         }),
         requestClientRequestId ? { clientRequestId: requestClientRequestId } : undefined,
       );
-      markPermissionNotificationsReadByRequestIds({
+      markPermissionNotificationsActedByRequestIds({
         requestIds: [body.requestId, ...cascadedRequestIds],
         sessionId,
         userId: user.sub,

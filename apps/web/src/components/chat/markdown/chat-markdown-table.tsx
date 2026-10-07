@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from 'react';
 import { extractTableData, toCsv, toDelimitedText } from './markdown-table-data.js';
+import './markdown-blocks.css';
 
 /** 复制成功提示的停留时长，与代码块保持一致。 */
 const COPY_FEEDBACK_MS = 1500;

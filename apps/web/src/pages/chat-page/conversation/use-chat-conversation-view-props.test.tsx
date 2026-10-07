@@ -59,6 +59,7 @@ describe('useChatConversationViewProps', () => {
       dialogueModeToggle: true,
       permissionMode: true,
       agentSwitch: true,
+      voice: true,
     });
   });
 

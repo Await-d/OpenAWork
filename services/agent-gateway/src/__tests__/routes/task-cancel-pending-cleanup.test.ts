@@ -88,8 +88,8 @@ function seedQuestionRequest(input: { requestId: string; sessionId: string }): v
 function seedPermissionNotification(input: { requestId: string; sessionId: string }): string {
   const notificationId = `notification-${input.requestId}`;
   dbModule.sqliteRun(
-    `INSERT INTO notifications (id, user_id, session_id, event_type, title, body, status)
-     VALUES (?, ?, ?, 'permission_asked', '权限申请', ?, 'unread')`,
+    `INSERT INTO notifications (id, user_id, session_id, event_type, kind, title, body, status)
+     VALUES (?, ?, ?, 'permission_asked', 'actionable', '权限申请', ?, 'unread')`,
     [notificationId, USER_ID, input.sessionId, `requestId=${input.requestId}\n请审批`],
   );
   return notificationId;
@@ -193,7 +193,7 @@ describe('POST /sessions/:sessionId/tasks/:taskId/cancel 的 pending 清理', ()
         'SELECT status FROM notifications WHERE id = ?',
         [notificationId],
       );
-      expect(notificationRow?.status).toBe('read');
+      expect(notificationRow?.status).toBe('expired');
 
       const childSession = dbModule.sqliteGet<{
         metadata_json: string;

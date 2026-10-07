@@ -27,6 +27,8 @@ import { useUnifiedComposerState } from './use-unified-composer-state.js';
 import type { MentionFileSearchFn } from './use-mention-file-search.js';
 import { buildPromptOptimizationContext } from './prompt-optimization-context.js';
 import { buildAttachmentFileMap } from '../../../pages/chat-page/conversation/composer/use-composer-queue.js';
+import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
+import { createVoiceRecordingFile } from './voice-recording-attachment.js';
 
 export interface UnifiedComposerFeatures {
   attachments?: boolean;
@@ -277,9 +279,22 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     textareaRef: textareaRefProp,
   } = props;
 
+  /**
+   * 语音入口可见性 = 页面能力开关 AND 用户偏好。
+   *
+   * - `featuresProp.voice` 是页面级准入（team 恒为 false），由`composerExtras` 推导；
+   * - `showVoiceInputButton` 是用户级偏好（设置 → 显示 → 语音输入），全局关闭麦克风入口。
+   *
+   * 两者取交集：任一为false 都不展示入口。
+   */
+  const showVoiceInputEnabled = useDisplayPreferencesStore((s) => s.showVoiceInputButton);
   const features = useMemo<Required<UnifiedComposerFeatures>>(
-    () => ({ ...DEFAULT_FEATURES, ...featuresProp }),
-    [featuresProp],
+    () => ({
+      ...DEFAULT_FEATURES,
+      ...featuresProp,
+      voice: (featuresProp?.voice ?? DEFAULT_FEATURES.voice) && showVoiceInputEnabled,
+    }),
+    [featuresProp, showVoiceInputEnabled],
   );
 
   const availableImageRefs = useMemo<ImageEditReferenceArtifact[]>(() => {
@@ -580,6 +595,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
           setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
           setShowVoice(false);
         }}
+        onVoiceRecordingComplete={(blob) => appendFiles([createVoiceRecordingFile(blob)])}
         onQueueMessage={
           features.queuedMessages
             ? (overrideText) => void enqueueComposerMessage(overrideText)

@@ -1,8 +1,4 @@
-import {
-  PREVIEW_ISOLATION_NOTE,
-  PREVIEW_SANDBOX,
-  stripActivePreviewContent,
-} from './sanitize-preview-html.js';
+import { PREVIEW_SANDBOX, stripActivePreviewContent } from './sanitize-preview-html.js';
 
 export const DEFAULT_FILE_PREVIEW_HEIGHT = 280;
 export const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -19,9 +15,12 @@ export type FilePreviewKind =
   | 'css'
   | 'javascript'
   | 'markdown'
+  | 'chart'
   | 'svg'
   | 'image'
   | 'json'
+  | 'table'
+  | 'text'
   | 'binary-office'
   | 'binary-pdf'
   | 'binary-archive'
@@ -62,6 +61,12 @@ export function getFilePreviewKind(path: string): FilePreviewKind | null {
     return 'markdown';
   }
 
+  // Mermaid 图表源码文件。与消息内渲染共用同一套图表引擎，
+  // 此前这类文件会落到下面的 null 分支，只显示「暂不支持预览」。
+  if (ext === 'mmd' || ext === 'mermaid') {
+    return 'chart';
+  }
+
   if (ext === 'svg') {
     return 'svg';
   }
@@ -88,6 +93,40 @@ export function getFilePreviewKind(path: string): FilePreviewKind | null {
 
   if (ext === 'json' || ext === 'jsonc') {
     return 'json';
+  }
+
+  // 分隔符表格：CSV / TSV。此前不在白名单里，工作区里的 .csv 只能落到
+  // 下面的 null 分支——编辑器直接隐藏预览按钮，团队侧栏浮层则显示
+  // 「暂不支持预览」，而产物侧 `canPreviewArtifact` 又把 csv 列为可预览，
+  // 同一类内容两套口径。
+  if (ext === 'csv' || ext === 'tsv' || ext === 'tab') {
+    return 'table';
+  }
+
+  // 纯文本兜底：这些类型此前一律不可预览，但内容就是 utf-8 文本，
+  // 网关 readFile 能正常返回，用不着走二进制占位。
+  // 注意 `.gitignore` / `.editorconfig` / `.npmrc` 这类点开头的文件名，
+  // 扩展名解析结果就是 `gitignore` / `editorconfig` / `npmrc`。
+  if (
+    ext === 'txt' ||
+    ext === 'log' ||
+    ext === 'yaml' ||
+    ext === 'yml' ||
+    ext === 'xml' ||
+    ext === 'toml' ||
+    ext === 'ini' ||
+    ext === 'conf' ||
+    ext === 'cfg' ||
+    ext === 'env' ||
+    ext === 'sql' ||
+    ext === 'properties' ||
+    ext === 'rst' ||
+    ext === 'gitignore' ||
+    ext === 'editorconfig' ||
+    ext === 'dockerignore' ||
+    ext === 'npmrc'
+  ) {
+    return 'text';
   }
 
   // Binary file kinds — these can't be displayed as text and the
@@ -298,6 +337,10 @@ export function getPreviewBadgeLabel(previewKind: FilePreviewKind): string {
     return 'Markdown 预览';
   }
 
+  if (previewKind === 'chart') {
+    return '图表预览';
+  }
+
   if (previewKind === 'svg') {
     return 'SVG 预览';
   }
@@ -308,6 +351,14 @@ export function getPreviewBadgeLabel(previewKind: FilePreviewKind): string {
 
   if (previewKind === 'json') {
     return 'JSON 预览';
+  }
+
+  if (previewKind === 'table') {
+    return '表格预览';
+  }
+
+  if (previewKind === 'text') {
+    return '文本预览';
   }
 
   return '静态预览';
@@ -326,6 +377,10 @@ export function getPreviewTitle(previewKind: FilePreviewKind): string {
     return 'Markdown 预览';
   }
 
+  if (previewKind === 'chart') {
+    return '图表预览';
+  }
+
   if (previewKind === 'svg') {
     return 'SVG 预览';
   }
@@ -338,35 +393,15 @@ export function getPreviewTitle(previewKind: FilePreviewKind): string {
     return 'JSON 格式化预览';
   }
 
+  if (previewKind === 'table') {
+    return '表格预览';
+  }
+
+  if (previewKind === 'text') {
+    return '文本预览';
+  }
+
   return 'HTML 预览';
-}
-
-export function getPreviewNote(previewKind: FilePreviewKind): string {
-  if (previewKind === 'css') {
-    return '当前使用固定示例骨架承载样式效果，便于安全观察布局、颜色和组件外观变化。';
-  }
-
-  if (previewKind === 'javascript') {
-    return '当前脚本仅在隔离 iframe 中运行：允许脚本执行，但不会获得宿主页同源权限。';
-  }
-
-  if (previewKind === 'markdown') {
-    return '渲染 Markdown 内容为富文本格式，支持 GFM 表格、代码高亮、任务列表等。';
-  }
-
-  if (previewKind === 'svg') {
-    return '直接渲染 SVG 矢量图形，支持缩放查看。';
-  }
-
-  if (previewKind === 'image') {
-    return '图片预览，支持缩放和适应窗口。';
-  }
-
-  if (previewKind === 'json') {
-    return 'JSON 数据格式化展示，支持折叠和语法高亮。';
-  }
-
-  return PREVIEW_ISOLATION_NOTE;
 }
 
 export function getPreviewSandbox(_previewKind: FilePreviewKind): string {
