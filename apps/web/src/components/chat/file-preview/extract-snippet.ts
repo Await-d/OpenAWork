@@ -33,7 +33,10 @@ export interface FileSnippet {
  * UI can display "L42" matching what users see in editors.
  */
 export function extractSnippet(content: string, line: number | null): FileSnippet {
-  const all = content.length === 0 ? [''] : content.split(/\r?\n/);
+  // 以换行结尾的文件 split 后会多出一个空的尾项，导致 footer「共 N 行」比编辑器多 1。
+  // 去掉它，行数才与编辑器状态栏一致。
+  const normalized = content.endsWith('\n') ? content.slice(0, -1) : content;
+  const all = normalized.length === 0 ? [''] : normalized.split(/\r?\n/);
   const total = all.length;
 
   if (line === null || !Number.isFinite(line) || line < 1) {

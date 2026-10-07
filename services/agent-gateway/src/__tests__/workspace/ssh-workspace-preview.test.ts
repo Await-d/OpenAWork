@@ -24,7 +24,7 @@ type ReadFileBytesMock = Mock<ReadFileBytesImpl>;
 
 const workspaceRoot = mkdtempSync(join(tmpdir(), 'openawork-ssh-preview-routes-'));
 const projectRoot = join(workspaceRoot, 'demo-project');
-const MAX_FILE_BYTES = 100 * 1024;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['JWT_SECRET'] = 'ssh-preview-route-test-secret-1234567890';
@@ -228,9 +228,9 @@ describe('GET /workspace/file — SSH 远程预览', () => {
     }
   });
 
-  it('远端文本超过 100KB 时截断并标记 truncated', async () => {
+  it('远端文本超过 10MB 上限时返回中文 413（不截断）', async () => {
     seedSshSession(SSH_SESSION_ID, USER_ID);
-    const size = MAX_FILE_BYTES * 2;
+    const size = MAX_FILE_BYTES + 1;
     const readFileBytes = registerSshService('connected', async (_id, _remotePath, options) => {
       const limit = options?.maxBytes ?? size;
       const data = Buffer.alloc(Math.min(size, limit), 97);
@@ -247,11 +247,38 @@ describe('GET /workspace/file — SSH 远程预览', () => {
         headers: { authorization: bearer(app) },
       });
 
+      expect(response.statusCode).toBe(413);
+      const body = response.json() as { error: string };
+      expect(body.error).toContain('10MB');
+      expect(readFileBytes).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('远端文本恰好等于 10MB 上限时完整返回且 truncated 为 false', async () => {
+    seedSshSession(SSH_SESSION_ID, USER_ID);
+    const size = MAX_FILE_BYTES;
+    registerSshService('connected', async (_id, _remotePath, options) => {
+      const limit = options?.maxBytes ?? size;
+      const data = Buffer.alloc(Math.min(size, limit), 97);
+      return { data, size, truncated: false, isDirectory: false };
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent('edge.txt')}` +
+          `&sessionId=${encodeURIComponent(SSH_SESSION_ID)}`,
+        headers: { authorization: bearer(app) },
+      });
+
       expect(response.statusCode).toBe(200);
       const body = response.json() as { content: string; truncated: boolean };
-      expect(body.truncated).toBe(true);
+      expect(body.truncated).toBe(false);
       expect(body.content.length).toBe(MAX_FILE_BYTES);
-      expect(readFileBytes).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
     }
@@ -527,7 +554,7 @@ describe('GET /workspace/file/binary — SSH 远程预览', () => {
     }
   });
 
-  it('远程二进制超过 100KB 时返回中文 413', async () => {
+  it('远程二进制超过 10MB 时返回中文 413', async () => {
     seedSshSession(SSH_SESSION_ID, USER_ID);
     registerSshService('connected', async () => ({
       data: Buffer.alloc(0),
@@ -547,7 +574,9 @@ describe('GET /workspace/file/binary — SSH 远程预览', () => {
       });
 
       expect(response.statusCode).toBe(413);
-      expect(response.json()).toMatchObject({ error: '文件体积超过预览限制，暂不支持预览。' });
+      expect(response.json()).toMatchObject({
+        error: '文件超过 10MB 预览上限，暂不支持预览与编辑。请下载后用本地应用打开。',
+      });
     } finally {
       await app.close();
     }

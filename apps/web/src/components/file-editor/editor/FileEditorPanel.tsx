@@ -2,6 +2,7 @@ import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useStat
 import type { editor as MonacoEditorNs } from 'monaco-editor';
 import type { OpenFile, RevealTarget } from '../../../hooks/editor/useFileEditor.js';
 import { getFilePreviewKind, isNonTextPreviewKind } from '../../../utils/file/file-preview.js';
+import { FILE_PREVIEW_MAX_LABEL } from '../../../utils/file/file-too-large.js';
 import { ContextMenu, type ContextMenuItem } from '../../common/display/ContextMenu.js';
 import {
   ContentContextMenuHost,
@@ -747,10 +748,15 @@ export function FileEditorPanel({
               ) : (
                 <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>当前文件暂不支持预览</span>
               )}
+              {activeFile.truncated && (
+                <span style={{ fontSize: 11, color: 'var(--warning)' }}>
+                  {`文件超过 ${FILE_PREVIEW_MAX_LABEL} 预览上限,预览已截断 · 保存已禁用`}
+                </span>
+              )}
               {saveError && (
                 <span style={{ fontSize: 11, color: 'var(--danger)' }}>{saveError}</span>
               )}
-              {isDirty(activeFile.path) && (
+              {isDirty(activeFile.path) && !activeFile.truncated && (
                 <button
                   type="button"
                   disabled={saving}
@@ -876,6 +882,23 @@ export function FileEditorPanel({
             <polyline points="13 2 13 9 20 9" />
           </svg>
           <span>从左侧文件树选择文件打开</span>
+          {/* 打开失败（例如文件超过 10MB 被网关 413 拒绝）时 activeFile 为空，
+              saveError 在文件工具栏里渲染不到，必须在这里兜底展示，否则用户
+              点击路径后界面完全无反馈。 */}
+          {saveError && (
+            <span
+              role="alert"
+              style={{
+                maxWidth: 420,
+                textAlign: 'center',
+                color: 'var(--danger)',
+                fontSize: 12,
+                lineHeight: 1.6,
+              }}
+            >
+              {saveError}
+            </span>
+          )}
         </div>
       )}
       {contextMenu ? (

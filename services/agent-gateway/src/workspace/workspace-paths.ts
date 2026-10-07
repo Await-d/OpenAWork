@@ -33,8 +33,13 @@ export function assertWorkspacePathSupportedByCurrentHost(path: string): void {
     return;
   }
 
+  // 文案是前端的稳定契约：`WorkspaceFileTreePanel` 用「无法访问 + 路径」判定
+  // 跨主机错误并挂出恢复入口，preview-read-identity.ts 用它判定是否改走 SSH
+  // 身份重试，故前缀不得改写，只在其后补足两条可操作的出路。
   throw new Error(
-    `当前网关运行在 ${currentHostName()}，无法访问 ${pathFlavorName(flavor)} 路径：${path}。请将会话工作区切换到当前设备可访问的目录。`,
+    `当前网关运行在 ${currentHostName()}，无法访问 ${pathFlavorName(flavor)} 路径：${path}。` +
+      '该路径位于其他设备的文件系统上。请将会话工作区切换到当前设备可访问的目录，' +
+      '或用 SSH 远程连接绑定该主机后再访问。',
   );
 }
 

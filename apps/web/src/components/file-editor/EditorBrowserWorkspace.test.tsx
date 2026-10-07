@@ -64,6 +64,71 @@ afterEach(() => {
   useUIStateStore.setState({ browserPreviewSurface: 'editor' });
 });
 
+describe('EditorBrowserWorkspace 预览关闭入口', () => {
+  it('有地址 + 提供写回回调时，浏览器 tab 工具条出现「关闭预览」', () => {
+    renderWorkspace({
+      activeTab: 'browser',
+      alwaysShowBrowserTab: true,
+      browserPreviewUrl: PREVIEW_URL,
+      onBrowserPreviewUrlChange: vi.fn(),
+      onTabChange: vi.fn(),
+    });
+
+    expect(screen.getByRole('button', { name: '关闭预览' })).not.toBeNull();
+  });
+
+  it('点击关闭预览把 null 写回宿主（清空当前工作区地址桶）', () => {
+    const onBrowserPreviewUrlChange = vi.fn();
+
+    renderWorkspace({
+      activeTab: 'browser',
+      alwaysShowBrowserTab: true,
+      browserPreviewUrl: PREVIEW_URL,
+      onBrowserPreviewUrlChange,
+      onTabChange: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
+
+    expect(onBrowserPreviewUrlChange).toHaveBeenCalledWith(null);
+  });
+
+  it('未提供写回回调时不渲染（不给出无法生效的空操作）', () => {
+    renderWorkspace({
+      activeTab: 'browser',
+      alwaysShowBrowserTab: true,
+      browserPreviewUrl: PREVIEW_URL,
+      onTabChange: vi.fn(),
+    });
+
+    expect(screen.queryByRole('button', { name: '关闭预览' })).toBeNull();
+  });
+
+  it('停在代码 tab 时不渲染关闭入口', () => {
+    renderWorkspace({
+      activeTab: 'code',
+      alwaysShowBrowserTab: true,
+      browserPreviewUrl: PREVIEW_URL,
+      onBrowserPreviewUrlChange: vi.fn(),
+      onTabChange: vi.fn(),
+    });
+
+    expect(screen.queryByRole('button', { name: '关闭预览' })).toBeNull();
+  });
+
+  it('无地址时不渲染关闭入口（此时只有地址输入空态）', () => {
+    renderWorkspace({
+      activeTab: 'browser',
+      alwaysShowBrowserTab: true,
+      browserPreviewUrl: null,
+      onBrowserPreviewUrlChange: vi.fn(),
+      onTabChange: vi.fn(),
+    });
+
+    expect(screen.queryByRole('button', { name: '关闭预览' })).toBeNull();
+  });
+});
+
 describe('EditorBrowserWorkspace 浏览器入口', () => {
   it('缺省不改变既有行为：无地址时没有预览子 tab，地址到达后自动挂到唯一浏览器', () => {
     const view = renderWorkspace();

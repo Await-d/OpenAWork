@@ -25,6 +25,12 @@ interface BrowserContentAreaProps {
   iframeRef: RefObject<HTMLIFrameElement | null>;
   activeTabId: string;
   refreshKey: number;
+  /**
+   * 预览作用域（当前 workspace 路径）：并入 iframe 的 key。
+   * BuiltInBrowser 的 tabs 是 keep-alive 的内存状态，仅靠 tabId 无法区分「不同工作区
+   * 下碰巧同 id 的 tab」，跨工作区切换时若不换 key，旧工作区的画面会留在 iframe 里。
+   */
+  frameScopeKey: string;
   hidden: boolean;
   appendLogToActiveTab: (entry: ConsoleEntry) => void;
   consoleOpen: boolean;
@@ -57,6 +63,7 @@ export function BrowserContentArea({
   iframeRef,
   activeTabId,
   refreshKey,
+  frameScopeKey,
   hidden,
   appendLogToActiveTab,
   consoleOpen,
@@ -200,7 +207,7 @@ export function BrowserContentArea({
             >
               <iframe
                 ref={iframeRef}
-                key={`${activeTabId}-${refreshKey}`}
+                key={`${frameScopeKey}-${activeTabId}-${refreshKey}`}
                 src={activeUrl}
                 title="内置浏览器"
                 sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-popups-to-escape-sandbox"

@@ -338,4 +338,71 @@ describe('ChatPage — 会话切换', () => {
     const noticesAfterSwitch = readRenderedNoticeTexts().join('\n');
     expect(noticesAfterSwitch).not.toContain(NOTICE_A_DESCRIPTION);
   });
+
+  it('切到会话 B 后收起预览视图，但保留工作区级预览地址', async () => {
+    const router = renderChatPageAt('/chat/session-a');
+
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_A_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    // 模拟「A 会话里打开过预览」：视图状态停在 browser，一级 tab 停在预览。
+    useUIStateStore.setState({
+      browserActive: true,
+      editorMode: true,
+      editorPaneTabByWorkspace: { '/home/await/project/OpenAWork': 'browser' },
+      browserPreviewUrlByWorkspace: {
+        '/home/await/project/OpenAWork': 'http://localhost:5173',
+      },
+      sidePanelActiveTab: 'preview',
+    });
+
+    await switchToSession(router, '/chat/session-b');
+
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_B_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    const state = useUIStateStore.getState();
+    // 预览视图必须被收起：否则旧会话的页面会永久停在 keep-alive 的预览宿主里。
+    expect(state.editorMode).toBe(false);
+    expect(state.editorPaneTabByWorkspace['/home/await/project/OpenAWork']).toBe('code');
+    expect(state.sidePanelActiveTab).toBe('review');
+    expect(state.browserActive).toBe(false);
+    // 地址桶属于工作区维度记忆，刻意保留。
+    expect(state.browserPreviewUrlByWorkspace['/home/await/project/OpenAWork']).toBe(
+      'http://localhost:5173',
+    );
+  });
+
+  it('首屏挂载不回收预览视图（刷新后仍停在上次预览）', async () => {
+    useUIStateStore.setState({
+      editorMode: true,
+      editorPaneTabByWorkspace: { '/home/await/project/OpenAWork': 'browser' },
+      browserPreviewUrlByWorkspace: {
+        '/home/await/project/OpenAWork': 'http://localhost:5173',
+      },
+      sidePanelActiveTab: 'preview',
+    });
+
+    renderChatPageAt('/chat/session-a');
+
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_A_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    const state = useUIStateStore.getState();
+    expect(state.editorMode).toBe(true);
+    expect(state.editorPaneTabByWorkspace['/home/await/project/OpenAWork']).toBe('browser');
+    expect(state.sidePanelActiveTab).toBe('preview');
+  });
 });

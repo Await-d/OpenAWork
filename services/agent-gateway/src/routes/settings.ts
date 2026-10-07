@@ -106,6 +106,8 @@ interface AuditLogRow {
   input_json: string | null;
   output_json: string | null;
   is_error: number;
+  /** 1 = 该行是「已挂起、等用户交互」（提问 / 审批），不是故障。 */
+  pending_interaction: number | null;
   duration_ms: number | null;
   created_at: string;
 }
@@ -760,11 +762,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
                     audit_logs.input_json,
                     audit_logs.output_json,
                     audit_logs.is_error,
+                    audit_logs.pending_interaction,
                     audit_logs.duration_ms,
                     audit_logs.created_at
              FROM audit_logs
              INNER JOIN sessions ON sessions.id = audit_logs.session_id
              WHERE sessions.user_id = ? AND audit_logs.is_error = 1
+               AND audit_logs.pending_interaction = 0
                AND date(audit_logs.created_at) = date(?)
              ORDER BY audit_logs.created_at DESC
              LIMIT 200`,
@@ -778,11 +782,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
                     audit_logs.input_json,
                     audit_logs.output_json,
                     audit_logs.is_error,
+                    audit_logs.pending_interaction,
                     audit_logs.duration_ms,
                     audit_logs.created_at
              FROM audit_logs
              INNER JOIN sessions ON sessions.id = audit_logs.session_id
              WHERE sessions.user_id = ? AND audit_logs.is_error = 1
+               AND audit_logs.pending_interaction = 0
              ORDER BY audit_logs.created_at DESC
              LIMIT 200`,
             [user.sub],
@@ -819,6 +825,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
          FROM audit_logs
          INNER JOIN sessions ON sessions.id = audit_logs.session_id
          WHERE sessions.user_id = ? AND audit_logs.is_error = 1
+           AND audit_logs.pending_interaction = 0
          ORDER BY date DESC
          LIMIT 90`,
         [user.sub],
@@ -1912,6 +1919,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
                 audit_logs.input_json,
                 audit_logs.output_json,
                 audit_logs.is_error,
+                audit_logs.pending_interaction,
                 audit_logs.duration_ms,
                 audit_logs.created_at
          FROM audit_logs
@@ -1928,20 +1936,29 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         const input = sanitizeAuditPayload(parseStoredJson(row.input_json ?? undefined));
         const output = sanitizeAuditPayload(parseStoredJson(row.output_json ?? undefined));
         const summary = extractAuditSummary(output);
+        // 提问 / 审批这类挂起必须以 is_error=1 落库（模型侧要看到失败才停下来等输入），
+        // 但对人不是故障：降级为 info 保留在日志流里，又不进「待排查问题合计」。
+        const isPendingInteraction = row.pending_interaction === 1;
+        const isError = row.is_error === 1 && !isPendingInteraction;
 
         return {
           id: String(row.id),
           sessionId: row.session_id,
           requestId: row.request_id,
-          level: row.is_error ? 'error' : 'info',
+          level: isError ? 'error' : 'info',
           message:
-            summary ?? (row.is_error ? `${row.tool_name} 执行失败` : `${row.tool_name} 执行完成`),
+            summary ??
+            (isError
+              ? `${row.tool_name} 执行失败`
+              : isPendingInteraction
+                ? `${row.tool_name} 等待用户交互`
+                : `${row.tool_name} 执行完成`),
           toolName: row.tool_name,
           durationMs: row.duration_ms,
           createdAt: row.created_at,
           input,
           output,
-          isError: row.is_error === 1,
+          isError,
           source: 'tool',
         };
       });

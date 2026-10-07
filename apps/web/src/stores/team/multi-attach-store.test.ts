@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunEvent } from '@openAwork/shared';
 import { useMultiAttachStore } from './multi-attach-store.js';
 
@@ -105,5 +105,24 @@ describe('multi-attach-store', () => {
     expect(next.sessions.has(SESSION_ID)).toBe(false);
     expect(next.processedRowIds.has(SESSION_ID)).toBe(false);
     expect(next.pendingEvents.has(SESSION_ID)).toBe(false);
+  });
+
+  it('dispatchEvent 单次写入同时更新 lastRowId 与 lastEventAt，重复 rowId 提前返回', () => {
+    const store = useMultiAttachStore.getState();
+    store.setSessionState(SESSION_ID, 'connected');
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(111);
+    store.dispatchEvent(SESSION_ID, buildTextDelta('hi'), { rowId: 7 });
+
+    const status = useMultiAttachStore.getState().sessions.get(SESSION_ID);
+    expect(status?.lastRowId).toBe(7);
+    expect(status?.lastEventAt).toBe(111);
+
+    nowSpy.mockReturnValue(222);
+    store.dispatchEvent(SESSION_ID, buildTextDelta('hi-again'), { rowId: 7 });
+    expect(useMultiAttachStore.getState().sessions.get(SESSION_ID)?.lastEventAt).toBe(111);
+
+    nowSpy.mockRestore();
   });
 });

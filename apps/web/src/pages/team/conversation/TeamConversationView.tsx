@@ -28,7 +28,6 @@ import { useChatSearch } from '../../../components/chat/search/chat-search-overl
 import { SnapshotRestoreConfirmDialog } from '../../../components/chat/snapshot/SnapshotRestoreConfirmDialog.js';
 import { useSnapshotAwareAction } from '../../../components/chat/snapshot/useSnapshotAwareAction.js';
 import { LatestAssistantMessageContext } from '../../../components/chat/message/collapsible-assistant-content.js';
-import type { ChatRenderGroup } from '../../../components/chat/message/chat-message-group-list.js';
 import type { UnifiedComposerSubmitPayload } from '../../../components/chat/composer/UnifiedComposer.js';
 import type { MentionFileSearchFn } from '../../../components/chat/composer/use-mention-file-search.js';
 import { prepareStandardChatSendInput } from '../../chat-page/conversation/composer/prepare-standard-chat-send-input.js';
@@ -51,7 +50,7 @@ import type { LayerMessages } from './extras/team-layer-messages.js';
 import type { MultiLayerViewMode, ViewMode } from './extras/TeamViewModeToggle.js';
 import { TeamConversationLayerSidePanel } from './TeamConversationLayerSidePanel.js';
 import { useTeamConversationState } from './use-team-conversation-state.js';
-import { buildTeamGroupedMessageEntries } from './build-team-grouped-message-entries.js';
+import { useTeamRenderGroups } from './use-team-render-groups.js';
 import { useTeamRuntimeReferenceViewData } from '../runtime/data/team-runtime-reference-data.js';
 import {
   useClarificationStore,
@@ -233,13 +232,15 @@ export function TeamConversationView({
   );
 
   // 工作区文件读取身份（瞬态 slice）：team 侧同样按 session 写入 / 卸载清空，
-  // 读取消费方才能把 sessionId 带到 `/workspace/file` 上。
+  // 读取消费方才能把 sessionId 带到 `/workspace/file` 上。sshConnectionId 一并
+  // 写入作为回退：会话 SSH 绑定为 unbound 时消费方会用连接身份改读远端，
+  // 见 utils/file/preview-read-identity.ts。
   const setReadIdentity = useUIStateStore((s) => s.setReadIdentity);
   const clearReadIdentity = useUIStateStore((s) => s.clearReadIdentity);
   useEffect(() => {
     setReadIdentity({
       sessionId,
-      sshConnectionId: null,
+      sshConnectionId: mentionSshConnectionId,
       remote: Boolean(mentionSshConnectionId),
     });
   }, [sessionId, mentionSshConnectionId, setReadIdentity]);
@@ -452,6 +453,9 @@ export function TeamConversationView({
    *   1. 每个 assistant 组首注入团队角色身份头（多级角色展示）。
    *   2. 每条消息注入 hover actions：复制 / 编辑重试（user）/ 重试（assistant）。
    *      仅在 composerEnabled（可交互）时注入编辑/重试，避免只读视图出现无效按钮。
+   *
+   * 流式期间只有尾部组重建（见 useTeamRenderGroups 的引用稳定不变量），
+   * 避免逐 token 全列表重渲染。
    */
   const { buildEntryActions } = useTeamConversationViewEntryActions({
     composerEnabled,
@@ -461,26 +465,16 @@ export function TeamConversationView({
     setRetryPrompt,
   });
 
-  const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
-    return buildTeamGroupedMessageEntries({
-      messages: state.messages,
-      subagentNotices: state.subagentNotices,
-      roleLayer: state.roleLayer,
-      resolveInlinePermissionActions,
-      visibleStreaming: state.visibleStreaming,
-      streamBuffer: state.streamBuffer,
-      streamingSegments: state.streamingSegments,
-      buildEntryActions,
-    });
-  }, [
-    state.messages,
-    state.roleLayer,
+  const groupedMessageEntries = useTeamRenderGroups({
+    messages: state.messages,
+    subagentNotices: state.subagentNotices,
+    roleLayer: state.roleLayer,
     resolveInlinePermissionActions,
-    state.visibleStreaming,
-    state.streamBuffer,
-    state.streamingSegments,
+    visibleStreaming: state.visibleStreaming,
+    streamBuffer: state.streamBuffer,
+    streamingSegments: state.streamingSegments,
     buildEntryActions,
-  ]);
+  });
 
   // Provider catalog for the model picker (composer header).
   const providerCatalog = useMemo(

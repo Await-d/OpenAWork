@@ -84,14 +84,12 @@ export const DEFAULT_SUBAGENT_MODEL_POLICY: SubagentModelPolicyRef = { modelMode
  * 前端同时用于数字输入的 min/max 与本地草稿归一，避免保存出无效值。
  */
 export const SUBAGENT_LIMITS_GUARDRAILS = {
-  maxRunningPerRoot: { min: 1, max: 16 },
-  maxTotalPerRoot: { min: 1, max: 200 },
+  maxActivePerRoot: { min: 1, max: 16 },
   maxNestingDepth: { min: 1, max: 8 },
 } as const;
 
 export const DEFAULT_SUBAGENT_LIMITS: SubagentLimitsRef = {
-  maxRunningPerRoot: 4,
-  maxTotalPerRoot: 24,
+  maxActivePerRoot: 4,
   maxNestingDepth: 1,
 };
 
@@ -193,9 +191,25 @@ function readBoundedInteger(
 }
 
 /**
+ * 先读新键 `value`，缺失 / 无法解析时回落历史键 `legacyValue`。
+ *
+ * `readBoundedInteger` 对坏值只回落 `fallback`、不返回 `undefined`，因此用
+ * `NaN` 哨兵把「解析成功」与「走了回落」区分开，否则新键缺失时旧键永远读不到。
+ */
+function readLimitWithLegacyFallback(
+  value: unknown,
+  legacyValue: unknown,
+  bounds: { min: number; max: number },
+  fallback: number,
+): number {
+  const parsed = readBoundedInteger(value, bounds, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : readBoundedInteger(legacyValue, bounds, fallback);
+}
+
+/**
  * 归一子代理数量限制草稿：
  * - 字段缺失 / 越界 → 默认值；
- * - `maxTotalPerRoot < maxRunningPerRoot` → 自动抬升累计上限，与网关落库语义一致。
+ * - 活跃上限兼容历史键 `maxRunningPerRoot`，与网关落库语义一致。
  */
 export function normalizeSubagentLimits(value: unknown): SubagentLimitsRef {
   if (!value || typeof value !== 'object') {
@@ -203,15 +217,12 @@ export function normalizeSubagentLimits(value: unknown): SubagentLimitsRef {
   }
 
   const record = value as Record<string, unknown>;
-  const maxRunningPerRoot = readBoundedInteger(
+  // 兼容历史键 `maxRunningPerRoot`（仅 running 口径）：语义最接近活跃上限。
+  const maxActivePerRoot = readLimitWithLegacyFallback(
+    record['maxActivePerRoot'],
     record['maxRunningPerRoot'],
-    SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot,
-    DEFAULT_SUBAGENT_LIMITS.maxRunningPerRoot,
-  );
-  const maxTotalPerRoot = readBoundedInteger(
-    record['maxTotalPerRoot'],
-    SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot,
-    DEFAULT_SUBAGENT_LIMITS.maxTotalPerRoot,
+    SUBAGENT_LIMITS_GUARDRAILS.maxActivePerRoot,
+    DEFAULT_SUBAGENT_LIMITS.maxActivePerRoot,
   );
   const maxNestingDepth = readBoundedInteger(
     record['maxNestingDepth'],
@@ -220,8 +231,7 @@ export function normalizeSubagentLimits(value: unknown): SubagentLimitsRef {
   );
 
   return {
-    maxRunningPerRoot,
-    maxTotalPerRoot: Math.max(maxTotalPerRoot, maxRunningPerRoot),
+    maxActivePerRoot,
     maxNestingDepth,
   };
 }

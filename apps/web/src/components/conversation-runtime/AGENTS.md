@@ -11,7 +11,7 @@
 
 ```
 conversation-runtime/
-├── stream/        流式协议（use-conversation-stream / stream-recovery / stream-usage / streaming-segments / streaming-thinking）
+├── stream/        流式协议（use-conversation-stream / use-coalesced-stream-setters / stream-recovery / stream-usage / streaming-segments / streaming-thinking）
 ├── attach/        断线重连（use-stream-attach-retry / attach-stream-eligibility / attach-stream-reconnect / attach-stream-reconnect-wiring）
 ├── reveal/        流式逐字显现节奏（streaming-reveal / use-stream-reveal / think-keyword-detector）
 ├── scroll/        滚动管理（use-scroll-manager / scroll-alignment / scroll-constants / scroll-follow-state / use-scroll-intent）
@@ -50,6 +50,12 @@ conversation-runtime/
   `partsFromOrderedAssistantContent`）两条路径必须**同序**；匹配不到 `tool_call` 时在**到达位置**
   插入占位 tool 段（`toolName` 回退字面量 `'tool'`，后续同 `toolCallId` 的 `tool_call_delta`
   原地补齐 name/input），**不得**推到数组末尾，也不得静默丢弃。
+- **高频流式写入必须在协议层合并**：token 级 setter（text / thinking / segments）一律经
+  `stream/use-coalesced-stream-setters.ts` 的「每帧至多一次」提交；同一状态的所有写入方必须
+  共用同一份 coalesced setter——绕过缓冲直写真实 setter 会与帧提交乱序（旧值覆盖新值）。
+  流式帧的消息分组必须保持前缀组对象引用稳定：`messages/group-render-entries.ts` 提供
+  `reconcileChatRenderGroups`（前缀复用 + 边界合并）与 `appendRenderEntryToMessageGroups`
+  （尾部追加），缓存消费方须成对保存 entries / groups 并校验装饰回调 identity。
 
 ## 演进规则
 

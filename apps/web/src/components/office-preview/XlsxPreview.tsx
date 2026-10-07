@@ -14,6 +14,13 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { sanitizeRichHtml } from '../../utils/html/sanitize-rich-html.js';
+
+/**
+ * 单表最多读取的行数。用来限制不可信工作簿的解析与渲染规模（配合下方
+ * `XLSX.read` 的 `sheetRows`），避免一个几十万行的表把主线程卡死。
+ */
+const MAX_SHEET_ROWS = 2_000;
 
 interface SheetData {
   name: string;
@@ -38,15 +45,22 @@ export default function XlsxPreview({ buffer }: XlsxPreviewProps) {
     void (async () => {
       try {
         const XLSX = await import('xlsx');
-        const workbook = XLSX.read(buffer, { type: 'array' });
+        // 依赖当前锁定在 xlsx@0.18.x：该版本对 CVE-2024-22363（ReDoS）与
+        // CVE-2023-30533（原型污染）均未修复，而输入是工作区里可能来自第三方
+        // 仓库的不可信文件。升级 SheetJS 需要评估破坏性变更，因此先用
+        // `sheetRows` 限制单表行数，压缩恶意文件的爆炸半径。
+        const workbook = XLSX.read(buffer, { type: 'array', sheetRows: MAX_SHEET_ROWS });
         const sheets: SheetData[] = workbook.SheetNames.map((name) => {
           const sheet = workbook.Sheets[name];
           if (!sheet) return { name, html: '' };
-          // `sheet_to_html` honours merged cells and Excel formats.
-          const html = XLSX.utils.sheet_to_html(sheet, {
-            id: 'oaw-xlsx-table',
-            editable: false,
-          });
+          // `sheet_to_html` honours merged cells and Excel formats. It does NOT
+          // sanitise, hence the whitelist pass before it reaches the host DOM.
+          const html = sanitizeRichHtml(
+            XLSX.utils.sheet_to_html(sheet, {
+              id: 'oaw-xlsx-table',
+              editable: false,
+            }),
+          );
           return { name, html };
         });
         if (cancelled) return;
@@ -171,7 +185,7 @@ export default function XlsxPreview({ buffer }: XlsxPreviewProps) {
             fontFamily: 'var(--font-mono, monospace)',
             overflow: 'auto',
           }}
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: html comes from SheetJS sheet_to_html, no untrusted user content
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: 已由 sanitizeRichHtml 白名单清洗
           dangerouslySetInnerHTML={{ __html: activeSheetData?.html ?? '' }}
         />
       </div>

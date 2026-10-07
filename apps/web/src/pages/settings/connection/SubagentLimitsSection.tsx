@@ -7,7 +7,7 @@ import {
 import { IS } from '../shared/settings-section-styles.js';
 
 /**
- * 「子代理」区块的数量限制编辑：同时运行上限 / 任务树累计上限 / 嵌套深度上限。
+ * 「子代理」区块的数量限制编辑：同时活跃上限 / 嵌套深度上限。
  *
  * 纯展示 + 受控输入组件——草稿状态与保存由「保存默认值」统一流程接管（与
  * `SubagentModelPolicySection` 同模式）。数值在**下一次子代理派发时**生效：
@@ -31,18 +31,11 @@ interface LimitField {
 
 const LIMIT_FIELDS: readonly LimitField[] = [
   {
-    key: 'maxRunningPerRoot',
-    ariaLabel: '子代理同时运行上限',
-    label: '同时运行上限',
-    hint: `同一任务树中同时运行的子代理数（${SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot.min}–${SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot.max}）。超出后新的委派会被拒绝。`,
-    bounds: SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot,
-  },
-  {
-    key: 'maxTotalPerRoot',
-    ariaLabel: '子代理任务树累计上限',
-    label: '任务树累计上限',
-    hint: `同一任务树下累计创建的子代理数，含已完成（${SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot.min}–${SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot.max}）。`,
-    bounds: SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot,
+    key: 'maxActivePerRoot',
+    ariaLabel: '子代理同时活跃上限',
+    label: '同时活跃上限',
+    hint: `同一任务树中活跃的子代理数，含执行中与待你交互未结束的（${SUBAGENT_LIMITS_GUARDRAILS.maxActivePerRoot.min}–${SUBAGENT_LIMITS_GUARDRAILS.maxActivePerRoot.max}）。子代理完成、失败或取消后名额自动释放。`,
+    bounds: SUBAGENT_LIMITS_GUARDRAILS.maxActivePerRoot,
   },
   {
     key: 'maxNestingDepth',

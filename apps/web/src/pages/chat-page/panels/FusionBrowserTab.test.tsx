@@ -94,6 +94,22 @@ describe('FusionBrowserTab', () => {
     expect(screen.getByTestId('fusion-browser-tab-host')).not.toBeNull();
   });
 
+  it('提供显式关闭入口：清空当前工作区地址并回到空态', () => {
+    useUIStateStore.setState({
+      browserPreviewUrlByWorkspace: { [WORKSPACE_PATH]: PREVIEW_URL },
+    });
+
+    render(
+      <FusionBrowserTab currentSessionId="session-1" effectiveWorkingDirectory={WORKSPACE_PATH} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
+
+    expect(useUIStateStore.getState().browserPreviewUrlByWorkspace[WORKSPACE_PATH]).toBeUndefined();
+    expect(screen.getByText('还没有预览地址')).not.toBeNull();
+    expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
+  });
+
   it('挂载时声明浏览器所有权，卸载时归还编辑器面板', () => {
     useUIStateStore.setState({
       browserPreviewUrlByWorkspace: { [WORKSPACE_PATH]: PREVIEW_URL },

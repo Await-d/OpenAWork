@@ -64,44 +64,54 @@ function writeUserSetting(key: string, value: unknown): void {
 }
 
 describe('resolveSubagentLimitsForUser', () => {
-  it('无任何设置时返回默认值（4 / 24 / 1）', () => {
+  it('无任何设置时返回默认值（4 / 1）', () => {
     expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
-      maxRunningPerRoot: 4,
-      maxTotalPerRoot: 24,
+      maxActivePerRoot: 4,
       maxNestingDepth: 1,
     });
   });
 
   it('读取已保存的完整限制', () => {
     writeUserSetting('subagent_limits', {
-      maxRunningPerRoot: 6,
-      maxTotalPerRoot: 30,
+      maxActivePerRoot: 6,
       maxNestingDepth: 2,
     });
 
     expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
-      maxRunningPerRoot: 6,
-      maxTotalPerRoot: 30,
+      maxActivePerRoot: 6,
       maxNestingDepth: 2,
     });
   });
 
   it('部分字段缺失时逐项回落默认值', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 8 });
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 8 });
 
     expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
-      maxRunningPerRoot: 8,
-      maxTotalPerRoot: 24,
+      maxActivePerRoot: 8,
       maxNestingDepth: 1,
     });
+  });
+
+  it('历史键 maxRunningPerRoot 回落为活跃上限', () => {
+    writeUserSetting('subagent_limits', { maxRunningPerRoot: 8, maxTotalPerRoot: 30 });
+
+    expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
+      maxActivePerRoot: 8,
+      maxNestingDepth: 1,
+    });
+  });
+
+  it('新键优先于历史键 maxRunningPerRoot', () => {
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 5, maxRunningPerRoot: 12 });
+
+    expect(limitsModule.resolveSubagentLimitsForUser(USER_ID).maxActivePerRoot).toBe(5);
   });
 
   it('历史 subagent_depth 键作为嵌套深度回落来源', () => {
     writeUserSetting('subagent_depth', 3);
 
     expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
-      maxRunningPerRoot: 4,
-      maxTotalPerRoot: 24,
+      maxActivePerRoot: 4,
       maxNestingDepth: 3,
     });
   });
@@ -109,8 +119,7 @@ describe('resolveSubagentLimitsForUser', () => {
   it('新键的深度优先于历史键', () => {
     writeUserSetting('subagent_depth', 2);
     writeUserSetting('subagent_limits', {
-      maxRunningPerRoot: 4,
-      maxTotalPerRoot: 24,
+      maxActivePerRoot: 4,
       maxNestingDepth: 5,
     });
 
@@ -119,35 +128,13 @@ describe('resolveSubagentLimitsForUser', () => {
 
   it('越界值收敛到护栏边界', () => {
     writeUserSetting('subagent_limits', {
-      maxRunningPerRoot: 999,
-      maxTotalPerRoot: 999,
+      maxActivePerRoot: 999,
       maxNestingDepth: 99,
     });
 
     expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
-      maxRunningPerRoot: 16,
-      maxTotalPerRoot: 200,
+      maxActivePerRoot: 16,
       maxNestingDepth: 8,
-    });
-  });
-
-  it('低于下限的累计上限收敛到边界后再抬升到并发上限', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 3, maxTotalPerRoot: -1 });
-
-    expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
-      maxRunningPerRoot: 3,
-      maxTotalPerRoot: 3,
-      maxNestingDepth: 1,
-    });
-  });
-
-  it('累计上限小于并发上限时自动抬升累计上限', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 10, maxTotalPerRoot: 5 });
-
-    expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
-      maxRunningPerRoot: 10,
-      maxTotalPerRoot: 10,
-      maxNestingDepth: 1,
     });
   });
 
@@ -158,16 +145,15 @@ describe('resolveSubagentLimitsForUser', () => {
     );
 
     expect(limitsModule.resolveSubagentLimitsForUser(USER_ID)).toEqual({
-      maxRunningPerRoot: 4,
-      maxTotalPerRoot: 24,
+      maxActivePerRoot: 4,
       maxNestingDepth: 1,
     });
   });
 });
 
-describe('getTaskSessionLimitError（用户级可调）', () => {
-  it('并发上限达到时拒绝新委派', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 1, maxTotalPerRoot: 24 });
+describe('getTaskSessionLimitError（同时活跃上限）', () => {
+  it('活跃上限达到时拒绝新委派', () => {
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 1 });
     seedChildSession({
       id: 'child-running',
       createdByTool: 'task',
@@ -177,15 +163,43 @@ describe('getTaskSessionLimitError（用户级可调）', () => {
 
     const message = limitsModule.getTaskSessionLimitError({
       currentSessionId: ROOT_SESSION_ID,
-      isNewChildSession: true,
       userId: USER_ID,
     });
 
-    expect(message).toContain('正在运行的子代理已达到上限（1）');
+    expect(message).toContain('活跃的子代理已达到上限（1）');
   });
 
-  it('提高并发上限后同一场景放行（设置即时生效）', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 2, maxTotalPerRoot: 24 });
+  it('paused（待用户交互、未终结）同样占用活跃名额', () => {
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 1 });
+    seedChildSession({
+      id: 'child-paused',
+      createdByTool: 'task',
+      parentSessionId: ROOT_SESSION_ID,
+      stateStatus: 'paused',
+    });
+
+    expect(
+      limitsModule.getTaskSessionLimitError({
+        currentSessionId: ROOT_SESSION_ID,
+        userId: USER_ID,
+      }),
+    ).toContain('活跃的子代理已达到上限（1）');
+  });
+
+  it('已结束（idle）的子代理不再占用名额——名额可随结束释放', () => {
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 2 });
+    seedChildSession({
+      id: 'child-done-1',
+      createdByTool: 'task',
+      parentSessionId: ROOT_SESSION_ID,
+      stateStatus: 'idle',
+    });
+    seedChildSession({
+      id: 'child-done-2',
+      createdByTool: 'task',
+      parentSessionId: ROOT_SESSION_ID,
+      stateStatus: 'idle',
+    });
     seedChildSession({
       id: 'child-running',
       createdByTool: 'task',
@@ -196,14 +210,32 @@ describe('getTaskSessionLimitError（用户级可调）', () => {
     expect(
       limitsModule.getTaskSessionLimitError({
         currentSessionId: ROOT_SESSION_ID,
-        isNewChildSession: true,
         userId: USER_ID,
       }),
     ).toBeNull();
   });
 
-  it('resume 目标不占并发位（excludeRunningSessionId）', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 1, maxTotalPerRoot: 24 });
+  it('大量已结束的子代理不会像累计上限那样把任务树永久锁死', () => {
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 2 });
+    for (let index = 0; index < 30; index += 1) {
+      seedChildSession({
+        id: `child-done-${index}`,
+        createdByTool: 'task',
+        parentSessionId: ROOT_SESSION_ID,
+        stateStatus: 'idle',
+      });
+    }
+
+    expect(
+      limitsModule.getTaskSessionLimitError({
+        currentSessionId: ROOT_SESSION_ID,
+        userId: USER_ID,
+      }),
+    ).toBeNull();
+  });
+
+  it('提高上限后同一场景放行（设置即时生效）', () => {
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 2 });
     seedChildSession({
       id: 'child-running',
       createdByTool: 'task',
@@ -214,15 +246,31 @@ describe('getTaskSessionLimitError（用户级可调）', () => {
     expect(
       limitsModule.getTaskSessionLimitError({
         currentSessionId: ROOT_SESSION_ID,
-        excludeRunningSessionId: 'child-running',
-        isNewChildSession: true,
         userId: USER_ID,
       }),
     ).toBeNull();
   });
 
-  it('非 task 工具创建的 running 会话不占并发位', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 1, maxTotalPerRoot: 24 });
+  it('resume 目标不占活跃名额（excludeActiveSessionId）', () => {
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 1 });
+    seedChildSession({
+      id: 'child-running',
+      createdByTool: 'task',
+      parentSessionId: ROOT_SESSION_ID,
+      stateStatus: 'running',
+    });
+
+    expect(
+      limitsModule.getTaskSessionLimitError({
+        currentSessionId: ROOT_SESSION_ID,
+        excludeActiveSessionId: 'child-running',
+        userId: USER_ID,
+      }),
+    ).toBeNull();
+  });
+
+  it('非 task 工具创建的 running 会话不占活跃名额', () => {
+    writeUserSetting('subagent_limits', { maxActivePerRoot: 1 });
     seedChildSession({
       id: 'handoff-child',
       parentSessionId: ROOT_SESSION_ID,
@@ -232,55 +280,6 @@ describe('getTaskSessionLimitError（用户级可调）', () => {
     expect(
       limitsModule.getTaskSessionLimitError({
         currentSessionId: ROOT_SESSION_ID,
-        isNewChildSession: true,
-        userId: USER_ID,
-      }),
-    ).toBeNull();
-  });
-
-  it('累计上限达到时拒绝新建（已完成子会话同样计入）', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 2, maxTotalPerRoot: 2 });
-    seedChildSession({
-      id: 'child-done-1',
-      createdByTool: 'task',
-      parentSessionId: ROOT_SESSION_ID,
-      stateStatus: 'idle',
-    });
-    seedChildSession({
-      id: 'child-done-2',
-      createdByTool: 'task',
-      parentSessionId: ROOT_SESSION_ID,
-      stateStatus: 'idle',
-    });
-
-    const message = limitsModule.getTaskSessionLimitError({
-      currentSessionId: ROOT_SESSION_ID,
-      isNewChildSession: true,
-      userId: USER_ID,
-    });
-
-    expect(message).toContain('子代理数量已达到上限（2）');
-  });
-
-  it('resume（isNewChildSession=false）不受累计上限约束', () => {
-    writeUserSetting('subagent_limits', { maxRunningPerRoot: 2, maxTotalPerRoot: 2 });
-    seedChildSession({
-      id: 'child-done-1',
-      createdByTool: 'task',
-      parentSessionId: ROOT_SESSION_ID,
-      stateStatus: 'idle',
-    });
-    seedChildSession({
-      id: 'child-done-2',
-      createdByTool: 'task',
-      parentSessionId: ROOT_SESSION_ID,
-      stateStatus: 'idle',
-    });
-
-    expect(
-      limitsModule.getTaskSessionLimitError({
-        currentSessionId: ROOT_SESSION_ID,
-        isNewChildSession: false,
         userId: USER_ID,
       }),
     ).toBeNull();

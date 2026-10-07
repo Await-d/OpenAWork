@@ -15,6 +15,7 @@
 import { useEffect, useRef } from 'react';
 import { HttpError, createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
+import { WORKSPACE_INDEX_CHANGED_EVENT } from '../../../../../utils/file/file-preview.js';
 
 /** 默认轮询间隔：兼顾「接近实时」与请求量，2500ms 足以覆盖常见的写盘节奏。 */
 export const WORKSPACE_INDEX_REFRESH_DEFAULT_INTERVAL_MS = 2500;
@@ -118,6 +119,13 @@ export function useWorkspaceIndexRefresh({
         if (version !== lastVersion) {
           // 网关版本是进程内计数器，重启后会归零；「变小」同样视为变化。
           lastVersion = version;
+          // 广播给 hover 文件预览等内容缓存：此前这些缓存没有任何生产代码会
+          // 失效，Agent 写盘后重复 hover 仍显示旧内容。
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent(WORKSPACE_INDEX_CHANGED_EVENT, { detail: { version } }),
+            );
+          }
           onChangeRef.current();
         }
       } catch (error) {

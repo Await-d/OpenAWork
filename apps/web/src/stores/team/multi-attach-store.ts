@@ -52,7 +52,10 @@ interface MultiAttachStoreState {
   /** 注册事件处理器 */
   registerHandler: (sessionId: string, handler: RunEventHandler) => () => void;
 
-  /** 分发事件到对应 session 的所有处理器（带 rowId 去重） */
+  /**
+   * 分发事件到对应 session 的所有处理器（带 rowId 去重）。
+   * 去重标记与 lastRowId / lastEventAt 在同一次 set 内更新，调用方无需再单独写。
+   */
   dispatchEvent: (
     sessionId: string,
     event: RunEvent,
@@ -145,27 +148,44 @@ export const useMultiAttachStore = create<MultiAttachStoreState>((set, get) => (
     // R-2 fix: deduplicate by rowId — if multiple TeamConversationView
     // instances are mounted for the same session, each registers a handler.
     // Without dedup, the same text_delta would be accumulated N times.
-    if (meta.rowId > 0) {
-      const processed = get().processedRowIds.get(sessionId) ?? new Set<number>();
-      if (processed.has(meta.rowId)) {
-        return; // Already dispatched to handlers
-      }
-      processed.add(meta.rowId);
-      // Cap the set to prevent unbounded growth (keep last 1000)
-      if (processed.size > 1000) {
-        const toRemove = processed.size - 1000;
-        const iter = processed.values();
-        for (let i = 0; i < toRemove; i++) {
-          const val = iter.next().value;
-          if (val !== undefined) processed.delete(val);
-        }
-      }
-      set((state) => {
-        const next = new Map(state.processedRowIds);
-        next.set(sessionId, processed);
-        return { processedRowIds: next };
-      });
+    if (meta.rowId > 0 && get().processedRowIds.get(sessionId)?.has(meta.rowId)) {
+      return; // Already dispatched to handlers
     }
+
+    // 流式事件逐条到达：去重标记 + lastRowId + lastEventAt 合并进同一次 set，
+    // 避免每个事件触发 3 次 store 写入、反复通知订阅者。
+    const receivedAt = Date.now();
+    set((state) => {
+      let processedRowIds = state.processedRowIds;
+      if (meta.rowId > 0) {
+        const processed = state.processedRowIds.get(sessionId) ?? new Set<number>();
+        processed.add(meta.rowId);
+        // Cap the set to prevent unbounded growth (keep last 1000)
+        if (processed.size > 1000) {
+          const toRemove = processed.size - 1000;
+          const iter = processed.values();
+          for (let i = 0; i < toRemove; i++) {
+            const val = iter.next().value;
+            if (val !== undefined) processed.delete(val);
+          }
+        }
+        processedRowIds = new Map(state.processedRowIds);
+        processedRowIds.set(sessionId, processed);
+      }
+
+      let sessions = state.sessions;
+      const status = state.sessions.get(sessionId);
+      if (status) {
+        sessions = new Map(state.sessions);
+        sessions.set(sessionId, {
+          ...status,
+          lastRowId: meta.rowId > 0 ? Math.max(status.lastRowId, meta.rowId) : status.lastRowId,
+          lastEventAt: receivedAt,
+        });
+      }
+
+      return { processedRowIds, sessions };
+    });
 
     const handlers = get().handlers.get(sessionId);
     if (!handlers || handlers.size === 0) {

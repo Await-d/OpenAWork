@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import type { ChatMessage, ChatUsageDetails } from '../../conversation-runtime/messages/support.js';
 import {
@@ -179,7 +180,7 @@ function buildAssistantFallbackMetaItem(
   return { label: '助手回复' };
 }
 
-export function MessageRow({
+export const MessageRow = React.memo(function MessageRow({
   message,
   providerId,
   providerName,
@@ -211,16 +212,22 @@ export function MessageRow({
   usageDetails?: ChatUsageDetails;
 }) {
   const isUser = message.role === 'user';
-  const showMessageTimestamps = useDisplayPreferencesStore((s) => s.showMessageTimestamps);
-  const showModelNamePref = useDisplayPreferencesStore((s) => s.showModelName);
-  const showProviderLabelPref = useDisplayPreferencesStore((s) => s.showProviderLabel);
-  const showDurationPref = useDisplayPreferencesStore((s) => s.showDuration);
-  const showStopReasonPref = useDisplayPreferencesStore((s) => s.showStopReason);
-  const showTokenBreakdownPref = useDisplayPreferencesStore((s) => s.showTokenBreakdown);
-  const showEstimatedTokensPref = useDisplayPreferencesStore((s) => s.showEstimatedTokens);
-  const showRequestIndexPref = useDisplayPreferencesStore((s) => s.showRequestIndex);
-  const showToolCountPref = useDisplayPreferencesStore((s) => s.showToolCount);
-  const showMetaLinePref = useDisplayPreferencesStore((s) => s.showMetaLine);
+  // 单一订阅 + shallow 比较：每行从 10 个 store 订阅降为 1 个。长列表（未虚拟化
+  // 的会话可达数百行）下订阅数量随行数线性放大，这是 memo 之外的第二重列表成本。
+  const messageRowPrefs = useDisplayPreferencesStore(
+    useShallow((s) => ({
+      showDuration: s.showDuration,
+      showEstimatedTokens: s.showEstimatedTokens,
+      showMessageTimestamps: s.showMessageTimestamps,
+      showMetaLine: s.showMetaLine,
+      showModelName: s.showModelName,
+      showProviderLabel: s.showProviderLabel,
+      showRequestIndex: s.showRequestIndex,
+      showStopReason: s.showStopReason,
+      showTokenBreakdown: s.showTokenBreakdown,
+      showToolCount: s.showToolCount,
+    })),
+  );
   const resolvedProviderId = message.providerId?.trim() || providerId.trim();
   const resolvedProviderIdentity = resolveProviderIdentity({
     providerId: resolvedProviderId,
@@ -236,10 +243,10 @@ export function MessageRow({
   const resolvedCurrentUserDisplayName = currentUserDisplayName?.trim();
   const displayName = isUser
     ? overrideDisplayName || resolvedCurrentUserDisplayName || email || '你'
-    : overrideDisplayName || (showModelNamePref ? assistantModelLabel : '助手');
+    : overrideDisplayName || (messageRowPrefs.showModelName ? assistantModelLabel : '助手');
 
   // 使用动态相对时间（"2分钟前"），而不是固定时间（"14:30"）
-  const relativeTime = useRelativeTime(message.createdAt, showMessageTimestamps);
+  const relativeTime = useRelativeTime(message.createdAt, messageRowPrefs.showMessageTimestamps);
   // 绝对时间用于 hover title
   const absoluteTime =
     message.createdAt !== undefined
@@ -281,12 +288,12 @@ export function MessageRow({
         usageDetails,
         durationLabel,
         stopReasonLabel,
-        showDuration: showDurationPref,
-        showStopReason: showStopReasonPref,
-        showTokenBreakdown: showTokenBreakdownPref,
-        showEstimatedTokens: showEstimatedTokensPref,
-        showRequestIndex: showRequestIndexPref,
-        showToolCount: showToolCountPref,
+        showDuration: messageRowPrefs.showDuration,
+        showStopReason: messageRowPrefs.showStopReason,
+        showTokenBreakdown: messageRowPrefs.showTokenBreakdown,
+        showEstimatedTokens: messageRowPrefs.showEstimatedTokens,
+        showRequestIndex: messageRowPrefs.showRequestIndex,
+        showToolCount: messageRowPrefs.showToolCount,
       })
     : [];
 
@@ -372,11 +379,13 @@ export function MessageRow({
               >
                 {displayName}
               </div>
-              {presentationMode !== 'team' && showProviderLabelPref && providerLabel && (
-                <span className="chat-message-provider-pill" style={agentPillStyle}>
-                  {providerLabel}
-                </span>
-              )}
+              {presentationMode !== 'team' &&
+                messageRowPrefs.showProviderLabel &&
+                providerLabel && (
+                  <span className="chat-message-provider-pill" style={agentPillStyle}>
+                    {providerLabel}
+                  </span>
+                )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {actions && actions.length > 0 && (
@@ -414,7 +423,7 @@ export function MessageRow({
                   ))}
                 </div>
               )}
-              {showMessageTimestamps && relativeTime && (
+              {messageRowPrefs.showMessageTimestamps && relativeTime && (
                 <div className="chat-message-timestamp" title={absoluteTime ?? undefined}>
                   {relativeTime}
                 </div>
@@ -434,11 +443,11 @@ export function MessageRow({
             {renderContent(message)}
           </div>
         </div>
-        {showMetaLinePref && metaItems.length > 0 && <MetaLine items={metaItems} />}
+        {messageRowPrefs.showMetaLine && metaItems.length > 0 && <MetaLine items={metaItems} />}
       </div>
     </article>
   );
-}
+});
 
 function formatCompactTokenCount(value: number): string {
   if (value >= 1_000_000) {

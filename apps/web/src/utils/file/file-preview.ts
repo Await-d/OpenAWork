@@ -1,5 +1,18 @@
+import {
+  PREVIEW_ISOLATION_NOTE,
+  PREVIEW_SANDBOX,
+  stripActivePreviewContent,
+} from './sanitize-preview-html.js';
+
 export const DEFAULT_FILE_PREVIEW_HEIGHT = 280;
 export const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
+
+/**
+ * 工作区文件索引版本变化事件。索引轮询（`use-workspace-index-refresh`）在检测到
+ * 版本变化时派发，hover 文件预览据此立即失效内容缓存——否则 Agent 写盘后
+ * 重复 hover 仍会显示旧内容。
+ */
+export const WORKSPACE_INDEX_CHANGED_EVENT = 'oaw-workspace-index-changed';
 
 export type FilePreviewKind =
   | 'html'
@@ -60,7 +73,15 @@ export function getFilePreviewKind(path: string): FilePreviewKind | null {
     ext === 'gif' ||
     ext === 'webp' ||
     ext === 'bmp' ||
-    ext === 'ico'
+    ext === 'ico' ||
+    // 补齐常见位图格式：此前 avif / heic / jfif / apng 会落到下面的 null 分支，
+    // 走 readFile 的 utf-8 解码，正是这里要避免的二进制乱码。
+    // 注意不加 svgz：它是 gzip 压缩的 SVG，浏览器无法直接解码，会显示坏图。
+    ext === 'avif' ||
+    ext === 'heic' ||
+    ext === 'heif' ||
+    ext === 'jfif' ||
+    ext === 'apng'
   ) {
     return 'image';
   }
@@ -157,7 +178,7 @@ function isFullHtmlDocument(code: string): boolean {
 }
 
 function buildFullPagePreview(code: string): string {
-  const safe = stripScriptTags(code);
+  const safe = stripActivePreviewContent(code);
   const baseTag = '<base href="about:srcdoc" target="_blank">';
 
   if (/<head[\s>]/iu.test(safe)) {
@@ -180,7 +201,7 @@ export function buildPreviewDocument(previewKind: FilePreviewKind, code: string)
     return buildFullPagePreview(code);
   }
 
-  const safeCode = previewKind === 'html' ? stripScriptTags(code) : code;
+  const safeCode = previewKind === 'html' ? stripActivePreviewContent(code) : code;
   const previewBody =
     previewKind === 'css'
       ? buildCssPreviewBody()
@@ -345,11 +366,11 @@ export function getPreviewNote(previewKind: FilePreviewKind): string {
     return 'JSON 数据格式化展示，支持折叠和语法高亮。';
   }
 
-  return '安全沙箱预览：用户脚本已移除，外链将在新窗口打开。';
+  return PREVIEW_ISOLATION_NOTE;
 }
 
 export function getPreviewSandbox(_previewKind: FilePreviewKind): string {
-  return 'allow-scripts';
+  return PREVIEW_SANDBOX;
 }
 
 function escapeForStyleTag(code: string): string {
@@ -358,12 +379,6 @@ function escapeForStyleTag(code: string): string {
 
 function escapeForInlineScript(code: string): string {
   return code.replace(/<\/script/giu, '<\\/script');
-}
-
-function stripScriptTags(html: string): string {
-  return html
-    .replace(/<script[\s>][\s\S]*?<\/script\s*>/giu, '')
-    .replace(/<script[^>]*\/\s*>/giu, '');
 }
 
 function buildCssPreviewBody(): string {

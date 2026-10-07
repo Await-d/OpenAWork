@@ -419,6 +419,26 @@ button.fusion-side-panel__file-row:focus-visible {
 
 /* ─── 浏览器预览 tab（移动端底部面板） ───────────────────────────── */
 
+/* 外层只做「工具条 + 浏览器」的纵向排布：浏览器本体仍由 browser-host 承载，
+   保持它的 flex:1 契约不变。 */
+.fusion-side-panel__browser-wrap {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fusion-side-panel__browser-bar {
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  padding: var(--spacing-1) var(--spacing-2);
+}
+
 .fusion-side-panel__browser-host {
   display: flex;
   flex: 1;

@@ -22,7 +22,8 @@ import { requireOwnedSshSession } from '../ssh/ssh-session-ownership.js';
 import { getSshService } from '../ssh/ssh-service.js';
 import { normalizeSshRemoteWorkingDirectory } from '../session/session-workspace-metadata.js';
 
-const SSH_FILE_TOO_LARGE_MESSAGE = '文件体积超过预览限制，暂不支持预览。';
+const SSH_FILE_TOO_LARGE_MESSAGE =
+  '文件超过 10MB 预览上限，暂不支持预览与编辑。请下载后用本地应用打开。';
 const SSH_PATH_NOT_FILE_MESSAGE = '目标路径不是文件。';
 const SSH_FILE_NOT_FOUND_MESSAGE = '目标文件不存在。';
 const SSH_SESSION_FORBIDDEN_MESSAGE = '会话不存在或无权访问。';
@@ -167,7 +168,12 @@ export interface RemoteTextFile {
   truncated: boolean;
 }
 
-/** 读取远端文本文件；目录 / 不存在映射为明确的 4xx。 */
+/**
+ * 读取远端文本文件；目录 / 不存在映射为明确的 4xx，超过预览上限 → 413。
+ *
+ * 超限**拒绝**而非截断：与本地端点保持同一口径。截断内容一旦成为编辑基线，
+ * 保存就会把远端源文件写短。
+ */
 export async function readRemoteTextFile(
   context: SshRemoteExecutionContext,
   remotePath: string,
@@ -181,11 +187,12 @@ export async function readRemoteTextFile(
     throw error;
   }
   if (result.isDirectory) throw new SshPreviewError(400, SSH_PATH_NOT_FILE_MESSAGE);
+  if (result.size > maxBytes) throw new SshPreviewError(413, SSH_FILE_TOO_LARGE_MESSAGE);
 
   return {
     path: remotePath,
     content: result.data.toString('utf8'),
-    truncated: result.truncated || result.size > maxBytes,
+    truncated: false,
   };
 }
 

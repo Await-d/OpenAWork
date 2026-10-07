@@ -25,6 +25,11 @@ import {
 } from './markdown-image.js';
 import { extractMarkdownImageUrls } from './markdown-image-urls.js';
 import { tryOpenLinkPreview } from '../../../utils/preview/link-preview.js';
+import {
+  PREVIEW_ISOLATION_NOTE,
+  PREVIEW_SANDBOX,
+  stripActivePreviewContent,
+} from '../../../utils/file/sanitize-preview-html.js';
 import { tokenizePathsInText } from '../tool-call/shared/tokenize-paths.js';
 import { normalizeAssistantMarkdown } from './normalize-markdown.js';
 import { MermaidPreviewCodeBlock } from './mermaid-preview-code-block.js';
@@ -698,7 +703,7 @@ const RESIZE_SCRIPT = `<script>
 </script>`;
 
 function buildFullPagePreview(code: string): string {
-  const safe = stripScriptTags(code);
+  const safe = stripActivePreviewContent(code);
   const baseTag = '<base href="about:srcdoc" target="_blank">';
 
   if (/<head[\s>]/iu.test(safe)) {
@@ -721,7 +726,8 @@ function buildPreviewDocument(previewKind: StaticPreviewKind, code: string): str
     return buildFullPagePreview(code);
   }
 
-  const safeCode = previewKind === 'html' || previewKind === 'svg' ? stripScriptTags(code) : code;
+  const safeCode =
+    previewKind === 'html' || previewKind === 'svg' ? stripActivePreviewContent(code) : code;
   const previewBody =
     previewKind === 'css'
       ? buildCssPreviewBody()
@@ -819,12 +825,6 @@ function escapeForInlineScript(code: string): string {
   return code.replace(/<\/script/giu, '<\\/script');
 }
 
-function stripScriptTags(html: string): string {
-  return html
-    .replace(/<script[\s>][\s\S]*?<\/script\s*>/giu, '')
-    .replace(/<script[^>]*\/\s*>/giu, '');
-}
-
 function buildCssPreviewBody(): string {
   return `<main class="oa-css-preview-shell">
   <section class="oa-css-preview-hero">
@@ -917,11 +917,11 @@ function getPreviewNote(previewKind: StaticPreviewKind): string {
     return '直接在白底沙箱中渲染矢量内容，便于检查图标与图示。';
   }
 
-  return '安全沙箱预览：用户脚本已移除，外链将在新窗口打开。';
+  return PREVIEW_ISOLATION_NOTE;
 }
 
 function getPreviewSandbox(_previewKind: StaticPreviewKind): string {
-  return 'allow-scripts';
+  return PREVIEW_SANDBOX;
 }
 
 const MARKDOWN_PREVIEW_COLLAPSED_HEIGHT = 300;
@@ -1096,6 +1096,15 @@ function StaticPreviewCodeBlock({
       event.data === null ||
       event.data.type !== PREVIEW_RESIZE_MSG_TYPE
     ) {
+      return;
+    }
+
+    // 必须校验来源：监听挂在 window 上，页面里任何一个第三方 iframe 都能
+    // postMessage 伪造高度消息驱动预览框布局。这里用 `event.source` 与本组件
+    // 自己的 iframe 比对（srcdoc iframe 的 origin 是不透明源，"null"，无法用
+    // origin 判定），同时把高度 clamp 在合法区间内。
+    const frame = iframeRef.current;
+    if (!frame || event.source !== frame.contentWindow) {
       return;
     }
 

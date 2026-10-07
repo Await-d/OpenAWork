@@ -190,6 +190,11 @@ export function EditorBrowserWorkspace({
   // 移动端保持原工具条（子 tab + 内建全屏按钮）。
   const showToolbar = !hidePaneTabs && (showBrowserTab || !!onToggleFullScreen);
 
+  // 「关闭预览」只在浏览器 tab 真的有地址时出现：清空 URL 桶即回到空态，
+  // 这是预览唯一能被用户主动收掉的出口（预览宿主是 keep-alive，不会自动卸载）。
+  const showBrowserCloseAction =
+    effectiveTab === 'browser' && !!browserPreviewUrl && !!onBrowserPreviewUrlChange;
+
   return (
     <div
       style={{
@@ -261,6 +266,44 @@ export function EditorBrowserWorkspace({
               />
             </>
           )}
+
+          {showBrowserCloseAction && onBrowserPreviewUrlChange ? (
+            <button
+              type="button"
+              onClick={() => onBrowserPreviewUrlChange(null)}
+              title="关闭预览"
+              aria-label="关闭预览"
+              style={{
+                marginLeft: 'auto',
+                width: 26,
+                height: 26,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 6,
+                border: '1px solid transparent',
+                background: 'transparent',
+                color: 'var(--fg-muted)',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              <svg
+                aria-hidden="true"
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          ) : null}
 
           {onToggleFullScreen && (
             <button

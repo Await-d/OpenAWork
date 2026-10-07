@@ -1741,15 +1741,6 @@ export async function executeToolCalls(input: {
       ) {
         parsedInput['prompt'] = NOTEPAD_DIRECTIVE + parsedInput['prompt'];
       }
-
-      // Non-interactive env (oh-my-opencode non-interactive-env pattern):
-      // Prepend env vars to git commands in non-interactive environments.
-      if (canonicalToolName === 'bash' && typeof parsedInput['command'] === 'string') {
-        const niCheck = checkNonInteractiveBash(parsedInput['command']);
-        if (niCheck.modifiedCommand) {
-          parsedInput['command'] = niCheck.modifiedCommand;
-        }
-      }
     }
 
     // Doom loop detection (mirrors opencode processor.ts):

@@ -65,18 +65,30 @@ function isWithinWorkspace(candidate: string, workspaceRoot: string): boolean {
 
 const REMOTE_BARE_NAME_SEARCH_LIMIT = 20;
 
+/** 解析结果缓存条目上限：超出后淘汰最旧写入，避免长会话无界增长。 */
+const MAX_RESOLUTION_CACHE_ENTRIES = 200;
+
+/**
+ * 择一规则：段数最少优先，段数相同时按字典序。
+ *
+ * 本地与远端分支必须共用这一条。此前本地按「字符串长度」、远端按「段数」，
+ * 同一个裸文件名在两侧会解析到不同的目标文件。
+ */
+function pickLeastSegments(paths: readonly string[]): string | null {
+  if (paths.length === 0) return null;
+  const sorted = [...paths].sort((left, right) => {
+    const segmentDelta = left.split('/').length - right.split('/').length;
+    return segmentDelta !== 0 ? segmentDelta : left.localeCompare(right);
+  });
+  return sorted[0] ?? null;
+}
+
 /**
  * 从远端索引返回的相对路径中挑出 basename 恰好等于 `bareName` 的最短路径：
  * 段数最少者优先，段数相同按字典序，确保同一输入得到确定结果。
  */
 function pickShortestBareNameMatch(files: readonly string[], bareName: string): string | null {
-  const matches = files.filter((file) => file.split('/').pop() === bareName);
-  if (matches.length === 0) return null;
-  const sorted = [...matches].sort((left, right) => {
-    const segmentDelta = left.split('/').length - right.split('/').length;
-    return segmentDelta !== 0 ? segmentDelta : left.localeCompare(right);
-  });
-  return sorted[0] ?? null;
+  return pickLeastSegments(files.filter((file) => file.split('/').pop() === bareName));
 }
 
 /**
@@ -114,12 +126,17 @@ export interface ResolveBareFilenameInput {
   token: string;
   workspaceRoot: string | null;
   rawPath: string;
+  /**
+   * @deprecated 有意忽略。见 `resolveBareFilename` 内注释：共享的 inflight
+   * 请求不能被任一调用方的 signal 取消，否则所有等待方都会拿到裸名回退值。
+   * 调用方需要放弃等待时，请使用自己的取消标志。
+   */
   signal?: AbortSignal;
   identity?: WorkspaceReadIdentity | null;
 }
 
 export async function resolveBareFilename(input: ResolveBareFilenameInput): Promise<string> {
-  const { client, token, workspaceRoot, rawPath, signal, identity } = input;
+  const { client, token, workspaceRoot, rawPath, identity } = input;
 
   const isCompletePath = rawPath.startsWith('/') || rawPath.includes('/');
   if (isCompletePath) return rawPath;
@@ -147,31 +164,28 @@ export async function resolveBareFilename(input: ResolveBareFilenameInput): Prom
           root,
           bareName: rawPath,
           identity,
-          ...(signal ? { signal } : {}),
         });
         // 搜索失败 / 无命中不缓存：远端索引可能仍在构建，交给下一次重试；
         // 回退裸名让 readFile 用用户点击的原始 token 报 404。
         if (remoteHit === null) return rawPath;
         picked = remoteHit;
       } else {
-        const initOptions: { maxResults?: number; signal?: AbortSignal } = {
-          maxResults: 16,
-        };
-        if (signal) initOptions.signal = signal;
-        const hits = await client.findByName(token, rawPath, root, initOptions);
+        const hits = await client.findByName(token, rawPath, root, { maxResults: 16 });
         // Defence-in-depth: drop any hit not inside the requested root.
         // Server-side validateWorkspacePath should already prevent this,
         // but we don't trust it to ensure cross-workspace isolation
         // matters here.
         const safeHits = hits.filter((h) => isWithinWorkspace(h.path, root));
-        // Prefer the shortest matching path (closer to the root, less
-        // likely to be a vendored / nested duplicate of the same name).
-        picked =
-          safeHits.length > 0
-            ? (safeHits.sort((a, b) => a.path.length - b.path.length)[0]?.path ?? rawPath)
-            : rawPath;
+        picked = pickLeastSegments(safeHits.map((h) => h.path)) ?? rawPath;
       }
       resolutionCache.set(key, { resolved: picked, ts: Date.now() });
+      if (resolutionCache.size > MAX_RESOLUTION_CACHE_ENTRIES) {
+        // Map 保持插入序，淘汰最早写入的一条即可形成 LRU 上界。
+        const oldest = resolutionCache.keys().next();
+        if (!oldest.done) {
+          resolutionCache.delete(oldest.value);
+        }
+      }
       return picked;
     } catch {
       // Don't cache failures so the next attempt retries; just

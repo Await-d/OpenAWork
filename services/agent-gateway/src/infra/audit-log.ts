@@ -19,6 +19,14 @@ export interface WriteAuditLogOptions {
   /** 需包含 `message` 字段以被前端 `extractAuditSummary` 正确提取 */
   output?: unknown;
   isError?: boolean;
+  /**
+   * 该行是否属于「工具已挂起、等用户交互」而非真正的失败。
+   *
+   * 权限审批 / 提问 / 计划审批都必须以 `isError: true` 返回给模型（让模型停下
+   * 等输入），于是它们会混进 `/settings/diagnostics` 与开发日志，把排障包的
+   * 「待排查问题合计」撑成一个假的高水位。标记后由读侧过滤，数据仍留库可查。
+   */
+  pendingInteraction?: boolean;
   durationMs?: number | null;
 }
 
@@ -163,7 +171,7 @@ export function __setAuditLogRetentionForTesting(
 export function writeAuditLog(options: WriteAuditLogOptions): void {
   try {
     sqliteRun(
-      'INSERT INTO audit_logs (session_id, tool_name, request_id, input_json, output_json, is_error, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO audit_logs (session_id, tool_name, request_id, input_json, output_json, is_error, pending_interaction, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         options.sessionId,
         resolveToolNameColumn(options.category, options.sourceName),
@@ -171,6 +179,7 @@ export function writeAuditLog(options: WriteAuditLogOptions): void {
         safeStringify(options.input),
         safeStringify(options.output),
         (options.isError ?? true) ? 1 : 0,
+        options.pendingInteraction ? 1 : 0,
         options.durationMs ?? null,
       ],
     );

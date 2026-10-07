@@ -42,6 +42,7 @@ import type { ChatSettingsProvider } from '../../../utils/chat/chat-session-defa
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useScrollManager } from '../../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useStreamReveal } from '../../../components/conversation-runtime/reveal/use-stream-reveal.js';
+import { useCoalescedStreamSetters } from '../../../components/conversation-runtime/stream/use-coalesced-stream-setters.js';
 import { useTeamConversationProviders } from './use-team-conversation-state-providers.js';
 import { useTeamConversationSnapshot } from './use-team-conversation-state-snapshot.js';
 import { useTeamConversationStreaming } from './use-team-conversation-state-streaming.js';
@@ -104,10 +105,12 @@ export function useTeamConversationState(
   // ─── 消息 + 流式 ────────────────────────────────────────────────
   const [streaming, setStreaming] = useState(false);
   const [stoppingStream, setStoppingStream] = useState(false);
-  const [streamBuffer, setStreamBuffer] = useState('');
-  const [streamThinkingBuffer, setStreamThinkingBuffer] = useState('');
-  const [streamThinkingBlocks, setStreamThinkingBlocks] = useState<StreamingThinkingBlock[]>([]);
-  const [streamingSegments, setStreamingSegments] = useState<ChatMessagePart[]>([]);
+  const [streamBuffer, setStreamBufferState] = useState('');
+  const [streamThinkingBuffer, setStreamThinkingBufferState] = useState('');
+  const [streamThinkingBlocks, setStreamThinkingBlocksState] = useState<StreamingThinkingBlock[]>(
+    [],
+  );
+  const [streamingSegments, setStreamingSegmentsState] = useState<ChatMessagePart[]>([]);
   const [reportedStreamUsage, setReportedStreamUsage] = useState<ChatBackendUsageSnapshot | null>(
     null,
   );
@@ -116,6 +119,22 @@ export function useTeamConversationState(
   const [, setActiveStreamStartedAt] = useState<number | null>(null);
   const [, setActiveStreamFirstTokenLatencyMs] = useState<number | null>(null);
   const [, setLatestUpstreamSummary] = useState<UpstreamStreamSummary | null>(null);
+
+  // ─── 流式写入合并 ────────────────────────────────────────────────
+  // token 级 setter 统一走「每帧至多一次」的合并提交；同一状态的所有写入方
+  // （stream consumer / snapshot reload / reveal 复位）都必须使用这一份 setter，
+  // 绕过缓冲直接调用真实 setter 会与帧提交乱序（旧值覆盖新值）。
+  const {
+    setStreamBuffer,
+    setStreamThinkingBuffer,
+    setStreamThinkingBlocks,
+    setStreamingSegments,
+  } = useCoalescedStreamSetters({
+    setStreamBuffer: setStreamBufferState,
+    setStreamThinkingBuffer: setStreamThinkingBufferState,
+    setStreamThinkingBlocks: setStreamThinkingBlocksState,
+    setStreamingSegments: setStreamingSegmentsState,
+  });
 
   // ─── composer ─────────────────────────────────────────────────────
   const [input, setInput] = useState('');

@@ -1,4 +1,5 @@
 import { JsonPreview } from './json-preview.js';
+import { InitialOpenDetails } from '../shared/initial-open-details.js';
 import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /**
@@ -78,10 +79,14 @@ export function ArrayOutputPreview({ data }: { data: unknown[] }) {
   return (
     <div className="array-output-objects">
       {shown.map((item, index) => (
-        <details className="array-output-obj" key={index} open={isInsideExpandedCard || undefined}>
+        <InitialOpenDetails
+          className="array-output-obj"
+          key={index}
+          initialOpen={isInsideExpandedCard}
+        >
           <summary title={itemTitle(item, index)}>{itemTitle(item, index)}</summary>
           <JsonPreview data={item} maxLines={14} />
-        </details>
+        </InitialOpenDetails>
       ))}
       {hiddenCount > 0 && <div className="array-output-more">还有 {hiddenCount} 项…</div>}
     </div>

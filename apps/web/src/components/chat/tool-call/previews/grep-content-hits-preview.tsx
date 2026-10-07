@@ -23,9 +23,12 @@ export function extractGrepContentHitsFromOutput(output: unknown): GrepContentHi
   const lines = trimmed.split('\n');
   const hits: GrepContentHit[] = [];
   for (const raw of lines) {
-    const line = raw.trimEnd();
-    if (!line) continue;
-    const m = /^(.+?):(\d+):\s(.*)$/.exec(line);
+    const line = raw.replace(/\r$/, '');
+    if (!line.trim()) continue;
+    // 冒号后只吃掉**一个**空白字符（保持与旧实现一致的展示），但允许其为空：
+    // `path/to/file.ts:12:`（空匹配文本）是合法输出，旧正则的 `\s` 要求必须
+    // 存在空白，导致整份 grep 结果退化为纯文本。
+    const m = /^(.+?):(\d+):[ \t]?(.*)$/.exec(line);
     if (!m) return null;
     hits.push({ path: m[1] ?? '', line: Number(m[2]), text: m[3] ?? '' });
   }

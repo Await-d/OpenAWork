@@ -1,5 +1,5 @@
 import type { PendingPermissionRequest } from '@openAwork/web-client';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   renderChatMessageContentWithOptions,
   renderStreamingChatMessageContentWithOptions,
@@ -14,10 +14,13 @@ import type { ModelPriceEntry } from './chat-page-utils.js';
 import {
   decorateAssistantGroupActions,
   estimateModelUsageCost,
-  groupChatRenderEntries,
   resolveModelPriceEntry,
 } from './chat-page-utils.js';
 import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
+import {
+  groupChatRenderEntries,
+  reconcileChatRenderGroups,
+} from '../../../../components/conversation-runtime/messages/group-render-entries.js';
 import {
   buildSubagentNoticeGroups,
   mergeNoticeGroupsIntoRenderGroups,
@@ -194,6 +197,15 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     visibleMessageCount,
     serverTotalTurnCount,
   } = input;
+
+  // 流式帧分组缓存：`mergedEntries` 与「已装饰、未并入通知」的消息组成对保存，
+  // 供 `reconcileChatRenderGroups` 复用未变化前缀的组对象引用 —— 这是
+  // `ChatGroupBlock`（React.memo）在流式期间跳过重渲染的前提。
+  const streamingGroupCacheRef = useRef<{
+    decorateKey: ChatRenderDataInput['handleCopyMessageGroup'];
+    mergedEntries: ChatRenderEntry[];
+    messageGroups: ChatRenderGroup[];
+  } | null>(null);
 
   const effectiveContextMessages = useMemo(
     () => filterChatMessagesForContext(messages),
@@ -697,9 +709,33 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       return historicalGroupedMessageEntries;
     }
 
-    const messageGroups = groupChatRenderEntries(mergedEntries).map((group) =>
-      decorateAssistantGroupActions(group, handleCopyMessageGroup),
-    );
+    const cache = streamingGroupCacheRef.current;
+    let messageGroups: ChatRenderGroup[];
+    if (cache !== null && cache.decorateKey === handleCopyMessageGroup) {
+      // 流式帧通常只有尾部 entry 变化：复用未变前缀的组对象引用，只对重算出的
+      // 尾部组重新装饰，让 ChatGroupBlock 的 memo 只对尾部生效。
+      const reconciled = reconcileChatRenderGroups({
+        previousEntries: cache.mergedEntries,
+        previousGroups: cache.messageGroups,
+        nextEntries: mergedEntries,
+      });
+      messageGroups = [
+        ...cache.messageGroups.slice(0, reconciled.reusedGroupCount),
+        ...reconciled.tailGroups.map((group) =>
+          decorateAssistantGroupActions(group, handleCopyMessageGroup),
+        ),
+      ];
+    } else {
+      messageGroups = groupChatRenderEntries(mergedEntries).map((group) =>
+        decorateAssistantGroupActions(group, handleCopyMessageGroup),
+      );
+    }
+    streamingGroupCacheRef.current = {
+      decorateKey: handleCopyMessageGroup,
+      mergedEntries,
+      messageGroups,
+    };
+
     return mergeNoticeGroupsIntoRenderGroups({
       messageGroups,
       noticeGroups: buildSubagentNoticeGroups(subagentNotices ?? []),

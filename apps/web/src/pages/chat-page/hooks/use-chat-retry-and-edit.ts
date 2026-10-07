@@ -37,6 +37,13 @@ export interface UseChatRetryAndEditOptions {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   resetStreamState: () => void;
   setStreamError: React.Dispatch<React.SetStateAction<string | null>>;
+  /**
+   * 实时读取当前活跃会话 id（读 ref，不受渲染闭包快照影响）。
+   *
+   * 回退重发中间隔着一次 truncate 网络往返；若期间用户切换了会话，
+   * 闭包里的 `currentSessionId` 会变成过期值，必须用本回调判定是否已切换。
+   */
+  getActiveSessionId: () => string | null;
   /** 重试弹窗状态（由父组件拥有,因为 useChatMessageActions 也需要 setter）。 */
   retryPrompt: RetryPrompt | null;
   setRetryPrompt: React.Dispatch<React.SetStateAction<RetryPrompt | null>>;
@@ -109,6 +116,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
     setMessages,
     resetStreamState,
     setStreamError,
+    getActiveSessionId,
     retryPrompt,
     setRetryPrompt,
     historyEditPrompt,
@@ -132,6 +140,16 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
         : undefined,
     );
   }, [onOpenFileChangesPanel]);
+
+  /**
+   * truncate 期间用户切换了会话时的提示。
+   *
+   * 截断已在服务端生效（不可撤销），但重发必须中止：否则 sendMessage 会按
+   * 当前视图所属的会话把回复写进新会话，造成跨会话串写。
+   */
+  const notifyResendAbandonedBySessionSwitch = useCallback(() => {
+    toast('已回退到所选消息；因已切换会话，本次重发已取消', 'warning');
+  }, []);
 
   // ── 工具回调 ──────────────────────────────────────────────────────────
   const truncateSessionMessagesInPlace = useCallback(
@@ -173,10 +191,13 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
   const handleRetryInCurrentSession = useCallback(async () => {
     if (!retryPrompt) return;
     if (!currentSessionId || !token) return;
+    // 目标会话必须在第一个 await 之前钉死：truncate / setMessages / sendMessage
+    // 三者必须始终落在同一个会话上，否则切换会话后会把回复写进新会话。
+    const targetSessionId = currentSessionId;
     let remainingMessages: Message[];
     try {
       remainingMessages = await truncateSessionMessagesInPlace(
-        currentSessionId,
+        targetSessionId,
         retryPrompt.sourceMessageId,
         retryPrompt.text,
       );
@@ -186,6 +207,11 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
       const message = err instanceof Error ? err.message : '截断失败';
       console.warn('[useChatRetryAndEdit] truncate failed, aborting resend:', message);
       setStreamError(`回退失败，已取消重发：${message}`);
+      return;
+    }
+    if (getActiveSessionId() !== targetSessionId) {
+      setRetryPrompt(null);
+      notifyResendAbandonedBySessionSwitch();
       return;
     }
     notifyRollbackApplied();
@@ -205,17 +231,21 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
     setStreamError(null);
     await sendMessage(retryPrompt.text, {
       ...(retryPrompt.inputParts ? { existingInputParts: retryPrompt.inputParts } : {}),
+      forcedSessionId: targetSessionId,
     });
     setRetryPrompt(null);
   }, [
     currentSessionId,
+    getActiveSessionId,
     messages,
+    notifyResendAbandonedBySessionSwitch,
     notifyRollbackApplied,
     resetStreamState,
     retryPrompt,
     sendMessage,
     setMessages,
     setStreamError,
+    setRetryPrompt,
     token,
     trimMessagesFromSource,
     truncateSessionMessagesInPlace,
@@ -224,11 +254,13 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
   const handleEditResendInCurrentSession = useCallback(
     async (text: string, sourceMessageId: string, editedInputParts?: InputImageContent[]) => {
       if (!currentSessionId || !token) return;
+      // 同 handleRetryInCurrentSession：先钉死目标会话，再跨 await。
+      const targetSessionId = currentSessionId;
       const sourceMessage = messages.find((message) => message.id === sourceMessageId);
       let remainingMessages: Message[];
       try {
         remainingMessages = await truncateSessionMessagesInPlace(
-          currentSessionId,
+          targetSessionId,
           sourceMessageId,
           sourceMessage?.content,
         );
@@ -236,6 +268,10 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
         const message = err instanceof Error ? err.message : '截断失败';
         console.warn('[useChatRetryAndEdit] truncate failed, aborting resend:', message);
         setStreamError(`回退失败，已取消重发：${message}`);
+        return;
+      }
+      if (getActiveSessionId() !== targetSessionId) {
+        notifyResendAbandonedBySessionSwitch();
         return;
       }
       notifyRollbackApplied();
@@ -256,12 +292,15 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
       const effectiveInputParts = editedInputParts ?? historyEditPrompt?.inputParts;
       await sendMessage(text, {
         ...(effectiveInputParts ? { existingInputParts: effectiveInputParts } : {}),
+        forcedSessionId: targetSessionId,
       });
     },
     [
       currentSessionId,
+      getActiveSessionId,
       historyEditPrompt,
       messages,
+      notifyResendAbandonedBySessionSwitch,
       notifyRollbackApplied,
       resetStreamState,
       sendMessage,

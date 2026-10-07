@@ -18,6 +18,7 @@ import {
 } from '../../chat/markdown/markdown-image.js';
 import { extractMarkdownImageUrls } from '../../chat/markdown/markdown-image-urls.js';
 import { tryOpenLinkPreview } from '../../../utils/preview/link-preview.js';
+import { sanitizeSvg } from '../../../utils/svg/sanitize-svg.js';
 import { OfficePreview } from '../../office-preview/OfficePreview.js';
 import '../../office-preview/office-preview.css';
 
@@ -472,18 +473,11 @@ function SvgPreview({ content }: { content: string }) {
           background:
             'repeating-conic-gradient(var(--bg-elevated) 0% 25%, var(--bg-base) 0% 50%) 50% / 16px 16px',
         }}
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG preview requires innerHTML
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: 内容已由白名单净化器 sanitizeSvg 清洗
         dangerouslySetInnerHTML={{ __html: sanitizeSvg(content) }}
       />
     </div>
   );
-}
-
-function sanitizeSvg(svg: string): string {
-  // Remove script tags and event handlers from SVG for safety
-  return svg
-    .replace(/<script[\s>][\s\S]*?<\/script\s*>/giu, '')
-    .replace(/\bon\w+\s*=\s*["'][^"']*["']/giu, '');
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

@@ -20,10 +20,11 @@ export interface SubagentModelPolicyRef {
 
 /** 子代理数量限制（用户级、设置页可调）。 */
 export interface SubagentLimitsRef {
-  /** 同一任务树中同时运行的子代理上限（默认 4）。 */
-  maxRunningPerRoot: number;
-  /** 同一任务树下累计创建的子代理上限，含已完成（默认 24）。 */
-  maxTotalPerRoot: number;
+  /**
+   * 同一任务树中同时活跃的子代理上限（默认 4）：统计运行中与待交互未终结的子代理，
+   * 已完成 / 失败 / 取消即释放名额。
+   */
+  maxActivePerRoot: number;
   /** 子代理嵌套深度上限，主会话深度 0（默认 1）。 */
   maxNestingDepth: number;
 }

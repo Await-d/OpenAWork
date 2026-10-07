@@ -45,15 +45,13 @@ describe('normalizeSubagentModelPolicy', () => {
 });
 
 describe('normalizeSubagentLimits', () => {
-  it('undefined / 非对象时回落默认值（4 / 24 / 1）', () => {
+  it('undefined / 非对象时回落默认值（4 / 1）', () => {
     expect(normalizeSubagentLimits(undefined)).toEqual({
-      maxRunningPerRoot: 4,
-      maxTotalPerRoot: 24,
+      maxActivePerRoot: 4,
       maxNestingDepth: 1,
     });
     expect(normalizeSubagentLimits('bad')).toEqual({
-      maxRunningPerRoot: 4,
-      maxTotalPerRoot: 24,
+      maxActivePerRoot: 4,
       maxNestingDepth: 1,
     });
   });
@@ -61,17 +59,15 @@ describe('normalizeSubagentLimits', () => {
   it('保留合法取值', () => {
     expect(
       normalizeSubagentLimits({
-        maxRunningPerRoot: 6,
-        maxTotalPerRoot: 30,
+        maxActivePerRoot: 6,
         maxNestingDepth: 2,
       }),
-    ).toEqual({ maxRunningPerRoot: 6, maxTotalPerRoot: 30, maxNestingDepth: 2 });
+    ).toEqual({ maxActivePerRoot: 6, maxNestingDepth: 2 });
   });
 
   it('部分字段缺失时逐项回落默认值', () => {
-    expect(normalizeSubagentLimits({ maxRunningPerRoot: 8 })).toEqual({
-      maxRunningPerRoot: 8,
-      maxTotalPerRoot: 24,
+    expect(normalizeSubagentLimits({ maxActivePerRoot: 8 })).toEqual({
+      maxActivePerRoot: 8,
       maxNestingDepth: 1,
     });
   });
@@ -79,17 +75,22 @@ describe('normalizeSubagentLimits', () => {
   it('越界值收敛到护栏边界', () => {
     expect(
       normalizeSubagentLimits({
-        maxRunningPerRoot: 999,
-        maxTotalPerRoot: 999,
+        maxActivePerRoot: 999,
         maxNestingDepth: 99,
       }),
-    ).toEqual({ maxRunningPerRoot: 16, maxTotalPerRoot: 200, maxNestingDepth: 8 });
+    ).toEqual({ maxActivePerRoot: 16, maxNestingDepth: 8 });
   });
 
-  it('累计上限小于并发上限时自动抬升', () => {
-    expect(normalizeSubagentLimits({ maxRunningPerRoot: 10, maxTotalPerRoot: 5 })).toEqual({
-      maxRunningPerRoot: 10,
-      maxTotalPerRoot: 10,
+  it('历史键 maxRunningPerRoot 回落为活跃上限', () => {
+    expect(normalizeSubagentLimits({ maxRunningPerRoot: 8, maxTotalPerRoot: 30 })).toEqual({
+      maxActivePerRoot: 8,
+      maxNestingDepth: 1,
+    });
+  });
+
+  it('新键优先于历史键 maxRunningPerRoot', () => {
+    expect(normalizeSubagentLimits({ maxActivePerRoot: 5, maxRunningPerRoot: 12 })).toEqual({
+      maxActivePerRoot: 5,
       maxNestingDepth: 1,
     });
   });

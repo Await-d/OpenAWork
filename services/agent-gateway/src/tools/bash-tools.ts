@@ -81,6 +81,7 @@ import {
   rewriteUnboundPlaceholderPath,
   validateSessionWorkspacePath,
 } from '../workspace/workspace-safety.js';
+import { withNonInteractiveEnv } from '../workspace/non-interactive-env.js';
 
 // Mirrors opencode's `DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000`.
 // We don't expose the experimental flag yet, but the env override hook keeps
@@ -313,6 +314,8 @@ function renderDescription(): string {
           '2) 反引号 `` ` `` 是转义符（如 `` `n `` / `` `t `` / `` `" ``），不是 bash 命令替换。',
           '3) 多行内容优先用 here-string：`@\'...\'@ | Set-Content ...`；也可用 `python -c "..."` 单行脚本。',
           '4) bash.txt 里“不要用换行分隔命令”对 bash 生效；PowerShell here-string 需要换行时允许。',
+          '5) 串行命令之间只写 `;`，**不要**写裸 `&`——那是后台 Job 运算符，会把命令丢进后台并立刻返回一张作业表。',
+          '6) 没有 `/dev/null`：丢弃 stderr 用 `2>$null`（写 `2>/dev/null` 会尝试去建 `\\dev\\null` 文件）。',
         ].join(' ')
       : [
           '当前是 Windows PowerShell 5.1：',
@@ -321,6 +324,8 @@ function renderDescription(): string {
           '3) 多行内容优先用 here-string：`@\'...\'@ | Set-Content ...`；也可用 `python -c "..."` 单行脚本。',
           '4) 可设 OPENAWORK_WINDOWS_SHELL=pwsh.exe 切到 PowerShell 7（支持 &&）。',
           '5) bash.txt 里“不要用换行分隔命令”对 bash 生效；PowerShell here-string 需要换行时允许。',
+          '6) 串行命令之间只写 `;`，**不要**写裸 `&`——那是后台 Job 运算符，会把命令丢进后台并立刻返回一张作业表。',
+          '7) 没有 `/dev/null`：丢弃 stderr 用 `2>$null`（写 `2>/dev/null` 会尝试去建 `\\dev\\null` 文件）。',
         ].join(' ')
     : '命令之间有依赖、必须串行时，请在同一次 Bash 调用中用 \'&&\' 连接（例如 `git add . && git commit -m "message" && git push`）。例如某一步必须在另一步之前完成（如 cp 之前先 mkdir、git 操作之前先 Write、git commit 之前先 git add），应该串行运行。';
   return RAW_DESCRIPTION_TEMPLATE.replaceAll('${os}', process.platform)
@@ -517,7 +522,11 @@ function spawnAndCollect(
     try {
       child = spawn(spawnTarget, spawnArgs, {
         cwd,
-        env: process.env,
+        // Non-interactive git env (GIT_EDITOR / GIT_PAGER / GIT_TERMINAL_PROMPT …)
+        // goes through the child `env` rather than a `VAR=value cmd` prefix:
+        // the prefix form is POSIX-only syntax and PowerShell parses it as an
+        // executable name, which broke every git command on Windows.
+        env: withNonInteractiveEnv(),
         // For non-PowerShell platforms, hand the command string to the
         // configured shell exactly as opencode does
         // (`ChildProcess.make(command, [], { shell, ... })`). Critically
@@ -909,7 +918,22 @@ export function buildShellCompatibilityHint(input: {
     return `当前 shell 为 Windows PowerShell 5.1（cwd: ${input.cwd}），不支持 '&&'。请拆成多次 bash 调用、改用 \`; if ($?) { ... }\`，或通过 OPENAWORK_WINDOWS_SHELL 切到 pwsh.exe。`;
   }
 
-  // 仅在明确是 PowerShell 解析器错误时提示，避免把业务脚本 stderr 里的
+  const unixToolHint = detectMissingUnixTool(input.output);
+  if (unixToolHint) {
+    return unixToolHint;
+  }
+
+  const nullRedirectHint = detectDevNullRedirect(input.output);
+  if (nullRedirectHint) {
+    return nullRedirectHint;
+  }
+
+  const backgroundJobHint = detectBackgroundJobLeak(input.output);
+  if (backgroundJobHint) {
+    return backgroundJobHint;
+  }
+
+  // 仅在明确是PowerShell 解析器错误时提示，避免把业务脚本 stderr 里的
   // "Unexpected token" / 通用 ParserError 误判成 shell 语法问题。
   const looksLikePowerShellParserError =
     /CategoryInfo\s*:\s*ParserError/i.test(input.output) ||
@@ -931,6 +955,56 @@ export function buildShellCompatibilityHint(input: {
   }
 
   return null;
+}
+
+const POWERSHELL_COMMAND_NOT_FOUND =
+  /术语\s*'(?<cmd>[^']+)'\s*不会被识别|(?<cmd2>'[^']+')\s+is not recognized as an internal or external command/;
+
+/**
+ * PowerShell 默认没有 `grep` / `ls`(这里是Get-ChildItem 别名) / `find` / `sed` /
+ * `awk` 这类 Unix 命令，模型却经常照着 bash 的习惯写。命中时给出专用工具替代方案，
+ * 否则模型会把「命令不存在」当成「项目里没有这个东西」继续走偏。
+ */
+function detectMissingUnixTool(output: string): string | null {
+  const match = POWERSHELL_COMMAND_NOT_FOUND.exec(output);
+  if (!match) {
+    return null;
+  }
+  const command = match.groups?.['cmd'] ?? match.groups?.['cmd2'] ?? '';
+  return [
+    `当前 shell 是 PowerShell，找不到命令 ${command.trim()}——Windows 没有内置 Unix CLI 工具。`,
+    '请改用专用工具：内容搜索用 Grep（不要用 grep / rg），文件查找用 Glob（不要用 find / ls），',
+    '读文件用 Read（不要用 cat / head / tail），编辑文件用 Edit（不要用 sed / awk）。',
+    `若确实需要 Unix 工具，请改用 PowerShell 原生命令（如 Select-String / Get-ChildItem / Get-Content），`,
+    '或安装 Git Bash /  busybox 后显式调用其完整路径。',
+  ].join(' ');
+}
+
+/** `2>/dev/null` 在 PowerShell 里被解析成 `2> /dev/null`（向 E:\dev\null 写文件）。 */
+function detectDevNullRedirect(output: string): string | null {
+  if (!/(?:Out-File|Could not find a (?:part of the )?path)[^\r\n]*dev[\\/]null/i.test(output)) {
+    return null;
+  }
+  return [
+    '当前 shell 是 PowerShell，不存在 /dev/null：`cmd 2>/dev/null` 被解析成 `2> /dev/null`，',
+    '即向 <盘符>\\dev\\null 写文件。请改用 `2>$null` 丢弃错误输出，',
+    '或直接省略重定向——本工具已单独收集 stdout 与 stderr。',
+  ].join(' ');
+}
+
+/**
+ * 裸 `&` 在 PowerShell 里是后台 Job 运算符：`cmd1 & cmd2` 不报错、立刻返回一张
+ * 作业表，真正的输出还没跑出来。这类失败最难自查，必须显式提示。
+ */
+function detectBackgroundJobLeak(output: string): string | null {
+  if (!/(?:PSJobTypeName\s*:?\s*BackgroundJob|\bJob\d+\s+BackgroundJob\b)/i.test(output)) {
+    return null;
+  }
+  return [
+    '当前 shell 是 PowerShell：命令里的裸 `&` 是后台 Job 运算符，`cmd1 & cmd2` 会把 cmd2 ',
+    '丢进后台作业并立刻返回作业表（所以看起来"什么都没执行"）。',
+    '请串行执行：忽略前一条是否失败用 `;`，有依赖用 `; if ($?) { ... }`（PS 5.1）或 `&&`（pwsh / cmd）。',
+  ].join(' ');
 }
 
 function buildPackageManagerHint(input: { cwd: string; output: string }): string | null {

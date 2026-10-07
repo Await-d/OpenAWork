@@ -474,7 +474,7 @@ export function rawListToEntries(
   return rawList.map(({ message, layerData }) => {
     const identity = buildLayerMessageIdentity(message, layerData);
     // 流式占位消息必须走流式渲染管线（StreamingMarkdownContent + 流式期间禁用围栏块
-    // 折叠），与主会话视图 build-team-grouped-message-entries 的分流一致。否则正文会被
+    // 折叠），与主会话视图 build-team-message-entries 的分流一致。否则正文会被
     // 折叠策略钳住高度：滚动容器不再随 token 增长，feed 的自动滚底随之停摆，同时丢掉
     // 流式光标等呈现。判定依据：LayerMessages.streamingMessage 由 View 层注入，status
     // 恒为 'streaming'（见 TeamConversationView 的构造处）；已定稿消息不会带该状态。

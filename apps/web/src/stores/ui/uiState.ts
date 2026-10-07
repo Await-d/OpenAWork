@@ -412,6 +412,18 @@ export interface UIStateStore {
   browserPreviewSurface: 'editor' | 'dock';
   setBrowserPreviewSurface: (surface: 'editor' | 'dock') => void;
   /**
+   * 收起浏览器预览的「视图状态」——会话切换时调用。
+   *
+   * 只回收「谁可见」这一层：分屏 / 全屏、停靠面板一级 tab、editor pane 的
+   * browser 子 tab、`browserActive`。**不动** `browserPreviewUrlByWorkspace`：
+   * 预览地址属于工作区维度记忆，刻意保留，切回该工作区仍能一键回到同一地址。
+   *
+   * 为什么必须有这个出口：预览宿主（`EditorBrowserWorkspace` / `BuiltInBrowser`）
+   * 是 keep-alive 的，切会话只切 `hidden`、不卸载；若视图状态也不回收，旧会话的
+   * 页面就会永久停在面板上，且没有任何代码路径能把它收掉。
+   */
+  resetBrowserPreviewView: () => void;
+  /**
    * 终端面板打开状态的镜像值——始终等于「当前会话桶」里的值。
    * 之所以保留这个全局布尔字段：TerminalPanel / ChatPage 等消费端不允许改动，
    * 按会话隔离必须完全收敛在 store 内部；会话切换时由 setLastChatPath 负责换镜。
@@ -1623,6 +1635,25 @@ export const useUIStateStore = create<UIStateStore>()(
       setSidePanelActiveTab: (tab) => set({ sidePanelActiveTab: tab }),
       browserPreviewSurface: 'editor',
       setBrowserPreviewSurface: (surface) => set({ browserPreviewSurface: surface }),
+      resetBrowserPreviewView: () =>
+        set((state) => {
+          // 只把停在 browser 的桶拉回 code，保留每个工作区各自的代码 / 预览偏好。
+          const editorPaneTabByWorkspace: Record<string, 'code' | 'browser'> = {};
+          for (const [key, tab] of Object.entries(state.editorPaneTabByWorkspace)) {
+            editorPaneTabByWorkspace[key] = tab === 'browser' ? 'code' : tab;
+          }
+          const sidePanelActiveTab: SidePanelActiveTab =
+            state.sidePanelActiveTab === 'preview' || state.sidePanelActiveTab === 'browser'
+              ? 'review'
+              : state.sidePanelActiveTab;
+          return {
+            editorMode: false,
+            editorFullScreen: false,
+            editorPaneTabByWorkspace,
+            browserActive: false,
+            sidePanelActiveTab,
+          };
+        }),
       terminalPanelOpened: false,
       terminalPanelOpenedBySession: {},
       setTerminalPanelOpened: (opened) =>

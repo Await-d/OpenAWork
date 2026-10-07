@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { InitialOpenDetails } from '../shared/initial-open-details.js';
 import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /* ── ParameterListPreview (universal input panel) ── */
@@ -60,12 +61,12 @@ export function ParamValue({ value }: { value: unknown }): ReactElement {
       const preview =
         flat.length > INLINE_PREVIEW_LIMIT ? `${flat.slice(0, INLINE_PREVIEW_LIMIT - 1)}…` : flat;
       return (
-        <details className="param-list-nested" open={isInsideExpandedCard || undefined}>
+        <InitialOpenDetails className="param-list-nested" initialOpen={isInsideExpandedCard}>
           <summary title={value}>
             <span className="param-list-str">{preview}</span>
           </summary>
           <pre className="param-list-json">{value}</pre>
-        </details>
+        </InitialOpenDetails>
       );
     }
     return <span className="param-list-str">{value}</span>;

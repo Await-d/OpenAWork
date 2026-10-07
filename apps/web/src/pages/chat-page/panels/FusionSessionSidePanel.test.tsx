@@ -578,6 +578,44 @@ describe('FusionSessionSidePanel', () => {
     expect(onTabChange).toHaveBeenCalledWith('preview');
   });
 
+  it('预览 tab 提供显式关闭入口：清空当前工作区地址并收回审查 tab', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    const onTabChange = vi.fn();
+    setPreviewUrl(PREVIEW_URL);
+
+    render(
+      <FusionSessionSidePanel
+        {...createBaseProps()}
+        activeTab="preview"
+        onTabChange={onTabChange}
+      />,
+    );
+
+    expect(screen.getByTestId('built-in-browser-mock')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
+
+    expect(useUIStateStore.getState().browserPreviewUrlByWorkspace[WORKSPACE_PATH]).toBeUndefined();
+    expect(onTabChange).toHaveBeenCalledWith('review');
+  });
+
+  it('无预览地址时不渲染关闭入口（避免给出无法生效的空操作）', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+
+    render(<FusionSessionSidePanel {...createBaseProps()} activeTab="preview" />);
+
+    expect(screen.queryByRole('button', { name: '关闭预览' })).toBeNull();
+  });
+
+  it('代码 / 审查 tab 不渲染关闭入口', () => {
+    getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
+    setPreviewUrl(PREVIEW_URL);
+
+    render(<FusionSessionSidePanel {...createBaseProps()} activeTab="code" />);
+
+    expect(screen.queryByRole('button', { name: '关闭预览' })).toBeNull();
+  });
+
   it('keep-alive：审查 → 代码 → 预览 → 审查 工作区与浏览器宿主节点身份不变', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     setPreviewUrl(PREVIEW_URL);

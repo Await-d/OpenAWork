@@ -5,6 +5,7 @@ import { useUIStateStore, useWorkspaceReadIdentity } from '../../stores/ui/uiSta
 import { resolveBareFilename } from '../../components/chat/file-preview/resolve-bare-filename.js';
 import { getFilePreviewKind, isBinaryPreviewKind } from '../../utils/file/file-preview.js';
 import { loadPreviewContent } from '../../utils/file/load-preview-content.js';
+import { describeFileReadError } from '../../utils/file/file-too-large.js';
 import { isPathWithinRoot } from '../../utils/workspace-path.js';
 
 export interface OpenFile {
@@ -14,6 +15,13 @@ export interface OpenFile {
   originalContent: string;
   language: string;
   disposeContent?: () => void;
+  /**
+   * 服务端读取时是否因超过预览上限而截断了内容。
+   *
+   * 为 `true` 时 `content` / `originalContent` 只是源文件的前缀。保存路径
+   * 必须拒绝写回（见 `saveFile`），否则一次普通保存就会把源文件永久截短。
+   */
+  truncated?: boolean;
 }
 
 export interface OpenFileOptions {
@@ -268,12 +276,14 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
           originalContent: loaded.content,
           language: getLanguage(resolvedPath),
           disposeContent: loaded.dispose,
+          truncated: loaded.truncated,
         };
         setOpenFiles((prev) => [...prev, file]);
         setActiveFilePath(resolvedPath);
         queueReveal(resolvedPath);
       } catch (err) {
-        setSaveError(err instanceof Error ? err.message : '打开文件失败');
+        // 超限时网关返回 413：给出统一的 10MB 提示，而不是裸的英文/状态码文案。
+        setSaveError(describeFileReadError(err, '打开文件失败'));
       } finally {
         setLoading(false);
       }
@@ -317,6 +327,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
             originalContent: next.content,
             language: getLanguage(path),
             disposeContent: next.dispose,
+            truncated: next.truncated,
           });
         } catch (_e) {
           // 单个文件加载失败不阻塞其他文件
@@ -401,6 +412,13 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
       // SSH 远端工作区的写回尚未打通：客户端兜底拦截，避免把本地路径写请求发给网关。
       if (readIdentity.remote) {
         setSaveError('SSH 远程会话暂不支持在工作区内保存文件。');
+        return;
+      }
+      // 超限文件只加载了前缀，写回会把源文件永久截短——必须在发起请求前拦死。
+      if (file.truncated) {
+        setSaveError(
+          '文件超过 100KB 预览读取上限，已截断显示。为避免覆盖原文件，保存已禁用；请用编辑器以外的方式修改大文件。',
+        );
         return;
       }
       setSaveError(null);

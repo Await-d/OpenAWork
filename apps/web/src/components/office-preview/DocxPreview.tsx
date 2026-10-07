@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { sanitizeRichHtml } from '../../utils/html/sanitize-rich-html.js';
 
 interface DocxPreviewProps {
   buffer: ArrayBuffer;
@@ -43,7 +44,9 @@ export default function DocxPreview({ buffer }: DocxPreviewProps) {
         if (cancelled) return;
         setState({
           status: 'ready',
-          html: result.value,
+          // mammoth **不做** XSS 净化（官方明确声明），而 docx 来自工作区，可能是
+          // 第三方仓库里的不可信文件。必须经白名单净化后才能注入宿主 DOM。
+          html: sanitizeRichHtml(result.value),
           warnings: result.messages.map((m) => m.message),
         });
       } catch (err) {
@@ -122,7 +125,7 @@ export default function DocxPreview({ buffer }: DocxPreviewProps) {
           fontFamily:
             '"Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
         }}
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: html comes from mammoth which sanitizes via its style map
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: 已由 sanitizeRichHtml 白名单清洗
         dangerouslySetInnerHTML={{ __html: state.html }}
       />
       {state.warnings.length > 0 && (

@@ -392,10 +392,12 @@ export async function migrate(): Promise<void> {
       input_json TEXT,
       output_json TEXT,
       is_error INTEGER NOT NULL DEFAULT 0,
+      pending_interaction INTEGER NOT NULL DEFAULT 0,
       duration_ms INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  ensureColumn('audit_logs', 'pending_interaction', 'INTEGER NOT NULL DEFAULT 0');
 
   // `audit_logs` 早先没有任何索引：`/settings/dev-logs` 的
   // `JOIN sessions ... WHERE sessions.user_id = ? ORDER BY audit_logs.created_at DESC`

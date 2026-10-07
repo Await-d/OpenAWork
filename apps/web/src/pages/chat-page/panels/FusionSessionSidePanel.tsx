@@ -171,6 +171,15 @@ export function FusionSessionSidePanel({
   // 只在工作区 pane 可见且主内容区尚未接管时出现，屏幕上任何时刻恰好一个。
   const showWorkspaceFullScreenAction = workspacePaneVisible && !workspacePromoted;
 
+  // 显式关闭入口：停靠 pane 隐藏了工作区内部工具条，而预览宿主是 keep-alive 的，
+  // 没有这个按钮用户就只能靠切 tab 绕开，当前预览永远留在面板上。关闭 = 清空当前
+  // 工作区的 URL 桶并把一级 tab 收回审查页。
+  const showClosePreviewAction = desktopTab === 'preview' && previewUrl !== null;
+  const handleClosePreview = () => {
+    setBrowserPreviewUrlForWorkspace(workspaceScope, null);
+    onTabChange('review');
+  };
+
   // 四个 pane 常驻挂载、用 hidden 切换：工作区里的浏览器实时会话（以及审查 /
   // 子代理 / Context 各自的滚动与展开状态）不会因切 tab 而重建。hidden 同时
   // 覆盖 a11y（不可聚焦、不进可访问性树），见 FusionSessionSidePanel.css。
@@ -181,9 +190,12 @@ export function FusionSessionSidePanel({
       reviewCount={reviewCount}
       subAgentCount={subAgentCount}
       trailingAction={
-        showWorkspaceFullScreenAction ? (
-          <PanelFullScreenAction onClick={() => onPromoteToFullScreen(workspacePromoteTarget)} />
-        ) : undefined
+        <>
+          {showWorkspaceFullScreenAction ? (
+            <PanelFullScreenAction onClick={() => onPromoteToFullScreen(workspacePromoteTarget)} />
+          ) : undefined}
+          {showClosePreviewAction ? <ClosePreviewAction onClick={handleClosePreview} /> : undefined}
+        </>
       }
     >
       <div
@@ -273,6 +285,33 @@ export function FusionSessionSidePanel({
         <FusionContextTab overview={overview} runtimeSummary={runtimeSummary} />
       </div>
     </SessionSidePanel>
+  );
+}
+
+function ClosePreviewAction({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="session-side-panel__tabs-action-btn"
+      onClick={onClick}
+      title="关闭预览"
+      aria-label="关闭预览"
+    >
+      <svg
+        aria-hidden="true"
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
+      </svg>
+    </button>
   );
 }
 

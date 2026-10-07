@@ -9,6 +9,7 @@ import {
 } from '../../../utils/chat/composer-reference-events.js';
 import { FileEditorPanel } from './FileEditorPanel.js';
 import type { OpenFile } from '../../../hooks/editor/useFileEditor.js';
+import { FILE_TOO_LARGE_MESSAGE } from '../../../utils/file/file-too-large.js';
 
 /**
  * Monaco 是 lazy 加载的重型依赖。这里把它换成一个记录型替身：
@@ -117,6 +118,68 @@ async function findEditorHost(): Promise<HTMLElement> {
   }
   return host;
 }
+
+describe('FileEditorPanel — 预览体积上限提示', () => {
+  it('没有打开任何文件时也展示 saveError（413 被拒后界面无死寂）', () => {
+    render(
+      <FileEditorPanel
+        files={[]}
+        activeFile={null}
+        activeFilePath={null}
+        isDirty={() => false}
+        saveError={FILE_TOO_LARGE_MESSAGE}
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        workspacePath={WORKSPACE}
+      />,
+    );
+
+    // 打开大文件失败时 activeFile 为空，提示只在文件工具栏里就永远看不到。
+    expect(screen.getByRole('alert').textContent).toBe(FILE_TOO_LARGE_MESSAGE);
+    expect(screen.getByRole('alert').textContent).toContain('10MB');
+  });
+
+  it('有打开文件时 saveError 展示在文件工具栏', () => {
+    render(
+      <FileEditorPanel
+        files={[createOpenFile()]}
+        activeFile={createOpenFile()}
+        activeFilePath={`${WORKSPACE}/src/app.ts`}
+        isDirty={() => false}
+        saveError={FILE_TOO_LARGE_MESSAGE}
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        workspacePath={WORKSPACE}
+      />,
+    );
+
+    expect(screen.getByText(FILE_TOO_LARGE_MESSAGE)).toBeTruthy();
+  });
+
+  it('超限时隐藏保存按钮，防止把截断内容写回源文件', () => {
+    render(
+      <FileEditorPanel
+        files={[createOpenFile({ truncated: true })]}
+        activeFile={createOpenFile({ truncated: true })}
+        activeFilePath={`${WORKSPACE}/src/app.ts`}
+        isDirty={() => true}
+        saveError={null}
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        workspacePath={WORKSPACE}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '保存' })).toBeNull();
+    expect(screen.getByText(/保存已禁用/)).toBeTruthy();
+  });
+});
 
 describe('FileEditorPanel — 代码视图右键菜单', () => {
   it('关闭 Monaco 自带菜单，把它交给自有菜单渲染', async () => {

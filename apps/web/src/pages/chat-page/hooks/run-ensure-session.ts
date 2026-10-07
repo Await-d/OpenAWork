@@ -103,6 +103,18 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
   } = deps;
 
   if (currentSessionId) {
+    // `currentSessionId` 是调用方渲染快照。若调用方跨越 await 期间用户切换了会话，
+    // 它就是过期值，绝不能把活跃会话 ref 回写到它 —— 一旦回写，
+    // sendMessage 的 `activeSessionRef.current === sid` 守卫会把旧会话误判为
+    // 「仍是当前会话」，从而把旧会话的回复写进切换后的会话视图。
+    // 这里以 ref 现状为准：仍在某个会话 → 交回活跃会话；已退回首页 → 报切换。
+    const liveSessionId = activeSessionRef.current;
+    if (liveSessionId !== currentSessionId) {
+      if (liveSessionId) {
+        return liveSessionId;
+      }
+      throw new Error('当前会话已切换，请重试');
+    }
     activeSessionRef.current = currentSessionId;
     currentSessionViewRef.current = {
       ...currentSessionViewRef.current,

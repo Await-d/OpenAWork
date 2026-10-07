@@ -8,7 +8,9 @@
  * 3. handleRetryInCurrentSession：缺 retryPrompt / sessionId / token 时安全返回
  * 4. handleRetryInCurrentSession：本地命中源消息时用本地截断 + 调 sendMessage + 清空 retryPrompt
  * 5. handleEditResendInCurrentSession：截断 + sendMessage（带 editedInputParts）
- * 6. handleRetryInNewSession：有 inputParts 走 createBranch、无 inputParts 走 createBranch + sendMessage(forcedSessionId)
+ *    并以 forcedSessionId 钉住目标会话
+ * 6. truncate 期间切换会话：中止重发、不污染新会话（回归用例）
+ * 7. handleRetryInNewSession：有 inputParts 走 createBranch、无 inputParts 走 createBranch + sendMessage(forcedSessionId)
  *
  * 参考：use-chat-conversation-state.test.tsx 的 fetch stub 风格。
  */
@@ -46,6 +48,7 @@ function makeOptions(overrides?: Partial<Parameters<typeof useChatRetryAndEdit>[
     setMessages: vi.fn() as never,
     resetStreamState: vi.fn(),
     setStreamError: vi.fn() as never,
+    getActiveSessionId: vi.fn(() => SESSION_ID),
     retryPrompt: null as RetryPrompt | null,
     setRetryPrompt: vi.fn() as never,
     historyEditPrompt: null,
@@ -192,7 +195,7 @@ describe('useChatRetryAndEdit — handleRetryInCurrentSession', () => {
       expect.objectContaining({ id: 'm1' }),
       expect.objectContaining({ id: 'm2' }),
     ]);
-    expect(sendMessage).toHaveBeenCalledWith('retry text', {});
+    expect(sendMessage).toHaveBeenCalledWith('retry text', { forcedSessionId: SESSION_ID });
     expect(setRetryPrompt).toHaveBeenCalledWith(null);
   });
 
@@ -254,6 +257,34 @@ describe('useChatRetryAndEdit — handleRetryInCurrentSession', () => {
     expect(sendMessage).not.toHaveBeenCalled();
     expect(setStreamError).toHaveBeenCalledWith(expect.stringContaining('回退失败'));
   });
+
+  it('truncate 期间切换会话时中止重发且关闭重试弹窗', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+    const setMessages = vi.fn();
+    const setRetryPrompt = vi.fn();
+    const getActiveSessionId = vi.fn(() => 'session-other-999');
+    const retryPrompt: RetryPrompt = { sourceMessageId: 'm3', text: 'retry text' };
+
+    const { result } = renderHook(() =>
+      useChatRetryAndEdit(
+        makeOptions({
+          retryPrompt,
+          sendMessage: sendMessage as never,
+          setMessages: setMessages as never,
+          setRetryPrompt: setRetryPrompt as never,
+          getActiveSessionId,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleRetryInCurrentSession();
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(setMessages).not.toHaveBeenCalled();
+    expect(setRetryPrompt).toHaveBeenCalledWith(null);
+  });
 });
 
 describe('useChatRetryAndEdit — handleEditResendInCurrentSession', () => {
@@ -279,7 +310,39 @@ describe('useChatRetryAndEdit — handleEditResendInCurrentSession', () => {
       expect.objectContaining({ id: 'm1' }),
       expect.objectContaining({ id: 'm2' }),
     ]);
-    expect(sendMessage).toHaveBeenCalledWith('edited text', { existingInputParts: editedParts });
+    expect(sendMessage).toHaveBeenCalledWith('edited text', {
+      existingInputParts: editedParts,
+      forcedSessionId: SESSION_ID,
+    });
+  });
+
+  it('truncate 期间切换会话时中止重发，不污染新会话', async () => {
+    render(<ToastContainer />);
+    const sendMessage = vi.fn(async () => undefined);
+    const setMessages = vi.fn();
+    const resetStreamState = vi.fn();
+    // 活跃会话在 truncate await 期间被切换流程推进到另一个会话
+    const getActiveSessionId = vi.fn(() => 'session-other-999');
+
+    const { result } = renderHook(() =>
+      useChatRetryAndEdit(
+        makeOptions({
+          sendMessage: sendMessage as never,
+          setMessages: setMessages as never,
+          resetStreamState,
+          getActiveSessionId,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleEditResendInCurrentSession('edited text', 'm3');
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(setMessages).not.toHaveBeenCalled();
+    expect(resetStreamState).not.toHaveBeenCalled();
+    expect(screen.getByText('已回退到所选消息；因已切换会话，本次重发已取消')).toBeTruthy();
   });
 });
 

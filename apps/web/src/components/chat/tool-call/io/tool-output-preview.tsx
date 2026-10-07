@@ -178,9 +178,17 @@ export function ToolOutputPreview({
 
   if (normalized === 'workspace_create_directory' || normalized === 'workspace_review_revert') {
     if (output && typeof output === 'object' && !Array.isArray(output)) {
-      return (
-        <SuccessConfirmPreview toolName={toolName} output={output as Record<string, unknown>} />
-      );
+      const record = output as Record<string, unknown>;
+      // 失败信封也带 filePath/path，直接渲染会显示「✓ 成功」。判定口径与
+      // repo_clone 预览保持一致：出现 error 文本或 ok/success 为 false 都不算成功。
+      const errorText = record['error'];
+      const failed =
+        (typeof errorText === 'string' && errorText.trim().length > 0) ||
+        record['ok'] === false ||
+        record['success'] === false;
+      if (!failed) {
+        return <SuccessConfirmPreview toolName={toolName} output={record} />;
+      }
     }
   }
 

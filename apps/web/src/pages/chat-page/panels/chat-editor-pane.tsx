@@ -30,6 +30,11 @@ export interface ChatEditorPaneProps {
   handleSaveFile: (path: string) => Promise<void>;
   /** Browser preview URL — when set, shows a browser tab in the editor pane. */
   browserPreviewUrl?: string | null;
+  /**
+   * 写入 / 清空当前工作区的预览地址。缺省时工作区不渲染地址输入与「关闭预览」，
+   * 预览只能靠切换到代码 tab 绕开。经典布局传它才能给预览一条显式关闭路径。
+   */
+  onBrowserPreviewUrlChange?: (url: string | null) => void;
   /** Current workspace path — used to namespace BuiltInBrowser tabs storage. */
   workspacePath?: string | null;
   /** Active tab in the editor pane. */
@@ -60,6 +65,7 @@ export function ChatEditorPane({
   saving,
   handleSaveFile,
   browserPreviewUrl,
+  onBrowserPreviewUrlChange,
   workspacePath,
   activeTab = 'code',
   onTabChange,
@@ -123,6 +129,7 @@ export function ChatEditorPane({
           saving={saving}
           handleSaveFile={handleSaveFile}
           browserPreviewUrl={browserPreviewUrl}
+          onBrowserPreviewUrlChange={onBrowserPreviewUrlChange}
           workspacePath={workspacePath}
           activeTab={activeTab}
           onTabChange={onTabChange}

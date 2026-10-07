@@ -313,6 +313,48 @@ describe('workspace routes', () => {
     }
   });
 
+  it('GET /workspace/file 对超过 10MB 的文件返回中文 413（不截断）', async () => {
+    const filePath = join(projectRoot, 'too-large.txt');
+    writeFileSync(filePath, Buffer.alloc(10 * 1024 * 1024 + 1, 97));
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/file?path=${encodeURIComponent(filePath)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(413);
+      expect(response.json()).toMatchObject({
+        error: '文件超过 10MB 预览上限，暂不支持预览与编辑。请下载后用本地应用打开。',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/file 对恰好 10MB 的文件完整返回且 truncated 为 false', async () => {
+    const filePath = join(projectRoot, 'edge-size.txt');
+    writeFileSync(filePath, Buffer.alloc(10 * 1024 * 1024, 97));
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/workspace/file?path=${encodeURIComponent(filePath)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { content: string; truncated: boolean };
+      expect(body.truncated).toBe(false);
+      expect(body.content.length).toBe(10 * 1024 * 1024);
+    } finally {
+      await app.close();
+    }
+  });
+
   testOnNonWindows('跨主机 Windows 路径返回明确的中文 400 错误', async () => {
     const windowsPath =
       'E:\\01Project\\appearance-automation\\appearance-automation-web-react\\src\\App.tsx';

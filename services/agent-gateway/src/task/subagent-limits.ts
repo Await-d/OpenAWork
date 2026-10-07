@@ -15,6 +15,10 @@ import { parseSessionMetadataJson } from '../session/session-workspace-metadata.
  * 判定口径：以**任务树根**为单位统计（`metadata.parentSessionId` 链的最早祖先），
  * 只统计 task 工具创建的子会话（`metadata.createdByTool === 'task'`）——
  * team 后台成员 / handoff 子会话不受本限制约束。
+ *
+ * 数量上限只看**同时活跃**（`running` + `paused`）的子会话；已完成 / 失败 /
+ * 取消（`idle`）不计入，因此子代理结束后名额自动释放。**不设累计上限**——
+ * 累计计数永不释放，已结束或不再使用的子代理会永久占用配额。
  */
 
 const SUBAGENT_LIMITS_KEY = 'subagent_limits';
@@ -109,32 +113,26 @@ function resolveTaskRootSessionId(
   return chain[chain.length - 1] ?? sessionId;
 }
 
-function countTaskChildSessionsUnderRoot(
-  sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
-  rootSessionId: string,
-): number {
-  let count = 0;
-  for (const session of sessionsById.values()) {
-    if (!isTaskCreatedSessionMetadata(session.metadata)) {
-      continue;
-    }
-
-    if (resolveTaskRootSessionId(sessionsById, session.id) === rootSessionId) {
-      count += 1;
-    }
-  }
-
-  return count;
+/**
+ * 是否为**活跃**的 task 子会话：
+ * - `running`：正在执行；
+ * - `paused`：未终结、等待用户交互，可被 resume——仍占用名额，避免 resume
+ *   瞬间突破并发上限。
+ *
+ * `idle`（已完成 / 失败 / 取消 / 已中止）是终态，不占用名额。
+ */
+function isActiveTaskChildSession(session: ParsedTaskSessionRow): boolean {
+  return session.state_status === 'running' || session.state_status === 'paused';
 }
 
-function countRunningTaskChildSessionsUnderRoot(
+function countActiveTaskChildSessionsUnderRoot(
   sessionsById: ReadonlyMap<string, ParsedTaskSessionRow>,
   rootSessionId: string,
   excludeSessionId?: string,
 ): number {
   let count = 0;
   for (const session of sessionsById.values()) {
-    if (session.id === excludeSessionId || session.state_status !== 'running') {
+    if (session.id === excludeSessionId || !isActiveTaskChildSession(session)) {
       continue;
     }
 
@@ -151,9 +149,13 @@ function countRunningTaskChildSessionsUnderRoot(
 }
 
 /**
- * 子代理派发的数量上限校验（用户级可调，见设置页「子代理」区域）：
- * - `maxTotalPerRoot`：同一任务树累计创建的 task 子会话数；
- * - `maxRunningPerRoot`：同一任务树中同时 running 的 task 子会话数。
+ * 子代理派发的**同时活跃**数量上限校验（用户级可调，见设置页「子代理」区域）：
+ * 同一任务树中处于 `running` / `paused` 的 task 子会话数达到
+ * `maxActivePerRoot` 时拒绝新的委派。
+ *
+ * 名额随子代理结束自动释放（终态 `idle` 不计入），因此不需要用户手动清理会话；
+ * 恢复既有子会话（`task_id` / `session_id` 命中）通过 `excludeActiveSessionId`
+ * 把自己排除在计数外，不会因「恢复自己」而被自身占用挡住。
  *
  * 限制值每次派发时从 `user_settings.subagent_limits` 读取 ⇒ 设置保存后立即生效。
  * 嵌套深度不在本函数：由 `checkSubagentDepthAllowed`（`subagent_limits.maxNestingDepth`）
@@ -161,8 +163,7 @@ function countRunningTaskChildSessionsUnderRoot(
  */
 export function getTaskSessionLimitError(input: {
   currentSessionId: string;
-  excludeRunningSessionId?: string;
-  isNewChildSession: boolean;
+  excludeActiveSessionId?: string;
   userId: string;
 }): string | null {
   const limits = resolveSubagentLimitsForUser(input.userId);
@@ -171,20 +172,13 @@ export function getTaskSessionLimitError(input: {
   const rootSessionId = resolveTaskRootSessionId(sessionsById, input.currentSessionId);
 
   if (
-    input.isNewChildSession &&
-    countTaskChildSessionsUnderRoot(sessionsById, rootSessionId) >= limits.maxTotalPerRoot
-  ) {
-    return `当前任务树下的子代理数量已达到上限（${limits.maxTotalPerRoot}），请先结束部分子任务再继续委派。`;
-  }
-
-  if (
-    countRunningTaskChildSessionsUnderRoot(
+    countActiveTaskChildSessionsUnderRoot(
       sessionsById,
       rootSessionId,
-      input.excludeRunningSessionId,
-    ) >= limits.maxRunningPerRoot
+      input.excludeActiveSessionId,
+    ) >= limits.maxActivePerRoot
   ) {
-    return `当前任务树中正在运行的子代理已达到上限（${limits.maxRunningPerRoot}），请等待已有子任务完成后再继续。`;
+    return `当前任务树中活跃的子代理已达到上限（${limits.maxActivePerRoot}），请等待已有子任务结束（或完成 / 失败 / 取消）后再继续委派。`;
   }
 
   return null;

@@ -17,9 +17,13 @@
 
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
-import type { WorkspaceFileReadOptions } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore, useWorkspaceReadIdentity } from '../../stores/ui/uiState.js';
+import { describeFileReadError } from '../../utils/file/file-too-large.js';
+import {
+  buildPreviewReadAttempts,
+  runWithReadIdentityFallback,
+} from '../../utils/file/preview-read-identity.js';
 
 const DocxPreview = lazy(() => import('./DocxPreview.js'));
 const XlsxPreview = lazy(() => import('./XlsxPreview.js'));
@@ -53,7 +57,7 @@ interface OfficePreviewState {
   error?: string;
 }
 
-function useOfficeFile(path: string): OfficePreviewState {
+function useOfficeFile(path: string, enabled: boolean): OfficePreviewState {
   const [state, setState] = useState<OfficePreviewState>({ status: 'loading' });
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -63,6 +67,9 @@ function useOfficeFile(path: string): OfficePreviewState {
   const identity = useWorkspaceReadIdentity();
 
   useEffect(() => {
+    // 不可在浏览器渲染的类型（pptx/pdf/doc/xls）根本不需要字节流。
+    // 旧实现的早退判断写在 hook 之后，注释与代码相反，每个这类文件都会白拉一次。
+    if (!enabled) return;
     let cancelled = false;
     setState({ status: 'loading' });
     if (!token) {
@@ -71,28 +78,25 @@ function useOfficeFile(path: string): OfficePreviewState {
     }
     void (async () => {
       try {
-        const options: WorkspaceFileReadOptions = {};
-        if (workspaceRoot) options.workspaceRoot = workspaceRoot;
-        if (identity.sessionId) {
-          options.sessionId = identity.sessionId;
-        } else if (identity.sshConnectionId) {
-          options.sshConnectionId = identity.sshConnectionId;
-        }
-        const data = await createWorkspaceClient(gatewayUrl).readFileBinary(token, path, options);
+        const attempts = buildPreviewReadAttempts(workspaceRoot, identity);
+        const data = await runWithReadIdentityFallback(attempts, (options) =>
+          createWorkspaceClient(gatewayUrl).readFileBinary(token, path, options),
+        );
         if (cancelled) return;
         setState({ status: 'ready', buffer: data.buffer, contentType: data.contentType });
       } catch (err) {
         if (cancelled) return;
         setState({
           status: 'error',
-          error: err instanceof Error ? err.message : '加载失败',
+          // 超过 10MB 时网关回 413，统一成明确的中文提示。
+          error: describeFileReadError(err, '加载失败'),
         });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [path, token, gatewayUrl, workspaceRoot, identity]);
+  }, [path, enabled, token, gatewayUrl, workspaceRoot, identity]);
 
   return state;
 }
@@ -203,13 +207,13 @@ function ErrorState({ error }: { error: string }) {
 
 export function OfficePreview({ path }: { path: string }) {
   const kind = getOfficeKindFromPath(path);
-  const fileState = useOfficeFile(path);
+  const renderable = kind === 'docx' || kind === 'xlsx';
+  const fileState = useOfficeFile(path, renderable);
 
   if (!kind) return null;
 
-  // Kinds we don't render in-browser get the notice immediately —
-  // no need to fetch bytes for those.
-  if (kind === 'pptx' || kind === 'pdf' || kind === 'doc' || kind === 'xls') {
+  // 早退必须发生在请求之前：这些类型直接给提示，不下载字节。
+  if (!renderable) {
     return <UnsupportedKindNotice kind={kind} path={path} />;
   }
 

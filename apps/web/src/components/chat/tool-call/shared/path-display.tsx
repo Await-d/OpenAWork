@@ -127,7 +127,10 @@ export function StyledPath({
   const fileEditorRef = useFileEditorContext();
   const relative = prefix ? stripPathPrefix(path, prefix) : path;
   const { dir, name } = splitPathParts(relative);
-  const canOpen = interactive && fileEditorRef?.current !== null;
+  // 必须是 `!= null`：无 FileEditorContext（context 为 null）时
+  // `fileEditorRef?.current` 求值为 undefined，而 `undefined !== null` 为 true，
+  // 会让非聊天页（产物查看器等）出现「可点击」样式却点不动的死按钮。
+  const canOpen = interactive && fileEditorRef?.current != null;
 
   const inner = (
     <>

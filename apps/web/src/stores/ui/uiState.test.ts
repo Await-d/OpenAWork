@@ -1370,3 +1370,72 @@ describe('collapsedSubagentParentIds 子代理列表折叠', () => {
     expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual([]);
   });
 });
+
+describe('resetBrowserPreviewView（会话切换时收起预览）', () => {
+  beforeEach(() => {
+    useUIStateStore.setState({
+      editorMode: true,
+      editorFullScreen: true,
+      editorPaneTabByWorkspace: {
+        '/ws/alpha': 'browser',
+        '/ws/beta': 'code',
+      },
+      browserActive: true,
+      browserPreviewUrlByWorkspace: { '/ws/alpha': 'http://localhost:5173' },
+      sidePanelActiveTab: 'preview',
+    });
+  });
+
+  it('回收「谁可见」这一层视图状态', () => {
+    act(() => {
+      useUIStateStore.getState().resetBrowserPreviewView();
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.editorMode).toBe(false);
+    expect(state.editorFullScreen).toBe(false);
+    expect(state.browserActive).toBe(false);
+    expect(state.sidePanelActiveTab).toBe('review');
+  });
+
+  it('只把停在 browser 的工作区桶拉回 code，其余桶不动', () => {
+    act(() => {
+      useUIStateStore.getState().resetBrowserPreviewView();
+    });
+
+    expect(useUIStateStore.getState().editorPaneTabByWorkspace).toEqual({
+      '/ws/alpha': 'code',
+      '/ws/beta': 'code',
+    });
+  });
+
+  it('保留预览地址桶：切会话只收起视图，不丢工作区级地址记忆', () => {
+    act(() => {
+      useUIStateStore.getState().resetBrowserPreviewView();
+    });
+
+    expect(useUIStateStore.getState().browserPreviewUrlByWorkspace).toEqual({
+      '/ws/alpha': 'http://localhost:5173',
+    });
+  });
+
+  it('一级 tab 停在非预览时保持原样', () => {
+    useUIStateStore.setState({ sidePanelActiveTab: 'agent' });
+
+    act(() => {
+      useUIStateStore.getState().resetBrowserPreviewView();
+    });
+
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('agent');
+  });
+
+  it('移动端 browser tab（脏值收敛前的成员）同样被收起', () => {
+    useUIStateStore.setState({ sidePanelActiveTab: 'browser' });
+
+    act(() => {
+      useUIStateStore.getState().resetBrowserPreviewView();
+    });
+
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('review');
+  });
+});

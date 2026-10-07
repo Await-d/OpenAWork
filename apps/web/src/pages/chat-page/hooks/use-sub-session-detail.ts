@@ -106,6 +106,9 @@ export function useSubSessionDetail(
 
     void refresh();
     const intervalId = window.setInterval(() => {
+      // 页面不可见时跳过：每个打开的子会话面板各有一条 2.5s 轮询，
+      // 后台叠加会成为多会话场景下的请求风暴。
+      if (typeof document !== 'undefined' && document.hidden) return;
       void refresh();
     }, 2500);
 

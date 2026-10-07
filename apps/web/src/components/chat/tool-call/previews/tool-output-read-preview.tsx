@@ -30,6 +30,14 @@ function readNumber(record: Record<string, unknown>, key: string): number | unde
   return typeof value === 'number' ? value : undefined;
 }
 
+/**
+ * 闭区间文案。`count === 0` 时不能算成 `start-1`，否则会显示「第 1-0 行」
+ * 这种自相矛盾的范围（历史实现的 `start + count - 1` 就是这么来的）。
+ */
+function formatRange(start: number, count: number): string {
+  return count > 0 ? `${start}-${start + count - 1}` : `${start}`;
+}
+
 function describeSelection(
   selection: Record<string, unknown>,
   total: { chars?: number; items?: number; lines?: number },
@@ -41,21 +49,21 @@ function describeSelection(
       const count = readNumber(selection, 'lineCount') ?? 0;
       return total.lines === undefined
         ? `第 ${start} 行起共 ${count} 行`
-        : `第 ${start}-${start + count - 1} 行 / 共 ${total.lines} 行`;
+        : `第 ${formatRange(start, count)} 行 / 共 ${total.lines} 行`;
     }
     case 'chars': {
       const start = readNumber(selection, 'charStart') ?? 0;
       const count = readNumber(selection, 'charCount') ?? 0;
       return total.chars === undefined
-        ? `字符 ${start}-${start + count}`
-        : `字符 ${start}-${start + count} / 共 ${total.chars}`;
+        ? `字符 ${formatRange(start, count)}`
+        : `字符 ${formatRange(start, count)} / 共 ${total.chars} 字符`;
     }
     case 'items': {
       const start = readNumber(selection, 'itemStart') ?? 0;
       const count = readNumber(selection, 'itemCount') ?? 0;
       return total.items === undefined
         ? `第 ${start} 项起共 ${count} 项`
-        : `第 ${start}-${start + count - 1} 项 / 共 ${total.items} 项`;
+        : `第 ${formatRange(start, count)} 项 / 共 ${total.items} 项`;
     }
     case 'keys':
       return typeof selection['jsonPath'] === 'string'

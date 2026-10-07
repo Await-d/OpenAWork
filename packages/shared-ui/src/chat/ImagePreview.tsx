@@ -104,16 +104,17 @@ const imagePreviewCss = `
 
 const IMAGE_PREVIEW_STYLE_ATTR = 'data-image-preview-styles';
 
-let imagePreviewStyleInjected = false;
-
 /** 模块级单例：composer 的 N 张缩略图只会在 `document.head` 留下一份样式。 */
 function ensureImagePreviewStyles(): void {
-  if (imagePreviewStyleInjected || typeof document === 'undefined') return;
+  if (typeof document === 'undefined') return;
+  // 幂等判据必须是「DOM 里是否真的存在这个节点」，而不是模块级布尔量：SPA
+  // 路由切换、测试 cleanup、宿主主动清理都会移除已注入的 <style>，而布尔量
+  // 仍为 true 时样式就永久丢失（交互态退化成无样式的裸元素）。
+  if (document.head.querySelector(`style[${IMAGE_PREVIEW_STYLE_ATTR}]`)) return;
   const styleElement = document.createElement('style');
   styleElement.setAttribute(IMAGE_PREVIEW_STYLE_ATTR, 'true');
   styleElement.textContent = imagePreviewCss;
   document.head.appendChild(styleElement);
-  imagePreviewStyleInjected = true;
 }
 
 export function ImagePreview({

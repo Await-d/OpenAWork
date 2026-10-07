@@ -9,8 +9,9 @@
 执行命令前，请遵循以下步骤：
 
 1. 目录校验：
-   - 如果命令会创建新目录或文件，先用 `ls` 确认父目录存在且位置正确
-   - 例如，运行 `mkdir foo/bar` 之前，先 `ls foo` 确认 `foo` 是预期的父目录
+   - 如果命令会创建新目录或文件，先用 Glob 工具确认父目录存在且位置正确
+   - 例如，运行 `mkdir foo/bar` 之前，先用 Glob 查看 `foo` 是否是预期的父目录
+   - **不要**用 `ls` 做这件事：Windows 上 ls 可能是 PowerShell 别名或干脆不存在，而本工具已明确禁止用 shell 做文件查找（见下方「使用须知」）
 
 2. 命令执行：
    - 包含空格的文件路径必须用双引号包裹（例如 `rm "path with spaces/file.txt"`）
@@ -28,13 +29,14 @@
   - 强烈建议在 `description` 里用 5–10 个字清楚说明这条命令做什么
   - 输出超过 ${maxLines} 行或 ${maxBytes} 字节会被截断，完整输出会被写入文件。可用 Read 配合 offset/limit 读取指定段，或用 Grep 在完整内容中检索。**不要**用 `head` / `tail` 等命令自行截断——完整输出已落盘，便于精确检索。
 
-  - 除非任务确实需要或被明确要求，否则避免用 Bash 调 `find` / `grep` / `cat` / `head` / `tail` / `sed` / `awk` / `echo`，请始终优先使用专用工具：
+  - 除非任务确实需要或被明确要求，否则避免用 Bash 调 `find` / `grep` / `cat` / `head` / `tail` / `sed` / `awk` / `echo` / `ls`，请始终优先使用专用工具：
     - 文件查找：用 Glob（不要用 find / ls）
     - 内容搜索：用 Grep（不要用 grep / rg）
     - 读文件：用 Read（不要用 cat / head / tail）
     - 编辑文件：用 Edit（不要用 sed / awk）
     - 写文件：用 Write（不要用 echo > / cat <<EOF）
     - 通信：直接输出文本（不要用 echo / printf）
+    - 以上命令在 Windows PowerShell 下大多**不存在**（`ls` 只是 `Get-ChildItem` 的别名，grep / find / sed / awk 完全没有），照着 bash 习惯写会直接报"术语不会被识别"
   - 同时执行多个命令时：
     - 命令之间相互独立可并行时，请在**同一条消息**里发起多次 Bash 工具调用。例如同时跑 `git status` 与 `git diff`，请用一条消息发两次并行的 Bash 调用
     - ${chaining}

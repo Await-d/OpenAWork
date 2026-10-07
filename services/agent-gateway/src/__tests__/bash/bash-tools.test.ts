@@ -385,6 +385,67 @@ describe('bash-tools', () => {
       expect(hint).toMatch(/&&/);
       expect(hint).not.toMatch(/PS 5\.1/);
     });
+
+    it('Unix 命令不存在时指向专用工具，而不是让模型以为"项目里没有"', () => {
+      const zh = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        output:
+          "grep: 术语 'grep' 不会被识别为 cmdlet、函数、脚本文件或可执行程序的名称。\r\n请检查名称的拼写，如果包含路径，请确保路径正确。",
+        shellChoice: powershell51,
+      });
+      expect(zh).toMatch(/grep/);
+      expect(zh).toMatch(/PowerShell/);
+      expect(zh).toMatch(/Grep/);
+      expect(zh).toMatch(/Glob/);
+
+      const en = buildShellCompatibilityHint({
+        cwd: 'E:\\work',
+        output: "'grep' is not recognized as an internal or external command",
+        shellChoice: powershell51,
+      });
+      expect(en).toMatch(/grep/);
+      expect(en).toMatch(/Select-String/);
+    });
+
+    it('2>/dev/null 被解析成 Out-File 写盘时给出 $null 替代', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        output: [
+          "Out-File: Could not find a part of the path 'E:\\dev\\null'.",
+          "Out-File: Could not find a part of the path 'E:\\dev\\null'.",
+        ].join('\r\n'),
+        shellChoice: powershell51,
+      });
+      expect(hint).toMatch(/\/dev\/null/);
+      expect(hint).toMatch(/2>\$null/);
+    });
+
+    it('裸 & 把命令丢进后台作业时提示改用分号', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        output: [
+          '',
+          'Id    Name           PSJobTypeName  State     HasMoreData  Location     Command',
+          '--    --             --         --       --          --          --',
+          '1      Job1           BackgroundJob   Running    True        localhost    cd E:/work',
+          '3      Job3           BackgroundJob   Running    True        localhost    echo "===DONE=== "',
+        ].join('\r\n'),
+        shellChoice: powershell51,
+      });
+      expect(hint).toMatch(/后台 Job/);
+      expect(hint).toMatch(/;/);
+      expect(hint).toMatch(/作业表/);
+    });
+
+    it('非 PowerShell 环境不做任何 shell 兼容提示', () => {
+      expect(
+        buildShellCompatibilityHint({
+          cwd: '/work',
+          output: "grep: 术语 'grep' 不会被识别",
+          shellChoice: { shell: '/bin/bash', isPowerShell: false, name: 'bash' },
+        }),
+      ).toBeNull();
+    });
   });
 
   describe('safety pre-checks', () => {

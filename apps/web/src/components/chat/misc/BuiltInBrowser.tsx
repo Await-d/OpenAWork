@@ -827,6 +827,7 @@ export function BuiltInBrowser({
         iframeRef={iframeRef}
         activeTabId={activeTabId}
         refreshKey={refreshKey}
+        frameScopeKey={workspacePath ?? ''}
         hidden={hidden}
         appendLogToActiveTab={appendLogToActiveTab}
         consoleOpen={consoleOpen}

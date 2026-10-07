@@ -59,44 +59,37 @@ export const DEFAULT_SUBAGENT_MODEL_POLICY: SubagentModelPolicy = { modelMode: '
 /**
  * 子代理数量限制的护栏（用户级设置可调，但不允许越过此范围）。
  *
- * - `maxRunningPerRoot`：同一任务树中**同时运行**的子代理上限（默认 4）；
- * - `maxTotalPerRoot`：同一任务树下累计创建的子代理上限（默认 24，含已完成）；
+ * - `maxActivePerRoot`：同一任务树中**同时活跃**的子代理上限（默认 4）——统计
+ *   `state_status` 为 `running`（执行中）/ `paused`（未终结、可被 resume）的 task
+ *   子会话；已完成 / 失败 / 取消（`idle`）**不占用**名额，下一次派发即复用；
  * - `maxNestingDepth`：子代理嵌套深度上限（主会话深度 0，默认 1，对齐上游
  *   `experimental.subagent_depth`）。
+ *
+ * 历史键 `maxRunningPerRoot`（仅 `running` 口径，无累计上限）在解析时回落为
+ * `maxActivePerRoot`；原「任务树累计上限」`maxTotalPerRoot` 已移除——累计计数
+ * 永不释放，已结束 / 不再使用的子代理会永久占用配额。
  */
 export const SUBAGENT_LIMITS_GUARDRAILS = {
-  maxRunningPerRoot: { min: 1, max: 16 },
-  maxTotalPerRoot: { min: 1, max: 200 },
+  maxActivePerRoot: { min: 1, max: 16 },
   maxNestingDepth: { min: 1, max: 8 },
 } as const;
 
-export const subagentLimitsSchema = z
-  .object({
-    maxRunningPerRoot: z
-      .number()
-      .int()
-      .min(SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot.min)
-      .max(SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot.max),
-    maxTotalPerRoot: z
-      .number()
-      .int()
-      .min(SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot.min)
-      .max(SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot.max),
-    maxNestingDepth: z
-      .number()
-      .int()
-      .min(SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth.min)
-      .max(SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth.max),
-  })
-  .refine((limits) => limits.maxTotalPerRoot >= limits.maxRunningPerRoot, {
-    message: '任务树累计上限不能小于同时运行上限。',
-    path: ['maxTotalPerRoot'],
-  });
+export const subagentLimitsSchema = z.object({
+  maxActivePerRoot: z
+    .number()
+    .int()
+    .min(SUBAGENT_LIMITS_GUARDRAILS.maxActivePerRoot.min)
+    .max(SUBAGENT_LIMITS_GUARDRAILS.maxActivePerRoot.max),
+  maxNestingDepth: z
+    .number()
+    .int()
+    .min(SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth.min)
+    .max(SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth.max),
+});
 export type SubagentLimits = z.infer<typeof subagentLimitsSchema>;
 
 export const DEFAULT_SUBAGENT_LIMITS: SubagentLimits = {
-  maxRunningPerRoot: 4,
-  maxTotalPerRoot: 24,
+  maxActivePerRoot: 4,
   maxNestingDepth: 1,
 };
 
@@ -423,8 +416,8 @@ function readLimitNumber(value: unknown, bounds: { min: number; max: number }): 
  * 容错解析已落库的子代理限制：
  * - 字段缺失 / 无法解析 → 用 `options.fallbackNestingDepth`（深度，兼容历史
  *   `subagent_depth` 键）或默认值；
- * - 越界值收敛到最近的护栏边界（与历史深度设置的收敛语义一致）；
- * - `maxTotalPerRoot < maxRunningPerRoot` 的坏数据自动抬升，避免保存后自相矛盾。
+ * - 活跃上限兼容历史键 `maxRunningPerRoot`（仅 running 口径），升级后自动迁移；
+ * - 越界值收敛到最近的护栏边界（与历史深度设置的收敛语义一致）。
  *
  * 不使用 schema 的 `safeParse` 整体拒绝：单字段损坏不应把用户其余合法设置重置。
  */
@@ -437,12 +430,10 @@ export const parseStoredSubagentLimits = (
       ? (raw as Record<string, unknown>)
       : undefined;
 
-  const maxRunningPerRoot =
-    readLimitNumber(record?.['maxRunningPerRoot'], SUBAGENT_LIMITS_GUARDRAILS.maxRunningPerRoot) ??
-    DEFAULT_SUBAGENT_LIMITS.maxRunningPerRoot;
-  const maxTotalPerRoot =
-    readLimitNumber(record?.['maxTotalPerRoot'], SUBAGENT_LIMITS_GUARDRAILS.maxTotalPerRoot) ??
-    DEFAULT_SUBAGENT_LIMITS.maxTotalPerRoot;
+  const maxActivePerRoot =
+    readLimitNumber(record?.['maxActivePerRoot'], SUBAGENT_LIMITS_GUARDRAILS.maxActivePerRoot) ??
+    readLimitNumber(record?.['maxRunningPerRoot'], SUBAGENT_LIMITS_GUARDRAILS.maxActivePerRoot) ??
+    DEFAULT_SUBAGENT_LIMITS.maxActivePerRoot;
   const fallbackNestingDepth =
     readLimitNumber(options?.fallbackNestingDepth, SUBAGENT_LIMITS_GUARDRAILS.maxNestingDepth) ??
     DEFAULT_SUBAGENT_LIMITS.maxNestingDepth;
@@ -451,8 +442,7 @@ export const parseStoredSubagentLimits = (
     fallbackNestingDepth;
 
   return {
-    maxRunningPerRoot,
-    maxTotalPerRoot: Math.max(maxTotalPerRoot, maxRunningPerRoot),
+    maxActivePerRoot,
     maxNestingDepth,
   };
 };

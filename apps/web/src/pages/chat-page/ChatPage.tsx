@@ -132,6 +132,7 @@ import {
   UserHistoryJumpList,
 } from './history/user-history-jump-list.js';
 import {
+  type ChatMessage,
   type ChatMessagePart,
   estimateTokenCount,
   MENTION_SEARCH_LIMIT,
@@ -527,6 +528,7 @@ export default function ChatPage() {
   const updateTabStreaming = useUIStateStore((s) => s.updateTabStreaming);
   const sidePanelActiveTab = useUIStateStore((s) => s.sidePanelActiveTab);
   const setSidePanelActiveTab = useUIStateStore((s) => s.setSidePanelActiveTab);
+  const resetBrowserPreviewView = useUIStateStore((s) => s.resetBrowserPreviewView);
   const setBrowserPreviewUrlForWorkspace = useUIStateStore(
     (s) => s.setBrowserPreviewUrlForWorkspace,
   );
@@ -591,13 +593,18 @@ export default function ChatPage() {
   // 只能从这里读瞬态身份，所以会话 / 草稿远程选择一变就同步写入。
   // - 已有会话：传 sessionId，网关沿父会话链解析 SSH 绑定；
   // - 草稿态：传草稿选中的 sshConnectionId；
+  // - 已有会话**仍**保留 sshConnectionId 作为回退：会话的 SSH 绑定可能解析为
+  //   unbound（历史会话 / 绑定未落库），此时网关会回落到本地路径校验，把远端
+  //   POSIX 路径判成跨主机不可访问而拒绝。消费方据此改用连接身份重试远端读取，
+  //   见 utils/file/preview-read-identity.ts。
   // - remote 只是提示位，不参与请求参数。
   useEffect(() => {
     setReadIdentity({
       sessionId: currentSessionId ?? null,
-      sshConnectionId: currentSessionId ? null : (selectedSshConnectionId ?? null),
-      remote:
-        Boolean(workspace.sshConnectionId) || Boolean(!currentSessionId && selectedSshConnectionId),
+      sshConnectionId: currentSessionId
+        ? (workspace.sshConnectionId ?? selectedSshConnectionId ?? null)
+        : (selectedSshConnectionId ?? null),
+      remote: Boolean(workspace.sshConnectionId) || Boolean(selectedSshConnectionId),
     });
   }, [currentSessionId, selectedSshConnectionId, workspace.sshConnectionId, setReadIdentity]);
 
@@ -1014,7 +1021,13 @@ export default function ChatPage() {
     setLastChatPath(location.pathname);
   }, [location.pathname, setLastChatPath]);
 
+  // 预览宿主（EditorBrowserWorkspace / BuiltInBrowser）是 keep-alive 的，切会话只切
+  // hidden 不卸载。视图状态若也不回收，旧会话的页面就会永久停在面板上且无法关闭。
+  // 用 ref 守卫只回收「真实切换」的那一次：首屏挂载（刷新后恢复上次预览）不动。
+  const previewResetSessionIdRef = useRef<string | null>(null);
   useEffect(() => {
+    const previousSessionId = previewResetSessionIdRef.current;
+    previewResetSessionIdRef.current = currentSessionId;
     void currentSessionId;
     setReportedStreamUsage(null);
     setMessageRatings({});
@@ -1023,8 +1036,11 @@ export default function ChatPage() {
     setSelectedImageEditReferenceArtifactId(null);
     // browserPreviewUrl 是按 workspace 路径持久化的(browserPreviewUrlByWorkspace),
     // 跨 workspace 切会话自动切到对应 workspace 的 url;同 workspace 内会话共享 url。
+    if (previousSessionId !== null && previousSessionId !== currentSessionId) {
+      resetBrowserPreviewView();
+    }
     devServerDetectedTerminalIdsRef.current = new Set();
-  }, [currentSessionId]);
+  }, [currentSessionId, resetBrowserPreviewView]);
 
   useEffect(() => {
     if (!currentSessionId || !token) {
@@ -2570,6 +2586,7 @@ export default function ChatPage() {
       setMessages,
       resetStreamState,
       setStreamError,
+      getActiveSessionId: () => activeSessionRef.current,
       retryPrompt,
       setRetryPrompt,
       historyEditPrompt,
@@ -3137,43 +3154,13 @@ export default function ChatPage() {
     thinkingEnabled,
   ]);
 
-  const {
-    assistantUsageDetails,
-    messageInputTokens,
-    streamingOutputTokens,
-    effectiveReportedStreamUsage,
-    streamingUsageDetails,
-    contextUsageSnapshot,
-    effectiveContextMessageCount,
-    sanitizedHistoricalMessages,
-    hiddenMessageCount,
-    historicalRenderedMessageEntries,
-    streamingRenderedMessageEntry,
-    historicalGroupedMessageEntries,
-    groupedMessageEntries,
-  } = useChatRenderData({
-    messages,
-    subagentNotices,
-    pendingPermissions,
-    modelPrices,
-    activeProviderId: effectiveProviderId,
-    activeModelId: effectiveModelId,
-    activeModelOption,
-    visibleStreaming,
-    visibleStreamBuffer,
-    visibleStreamThinkingBuffer,
-    visibleStreamThinkingBlocks,
-    visibleStreamStartedAt,
-    activeStreamRoundStartedAt: activeStreamRoundStart,
-    visibleReportedStreamUsage,
-    activeStreamClientRequestId: activeGatewayStreamClientRequestId,
-    activeStreamFirstTokenLatencyMs,
-    activeStreamMessageId,
-    toolCallCards,
-    streamingOrderedParts: visibleStreamingSegments,
-    resolveAssistantCapabilityKind,
-    resolveInlinePermissionActions,
-    buildMessageActions: (message) => {
+  /**
+   * 消息 hover actions 构建器。必须保持引用稳定（依赖只在书签 / 多选 / 会话
+   * 变化时更新）：它进入 useChatRenderData 的 memo 依赖，流式帧里若每帧换新，
+   * 历史 entry / 分组缓存会整帧失效，整个消息列表随之重渲染。
+   */
+  const buildRenderMessageActions = useCallback(
+    (message: ChatMessage) => {
       const baseActions = buildMessageActions(message);
       const isBookmarked = bookmarkStore.isBookmarked(message.id);
 
@@ -3212,6 +3199,53 @@ export default function ChatPage() {
           : []),
       ];
     },
+    [
+      bookmarkStore,
+      buildMessageActions,
+      currentSessionId,
+      multiSelect.isSelected,
+      multiSelect.multiSelect.enabled,
+      multiSelect.toggleMessage,
+    ],
+  );
+
+  const {
+    assistantUsageDetails,
+    messageInputTokens,
+    streamingOutputTokens,
+    effectiveReportedStreamUsage,
+    streamingUsageDetails,
+    contextUsageSnapshot,
+    effectiveContextMessageCount,
+    sanitizedHistoricalMessages,
+    hiddenMessageCount,
+    historicalRenderedMessageEntries,
+    streamingRenderedMessageEntry,
+    historicalGroupedMessageEntries,
+    groupedMessageEntries,
+  } = useChatRenderData({
+    messages,
+    subagentNotices,
+    pendingPermissions,
+    modelPrices,
+    activeProviderId: effectiveProviderId,
+    activeModelId: effectiveModelId,
+    activeModelOption,
+    visibleStreaming,
+    visibleStreamBuffer,
+    visibleStreamThinkingBuffer,
+    visibleStreamThinkingBlocks,
+    visibleStreamStartedAt,
+    activeStreamRoundStartedAt: activeStreamRoundStart,
+    visibleReportedStreamUsage,
+    activeStreamClientRequestId: activeGatewayStreamClientRequestId,
+    activeStreamFirstTokenLatencyMs,
+    activeStreamMessageId,
+    toolCallCards,
+    streamingOrderedParts: visibleStreamingSegments,
+    resolveAssistantCapabilityKind,
+    resolveInlinePermissionActions,
+    buildMessageActions: buildRenderMessageActions,
     handleCopyMessageGroup,
     openChildSessionInspector,
     selectedChildSessionId,
@@ -3804,6 +3838,7 @@ export default function ChatPage() {
               saving={saving}
               handleSaveFile={handleSaveFile}
               browserPreviewUrl={browserPreviewUrl}
+              onBrowserPreviewUrlChange={setBrowserPreviewUrl}
               workspacePath={uiWorkspaceScope}
               activeTab={editorPaneTab}
               onTabChange={setEditorPaneTab}
@@ -4069,6 +4104,7 @@ export default function ChatPage() {
                 saving={saving}
                 handleSaveFile={handleSaveFile}
                 browserPreviewUrl={browserPreviewUrl}
+                onBrowserPreviewUrlChange={setBrowserPreviewUrl}
                 workspacePath={uiWorkspaceScope}
                 activeTab={editorPaneTab}
                 onTabChange={setEditorPaneTab}

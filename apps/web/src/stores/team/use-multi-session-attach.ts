@@ -116,10 +116,7 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
           }
         },
         onEvent: (event: RunEvent, meta) => {
-          if (meta.rowId > 0) {
-            storeGetState().setLastRowId(sessionId, meta.rowId);
-          }
-          storeGetState().setLastEventAt(sessionId, Date.now());
+          // lastRowId / lastEventAt 已并入 dispatchEvent 的单次 set，不再单独写。
           storeGetState().dispatchEvent(sessionId, event, meta);
         },
         onError: (_code, _message) => {

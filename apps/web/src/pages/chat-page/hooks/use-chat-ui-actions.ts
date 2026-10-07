@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { CommandResultCard, RunEvent } from '@openAwork/shared';
 import {
   createCommandCardContent,
@@ -156,6 +156,17 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
     [fileEditor, setSaving],
   );
 
+  // 拖动遮罩挂在 document.body 上（z-index 2147483646，本质是屏蔽 iframe 指针事件），
+  // 只靠 window 的 mouseup 回收。拖动途中切会话 / 窗口失焦会让那次 mouseup 丢失，
+  // 遮罩永久残留 → 整块预览「点不动、像冻住」。ref + 卸载兜底 + blur 兜底保证必被清掉。
+  const splitOverlayRef = useRef<HTMLDivElement | null>(null);
+  const clearSplitOverlay = useCallback(() => {
+    const overlay = splitOverlayRef.current;
+    splitOverlayRef.current = null;
+    overlay?.remove();
+  }, []);
+  useEffect(() => clearSplitOverlay, [clearSplitOverlay]);
+
   const handleSplitMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -169,11 +180,13 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
       //      监听不到,拖动方向受限只能往代码区域那一侧。
       //   2) 锁定光标为 col-resize,保持拖动时的视觉反馈。
       // mouseup 时移除 overlay,正常事件流恢复。
+      clearSplitOverlay();
       const overlay = document.createElement('div');
       overlay.setAttribute('aria-hidden', 'true');
       overlay.style.cssText =
         'position:fixed;inset:0;z-index:2147483646;cursor:col-resize;background:transparent;user-select:none;';
       document.body.appendChild(overlay);
+      splitOverlayRef.current = overlay;
 
       // 拖动期间走 CSS variable 直接改样式,不进 React state — 60Hz 下避免:
       //  1) zustand persist 每帧 JSON.stringify ui-state 并写 localStorage
@@ -196,15 +209,15 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
         const pct = Math.min(80, Math.max(20, ((ev.clientX - rect.left) / rect.width) * 100));
         applyPct(pct);
       };
-      const onUp = () => {
+      // mouseup 与 blur 共用收尾：失焦时那一帧 mouseup 永远不会到达 window，
+      // 若只监听 mouseup，遮罩会永久残留（预览整块点不动）。
+      const onEndDrag = (commit: boolean) => {
         splitDragging.current = false;
         window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-        try {
-          overlay.remove();
-        } catch {
-          /* already removed */
-        }
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('blur', onBlur);
+        clearSplitOverlay();
+        if (!commit) return;
         // setSplitPos here points at writeSplitPos (see ChatPage),
         // a tiny `localStorage.setItem` call. No zustand subscriber
         // chain, no persist middleware re-stringifying the entire UI
@@ -212,10 +225,14 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
         // mouseup handler.
         setSplitPos(latestPct);
       };
+      const onMouseUp = () => onEndDrag(true);
+      const onBlur = () => onEndDrag(false);
+
       window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
+      window.addEventListener('mouseup', onMouseUp);
+      window.addEventListener('blur', onBlur);
     },
-    [setSplitPos, splitContainerRef, splitDragging],
+    [clearSplitOverlay, setSplitPos, splitContainerRef, splitDragging],
   );
 
   useEffect(() => {

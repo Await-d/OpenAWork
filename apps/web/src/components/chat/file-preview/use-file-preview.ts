@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { createWorkspaceClient } from '@openAwork/web-client';
-import type { WorkspaceFileReadOptions } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { useUIStateStore, useWorkspaceReadIdentity } from '../../../stores/ui/uiState.js';
 import type { WorkspaceReadIdentity } from '../../../stores/ui/uiState.js';
-import { getFilePreviewKind, isNonTextPreviewKind } from '../../../utils/file/file-preview.js';
+import {
+  getFilePreviewKind,
+  isNonTextPreviewKind,
+  WORKSPACE_INDEX_CHANGED_EVENT,
+} from '../../../utils/file/file-preview.js';
+import { describeFileReadError } from '../../../utils/file/file-too-large.js';
+import {
+  buildPreviewReadAttempts,
+  runWithReadIdentityFallback,
+} from '../../../utils/file/preview-read-identity.js';
 import { extractSnippet, type FileSnippet } from './extract-snippet.js';
 import { resolveBareFilename } from './resolve-bare-filename.js';
 
@@ -15,13 +23,42 @@ import { resolveBareFilename } from './resolve-bare-filename.js';
  * contents at this granularity rarely change inside a single chat
  * exchange and saving a few hundred ms on re-hover matters more.
  *
- * TTL is short (60s) to bound staleness if the user edits the file
- * out-of-band; for a "what does this look like right now" preview
- * this is well within tolerance.
+ * TTL bounds staleness when the file is edited out-of-band (e.g. the
+ * Agent writes it mid-session). It used to be 60s, which meant a
+ * hover right after a write kept showing the pre-write content; 15s
+ * keeps the re-hover win while shrinking the stale window.
  */
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 15_000;
+
+/**
+ * 缓存条目上限。此前两个进程级 Map 只在读取时判 TTL、从不淘汰，长会话内
+ * 每项都持有一份完整文件文本，内存无界增长。
+ */
+const MAX_CACHE_ENTRIES = 200;
+
 const cache = new Map<string, { content: string; ts: number }>();
 const inflight = new Map<string, Promise<string>>();
+
+/** 淘汰过期条目，并在超出上限时按插入序丢弃最旧的一条（Map 保持插入序）。 */
+function pruneCache(): void {
+  const now = Date.now();
+  for (const [key, entry] of [...cache]) {
+    if (now - entry.ts >= CACHE_TTL_MS) {
+      cache.delete(key);
+    }
+  }
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+}
+
+/** 清空全部内容缓存。用于工作区索引版本变化时（Agent 写盘后）立即失效。 */
+function clearAllFilePreviewCache(): void {
+  cache.clear();
+  inflight.clear();
+}
 
 /**
  * 缓存键带身份命名空间：本地与远端工作区可能给出同形路径
@@ -41,6 +78,26 @@ export function invalidateFilePreviewCache(path: string): void {
   }
 }
 
+/**
+ * 让工作区索引变化（Agent 写盘 / 用户在编辑器里保存）能立即失效预览缓存。
+ *
+ * 此前 `invalidateFilePreviewCache` 全仓只被测试调用，生产环境没有任何路径会
+ * 清缓存，只能等 TTL 到期。这里挂在窗口自定义事件上，由工作区索引轮询在检测
+ * 到版本变化时派发。
+ */
+function useWorkspaceIndexInvalidation(): void {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => {
+      clearAllFilePreviewCache();
+    };
+    window.addEventListener(WORKSPACE_INDEX_CHANGED_EVENT, handler);
+    return () => {
+      window.removeEventListener(WORKSPACE_INDEX_CHANGED_EVENT, handler);
+    };
+  }, []);
+}
+
 async function fetchFileContent(
   gatewayUrl: string,
   token: string,
@@ -49,6 +106,7 @@ async function fetchFileContent(
   identity: WorkspaceReadIdentity,
 ): Promise<string> {
   const key = previewCacheKey(identity, path);
+  pruneCache();
   const cached = cache.get(key);
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return cached.content;
@@ -58,17 +116,12 @@ async function fetchFileContent(
 
   const promise = (async () => {
     try {
-      const readOptions: WorkspaceFileReadOptions = {};
-      if (workspaceRoot && workspaceRoot.trim().length > 0) {
-        readOptions.workspaceRoot = workspaceRoot;
-      }
-      if (identity.sessionId) {
-        readOptions.sessionId = identity.sessionId;
-      } else if (identity.sshConnectionId) {
-        readOptions.sshConnectionId = identity.sshConnectionId;
-      }
-      const data = await createWorkspaceClient(gatewayUrl).readFile(token, path, readOptions);
+      const attempts = buildPreviewReadAttempts(workspaceRoot, identity);
+      const data = await runWithReadIdentityFallback(attempts, (options) =>
+        createWorkspaceClient(gatewayUrl).readFile(token, path, options),
+      );
       cache.set(key, { content: data.content, ts: Date.now() });
+      pruneCache();
       return data.content;
     } finally {
       inflight.delete(key);
@@ -116,6 +169,8 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
   const lastSuccessfulSnippetsRef = useRef<Map<string, FileSnippet>>(new Map());
   const currentResolvedPathRef = useRef<string>(path);
 
+  useWorkspaceIndexInvalidation();
+
   useEffect(() => {
     let cancelled = false;
     setState({ status: 'loading' });
@@ -139,6 +194,10 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
           rawPath: path,
           identity,
         });
+        // 记住**解析后**的路径：失败兜底要按同一个键取历史片段。此前 ref 里存的是
+        // 原始裸文件名，与成功分支写入的 resolvedPath 不同键，裸文件名场景下
+        // 兜底内容永远取不到。
+        currentResolvedPathRef.current = resolvedPath;
         // Binary file kinds (Office docs, PDFs, archives) — surface
         // a "binary, no text preview" message instead of fetching
         // the bytes and feeding mojibake to extractSnippet.
@@ -168,10 +227,10 @@ export function useFilePreview(path: string, line: number | null): FilePreviewSt
         });
       } catch (err) {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : '加载失败';
         setState({
           status: 'error',
-          error: message,
+          // 超过 10MB 时网关回 413，统一成明确的中文提示。
+          error: describeFileReadError(err, '加载失败'),
           staleSnippet: lastSuccessfulSnippetsRef.current.get(currentResolvedPathRef.current),
         });
       }

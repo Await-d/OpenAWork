@@ -60,10 +60,23 @@ export function BashOutputPreview({
 
   const lines = fullOutput.split('\n');
   const shouldCollapse = lines.length > MAX_LINES;
-  const displayLines = effectiveExpanded || !shouldCollapse ? lines : lines.slice(0, MAX_LINES);
 
-  // 检测错误关键词
-  const hasErrors = /error|failed|exception|fatal/i.test(fullOutput);
+  // stdout / stderr 必须各自独立截断。旧实现把**合并后**的 displayLines 塞进
+  // stdout 块，于是「stdout 短、stderr 长」时 stderr 的前 29 行会在 stdout 里
+  // 重复出现一次，同时 stderr 自己完全不受 MAX_LINES 保护。
+  const stdoutLines = useMemo(() => (data.stdout ?? '').split('\n'), [data.stdout]);
+  const stderrLines = useMemo(() => (data.stderr ?? '').split('\n'), [data.stderr]);
+
+  // 错误判定以 exitCode / stderr 为准。旧实现对全文匹配
+  // /error|failed|exception|fatal/i，`0 failed` 这类成功输出也会亮起徽标。
+  const hasErrors = useMemo(() => {
+    if (data.exitCode !== undefined && data.exitCode !== 0) return true;
+    if (hasStderr && data.stderr && data.stderr.trim().length > 0) return true;
+    return /(^|\n)\s*(error|exception|fatal)\b/im.test(fullOutput);
+  }, [data.exitCode, data.stderr, hasStderr, fullOutput]);
+
+  const stdoutBody = effectiveExpanded ? data.stdout : stdoutLines.slice(0, MAX_LINES).join('\n');
+  const stderrBody = effectiveExpanded ? data.stderr : stderrLines.slice(0, MAX_LINES).join('\n');
 
   return (
     <div className="bash-output-preview">
@@ -87,16 +100,12 @@ export function BashOutputPreview({
       </div>
 
       <div className="bash-output-content">
-        {hasStdout && data.stdout && (
-          <pre className="bash-output-stdout">
-            {effectiveExpanded ? data.stdout : displayLines.join('\n')}
-          </pre>
-        )}
+        {hasStdout && data.stdout && <pre className="bash-output-stdout">{stdoutBody}</pre>}
         {hasStderr && data.stderr && (
           <pre className="bash-output-stderr">
             <span className="bash-stderr-label">stderr:</span>
             {'\n'}
-            {data.stderr}
+            {stderrBody}
           </pre>
         )}
       </div>

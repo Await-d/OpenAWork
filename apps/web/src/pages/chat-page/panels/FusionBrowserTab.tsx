@@ -53,16 +53,33 @@ export function FusionBrowserTab({
     setDraftUrl('');
   };
 
+  // 预览宿主是 keep-alive 的，不会因为切 tab 而卸载；没有这个出口时用户只能靠
+  // 换地址绕开，清空当前预览（回到空态输入框）是唯一能主动收掉它的动作。
+  const handleClosePreview = () => {
+    setBrowserPreviewUrlForWorkspace(workspaceScope, null);
+  };
+
   return (
     <div className="fusion-side-panel__scroll">
       {browserPreviewUrl !== null ? (
         ownsBrowserSurface ? (
-          <div className="fusion-side-panel__browser-host" data-testid="fusion-browser-tab-host">
-            <BuiltInBrowser
-              previewUrl={browserPreviewUrl}
-              workspacePath={workspaceScope}
-              hidden={false}
-            />
+          <div className="fusion-side-panel__browser-wrap">
+            <div className="fusion-side-panel__browser-bar">
+              <button
+                type="button"
+                className="fusion-side-panel__ghost-button"
+                onClick={handleClosePreview}
+              >
+                关闭预览
+              </button>
+            </div>
+            <div className="fusion-side-panel__browser-host" data-testid="fusion-browser-tab-host">
+              <BuiltInBrowser
+                previewUrl={browserPreviewUrl}
+                workspacePath={workspaceScope}
+                hidden={false}
+              />
+            </div>
           </div>
         ) : null
       ) : (

@@ -4168,165 +4168,320 @@ async function executeGatewayManagedToolImpl(
               toolCallId: request.toolCallId,
             }
           : undefined;
-      const childSessionMetadata: Record<string, unknown> = {
-        parentSessionId: sessionId,
-        subagentType: resolvedAgent.agentId,
-        createdByTool: 'task',
-        delegatedPromptVersion: 'v2',
-        delegatedSystemPrompt: resolvedAgent.systemPrompt,
-        delegatedModelCandidates: resolvedAgent.modelCandidates,
-        requestedSkills,
-      };
-      if (effectiveDelegatedModel?.modelId) {
-        childSessionMetadata.modelId = effectiveDelegatedModel.modelId;
-      }
-      if (effectiveDelegatedModel?.providerId) {
-        childSessionMetadata.providerId = effectiveDelegatedModel.providerId;
-      }
-      if (effectiveDelegatedModel?.variant) {
-        childSessionMetadata.variant = effectiveDelegatedModel.variant;
-      }
-      if (parentToolReference) {
-        childSessionMetadata[TASK_PARENT_TOOL_REQUEST_ID_KEY] = parentToolReference.clientRequestId;
-        childSessionMetadata[TASK_PARENT_TOOL_CALL_ID_KEY] = parentToolReference.toolCallId;
-      }
-      if (category) {
-        childSessionMetadata.taskCategory = category;
-      }
-      const inheritedWorkingDirectory = parentSessionMetadata.workingDirectory;
-      if (typeof inheritedWorkingDirectory === 'string') {
-        childSessionMetadata.workingDirectory = inheritedWorkingDirectory;
-      }
-      const inheritedDialogueMode = parentSessionMetadata.dialogueMode;
-      if (typeof inheritedDialogueMode === 'string') {
-        childSessionMetadata.dialogueMode = inheritedDialogueMode;
-      }
-      // 继承权限档位：子代理 session 在后台运行，无法与用户交互审批。
-      // permissionMode 是规范键，仅在父会话确实表达过档位时才继承（已写规范键，
-      // 或历史布尔 yoloMode === true）——auto-edit 父会话的子会话不得降级为 ask；
-      // 父会话未表达时保持缺席（读取侧按 ask 兜底，不凭空写入）。
-      // 旧布尔 yoloMode 同步保留，兼容仍直接读取它的历史消费方。
-      if (
-        parentSessionMetadata.permissionMode !== undefined ||
-        parentSessionMetadata.yoloMode === true
-      ) {
-        childSessionMetadata.permissionMode = resolveSessionPermissionMode(parentSessionMetadata);
-      }
-      if (parentSessionMetadata.yoloMode === true) {
-        childSessionMetadata.yoloMode = true;
-      }
-      const inheritedUpstreamRetryMaxRetries =
-        normalizeUpstreamRetryMaxRetries(childRequestData?.[UPSTREAM_RETRY_MAX_RETRIES_KEY]) ??
-        normalizeUpstreamRetryMaxRetries(parentSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY]);
-      if (inheritedUpstreamRetryMaxRetries !== undefined) {
-        childSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY] = inheritedUpstreamRetryMaxRetries;
-      }
-      const existingChildSession = sqliteGet<{
-        id: string;
-        metadata_json: string;
-      }>('SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1', [
-        childSessionId,
-        userId,
-      ]);
-      if (resumableTask?.sessionId && !existingChildSession) {
-        return {
-          toolCallId: request.toolCallId,
-          toolName: request.toolName,
-          output: `Existing child session ${childSessionId} was not found for task ${resumableTask.id}`,
-          isError: true,
-          durationMs: 0,
-        };
-      }
-
-      const taskSessionLimitError = getTaskSessionLimitError({
-        currentSessionId: sessionId,
-        excludeRunningSessionId: resumableTask?.sessionId,
-        isNewChildSession: resumableTask === null,
-        userId,
-      });
-      if (taskSessionLimitError) {
-        return {
-          toolCallId: request.toolCallId,
-          toolName: request.toolName,
-          output: taskSessionLimitError,
-          isError: true,
-          durationMs: 0,
-        };
-      }
-
-      if (existingChildSession) {
-        let mergedMetadata = childSessionMetadata;
-        try {
-          const parsedExistingMetadata = JSON.parse(existingChildSession.metadata_json) as Record<
-            string,
-            unknown
-          >;
-          mergedMetadata = {
-            ...parsedExistingMetadata,
-            ...childSessionMetadata,
-          };
-        } catch {
-          mergedMetadata = childSessionMetadata;
-        }
-        sqliteRun(
-          "UPDATE sessions SET metadata_json = ?, title = COALESCE(title, ?), updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-          [JSON.stringify(mergedMetadata), childSessionTitle, childSessionId, userId],
-        );
-      } else {
-        sqliteRun(
-          `INSERT INTO sessions (id, user_id, messages_json, metadata_json, title) VALUES (?, ?, '[]', ?, ?)`,
-          [childSessionId, userId, JSON.stringify(childSessionMetadata), childSessionTitle],
-        );
-      }
-
-      const buildCurrentTaskOutput = (taskState: {
-        assignedAgent?: string;
-        errorMessage?: string;
-        message?: string;
-        result?: string;
-        status: string;
-        taskId: string;
-      }) =>
-        buildTaskToolOutput({
-          assignedAgent: taskState.assignedAgent ?? resolvedAgent.agentId,
-          category,
-          errorMessage: taskState.errorMessage,
-          message: taskState.message,
+      // 派发期兜底：子会话被置为 `running` 之后（resume / 新建两条分支），仍有
+      // `appendSessionMessage` / `taskManager.save` / `publishSessionRunEvent` 等可抛错的
+      // 操作，且整条 task 分支不在任何 try 内。一旦抛错逃出本分支，子会话会永久残留
+      // `running`——无执行体、无 reconcile 触发点，持续占用任务树的活跃子代理名额；
+      // 任务图里的 task 残留 `running` 还会让后续 resume 被 `isAlreadyRunning` 判成
+      // 「仍在运行」而永远无法恢复。因此这里登记已置位的 task id，交由 catch 统一回滚。
+      let dispatchedChildTaskId: string | null = null;
+      try {
+        const childSessionMetadata: Record<string, unknown> = {
+          parentSessionId: sessionId,
+          subagentType: resolvedAgent.agentId,
+          createdByTool: 'task',
+          delegatedPromptVersion: 'v2',
+          delegatedSystemPrompt: resolvedAgent.systemPrompt,
+          delegatedModelCandidates: resolvedAgent.modelCandidates,
           requestedSkills,
-          reason: readChildSessionTerminalReason(getSessionMetadata(childSessionId)),
-          result: taskState.result,
-          sessionId: childSessionId,
-          status: mapTaskStatusToToolOutputStatus(taskState.status),
-          taskId: taskState.taskId,
-          timeoutSource: readChildSessionTimeoutSource(getSessionMetadata(childSessionId)),
+        };
+        if (effectiveDelegatedModel?.modelId) {
+          childSessionMetadata.modelId = effectiveDelegatedModel.modelId;
+        }
+        if (effectiveDelegatedModel?.providerId) {
+          childSessionMetadata.providerId = effectiveDelegatedModel.providerId;
+        }
+        if (effectiveDelegatedModel?.variant) {
+          childSessionMetadata.variant = effectiveDelegatedModel.variant;
+        }
+        if (parentToolReference) {
+          childSessionMetadata[TASK_PARENT_TOOL_REQUEST_ID_KEY] =
+            parentToolReference.clientRequestId;
+          childSessionMetadata[TASK_PARENT_TOOL_CALL_ID_KEY] = parentToolReference.toolCallId;
+        }
+        if (category) {
+          childSessionMetadata.taskCategory = category;
+        }
+        const inheritedWorkingDirectory = parentSessionMetadata.workingDirectory;
+        if (typeof inheritedWorkingDirectory === 'string') {
+          childSessionMetadata.workingDirectory = inheritedWorkingDirectory;
+        }
+        const inheritedDialogueMode = parentSessionMetadata.dialogueMode;
+        if (typeof inheritedDialogueMode === 'string') {
+          childSessionMetadata.dialogueMode = inheritedDialogueMode;
+        }
+        // 继承权限档位：子代理 session 在后台运行，无法与用户交互审批。
+        // permissionMode 是规范键，仅在父会话确实表达过档位时才继承（已写规范键，
+        // 或历史布尔 yoloMode === true）——auto-edit 父会话的子会话不得降级为 ask；
+        // 父会话未表达时保持缺席（读取侧按 ask 兜底，不凭空写入）。
+        // 旧布尔 yoloMode 同步保留，兼容仍直接读取它的历史消费方。
+        if (
+          parentSessionMetadata.permissionMode !== undefined ||
+          parentSessionMetadata.yoloMode === true
+        ) {
+          childSessionMetadata.permissionMode = resolveSessionPermissionMode(parentSessionMetadata);
+        }
+        if (parentSessionMetadata.yoloMode === true) {
+          childSessionMetadata.yoloMode = true;
+        }
+        const inheritedUpstreamRetryMaxRetries =
+          normalizeUpstreamRetryMaxRetries(childRequestData?.[UPSTREAM_RETRY_MAX_RETRIES_KEY]) ??
+          normalizeUpstreamRetryMaxRetries(parentSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY]);
+        if (inheritedUpstreamRetryMaxRetries !== undefined) {
+          childSessionMetadata[UPSTREAM_RETRY_MAX_RETRIES_KEY] = inheritedUpstreamRetryMaxRetries;
+        }
+        const existingChildSession = sqliteGet<{
+          id: string;
+          metadata_json: string;
+        }>('SELECT id, metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1', [
+          childSessionId,
+          userId,
+        ]);
+        if (resumableTask?.sessionId && !existingChildSession) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: `Existing child session ${childSessionId} was not found for task ${resumableTask.id}`,
+            isError: true,
+            durationMs: 0,
+          };
+        }
+
+        const taskSessionLimitError = getTaskSessionLimitError({
+          currentSessionId: sessionId,
+          excludeActiveSessionId: resumableTask?.sessionId,
+          userId,
         });
+        if (taskSessionLimitError) {
+          return {
+            toolCallId: request.toolCallId,
+            toolName: request.toolName,
+            output: taskSessionLimitError,
+            isError: true,
+            durationMs: 0,
+          };
+        }
 
-      if (resumableTask?.sessionId) {
-        const existingChildSessionState = sqliteGet<{ state_status: string }>(
-          'SELECT state_status FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-          [childSessionId, userId],
-        );
-        const isAlreadyRunning =
-          resumableTask.status === 'running' ||
-          existingChildSessionState?.state_status === 'running';
+        if (existingChildSession) {
+          let mergedMetadata = childSessionMetadata;
+          try {
+            const parsedExistingMetadata = JSON.parse(existingChildSession.metadata_json) as Record<
+              string,
+              unknown
+            >;
+            mergedMetadata = {
+              ...parsedExistingMetadata,
+              ...childSessionMetadata,
+            };
+          } catch {
+            mergedMetadata = childSessionMetadata;
+          }
+          sqliteRun(
+            "UPDATE sessions SET metadata_json = ?, title = COALESCE(title, ?), updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+            [JSON.stringify(mergedMetadata), childSessionTitle, childSessionId, userId],
+          );
+        } else {
+          sqliteRun(
+            `INSERT INTO sessions (id, user_id, messages_json, metadata_json, title) VALUES (?, ?, '[]', ?, ?)`,
+            [childSessionId, userId, JSON.stringify(childSessionMetadata), childSessionTitle],
+          );
+        }
 
-        if (isAlreadyRunning) {
+        const buildCurrentTaskOutput = (taskState: {
+          assignedAgent?: string;
+          errorMessage?: string;
+          message?: string;
+          result?: string;
+          status: string;
+          taskId: string;
+        }) =>
+          buildTaskToolOutput({
+            assignedAgent: taskState.assignedAgent ?? resolvedAgent.agentId,
+            category,
+            errorMessage: taskState.errorMessage,
+            message: taskState.message,
+            requestedSkills,
+            reason: readChildSessionTerminalReason(getSessionMetadata(childSessionId)),
+            result: taskState.result,
+            sessionId: childSessionId,
+            status: mapTaskStatusToToolOutputStatus(taskState.status),
+            taskId: taskState.taskId,
+            timeoutSource: readChildSessionTimeoutSource(getSessionMetadata(childSessionId)),
+          });
+
+        if (resumableTask?.sessionId) {
+          const existingChildSessionState = sqliteGet<{ state_status: string }>(
+            'SELECT state_status FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+            [childSessionId, userId],
+          );
+          const isAlreadyRunning =
+            resumableTask.status === 'running' ||
+            existingChildSessionState?.state_status === 'running';
+
+          if (isAlreadyRunning) {
+            return {
+              toolCallId: request.toolCallId,
+              toolName: request.toolName,
+              output: buildCurrentTaskOutput({
+                assignedAgent: resumableTask.assignedAgent,
+                errorMessage: resumableTask.errorMessage,
+                message: buildTaskToolBackgroundMessage({
+                  agent: resumableTask.assignedAgent ?? resolvedAgent.agentId,
+                  category,
+                  description: effectiveTaskDescription,
+                  sessionId: childSessionId,
+                  status: mapTaskStatusToToolOutputStatus(resumableTask.status),
+                  taskId: resumableTask.id,
+                }),
+                result: resumableTask.result,
+                status: resumableTask.status,
+                taskId: resumableTask.id,
+              }),
+              isError: false,
+              durationMs: 0,
+            };
+          }
+
+          sqliteRun(
+            "UPDATE sessions SET state_status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+            [canExecuteImmediately ? 'running' : 'idle', childSessionId, userId],
+          );
+          dispatchedChildTaskId = resumableTask.id;
+          if (!childRequestData) {
+            appendSessionMessage({
+              sessionId: childSessionId,
+              userId,
+              role: 'user',
+              content: [{ type: 'text', text: parsed.data.prompt }],
+              clientRequestId: `task:${request.toolCallId}`,
+            });
+          }
+
+          taskManager.updateTask(graph, resumableTask.id, {
+            assignedAgent: resolvedAgent.agentId,
+            completedAt: undefined,
+            description: parsed.data.prompt,
+            errorMessage: undefined,
+            result: undefined,
+            startedAt: canExecuteImmediately ? Date.now() : resumableTask.startedAt,
+            status: canExecuteImmediately ? 'running' : 'pending',
+            tags: taskTags,
+            title: effectiveTaskDescription,
+          });
+          await taskManager.save(graph);
+          // 写入父会话上下文：子代理中途停下（待批准 / 待回答）时，
+          // `task/task-parent-auto-decision.ts` 需要父会话的原始请求数据来构造父级决策请求。
+          if (
+            shouldRunInBackground &&
+            parentToolReference !== undefined &&
+            executionContext?.requestData !== undefined
+          ) {
+            upsertTaskParentContext({
+              childSessionId,
+              parentSessionId: sessionId,
+              requestData: executionContext.requestData,
+              taskId: resumableTask.id,
+              userId,
+            });
+          }
+
+          publishSessionRunEvent(sessionId, {
+            type: 'task_update',
+            taskId: resumableTask.id,
+            label: effectiveTaskDescription,
+            status: shouldRunInBackground || canExecuteImmediately ? 'in_progress' : 'pending',
+            assignedAgent: resolvedAgent.agentId,
+            ...(category ? { category } : {}),
+            ...(requestedSkills.length > 0 ? { requestedSkills } : {}),
+            sessionId: childSessionId,
+            parentSessionId: sessionId,
+          });
+
+          if (shouldRunInBackground && childRequestData) {
+            registerBackgroundChildTask({
+              assignedAgent: resolvedAgent.agentId,
+              childSessionId,
+              parentSessionId: sessionId,
+              taskTitle: effectiveTaskDescription,
+            });
+            setTimeout(() => {
+              void runChildTaskSessionInBackground({
+                assignedAgent: resolvedAgent.agentId,
+                childSessionId,
+                childTaskId: resumableTask.id,
+                parentToolReference,
+                parentSessionId: sessionId,
+                requestData: childRequestData,
+                requestedSkills,
+                taskCategory: category,
+                taskTitle: effectiveTaskDescription,
+                userId,
+              });
+            }, 0);
+          }
+
+          if (!shouldRunInBackground && childRequestData) {
+            await runChildTaskSessionInBackground({
+              assignedAgent: resolvedAgent.agentId,
+              childSessionId,
+              childTaskId: resumableTask.id,
+              parentToolReference,
+              parentSessionId: sessionId,
+              requestData: childRequestData,
+              requestedSkills,
+              taskCategory: category,
+              taskTitle: effectiveTaskDescription,
+              userId,
+            });
+            const refreshedGraph = await loadTaskGraphForSession(taskManager, sessionId);
+            const refreshedTask = refreshedGraph.tasks[resumableTask.id] ?? resumableTask;
+            return {
+              toolCallId: request.toolCallId,
+              toolName: request.toolName,
+              output: buildCurrentTaskOutput({
+                assignedAgent: refreshedTask.assignedAgent,
+                errorMessage: refreshedTask.errorMessage,
+                message: buildTaskToolTerminalMessage({
+                  agent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
+                  category,
+                  completedAt: refreshedTask.completedAt,
+                  errorMessage: refreshedTask.errorMessage,
+                  // 对齐参考库前台路径（`SubagentCompletion.text`）：只回传子代理最后一条
+                  // assistant 文本，不再把整个子会话的文本 + 工具输出全量拼进父会话。
+                  resultText:
+                    getChildSessionSummary(childSessionId, userId) || refreshedTask.result,
+                  sessionId: childSessionId,
+                  startedAt: refreshedTask.startedAt,
+                  status:
+                    refreshedTask.status === 'failed'
+                      ? 'failed'
+                      : refreshedTask.status === 'cancelled'
+                        ? 'cancelled'
+                        : 'done',
+                }),
+                result: refreshedTask.result,
+                status: refreshedTask.status,
+                taskId: refreshedTask.id,
+              }),
+              isError: refreshedTask.status === 'failed',
+              durationMs: 0,
+            };
+          }
+
           return {
             toolCallId: request.toolCallId,
             toolName: request.toolName,
             output: buildCurrentTaskOutput({
-              assignedAgent: resumableTask.assignedAgent,
-              errorMessage: resumableTask.errorMessage,
+              assignedAgent: resolvedAgent.agentId,
               message: buildTaskToolBackgroundMessage({
-                agent: resumableTask.assignedAgent ?? resolvedAgent.agentId,
+                agent: resolvedAgent.agentId,
                 category,
                 description: effectiveTaskDescription,
                 sessionId: childSessionId,
-                status: mapTaskStatusToToolOutputStatus(resumableTask.status),
+                status: shouldRunInBackground || canExecuteImmediately ? 'running' : 'pending',
                 taskId: resumableTask.id,
               }),
-              result: resumableTask.result,
-              status: resumableTask.status,
+              status: shouldRunInBackground || canExecuteImmediately ? 'running' : 'pending',
               taskId: resumableTask.id,
             }),
             isError: false,
@@ -4348,20 +4503,24 @@ async function executeGatewayManagedToolImpl(
           });
         }
 
-        taskManager.updateTask(graph, resumableTask.id, {
-          assignedAgent: resolvedAgent.agentId,
-          completedAt: undefined,
-          description: parsed.data.prompt,
-          errorMessage: undefined,
-          result: undefined,
-          startedAt: canExecuteImmediately ? Date.now() : resumableTask.startedAt,
-          status: canExecuteImmediately ? 'running' : 'pending',
-          tags: taskTags,
+        const childTask = taskManager.addTask(graph, {
           title: effectiveTaskDescription,
+          description: parsed.data.prompt,
+          status: 'pending',
+          blockedBy: [],
+          sessionId: childSessionId,
+          assignedAgent: resolvedAgent.agentId,
+          priority: 'medium',
+          tags: taskTags,
+          clientRequestId:
+            resolveTaskGraphTurnClientRequestId(sessionId, executionContext) ?? undefined,
         });
+        dispatchedChildTaskId = childTask.id;
+        if (canExecuteImmediately) {
+          taskManager.startTask(graph, childTask.id);
+        }
         await taskManager.save(graph);
-        // 写入父会话上下文：子代理中途停下（待批准 / 待回答）时，
-        // `task/task-parent-auto-decision.ts` 需要父会话的原始请求数据来构造父级决策请求。
+        // 同上前置条件：为父级决策路径留存父会话原始请求数据。
         if (
           shouldRunInBackground &&
           parentToolReference !== undefined &&
@@ -4371,16 +4530,22 @@ async function executeGatewayManagedToolImpl(
             childSessionId,
             parentSessionId: sessionId,
             requestData: executionContext.requestData,
-            taskId: resumableTask.id,
+            taskId: childTask.id,
             userId,
           });
         }
 
         publishSessionRunEvent(sessionId, {
+          type: 'session_child',
+          sessionId: childSessionId,
+          parentSessionId: sessionId,
+          title: childSessionTitle,
+        });
+        publishSessionRunEvent(sessionId, {
           type: 'task_update',
-          taskId: resumableTask.id,
+          taskId: childTask.id,
           label: effectiveTaskDescription,
-          status: shouldRunInBackground || canExecuteImmediately ? 'in_progress' : 'pending',
+          status: shouldRunInBackground ? 'in_progress' : 'pending',
           assignedAgent: resolvedAgent.agentId,
           ...(category ? { category } : {}),
           ...(requestedSkills.length > 0 ? { requestedSkills } : {}),
@@ -4399,7 +4564,7 @@ async function executeGatewayManagedToolImpl(
             void runChildTaskSessionInBackground({
               assignedAgent: resolvedAgent.agentId,
               childSessionId,
-              childTaskId: resumableTask.id,
+              childTaskId: childTask.id,
               parentToolReference,
               parentSessionId: sessionId,
               requestData: childRequestData,
@@ -4415,7 +4580,7 @@ async function executeGatewayManagedToolImpl(
           await runChildTaskSessionInBackground({
             assignedAgent: resolvedAgent.agentId,
             childSessionId,
-            childTaskId: resumableTask.id,
+            childTaskId: childTask.id,
             parentToolReference,
             parentSessionId: sessionId,
             requestData: childRequestData,
@@ -4425,20 +4590,21 @@ async function executeGatewayManagedToolImpl(
             userId,
           });
           const refreshedGraph = await loadTaskGraphForSession(taskManager, sessionId);
-          const refreshedTask = refreshedGraph.tasks[resumableTask.id] ?? resumableTask;
+          const refreshedTask = refreshedGraph.tasks[childTask.id] ?? childTask;
           return {
             toolCallId: request.toolCallId,
             toolName: request.toolName,
-            output: buildCurrentTaskOutput({
-              assignedAgent: refreshedTask.assignedAgent,
+            output: buildTaskToolOutput({
+              assignedAgent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
+              category,
               errorMessage: refreshedTask.errorMessage,
               message: buildTaskToolTerminalMessage({
                 agent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
                 category,
                 completedAt: refreshedTask.completedAt,
                 errorMessage: refreshedTask.errorMessage,
-                // 对齐参考库前台路径（`SubagentCompletion.text`）：只回传子代理最后一条
-                // assistant 文本，不再把整个子会话的文本 + 工具输出全量拼进父会话。
+                // 对齐参考库前台路径：只回传子代理最后一条 assistant 文本，
+                // 不再全量拼接子会话文本与工具输出（防父会话上下文膨胀）。
                 resultText: getChildSessionSummary(childSessionId, userId) || refreshedTask.result,
                 sessionId: childSessionId,
                 startedAt: refreshedTask.startedAt,
@@ -4449,9 +4615,13 @@ async function executeGatewayManagedToolImpl(
                       ? 'cancelled'
                       : 'done',
               }),
+              requestedSkills,
+              reason: readChildSessionTerminalReason(getSessionMetadata(childSessionId)),
               result: refreshedTask.result,
-              status: refreshedTask.status,
+              sessionId: childSessionId,
+              status: mapTaskStatusToToolOutputStatus(refreshedTask.status),
               taskId: refreshedTask.id,
+              timeoutSource: readChildSessionTimeoutSource(getSessionMetadata(childSessionId)),
             }),
             isError: refreshedTask.status === 'failed',
             durationMs: 0,
@@ -4461,184 +4631,61 @@ async function executeGatewayManagedToolImpl(
         return {
           toolCallId: request.toolCallId,
           toolName: request.toolName,
-          output: buildCurrentTaskOutput({
+          output: buildTaskToolOutput({
             assignedAgent: resolvedAgent.agentId,
+            category,
             message: buildTaskToolBackgroundMessage({
               agent: resolvedAgent.agentId,
               category,
               description: effectiveTaskDescription,
               sessionId: childSessionId,
-              status: shouldRunInBackground || canExecuteImmediately ? 'running' : 'pending',
-              taskId: resumableTask.id,
-            }),
-            status: shouldRunInBackground || canExecuteImmediately ? 'running' : 'pending',
-            taskId: resumableTask.id,
-          }),
-          isError: false,
-          durationMs: 0,
-        };
-      }
-
-      sqliteRun(
-        "UPDATE sessions SET state_status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-        [canExecuteImmediately ? 'running' : 'idle', childSessionId, userId],
-      );
-      if (!childRequestData) {
-        appendSessionMessage({
-          sessionId: childSessionId,
-          userId,
-          role: 'user',
-          content: [{ type: 'text', text: parsed.data.prompt }],
-          clientRequestId: `task:${request.toolCallId}`,
-        });
-      }
-
-      const childTask = taskManager.addTask(graph, {
-        title: effectiveTaskDescription,
-        description: parsed.data.prompt,
-        status: 'pending',
-        blockedBy: [],
-        sessionId: childSessionId,
-        assignedAgent: resolvedAgent.agentId,
-        priority: 'medium',
-        tags: taskTags,
-        clientRequestId:
-          resolveTaskGraphTurnClientRequestId(sessionId, executionContext) ?? undefined,
-      });
-      if (canExecuteImmediately) {
-        taskManager.startTask(graph, childTask.id);
-      }
-      await taskManager.save(graph);
-      // 同上前置条件：为父级决策路径留存父会话原始请求数据。
-      if (
-        shouldRunInBackground &&
-        parentToolReference !== undefined &&
-        executionContext?.requestData !== undefined
-      ) {
-        upsertTaskParentContext({
-          childSessionId,
-          parentSessionId: sessionId,
-          requestData: executionContext.requestData,
-          taskId: childTask.id,
-          userId,
-        });
-      }
-
-      publishSessionRunEvent(sessionId, {
-        type: 'session_child',
-        sessionId: childSessionId,
-        parentSessionId: sessionId,
-        title: childSessionTitle,
-      });
-      publishSessionRunEvent(sessionId, {
-        type: 'task_update',
-        taskId: childTask.id,
-        label: effectiveTaskDescription,
-        status: shouldRunInBackground ? 'in_progress' : 'pending',
-        assignedAgent: resolvedAgent.agentId,
-        ...(category ? { category } : {}),
-        ...(requestedSkills.length > 0 ? { requestedSkills } : {}),
-        sessionId: childSessionId,
-        parentSessionId: sessionId,
-      });
-
-      if (shouldRunInBackground && childRequestData) {
-        registerBackgroundChildTask({
-          assignedAgent: resolvedAgent.agentId,
-          childSessionId,
-          parentSessionId: sessionId,
-          taskTitle: effectiveTaskDescription,
-        });
-        setTimeout(() => {
-          void runChildTaskSessionInBackground({
-            assignedAgent: resolvedAgent.agentId,
-            childSessionId,
-            childTaskId: childTask.id,
-            parentToolReference,
-            parentSessionId: sessionId,
-            requestData: childRequestData,
-            requestedSkills,
-            taskCategory: category,
-            taskTitle: effectiveTaskDescription,
-            userId,
-          });
-        }, 0);
-      }
-
-      if (!shouldRunInBackground && childRequestData) {
-        await runChildTaskSessionInBackground({
-          assignedAgent: resolvedAgent.agentId,
-          childSessionId,
-          childTaskId: childTask.id,
-          parentToolReference,
-          parentSessionId: sessionId,
-          requestData: childRequestData,
-          requestedSkills,
-          taskCategory: category,
-          taskTitle: effectiveTaskDescription,
-          userId,
-        });
-        const refreshedGraph = await loadTaskGraphForSession(taskManager, sessionId);
-        const refreshedTask = refreshedGraph.tasks[childTask.id] ?? childTask;
-        return {
-          toolCallId: request.toolCallId,
-          toolName: request.toolName,
-          output: buildTaskToolOutput({
-            assignedAgent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
-            category,
-            errorMessage: refreshedTask.errorMessage,
-            message: buildTaskToolTerminalMessage({
-              agent: refreshedTask.assignedAgent ?? resolvedAgent.agentId,
-              category,
-              completedAt: refreshedTask.completedAt,
-              errorMessage: refreshedTask.errorMessage,
-              // 对齐参考库前台路径：只回传子代理最后一条 assistant 文本，
-              // 不再全量拼接子会话文本与工具输出（防父会话上下文膨胀）。
-              resultText: getChildSessionSummary(childSessionId, userId) || refreshedTask.result,
-              sessionId: childSessionId,
-              startedAt: refreshedTask.startedAt,
-              status:
-                refreshedTask.status === 'failed'
-                  ? 'failed'
-                  : refreshedTask.status === 'cancelled'
-                    ? 'cancelled'
-                    : 'done',
+              status: shouldRunInBackground ? 'running' : 'pending',
+              taskId: childTask.id,
             }),
             requestedSkills,
-            reason: readChildSessionTerminalReason(getSessionMetadata(childSessionId)),
-            result: refreshedTask.result,
-            sessionId: childSessionId,
-            status: mapTaskStatusToToolOutputStatus(refreshedTask.status),
-            taskId: refreshedTask.id,
-            timeoutSource: readChildSessionTimeoutSource(getSessionMetadata(childSessionId)),
-          }),
-          isError: refreshedTask.status === 'failed',
-          durationMs: 0,
-        };
-      }
-
-      return {
-        toolCallId: request.toolCallId,
-        toolName: request.toolName,
-        output: buildTaskToolOutput({
-          assignedAgent: resolvedAgent.agentId,
-          category,
-          message: buildTaskToolBackgroundMessage({
-            agent: resolvedAgent.agentId,
-            category,
-            description: effectiveTaskDescription,
             sessionId: childSessionId,
             status: shouldRunInBackground ? 'running' : 'pending',
             taskId: childTask.id,
           }),
-          requestedSkills,
-          sessionId: childSessionId,
-          status: shouldRunInBackground ? 'running' : 'pending',
-          taskId: childTask.id,
-        }),
-        isError: false,
-        durationMs: 0,
-      };
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        // 回滚派发期残留：优先走 finalize 以同时归位子会话状态并结算 task；
+        // 任务图本身读不了（可能正是本次失败原因）时，至少把子会话从 `running` 归位。
+        try {
+          if (dispatchedChildTaskId !== null) {
+            await finalizeChildTaskRunSafely({
+              assignedAgent: resolvedAgent.agentId,
+              childSessionId,
+              childTaskId: dispatchedChildTaskId,
+              ...(parentToolReference ? { parentToolReference } : {}),
+              parentSessionId: sessionId,
+              ...(requestedSkills ? { requestedSkills } : {}),
+              result: {
+                pendingInteraction: false,
+                statusCode: 500,
+                summary: `子代理派发失败：${error instanceof Error ? error.message : String(error)}`,
+              },
+              ...(category ? { taskCategory: category } : {}),
+              taskManager,
+              taskTitle: effectiveTaskDescription,
+              userId,
+            });
+          } else {
+            releaseChildSessionActiveSlot({ childSessionId, userId });
+          }
+        } catch (rollbackError) {
+          releaseChildSessionActiveSlot({ childSessionId, userId });
+          console.warn(
+            `[task] 子代理派发失败回滚未完成（childSessionId=${childSessionId}）：${
+              rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+            }`,
+          );
+        }
+
+        throw error;
+      }
     }
 
     if (request.toolName === 'background_output') {
@@ -4957,6 +5004,7 @@ async function executeGatewayManagedToolImpl(
       // a userId explicitly (e.g. some non-stream call paths).
       const ownerUserId = executionContext?.userId ?? getSessionOwnerUserId(sessionId) ?? undefined;
 
+      const bashStartAt = Date.now();
       const output = await runBashCommand(parsed.data, {
         signal,
         sessionId,
@@ -4986,7 +5034,7 @@ async function executeGatewayManagedToolImpl(
         toolName: request.toolName,
         output,
         isError: output.exitCode !== 0,
-        durationMs: 0,
+        durationMs: Date.now() - bashStartAt,
       };
     }
 
@@ -5546,18 +5594,22 @@ async function runChildTaskSessionInBackground(input: {
   if (existingJob && existingJob.status !== 'running') {
     return;
   }
-  const graph = await loadTaskGraphForSession(taskManager, input.parentSessionId);
-  if (
-    graph.tasks[input.childTaskId]?.status !== 'running' ||
-    (existingJob && getTaskJob(input.childSessionId)?.status !== 'running')
-  ) {
-    return;
-  }
-  if (!existingJob) {
-    registerBackgroundChildTask(input);
-  }
-
+  // try 从「加载任务图」之前就生效：派发方（新建路径 / resume 路径）已先把子会话
+  // 置为 `running`，此前的准备阶段一旦抛错逃出本函数，子会话会永久残留 `running`
+  // —— 既不再有任何执行、也无 reconcile 触发点，持续占用任务树的活跃子代理名额
+  // （后台路径还会额外产生 unhandled rejection）。
   try {
+    const graph = await loadTaskGraphForSession(taskManager, input.parentSessionId);
+    if (
+      graph.tasks[input.childTaskId]?.status !== 'running' ||
+      (existingJob && getTaskJob(input.childSessionId)?.status !== 'running')
+    ) {
+      return;
+    }
+    if (!existingJob) {
+      registerBackgroundChildTask(input);
+    }
+
     const { runSessionInBackground } = await import('../routes/stream-runtime.js');
     let finalResult: TaskBackgroundRunResult | null = null;
 
@@ -5722,6 +5774,20 @@ async function runChildTaskSessionInBackground(input: {
       userId: input.userId,
     });
   }
+}
+
+/**
+ * 派发期失败回滚：把子会话从 `running` 归位为 `idle`，立即释放任务树的活跃名额。
+ *
+ * 只处理 `running` —— `idle` 无需动作，`paused` 表示子代理确实在等用户交互、
+ * 仍可被恢复，不能在此被静默抹平。条件写在 SQL 里保证幂等：重复回滚无副作用。
+ */
+function releaseChildSessionActiveSlot(input: { childSessionId: string; userId: string }): void {
+  sqliteRun(
+    `UPDATE sessions SET state_status = 'idle', updated_at = datetime('now')
+     WHERE id = ? AND user_id = ? AND state_status = 'running'`,
+    [input.childSessionId, input.userId],
+  );
 }
 
 function isIgnorableChildFinalizeError(error: unknown): boolean {
@@ -7170,6 +7236,7 @@ export class ToolSandbox {
         input: effectiveRequest.rawInput,
         output: result.output,
         isError: false,
+        pendingInteraction: true,
         durationMs: result.durationMs ?? null,
       });
       return result;
@@ -7204,6 +7271,7 @@ export class ToolSandbox {
         input: effectiveRequest.rawInput,
         output: gatewayManagedResult.output,
         isError: gatewayManagedResult.isError ?? false,
+        pendingInteraction: Boolean(gatewayManagedResult.pendingPermissionRequestId),
         durationMs: gatewayManagedResult.durationMs ?? null,
       });
       if (permissionState.kind === 'approved' && permissionState.decision === 'once') {
@@ -7270,7 +7338,13 @@ export class ToolSandbox {
       input: effectiveRequest.rawInput,
       output: result.output,
       isError: result.isError ?? false,
-      durationMs: result.durationMs ?? null,
+      // 提问 / 计划审批这类「已挂起、等用户输入」必须以 isError 返回给模型（让模型
+      // 停下），但它不是故障——标记后由 /settings/diagnostics 与开发日志过滤掉。
+      pendingInteraction: Boolean(result.pendingPermissionRequestId),
+      // 兜底计时：多数工具分支（含历史上硬编码 0 的 bash）没有自报耗时，
+      // 导致 audit_logs.duration_ms 全为 0，排障包里的「耗时」一列失去意义。
+      // 分支自己量了就用它的，没量就用这里的兜底。
+      durationMs: result.durationMs || Date.now() - startAt,
     });
     // read 成功后按需注入最近的 AGENTS.md 作为上下文指令（按「会话 + 路径」去重，
     // 失败不影响读取本身）。SSH 远程 read 走 executeGatewayManagedTool 提前返回，

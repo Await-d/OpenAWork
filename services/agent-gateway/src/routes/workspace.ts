@@ -118,7 +118,7 @@ const WORKSPACE_ERROR_MESSAGES = {
   pathDoesNotExist: '目标路径不存在。',
   fileNotFound: '目标文件不存在。',
   pathNotFile: '目标路径不是文件。',
-  fileTooLargeForPreview: '文件体积超过预览限制，暂不支持预览。',
+  fileTooLargeForPreview: '文件超过 10MB 预览上限，暂不支持预览与编辑。请下载后用本地应用打开。',
   fileWriteFailed: '写入文件失败。',
   parentDirectoryInvalid: '父目录无效。',
   parentDirectoryNotFound: '父目录不存在。',
@@ -136,7 +136,15 @@ const WORKSPACE_ERROR_MESSAGES = {
 const IGNORED = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.DS_Store']);
 const MAX_ENTRIES = 500;
 const MAX_DEPTH = 4;
-const MAX_FILE_BYTES = 100 * 1024;
+/**
+ * 预览 / 编辑的体积上限（10MB）。
+ *
+ * 超过此值一律**明确拒绝**（413），不再返回截断内容：截断文本一旦被当作
+ * 编辑基线（`originalContent`），用户任何一次保存都会把源文件写短，属于不可
+ * 逆的数据损坏。历史上限是 100KB，导致 `package-lock.json`、构建产物、大 JSON
+ * 这类正常文件完全无法查看。
+ */
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SEARCH_RESULTS = 50;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
@@ -866,16 +874,22 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
       statStep.succeed(undefined, { size: stat.size });
 
-      const truncated = stat.size > MAX_FILE_BYTES;
-      const readStep = child('read', undefined, { truncated });
+      // 超限一律拒绝，不做静默截断。截断内容进入编辑器基线后，任何一次保存都会
+      // 把源文件写短（不可逆损坏）。与二进制端点保持同一口径。
+      if (stat.size > MAX_FILE_BYTES) {
+        step.fail('file too large');
+        return reply.status(413).send({ error: WORKSPACE_ERROR_MESSAGES.fileTooLargeForPreview });
+      }
+
+      const readStep = child('read', undefined, { size: stat.size });
       const fd = await fsp.open(safePath, 'r');
       try {
-        const buffer = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
+        const buffer = Buffer.alloc(stat.size);
         await fd.read(buffer, 0, buffer.length, 0);
         const content = buffer.toString('utf8');
-        readStep.succeed(undefined, { bytesRead: buffer.length, truncated });
-        step.succeed(undefined, { bytesRead: buffer.length, truncated });
-        return reply.send({ path: safePath, content, truncated });
+        readStep.succeed(undefined, { bytesRead: buffer.length });
+        step.succeed(undefined, { bytesRead: buffer.length });
+        return reply.send({ path: safePath, content, truncated: false });
       } finally {
         await fd.close();
       }
