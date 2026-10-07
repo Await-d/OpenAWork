@@ -86,7 +86,10 @@ describe('tool sandbox permission audit', () => {
               question: '走哪条路？',
               header: '路线',
               multiSelect: false,
-              options: ['方案 A', '方案 B'],
+              options: [
+                { label: '方案 A', description: '按方案 A 推进' },
+                { label: '方案 B', description: '按方案 B 推进' },
+              ],
             },
           ],
         },
