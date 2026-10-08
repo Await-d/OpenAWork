@@ -6,6 +6,7 @@ import {
   filterSessionTreeGroupsByQuery,
   groupSessionsByWorkspace,
   resolveSessionWorkspaceBindingById,
+  resolveWorkspaceGroupDisplayName,
 } from './session-grouping.js';
 import type { WorkspaceSessionTreeGroup, WorkspaceSessionTreeNode } from './session-grouping.js';
 
@@ -62,6 +63,84 @@ describe('groupSessionsByWorkspace', () => {
 
     expect(groups.map((group) => group.workspacePath)).toEqual(['/repo/alpha', null]);
     expect(groups[1]?.workspaceLabel).toBe(UNBOUND_WORKSPACE_LABEL);
+  });
+
+  it('多个工作区都活跃时按名称字母序，闲置组沉底', () => {
+    const alpha: Session = {
+      ...makeSession('alpha', 'A 会话'),
+      metadata_json: JSON.stringify({ workingDirectory: '/repo/alpha' }),
+    };
+    const zeta: Session = {
+      ...makeSession('zeta', 'Z 会话'),
+      updated_at: '2026-09-13T00:00:00.000Z',
+      metadata_json: JSON.stringify({ workingDirectory: '/repo/zeta' }),
+    };
+
+    const groups = groupSessionsByWorkspace([zeta, alpha], ['/repo/idle']);
+
+    expect(groups.map((group) => group.workspaceLabel)).toEqual(['alpha', 'zeta', 'idle']);
+  });
+
+  it('会话组透传 SSH 连接 id：远端组非空，本地组为 null', () => {
+    const sshSession: Session = {
+      ...makeSession('ssh', '远端会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-1',
+        workingDirectory: '/remote/repo',
+      }),
+    };
+    const localSession: Session = {
+      ...makeSession('local', '本地会话'),
+      metadata_json: JSON.stringify({ workingDirectory: '/local/repo' }),
+    };
+
+    const groups = groupSessionsByWorkspace([sshSession, localSession]);
+    const byPath = new Map(groups.map((group) => [group.workspacePath, group]));
+
+    expect(byPath.get('/remote/repo')?.sshConnectionId).toBe('ssh-1');
+    expect(byPath.get('/local/repo')?.sshConnectionId).toBeNull();
+  });
+
+  it('同一远端目录下的子会话继承连接 id，整组统一标记为远端', () => {
+    const parent: Session = {
+      ...makeSession('ssh-parent', '远端父会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-1',
+        workingDirectory: '/remote/repo',
+      }),
+    };
+    const child: Session = {
+      ...makeSession('ssh-child', '子会话'),
+      metadata_json: JSON.stringify({
+        parentSessionId: 'ssh-parent',
+        workingDirectory: '/remote/repo',
+      }),
+    };
+
+    const groups = groupSessionsByWorkspace([parent, child]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.sshConnectionId).toBe('ssh-1');
+  });
+});
+
+describe('resolveWorkspaceGroupDisplayName', () => {
+  it('有工作区时优先返回自定义名称', () => {
+    expect(
+      resolveWorkspaceGroupDisplayName(
+        { workspacePath: '/repo/alpha', workspaceLabel: 'alpha' },
+        () => '我的项目',
+      ),
+    ).toBe('我的项目');
+  });
+
+  it('未绑定工作区的分组沿用默认标签，不落到兜底名', () => {
+    expect(
+      resolveWorkspaceGroupDisplayName(
+        { workspacePath: null, workspaceLabel: UNBOUND_WORKSPACE_LABEL },
+        () => '不应生效',
+      ),
+    ).toBe(UNBOUND_WORKSPACE_LABEL);
   });
 });
 

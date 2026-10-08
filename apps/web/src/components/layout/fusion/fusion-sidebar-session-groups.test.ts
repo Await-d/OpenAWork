@@ -33,10 +33,12 @@ function makeNode(
 function makeGroup(
   workspacePath: string | null,
   sessions: Session[],
+  sshConnectionId: string | null = null,
 ): WorkspaceSessionGroup<Session> {
   return {
     workspacePath,
     workspaceLabel: workspacePath ?? UNBOUND_WORKSPACE_LABEL,
+    sshConnectionId,
     sessions,
   };
 }
@@ -119,7 +121,7 @@ describe('buildFusionChatGroups', () => {
     expect(alphaRow?.sessionCount).toBe(1);
   });
 
-  it('非搜索态：按组内最近活动倒序排列，空组沉底', () => {
+  it('非搜索态：多个工作区都活跃时按名称字母序，空组沉底', () => {
     const oldSession: Session = {
       id: 'old',
       title: '旧会话',
@@ -150,7 +152,55 @@ describe('buildFusionChatGroups', () => {
       isPinned: () => false,
     });
 
+    // 「new」的会话更新更近，但两个工作区都活跃时按字母序：
+    // 名称 new < old，且空组 empty 沉底。
     expect(rows.map((row) => row.key)).toEqual(['/repo/new', '/repo/old', '/repo/empty']);
+  });
+
+  it('非搜索态：活跃组全部排在闲置组之前，与字母序无关', () => {
+    const activeSession = makeSession('active', '活跃会话');
+
+    const rows = buildFusionChatGroups({
+      groupedSessions: [
+        makeGroup('/repo/aaa-idle', []),
+        makeGroup('/repo/zzz-active', [activeSession]),
+      ],
+      groupedSessionTrees: [makeTreeGroup('/repo/zzz-active', [makeNode(activeSession)])],
+      sessionCountByWorkspace: new Map([
+        ['/repo/aaa-idle', 0],
+        ['/repo/zzz-active', 1],
+      ]),
+      isSearching: false,
+      isPinned: () => false,
+    });
+
+    expect(rows.map((row) => row.key)).toEqual(['/repo/zzz-active', '/repo/aaa-idle']);
+  });
+
+  it('非搜索态：SSH 工作区把连接 id 透传到渲染模型', () => {
+    const sshSession: Session = makeSession('ssh', '远端会话');
+    const localSession: Session = makeSession('local', '本地会话');
+
+    const rows = buildFusionChatGroups({
+      groupedSessions: [
+        makeGroup('/repo/remote', [sshSession], 'ssh-1'),
+        makeGroup('/repo/local', [localSession]),
+      ],
+      groupedSessionTrees: [
+        makeTreeGroup('/repo/remote', [makeNode(sshSession)]),
+        makeTreeGroup('/repo/local', [makeNode(localSession)]),
+      ],
+      sessionCountByWorkspace: new Map([
+        ['/repo/remote', 1],
+        ['/repo/local', 1],
+      ]),
+      isSearching: false,
+      isPinned: () => false,
+    });
+
+    expect(rows.map((row) => row.key)).toEqual(['/repo/local', '/repo/remote']);
+    expect(rows[0]?.sshConnectionId).toBeNull();
+    expect(rows[1]?.sshConnectionId).toBe('ssh-1');
   });
 
   it('非搜索态：未指定工作区的会话组永远沉底，不参与最近活动排序', () => {

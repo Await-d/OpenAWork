@@ -16,6 +16,7 @@ import { runSessionInBackground } from '../routes/stream-runtime.js';
 import { GitHubTriggerImpl } from './github-trigger.js';
 import type { GitHubEventType, GitHubTriggerConfig } from './github-trigger.js';
 import { GitHubActionOutput } from './github-action-output.js';
+import { logGatewayError } from '../infra/gateway-logger.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -192,7 +193,7 @@ function startGitHubBackgroundExecution(input: {
           userId: input.userId,
         });
       } catch (writeBackError) {
-        console.error('GitHub write-back failed (non-fatal)', {
+        logGatewayError('GitHub write-back failed (non-fatal)', {
           sessionId: input.sessionId,
           error: writeBackError instanceof Error ? writeBackError.message : String(writeBackError),
         });
@@ -216,10 +217,10 @@ function startGitHubBackgroundExecution(input: {
           content: [{ type: 'text', text: `[错误: GITHUB_TRIGGER_START_FAILED] ${message}` }],
         });
       } catch (appendError) {
-        console.error('Failed to persist GitHub trigger execution error', appendError);
+        logGatewayError('Failed to persist GitHub trigger execution error', appendError);
       }
 
-      console.error('GitHub trigger background execution failed', {
+      logGatewayError('GitHub trigger background execution failed', {
         sessionId: input.sessionId,
         userId: input.userId,
         message,
@@ -330,7 +331,7 @@ export function restoreGitHubTriggers(): void {
       }
       configs = parsed;
     } catch {
-      console.error('GitHub trigger restore: 无法解析存储的触发器配置', { userId });
+      logGatewayError('GitHub trigger restore: 无法解析存储的触发器配置', { userId });
       continue;
     }
 
@@ -346,7 +347,7 @@ export function restoreGitHubTriggers(): void {
         }
         trigger.register({ ...config, ownerUserId: userId });
       } catch (error) {
-        console.error('GitHub trigger restore: 单个触发器注册失败', {
+        logGatewayError('GitHub trigger restore: 单个触发器注册失败', {
           userId,
           error: error instanceof Error ? error.message : String(error),
         });

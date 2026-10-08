@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  WORKSPACE_ALIAS_MAX_LENGTH,
   readWorkspaceAlias,
   resolveWorkspaceDisplayName,
   subscribeWorkspaceAlias,
+  validateWorkspaceAlias,
   writeWorkspaceAlias,
 } from './workspace-alias.js';
 
@@ -52,5 +54,29 @@ describe('workspace-alias', () => {
 
     writeWorkspaceAlias(OPENAWORK_PATH, '改名后');
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('validateWorkspaceAlias', () => {
+  it('空输入视为清除别名（恢复默认名）', () => {
+    expect(validateWorkspaceAlias('   ')).toEqual({ ok: true, alias: '' });
+  });
+
+  it('去除首尾空白后返回规范名', () => {
+    expect(validateWorkspaceAlias('  我的项目  ')).toEqual({ ok: true, alias: '我的项目' });
+  });
+
+  it('超过长度上限时拒绝并给出原因', () => {
+    const tooLong = 'x'.repeat(WORKSPACE_ALIAS_MAX_LENGTH + 1);
+    const result = validateWorkspaceAlias(tooLong);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toContain(String(WORKSPACE_ALIAS_MAX_LENGTH));
+    expect(validateWorkspaceAlias('x'.repeat(WORKSPACE_ALIAS_MAX_LENGTH)).ok).toBe(true);
+  });
+
+  it('拒绝含换行 / 制表符的名称', () => {
+    expect(validateWorkspaceAlias('我的\n项目').ok).toBe(false);
+    expect(validateWorkspaceAlias('我的\t项目').ok).toBe(false);
   });
 });

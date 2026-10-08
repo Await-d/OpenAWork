@@ -91,36 +91,14 @@ export function reconcileSnapshotChatMessages(
             : snapshotMessage.parts;
         reconciledSnapshotEntries.push({
           matchedPreviousIndex: previousEntry.index,
-          message: {
-            ...snapshotMessage,
-            ...(mergedParts
-              ? {
-                  parts: mergedParts,
-                  content: contentFromParts(
-                    mergedParts,
-                    snapshotMessage.modifiedFilesSummary ?? previousMessage.modifiedFilesSummary,
-                  ),
-                }
-              : {}),
-            ...preferLocalTerminalStatus(previousMessage, snapshotMessage),
-          },
+          message: buildFinalizedMessage(previousMessage, snapshotMessage, mergedParts),
         });
       } else if (previousMessage.parts && snapshotMessage.parts) {
         // Both have parts — merge by part ID (find → replace or push).
         const mergedParts = reconcilePartsById(previousMessage.parts, snapshotMessage.parts);
         reconciledSnapshotEntries.push({
           matchedPreviousIndex: previousEntry.index,
-          message: {
-            ...previousMessage,
-            parts: mergedParts,
-            content: contentFromParts(
-              mergedParts,
-              previousMessage.modifiedFilesSummary ?? snapshotMessage.modifiedFilesSummary,
-            ),
-            modifiedFilesSummary:
-              snapshotMessage.modifiedFilesSummary ?? previousMessage.modifiedFilesSummary,
-            ...preferLocalTerminalStatus(previousMessage, snapshotMessage),
-          },
+          message: buildFinalizedMessage(previousMessage, snapshotMessage, mergedParts),
         });
       } else {
         // Fallback: prefer previous to preserve local annotations, but merge
@@ -329,7 +307,196 @@ export function reconcileSnapshotChatMessages(
     deduplicated[duplicateIndex] = chooseMoreCompleteMessage(existing, message);
   }
 
-  return deduplicated;
+  return recycleUnchangedMessageReferences(previousMessages, deduplicated);
+}
+
+/**
+ * 不进入 `content`、但参与渲染的 `ChatMessage` 字段。
+ *
+ * 快照带来的这些字段常常比本地更完整（典型：流式结束后才由服务端回填
+ * `providerUsage`），所以引用回收时**必须**逐项比对，否则会复用缺字段的旧对象，
+ * 让用量 / 模型标签 / 耗时展示停在旧值。
+ *
+ * `rawContent` 刻意不在列：它是 user 消息的原始内容数组，每次归一化都是新引用，
+ * 按引用比较会永不命中；其信息已被 `content` 完整覆盖（渲染只读 `content`，
+ * `rawContent` 仅用于导出）。
+ */
+const RECYCLED_SCALAR_FIELDS = [
+  'role',
+  'clientRequestId',
+  'model',
+  'providerId',
+  'agentId',
+  'createdAt',
+  'durationMs',
+  'firstTokenLatencyMs',
+  'stopReason',
+  'tokenEstimate',
+  'providerUsage',
+  'toolCallCount',
+  'modifiedFilesSummary',
+  'status',
+  'reasoningBlocksEndedFlags',
+  'reasoningBlocksDurationsMs',
+] as const satisfies readonly (keyof ChatMessage)[];
+
+/**
+ * 单个标量字段的等价判定。
+ *
+ * 原始值直接 `Object.is`；对象/数组走 `JSON.stringify` —— 这些字段（usage 快照、
+ * 数字数组）都是小而扁的结构，序列化成本远低于整条消息，且键序不同导致的漏命中
+ * 只是少一次复用，不会漏更新。
+ */
+function isSameScalarField(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (left === null || right === null || left === undefined || right === undefined) {
+    return false;
+  }
+  if (typeof left !== 'object' || typeof right !== 'object') {
+    return false;
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * parts 序列等价判定。
+ *
+ * text / reasoning / tool 分片的内容已由 `content` 覆盖（`contentFromParts` 会把
+ * `status` / `isError` / `output` / `pendingPermissionRequestId` 一并序列化），这里
+ * 只校验分片 id 序列，防止顺序错乱。`event` 分片是唯一不进 `content` 的变体
+ * （`readAssistantTracePayloadFromParts` 忽略它），故单独比对其 payload。
+ */
+function haveEquivalentParts(
+  previousParts: ChatMessagePart[] | undefined,
+  nextParts: ChatMessagePart[] | undefined,
+): boolean {
+  if (previousParts === undefined || nextParts === undefined) {
+    return previousParts === nextParts;
+  }
+  if (previousParts.length !== nextParts.length) {
+    return false;
+  }
+  for (let index = 0; index < previousParts.length; index += 1) {
+    const previousPart = previousParts[index];
+    const nextPart = nextParts[index];
+    if (previousPart === undefined || nextPart === undefined) {
+      return false;
+    }
+    if (previousPart.id !== nextPart.id || previousPart.type !== nextPart.type) {
+      return false;
+    }
+    if (previousPart.type === 'event' && nextPart.type === 'event') {
+      if (!isSameScalarField(previousPart.payload, nextPart.payload)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * 同 id 且内容未变 —— 即「同一条持久化消息、这一帧没有任何新信息」。
+ *
+ * 不做整条消息的 `JSON.stringify`：`content` 是 parts 的序列化结果，而 tool output
+ * 可能是整份文件内容（几十 KB～数 MB），长历史每帧全量序列化一遍的成本高于它
+ * 省下的重渲染。改为「`content` 值比较 + 非 content 字段逐项 + parts id 序列」。
+ *
+ * 判定只允许**更保守**（漏判 = 少一次复用 = 多渲染）；一旦过宽就会复用陈旧对象，
+ * 那比不优化更糟。
+ */
+function isSameMessageRevision(previous: ChatMessage, next: ChatMessage): boolean {
+  if (previous.id !== next.id) {
+    return false;
+  }
+  for (const field of RECYCLED_SCALAR_FIELDS) {
+    if (!isSameScalarField(previous[field], next[field])) {
+      return false;
+    }
+  }
+  if (previous.content !== next.content) {
+    return false;
+  }
+  return haveEquivalentParts(previous.parts, next.parts);
+}
+
+/**
+ * 引用回收：把「与 previous 同 id 且内容一致」的消息换回 previous 的对象引用。
+ *
+ * 归一化每次都会造新消息对象，因此即便切回一个刚离开的会话、快照内容与视图缓存
+ * 完全一致，合流结果也会整表换新引用，击穿消息列表里所有 `ChatGroupBlock` 的
+ * `React.memo`（长历史下是几百 ms 级的重渲染）。全部命中时直接返回 `previousMessages`，
+ * 让 `setMessages` 短路，彻底消除这次重渲染。
+ */
+function recycleUnchangedMessageReferences(
+  previousMessages: readonly ChatMessage[],
+  reconciled: ChatMessage[],
+): ChatMessage[] {
+  const previousById = new Map<string, ChatMessage>();
+  for (const message of previousMessages) {
+    if (!previousById.has(message.id)) {
+      previousById.set(message.id, message);
+    }
+  }
+
+  const recycled = reconciled.map((message) => {
+    const candidate = previousById.get(message.id);
+    return candidate !== undefined && isSameMessageRevision(candidate, message)
+      ? candidate
+      : message;
+  });
+
+  // 长度不同说明快照增删了消息：此时仍可逐项复用引用，但不能沿用 previous 数组本身。
+  if (recycled.length !== previousMessages.length) {
+    return recycled;
+  }
+
+  for (let index = 0; index < recycled.length; index += 1) {
+    if (!Object.is(recycled[index], previousMessages[index])) {
+      return recycled;
+    }
+  }
+  return previousMessages as ChatMessage[];
+}
+
+/**
+ * 终态消息的统一基底：**服务端优先 + 本地独有字段兜底**。
+ *
+ * 同 id 合流有两条「本地已终态 / 快照也终态」的分支（流式收尾与后台快照刷新），
+ * 二者处理的是同一类语义，却曾采用相反的服务端优先级 —— 一条用 `{ ...snapshotMessage }`、
+ * 一条用 `{ ...previousMessage }`，导致服务端回填的 `providerUsage` / `model` /
+ * `agentId` / `durationMs` 在后者被丢弃。抽取到这里让两条分支真正共用一套基底。
+ *
+ * `parts` / `content` 一律由 `mergedParts` 派生（保证两者永远序列化自同一份分片），
+ * `modifiedFilesSummary` 走「服务端优先、本地兜底」。
+ *
+ * `reasoningBlocksEndedFlags` / `reasoningBlocksDurationsMs` 是唯一需要额外裁决的
+ * 字段：recovery 归一化产物并不携带它们（`normalize-chat-messages.ts` 无此字段），
+ * 因此**快照有值时以快照为准**（既有契约要求按快照的 reasoning parts 同步结束标记
+ * 与时长——本地可能只记录了前 N 个块），快照缺失时才沿用本地值兜底。
+ */
+function buildFinalizedMessage(
+  previousMessage: ChatMessage,
+  snapshotMessage: ChatMessage,
+  mergedParts: ChatMessagePart[] | undefined,
+): ChatMessage {
+  const modifiedFilesSummary =
+    snapshotMessage.modifiedFilesSummary ?? previousMessage.modifiedFilesSummary;
+  const reasoningBlocksEndedFlags =
+    snapshotMessage.reasoningBlocksEndedFlags ?? previousMessage.reasoningBlocksEndedFlags;
+  const reasoningBlocksDurationsMs =
+    snapshotMessage.reasoningBlocksDurationsMs ?? previousMessage.reasoningBlocksDurationsMs;
+  return {
+    ...snapshotMessage,
+    ...(mergedParts
+      ? { parts: mergedParts, content: contentFromParts(mergedParts, modifiedFilesSummary) }
+      : {}),
+    modifiedFilesSummary,
+    ...(reasoningBlocksEndedFlags ? { reasoningBlocksEndedFlags } : {}),
+    ...(reasoningBlocksDurationsMs ? { reasoningBlocksDurationsMs } : {}),
+    ...preferLocalTerminalStatus(previousMessage, snapshotMessage),
+  };
 }
 
 function chooseMoreCompleteMessage(left: ChatMessage, right: ChatMessage): ChatMessage {

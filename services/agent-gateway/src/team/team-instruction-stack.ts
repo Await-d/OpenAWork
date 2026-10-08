@@ -41,6 +41,7 @@ import { listMemoriesForTeamWorkspaceKnowledge } from '../memory/memory-store.js
 import { sqliteGet } from '../infra/db.js';
 import { QUALITY_GATES_MD, getCompletionProtocolMd } from '../team-phase-a-content/index.js';
 import type { SoulRoleLayer } from '../team-phase-a-content/index.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export interface TeamInstructionStackInput {
   userId: string;
@@ -119,7 +120,7 @@ async function readFileSafe(filePath: string): Promise<string | null> {
     return trimmed.length > 0 ? trimmed : null;
   } catch (error) {
     if (!isFileNotFoundError(error)) {
-      console.warn(
+      logGatewayWarn(
         `[team-instruction-stack] 读取指令栈文件失败：${
           error instanceof Error ? error.message : String(error)
         }`,

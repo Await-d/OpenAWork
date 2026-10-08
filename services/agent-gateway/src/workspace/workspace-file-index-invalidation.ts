@@ -13,6 +13,7 @@
 import { getSessionWorkspaceRoot } from './workspace-safety.js';
 import { invalidateWorkspaceFileIndex } from './workspace-file-index.js';
 import { invalidateSshWorkspaceFileIndexForSession } from './ssh-workspace-file-index.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /**
  * 可能改动工作区文件系统的 canonical 工具名。
@@ -55,7 +56,7 @@ export function invalidateWorkspaceFileIndexForToolCall(sessionId: string, toolN
       invalidateWorkspaceFileIndex(workspaceRoot);
     }
   } catch (error) {
-    console.warn('[workspace-file-index] 解析会话工作区根失败，跳过索引失效：', String(error));
+    logGatewayWarn('[workspace-file-index] 解析会话工作区根失败，跳过索引失效：', String(error));
   }
   // SSH 会话的远端工作目录无法解析成本地根（本地校验必然失败），因此独立
   // 失效远端索引；未绑定 / 无 service 时内部静默跳过。

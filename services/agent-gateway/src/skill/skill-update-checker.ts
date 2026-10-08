@@ -21,6 +21,7 @@
 
 import { sqliteAll, sqliteRun } from '../infra/db.js';
 import { readResponseTextWithLimit } from '../infra/http-body-limit.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const SKILL_UPDATE_CHECK_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const SKILL_UPDATE_FETCH_TIMEOUT_MS = 8 * 1000;
@@ -255,7 +256,7 @@ export async function checkInstalledSkillUpdates(): Promise<SkillUpdateCheckSumm
         );
       } catch (err) {
         summary.errors += 1;
-        console.warn(
+        logGatewayWarn(
           `[skill-update-checker] 跳过技能 ${row.skill_id}（用户 ${row.user_id}）版本检查失败：${
             err instanceof Error ? err.message : String(err)
           }`,

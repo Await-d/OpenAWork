@@ -30,6 +30,7 @@ import {
   boundPreserveTokens,
 } from './compaction-tail-budget.js';
 import { persistCompactionProjection } from './compaction-projection.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const RUNTIME_REPLACE_STRATEGY = 'runtime_replace' as const;
 const SUMMARY_ONLY_STRATEGY = 'summary_only' as const;
@@ -308,7 +309,7 @@ async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveC
     return { triggered: true, metadataJson: compactionResult.metadataJson };
   } catch (error: unknown) {
     publishFailed(input, input.round, 'proactive_near_overflow', error);
-    console.warn('proactive compaction failed', error);
+    logGatewayWarn('proactive compaction failed', error);
     return { triggered: false, metadataJson: input.metadataJson };
   }
 }
@@ -391,7 +392,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
         );
         return { triggered: true, recovered: true, metadataJson: persisted.metadataJson };
       } catch (error: unknown) {
-        console.warn('reactive compaction projection failed, falling through', error);
+        logGatewayWarn('reactive compaction projection failed, falling through', error);
       }
     }
   }
@@ -440,7 +441,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
         );
         return { triggered: true, recovered: true, metadataJson: persisted.metadataJson };
       } catch (error: unknown) {
-        console.warn('tool output projection failed, falling through', error);
+        logGatewayWarn('tool output projection failed, falling through', error);
       }
     }
   }
@@ -470,7 +471,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
       return { triggered: true, recovered: true, metadataJson: smResult.metadataJson };
     }
   } catch (error: unknown) {
-    console.warn('session memory compaction failed, falling through', error);
+    logGatewayWarn('session memory compaction failed, falling through', error);
   }
 
   try {
@@ -541,7 +542,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
     };
   } catch (error: unknown) {
     publishFailed(input, input.round, cause, error);
-    console.warn('automatic compaction failed', error);
+    logGatewayWarn('automatic compaction failed', error);
     return { triggered: true, recovered: false, metadataJson: input.metadataJson };
   }
 }

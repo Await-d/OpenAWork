@@ -303,9 +303,26 @@ export function useTeamCollaboration(
     };
   }, []);
 
+  /**
+   * 上一拍已应用快照的指纹。`GET /team/runtime` 是 20s 一次的轮询，而
+   * `normalizeSnapshot` 里的 `sort*` 全是 `[...x].sort()`，每拍必然产生新数组
+   * —— 于是 15 个 setter 与 4 个 zustand store hydrate 每拍都无条件执行，团队
+   * 运行时整页跟着重渲染，即使服务端数据一字未变。
+   *
+   * 这里在写入前先算一次覆盖**全部**字段的指纹：与上一拍一致就直接返回，什么都
+   * 不写，让下游 React / zustand 全部跳过。指纹只序列化一次（而非逐字段比较），
+   * `normalizeSnapshot` 返回的是字面量对象、字段顺序固定，故结果稳定可比。
+   */
+  const snapshotFingerprintRef = useRef<string | null>(null);
+
   const applySnapshot = useCallback(
     (runtime: TeamRuntimeReadModel) => {
       const snapshot = normalizeSnapshot(runtime);
+      const fingerprint = JSON.stringify(snapshot);
+      if (fingerprint === snapshotFingerprintRef.current) {
+        return;
+      }
+      snapshotFingerprintRef.current = fingerprint;
       setAuditLogs(snapshot.auditLogs);
       setDiagnostics(snapshot.diagnostics);
       setMembers(snapshot.members);
@@ -340,6 +357,9 @@ export function useTeamCollaboration(
       if (!accessToken || !enabled) {
         snapshotLoadedRef.current = false;
         resetRuntimeSnapshotRetry();
+        // 清空后必须让 applySnapshot 的早退失效，否则下一拍快照若与清空前一致
+        // 就会被判为「无变化」而跳过写入，state 永远回不来。
+        snapshotFingerprintRef.current = null;
         setAuditLogs([]);
         setDiagnostics(undefined);
         setMembers([]);
@@ -499,6 +519,8 @@ export function useTeamCollaboration(
   // 避免在新工作区 snapshot 加载完成前右侧内容体残留旧工作区的
   // messages / tasks / auditLogs 等。
   useEffect(() => {
+    // 切换工作区清空后必须让 applySnapshot 的早退失效（理由同 refresh 内清空分支）。
+    snapshotFingerprintRef.current = null;
     setAuditLogs([]);
     setDiagnostics(undefined);
     setMessages([]);
@@ -521,6 +543,12 @@ export function useTeamCollaboration(
 
     const intervalId = window.setInterval(() => {
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return;
+      }
+      // 页面不可见时跳过：`/team/runtime` 是全量快照（messages / usageRecords /
+      // toolCallRecords / auditLogs 全量），另有一条 30s 轮询也在拉同一个接口。
+      // 后台两者叠加纯属浪费，用户切回前台时会立刻对齐。
+      if (typeof document !== 'undefined' && document.hidden) {
         return;
       }
       void refresh();

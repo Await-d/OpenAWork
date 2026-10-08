@@ -2,7 +2,6 @@ import type { InputImageContent, SubagentNotice, WorkflowRuntimeState } from '@o
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { RollbackReceipt, Session, SessionTask } from '@openAwork/web-client';
 import {
-  createArtifactsClient,
   createQuestionsClient,
   createSessionsClient,
   createSettingsClient,
@@ -43,11 +42,9 @@ import { useBuddyIdleDetector } from '../../components/chat/companion/use-buddy-
 import { InlineQuestionPanel } from '../../components/chat/misc/InlineQuestionPanel.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
-import SshWorkspacePickerModal, {
-  type SshPickerConnection,
-  type SshWorkspaceSelection,
-} from '../../components/common/modal/SshWorkspacePickerModal.js';
-import type { SshConnectionDraft } from '../../components/common/modal/SshConnectionCreateForm.js';
+import SshWorkspacePickerModal from '../../components/common/modal/SshWorkspacePickerModal.js';
+import type { SshWorkspaceSelection } from '../../components/common/modal/SshWorkspacePickerModal.js';
+import { useWorkspacePickerSources } from '../../components/common/modal/use-workspace-picker-sources.js';
 import { useCommandRegistry } from '../../hooks/command/useCommandRegistry.js';
 import { useComposerWorkspaceCatalog } from '../../hooks/chat/useComposerWorkspaceCatalog.js';
 import { useFileEditor } from '../../hooks/editor/useFileEditor.js';
@@ -74,6 +71,10 @@ import { subscribeSessionDialogueModeSwitch } from '../../utils/session/dialogue
 import { subscribeSessionStreamResumeAttach } from '../../utils/session/session-stream-resume-events.js';
 
 import { UNBOUND_WORKSPACE_LABEL } from '../../utils/session/session-grouping.js';
+import {
+  SESSION_RECOVERY_MESSAGE_LIMIT,
+  fetchSessionRecoveryOnce,
+} from '../../utils/session/session-recovery-flight.js';
 import { resolveNewSessionWorkspace } from '../../utils/session/new-session-workspace.js';
 import { getPathBasename } from '../../utils/workspace-path.js';
 import { useLinkPreviewRequest } from '../../utils/preview/use-link-preview-request.js';
@@ -96,10 +97,6 @@ import {
 import { ChatRightPanel } from './panels/chat-right-panel.js';
 import { useBackgroundTaskPanel } from './panels/use-background-task-panel.js';
 
-import {
-  type ImageEditReferenceArtifact,
-  toImageEditReferenceArtifacts,
-} from './conversation/render/image-edit-reference-artifacts.js';
 import { makeOrderedMessageId } from '../../components/conversation-runtime/messages/ordered-id.js';
 import { collectSubagentNotices } from '../../components/conversation-runtime/messages/subagent-notices.js';
 
@@ -181,7 +178,7 @@ import { resolveChatUiWorkspaceScope, useChatUiState } from './hooks/use-chat-ui
 import { useModelPrices } from './conversation/settings/use-model-prices.js';
 import { useProviderModelInfo } from './conversation/settings/use-provider-model-info.js';
 import { useScrollManager } from '../../components/conversation-runtime/scroll/use-scroll-manager.js';
-import { useSessionContentArtifactCount } from './conversation/snapshot/use-session-content-artifact-count.js';
+import { useSessionContentArtifacts } from './conversation/snapshot/use-session-content-artifacts.js';
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
 
 import { useSessionSettingsCallbacks } from './conversation/settings/use-session-settings-callbacks.js';
@@ -192,8 +189,6 @@ import {
 } from './conversation/settings/model-selection-source.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
-
-import { type SessionArtifactsResponse } from '../artifacts/workspace/artifact-workspace-types.js';
 
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
 import { normalizeChatThinkingState } from './conversation/settings/resolve-chat-thinking-request.js';
@@ -245,7 +240,7 @@ type SplitStyle = {
   readonly overflow: CSSProperties['overflow'];
   readonly '--split-pos': string;
 };
-const INITIAL_TURN_LIMIT = 10;
+const INITIAL_TURN_LIMIT = SESSION_RECOVERY_MESSAGE_LIMIT;
 
 export default function ChatPage() {
   const routeParams = useParams<{ sessionId: string }>();
@@ -482,9 +477,6 @@ export default function ChatPage() {
     artifactTitle: string;
     modelLabel: string;
   } | null>(null);
-  const [sessionImageEditReferenceArtifacts, setSessionImageEditReferenceArtifacts] = useState<
-    ImageEditReferenceArtifact[]
-  >([]);
   const [selectedImageEditReferenceArtifactId, setSelectedImageEditReferenceArtifactId] = useState<
     string | null
   >(null);
@@ -652,8 +644,6 @@ export default function ChatPage() {
     quickTerminalOpen,
     setQuickTerminalOpenForWorkspace,
     // 弹窗 / 信号
-    showWorkspaceSelector,
-    setShowWorkspaceSelector,
     companionPanelSignal,
     bumpCompanionPanelSignal,
     // 滚动
@@ -667,6 +657,11 @@ export default function ChatPage() {
     setShowScrollToBottom,
   } = ui;
   const attachAttemptedSessionRef = useRef<string | null>(null);
+  // 当前已建立 attach 传输的会话 id（无在途 attach 时为 null）。
+  // 与 attachAttemptedSessionRef 分开：后者在重试调度 / 终态复位时会被置空，
+  // 无法表达「传输仍属于哪个会话」，而 runSessionAttachEffect 的 cleanup 需要
+  // 据此区分「token delta 重跑」（保留传输）与「切走会话」（掐断传输）。
+  const attachOwnerSessionIdRef = useRef<string | null>(null);
   // Tracks the last logged attach-eligibility signature so the diagnostic
   // [ATTACH_ELIGIBILITY] line in the effect below only prints when the
   // decision-relevant inputs actually change (not on every token delta).
@@ -740,13 +735,17 @@ export default function ChatPage() {
   const artifactsWorkspaceHref = currentSessionId
     ? `/artifacts?sessionId=${encodeURIComponent(currentSessionId)}`
     : null;
-  const { contentArtifactCount, status: contentArtifactCountStatus } =
-    useSessionContentArtifactCount({
-      currentSessionId,
-      gatewayUrl,
-      refreshKey: sessionReloadNonce + messages.length,
-      token,
-    });
+  const {
+    referenceArtifacts: sessionImageEditReferenceArtifacts,
+    contentArtifactCount,
+    status: contentArtifactCountStatus,
+  } = useSessionContentArtifacts({
+    currentSessionId,
+    gatewayUrl,
+    reloadKey: sessionReloadNonce,
+    messageCount: messages.length,
+    token,
+  });
   const sessionTerminals = useSessionTerminals({
     currentSessionId,
     gatewayUrl,
@@ -1032,7 +1031,6 @@ export default function ChatPage() {
     setReportedStreamUsage(null);
     setMessageRatings({});
     setLatestGeneratedImageResult(null);
-    setSessionImageEditReferenceArtifacts([]);
     setSelectedImageEditReferenceArtifactId(null);
     // browserPreviewUrl 是按 workspace 路径持久化的(browserPreviewUrlByWorkspace),
     // 跨 workspace 切会话自动切到对应 workspace 的 url;同 workspace 内会话共享 url。
@@ -1041,40 +1039,6 @@ export default function ChatPage() {
     }
     devServerDetectedTerminalIdsRef.current = new Set();
   }, [currentSessionId, resetBrowserPreviewView]);
-
-  useEffect(() => {
-    if (!currentSessionId || !token) {
-      setSessionImageEditReferenceArtifacts([]);
-      return;
-    }
-
-    const controller = new AbortController();
-    let cancelled = false;
-
-    void createArtifactsClient(gatewayUrl)
-      .listForSession(token, currentSessionId, { signal: controller.signal })
-      .then((rawPayload) => {
-        if (cancelled) {
-          return;
-        }
-        const payload = rawPayload as unknown as SessionArtifactsResponse;
-        setSessionImageEditReferenceArtifacts(
-          toImageEditReferenceArtifacts(payload.contentArtifacts ?? []),
-        );
-      })
-      .catch((error: unknown) => {
-        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) {
-          return;
-        }
-
-        setSessionImageEditReferenceArtifacts([]);
-      });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [currentSessionId, gatewayUrl, sessionReloadNonce, token]);
 
   useEffect(() => {
     if (!selectedImageEditReferenceArtifactId) {
@@ -1259,6 +1223,12 @@ export default function ChatPage() {
     setRightTab('snapshots');
   }, [isFusionLayout, setReviewPanelOpened, setSidePanelActiveTab]);
 
+  // 路由 sessionId 的 ref 镜像。用于让「与当前会话无关」的 effect（保存的
+  // provider/model 默认值加载）读取最新 sessionId 而不必把它列入依赖 ——
+  // 否则每次切会话都会重发一次与会话无关的 /settings/providers。
+  const routeSessionIdRef = useRef(sessionId);
+  routeSessionIdRef.current = sessionId;
+
   const loadSavedChatDefaults = useCallback(async () => {
     if (!token) {
       return null;
@@ -1320,7 +1290,7 @@ export default function ChatPage() {
 
         setActiveProviderId((prev) => {
           const normalizedPrev = prev.trim();
-          if (sessionId) {
+          if (routeSessionIdRef.current) {
             return normalizedPrev || defaults.providerId;
           }
           return defaults.providerId;
@@ -1328,7 +1298,7 @@ export default function ChatPage() {
 
         setActiveModelId((prev) => {
           const normalizedPrev = prev.trim();
-          if (sessionId) {
+          if (routeSessionIdRef.current) {
             return normalizedPrev || defaults.modelId;
           }
           return defaults.modelId;
@@ -1343,13 +1313,16 @@ export default function ChatPage() {
           hasAppliedSavedImageDefaultsRef.current = true;
         }
 
-        if (!sessionId) {
+        if (!routeSessionIdRef.current) {
           setThinkingEnabled(defaults.thinkingEnabled);
           setReasoningEffort(defaults.reasoningEffort);
         }
       })
       .catch(() => null);
-  }, [applySavedImageDefaults, loadSavedChatDefaults, sessionId, token]);
+    // 刻意不含 sessionId：保存的 provider/model 默认值与会话无关，切换会话时
+    // 通过 routeSessionIdRef 读取最新值即可，无需重发 /settings/providers。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applySavedImageDefaults, loadSavedChatDefaults, token]);
 
   useEffect(() => {
     const savedDefaults = savedChatDefaultsRef.current;
@@ -1597,6 +1570,19 @@ export default function ChatPage() {
       return;
     }
 
+    // recovery 在途期间必须**既不发请求、也不消费 null 基线**。
+    //
+    // 切会话时 `lastParentTaskSyncMarkerRef` 被重置为 null，而 `sessionTasks`
+    // 也被同步清空 —— 若此处照旧把「清空态」记成基线，基线就变成空串；待
+    // recovery 落地、真实任务集到达时 marker 与空串不等，会被误判为「任务集
+    // 发生变化」而多打一次 recovery（每次切会话必现的重复请求）。
+    //
+    // 因此加载中直接返回且不写入 marker：等 `sessionTasks` 随 recovery 落地后
+    // 再由下方 `:null` 分支用真实任务集建立基线。
+    if (isSessionLoading) {
+      return;
+    }
+
     const nextMarker = buildTerminalTaskSyncMarker(sessionTasks);
     if (lastParentTaskSyncMarkerRef.current === null) {
       lastParentTaskSyncMarkerRef.current = nextMarker;
@@ -1606,8 +1592,7 @@ export default function ChatPage() {
     if (
       nextMarker.length === 0 ||
       nextMarker === lastParentTaskSyncMarkerRef.current ||
-      streaming ||
-      isSessionLoading
+      streaming
     ) {
       return;
     }
@@ -1615,9 +1600,18 @@ export default function ChatPage() {
     let cancelled = false;
     const targetSessionId = currentSessionId;
     const expectedSessionViewEpoch = currentSessionViewRef.current.epoch;
+    const snapshotController = new AbortController();
 
-    void createSessionsClient(gatewayUrl)
-      .getRecovery(token, targetSessionId, { messageLimit: INITIAL_TURN_LIMIT })
+    // 走会话 recovery 的在途单飞层：切会话同一 commit 内 ChatPage 的任务同步
+    // 与 `run-chat-session-switch-effect`、`useLayoutShared` 读的是同一份快照，
+    // 直连 getRecovery 会把同一次切换的快照请求打两遍。
+    void fetchSessionRecoveryOnce({
+      gatewayUrl,
+      token,
+      sessionId: targetSessionId,
+      messageLimit: INITIAL_TURN_LIMIT,
+      signal: snapshotController.signal,
+    })
       .then((session) => {
         if (cancelled || !isCurrentSessionView(targetSessionId, expectedSessionViewEpoch)) {
           return;
@@ -1684,6 +1678,8 @@ export default function ChatPage() {
 
     return () => {
       cancelled = true;
+      // 只掐断自己这一份等待；共享请求由在途层按订阅者计数决定何时真正中止。
+      snapshotController.abort();
     };
   }, [
     currentSessionId,
@@ -1794,6 +1790,7 @@ export default function ChatPage() {
   ]);
 
   useChatDataLoaders({
+    currentSessionId,
     effectiveWorkingDirectory,
     workspace,
     workspaceTreeVersion,
@@ -2605,6 +2602,7 @@ export default function ChatPage() {
       appendAssistantEventMessages,
       attachAttemptedSessionRef,
       attachEligibilitySignatureRef,
+      attachOwnerSessionIdRef,
       attachRetryExhausted,
       attachRetryScheduledSessionId,
       cancelAttachRetry,
@@ -2716,174 +2714,6 @@ export default function ChatPage() {
     (currentSessionId !== null && (isSessionLoading || !isSessionSnapshotReady));
   const canAdjustWorkspaceBinding = !workspaceBindingLocked;
 
-  const [workspacePickerCreateMode, setWorkspacePickerCreateMode] = useState(false);
-  /** 工作区选择弹窗来源：本地文件夹 / SSH 远端目录。 */
-  const [workspacePickerSource, setWorkspacePickerSource] = useState<'local' | 'ssh'>('local');
-  const [sshPickerConnections, setSshPickerConnections] = useState<SshPickerConnection[]>([]);
-  const [sshPickerConnectionsLoading, setSshPickerConnectionsLoading] = useState(false);
-
-  /**
-   * 打开工作区选择弹窗。`create` 模式用于「新建工作空间」：弹窗打开后直接展开新建表单。
-   */
-  const openWorkspacePicker = useCallback(
-    (mode: 'browse' | 'create' = 'browse') => {
-      setWorkspacePickerCreateMode(mode === 'create');
-      setWorkspacePickerSource('local');
-      setShowWorkspaceSelector(true);
-    },
-    [setShowWorkspaceSelector],
-  );
-
-  /** 弹窗统一关闭：复位来源，避免下次打开停在 SSH 模式。 */
-  const closeWorkspacePicker = useCallback(() => {
-    setShowWorkspaceSelector(false);
-    setWorkspacePickerSource('local');
-  }, [setShowWorkspaceSelector]);
-
-  /** 懒加载 SSH 连接列表（切到 SSH 来源时才拉取）。 */
-  const loadSshPickerConnections = useCallback(async (): Promise<void> => {
-    if (!token) {
-      setSshPickerConnections([]);
-      return;
-    }
-    setSshPickerConnectionsLoading(true);
-    try {
-      const connections = await createSshClient(gatewayUrl).list(token);
-      setSshPickerConnections(connections);
-    } catch (error: unknown) {
-      toast(error instanceof Error ? error.message : '加载 SSH 连接失败', 'error');
-      setSshPickerConnections([]);
-    } finally {
-      setSshPickerConnectionsLoading(false);
-    }
-  }, [gatewayUrl, token]);
-
-  const switchWorkspacePickerToSsh = useCallback((): void => {
-    setWorkspacePickerSource('ssh');
-    void loadSshPickerConnections();
-  }, [loadSshPickerConnections]);
-
-  /**
-   * 新建 SSH 连接：写入网关的 SSH 连接表（`POST /ssh/connections`）后刷新列表，
-   * 下次打开工作区选择器即可直接选中，无需再进设置页录入。
-   *
-   * 保存成功后尽力自动连接一次，让用户立刻能浏览远端目录；自动连接失败
-   * 不向上抛错（连接已入库），仅提示用户可在设置 → 工作区中重试连接。
-   */
-  const createSshPickerConnection = useCallback(
-    async (draft: SshConnectionDraft): Promise<SshPickerConnection> => {
-      if (!token) {
-        throw new Error('未登录，无法保存 SSH 连接。');
-      }
-
-      const client = createSshClient(gatewayUrl);
-      const created = await client.create(token, {
-        name: draft.name,
-        host: draft.host,
-        port: draft.port,
-        username: draft.username,
-        authType: draft.authType,
-        ...(draft.password ? { password: draft.password } : {}),
-        ...(draft.authType === 'key' || draft.authType === 'key-password'
-          ? draft.privateKey
-            ? { privateKey: draft.privateKey, privateKeyPath: null }
-            : draft.privateKeyPath
-              ? { privateKeyPath: draft.privateKeyPath, privateKey: null }
-              : {}
-          : {}),
-        ...(draft.passphrase ? { passphrase: draft.passphrase } : {}),
-      });
-
-      let resolved: SshPickerConnection = created;
-      try {
-        await client.connect(token, created.id);
-        // connect 未抛错即视为握手成功（网关侧状态已更新为 connected）：
-        // 新建接口返回的是创建时的状态，这里要按握手结果推进，
-        // 否则弹窗会误判为「尚未连通」而不去读取远端目录。
-        resolved = { ...created, status: 'connected' };
-      } catch (error: unknown) {
-        toast(
-          `连接已保存，但自动连接失败：${error instanceof Error ? error.message : '未知错误'}`,
-          'warning',
-        );
-      }
-
-      await loadSshPickerConnections();
-      return resolved;
-    },
-    [gatewayUrl, loadSshPickerConnections, token],
-  );
-
-  /**
-   * 更新已有 SSH 连接的配置：PATCH 到网关后刷新列表。
-   * 未提供的字段按「保留原值」处理，因此编辑表单里留空的密码不会清空已保存凭据。
-   */
-  const updateSshPickerConnection = useCallback(
-    async (connectionId: string, draft: SshConnectionDraft): Promise<SshPickerConnection> => {
-      if (!token) {
-        throw new Error('未登录，无法更新 SSH 连接。');
-      }
-
-      const updated = await createSshClient(gatewayUrl).update(token, connectionId, {
-        name: draft.name,
-        host: draft.host,
-        port: draft.port,
-        username: draft.username,
-        authType: draft.authType,
-        ...(draft.password !== undefined ? { password: draft.password } : {}),
-        ...(draft.authType === 'key' || draft.authType === 'key-password'
-          ? draft.privateKey
-            ? { privateKey: draft.privateKey, privateKeyPath: null }
-            : draft.privateKeyPath
-              ? { privateKeyPath: draft.privateKeyPath, privateKey: null }
-              : {}
-          : {}),
-        ...(draft.passphrase ? { passphrase: draft.passphrase } : {}),
-      });
-
-      await loadSshPickerConnections();
-      return updated;
-    },
-    [gatewayUrl, loadSshPickerConnections, token],
-  );
-
-  /** 测试连接：让网关实际握手一次远端（`/ssh/connections/:id/connect`），随后刷新列表同步状态。 */
-  const testSshPickerConnection = useCallback(
-    async (connectionId: string): Promise<void> => {
-      if (!token) {
-        throw new Error('未登录，无法测试 SSH 连接。');
-      }
-
-      await createSshClient(gatewayUrl).connect(token, connectionId);
-      await loadSshPickerConnections();
-    },
-    [gatewayUrl, loadSshPickerConnections, token],
-  );
-
-  /**
-   * 「调整绑定工作区」所有入口的统一收口：可调整时打开选择器；已锁定则提示并忽略，
-   * 让文件树 / 侧栏里的切换入口在对话开始后自然失效。
-   */
-  const requestWorkspaceBindingChange = useCallback(() => {
-    if (workspaceBindingLocked) {
-      toast('会话已开始对话，工作区绑定已锁定', 'warning');
-      return;
-    }
-
-    openWorkspacePicker('browse');
-  }, [openWorkspacePicker, workspaceBindingLocked]);
-
-  const workspaceBindingChip = useMemo<WorkspaceBindingChipState>(
-    () => ({
-      label: effectiveWorkingDirectory
-        ? getPathBasename(effectiveWorkingDirectory, effectiveWorkingDirectory)
-        : UNBOUND_WORKSPACE_LABEL,
-      fullPath: effectiveWorkingDirectory,
-      ...(canAdjustWorkspaceBinding ? { onSelect: requestWorkspaceBindingChange } : {}),
-    }),
-    [canAdjustWorkspaceBinding, effectiveWorkingDirectory, requestWorkspaceBindingChange],
-  );
-
   /**
    * 工作区绑定的统一落地点：草稿态只改本地选中值；已有会话（且绑定未锁定）时同步 PATCH 到网关。
    * 绑定锁兜底：即使入口在锁定后仍被触发，也不会修改已开始对话的会话。
@@ -2961,6 +2791,61 @@ export default function ChatPage() {
     ],
   );
 
+  /**
+   * 工作区选择弹窗：本地 + SSH 双来源。与侧栏头部 ＋ 共用同一份接线
+   * （来源状态、SSH 连接 CRUD、两个弹窗的 props 组装），避免两处各写一套。
+   *
+   * 数据源注入 `useWorkspace` 的实现：它带着会话/ SSH 读取身份，与迁移前的
+   * 内联行为逐字节一致。
+   */
+  const {
+    openLocal,
+    openSsh: openSshWorkspacePicker,
+    localPickerProps,
+    sshPickerProps,
+    sshConnections,
+  } = useWorkspacePickerSources({
+    gatewayUrl,
+    token,
+    initialPath: effectiveWorkingDirectory ?? undefined,
+    initialSshConnectionId: selectedSshConnectionId,
+    onSelectLocal: applyWorkspaceSelection,
+    onSelectSsh: applySshWorkspaceSelection,
+    localSource: {
+      fetchTree: workspace.fetchTree,
+      createDirectory: workspace.createDirectory,
+      validatePath: workspace.validatePath,
+      loading: workspace.loading,
+    },
+    sshSource: {
+      fetchTree: workspace.fetchSshTree,
+      createDirectory: workspace.createSshDirectory,
+    },
+  });
+
+  /**
+   * 「调整绑定工作区」所有入口的统一收口：可调整时打开选择器；已锁定则提示并忽略，
+   * 让文件树 / 侧栏里的切换入口在对话开始后自然失效。
+   */
+  const requestWorkspaceBindingChange = useCallback(() => {
+    if (workspaceBindingLocked) {
+      toast('会话已开始对话，工作区绑定已锁定', 'warning');
+      return;
+    }
+
+    openLocal();
+  }, [openLocal, workspaceBindingLocked]);
+  const workspaceBindingChip = useMemo<WorkspaceBindingChipState>(
+    () => ({
+      label: effectiveWorkingDirectory
+        ? getPathBasename(effectiveWorkingDirectory, effectiveWorkingDirectory)
+        : UNBOUND_WORKSPACE_LABEL,
+      fullPath: effectiveWorkingDirectory,
+      ...(canAdjustWorkspaceBinding ? { onSelect: requestWorkspaceBindingChange } : {}),
+    }),
+    [canAdjustWorkspaceBinding, effectiveWorkingDirectory, requestWorkspaceBindingChange],
+  );
+
   /** 「不绑定工作区」：解除当前绑定；已有会话时同步清空网关侧 metadata。 */
   const clearWorkspaceSelection = useCallback(async (): Promise<void> => {
     try {
@@ -2985,7 +2870,7 @@ export default function ChatPage() {
   /** 「打开本地文件夹」：桌面端调用原生选择器，浏览器端退化为完整浏览弹窗。 */
   const openLocalWorkspaceFolder = useCallback((): void => {
     if (!isTauriRuntime()) {
-      openWorkspacePicker('browse');
+      openLocal();
       return;
     }
 
@@ -2998,22 +2883,20 @@ export default function ChatPage() {
       .catch((error: unknown) => {
         toast(error instanceof Error ? error.message : '打开系统文件夹选择器失败', 'error');
       });
-  }, [applyWorkspaceSelection, openWorkspacePicker]);
+  }, [applyWorkspaceSelection, openLocal]);
 
   /** 「新建工作空间」：打开浏览弹窗并直接展开新建文件夹表单。 */
   const createWorkspaceFromComposer = useCallback((): void => {
-    openWorkspacePicker('create');
-  }, [openWorkspacePicker]);
+    openLocal('create');
+  }, [openLocal]);
 
   /**
    * 「连接 SSH 远端目录」：直接以 SSH 来源打开工作区选择弹窗，复用
    * SshWorkspacePickerModal 的连接选择 → 远端目录浏览 → 绑定流程。
    */
   const openSshWorkspaceFromComposer = useCallback((): void => {
-    setWorkspacePickerCreateMode(false);
-    setShowWorkspaceSelector(true);
-    switchWorkspacePickerToSsh();
-  }, [setShowWorkspaceSelector, switchWorkspacePickerToSsh]);
+    openSshWorkspacePicker();
+  }, [openSshWorkspacePicker]);
 
   /** 草稿态绑定的 SSH 连接摘要：供 composer 工作区菜单标注「远端执行」。 */
   const composerSshConnection = useMemo<ComposerSshConnectionSummary | null>(() => {
@@ -3021,9 +2904,7 @@ export default function ChatPage() {
       return null;
     }
 
-    const matched = sshPickerConnections.find(
-      (connection) => connection.id === selectedSshConnectionId,
-    );
+    const matched = sshConnections.find((connection) => connection.id === selectedSshConnectionId);
     if (!matched) {
       // 连接列表尚未加载（懒加载）时先给出通用标签，避免菜单显示成未绑定。
       return { id: selectedSshConnectionId, label: 'SSH 远端连接' };
@@ -3034,7 +2915,7 @@ export default function ChatPage() {
       id: matched.id,
       label: name && name.length > 0 ? name : `${matched.username}@${matched.host}:${matched.port}`,
     };
-  }, [selectedSshConnectionId, sshPickerConnections]);
+  }, [selectedSshConnectionId, sshConnections]);
 
   /** 输入框外壳上方的「选择工作空间」下拉；仅在绑定未锁定时渲染（新建会话未发首条消息）。 */
   const composerWorkspaceSlot = canAdjustWorkspaceBinding ? (
@@ -3960,45 +3841,8 @@ export default function ChatPage() {
           }
         >
           <SessionPanelFrame>
-            <WorkspacePickerModal
-              isOpen={showWorkspaceSelector && workspacePickerSource === 'local'}
-              onClose={closeWorkspacePicker}
-              onSelect={async (path) => {
-                // 绑定锁兜底：即使选择器被其它入口打开，已开始对话的会话也不允许改绑。
-                if (currentSessionId && canAdjustWorkspaceBinding) {
-                  await workspace.setWorkspace(path);
-                }
-                // 选择本地工作区即清理 SSH 草稿连接。
-                setSelectedSshConnectionId(null);
-                addSavedWorkspacePath(path);
-                setSelectedWorkspacePath(path);
-                setFileTreeRootPath(path);
-                closeWorkspacePicker();
-              }}
-              fetchRootPath={workspace.fetchRootPath}
-              fetchWorkspaceRoots={workspace.fetchWorkspaceRoots}
-              fetchTree={workspace.fetchTree}
-              createDirectory={workspace.createDirectory}
-              initialPath={effectiveWorkingDirectory ?? undefined}
-              initialCreateMode={workspacePickerCreateMode}
-              validatePath={workspace.validatePath}
-              loading={workspace.loading}
-              onSwitchToSshSource={switchWorkspacePickerToSsh}
-            />
-            <SshWorkspacePickerModal
-              isOpen={showWorkspaceSelector && workspacePickerSource === 'ssh'}
-              onClose={closeWorkspacePicker}
-              connections={sshPickerConnections}
-              loadingConnections={sshPickerConnectionsLoading}
-              onSelect={applySshWorkspaceSelection}
-              fetchTree={workspace.fetchSshTree}
-              createDirectory={workspace.createSshDirectory}
-              onSwitchToLocalSource={() => setWorkspacePickerSource('local')}
-              onCreateConnection={createSshPickerConnection}
-              onUpdateConnection={updateSshPickerConnection}
-              onTestConnection={testSshPickerConnection}
-              initialConnectionId={selectedSshConnectionId}
-            />
+            <WorkspacePickerModal {...localPickerProps} />
+            <SshWorkspacePickerModal {...sshPickerProps} />
             <LatestAssistantMessageContext value={latestAssistantMessageId}>
               <FusionChatRegion model={conversationViewModel} />
             </LatestAssistantMessageContext>
@@ -4006,45 +3850,8 @@ export default function ChatPage() {
         </FusionChatMainShell>
       ) : (
         <>
-          <WorkspacePickerModal
-            isOpen={showWorkspaceSelector && workspacePickerSource === 'local'}
-            onClose={closeWorkspacePicker}
-            onSelect={async (path) => {
-              // 绑定锁兜底：即使选择器被其它入口打开，已开始对话的会话也不允许改绑。
-              if (currentSessionId && canAdjustWorkspaceBinding) {
-                await workspace.setWorkspace(path);
-              }
-              // 选择本地工作区即清理 SSH 草稿连接。
-              setSelectedSshConnectionId(null);
-              addSavedWorkspacePath(path);
-              setSelectedWorkspacePath(path);
-              setFileTreeRootPath(path);
-              closeWorkspacePicker();
-            }}
-            fetchRootPath={workspace.fetchRootPath}
-            fetchWorkspaceRoots={workspace.fetchWorkspaceRoots}
-            fetchTree={workspace.fetchTree}
-            createDirectory={workspace.createDirectory}
-            initialPath={effectiveWorkingDirectory ?? undefined}
-            initialCreateMode={workspacePickerCreateMode}
-            validatePath={workspace.validatePath}
-            loading={workspace.loading}
-            onSwitchToSshSource={switchWorkspacePickerToSsh}
-          />
-          <SshWorkspacePickerModal
-            isOpen={showWorkspaceSelector && workspacePickerSource === 'ssh'}
-            onClose={closeWorkspacePicker}
-            connections={sshPickerConnections}
-            loadingConnections={sshPickerConnectionsLoading}
-            onSelect={applySshWorkspaceSelection}
-            fetchTree={workspace.fetchSshTree}
-            createDirectory={workspace.createSshDirectory}
-            onSwitchToLocalSource={() => setWorkspacePickerSource('local')}
-            onCreateConnection={createSshPickerConnection}
-            onUpdateConnection={updateSshPickerConnection}
-            onTestConnection={testSshPickerConnection}
-            initialConnectionId={selectedSshConnectionId}
-          />
+          <WorkspacePickerModal {...localPickerProps} />
+          <SshWorkspacePickerModal {...sshPickerProps} />
           <LatestAssistantMessageContext value={latestAssistantMessageId}>
             <div
               ref={splitContainerRef}

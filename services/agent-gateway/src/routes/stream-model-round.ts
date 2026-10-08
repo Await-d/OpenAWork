@@ -1051,6 +1051,7 @@ function isTeamSession(sessionContext: SessionStreamContext): boolean {
 }
 
 import type { StreamRequest } from './stream.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 function createIntermediateAssistantRequestId(clientRequestId: string, round: number): string {
   return `${clientRequestId}:assistant:${round}`;
@@ -1145,7 +1146,7 @@ async function captureSnapshotTreeBestEffort(input: {
     });
   } catch (error) {
     // Don't fail the response on snapshot capture errors.
-    console.warn(
+    logGatewayWarn(
       '[stream-model-round] shadow-git capture failed:',
       error instanceof Error ? error.message : String(error),
     );

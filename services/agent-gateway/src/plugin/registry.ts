@@ -27,6 +27,7 @@ import { getPluginHooks, type PluginHooksRegistry } from './hooks.js';
 import { createPluginStorage } from './storage.js';
 import { getPluginToolRegistry } from './tool-registry.js';
 import { registerV1Hooks, type V1PluginHooks } from './v1-shim.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** Unified definition accepted by `activate` (both API styles). */
 export type PluginDefinition = EffectPlugin | PromisePlugin;
@@ -90,7 +91,7 @@ export class PluginRegistry {
       this.disposeRegistrations(registrations);
       const message = err instanceof Error ? err.message : String(err);
       this.failures.set(id, message);
-      console.warn(`[plugin] failed to activate "${id}" (${opts.source}): ${message}`);
+      logGatewayWarn(`[plugin] failed to activate "${id}" (${opts.source}): ${message}`);
     }
   }
 
@@ -174,7 +175,7 @@ export class PluginRegistry {
       try {
         await plugin.cleanup();
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           `[plugin] cleanup for "${id}" threw: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
@@ -182,7 +183,7 @@ export class PluginRegistry {
 
     if (plugin.scope) {
       await Effect.runPromise(Scope.close(plugin.scope, Exit.void)).catch((err: unknown) => {
-        console.warn(
+        logGatewayWarn(
           `[plugin] scope close for "${id}" threw: ${err instanceof Error ? err.message : String(err)}`,
         );
       });

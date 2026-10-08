@@ -29,6 +29,9 @@ import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerM
 import { buildWorkspacePickerDataSource } from '../../components/common/modal/workspace-picker-data-source.js';
 import WorkspaceGroupMenu from '../../components/layout/workspace/WorkspaceGroupMenu.js';
 import { WorkspaceDeleteConfirmDialog } from '../../components/layout/workspace/WorkspaceDeleteConfirmDialog.js';
+import { WorkspaceRenameDialog } from '../../components/layout/workspace/WorkspaceRenameDialog.js';
+import { readWorkspaceAlias } from '../../utils/workspace-alias.js';
+import { renameWorkspaceDisplay } from '../../hooks/workspace/useWorkspaceAlias.js';
 import { preloadRouteModuleByPath } from '../../routes/preloadable-route-modules.js';
 import { DetailPanel } from './views/detail-panel.js';
 import { WorkspaceGroupSection } from './views/workspace-group-section.js';
@@ -148,6 +151,10 @@ export default function SessionsPage() {
     sessionIds: string[];
     workspaceLabel: string;
     workspacePath: string | null;
+  } | null>(null);
+  const [renamingWorkspace, setRenamingWorkspace] = useState<{
+    workspacePath: string;
+    defaultName: string;
   } | null>(null);
   const [deletingWorkspaceGroupKeys, setDeletingWorkspaceGroupKeys] = useState<Set<string>>(
     () => new Set(),
@@ -783,6 +790,7 @@ export default function SessionsPage() {
                           groupKey={groupKey}
                           workspaceLabel={group.workspaceLabel}
                           workspacePath={group.workspacePath}
+                          sshConnectionId={group.sshConnectionId}
                           sessions={group.sessions}
                           actualSessionCount={actualSessionCount}
                           collapsed={collapsedWorkspaceGroupKeySet.has(groupKey)}
@@ -855,9 +863,20 @@ export default function SessionsPage() {
             canDelete={
               workspaceContextMenu.workspacePath !== null || workspaceContextMenu.sessionCount > 0
             }
+            hasCustomName={readWorkspaceAlias(workspaceContextMenu.workspacePath) !== ''}
             onClose={() => setWorkspaceContextMenu(null)}
             onNewSession={() => void createSession(workspaceContextMenu.workspacePath)}
             onToggleCollapse={() => undefined}
+            onRename={() => {
+              const workspacePath = workspaceContextMenu.workspacePath;
+              if (!workspacePath) {
+                return;
+              }
+              setRenamingWorkspace({
+                workspacePath,
+                defaultName: workspaceContextMenu.workspaceLabel,
+              });
+            }}
             onDelete={() => {
               const groupKey = workspaceContextMenu.groupKey;
               setPendingWorkspaceDeletion({
@@ -873,6 +892,17 @@ export default function SessionsPage() {
           />,
           document.body,
         )}
+      <WorkspaceRenameDialog
+        open={renamingWorkspace !== null}
+        workspacePath={renamingWorkspace?.workspacePath ?? null}
+        defaultName={renamingWorkspace?.defaultName ?? ''}
+        onCancel={() => setRenamingWorkspace(null)}
+        onSubmit={(alias) => {
+          renameWorkspaceDisplay(renamingWorkspace?.workspacePath ?? null, alias);
+          setRenamingWorkspace(null);
+          toast(alias ? '工作区已重命名' : '已恢复默认名称', 'success');
+        }}
+      />
       <WorkspaceDeleteConfirmDialog
         open={pendingWorkspaceDeletion !== null}
         workspaceLabel={pendingWorkspaceDeletion?.workspaceLabel ?? ''}

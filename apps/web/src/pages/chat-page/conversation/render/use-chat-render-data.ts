@@ -207,6 +207,21 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     messageGroups: ChatRenderGroup[];
   } | null>(null);
 
+  // 非流式路径的同构缓存。历史消息 entry 每次都重造 `actions` / `renderContent`
+  // 闭包，因此「仅 1 条消息更新」也会让整表 entry 换新、连带击穿所有
+  // `ChatGroupBlock` 的 memo。这里记录上一帧的 entry 与其闭包依赖，未变项直接
+  // 复用旧 entry 对象，让下游的分组增量重组能真正跳过历史分组。
+  const historicalEntryCacheRef = useRef<{
+    closureDeps: readonly unknown[];
+    entries: ChatRenderEntry[];
+  } | null>(null);
+  // 历史分组缓存：与 entry 缓存成对更新，供 `reconcileChatRenderGroups` 复用前缀组。
+  const historicalGroupCacheRef = useRef<{
+    decorateKey: ChatRenderDataInput['handleCopyMessageGroup'];
+    entries: ChatRenderEntry[];
+    messageGroups: ChatRenderGroup[];
+  } | null>(null);
+
   const effectiveContextMessages = useMemo(
     () => filterChatMessagesForContext(messages),
     [messages],
@@ -523,7 +538,18 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
           -1,
         );
 
-    return deduplicatedMessages.map((message, index) => ({
+    // `renderContent` 闭包捕获的全部依赖。签名不变才允许复用上一帧的 entry 对象。
+    const closureDeps: readonly unknown[] = [
+      buildMessageActions,
+      openChildSessionInspector,
+      resolveInlinePermissionActions,
+      selectedChildSessionId,
+      visibleStreaming,
+      assistantUsageDetails,
+      taskToolRuntimeLookup,
+    ];
+
+    const nextEntries: ChatRenderEntry[] = deduplicatedMessages.map((message, index) => ({
       message,
       actions: buildMessageActions(message),
       // Keep compaction markers as their own visual group so they don't
@@ -549,6 +575,45 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
               }),
       usageDetails: assistantUsageDetails.get(message.id),
     }));
+
+    // 引用回收：`actions` / `renderContent` / `usageDetails` / `groupIdentityKey` 都是
+    // (message, closureDeps, index) 的纯函数——`actions` 每次调用都返回新闭包，所以不能
+    // 按引用比较。改为沿用同一位置（index）的旧 entry：message 引用未变且闭包依赖
+    // 未变时，该 entry 必然逐字段等价。
+    const previousCache = historicalEntryCacheRef.current;
+    let canReuse =
+      previousCache !== null && previousCache.closureDeps.length === closureDeps.length;
+    if (canReuse && previousCache !== null) {
+      for (let index = 0; index < closureDeps.length; index += 1) {
+        if (previousCache.closureDeps[index] !== closureDeps[index]) {
+          canReuse = false;
+          break;
+        }
+      }
+    }
+
+    let entries = nextEntries;
+    if (canReuse && previousCache !== null) {
+      const recycled = nextEntries.map((entry, index) => {
+        const previousEntry = previousCache.entries[index];
+        return previousEntry !== undefined && previousEntry.message === entry.message
+          ? previousEntry
+          : entry;
+      });
+      // 全部命中时直接沿用旧数组，让下游 `useMemo` 整体短路。
+      let fullyReused = true;
+      for (let index = 0; index < recycled.length; index += 1) {
+        if (recycled[index] !== previousCache.entries[index]) {
+          fullyReused = false;
+          break;
+        }
+      }
+      entries = fullyReused ? previousCache.entries : recycled;
+    }
+
+    historicalEntryCacheRef.current = { closureDeps, entries };
+
+    return entries;
   }, [
     assistantUsageDetails,
     buildMessageActions,
@@ -688,9 +753,33 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   ]);
 
   const historicalGroupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
-    const messageGroups = groupChatRenderEntries(historicalRenderedMessageEntries).map((group) =>
-      decorateAssistantGroupActions(group, handleCopyMessageGroup),
-    );
+    const cache = historicalGroupCacheRef.current;
+    let messageGroups: ChatRenderGroup[];
+    if (cache !== null && cache.decorateKey === handleCopyMessageGroup) {
+      // 与流式路径同构：未变化的前缀组直接复用旧引用，只对首个差异之后的组重新装饰，
+      // 让 `ChatGroupBlock` 的 memo 只作用于真正变化的分组。
+      const reconciled = reconcileChatRenderGroups({
+        previousEntries: cache.entries,
+        previousGroups: cache.messageGroups,
+        nextEntries: historicalRenderedMessageEntries,
+      });
+      messageGroups = [
+        ...cache.messageGroups.slice(0, reconciled.reusedGroupCount),
+        ...reconciled.tailGroups.map((group) =>
+          decorateAssistantGroupActions(group, handleCopyMessageGroup),
+        ),
+      ];
+    } else {
+      messageGroups = groupChatRenderEntries(historicalRenderedMessageEntries).map((group) =>
+        decorateAssistantGroupActions(group, handleCopyMessageGroup),
+      );
+    }
+    historicalGroupCacheRef.current = {
+      decorateKey: handleCopyMessageGroup,
+      entries: historicalRenderedMessageEntries,
+      messageGroups,
+    };
+
     return mergeNoticeGroupsIntoRenderGroups({
       messageGroups,
       noticeGroups: buildSubagentNoticeGroups(subagentNotices ?? []),

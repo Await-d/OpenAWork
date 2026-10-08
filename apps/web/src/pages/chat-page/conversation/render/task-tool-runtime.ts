@@ -66,10 +66,61 @@ function mapTaskStatusToRuntimeStatus(
   return 'pending';
 }
 
+/**
+ * 影响 lookup 内容的全部输入签名。
+ *
+ * 只覆盖真正参与 snapshot 构造的字段：子会话只贡献 `state_status`（用于把
+ * running 细化为 paused），其余字段变化不应让 lookup 换引用。
+ */
+function buildLookupSignature(
+  childSessions: readonly Session[],
+  sessionTasks: readonly SessionTask[],
+): string {
+  const childStateById = childSessions
+    .map((session) => `${session.id}=${session.state_status ?? ''}`)
+    .sort((left, right) => left.localeCompare(right, 'en-US'))
+    .join(',');
+  const taskPart = sessionTasks
+    .map((task) =>
+      [
+        task.id,
+        task.sessionId ?? '',
+        task.status,
+        task.assignedAgent ?? '',
+        task.errorMessage ?? '',
+        task.result ?? '',
+        task.timeoutSource ?? '',
+        task.terminalReason ?? '',
+        task.title,
+        task.updatedAt,
+      ].join(''),
+    )
+    .sort((left, right) => left.localeCompare(right, 'en-US'))
+    .join('');
+  return `${childStateById}${taskPart}`;
+}
+
+let lastLookupSignature: string | null = null;
+let lastLookup: TaskToolRuntimeLookup | null = null;
+
+/**
+ * 构造子代理任务运行时查找表。
+ *
+ * 返回值被 `renderContent` 闭包捕获并进入 `useChatRenderData` 的 memo 依赖，
+ * 因此**引用稳定性直接决定消息列表是否重渲染**。会话运行时快照每 3s 轮询一次、
+ * `loadCurrentSessionSnapshot` 也会直接写入 `childSessions` / `sessionTasks`，
+ * 若每次都返回新对象，即使内容完全一致也会击穿所有 `ChatGroupBlock` 的
+ * `React.memo`。这里按内容签名缓存上一次结果。
+ */
 export function buildTaskToolRuntimeLookup(
   childSessions: Session[],
   sessionTasks: SessionTask[],
 ): TaskToolRuntimeLookup {
+  const signature = buildLookupSignature(childSessions, sessionTasks);
+  if (lastLookup !== null && lastLookupSignature === signature) {
+    return lastLookup;
+  }
+
   const childSessionsById = new Map(childSessions.map((session) => [session.id, session]));
   const byTaskId = new Map<string, TaskToolRuntimeSnapshot>();
   const bySessionId = new Map<string, TaskToolRuntimeSnapshot>();
@@ -95,7 +146,9 @@ export function buildTaskToolRuntimeLookup(
     }
   }
 
-  return { bySessionId, byTaskId };
+  lastLookup = { bySessionId, byTaskId };
+  lastLookupSignature = signature;
+  return lastLookup;
 }
 
 export function resolveTaskToolRuntimeSnapshot(

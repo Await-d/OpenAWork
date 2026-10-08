@@ -1,3 +1,4 @@
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   buildAxiosRequestOptions,
   requestWithSafeRedirects,
@@ -146,7 +147,7 @@ function logReadabilityFallback(message: string, error?: unknown): void {
     return;
   }
   if (error === undefined) {
-    console.warn(`[open-websearch/readability] ${message}`);
+    logGatewayWarn(`[open-websearch/readability] ${message}`);
     return;
   }
   console.warn(`[open-websearch/readability] ${message}`, error);

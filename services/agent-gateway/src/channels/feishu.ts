@@ -40,6 +40,7 @@ import {
 } from './feishu-messaging.js';
 import { sendFeishuMention } from './feishu-mention.js';
 import { feishuTokenResponseSchema } from './feishu-response-schemas.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export class FeishuChannelService implements MessagingChannelService {
   readonly pluginId: string;
@@ -284,7 +285,7 @@ export class FeishuChannelService implements MessagingChannelService {
     try {
       this.notify(event);
     } catch (error) {
-      console.warn('[feishu] channel notify handler threw', {
+      logGatewayWarn('[feishu] channel notify handler threw', {
         pluginId: this.pluginId,
         error: error instanceof Error ? error.message : String(error),
       });

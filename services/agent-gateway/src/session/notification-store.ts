@@ -2,6 +2,9 @@ import type { RunEvent } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import type { SqliteBindableValue } from '../infra/sqlite-bind-params.js';
 import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';
+import type { NotificationChangeReason } from './notification-events-bus.js';
+import { publishNotificationChangedEvent } from './notification-events-bus.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export const NOTIFICATION_PREFERENCE_CHANNELS = ['web'] as const;
 export const NOTIFICATION_PREFERENCE_EVENT_TYPES = [
@@ -171,7 +174,7 @@ function maybePruneNotifications(userId: string): void {
   try {
     pruneNotifications(userId, limit);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[notification-store] 裁剪 notifications 失败（user=${userId}）：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -274,12 +277,14 @@ export function createNotification(input: CreateNotificationInput): void {
     );
   } catch (error) {
     // 并发下另一路写入抢占了同一个 dedupe_key：业务语义已由那次写入满足，直接跳过。
+    // 那次写入已经发过事件，这里绝不能补发——否则同一条待办会把红点/列表刷新两遍。
     if (isUniqueConstraintViolation(error)) {
       return;
     }
     throw error;
   }
   maybePruneNotifications(input.userId);
+  publishNotificationChanged({ reason: 'created', userId: input.userId });
 }
 
 function isUniqueConstraintViolation(error: unknown): boolean {
@@ -312,6 +317,46 @@ export function listUnreadBroadcastNotifications(input: {
     status: 'unread',
     userId: input.userId,
   });
+}
+
+export interface NotificationSnapshot {
+  /**
+   * 未读结果播报的完整记录（任务完成/失败）——仅 `pending` 视图有值。
+   * 它们不在铃铛列表里占位，客户端只用它在页面隐藏时弹系统通知。
+   */
+  browserBroadcasts: NotificationRecord[];
+  notifications: NotificationRecord[];
+  /** 未处理 actionable 待办数——铃铛红点应显示这个，而不是列表长度。 */
+  pendingActionableCount: number;
+}
+
+/**
+ * `pending` 视图的权威快照。
+ *
+ * `GET /notifications?view=pending` 与 `/notification-events` 的 `sync` 握手共用它：
+ * 两者一旦各写各的，行口径与红点计数迟早漂移，而漂移表现是「红点说有 3 条、点开只有
+ * 1 条」这类极难定位的问题。宁可多一个函数也不要两份口径。
+ */
+export function buildPendingNotificationSnapshot(
+  userId: string,
+  limit: number,
+  status?: NotificationStatus,
+): NotificationSnapshot {
+  // `view=pending` 只含 actionable 待办 —— rows 与 pendingActionableCount 口径一致，
+  // 结果播报不在铃铛里占位。
+  const notifications = listNotifications({
+    kind: 'actionable',
+    limit,
+    status,
+    userId,
+    view: 'pending',
+  });
+  // 红点只被「真的需要用户动手」的 actionable 待办点亮；结果播报不该抢注意力。
+  const pendingActionableCount = countPendingActionableNotifications(userId);
+  // 结果播报仅在待处理视图额外交付：客户端页面隐藏时据此弹系统通知，
+  // 让「不进铃铛」不等于「不告知」。
+  const browserBroadcasts = listUnreadBroadcastNotifications({ limit, userId });
+  return { browserBroadcasts, notifications, pendingActionableCount };
 }
 
 export function listNotifications(input: {
@@ -379,12 +424,40 @@ export function listNotifications(input: {
 /** 未处理的 actionable 待办数——铃铛红点只应被「真的需要我动手」的事点亮。 */
 export function countPendingActionableNotifications(userId: string): number {
   expireDueNotifications(userId);
+  return countPendingActionableWithoutExpiring(userId);
+}
+
+/**
+ * 与 `countPendingActionableNotifications` 同口径，但**跳过惰性过期**（纯读）。
+ *
+ * 事件推送路径专用：推送只是「这里脏了」的信号，不该为了算一个红点数而制造写事务
+ * 去抢 SQLite 写锁；客户端拿到事件后会走一次读路径，那条路径顺手完成过期收口。
+ */
+export function countPendingActionableWithoutExpiring(userId: string): number {
   const row = sqliteGet<{ count: number }>(
     `SELECT COUNT(1) AS count FROM notifications
       WHERE user_id = ? AND kind = 'actionable' AND status = 'unread'`,
     [userId],
   );
   return row?.count ?? 0;
+}
+
+/**
+ * 落库即发事件——`/notification-events` WS 通道的唯一数据源。
+ *
+ * 没有任何 WS 订阅者时这是一次 no-op，因此对通知生命周期的单测完全透明。
+ */
+function publishNotificationChanged(input: {
+  reason: NotificationChangeReason;
+  userId: string;
+}): void {
+  publishNotificationChangedEvent({
+    pendingActionableCount: countPendingActionableWithoutExpiring(input.userId),
+    reason: input.reason,
+    timestamp: Date.now(),
+    type: 'notification.changed',
+    userId: input.userId,
+  });
 }
 
 export function markNotificationRead(input: { id: string; userId: string }): void {
@@ -394,6 +467,7 @@ export function markNotificationRead(input: { id: string; userId: string }): voi
      WHERE id = ? AND user_id = ?`,
     [input.id, input.userId],
   );
+  publishNotificationChanged({ reason: 'read', userId: input.userId });
 }
 
 /**
@@ -418,6 +492,7 @@ export function markPermissionNotificationsActedByRequestIds(input: {
       [input.userId, input.sessionId, prefix.length, prefix],
     );
   }
+  publishNotificationChanged({ reason: 'acted', userId: input.userId });
 }
 
 /**
@@ -444,6 +519,7 @@ export function expireActionableNotificationsForSession(input: {
        AND status = 'unread'`,
     [input.userId, input.sessionId],
   );
+  publishNotificationChanged({ reason: 'expired', userId: input.userId });
 }
 
 export function markAllNotificationsRead(input: { userId: string }): void {
@@ -453,6 +529,7 @@ export function markAllNotificationsRead(input: { userId: string }): void {
      WHERE user_id = ? AND status = 'unread'`,
     [input.userId],
   );
+  publishNotificationChanged({ reason: 'read', userId: input.userId });
 }
 
 /** 用户主动忽略单条通知：不删除，留档可回溯。 */
@@ -463,6 +540,7 @@ export function archiveNotification(input: { id: string; userId: string }): void
      WHERE id = ? AND user_id = ? AND status != 'archived'`,
     [input.id, input.userId],
   );
+  publishNotificationChanged({ reason: 'archived', userId: input.userId });
 }
 
 export interface ArchiveNotificationsInput {
@@ -497,6 +575,7 @@ export function archiveNotifications(input: ArchiveNotificationsInput): void {
      WHERE ${filters.join(' AND ')}`,
     params,
   );
+  publishNotificationChanged({ reason: 'archived', userId: input.userId });
 }
 
 export function listNotificationPreferences(input: {

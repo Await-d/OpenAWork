@@ -1,9 +1,15 @@
 .review-panel-review-badge {
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
+  /* 位于文件卡片的元信息行内：审查结论必须始终完整可读，
+     宽度不足时由工具名 chip 让位，而不是把徽章压成省略号。 */
+  flex: 0 0 auto;
   font-size: 10px;
   font-weight: 650;
-  padding: var(--spacing-1) var(--spacing-2);
+  /* 纵向 padding 归零 + 固定 line-height：徽章高度收敛到 ~17px，
+     不再反过来撑高元信息行（原先 4px 上下内缩会让整行长到 24px）。 */
+  line-height: 1.5;
+  padding: 0 var(--spacing-2);
   white-space: nowrap;
 }
 
@@ -34,13 +40,20 @@
 
 .review-panel-file-row-actions__button {
   align-items: center;
-  border: 1px solid transparent;
+  /* 默认态用「描边 + 语义色图标」而非实心色块：18 个文件 × 2 个按钮共 36 个实心方块
+     会把整列变成色块墙，反而淹没文件名。强调色按 token 规约只用于 CTA / active，
+     因此实心填充下沉到 hover / focus-within。 */
+  background: transparent;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+  color: var(--fg-subtle);
   cursor: pointer;
   display: inline-flex;
   font-size: 10.5px;
   font-weight: 650;
-  height: 28px;
+  /* 24px 与头部 segmented / bulk 按钮（min-height: 24px）对齐，
+     统一控件高度刻度；行内按钮不再反向撑高文件卡片。 */
+  height: 24px;
   justify-content: center;
   outline: 2px solid transparent;
   outline-offset: 2px;
@@ -49,27 +62,49 @@
     background var(--dur-micro) var(--ease-micro),
     border-color var(--dur-micro) var(--ease-micro),
     box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
     opacity var(--dur-micro) var(--ease-micro),
     transform var(--dur-micro) var(--ease-micro);
-  width: 28px;
+  width: 24px;
 }
 
 .review-panel-file-row-actions__button--accept {
-  background: var(--accent);
-  color: var(--fg-on-accent);
+  color: var(--accent);
 }
 
 .review-panel-file-row-actions__button--reject {
-  background: var(--danger);
-  color: var(--fg-on-complement);
+  color: var(--danger);
+}
+
+/* 行 hover / 键盘焦点落在行内时，按钮升到可操作档位。
+   必须排在下方按钮自身 :hover 规则之前：两者特异度相同（各 3 个类/伪类），
+   只靠源码顺序决定胜负，否则直接悬停按钮时反而拿不到实心反馈。 */
+.review-panel-file-list__item:hover .review-panel-file-row-actions__button,
+.review-panel-file-list__item:focus-within .review-panel-file-row-actions__button {
+  border-color: var(--border-emphasis);
+  color: var(--fg-muted);
+}
+
+.review-panel-file-list__item:hover .review-panel-file-row-actions__button--accept,
+.review-panel-file-list__item:focus-within .review-panel-file-row-actions__button--accept {
+  color: var(--accent);
+}
+
+.review-panel-file-list__item:hover .review-panel-file-row-actions__button--reject,
+.review-panel-file-list__item:focus-within .review-panel-file-row-actions__button--reject {
+  color: var(--danger);
 }
 
 .review-panel-file-row-actions__button--accept:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--accent-muted);
+  border-color: var(--accent-border);
+  color: var(--accent);
 }
 
 .review-panel-file-row-actions__button--reject:hover:not(:disabled) {
-  background: var(--complement-hover);
+  background: var(--danger-muted);
+  border-color: var(--danger-border);
+  color: var(--danger);
 }
 
 .review-panel-file-row-actions__button--accept:active:not(:disabled),

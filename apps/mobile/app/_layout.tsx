@@ -1,3 +1,6 @@
+// 必须是第一条 import：把错误捕获的安装时点提到其余依赖求值之前（ESM 按书写顺序
+// 执行 import）。否则依赖树里任何模块的顶层抛错都会在捕获就绪前发生，无处留痕。
+import '../src/monitoring/install-error-capture';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
@@ -8,6 +11,7 @@ import { useAuthStore } from '../src/store/auth';
 import { subscribeAuthError } from '../src/hooks/use-auth-error-handler';
 import { NetworkBanner } from '../src/components/NetworkBanner';
 import { initSentry } from '../src/monitoring/sentry';
+import { AppErrorBoundary } from '../src/components/AppErrorBoundary';
 import { BottomNav, type BottomNavTab } from '../src/components/BottomNav';
 import { shouldShowBottomNav } from '../src/layout/metrics';
 import { colors } from '../src/theme/colors';
@@ -116,47 +120,51 @@ export default function RootLayout() {
     );
   }
 
+  // 根级错误边界：渲染异常时给出可恢复的错误页并留下诊断记录，
+  // 而不是让异常冒泡到 expo-router 根导致白屏且无迹可寻。
   return (
-    <SafeAreaProvider>
-      <StatusBar style="dark" />
-      <NetworkBanner />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.bgBase },
-        }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="login" />
-        <Stack.Screen name="connection" />
-        <Stack.Screen name="onboarding" />
-        <Stack.Screen name="onboarding/gateway" />
-        <Stack.Screen name="onboarding/client" />
-        <Stack.Screen name="sessions" />
-        <Stack.Screen name="sessions/new" />
-        <Stack.Screen name="home" />
-        <Stack.Screen name="chat/[sessionId]" />
-        <Stack.Screen name="settings" />
-        <Stack.Screen name="settings/mcp" />
-        <Stack.Screen name="settings/[section]" />
-        <Stack.Screen name="image-workspace" />
-        <Stack.Screen name="network" />
-        <Stack.Screen name="quick-commands" />
-        <Stack.Screen name="artifacts" />
-        <Stack.Screen name="change-review" />
-        <Stack.Screen name="answer-retry" />
-        <Stack.Screen name="panel-center" />
-        <Stack.Screen name="snapshot-recovery" />
-        <Stack.Screen name="input-context" />
-        <Stack.Screen name="channels" />
-        <Stack.Screen name="channel/[channelId]" />
-        <Stack.Screen name="channel/diagnostics" />
-        <Stack.Screen name="attachments" />
-        <Stack.Screen name="agent-tasks" />
-        <Stack.Screen name="image-params" />
-        <Stack.Screen name="image-progress" />
-      </Stack>
-      {showNav && <BottomNav active={resolveActiveTab(pathname)} onNavigate={handleNav} />}
-    </SafeAreaProvider>
+    <AppErrorBoundary>
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <NetworkBanner />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.bgBase },
+          }}
+        >
+          <Stack.Screen name="index" />
+          <Stack.Screen name="login" />
+          <Stack.Screen name="connection" />
+          <Stack.Screen name="onboarding" />
+          <Stack.Screen name="onboarding/gateway" />
+          <Stack.Screen name="onboarding/client" />
+          <Stack.Screen name="sessions" />
+          <Stack.Screen name="sessions/new" />
+          <Stack.Screen name="home" />
+          <Stack.Screen name="chat/[sessionId]" />
+          <Stack.Screen name="settings" />
+          <Stack.Screen name="settings/mcp" />
+          <Stack.Screen name="settings/[section]" />
+          <Stack.Screen name="image-workspace" />
+          <Stack.Screen name="network" />
+          <Stack.Screen name="quick-commands" />
+          <Stack.Screen name="artifacts" />
+          <Stack.Screen name="change-review" />
+          <Stack.Screen name="answer-retry" />
+          <Stack.Screen name="panel-center" />
+          <Stack.Screen name="snapshot-recovery" />
+          <Stack.Screen name="input-context" />
+          <Stack.Screen name="channels" />
+          <Stack.Screen name="channel/[channelId]" />
+          <Stack.Screen name="channel/diagnostics" />
+          <Stack.Screen name="attachments" />
+          <Stack.Screen name="agent-tasks" />
+          <Stack.Screen name="image-params" />
+          <Stack.Screen name="image-progress" />
+        </Stack>
+        {showNav && <BottomNav active={resolveActiveTab(pathname)} onNavigate={handleNav} />}
+      </SafeAreaProvider>
+    </AppErrorBoundary>
   );
 }

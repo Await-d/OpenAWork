@@ -20,6 +20,7 @@ import {
   persistTeamUsageRecord,
 } from '../team/team-usage-records-store.js';
 import type { SessionStreamContext } from './stream.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /**
  * 团队记录归属的回合键解析（严格优先序，见 `resolveSessionTurnClientRequestId`）：
@@ -174,7 +175,7 @@ export function publishTeamWorkflowUsageEvent(input: TeamWorkflowUsageEventInput
       costUsd: input.costUsd ?? 0,
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[stream-team-events] persist workflow usage 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }

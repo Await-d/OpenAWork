@@ -85,3 +85,80 @@ describe('resolveTaskToolRuntimeSnapshot', () => {
     expect(resolveTaskToolRuntimeSnapshot({ prompt: 'x' }, undefined, undefined)).toBeUndefined();
   });
 });
+
+/**
+ * 引用稳定性。
+ *
+ * 回归背景：lookup 被 `renderContent` 闭包捕获并进入 `useChatRenderData` 的 memo
+ * 依赖，引用一换就会击穿所有 `ChatGroupBlock` 的 `React.memo`。会话运行时快照每 3s
+ * 轮询一次、`loadCurrentSessionSnapshot` 也会直接写 `childSessions`/`sessionTasks`，
+ * 因此内容一致时必须返回同一个对象。
+ */
+describe('buildTaskToolRuntimeLookup 的引用稳定性', () => {
+  it('内容一致时返回同一个 lookup 引用', () => {
+    const first = buildTaskToolRuntimeLookup(
+      [buildSession({ id: 'c1', state_status: 'running' })],
+      [buildTask({ id: 't1', sessionId: 'c1', status: 'running' })],
+    );
+    // 模拟重新反序列化：对象全新但内容一致
+    const second = buildTaskToolRuntimeLookup(
+      [buildSession({ id: 'c1', state_status: 'running' })],
+      [buildTask({ id: 't1', sessionId: 'c1', status: 'running' })],
+    );
+
+    expect(second).toBe(first);
+  });
+
+  it('任务状态推进时返回新引用', () => {
+    const first = buildTaskToolRuntimeLookup([], [buildTask({ id: 't1', status: 'running' })]);
+    const second = buildTaskToolRuntimeLookup([], [buildTask({ id: 't1', status: 'completed' })]);
+
+    expect(second).not.toBe(first);
+  });
+
+  it('任务结果回填时返回新引用', () => {
+    const first = buildTaskToolRuntimeLookup([], [buildTask({ id: 't1', status: 'running' })]);
+    const second = buildTaskToolRuntimeLookup(
+      [],
+      [buildTask({ id: 't1', status: 'running', result: '完成' })],
+    );
+
+    expect(second).not.toBe(first);
+  });
+
+  it('子会话进入 paused（影响状态派生）时返回新引用', () => {
+    const first = buildTaskToolRuntimeLookup(
+      [buildSession({ id: 'c1', state_status: 'running' })],
+      [buildTask({ id: 't1', sessionId: 'c1', status: 'running' })],
+    );
+    const second = buildTaskToolRuntimeLookup(
+      [buildSession({ id: 'c1', state_status: 'paused' })],
+      [buildTask({ id: 't1', sessionId: 'c1', status: 'running' })],
+    );
+
+    expect(second).not.toBe(first);
+  });
+
+  it('子会话与任务顺序变化时仍视为内容一致', () => {
+    const first = buildTaskToolRuntimeLookup(
+      [buildSession({ id: 'c1' }), buildSession({ id: 'c2' })],
+      [buildTask({ id: 't1', sessionId: 'c1' }), buildTask({ id: 't2', sessionId: 'c2' })],
+    );
+    const reordered = buildTaskToolRuntimeLookup(
+      [buildSession({ id: 'c2' }), buildSession({ id: 'c1' })],
+      [buildTask({ id: 't2', sessionId: 'c2' }), buildTask({ id: 't1', sessionId: 'c1' })],
+    );
+
+    expect(reordered).toBe(first);
+  });
+
+  it('任务集合变化时返回新引用', () => {
+    const first = buildTaskToolRuntimeLookup([], [buildTask({ id: 't1' })]);
+    const second = buildTaskToolRuntimeLookup(
+      [],
+      [buildTask({ id: 't1' }), buildTask({ id: 't2' })],
+    );
+
+    expect(second).not.toBe(first);
+  });
+});

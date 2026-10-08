@@ -366,3 +366,308 @@ describe('toSharedMessageSnapshot', () => {
     expect(toSharedMessageSnapshot([])).toEqual([]);
   });
 });
+
+/**
+ * 引用回收。
+ *
+ * 回归背景：归一化每次都造新消息对象，因此「切回刚离开的会话」时，即使快照内容与
+ * 视图缓存逐字段一致，合流结果也会整表换新引用，击穿消息列表里所有
+ * `ChatGroupBlock` 的 `React.memo`。回收后 `setMessages` 能直接短路。
+ */
+describe('reconcileSnapshotChatMessages 的引用回收', () => {
+  function userMessage(id: string, content: string, createdAt: number): ChatMessage {
+    return { id, role: 'user', content, createdAt };
+  }
+
+  it('快照与 previous 逐字段一致时返回同一个数组引用', () => {
+    const previous = [userMessage('u1', '第一条', 1_000), userMessage('u2', '第二条', 2_000)];
+    // 模拟重新归一化：对象全新但内容一致
+    const snapshot = [userMessage('u1', '第一条', 1_000), userMessage('u2', '第二条', 2_000)];
+
+    expect(reconcileSnapshotChatMessages(previous, snapshot)).toBe(previous);
+  });
+
+  it('快照新增消息时，未变消息仍复用 previous 的对象引用', () => {
+    const kept = userMessage('u1', '第一条', 1_000);
+    const previous = [kept];
+    const snapshot = [userMessage('u1', '第一条', 1_000), userMessage('u2', '第二条', 2_000)];
+
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    expect(reconciled).not.toBe(previous);
+    expect(reconciled[0]).toBe(kept);
+    expect(reconciled[1]).toBe(snapshot[1]);
+  });
+
+  it('previous 多出本地消息时不能返回 previous 引用', () => {
+    const previous = [userMessage('u1', '第一条', 1_000), userMessage('u2', '本地补充', 2_000)];
+    const snapshot = [userMessage('u1', '第一条', 1_000)];
+
+    // 本地独有消息会被保留（合流契约），因此结果内容等价但数组是新引用。
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    expect(reconciled).toHaveLength(2);
+    expect(reconciled[0]).toBe(previous[0]);
+    expect(reconciled[1]).toBe(previous[1]);
+  });
+
+  it('同 id 但状态变化时视为真实更新（不沿用旧引用，避免渲染陈旧状态）', () => {
+    const previous: ChatMessage[] = [
+      { id: 'm1', role: 'assistant', content: '回答', status: 'streaming', createdAt: 1_000 },
+    ];
+    const snapshot: ChatMessage[] = [
+      { id: 'm1', role: 'assistant', content: '回答', status: 'completed', createdAt: 1_000 },
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    expect(reconciled).not.toBe(previous);
+    expect(reconciled[0]).not.toBe(previous[0]);
+    expect(reconciled[0]?.status).toBe('completed');
+  });
+
+  it('快照带来更完整的 assistant 正文时视为真实更新', () => {
+    const previous: ChatMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: createAssistantTraceContent({ text: '回答', toolCalls: [] }),
+        createdAt: 1_000,
+      },
+    ];
+    const snapshot: ChatMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: createAssistantTraceContent({ text: '回答，且快照更完整', toolCalls: [] }),
+        createdAt: 1_000,
+      },
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    expect(reconciled[0]).not.toBe(previous[0]);
+    expect(reconciled[0]?.content).not.toBe(previous[0]?.content);
+  });
+
+  it('同 id 但 parts 变化时视为真实更新（content 相同也不复用）', () => {
+    const previous: ChatMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: '序列化文本',
+        createdAt: 1_000,
+        parts: [{ id: 'p1', type: 'text', text: '序列化文本' }] as ChatMessagePart[],
+      },
+    ];
+    const snapshot: ChatMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: '序列化文本',
+        createdAt: 1_000,
+        parts: [
+          { id: 'p1', type: 'text', text: '序列化文本' },
+          { id: 'p2', type: 'text', text: '追加' },
+        ] as ChatMessagePart[],
+      },
+    ];
+
+    expect(reconcileSnapshotChatMessages(previous, snapshot)).not.toBe(previous);
+  });
+
+  // ─── 不进入 content 但参与渲染的字段（漏判会造成陈旧展示）──────────────────
+
+  /**
+   * 构造一条自洽的 assistant 消息：`content` 必须等于 `contentFromParts(parts)`
+   * —— 这是真实消息的形态（`content` 是 parts 的序列化结果），也是引用回收判定
+   * 所依赖的不变量。构造不自洽会让判定误判为「内容已变」，测试就失去意义。
+   */
+  function tracedMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+    const parts: ChatMessagePart[] = [{ id: 'p1', type: 'text', text: '回答' }];
+    return {
+      id: 'm1',
+      role: 'assistant',
+      createdAt: 1_000,
+      ...overrides,
+      parts: overrides.parts ?? parts,
+      content: overrides.content ?? contentFromParts(overrides.parts ?? parts),
+    } as ChatMessage;
+  }
+
+  // ─── 统一基底：两条终态分支都是「服务端优先」 ─────────────────────────────
+
+  it('两条终态分支都保留服务端回填的元数据（流式收尾）', () => {
+    const usage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 };
+    const previous = [tracedMessage({ status: 'streaming' })];
+    const snapshot = [
+      tracedMessage({ status: 'completed', providerUsage: usage } as Partial<ChatMessage>),
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    expect(reconciled[0]?.providerUsage).toEqual(usage);
+  });
+
+  it('两条终态分支都保留服务端回填的元数据（两侧均终态）', () => {
+    const usage = { inputTokens: 7, outputTokens: 8, totalTokens: 15 };
+    const previous = [tracedMessage({ status: 'completed' })];
+    const snapshot = [
+      tracedMessage({ status: 'completed', providerUsage: usage } as Partial<ChatMessage>),
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    // 此前该分支以本地为基底，服务端元数据在这里被丢弃。
+    expect(reconciled[0]?.providerUsage).toEqual(usage);
+  });
+
+  it('服务端元数据优先于本地较旧的同名字段', () => {
+    const previous = [
+      tracedMessage({ status: 'completed', model: '本地旧模型' } as Partial<ChatMessage>),
+    ];
+    const snapshot = [
+      tracedMessage({ status: 'completed', model: '服务端新模型' } as Partial<ChatMessage>),
+    ];
+
+    expect(reconcileSnapshotChatMessages(previous, snapshot)[0]?.model).toBe('服务端新模型');
+  });
+
+  it('推理块计时以快照为准（本地可能只记录了前 N 个块）', () => {
+    const previous = [
+      tracedMessage({
+        status: 'streaming',
+        reasoningBlocksEndedFlags: [true],
+        reasoningBlocksDurationsMs: [1_200],
+      } as Partial<ChatMessage>),
+    ];
+    const snapshot = [
+      tracedMessage({
+        status: 'completed',
+        reasoningBlocksEndedFlags: [true, true],
+        reasoningBlocksDurationsMs: [1_200, 800],
+        providerUsage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+      } as Partial<ChatMessage>),
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    expect(reconciled[0]?.reasoningBlocksEndedFlags).toEqual([true, true]);
+    expect(reconciled[0]?.reasoningBlocksDurationsMs).toEqual([1_200, 800]);
+    expect(reconciled[0]?.providerUsage).toBeDefined();
+  });
+
+  it('快照缺失推理块计时字段时沿用本地兜底', () => {
+    const previous = [
+      tracedMessage({
+        status: 'streaming',
+        reasoningBlocksEndedFlags: [true],
+        reasoningBlocksDurationsMs: [1_200],
+      } as Partial<ChatMessage>),
+    ];
+    const snapshot = [
+      tracedMessage({
+        status: 'completed',
+        reasoningBlocksEndedFlags: undefined,
+        reasoningBlocksDurationsMs: undefined,
+      } as Partial<ChatMessage>),
+    ];
+
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    expect(reconciled[0]?.reasoningBlocksEndedFlags).toEqual([true]);
+    expect(reconciled[0]?.reasoningBlocksDurationsMs).toEqual([1_200]);
+  });
+
+  it('快照未提供计时字段时不会把本地的 undefined 写进去', () => {
+    const previous = [tracedMessage({ status: 'streaming', reasoningBlocksEndedFlags: undefined })];
+    const snapshot = [tracedMessage({ status: 'completed' })];
+
+    const reconciled = reconcileSnapshotChatMessages(previous, snapshot);
+
+    expect('reasoningBlocksEndedFlags' in reconciled[0]!).toBe(false);
+  });
+
+  // ─── 引用回收：非 content 字段也必须参与判定 ──────────────────────────────
+
+  it('快照回填 providerUsage 时换新引用，避免用量展示停在本地空值', () => {
+    const previous = [tracedMessage({ status: 'streaming' })];
+    const snapshot = [
+      tracedMessage({
+        status: 'completed',
+        providerUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+      } as Partial<ChatMessage>),
+    ];
+
+    expect(reconcileSnapshotChatMessages(previous, snapshot)).not.toBe(previous);
+  });
+
+  it('tokenEstimate / model / durationMs 变化时换新引用', () => {
+    for (const patch of [
+      { tokenEstimate: 42 },
+      { model: 'gpt-5' },
+      { durationMs: 1_234 },
+      { toolCallCount: 3 },
+      { agentId: 'agent-a' },
+    ] as Partial<ChatMessage>[]) {
+      const previous = [tracedMessage({ status: 'streaming' })];
+      const snapshot = [tracedMessage({ status: 'completed', ...patch } as Partial<ChatMessage>)];
+      expect(reconcileSnapshotChatMessages(previous, snapshot)).not.toBe(previous);
+    }
+  });
+
+  it('所有渲染字段一致时仍复用 previous 引用（优化不能失效）', () => {
+    const shared = {
+      model: 'gpt-5',
+      tokenEstimate: 42,
+      providerUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+    } as Partial<ChatMessage>;
+
+    const previous = [tracedMessage({ ...shared, status: 'streaming' })];
+    const snapshot = [tracedMessage({ ...shared, status: 'completed' })];
+    expect(reconcileSnapshotChatMessages(previous, snapshot)).not.toBe(previous);
+
+    // 两侧终态且逐字段一致 ⇒ 整表复用
+    const bothCompleted = [tracedMessage({ ...shared, status: 'completed' })];
+    expect(
+      reconcileSnapshotChatMessages(bothCompleted, [
+        tracedMessage({ ...shared, status: 'completed' }),
+      ]),
+    ).toBe(bothCompleted);
+  });
+
+  it('event 分片 payload 变化时换新引用（唯一不进 content 的分片变体）', () => {
+    const previous: ChatMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: '回答',
+        createdAt: 1_000,
+        parts: [
+          {
+            id: 'e1',
+            type: 'event',
+            payload: { kind: 'audit', message: 'm', status: 'running', title: 't' },
+          },
+        ] as ChatMessagePart[],
+      },
+    ];
+    const snapshot: ChatMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: '回答',
+        createdAt: 1_000,
+        parts: [
+          {
+            id: 'e1',
+            type: 'event',
+            payload: { kind: 'audit', message: 'm', status: 'success', title: 't' },
+          },
+        ] as ChatMessagePart[],
+      },
+    ];
+
+    expect(reconcileSnapshotChatMessages(previous, snapshot)).not.toBe(previous);
+  });
+});

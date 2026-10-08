@@ -82,11 +82,18 @@ const ACTIVE_STATUSES: ReadonlySet<SessionTerminalStatus> = new Set(['running', 
 export const TERMINAL_OUTPUT_STATE_FLUSH_MS = 250;
 
 /** Reconcile cadence while at least one terminal is still active. */
-const ACTIVE_RECONCILE_INTERVAL_MS = 5_000;
+const ACTIVE_RECONCILE_INTERVAL_MS = 10_000;
 /** Reconcile cadence when nothing is running (still catches missed starts). */
 const IDLE_RECONCILE_INTERVAL_MS = 20_000;
 /** Upper bound for the failure backoff. */
 const SYNC_ERROR_MAX_DELAY_MS = 20_000;
+/** ±20% 抖动比例：把多客户端的轮询打点摊开。 */
+const POLL_JITTER_RATIO = 0.2;
+
+function withPollJitter(baseMs: number): number {
+  const spread = baseMs * POLL_JITTER_RATIO;
+  return Math.round(baseMs - spread + Math.random() * spread * 2);
+}
 /**
  * A locally-created row younger than this survives a server snapshot that
  * hasn't observed it yet. Without the grace window the `terminal_started`
@@ -101,11 +108,58 @@ interface UseSessionTerminalsOptions {
 }
 
 /**
+ * 浅比较两个终端行，用于**跳过无变化的重渲染**。
+ *
+ * 列表接口是轮询接口（活跃期每 5s 一次）。如果每次都用服务端新解析出来的对象
+ * 替换本地 map，`terminalsById` 引用必变 → `sortedTerminals` 重算 → 终端面板
+ * 整棵子树重渲染，而每张卡片还内嵌一个把 `outputTail` 全文塞进去的 `<pre>`，
+ * 单次重渲染的 DOM 文本量可达几百 KB。数据没变时复用旧对象引用即可让 React
+ * 直接跳过。
+ *
+ * `shell` 是服务端每次新建的 `{ id, label }` 对象，引用比较必然不等，故按字段比。
+ */
+function sameTerminalRow(a: SessionTerminalView, b: SessionTerminalView): boolean {
+  if (
+    a.terminalId !== b.terminalId ||
+    a.sessionId !== b.sessionId ||
+    a.clientRequestId !== b.clientRequestId ||
+    a.toolName !== b.toolName ||
+    a.kind !== b.kind ||
+    a.command !== b.command ||
+    a.description !== b.description ||
+    a.name !== b.name ||
+    a.cwd !== b.cwd ||
+    a.pid !== b.pid ||
+    a.status !== b.status ||
+    a.exitCode !== b.exitCode ||
+    a.startedAtMs !== b.startedAtMs ||
+    a.endedAtMs !== b.endedAtMs ||
+    a.lastActivityMs !== b.lastActivityMs ||
+    a.outputBytesTotal !== b.outputBytesTotal ||
+    a.outputTail !== b.outputTail ||
+    a.outputPath !== b.outputPath ||
+    a.backend !== b.backend ||
+    a.supportsResize !== b.supportsResize ||
+    a.interactive !== b.interactive
+  ) {
+    return false;
+  }
+  const aShell = a.shell;
+  const bShell = b.shell;
+  if (aShell === bShell) return true;
+  if (!aShell || !bShell) return false;
+  return aShell.id === bShell.id && aShell.label === bShell.label;
+}
+
+/**
  * Merge a server snapshot into the local map.
  *
  * Server rows win, with two exceptions: rows with an in-flight kill keep
  * their optimistic local status, and very recent active local rows are
  * preserved when the snapshot predates them.
+ *
+ * 当合并结果与 `previous` 完全等价（逐行字段相同、增删均为零）时**原样返回
+ * `previous`**，让 `setTerminalsById` 拿到相同引用、React 跳过重渲染。
  */
 function mergeServerSnapshot(
   previous: Record<string, SessionTerminalView>,
@@ -116,6 +170,7 @@ function mergeServerSnapshot(
 ): Record<string, SessionTerminalView> {
   const next: Record<string, SessionTerminalView> = {};
   const seen = new Set<string>();
+  let mutated = false;
 
   for (const row of rows) {
     if (row.sessionId !== sessionId) continue;
@@ -127,7 +182,14 @@ function mergeServerSnapshot(
         continue;
       }
     }
+    const local = previous[row.terminalId];
+    if (local !== undefined && sameTerminalRow(local, row)) {
+      // 复用旧引用：字段没变就不该让下游重渲染。
+      next[row.terminalId] = local;
+      continue;
+    }
     next[row.terminalId] = row;
+    mutated = true;
   }
 
   for (const [terminalId, local] of Object.entries(previous)) {
@@ -137,6 +199,9 @@ function mergeServerSnapshot(
     }
   }
 
+  if (!mutated && Object.keys(next).length === Object.keys(previous).length) {
+    return previous;
+  }
   return next;
 }
 
@@ -342,7 +407,14 @@ export function useSessionTerminals(
     const baseDelay = hasActiveTerminals
       ? ACTIVE_RECONCILE_INTERVAL_MS
       : IDLE_RECONCILE_INTERVAL_MS;
-    const delay = Math.min(baseDelay * 2 ** failureCountRef.current, SYNC_ERROR_MAX_DELAY_MS);
+    const backoffDelay = baseDelay * 2 ** failureCountRef.current;
+    // 失败退避不给抖动（已经在退避了，再随机只会让行为不可预期）；正常轮询
+    // 给 ±20% 抖动，避免多客户端（桌面端 + 多个浏览器标签 + 移动端）在同一
+    // 毫秒集中打网关，把单线程事件循环顶出周期性尖刺。
+    const delay =
+      failureCountRef.current > 0
+        ? Math.min(backoffDelay, SYNC_ERROR_MAX_DELAY_MS)
+        : withPollJitter(baseDelay);
 
     const timer = window.setTimeout(() => {
       // 后台标签页不做无谓请求；切回前台时由 visibilitychange 立刻补一次。
@@ -359,6 +431,11 @@ export function useSessionTerminals(
     const onVisibilityChange = (): void => {
       if (typeof document !== 'undefined' && document.hidden) return;
       void runSync('silent');
+      // 轮询定时器在 `document.hidden` 期间触发时直接 return、不重臂，而它的
+      // effect 依赖都没变也不会重排 —— 后台停留足够久后轮询就永久停了。
+      // 这里补一次 bump 强制重排定时器，让轮询恢复。放在回前台侧（而非
+      // hidden 分支）可避免「setSyncTick → 重排 → 再 hidden → 再 bump」的自激循环。
+      setSyncTick((tick) => tick + 1);
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('focus', onVisibilityChange);

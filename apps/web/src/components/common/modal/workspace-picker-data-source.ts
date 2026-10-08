@@ -1,8 +1,24 @@
-import type { FileTreeNode, WorkspaceClient, WorkspaceValidateResult } from '@openAwork/web-client';
+import type {
+  FileTreeNode,
+  WorkspaceClient,
+  WorkspaceFileReadOptions,
+  WorkspaceTreeReadOptions,
+  WorkspaceValidateResult,
+} from '@openAwork/web-client';
 
 export interface WorkspacePickerDataSource {
   fetchRootPath: () => Promise<string>;
-  fetchTree: (path: string, depth?: number) => Promise<FileTreeNode[]>;
+  /**
+   * 读取目录树。
+   *
+   * `readOptions` 用于 SSH 远程工作区：会话身份 / 连接身份 / 远端根由调用方传入，
+   * 缺省时是纯本地读取，请求参数与改动前逐字节一致。
+   */
+  fetchTree: (
+    path: string,
+    depth?: number,
+    readOptions?: WorkspaceFileReadOptions,
+  ) => Promise<FileTreeNode[]>;
   fetchWorkspaceRoots: () => Promise<string[]>;
   createDirectory: (path: string) => Promise<void>;
   validatePath: (path: string) => Promise<WorkspaceValidateResult>;
@@ -44,8 +60,14 @@ export function buildWorkspacePickerDataSource(input: {
       }
       return root;
     },
-    fetchTree: async (path: string, depth = 1): Promise<FileTreeNode[]> => {
-      const result = await input.client.fetchTreeResult(requireToken(), path, { depth });
+    fetchTree: async (
+      path: string,
+      depth = 1,
+      readOptions?: WorkspaceFileReadOptions,
+    ): Promise<FileTreeNode[]> => {
+      // depth 以位置参数为准：调用方显式传的第二参优先于身份参数里的同名字段。
+      const options: WorkspaceTreeReadOptions = { ...(readOptions ?? {}), depth };
+      const result = await input.client.fetchTreeResult(requireToken(), path, options);
       if (!result.ok) {
         throw new Error(result.errorMessage ?? WORKSPACE_PICKER_TREE_LOAD_FAILED_MESSAGE);
       }

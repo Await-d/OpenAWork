@@ -39,6 +39,7 @@ import { inferExecutionSummaryVerdict } from '../workflow/execution-output-norma
 import { listSessionMessagesV2 } from '../../message/message-v2-adapter.js';
 import { extractLatestChildSessionSummary } from '../../task/task-result-extraction.js';
 import { sqliteGet } from '../../infra/db.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 /**
  * 创建一个 task runner，根据 toRoleLayer 分发。
@@ -200,7 +201,7 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
       }
     }
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[${role}-runner] 解析 team root session id 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -220,7 +221,7 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
     });
   } catch (err) {
     streamThrew = err;
-    console.warn(
+    logGatewayWarn(
       `[${role}-runner] stream 执行异常：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -866,7 +867,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
         }
       }
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[pm1-runner] 构建 resume 上下文失败，按正常流程处理：${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -958,7 +959,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
     }
   } catch (ctxErr) {
     if (ctxErr instanceof PlanningFailure || input.signal.aborted) throw ctxErr;
-    console.warn(
+    logGatewayWarn(
       `[pm1-runner] 构建项目上下文失败：${ctxErr instanceof Error ? ctxErr.message : String(ctxErr)}`,
     );
   }

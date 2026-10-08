@@ -25,6 +25,7 @@ import path from 'node:path';
 import { AgentTaskManagerImpl, AgentTaskStoreImpl } from '@openAwork/agent-core';
 import type { AgentTask, AgentTaskGraph } from '@openAwork/agent-core';
 import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export async function purgeRolledBackTurnTaskGraphNodes(input: {
   affectedSessionIds: readonly string[];
@@ -64,7 +65,7 @@ export async function purgeRolledBackTurnTaskGraphNodes(input: {
         removedTaskIds: [...removedTaskIds],
       });
     } catch (error) {
-      console.warn(
+      logGatewayWarn(
         `[turn-rollback] 清理文件任务图失败（session=${sessionId}，不影响已提交的 DB 删除）：${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -118,7 +119,7 @@ async function warnIfGraphFileUnparsable(projectRoot: string, sessionId: string)
   try {
     JSON.parse(content);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[turn-rollback] 任务图文件存在但无法解析，该会话的作废回合节点可能残留：${graphPath}（${
         error instanceof Error ? error.message : String(error)
       }）`,

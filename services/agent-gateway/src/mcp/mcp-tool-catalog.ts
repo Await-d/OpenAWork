@@ -24,6 +24,7 @@
  */
 
 import type { MCPToolDef } from '@openAwork/mcp-client';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   mcpConnectionPool,
   type ToolListChangedListener,
@@ -180,7 +181,7 @@ function publishChange(event: ToolCatalogChangeEvent): void {
     try {
       listener(event);
     } catch (err) {
-      console.warn('MCP tool-catalog change listener threw:', err);
+      logGatewayWarn('MCP tool-catalog change listener threw:', err);
     }
   }
 }
@@ -215,7 +216,7 @@ function installPoolListenerOnce(): void {
       const tools = await adapter.listTools(serverId);
       setCatalogSnapshot(userId, mcpName, serverId, tools);
     } catch (err) {
-      console.warn(`Failed to refresh MCP tool catalog after push for ${userId}/${mcpName}:`, err);
+      logGatewayWarn(`Failed to refresh MCP tool catalog after push for ${userId}/${mcpName}:`, err);
       clearCatalogSnapshot(userId, mcpName);
     }
   };
@@ -259,7 +260,7 @@ export function publishOAuthRedirect(event: OAuthRedirectEvent): void {
     try {
       listener(event);
     } catch (err) {
-      console.warn('MCP oauth-redirect listener threw:', err);
+      logGatewayWarn('MCP oauth-redirect listener threw:', err);
     }
   }
 }

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { ChannelEvent, ChannelInstance, ChannelMessage } from './types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   getQQBotSecret,
   isAuthorizedQQWebhookRequest,
@@ -154,7 +155,7 @@ async function enrichInboundMessageOrFallback(
   try {
     return await deps.enrichInboundMessage({ channel, message });
   } catch (error) {
-    console.warn('[channels] inbound media enrich failed', {
+    logGatewayWarn('[channels] inbound media enrich failed', {
       channelId: channel.id,
       error: error instanceof Error ? error.message : String(error),
     });

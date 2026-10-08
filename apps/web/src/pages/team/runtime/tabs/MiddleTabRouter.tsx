@@ -13,7 +13,7 @@
  */
 
 import { type ReactNode, useCallback, useMemo } from 'react';
-import { createWorkspaceClient } from '@openAwork/web-client';
+import { createWorkspaceClient, type WorkspaceFileReadOptions } from '@openAwork/web-client';
 import { WorkspaceFileTreePanel } from '../../../../components/layout/sidebar/WorkspaceFileTreePanel.js';
 import { EditorBrowserWorkspace } from '../../../../components/file-editor/EditorBrowserWorkspace.js';
 import type { FileTreeNode } from '../../../../components/common/modal/WorkspacePickerModal.js';
@@ -448,9 +448,18 @@ function FilesTabContent({
   );
 
   const fetchTree = useCallback(
-    async (path: string, depth?: number): Promise<FileTreeNode[]> => {
+    async (
+      path: string,
+      depth?: number,
+      readOptions?: WorkspaceFileReadOptions,
+    ): Promise<FileTreeNode[]> => {
       if (!workspaceClient || !accessToken) return [];
-      const result = await workspaceClient.fetchTreeResult(accessToken, path, { depth });
+      const result = await workspaceClient.fetchTreeResult(accessToken, path, {
+        depth: depth ?? 1,
+        // 透传 SSH 读取身份：缺失时网关会判为 `local` 并用网关本机 fs 读同名
+        // 路径，远端工作区下就会渲染出本机目录。
+        ...(readOptions ?? {}),
+      });
       if (!result.ok) {
         throw new Error(result.errorMessage ?? '读取文件树失败');
       }

@@ -23,6 +23,7 @@ import {
 import { normalizeSqliteBindParams, type SqliteBindableValue } from './sqlite-bind-params.js';
 import { buildToolOutputReferenceIdentity } from '../message/tool-output-reference.js';
 import { makeOrderedPartId } from './ordered-id.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface SqliteStatement {
   all(...params: unknown[]): unknown[];
@@ -115,6 +116,47 @@ let dbClosed = false;
 let sqliteTransactionDepth = 0;
 
 export let db = createDatabase(currentDbPath);
+
+/**
+ * Prepared statement 缓存（按 db 实例隔离）。
+ *
+ * 网关的查询全是固定 SQL 文本，`sqliteGet/sqliteAll/sqliteRun` 过去每次调用都
+ * `db.prepare()` 重新编译一遍。高频轮询接口（如终端列表，活跃期每 5s 一次/客户端）
+ * 把这笔固定开销乘得很高，而编译结果本来就可以复用。
+ *
+ * 语义要点：
+ * - 用 `WeakMap` 绑定 db 实例，`connectDb()` 换库 / `closeDb()` 关闭后旧缓存
+ *   随实例一起被回收，不存在「拿着已关闭 db 的 statement」。
+ * - DDL（`db.exec('CREATE INDEX ...')`）后缓存的 statement 依然有效：SQLite 对
+ *   prepare_v2 系列的语句在 schema 变化时会自动重编译。
+ * - 单库缓存条数封顶，Map 按插入序迭代，超限时淘汰最早插入的一条。
+ */
+const STATEMENT_CACHE_MAX_ENTRIES = 256;
+const statementCaches = new WeakMap<GatewayDatabase, Map<string, SqliteStatement>>();
+
+function preparedStatement(database: GatewayDatabase, query: string): SqliteStatement {
+  let cache = statementCaches.get(database);
+  if (!cache) {
+    cache = new Map<string, SqliteStatement>();
+    statementCaches.set(database, cache);
+  }
+  const cached = cache.get(query);
+  if (cached) {
+    // 提升到最新使用位置，配合 LRU 淘汰策略。
+    cache.delete(query);
+    cache.set(query, cached);
+    return cached;
+  }
+  const statement = database.prepare(query);
+  if (cache.size >= STATEMENT_CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done !== true) {
+      cache.delete(oldest.value);
+    }
+  }
+  cache.set(query, statement);
+  return statement;
+}
 
 function buildSearchableMessageTextForMigration(contentJson: string): string {
   try {
@@ -596,6 +638,16 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_session_terminals_status ON session_terminals(status, session_id)',
   );
+  // `user_id` 打头：覆盖 `listOwnedTerminalPids`（端口归属枚举按 user 过滤 +
+  // status IN (...) + started_at_ms DESC），此前该列无任何索引，只能全表扫。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_terminals_user_status ON session_terminals(user_id, status, started_at_ms DESC)',
+  );
+  // 列表查询的复合前缀：session_id + user_id + 排序键，免去 user_id 回表过滤
+  // 与 ORDER BY 的临时 B-tree。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_terminals_session_user ON session_terminals(session_id, user_id, started_at_ms DESC)',
+  );
   // User-defined display name for terminal tabs (rename feature).
   ensureColumn('session_terminals', 'name', 'TEXT');
 
@@ -898,6 +950,11 @@ export async function migrate(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  // `GET /team/members` 与 `GET /team/runtime`（前端 20s + 30s 两条轮询）都按
+  // user_id 过滤并按 created_at 排序，此前该表除主键外零索引 → 每次全表扫描。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_members_user_created ON team_members(user_id, created_at)',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS team_tasks (
@@ -911,6 +968,11 @@ export async function migrate(): Promise<void> {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  // 同上：`GET /team/tasks`（LIMIT 500）与 `GET /team/runtime` 按 user_id 过滤、
+  // 按 created_at DESC 排序，此前零索引。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_tasks_user_created ON team_tasks(user_id, created_at DESC)',
+  );
   ensureColumn('team_tasks', 'result', 'TEXT');
 
   db.exec(`
@@ -1686,6 +1748,17 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_session_inbound_idempotency ON session_inbound_messages(user_id, client_idempotency_key) WHERE client_idempotency_key IS NOT NULL',
   );
+  // `GET /team/runtime` 的 clarifications / notifications 两条查询（前端 20s +
+  // 30s 两处轮询）：`WHERE user_id = ? AND message_type ... AND state IN
+  // ('pending','consumed') AND (expires_at ...) AND to_session_id IN (...)`。
+  // 上面 4 个索引没有一个能服务它——两个 partial index 的 WHERE 条件与查询不
+  // 匹配（`state IN (...)` 推不出 `state = 'pending'`），`expires_at` 无等值，
+  // 幂等索引是 partial 而查询未蕴含 `client_idempotency_key IS NOT NULL`
+  // （SQLite 不允许用），因此此前每次都全表扫描。这条非 partial 索引按实际
+  // WHERE 前缀排列，覆盖两条查询的等值/范围部分。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_inbound_user_state_session ON session_inbound_messages(user_id, state, to_session_id, message_type)',
+  );
 
   // 改造 2：sessions 子状态机字段
   ensureColumn('sessions', 'substate', 'TEXT DEFAULT NULL');
@@ -1756,7 +1829,7 @@ function ensureTeamSchemaSafe(): void {
     try {
       fn();
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[migrate] ensureTeamSchemaSafe · ${label} 失败：` +
           `${err instanceof Error ? err.message : String(err)}`,
       );
@@ -3093,13 +3166,13 @@ function repairLegacyMigratedPartOrder(): void {
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
-      console.warn(`[V2_MIGRATION] Failed to repair legacy part order for ${candidate.id}`, error);
+      logGatewayWarn(`[V2_MIGRATION] Failed to repair legacy part order for ${candidate.id}`, error);
     }
   }
 }
 
 export function sqliteRun(query: string, params: readonly SqliteBindableValue[] = []): void {
-  const stmt = db.prepare(query);
+  const stmt = preparedStatement(db, query);
   stmt.run(...normalizeSqliteBindParams(params));
 }
 
@@ -3111,7 +3184,7 @@ export function sqliteRunWithRowId(
   query: string,
   params: readonly SqliteBindableValue[] = [],
 ): number {
-  const stmt = db.prepare(query);
+  const stmt = preparedStatement(db, query);
   const result = stmt.run(...normalizeSqliteBindParams(params)) as { lastInsertRowid?: unknown };
   return Number(result.lastInsertRowid ?? 0);
 }
@@ -3124,7 +3197,7 @@ export function sqliteRunWithChanges(
   query: string,
   params: readonly SqliteBindableValue[] = [],
 ): number {
-  const stmt = db.prepare(query);
+  const stmt = preparedStatement(db, query);
   const result = stmt.run(...normalizeSqliteBindParams(params)) as { changes?: unknown };
   return Number(result.changes ?? 0);
 }
@@ -3133,7 +3206,7 @@ export function sqliteGet<T>(
   query: string,
   params: readonly SqliteBindableValue[] = [],
 ): T | undefined {
-  const stmt = db.prepare(query);
+  const stmt = preparedStatement(db, query);
   // bun:sqlite 在没有匹配行时返回 `null`，node:sqlite 返回 `undefined`。
   // 上层代码大量使用 `row !== undefined` / `row != null` 等判断，统一在
   // 这里把 `null` 折叠为 `undefined`，让所有 caller 在两种 runtime 下行为一致。
@@ -3142,7 +3215,7 @@ export function sqliteGet<T>(
 }
 
 export function sqliteAll<T>(query: string, params: readonly SqliteBindableValue[] = []): T[] {
-  const stmt = db.prepare(query);
+  const stmt = preparedStatement(db, query);
   return stmt.all(...normalizeSqliteBindParams(params)) as T[];
 }
 

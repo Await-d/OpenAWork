@@ -30,6 +30,7 @@ import {
   runReviewAggregation,
 } from '../workflow/review-aggregator.js';
 import type { ReviewReport } from '../workflow/review-aggregator.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 const inFlightPm2QualityReviews = new Set<string>();
 export const QUALITY_REVIEW_RETRY_INTERVAL_MS = 30 * 1000;
@@ -562,7 +563,7 @@ export async function reconcilePm2QualityReview(input: {
             const reason = errorToMessage(err);
             candidateErrors.push(`候选 ${index}: ${reason}`);
             if (index < llmConfigs.length) {
-              console.warn(
+              logGatewayWarn(
                 `[pm2-quality-review] 辅助 LLM 候选 ${index} 调用失败，尝试下一个：${reason}`,
               );
             }
@@ -635,7 +636,7 @@ export async function reconcilePm2QualityReview(input: {
             }
           }
         } catch (receptionErr) {
-          console.warn(
+          logGatewayWarn(
             `[pm2-quality-review] 向 reception 回写完成消息失败：${receptionErr instanceof Error ? receptionErr.message : String(receptionErr)}`,
           );
         }
@@ -992,7 +993,7 @@ export async function reconcilePm2QualityReview(input: {
             }
           }
         } catch (replanErr) {
-          console.warn(
+          logGatewayWarn(
             `[pm2-quality-review] 自动退回 PM1 重新规划失败：${replanErr instanceof Error ? replanErr.message : String(replanErr)}`,
           );
         }
@@ -1337,7 +1338,7 @@ function safeAppendPm2Message(input: Parameters<typeof appendSessionMessageV2>[0
   try {
     appendSessionMessageV2(input);
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[pm2-quality-review] appendSessionMessageV2 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -1347,7 +1348,7 @@ function safeSetPm2Substate(input: Parameters<typeof setSubstate>[0]): void {
   try {
     setSubstate(input);
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[pm2-quality-review] setSubstate 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }

@@ -22,6 +22,7 @@ import { setSubstate } from '../store/substate-store.js';
 import { sqliteRun, sqliteGet } from '../../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 import {
   extractComparablePathsFromText,
   inferTaskProfile,
@@ -208,21 +209,21 @@ registerInstruction({
             payload: { reason: args.reason, handoffId: args.handoffId, requestedBy: 'reception' },
           });
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[cancel_downstream] cancel_signal 注入失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
           );
         }
         try {
           await stopAllInFlightStreamRequestsForSession({ sessionId, userId: ctx.userId });
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[cancel_downstream] 停流失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
           );
         }
         try {
           setSubstate({ sessionId, substate: 'cancelled', userId: ctx.userId });
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[cancel_downstream] setSubstate('cancelled') 失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
           );
         }
@@ -262,7 +263,7 @@ registerInstruction({
         userId: ctx.userId,
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[cancel_downstream] 审计日志写入失败（不阻塞）：${err instanceof Error ? err.message : String(err)}`,
       );
     }

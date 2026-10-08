@@ -60,6 +60,7 @@ import { assessTeamResumeMode, resolveBackgroundRerunTarget } from '../team/team
 import { preResumeConsistencyCheck } from '../team/team-resume-consistency-check.js';
 import { runSessionInBackground } from './stream-runtime.js';
 import { getBackgroundTaskScheduler } from '../handoff/runner/scheduler.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const TEAM_ROLE_LAYERS = ['user', 'reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 
@@ -179,7 +180,7 @@ function triggerTeamResumeBackgroundRun(input: {
     teamResumeRootSessionId: input.rootSessionId,
     userId: input.userId,
   }).catch((error: unknown) => {
-    console.warn(
+    logGatewayWarn(
       `[team-handoffs] resume-all 后台恢复续跑失败（不阻塞 HTTP 回复）：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -198,7 +199,7 @@ function pauseScheduledHandoffTask(handoffId: string): void {
   try {
     getBackgroundTaskScheduler().pause(toScheduledHandoffTaskId(handoffId));
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-handoffs] scheduler.pause 失败（${handoffId}）：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -208,7 +209,7 @@ function resumeScheduledHandoffTask(handoffId: string): void {
   try {
     getBackgroundTaskScheduler().resume(toScheduledHandoffTaskId(handoffId));
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-handoffs] scheduler.resume 失败（${handoffId}）：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -245,7 +246,7 @@ function logHandoffControl(input: {
       userId: input.record.userId,
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-handoffs] audit(${input.action}) 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -271,7 +272,7 @@ function injectControlSignal(input: {
       },
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-handoffs] ${input.messageType} 注入失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -363,7 +364,7 @@ function logSessionTreeControl(
       userId: input.userId,
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-handoffs] audit(${input.action}) 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -671,7 +672,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
               roleLayer: after.toRoleLayer,
             });
           } catch (e) {
-            console.warn(
+            logGatewayWarn(
               `[team-handoffs] setSubstate('cancelled') 失败：${e instanceof Error ? e.message : String(e)}`,
             );
           }
@@ -704,7 +705,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
               clientRequestId: after.clientRequestId,
             });
           } catch (e) {
-            console.warn(
+            logGatewayWarn(
               `[team-handoffs] cancel 级联下游失败（不阻塞主流程）：${e instanceof Error ? e.message : String(e)}`,
             );
           }
@@ -749,7 +750,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
               roleLayer: after.toRoleLayer,
             });
           } catch (e) {
-            console.warn(
+            logGatewayWarn(
               `[team-handoffs] setSubstate('cancelled') 失败：${e instanceof Error ? e.message : String(e)}`,
             );
           }
@@ -927,7 +928,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
             record: after,
           });
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[team-handoffs] pause-all 派发 handoff ${handoffId} 控制信号失败，跳过继续：${
               err instanceof Error ? err.message : String(err)
             }`,
@@ -991,7 +992,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
           userId: user.sub,
         });
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           `[team-handoffs] resume-all 一致性校验失败（不阻塞恢复）：${
             err instanceof Error ? err.message : String(err)
           }`,
@@ -1045,7 +1046,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
             record: after,
           });
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[team-handoffs] resume-all 派发 handoff ${handoffId} 控制信号失败，跳过继续：${
               err instanceof Error ? err.message : String(err)
             }`,
@@ -1138,7 +1139,7 @@ export async function teamHandoffsRoutes(app: FastifyInstance): Promise<void> {
               teamResumeRootSessionId: result.rootSessionId,
               userId: user.sub,
             }).catch((error: unknown) => {
-              console.warn(
+              logGatewayWarn(
                 `[team-handoffs] resume-all 精准后台续跑失败（${backgroundRerunTarget!.roleLayer}）：${
                   error instanceof Error ? error.message : String(error)
                 }`,
@@ -1283,7 +1284,7 @@ async function appendPm2SystemMessage(input: {
       content: [{ type: 'text', text: input.text }],
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-handoffs] append pm2 system message failed: ${err instanceof Error ? err.message : String(err)}`,
     );
   }

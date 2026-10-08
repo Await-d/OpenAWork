@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findContainingRoot,
+  formatWorkspacePathLabel,
   getRelativePath,
   getParentPath,
   getPathBasename,
@@ -92,5 +93,47 @@ describe('workspace-path', () => {
     expect(resolvePathWithinRoot('a/../../secret.txt', '/home/await/repo')).toBeNull();
     expect(resolvePathWithinRoot('src/index.ts', '')).toBeNull();
     expect(resolvePathWithinRoot('', '/home/await/repo')).toBeNull();
+  });
+
+  it('窄栏位路径标签超预算时从左侧省略中间层级', () => {
+    expect(formatWorkspacePathLabel('/home/await/project/OpenAWork')).toBe('/…/project/OpenAWork');
+    expect(formatWorkspacePathLabel('/home/await/project/OpenAWork/services/agent-gateway')).toBe(
+      '/…/services/agent-gateway',
+    );
+  });
+
+  it('窄栏位路径标签在预算内原样返回', () => {
+    expect(formatWorkspacePathLabel('/home/await/repo')).toBe('/home/await/repo');
+    expect(formatWorkspacePathLabel('/home/await/repo/')).toBe('/home/await/repo');
+    expect(formatWorkspacePathLabel('E:\\repo\\client\\src')).toBe('E:\\repo\\client\\src');
+    expect(formatWorkspacePathLabel('\\\\host\\share\\repo')).toBe('\\\\host\\share\\repo');
+  });
+
+  it('窄栏位路径标签可排除已在标题行展示的目录名', () => {
+    expect(
+      formatWorkspacePathLabel('/home/await/project/OpenAWork', { includeBasename: false }),
+    ).toBe('/home/await/project');
+    expect(formatWorkspacePathLabel('/home/await/repo', { includeBasename: false })).toBe(
+      '/home/await',
+    );
+    // 只剩根锚点时交回根本身，供调用方判定「根目录」语境。
+    expect(formatWorkspacePathLabel('C:\\repo', { includeBasename: false })).toBe('C:\\');
+  });
+
+  it('窄栏位路径标签的预算与最小尾部层级可覆盖', () => {
+    expect(formatWorkspacePathLabel('/home/await/repo', { maxLength: 8 })).toBe('/…/await/repo');
+    // 最小尾部层级放宽到 1 时，长路径才会收缩到只剩末段。
+    expect(
+      formatWorkspacePathLabel('/home/await/project/OpenAWork/services/agent-gateway', {
+        minTailSegments: 1,
+      }),
+    ).toBe('/…/agent-gateway');
+  });
+
+  it('根路径与空路径不产出可省略的标签', () => {
+    expect(formatWorkspacePathLabel('/')).toBe('');
+    expect(formatWorkspacePathLabel('D:\\')).toBe('');
+    expect(formatWorkspacePathLabel('  ')).toBe('');
+    expect(formatWorkspacePathLabel(null)).toBe('');
   });
 });

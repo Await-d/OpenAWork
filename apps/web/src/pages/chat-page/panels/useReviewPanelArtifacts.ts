@@ -11,6 +11,7 @@ import {
   type ReviewPanelArtifactPreviewState,
 } from './review-panel-artifact-model.js';
 import { isAbortError } from './review-panel-model.js';
+import { fetchSessionArtifactsOnce } from '../../../utils/session/session-artifacts-flight.js';
 
 export interface UseReviewPanelArtifactsInput {
   readonly gatewayUrl: string;
@@ -46,6 +47,7 @@ export function useReviewPanelArtifacts({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const [forceReloadToken, setForceReloadToken] = useState(0);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [fallbackContent, setFallbackContent] = useState<ReviewPanelArtifactContentFallback>({
     kind: 'idle',
@@ -68,13 +70,19 @@ export function useReviewPanelArtifacts({
     setLoading(true);
     setError(null);
 
-    void artifactsClient
-      .listForSession(token, sessionId, { signal: controller.signal })
+    void fetchSessionArtifactsOnce({
+      gatewayUrl,
+      token,
+      sessionId,
+      // 手动「重新加载」必须真正打一次网关，不能被同刻的在途请求吞掉。
+      force: forceReloadToken > 0,
+      signal: controller.signal,
+    })
       .then((payload) => {
         if (controller.signal.aborted) {
           return;
         }
-        const nextArtifacts = payload.contentArtifacts ?? [];
+        const nextArtifacts = payload.contentArtifacts;
         setArtifacts(nextArtifacts);
         setSelectedArtifactId((current) =>
           current && nextArtifacts.some((artifact) => artifact.id === current)
@@ -96,7 +104,7 @@ export function useReviewPanelArtifacts({
       });
 
     return () => controller.abort();
-  }, [artifactsClient, opened, reloadTick, revision, sessionId, token]);
+  }, [forceReloadToken, opened, reloadTick, revision, sessionId, token]);
 
   const selectedArtifact = resolveSelectedArtifact(artifacts, selectedArtifactId);
 
@@ -159,7 +167,11 @@ export function useReviewPanelArtifacts({
   return {
     artifactsState,
     preview,
-    reload: () => setReloadTick((tick) => tick + 1),
+    reload: () => {
+      // 递增 forceReloadToken 绕过在途单飞，保证手动刷新真的打网关。
+      setForceReloadToken((token) => token + 1);
+      setReloadTick((tick) => tick + 1);
+    },
     selectArtifact: (artifactId: string) => setSelectedArtifactId(artifactId),
     selectedArtifact,
     selectedArtifactId,

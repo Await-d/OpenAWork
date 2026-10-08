@@ -6,7 +6,8 @@
  * - 暴露 trackEvent 方法（通过 web-client 上报到网关）
  * - 暴露 isTelemetryEnabled 状态
  * - 自动采集 app_start 事件（组件挂载且已同意时）
- * - 自动采集 error_boundary 事件（全局 error handler）
+ * - 自动转发客户端错误记录为 error_boundary 事件（本地记录始终发生，
+ *   外发仅在已同意时——见 utils/log/error-capture.ts）
  *
  * 使用方式：
  * const { trackEvent, isTelemetryEnabled } = useTelemetry();
@@ -16,6 +17,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../stores/auth/auth.js';
+import { clientErrorRecorder } from '../utils/log/error-capture.js';
 
 export type TelemetryConsentValue = 'accepted' | 'declined' | null;
 
@@ -93,15 +95,22 @@ export function useTelemetry(): UseTelemetryResult {
       .catch(() => undefined);
   }, [isTelemetryEnabled, accessToken, gatewayUrl]);
 
-  // 全局 error handler — 自动采集 error_boundary 事件
+  // 客户端错误 → `error_boundary` 事件（外发）。
+  //
+  // 这里刻意**不再自己监听 window 'error'**：
+  //   - 本地记录由 `utils/log/error-capture.ts` 无条件完成（不依赖遥测授权），
+  //     在此重复监听只会让同一错误被采集两次；
+  //   - 原实现漏了 `unhandledrejection`，而 Promise 拒绝才是客户端故障的主要来源；
+  //   - 外发仍严格受用户授权约束：未同意遥测时不发送任何数据，隐私语义不变。
   useEffect(() => {
     if (!isTelemetryEnabled || !accessToken || !gatewayUrl) return;
 
-    const handler = (event: ErrorEvent) => {
+    const unsubscribe = clientErrorRecorder.subscribe((record) => {
       const props: Record<string, string | number | boolean> = {
-        errorName: event.error?.name ?? 'Error',
-        message: (event.message ?? '').slice(0, 500),
-        stack: (event.error?.stack ?? '').slice(0, 4000),
+        source: record.source,
+        errorName: record.name,
+        message: record.message.slice(0, 500),
+        stack: (record.stack ?? '').slice(0, 4000),
         platform: navigator.platform,
         appVersion: localStorage.getItem('app_version') ?? 'unknown',
         userAgent: navigator.userAgent.slice(0, 200),
@@ -110,10 +119,9 @@ export function useTelemetry(): UseTelemetryResult {
       createSettingsClient(gatewayUrl)
         .reportTelemetryEvent(accessToken, 'error_boundary', props)
         .catch(() => undefined);
-    };
+    });
 
-    window.addEventListener('error', handler);
-    return () => window.removeEventListener('error', handler);
+    return unsubscribe;
   }, [isTelemetryEnabled, accessToken, gatewayUrl]);
 
   const trackEvent = useCallback<UseTelemetryResult['trackEvent']>(

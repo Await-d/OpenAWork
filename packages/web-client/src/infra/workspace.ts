@@ -52,6 +52,61 @@ export interface WorkspaceFileReadOptions {
   sshConnectionId?: string;
 }
 
+/** 目录树读取选项：身份参数与文件读取完全一致，额外带展开深度。 */
+export interface WorkspaceTreeReadOptions extends WorkspaceFileReadOptions {
+  depth?: number;
+}
+
+/**
+ * SSH 读取身份的宽松形态。
+ *
+ * 调用方（`deleteEntry` / `renameEntry` / `searchFileIndexResult`）历史上用
+ * `string | null` 表达「无」，而 `WorkspaceFileReadOptions` 用 `undefined`。
+ * 两者语义相同（不下发该参数），故 helper 侧统一接受两者。
+ */
+type WorkspaceReadIdentityLike = {
+  sessionId?: string | null;
+  sshConnectionId?: string | null;
+  workspaceRoot?: string | null;
+};
+
+/**
+ * 把 SSH 读取身份追加到 query 参数。
+ *
+ * 统一走这里而不是各方法内联展开：身份三字段一旦漏掉某一个，SSH 远端工作区就会
+ * 静默退化为「读网关本机路径」——在网关为 Linux 且同路径存在时不报错，只是数据
+ * 是错的，极难发现。
+ */
+function appendIdentityParams(
+  params: URLSearchParams,
+  options: WorkspaceReadIdentityLike | undefined,
+): void {
+  if (!options) return;
+  if (options.sessionId) params.set('sessionId', options.sessionId);
+  if (options.sshConnectionId) params.set('sshConnectionId', options.sshConnectionId);
+  if (options.workspaceRoot) params.set('workspaceRoot', options.workspaceRoot);
+}
+
+/** {@link appendIdentityParams} 的对象形式，供 `buildPathParams` 的 extra 使用。 */
+function identityParams(
+  options: WorkspaceReadIdentityLike | undefined,
+): Record<string, string | undefined> {
+  return {
+    sessionId: options?.sessionId ?? undefined,
+    sshConnectionId: options?.sshConnectionId ?? undefined,
+    workspaceRoot: options?.workspaceRoot ?? undefined,
+  };
+}
+
+/** {@link appendIdentityParams} 的 body 形式（写操作走 JSON body 而非 query）。 */
+function identityBody(options: WorkspaceReadIdentityLike | undefined): Record<string, string> {
+  const body: Record<string, string> = {};
+  if (options?.sessionId) body['sessionId'] = options.sessionId;
+  if (options?.sshConnectionId) body['sshConnectionId'] = options.sshConnectionId;
+  if (options?.workspaceRoot) body['workspaceRoot'] = options.workspaceRoot;
+  return body;
+}
+
 export interface WorkspaceValidateResult {
   valid: boolean;
   error?: string;
@@ -167,6 +222,7 @@ export interface WorkspaceClient {
       signal?: AbortSignal;
       sessionId?: string | null;
       sshConnectionId?: string | null;
+      workspaceRoot?: string | null;
     },
   ): Promise<WorkspaceFileSearchLoadResult>;
   /**
@@ -181,18 +237,24 @@ export interface WorkspaceClient {
   getFileIndexVersion(
     token: string,
     path?: string | null,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal } & WorkspaceFileReadOptions,
   ): Promise<{ root: string; version: number }>;
-  /** GET `/workspace/tree?path=&depth=`，返回展开 `depth` 层的目录树。 */
+  /**
+   * GET `/workspace/tree?path=&depth=`，返回展开 `depth` 层的目录树。
+   *
+   * SSH 远程工作区另可传 `sessionId`（已有会话）或 `sshConnectionId`（草稿态），
+   * 网关据此把 POSIX 远端路径解析到对应连接读取远端树；两者都缺省时是纯本地树。
+   * 与 {@link readFile} 使用同一套身份参数。
+   */
   fetchTree(
     token: string,
     path: string,
-    options?: { depth?: number; signal?: AbortSignal },
+    options?: WorkspaceTreeReadOptions,
   ): Promise<FileTreeNode[]>;
   fetchTreeResult(
     token: string,
     path: string,
-    options?: { depth?: number; signal?: AbortSignal },
+    options?: WorkspaceTreeReadOptions,
   ): Promise<WorkspaceTreeLoadResult>;
   /**
    * GET `/workspace/file?path=&workspaceRoot=`,读取单个文件内容（含 `truncated` 标志）。
@@ -226,19 +288,54 @@ export interface WorkspaceClient {
     options?: WorkspaceFileReadOptions,
   ): Promise<{ buffer: ArrayBuffer; contentType: string }>;
   /** PUT `/workspace/file`，按 `path` 覆盖写入。 */
-  writeFile(token: string, path: string, content: string): Promise<void>;
-  /** POST `/workspace/file`，创建新文件（默认空内容）。 */
-  createFile(token: string, path: string, content?: string): Promise<void>;
-  /** POST `/workspace/directory`，创建空目录。 */
-  createDirectory(token: string, path: string): Promise<void>;
+  /**
+   * PUT `/workspace/file`，整文件覆盖写。
+   *
+   * SSH 会话须传 `readOptions`（sessionId / sshConnectionId / workspaceRoot），
+   * 否则网关按本机路径写入，远端工作区会静默写到错误位置。
+   */
+  writeFile(
+    token: string,
+    path: string,
+    content: string,
+    readOptions?: WorkspaceFileReadOptions,
+  ): Promise<void>;
+  /** POST `/workspace/file`，创建新文件（默认空内容）。SSH 会话须传 `readOptions`。 */
+  createFile(
+    token: string,
+    path: string,
+    content?: string,
+    readOptions?: WorkspaceFileReadOptions,
+  ): Promise<void>;
+  /** POST `/workspace/directory`，创建空目录。SSH 会话须传 `readOptions`。 */
+  createDirectory(
+    token: string,
+    path: string,
+    readOptions?: WorkspaceFileReadOptions,
+  ): Promise<void>;
   /** GET `/workspace/validate?path=`，校验路径是否在允许范围内。 */
-  validatePath(token: string, path: string): Promise<WorkspaceValidateResult>;
+  /**
+   * GET `/workspace/validate?path=`，校验路径存在性与类型。
+   *
+   * SSH 会话须传 `readOptions`，否则远端 POSIX 路径被判为本机越界路径，
+   * 用户无法进入远端目录。
+   */
+  validatePath(
+    token: string,
+    path: string,
+    readOptions?: WorkspaceFileReadOptions,
+  ): Promise<WorkspaceValidateResult>;
   /** GET `/workspace/search?q=&path=&maxResults=`。 */
+  /**
+   * GET `/workspace/search?q=&path=&maxResults=`，在网关上做内容检索。
+   *
+   * SSH 会话须传身份参数，否则远端检索退化为网关本机 grep。
+   */
   search(
     token: string,
     query: string,
     rootPath: string,
-    options?: { maxResults?: number; signal?: AbortSignal },
+    options?: { maxResults?: number; signal?: AbortSignal } & WorkspaceFileReadOptions,
   ): Promise<WorkspaceSearchHit[]>;
   /**
    * GET `/workspace/find-by-name?name=&path=&maxResults=`.
@@ -249,11 +346,20 @@ export interface WorkspaceClient {
    * actual file" since search() can't surface a file that doesn't
    * mention itself in its own contents.
    */
+  /**
+   * GET `/workspace/find-by-name?name=&path=&maxResults=`，按 basename 精确匹配。
+   *
+   * Distinct from {@link search}:这是 basename 查找而非内容 grep，适用于「用户在
+   * 对话里点了一个裸文件名，定位到真实文件」。
+   *
+   * SSH 会话须传身份参数，否则会在网关本机按 basename 扫，可能返回**同形的
+   * 本机文件**。
+   */
   findByName(
     token: string,
     name: string,
     rootPath: string,
-    options?: { maxResults?: number; signal?: AbortSignal },
+    options?: { maxResults?: number; signal?: AbortSignal } & WorkspaceFileReadOptions,
   ): Promise<Array<{ path: string }>>;
   /** GET `/workspace/review/status?path=`，列出未提交改动。 */
   reviewStatus(
@@ -520,9 +626,15 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
   const fetchTreeResult = async (
     token: string,
     path: string,
-    options?: { depth?: number; signal?: AbortSignal },
+    options?: WorkspaceTreeReadOptions,
   ): Promise<WorkspaceTreeLoadResult> => {
-    const params = buildPathParams(path, { depth: options?.depth ?? 1 });
+    const params = buildPathParams(path, {
+      depth: options?.depth ?? 1,
+      // SSH 远程工作区身份：缺省时网关走纯本地树，行为与改动前一致。
+      workspaceRoot: options?.workspaceRoot ?? undefined,
+      sessionId: options?.sessionId ?? undefined,
+      sshConnectionId: options?.sshConnectionId ?? undefined,
+    });
     try {
       const response = await fetchWithTimeout(withQuery(`${baseUrl}/workspace/tree`, params), {
         headers: authHeader(token),
@@ -565,6 +677,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       signal?: AbortSignal;
       sessionId?: string | null;
       sshConnectionId?: string | null;
+      workspaceRoot?: string | null;
     },
   ): Promise<WorkspaceFileSearchLoadResult> => {
     const params = buildPathParams(path, {
@@ -572,6 +685,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       limit: options.limit,
       sessionId: options.sessionId ?? undefined,
       sshConnectionId: options.sshConnectionId ?? undefined,
+      workspaceRoot: options.workspaceRoot ?? undefined,
     });
     try {
       const response = await fetchWithTimeout(
@@ -622,13 +736,16 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
   const getFileIndexVersion = async (
     token: string,
     path?: string | null,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal } & WorkspaceFileReadOptions,
   ): Promise<{ root: string; version: number }> => {
     const requestedPath = path?.trim() ?? '';
     const params = new URLSearchParams();
     if (requestedPath) {
       params.set('path', requestedPath);
     }
+    // SSH 远端工作区：身份缺省会落到网关本机索引查询（返回错误版本号），
+    // 使内置浏览器预览的自动刷新永久停摆。
+    appendIdentityParams(params, options);
     const response = await fetchWithTimeout(
       withQuery(`${baseUrl}/workspace/files/index-version`, params),
       {
@@ -798,7 +915,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       }
     },
 
-    async writeFile(token, path, content) {
+    async writeFile(token, path, content, readOptions?: WorkspaceFileReadOptions) {
       await performWorkspaceJsonRequest({
         actionLabel: '写入工作区文件',
         parseJson: false,
@@ -806,12 +923,12 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
           fetchWithTimeout(`${baseUrl}/workspace/file`, {
             method: 'PUT',
             headers: jsonAuthHeaders(token),
-            body: JSON.stringify({ path, content }),
+            body: JSON.stringify({ path, content, ...identityBody(readOptions) }),
           }),
       });
     },
 
-    async createFile(token, path, content = '') {
+    async createFile(token, path, content = '', readOptions?: WorkspaceFileReadOptions) {
       await performWorkspaceJsonRequest({
         actionLabel: '创建工作区文件',
         parseJson: false,
@@ -819,12 +936,12 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
           fetchWithTimeout(`${baseUrl}/workspace/file`, {
             method: 'POST',
             headers: jsonAuthHeaders(token),
-            body: JSON.stringify({ path, content }),
+            body: JSON.stringify({ path, content, ...identityBody(readOptions) }),
           }),
       });
     },
 
-    async createDirectory(token, path) {
+    async createDirectory(token, path, readOptions?: WorkspaceFileReadOptions) {
       await performWorkspaceJsonRequest({
         actionLabel: '创建工作区目录',
         parseJson: false,
@@ -832,13 +949,13 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
           fetchWithTimeout(`${baseUrl}/workspace/directory`, {
             method: 'POST',
             headers: jsonAuthHeaders(token),
-            body: JSON.stringify({ path }),
+            body: JSON.stringify({ path, ...identityBody(readOptions) }),
           }),
       });
     },
 
-    async validatePath(token, path) {
-      const params = buildPathParams(path);
+    async validatePath(token, path, readOptions?: WorkspaceFileReadOptions) {
+      const params = buildPathParams(path, identityParams(readOptions));
       try {
         const response = await fetchWithTimeout(
           withQuery(`${baseUrl}/workspace/validate`, params),
@@ -872,6 +989,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       if (options?.maxResults !== undefined) {
         params.set('maxResults', String(options.maxResults));
       }
+      appendIdentityParams(params, options);
       const data = await performWorkspaceJsonRequest<{ results?: WorkspaceSearchHit[] }>({
         actionLabel: '搜索工作区内容',
         request: () =>
@@ -890,6 +1008,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
       if (options?.maxResults !== undefined) {
         params.set('maxResults', String(options.maxResults));
       }
+      appendIdentityParams(params, options);
       const data = await performWorkspaceJsonRequest<{ results?: Array<{ path: string }> }>({
         actionLabel: '按文件名查找工作区文件',
         request: () =>
@@ -938,10 +1057,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
     },
 
     async deleteEntry(token, path, options) {
-      const params = buildPathParams(path, {
-        sessionId: options?.sessionId ?? undefined,
-        workspaceRoot: options?.workspaceRoot ?? undefined,
-      });
+      const params = buildPathParams(path, identityParams(options));
       await performWorkspaceJsonRequest({
         actionLabel: '删除工作区条目',
         parseJson: false,
@@ -961,12 +1077,7 @@ export function createWorkspaceClient(baseUrl: string): WorkspaceClient {
           fetchWithTimeout(`${baseUrl}/workspace/rename`, {
             method: 'POST',
             headers: jsonAuthHeaders(token),
-            body: JSON.stringify({
-              oldPath,
-              newPath,
-              ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
-              ...(options?.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
-            }),
+            body: JSON.stringify({ oldPath, newPath, ...identityBody(options) }),
           }),
       });
     },

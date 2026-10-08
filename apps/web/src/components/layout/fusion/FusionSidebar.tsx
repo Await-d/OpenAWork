@@ -19,7 +19,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router';
-import { createWorkspaceClient } from '@openAwork/web-client';
+import { createSessionsClient, createSshClient } from '@openAwork/web-client';
 import { InlineEditor } from '@openAwork/shared-ui';
 import {
   SIDEBAR_PANEL_WIDTH_BOUNDS,
@@ -36,11 +36,17 @@ import {
   getWorkspaceGroupKey,
 } from '../../../utils/session/session-grouping.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
-import { getPathBasename } from '../../../utils/workspace-path.js';
-import { readWorkspaceAlias, writeWorkspaceAlias } from '../../../utils/workspace-alias.js';
+import { getPathBasename, formatWorkspacePathLabel } from '../../../utils/workspace-path.js';
+import { readWorkspaceAlias } from '../../../utils/workspace-alias.js';
+import {
+  renameWorkspaceDisplay,
+  useWorkspaceDisplayName,
+} from '../../../hooks/workspace/useWorkspaceAlias.js';
 import { buildTeamSessionRoute } from '../../../utils/session/team-session-route.js';
 import WorkspacePickerModal from '../../common/modal/WorkspacePickerModal.js';
-import { buildWorkspacePickerDataSource } from '../../common/modal/workspace-picker-data-source.js';
+import SshWorkspacePickerModal from '../../common/modal/SshWorkspacePickerModal.js';
+import { useWorkspacePickerSources } from '../../common/modal/use-workspace-picker-sources.js';
+import type { SshWorkspaceSelection } from '../../common/modal/SshWorkspacePickerModal.js';
 import { SidebarRailV2 } from './SidebarRailV2.js';
 import { FusionSidebarPeek } from './FusionSidebarPeek.js';
 import { ResizeHandle } from '../shared/resize-handle.js';
@@ -107,11 +113,47 @@ const PANEL_TITLE_STYLE: CSSProperties = {
 };
 
 const PANEL_SUBTITLE_STYLE: CSSProperties = {
-  fontSize: 10,
+  fontSize: 11,
   color: 'var(--fg-subtle)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+};
+
+/**
+ * 路径行专用样式：等宽字体让`/` `.` `-` 的分隔节奏更清晰，
+ * 也把「机器路径」和上一行的「人写的项目名」在质感上区分开。
+ */
+const PANEL_PATH_STYLE: CSSProperties = {
+  ...PANEL_SUBTITLE_STYLE,
+  fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+  fontSize: 10.5,
+  letterSpacing: '0.01em',
+};
+
+/**
+ * 头部图标按钮的布局尺寸。
+ *
+ * 外观（描边 / 底色 / hover / focus ring）统一由 `.sidebar-icon-button` 提供，
+ * 这里**只放布局**：此前把 `background: transparent` 等外观属性内联进按钮，
+ * 内联优先级高于 class，hover 底色因此被压掉，交互态形同虚设。
+ */
+const PANEL_ICON_BUTTON_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 26,
+  height: 26,
+  borderRadius: 6,
+  flexShrink: 0,
+};
+
+/** 头部右侧图标按钮的排列容器。 */
+const PANEL_HEADER_ACTIONS_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 2,
+  flexShrink: 0,
 };
 
 const SEARCH_STYLE: CSSProperties = {
@@ -126,6 +168,13 @@ const SEARCH_STYLE: CSSProperties = {
   boxSizing: 'border-box',
 };
 
+/**
+ * 面板底部主操作按钮。
+ *
+ * Chat 路由承载「新建会话」（头部 ＋ 是「新建工作空间」，两者不是同一动作）；
+ * Team 路由不再渲染 —— 头部 ＋ 已经是同一个「新建工作空间」动作，重复放两个
+ * 只会让人分不清哪个才是入口。
+ */
 const NEW_SESSION_BTN_STYLE: CSSProperties = {
   flexShrink: 0,
   display: 'flex',
@@ -225,7 +274,6 @@ export function FusionSidebar({
   const togglePinSession = useUIStateStore((s) => s.togglePinSession);
   const isPinned = useUIStateStore((s) => s.isPinned);
 
-  const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [teamSearch, setTeamSearch] = useState('');
   const [peekWorkspacePath, setPeekWorkspacePath] = useState<string | null>(null);
   const [compactViewport, setCompactViewport] = useState(isCompactFusionSidebarViewport);
@@ -238,42 +286,19 @@ export function FusionSidebar({
   const peekCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelContainerRef = useRef<HTMLDivElement>(null);
   const sessionListRef = useRef<HTMLDivElement>(null);
-
-  // 工作区显示别名：localStorage 持久化，key = 'ws-alias:' + path
-  // （读写实现与标题栏共用 utils/workspace-alias，写入时会广播变更）
-  const [workspaceAlias, setWorkspaceAlias] = useState<string>(() =>
-    readWorkspaceAlias(selectedWorkspacePath),
-  );
-
-  // 当 selectedWorkspacePath 变化时，从 localStorage 重新读取别名
-  useEffect(() => {
-    setWorkspaceAlias(readWorkspaceAlias(selectedWorkspacePath));
-  }, [selectedWorkspacePath]);
-
-  const handleWorkspaceAliasChange = useCallback(
-    (newAlias: string): void => {
-      if (!selectedWorkspacePath) return;
-      setWorkspaceAlias(newAlias);
-      writeWorkspaceAlias(selectedWorkspacePath, newAlias);
-    },
-    [selectedWorkspacePath],
-  );
-
-  const workspaceDisplayName = workspaceAlias || basename(selectedWorkspacePath);
-
-  const workspacePickerDataSource = useState(() =>
-    buildWorkspacePickerDataSource({
-      client: createWorkspaceClient(gatewayUrl),
-      token: accessToken,
-    }),
-  )[0];
+  const selectedSshConnectionId = useUIStateStore((s) => s.selectedSshConnectionId);
+  const setSelectedSshConnectionId = useUIStateStore((s) => s.setSelectedSshConnectionId);
+  const setActiveSessionWorkspace = useUIStateStore((s) => s.setActiveSessionWorkspace);
+  // 当前会话 id：SSH 绑定与头部工作区口径都要用它，必须早于相关回调声明。
+  const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
 
   const handleSelectWorkspace = useCallback(
     async (path: string) => {
       addSavedWorkspacePath(path);
       setSelectedWorkspacePath(path);
       setFileTreeRootPath(path);
-      setShowWorkspacePicker(false);
+      // 选中本地目录即清理 SSH 草稿连接，避免头部继续标注「远端」。
+      setSelectedSshConnectionId(null);
       // 切换工作区时桌面端保持 Panel 展开，让用户看到新工作区的会话列表；
       // 移动端才收起，避免遮挡内容区。
       if (compactViewport) {
@@ -285,9 +310,80 @@ export function FusionSidebar({
       compactViewport,
       setFileTreeRootPath,
       setLeftSidebarOpen,
+      setSelectedSshConnectionId,
       setSelectedWorkspacePath,
     ],
   );
+
+  /**
+   * SSH 远端工作区的落地：远端目录不写入本地文件树根（否则会对`/workspace/*`
+   * 发起无效的本地请求），并记录连接 id 供读取身份使用。
+   *
+   * 已有会话时把绑定同步进网关 + store，否则头部会继续显示旧工作区 ——
+   * `selectedWorkspacePath` 只是全局选中值，会话实际绑定由
+   * `activeSessionWorkspace` 承载。
+   */
+  const handleSelectSshWorkspace = useCallback(
+    async (selection: SshWorkspaceSelection): Promise<void> => {
+      const path = selection.path.trim();
+      if (!path) {
+        return;
+      }
+
+      if (currentSessionId) {
+        if (!accessToken) {
+          throw new Error('未登录，无法绑定远端工作区。');
+        }
+        await createSshClient(gatewayUrl).bind(
+          accessToken,
+          selection.connectionId,
+          currentSessionId,
+        );
+        await createSessionsClient(gatewayUrl).updateMetadata(accessToken, currentSessionId, {
+          workingDirectory: path,
+          sshConnectionId: selection.connectionId,
+        });
+        setActiveSessionWorkspace(currentSessionId, path, selection.connectionId);
+      }
+
+      addSavedWorkspacePath(path);
+      setSelectedWorkspacePath(path);
+      setSelectedSshConnectionId(selection.connectionId);
+      setFileTreeRootPath(null);
+      if (compactViewport) {
+        setLeftSidebarOpen(false);
+      }
+    },
+    [
+      accessToken,
+      addSavedWorkspacePath,
+      compactViewport,
+      currentSessionId,
+      gatewayUrl,
+      setActiveSessionWorkspace,
+      setFileTreeRootPath,
+      setSelectedSshConnectionId,
+      setSelectedWorkspacePath,
+    ],
+  );
+
+  /**
+   * 工作区选择弹窗：本地 + SSH 双来源，与 ChatPage 的绑定入口能力一致。
+   * 侧栏不消费弹窗自身状态，只需把「选中后怎么落地」交给上面的两个收口。
+   */
+  const {
+    openLocal: openWorkspacePicker,
+    close: closeWorkspacePicker,
+    localPickerProps,
+    sshPickerProps,
+  } = useWorkspacePickerSources({
+    gatewayUrl,
+    token: accessToken,
+    initialPath: fileTreeRootPath ?? selectedWorkspacePath ?? undefined,
+    initialSshConnectionId: selectedSshConnectionId,
+    onSelectLocal: handleSelectWorkspace,
+    onSelectSsh: handleSelectSshWorkspace,
+  });
 
   const preloadRoute = useCallback((path: string) => {
     void preloadRouteModuleByPath(path);
@@ -354,8 +450,65 @@ export function FusionSidebar({
     deleteWorkspace: handleTeamWorkspaceDelete,
   } = useSidebarTeamActions();
 
-  const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
   const isTeamRoute = location.pathname.startsWith('/team');
+
+  // ---- 面板头部的工作区身份 -------------------------------------------------
+  // 口径必须与 ChatPage 的 effectiveWorkingDirectory 一致「会话优先、草稿回落」：
+  // 已有会话时，权威来源是 useWorkspace 解析后写进 store 的 activeSessionWorkspace，
+  // 它在「切会话 / 改会话绑定 / 会话继承父会话工作区」时都会更新，
+  // 但从!== 写 selectedWorkspacePath——只盯后者正是「切换后标题仍是旧工作区」的根因。
+  // 解析尚未落定时取null（而不是回落旧值），避免闪回上一个工作区造成误导。
+  const activeSessionWorkspace = useUIStateStore((s) => s.activeSessionWorkspace);
+  const activeSessionWorkspaceForCurrent =
+    currentSessionId !== null && activeSessionWorkspace?.sessionId === currentSessionId
+      ? activeSessionWorkspace
+      : null;
+  const headerWorkspacePath = currentSessionId
+    ? (activeSessionWorkspaceForCurrent?.path ?? null)
+    : selectedWorkspacePath;
+  // 会话已切换但工作区还没解析落定：这中间态既不能闪回上一个工作区，也不能谎称
+  // 「未选择工作区」，因此单列一态（与主区文件树的宽限期同源）。
+  const isWorkspaceHeaderPending =
+    currentSessionId !== null && activeSessionWorkspaceForCurrent === null;
+
+  // 展示名走共享的订阅式解析器：别名写入会广播事件，因此分组头右键重命名 /
+  // 会话管理页 / 标题栏任一入口改名后，头部立刻同步，不需要刷新页面。
+  const resolveDisplayName = useWorkspaceDisplayName();
+  const workspaceDisplayName = resolveDisplayName(headerWorkspacePath);
+  const hasWorkspace = Boolean(headerWorkspacePath);
+
+  const handleWorkspaceAliasChange = useCallback(
+    (newAlias: string): void => {
+      // 写空串即清除别名，展示名回落到路径末段；path 为空时写入是 no-op。
+      // 落点是「头部正在展示的那个工作区」，否则改的是另一个工作区的别名。
+      renameWorkspaceDisplay(headerWorkspacePath, newAlias);
+    },
+    [headerWorkspacePath],
+  );
+
+  // 头部两行的分工：标题行给人看的名字（别名优先），第二行给机器路径。
+  // 未设置别名时标题本身就是路径末段，第二行只保留父级链，避免两行重复同一段文字；
+  // 设了别名才需要把末段补回路径里，保证「名字 ↔ 位置」仍可对照。
+  const hasCustomWorkspaceName = readWorkspaceAlias(headerWorkspacePath) !== '';
+  const workspacePathLabel = useMemo(
+    () =>
+      headerWorkspacePath
+        ? formatWorkspacePathLabel(headerWorkspacePath, {
+            includeBasename: hasCustomWorkspaceName,
+          })
+        : '',
+    [headerWorkspacePath, hasCustomWorkspaceName],
+  );
+
+  const workspaceTitleText = isWorkspaceHeaderPending
+    ? '正在解析工作区…'
+    : hasWorkspace
+      ? workspaceDisplayName
+      : '未选择工作区';
+  // 未落定 / 未选择工作区时不渲染副行：此时标题行已经说明了状态，
+  // 再补一句引导文案只会重复，而且路径行已回到纯展示职责。
+  const workspaceSubtitleText = hasWorkspace ? workspacePathLabel || '本机文件系统根目录' : '';
+
   const storedActiveTeamSessionId = useUIStateStore((s) => s.activeTeamSessionId);
   const activeTeamSessionId = isTeamRoute ? storedActiveTeamSessionId : null;
   const activeSessionId = currentSessionId ?? activeTeamSessionId;
@@ -653,27 +806,19 @@ export function FusionSidebar({
         {isTeamRoute ? (
           <>
             <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}>
-              <span style={PANEL_TITLE_STYLE}>团队工作空间</span>
+              <span style={PANEL_TITLE_STYLE}>团队空间</span>
               <span style={PANEL_SUBTITLE_STYLE}>
                 {teamLoading ? '加载中…' : `${teamWorkspaceGroups.length} 个工作空间`}
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            <div style={PANEL_HEADER_ACTIONS_STYLE}>
               <button
                 type="button"
                 className="sidebar-icon-button"
                 title="新建工作空间"
                 aria-label="新建工作空间"
                 onClick={handleNewTeamWorkspace}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 26,
-                  height: 26,
-                  borderRadius: 6,
-                  flexShrink: 0,
-                }}
+                style={PANEL_ICON_BUTTON_STYLE}
               >
                 <svg
                   aria-hidden="true"
@@ -697,19 +842,7 @@ export function FusionSidebar({
                   title="收起面板"
                   aria-label="收起面板"
                   onClick={() => setLeftSidebarOpen(false)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 26,
-                    height: 26,
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--fg-muted)',
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  }}
+                  style={PANEL_ICON_BUTTON_STYLE}
                 >
                   <svg
                     aria-hidden="true"
@@ -731,34 +864,38 @@ export function FusionSidebar({
           </>
         ) : (
           <>
-            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}>
+            <div
+              style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}
+              title={
+                isWorkspaceHeaderPending
+                  ? undefined
+                  : `${headerWorkspacePath ?? ''} · 双击名称可重命名`
+              }
+            >
               <InlineEditor
-                value={workspaceDisplayName}
+                value={workspaceTitleText}
                 label="项目名称"
-                emptyFallback={basename(selectedWorkspacePath)}
+                emptyFallback={basename(headerWorkspacePath)}
                 onSave={handleWorkspaceAliasChange}
+                disabled={isWorkspaceHeaderPending}
                 style={{ ...PANEL_TITLE_STYLE, width: '100%' }}
                 buttonStyle={{ ...PANEL_TITLE_STYLE, padding: '1px 2px' }}
                 inputStyle={{ fontSize: 13, fontWeight: 800 }}
               />
-              <span style={PANEL_SUBTITLE_STYLE}>{selectedWorkspacePath ?? '未选择工作区'}</span>
+              {/* 副行是纯展示：切换/新建工作区的动作统一由右侧 ＋ 按钮触发，
+                  两处都挂同一个 picker 会让「哪里能点」变得不可预期。 */}
+              {workspaceSubtitleText ? (
+                <span style={PANEL_PATH_STYLE}>{workspaceSubtitleText}</span>
+              ) : null}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            <div style={PANEL_HEADER_ACTIONS_STYLE}>
               <button
                 type="button"
                 className="sidebar-icon-button"
-                title="更多"
-                aria-label="更多"
-                onClick={() => setShowWorkspacePicker(true)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 26,
-                  height: 26,
-                  borderRadius: 6,
-                  flexShrink: 0,
-                }}
+                title="新建工作空间"
+                aria-label="新建工作空间"
+                onClick={() => openWorkspacePicker('create')}
+                style={PANEL_ICON_BUTTON_STYLE}
               >
                 <svg
                   aria-hidden="true"
@@ -769,10 +906,10 @@ export function FusionSidebar({
                   stroke="currentColor"
                   strokeWidth="1.75"
                   strokeLinecap="round"
+                  strokeLinejoin="round"
                 >
-                  <circle cx="12" cy="5" r="1" />
-                  <circle cx="12" cy="12" r="1" />
-                  <circle cx="12" cy="19" r="1" />
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
               </button>
               {!compactViewport && (
@@ -782,19 +919,7 @@ export function FusionSidebar({
                   title="收起面板"
                   aria-label="收起面板"
                   onClick={() => setLeftSidebarOpen(false)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 26,
-                    height: 26,
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--fg-muted)',
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  }}
+                  style={PANEL_ICON_BUTTON_STYLE}
                 >
                   <svg
                     aria-hidden="true"
@@ -969,28 +1094,30 @@ export function FusionSidebar({
         </div>
       </div>
 
-      {/* 新建会话 / 新建工作空间 */}
-      <button
-        type="button"
-        className="sidebar-primary-action"
-        onClick={isTeamRoute ? handleNewTeamWorkspace : handleNewTask}
-        style={NEW_SESSION_BTN_STYLE}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+      {/*新建会话（团队路由的新建工作空间入口已在头部，底部不再重复） */}
+      {!isTeamRoute ? (
+        <button
+          type="button"
+          className="sidebar-primary-action"
+          onClick={handleNewTask}
+          style={NEW_SESSION_BTN_STYLE}
         >
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-        {isTeamRoute ? '新建工作空间' : '新建会话'}
-      </button>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          新建会话
+        </button>
+      ) : null}
     </>
   );
 
@@ -1102,17 +1229,10 @@ export function FusionSidebar({
       ) : null}
 
       {createPortal(
-        <WorkspacePickerModal
-          isOpen={showWorkspacePicker}
-          onClose={() => setShowWorkspacePicker(false)}
-          onSelect={handleSelectWorkspace}
-          fetchRootPath={workspacePickerDataSource.fetchRootPath}
-          fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
-          fetchTree={workspacePickerDataSource.fetchTree}
-          createDirectory={workspacePickerDataSource.createDirectory}
-          validatePath={workspacePickerDataSource.validatePath}
-          initialPath={fileTreeRootPath ?? selectedWorkspacePath ?? undefined}
-        />,
+        <>
+          <WorkspacePickerModal {...localPickerProps} />
+          <SshWorkspacePickerModal {...sshPickerProps} />
+        </>,
         document.body,
       )}
 

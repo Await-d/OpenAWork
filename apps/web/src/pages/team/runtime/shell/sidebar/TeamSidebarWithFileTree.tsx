@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createWorkspaceClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
+import { useWorkspaceReadIdentity } from '../../../../../stores/ui/uiState.js';
 import { toast } from '../../../../../components/common/feedback/ToastNotification.js';
 import {
   FileTreeView,
@@ -195,6 +196,8 @@ export function TeamSidebarWithFileTree({
   >(null);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const token = useAuthStore((s) => s.accessToken);
+  /** SSH 读取身份：与主文件树同源，供文件树读取与删除/重命名共用。 */
+  const readIdentity = useWorkspaceReadIdentity();
   const showNewSessionModal = controlledShowModal ?? internalShowNewSessionModal;
   const effectiveInitialWorkingDirectory =
     initialWorkingDirectory ?? internalInitialWorkingDirectory;
@@ -225,6 +228,13 @@ export function TeamSidebarWithFileTree({
     gatewayUrl,
     token,
     workspacePath,
+    // 团队侧边栏此前只给delete/rename 手工传身份，文件树读取本身没传 ——
+    // SSH 远端工作区下会渲染出网关本机目录。这里与主文件树统一走 readIdentity。
+    readIdentity: {
+      ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
+      ...(readIdentity.sshConnectionId ? { sshConnectionId: readIdentity.sshConnectionId } : {}),
+      ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+    },
   });
 
   // F5：单击文件树节点 → 内联预览（轻量，不进编辑器 tab）。
@@ -320,10 +330,19 @@ export function TeamSidebarWithFileTree({
       const nextPath = joinFileTreePath(directoryPath, entryName);
 
       try {
+        // 身份必须下发：缺失时网关按本机路径创建，SSH 远端工作区下会「假成功」——
+        // 远端并没有这个条目，但 UI 仍把它插进了树。
+        const createIdentity = {
+          ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
+          ...(readIdentity.sshConnectionId
+            ? { sshConnectionId: readIdentity.sshConnectionId }
+            : {}),
+          ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+        };
         if (entryType === 'file') {
-          await workspaceClient.createFile(token, nextPath);
+          await workspaceClient.createFile(token, nextPath, '', createIdentity);
         } else {
-          await workspaceClient.createDirectory(token, nextPath);
+          await workspaceClient.createDirectory(token, nextPath, createIdentity);
         }
 
         applyCreatedEntry({

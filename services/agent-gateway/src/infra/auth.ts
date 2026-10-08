@@ -10,6 +10,7 @@ import { syncSystemSkillsForUser } from '../skill/system-skills.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { LoginRateLimiter, buildLoginRateLimitKey } from './login-rate-limiter.js';
 import { hashPassword, verifyPassword } from './password-hash.js';
+import { setRequestUserId } from './request-diagnostics.js';
 
 const JWT_SECRET = globalThis.process?.env['JWT_SECRET'] ?? 'change-me-in-production-min-32-chars';
 const JWT_EXPIRES_IN = globalThis.process?.env['JWT_EXPIRES_IN'] ?? '15m';
@@ -444,6 +445,10 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     step.fail(error instanceof Error ? error.message : 'user lookup failed');
     return;
   }
+
+  // 鉴权通过：把 userId 写入请求诊断上下文，使后续任何错误日志都能按用户聚合，
+  // 而不必再从 request.user 上重复解析（解析失败时错误日志就退化成无用户信息）。
+  setRequestUserId(request, userId);
 
   step.succeed(undefined, { userId });
 }

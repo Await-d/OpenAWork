@@ -1,3 +1,4 @@
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 /**
  * 260515-team-phase-b · T-05
  *
@@ -272,7 +273,7 @@ export class InProcessScheduler implements BackgroundTaskScheduler {
         listener(event);
       } catch (err) {
         // 监听器异常不应影响调度器主流程
-        console.warn(
+        logGatewayWarn(
           `[InProcessScheduler] listener threw: ${err instanceof Error ? err.message : String(err)}`,
         );
       }

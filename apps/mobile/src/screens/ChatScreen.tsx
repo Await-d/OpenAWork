@@ -78,6 +78,17 @@ import { useChatArtifacts } from './chat-screen/use-chat-artifacts';
 import { useChatImageViewer } from './chat-screen/use-chat-image-viewer';
 import { useMobileImageGenerationSettings } from './chat-screen/use-mobile-image-generation-settings';
 import { useRollbackFileChoice } from './chat-screen/use-rollback-file-choice';
+import { isMobileSessionRuntimeActive } from './chat-screen/mobile-status-activity';
+
+/**
+ * `/status` 轮询档位。
+ *
+ * 活跃档与 `taskSyncIntervalMs` 的活跃档一致（1.8s），保证「发消息后 todo / 待审批
+ * 立刻跟手」；空闲档放宽到 60s——它只负责兜底对账（WS 重连、cron 改过 todo、
+ * 团队页回复了审批），不承担及时性。
+ */
+const MOBILE_STATUS_ACTIVE_POLL_MS = 1800;
+const MOBILE_STATUS_IDLE_POLL_MS = 60_000;
 
 export function ChatScreen({ sessionId }: ChatScreenProps) {
   const { accessToken, gatewayUrl, userEmail } = useAuthStore();
@@ -116,6 +127,13 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     useMobileImageGenerationSettings({ persistence, sessionId });
   const [todoCount, setTodoCount] = useState(0);
   const [pendingPermissionCount, setPendingPermissionCount] = useState(0);
+  /**
+   * 服务端侧是否存在活跃运行时——由上一次 `/status` 响应的信号自持推导。
+   *
+   * 它与 `sending` / `hasRunningSubagents`（本地信号）一起决定 `/status` 的轮询档位。
+   * 见 `isMobileSessionRuntimeActive` 的口径说明。
+   */
+  const [serverRuntimeActive, setServerRuntimeActive] = useState(false);
   const imageViewer = useChatImageViewer();
   const { handlePressMessageImage, reset: resetImageViewer } = imageViewer;
   const listRef = useRef<FlatList>(null);
@@ -131,6 +149,32 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     (activity) => activity.kind === 'subagent' && activity.status === 'running',
   );
   const taskSyncIntervalMs = sending || hasRunningSubagents ? 1800 : 10000;
+  /**
+   * `sending` / `hasRunningSubagents` 的最新值，供轮询回调读取。
+   *
+   * 它们**刻意不进** `/status` 轮询 effect 的依赖——那样每次流状态翻转都会重建定时器
+   * 并立即补拉一次。但直接读闭包里的值又会陈旧：会话结束时 `sending` 由 `true` 变
+   * `false`，只要 `serverRuntimeActive` 仍为 `true`，`statusSyncIntervalMs` 前后都是
+   * 活跃档 → effect 不重跑 → 回调永远读到 `sending === true` → 判定恒为活跃，
+   * 轮询再也退不回空闲档（这个门控就白加了）。
+   *
+   * 官方推荐的「最新值 ref」模式：每次渲染同步赋值，回调读 `.current`。
+   */
+  const sendingRef = useRef(sending);
+  sendingRef.current = sending;
+  const hasRunningSubagentsRef = useRef(hasRunningSubagents);
+  hasRunningSubagentsRef.current = hasRunningSubagents;
+  /**
+   * `/status` 的轮询档位：活跃时跟手，空闲时退到低频保底。
+   *
+   * 只取固定两档，避免响应驱动的 `serverRuntimeActive` 在临界点来回翻转时反复重建
+   * 定时器（每次重建都会立刻补拉一次，反而制造请求风暴）。翻转的成本是每次最多多打
+   * 一发——换来的是空闲时请求量降一个数量级。
+   */
+  const isRuntimeActive = sending || hasRunningSubagents || serverRuntimeActive;
+  const statusSyncIntervalMs = isRuntimeActive
+    ? MOBILE_STATUS_ACTIVE_POLL_MS
+    : MOBILE_STATUS_IDLE_POLL_MS;
   const streamOptions = useMemo(() => ({ dialogueMode }), [dialogueMode]);
   const searchMatches = useMemo(
     () => findChatMessageMatches(messages, searchQuery),
@@ -315,10 +359,15 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   }, [accessToken, sessionId, syncTaskActivities, taskSyncIntervalMs]);
 
   // 同步 session status（todo + pending permission 计数）
+  //
+  // 门控：`isRuntimeActive` 为假时退到低频保底，而不是停轮询。停轮询会在
+  // WebSocket 断线重连、或用户从别的入口（cron / 团队页）改过 todo 后再也学不到
+  // 真实状态——挂件上的两个数字会一直停在旧值。
   useEffect(() => {
     if (!accessToken) {
       setTodoCount(0);
       setPendingPermissionCount(0);
+      setServerRuntimeActive(false);
       return;
     }
     let cancelled = false;
@@ -330,19 +379,37 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         const pendingTodos = (status.todoLanes?.main ?? []).filter(
           (t) => t.status === 'pending' || t.status === 'in_progress',
         ).length;
+        const pendingPermissions = status.pendingPermissions ?? [];
         setTodoCount(pendingTodos);
-        setPendingPermissionCount(status.pendingPermissions?.length ?? 0);
+        setPendingPermissionCount(pendingPermissions.length);
+        // 用响应自持地更新活跃判定：服务端自己都没有活跃流、也没有待处理项时，
+        // 下一次轮询就可以退到低频，不必继续按运行中的节奏打网关。
+        setServerRuntimeActive(
+          isMobileSessionRuntimeActive({
+            activeStream: status.activeStream,
+            // 读 ref 而非闭包值：effect 不依赖 sending / hasRunningSubagents，
+            // 闭包里的副本会停在上一轮（见上方 ref 的注释）。
+            hasRunningLocalWork: hasRunningSubagentsRef.current,
+            pendingPermissionCount: pendingPermissions.length,
+            pendingTodoCount: pendingTodos,
+            sending: sendingRef.current,
+            taskStatuses: (status.tasks ?? []).map((task) => task.status),
+          }),
+        );
       } catch {
         // 静默处理——状态同步失败不应阻塞聊天
       }
     };
     void syncStatus();
-    const timer = setInterval(() => void syncStatus(), taskSyncIntervalMs);
+    const timer = setInterval(() => void syncStatus(), statusSyncIntervalMs);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [accessToken, sessionId, sessionsClient, taskSyncIntervalMs]);
+    // 有意不依赖 `sending` / `hasRunningSubagents`：进依赖会让每次流状态翻转都重建
+    // 定时器并立即补拉一次。它们通过 `statusSyncIntervalMs` 表达档位，回调内读
+    // `sendingRef` / `hasRunningSubagentsRef` 拿最新值（见上方 ref 注释）。
+  }, [accessToken, sessionId, sessionsClient, statusSyncIntervalMs]);
   const { generateImageForSession, loadArtifactHistory, uploadSelectedAttachments } =
     useChatArtifacts({
       accessToken,

@@ -84,6 +84,76 @@ afterEach(() => {
 });
 
 describe('FusionSidebar 展开 Panel', () => {
+  it('头部工作区跟随当前会话，而不是全局选中的工作区', () => {
+    // 切换会话只更新 activeSessionWorkspace（useWorkspace 的权威落点），
+    // selectedWorkspacePath 保持不变；头部必须显示会话绑定的工作区。
+    useUIStateStore.getState().setActiveSessionWorkspace('open-session', MARKET_PATH);
+
+    renderFusionSidebar('/chat/open-session');
+
+    expect(screen.getByRole('button', { name: '项目名称: MarketAgent' })).not.toBeNull();
+    expect(screen.getByText('/home/await/project')).not.toBeNull();
+  });
+
+  it('会话工作区尚未解析时展示解析中，且不回落全局选中值', () => {
+    useUIStateStore.getState().setActiveSessionWorkspace('other-session', MARKET_PATH);
+
+    renderFusionSidebar('/chat/open-session');
+
+    expect(screen.getByRole('button', { name: '项目名称: 正在解析工作区…' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '项目名称: OpenAWork' })).toBeNull();
+  });
+
+  it('草稿态无选中工作区时不再展示重复的副行提示', () => {
+    useUIStateStore.setState({ selectedWorkspacePath: null });
+
+    renderFusionSidebar('/chat');
+
+    expect(screen.getByRole('button', { name: '项目名称: 未选择工作区' })).not.toBeNull();
+  });
+
+  it('头部 ＋ 是新建工作空间，且会话工作区解析失败时依然可用', () => {
+    // activeSessionWorkspace 永远为空（网关 unavailable 分支）时，
+    // 新建 / 切换工作区的入口不能失效。
+    renderFusionSidebar('/chat/open-session');
+
+    // 旧的「更多」语义按钮已移除。
+    expect(screen.queryByRole('button', { name: '更多' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '新建工作空间' }));
+
+    expect(screen.getByRole('dialog', { name: '选择工作区文件夹' })).not.toBeNull();
+  });
+
+  it('头部选择器提供与会话绑定一致的 SSH 远端入口', async () => {
+    renderFusionSidebar('/chat/open-session');
+    fireEvent.click(screen.getByRole('button', { name: '新建工作空间' }));
+
+    // 本地弹窗里带「使用 SSH 远端目录」入口，点击后切到 SSH 弹窗。
+    // 弹窗打开后会异步加载目录树，加载期间底部动作按钮处于 busy（disabled），
+    // 因此必须等busy 解除再点，否则点击会被静默忽略。
+    const sshEntry = await screen.findByRole('button', { name: '使用 SSH 远端目录' });
+    await waitFor(() => expect((sshEntry as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(sshEntry);
+
+    expect(await screen.findByRole('dialog', { name: '选择 SSH 远端工作区文件夹' })).not.toBeNull();
+    expect(screen.queryByRole('dialog', { name: '选择工作区文件夹' })).toBeNull();
+  });
+
+  it('新建会话留在面板底部，与头部新建工作空间各司其职', () => {
+    renderFusionSidebar('/chat/open-session');
+
+    expect(screen.getByRole('button', { name: '新建会话' })).not.toBeNull();
+    expect(screen.getAllByRole('button', { name: '新建工作空间' })).toHaveLength(1);
+  });
+
+  it('团队路由下底部不再重复新建工作空间入口', () => {
+    renderFusionSidebar('/team');
+
+    expect(screen.getAllByRole('button', { name: '新建工作空间' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: '新建会话' })).toBeNull();
+  });
+
   it('点击新建会话走统一 newSession 入口并回到 Chat 首页', async () => {
     const sessionsResult = setFusionSidebarChatGroups([], []);
     renderFusionSidebar('/chat/open-session');

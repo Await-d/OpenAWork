@@ -7,14 +7,31 @@
  * - 鉴权 header / JSON header / 查询串构造保持纯函数风格，便于在测试中拼装请求。
  */
 
+/** 网关回写 requestId 的响应头。与服务端 error-handler / request_workflow_logs 同源。 */
+const REQUEST_ID_HEADER = 'x-request-id';
+
 export class HttpError<T = unknown> extends Error {
+  /**
+   * 网关侧 requestId。
+   *
+   * 这是排障闭环的关键：用户报障时把这个 ID 交给我们，就能直接在网关日志与
+   * `request_workflow_logs` 表里定位到那一次请求。没有它，客户端只知道
+   * 「500」这个数字，无法区分是哪一次调用。
+   */
+  readonly requestId?: string;
+  /** 服务端返回的可读原因（从 `data.message` / `error` / `message` 提取）。 */
+  readonly serverMessage?: string;
+
   constructor(
     message: string,
     public readonly status: number,
     public readonly data?: T,
+    context?: { requestId?: string; serverMessage?: string },
   ) {
     super(message);
     this.name = 'HttpError';
+    if (context?.requestId) this.requestId = context.requestId;
+    if (context?.serverMessage) this.serverMessage = context.serverMessage;
   }
 }
 
@@ -77,6 +94,31 @@ export async function readJsonErrorData<T>(response: Response): Promise<T | unde
   return data ?? undefined;
 }
 
+/** 读取网关回写的 requestId（缺失返回 undefined，不视为错误）。 */
+export function readRequestId(response: Response): string | undefined {
+  const raw = response.headers?.get?.(REQUEST_ID_HEADER);
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+}
+
+/**
+ * 构造 HttpError：统一补齐 requestId 与服务端可读原因。
+ *
+ * 注意 `message` 保持 `${label} failed: ${status}` 原样——上层有若干处依赖该格式做
+ * 分支判断，改写会波及行为。可读原因放在 `serverMessage` 上按需取用。
+ */
+function buildHttpError<T>(
+  label: string,
+  response: Response,
+  data: T | undefined,
+): HttpError<T> {
+  const requestId = readRequestId(response);
+  const serverMessage = extractJsonErrorMessage(data as JsonErrorData | undefined);
+  return new HttpError(`${label} failed: ${response.status}`, response.status, data, {
+    ...(requestId ? { requestId } : {}),
+    ...(serverMessage ? { serverMessage } : {}),
+  });
+}
+
 /**
  * 把可选标量字段拼到 `URLSearchParams`。
  * - `undefined` / `null` 跳过。
@@ -130,11 +172,7 @@ export async function expectOk(response: Response, label: string): Promise<void>
   if (response.ok || response.status === 204) {
     return;
   }
-  throw new HttpError(
-    `${label} failed: ${response.status}`,
-    response.status,
-    await readJsonErrorData(response),
-  );
+  throw buildHttpError(label, response, await readJsonErrorData(response));
 }
 
 /** Default wall-clock ceiling for gateway reads (ms). */
@@ -171,7 +209,16 @@ export async function fetchWithTimeout(
       callerSignal.addEventListener('abort', onAbort, { once: true });
     }
   }
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // 超时 reason 刻意包含 "aborted"：既让日志能区分「超时」与「调用方主动取消」，
+// 又能被 isGenericFetchErrorMessage 的 /\babort/i 命中，从而维持既有的
+// 「超时 → 折叠为友好文案」行为不变。
+  const timer = setTimeout(() => {
+    if (typeof controller.abort === 'function') {
+      controller.abort(new Error(`Request aborted: gateway timeout after ${timeoutMs}ms`));
+      return;
+    }
+    controller.abort();
+  }, timeoutMs);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {

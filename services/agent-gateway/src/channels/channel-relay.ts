@@ -1,3 +1,4 @@
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import type {
   ChannelEvent,
   ChannelInstance,
@@ -144,7 +145,7 @@ export class ChannelRelay {
     try {
       return await enrich(message);
     } catch (error) {
-      console.warn('[channels] relay inbound media enrich failed', {
+      logGatewayWarn('[channels] relay inbound media enrich failed', {
         channelId: this.channel.id,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -203,7 +204,7 @@ export class ChannelRelay {
     try {
       this.notify(event);
     } catch (error) {
-      console.warn('[channels] relay notify handler threw', {
+      logGatewayWarn('[channels] relay notify handler threw', {
         channelId: this.channel.id,
         error: error instanceof Error ? error.message : String(error),
       });

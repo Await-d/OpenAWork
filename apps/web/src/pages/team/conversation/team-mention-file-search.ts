@@ -51,6 +51,16 @@ export interface TeamMentionFileSearchInput {
   token: string;
   /** 当前 team 会话 id：SSH 绑定会话必须携带，网关据此解析远端连接。 */
   sessionId: string | null;
+  /**
+   * 会话绑定的 SSH 连接 id。
+   *
+   * 与 sessionId 互补：网关解析「会话 → SSH 连接」时走父会话链回溯，子会话
+   * 可能继承到远端 workingDirectory 却继承不到 SSH 绑定（unbound）。此时若只有
+   * sessionId，`@` 菜单检索会退化为网关本机索引 —— 返回同形的本机文件。
+   */
+  sshConnectionId?: string | null;
+  /** 远端工作区根：草稿态（无会话）时作为远端根目录下发。 */
+  workspaceRoot?: string | null;
 }
 
 /**
@@ -63,7 +73,8 @@ export interface TeamMentionFileSearchInput {
 export function createTeamMentionFileSearch(
   input: TeamMentionFileSearchInput,
 ): MentionFileSearchFn {
-  const { workspaceDirectory, gatewayUrl, token, sessionId } = input;
+  const { workspaceDirectory, gatewayUrl, token, sessionId, sshConnectionId, workspaceRoot } =
+    input;
   if (!workspaceDirectory) {
     return () => Promise.resolve(EMPTY_MENTION_SEARCH_RESULT);
   }
@@ -75,6 +86,8 @@ export function createTeamMentionFileSearch(
       limit: MENTION_SEARCH_LIMIT,
       signal,
       ...(sessionId ? { sessionId } : {}),
+      ...(!sessionId && sshConnectionId ? { sshConnectionId } : {}),
+      ...(workspaceRoot ? { workspaceRoot } : {}),
     });
     if (!result.ok) {
       throw new Error(result.errorMessage ?? '检索工作区文件索引失败。');

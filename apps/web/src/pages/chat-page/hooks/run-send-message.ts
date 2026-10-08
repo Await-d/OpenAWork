@@ -112,7 +112,9 @@ import type {
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import {
   createPendingPermissionRequestSnapshot,
+  createClientErrorReporter,
   dedupePendingPermissionRequests,
+  isClientSyntheticStreamErrorCode,
 } from '@openAwork/web-client';
 import type { PendingQuestionRequest, Session, SessionTask } from '@openAwork/web-client';
 
@@ -659,6 +661,34 @@ export async function runSendMessage(
   // rid 由 `client.stream()` 内部生成，调用返回后同步可读；提交闭包在事件
   // 到达时才执行，因此这里先声明、stream() 之后立即赋值。
   let streamClientRequestId: string | null = null;
+  // 客户端合成的传输错误（网关侧无记录）需要 best-effort 上报落库，
+  // 否则刷新页面后错误气泡消失。写入由网关执行，幂等由 clientRequestId 保证。
+  const clientErrorReporter = createClientErrorReporter(gatewayUrl);
+  const reportClientSideStreamError = (
+    code: string,
+    resolvedMessage: string,
+    technicalDetail: string | undefined,
+  ): void => {
+    if (!token || !isClientSyntheticStreamErrorCode(code)) return;
+    const clientRequestId = streamClientRequestId;
+    if (!clientRequestId) return;
+    void clientErrorReporter
+      .reportClientStreamError(token, {
+        clientRequestId,
+        code,
+        message: resolvedMessage,
+        sessionId: sid,
+        ...(technicalDetail ? { technicalDetail } : {}),
+      })
+      .then((result) => {
+        if (!result.ok) {
+          logger.warn(
+            'stream error report failed',
+            `${code}: ${result.errorMessage ?? '未知原因'}`,
+          );
+        }
+      });
+  };
   const resolveRoundModelLabel = (summary?: UpstreamStreamSummary | null): string | undefined =>
     summary?.modelId ?? latestUpstreamRoute?.modelId ?? requestModelLabel;
   const resolveRoundProviderId = (summary?: UpstreamStreamSummary | null): string | undefined =>
@@ -1283,6 +1313,7 @@ export async function runSendMessage(
       const resolvedMessage = formatGatewayStreamErrorMessage(code, message, technicalDetail);
       const errorContent = `[错误: ${code}] ${resolvedMessage}`;
       logger.error('stream error', `${code}: ${resolvedMessage}`);
+      reportClientSideStreamError(code, resolvedMessage, technicalDetail);
       const errorMsgId = makeOrderedMessageId();
       const resolvedMessageModel = resolveRoundModelLabel(latestRoundUpstreamSummary);
       const resolvedMessageProviderId = resolveRoundProviderId(latestRoundUpstreamSummary);

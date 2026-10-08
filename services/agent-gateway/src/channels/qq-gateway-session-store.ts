@@ -1,4 +1,5 @@
 import { sqliteGet, sqliteRun } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export interface QQGatewaySessionState {
   readonly sessionId: string;
@@ -55,7 +56,7 @@ export function loadQQGatewaySession(
     const parsed: unknown = JSON.parse(row.value);
     return isSessionState(parsed) ? parsed : null;
   } catch (error) {
-    console.warn('[qq] gateway session 解析失败，已忽略旧会话', {
+    logGatewayWarn('[qq] gateway session 解析失败，已忽略旧会话', {
       pluginId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -78,7 +79,7 @@ export function saveQQGatewaySession(
       [userId, buildSessionKey(pluginId), JSON.stringify(state)],
     );
   } catch (error) {
-    console.warn('[qq] gateway session 保存失败，已跳过本次持久化', {
+    logGatewayWarn('[qq] gateway session 保存失败，已跳过本次持久化', {
       pluginId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -95,7 +96,7 @@ export function clearQQGatewaySession(userId: string | undefined, pluginId: stri
       buildSessionKey(pluginId),
     ]);
   } catch (error) {
-    console.warn('[qq] gateway session 清理失败，已忽略', {
+    logGatewayWarn('[qq] gateway session 清理失败，已忽略', {
       pluginId,
       error: error instanceof Error ? error.message : String(error),
     });

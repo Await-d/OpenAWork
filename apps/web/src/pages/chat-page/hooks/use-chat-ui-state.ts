@@ -105,8 +105,6 @@ export interface ChatUiState extends ChatSidebarLayout {
   setQuickTerminalOpenForWorkspace: (workspacePath: string | null, open: boolean) => void;
 
   // ─── 各种弹窗 / 面板信号 ──────────────────────────────────────────────
-  showWorkspaceSelector: boolean;
-  setShowWorkspaceSelector: React.Dispatch<React.SetStateAction<boolean>>;
   /** 自增计数器：每次 `bumpCompanionPanelSignal()` +1，订阅方据此打开伴侣面板。 */
   companionPanelSignal: number;
   bumpCompanionPanelSignal: () => void;
@@ -233,7 +231,6 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
   const quickTerminalOpen = quickTerminalOpenByWorkspace[quickTerminalWorkspaceKey] ?? false;
 
   // ── 弹窗 / 面板信号 ─────────────────────────────────────────────────────
-  const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);
   const [companionPanelSignal, setCompanionPanelSignal] = useState(0);
   const bumpCompanionPanelSignal = useCallback(() => {
     setCompanionPanelSignal((v) => v + 1);
@@ -288,8 +285,6 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
     quickTerminalOpenByWorkspace,
     setQuickTerminalOpenForWorkspace,
 
-    showWorkspaceSelector,
-    setShowWorkspaceSelector,
     companionPanelSignal,
     bumpCompanionPanelSignal,
 

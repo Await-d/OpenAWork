@@ -17,6 +17,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { resolveGatewayToolOutputsDir } from '../infra/storage-paths.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const STALE_SPILL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -57,7 +58,7 @@ export function spillToolOutput(input: {
     writeFileSync(filePath, input.content, 'utf8');
     return filePath;
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[tool-output-spill] 写入失败（忽略，不影响工具执行）：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -84,7 +85,7 @@ export function deleteSpilledToolOutputsForSession(sessionId: string): void {
   try {
     rmSync(dir, { recursive: true, force: true });
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[tool-output-spill] 清理失败：${error instanceof Error ? error.message : String(error)}`,
     );
   }

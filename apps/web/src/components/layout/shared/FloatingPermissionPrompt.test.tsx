@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   replyPermissionRequest: vi.fn(async () => undefined),
   toast: vi.fn(),
   sessionsClientGet: vi.fn(),
+  /** 握手快照的数据源（服务端 `sync` 帧）。默认无通知。 */
+  wsSnapshotProvider: null as null | (() => { notifications: unknown[] }),
 }));
 
 vi.mock('react-router', () => ({
@@ -64,6 +66,25 @@ vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: () => ({
     get: mocks.sessionsClientGet,
   }),
+  /**
+   * 复刻服务端协议：建连即下发全量 `sync` 快照。恢复待审批弹层的数据由此而来，
+   * 不再有 15s 轮询去补「错过的实时事件」。
+   */
+  createNotificationEventsConnection: (input: { handlers: unknown }) => {
+    const handlers = input.handlers as {
+      onSnapshot?: (snapshot: {
+        browserBroadcasts: unknown[];
+        notifications: unknown[];
+        pendingActionableCount: number;
+      }) => void;
+    };
+    queueMicrotask(() => {
+      const source = mocks.wsSnapshotProvider?.();
+      if (!source) return;
+      handlers.onSnapshot?.({ ...source, browserBroadcasts: [], pendingActionableCount: 0 });
+    });
+    return { close: () => undefined, requestSnapshot: () => undefined };
+  },
 }));
 
 beforeEach(() => {
@@ -71,6 +92,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.createNotificationsList.mockResolvedValue([]);
   mocks.createPermissionsListPending.mockResolvedValue([]);
+  mocks.wsSnapshotProvider = () => ({ notifications: [] });
   mocks.subscribeSessionPendingPermission.mockImplementation((onChange) => {
     onChange('target-session-1', {
       requestId: 'perm-1',
@@ -150,9 +172,9 @@ describe('FloatingPermissionPrompt', () => {
     expect(mocks.requestSessionListRefresh).toHaveBeenCalled();
   });
 
-  it('错过实时事件时会从未读通知恢复待审批弹层', async () => {
+  it('错过实时事件时由握手快照恢复待审批弹层', async () => {
     mocks.subscribeSessionPendingPermission.mockImplementation(() => () => undefined);
-    mocks.createNotificationsList.mockResolvedValue({
+    mocks.wsSnapshotProvider = () => ({
       notifications: [
         {
           id: 'notif-1',
@@ -169,7 +191,6 @@ describe('FloatingPermissionPrompt', () => {
           createdAt: '2026-07-16T07:30:45.000Z',
         },
       ],
-      pendingActionableCount: 1,
     });
     mocks.createPermissionsListPending.mockResolvedValue([
       {
@@ -196,14 +217,12 @@ describe('FloatingPermissionPrompt', () => {
     expect(await screen.findByText('write')).toBeTruthy();
     expect(await screen.findByRole('button', { name: '恢复出来的审批' })).toBeTruthy();
     await waitFor(() => {
-      expect(mocks.createNotificationsList).toHaveBeenCalledWith('token-test', {
-        limit: 20,
-        view: 'pending',
-      });
+      expect(mocks.createPermissionsListPending).toHaveBeenCalledWith(
+        'token-test',
+        'target-session-2',
+      );
     });
-    expect(mocks.createPermissionsListPending).toHaveBeenCalledWith(
-      'token-test',
-      'target-session-2',
-    );
+    // 快照已含完整通知列表，恢复弹层不必再走一次 HTTP。
+    expect(mocks.createNotificationsList).not.toHaveBeenCalled();
   });
 });

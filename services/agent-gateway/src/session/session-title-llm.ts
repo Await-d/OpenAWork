@@ -3,6 +3,7 @@ import { Effect } from 'effect';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const TITLE_SYSTEM_PROMPT = `你是一个标题生成器。你输出一个会话标题和一个 emoji 图标，仅此而已。
 
@@ -120,7 +121,7 @@ export async function generateSessionTitleLlm(input: TitleLlmInput): Promise<voi
       saveSessionIcon(input.sessionId, input.userId, emoji);
     }
   } catch (error: unknown) {
-    console.warn('LLM title generation failed, keeping heuristic title:', error);
+    logGatewayWarn('LLM title generation failed, keeping heuristic title:', error);
   }
 }
 
@@ -188,7 +189,7 @@ async function callTitleLlm(
   } catch (error: unknown) {
     // 静默吞掉会让「上游 403 / 模型不支持」这类问题只表现为「会话没有图标」，
     // 因此保留一条带 model 的告警，便于定位是哪条路由失败。
-    console.warn(
+    logGatewayWarn(
       `[session-title] 标题/图标生成请求失败（model=${route.model}）：`,
       error instanceof Error ? error.message : error,
     );
@@ -222,7 +223,7 @@ function saveSessionIcon(sessionId: string, userId: string, icon: string): void 
       userId,
     ]);
   } catch (error: unknown) {
-    console.warn('Failed to save session icon:', error);
+    logGatewayWarn('Failed to save session icon:', error);
   }
 }
 

@@ -50,6 +50,7 @@
 
 import { execFile } from 'node:child_process';
 import { readFile, readdir, readlink } from 'node:fs/promises';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 端口的终端归属：仅当监听进程确实是某个「属于当前用户的本网关终端」的进程树节点时才有值。 */
 export interface TerminalAttribution {
@@ -749,7 +750,7 @@ function safeListOwnedTerminalPids(
   } catch (error) {
     // 查询失败只损失归属能力：端口列表照常返回、全部 terminal: null，
     // 不能让一次 registry 异常把只读枚举整体降级为错误。
-    console.warn(`[listening-ports] 查询用户终端 pid 失败：${describeError(error)}`);
+    logGatewayWarn(`[listening-ports] 查询用户终端 pid 失败：${describeError(error)}`);
     return [];
   }
 }

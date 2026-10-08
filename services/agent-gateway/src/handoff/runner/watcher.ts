@@ -55,6 +55,7 @@ import {
   resolveMemberSystemPrompt,
 } from '../bus/resolve-member-model.js';
 import { reconcilePm2QualityReview } from './pm2-quality-review-reconciler.js';
+import { logGatewayError, logGatewayWarn } from '../../infra/gateway-logger.js';
 
 const DEFAULT_WATCHER_INTERVAL_MS = 100;
 const DEFAULT_RECOVERY_INTERVAL_MS = 5_000;
@@ -258,7 +259,7 @@ export class HandoffWatcher {
       // gateway. Direct callers (tests / manual triggers) still observe the
       // rejection normally.
       this.tickOnce().catch((err: unknown) => {
-        console.error(
+        logGatewayError(
           '[watcher] tickOnce failed',
           err instanceof Error ? err.message : String(err),
         );
@@ -269,7 +270,7 @@ export class HandoffWatcher {
 
     this.recoveryTimer = setInterval(() => {
       this.recoveryTick().catch((err: unknown) => {
-        console.error(
+        logGatewayError(
           '[watcher] recoveryTick failed',
           err instanceof Error ? err.message : String(err),
         );
@@ -471,7 +472,7 @@ export class HandoffWatcher {
               }
             }
           } catch (err) {
-            console.warn(
+            logGatewayWarn(
               `[watcher] 读取父 session metadata 失败：${err instanceof Error ? err.message : String(err)}`,
             );
           }
@@ -536,7 +537,7 @@ export class HandoffWatcher {
           // past its heartbeat, so a record that threw after being claimed is
           // retried later rather than silently lost.
           skipped += 1;
-          console.error(
+          logGatewayError(
             `[watcher] 派发 handoff ${record.id} 失败，跳过该条继续本轮扫描：${
               err instanceof Error ? err.message : String(err)
             }`,
@@ -589,7 +590,7 @@ export class HandoffWatcher {
             publishHandoffEvent({ type: 'handoff.reclaimed', record });
           }
         } catch (err) {
-          console.error(
+          logGatewayError(
             `[watcher] recovery 发布 reclaimed 事件失败（${id}），跳过继续：${
               err instanceof Error ? err.message : String(err)
             }`,
@@ -623,7 +624,7 @@ export class HandoffWatcher {
                   roleLayer: record.toRoleLayer,
                 });
               } catch (e) {
-                console.warn(
+                logGatewayWarn(
                   `[watcher] recovery setSubstate('failed') 失败：${e instanceof Error ? e.message : String(e)}`,
                 );
               }
@@ -635,7 +636,7 @@ export class HandoffWatcher {
             });
           }
         } catch (err) {
-          console.error(
+          logGatewayError(
             `[watcher] recovery 处理 failed handoff ${id} 失败，跳过继续：${
               err instanceof Error ? err.message : String(err)
             }`,
@@ -675,14 +676,14 @@ export class HandoffWatcher {
             userId: stuck.user_id,
           });
         } catch (e) {
-          console.warn(
+          logGatewayWarn(
             `[watcher] stale session reset failed (${stuck.id}): ${e instanceof Error ? e.message : String(e)}`,
           );
         }
       }
     } catch (err) {
       // Best-effort: 不阻塞 recoveryTick 主流程
-      console.warn(
+      logGatewayWarn(
         `[watcher] stale session sweep failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -696,7 +697,7 @@ export class HandoffWatcher {
     try {
       await this.reconcileStuckReceptionSessions();
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[watcher] reception awaiting_downstream sweep failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -745,7 +746,7 @@ export class HandoffWatcher {
           userId: candidate.userId,
         });
       } catch (err) {
-        console.error(
+        logGatewayError(
           `[watcher] pm2 质量评审 ${candidate.handoffId} 协调失败，跳过该条继续本轮：${
             err instanceof Error ? err.message : String(err)
           }`,
@@ -870,7 +871,7 @@ export class HandoffWatcher {
               clientRequestId: null,
             });
           } catch (ackErr) {
-            console.warn(
+            logGatewayWarn(
               `[watcher] reception 死锁兜底反馈写入失败（${reception.id}）：${ackErr instanceof Error ? ackErr.message : String(ackErr)}`,
             );
           }
@@ -885,7 +886,7 @@ export class HandoffWatcher {
           });
         }
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           `[watcher] reception ${reception.id} awaiting_downstream 兜底失败，跳过：${
             err instanceof Error ? err.message : String(err)
           }`,
@@ -995,7 +996,7 @@ export class HandoffWatcher {
               }
             } catch (hallucinationErr) {
               // 幻觉检测失败不影响 handoff 完成流程
-              console.warn(
+              logGatewayWarn(
                 `[watcher] 幻觉检测失败：${hallucinationErr instanceof Error ? hallucinationErr.message : String(hallucinationErr)}`,
               );
             }
@@ -1031,7 +1032,7 @@ export class HandoffWatcher {
                 clientRequestId: `handoff:${input.handoff.id}:completed`,
               });
             } catch (msgErr) {
-              console.warn(
+              logGatewayWarn(
                 `[watcher] 写 handoff 完成消息失败：${msgErr instanceof Error ? msgErr.message : String(msgErr)}`,
               );
             }
@@ -1154,7 +1155,7 @@ export class HandoffWatcher {
                   }
                 }
               } catch (msgErr) {
-                console.warn(
+                logGatewayWarn(
                   `[watcher] 写 pm1→pm2 转交消息失败：${msgErr instanceof Error ? msgErr.message : String(msgErr)}`,
                 );
               }
@@ -1196,7 +1197,7 @@ export class HandoffWatcher {
                   clientRequestId: null,
                 });
               } catch (ackErr) {
-                console.warn(
+                logGatewayWarn(
                   `[watcher] auto-chain failure ack write failed: ${ackErr instanceof Error ? ackErr.message : String(ackErr)}`,
                 );
               }
@@ -1230,7 +1231,7 @@ export class HandoffWatcher {
                 clientRequestId: `handoff:${input.handoff.id}:executor-completed`,
               });
             } catch (msgErr) {
-              console.warn(
+              logGatewayWarn(
                 `[watcher] 写 executor/reviewer 完成进度到 pm2 失败：${msgErr instanceof Error ? msgErr.message : String(msgErr)}`,
               );
             }
@@ -1421,7 +1422,7 @@ export class HandoffWatcher {
                 }
               }
             } catch (degradedErr) {
-              console.warn(
+              logGatewayWarn(
                 `[watcher] PM1 降级 auto-chain 失败：${degradedErr instanceof Error ? degradedErr.message : String(degradedErr)}`,
               );
             }
@@ -1501,7 +1502,7 @@ export class HandoffWatcher {
                 roleLayer: input.handoff.toRoleLayer,
               });
             } catch (e) {
-              console.warn(
+              logGatewayWarn(
                 `[watcher] setSubstate('failed') 失败：${e instanceof Error ? e.message : String(e)}`,
               );
             }
@@ -1530,7 +1531,7 @@ export class HandoffWatcher {
                   });
                 }
               } catch (reviewErr) {
-                console.warn(
+                logGatewayWarn(
                   `[watcher] executor/reviewer 失败后触发 quality review 失败：${reviewErr instanceof Error ? reviewErr.message : String(reviewErr)}`,
                 );
               }
@@ -1570,7 +1571,7 @@ export class HandoffWatcher {
                 clientRequestId: `handoff:${input.handoff.id}:failed`,
               });
             } catch (msgErr) {
-              console.warn(
+              logGatewayWarn(
                 `[watcher] 写 handoff 失败消息失败：${msgErr instanceof Error ? msgErr.message : String(msgErr)}`,
               );
             }

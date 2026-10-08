@@ -12,6 +12,7 @@ import { appendSessionMessageV2 as appendSessionMessage } from '../message/messa
 import { appendSessionEvent, translateRunEventToSessionEvent } from './session-entry-store.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { getSessionOwnerUserId } from '../infra/session-owner-cache.js';
+import { logGatewayError, logGatewayWarn } from '../infra/gateway-logger.js';
 
 type RunEventHandler = (event: RunEvent, meta?: PublishRunEventMeta) => void;
 
@@ -136,7 +137,7 @@ function maybePruneSessionRunEvents(sessionId: string): void {
       sessionRunEventStoreDisabled = true;
       return;
     }
-    console.warn(
+    logGatewayWarn(
       `[session-run-events] retention prune failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
@@ -359,7 +360,7 @@ function flushPendingRunEventQueue(key: string): void {
     // log and drop this batch. The seq cursor is intentionally NOT rewound —
     // reusing a seq the client already saw would make its dedupe drop new
     // events — so a failed flush leaves a gap instead of a duplicate.
-    console.error('[session-run-events] batched flush failed', {
+    logGatewayError('[session-run-events] batched flush failed', {
       error: error instanceof Error ? error.message : String(error),
       key,
       queued: queued.length,
@@ -621,7 +622,7 @@ function notifyRunEventHandler(input: {
   try {
     input.handler(input.event, input.meta);
   } catch (error) {
-    console.error('session run event handler failed', {
+    logGatewayError('session run event handler failed', {
       error: error instanceof Error ? error.message : String(error),
       eventType: input.event.type,
       sessionId: input.sessionId,

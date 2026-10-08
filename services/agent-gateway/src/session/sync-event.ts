@@ -12,6 +12,7 @@ import { sqliteGet, sqliteRun, sqliteTransaction, sqliteAll } from '../infra/db.
 import { randomUUID } from 'node:crypto';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // ─── BusEvent (Real-time Publish) ───
 // Inspired by opencode's BusEvent: after SyncEvent is persisted,
@@ -181,7 +182,7 @@ function maybePruneEventLog(): void {
       eventLogStoreDisabled = true;
       return;
     }
-    console.warn(
+    logGatewayWarn(
       `[sync-event] event_log retention prune failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }

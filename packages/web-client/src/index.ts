@@ -1,6 +1,21 @@
 // allow: SIZE_OK — package barrel export surface; entries are intentionally centralized.
 export { GatewayWebSocketClient } from './gateway/gateway-ws.js';
 export { GatewaySSEClient } from './gateway/gateway-sse.js';
+export {
+  CLIENT_SYNTHETIC_STREAM_ERROR_CODES,
+  isClientSyntheticStreamErrorCode,
+} from './gateway/client-stream-error-codes.js';
+export type { ClientSyntheticStreamErrorCode } from './gateway/client-stream-error-codes.js';
+export {
+  createClientErrorReporter,
+  CLIENT_ERROR_REPORT_TIMEOUT_MS,
+} from './session/client-errors.js';
+export type {
+  ClientErrorReporter,
+  ClientStreamErrorReportOutcome,
+  ClientStreamErrorReportResult,
+  ReportClientStreamErrorInput,
+} from './session/client-errors.js';
 export { login, refreshAccessToken, logout } from './gateway/auth.js';
 export type { TokenPair } from './gateway/auth.js';
 export { getPairingQr, loginWithDesktopDefault, loginWithPairingToken } from './gateway/pairing.js';
@@ -25,6 +40,15 @@ export type {
   NotificationStatus,
   NotificationView,
 } from './infra/notifications.js';
+export { createNotificationEventsConnection } from './infra/notification-events.js';
+export type {
+  NotificationChangedEvent,
+  NotificationChangeReason,
+  NotificationEventsConnection,
+  NotificationEventsHandlers,
+  NotificationEventsSnapshot,
+  NotificationEventsStatus,
+} from './infra/notification-events.js';
 export { createCapabilitiesClient } from './session/capabilities.js';
 export type {
   CapabilitiesClient,
@@ -263,6 +287,7 @@ export type {
   WorkspaceClient,
   WorkspaceFileContent,
   WorkspaceFileReadOptions,
+  WorkspaceTreeReadOptions,
   WorkspaceFileSearch,
   WorkspaceFileSearchLoadResult,
   WorkspaceRootsLoadResult,

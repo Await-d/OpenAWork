@@ -49,6 +49,7 @@ import {
   listSessionTerminals,
   renameTerminal,
   subscribeTerminalOutputImmediate,
+  TERMINAL_LIST_MAX_LIMIT,
 } from '../session/session-terminal-registry.js';
 
 interface SessionOwnerRow {
@@ -284,8 +285,12 @@ export async function sessionTerminalsRoutes(app: FastifyInstance): Promise<void
       }
       const query = request.query as { status?: string; limit?: string };
       const includeClosed = query.status !== 'running';
+      // limit 在路由层就夹到 [1, TERMINAL_LIST_MAX_LIMIT]：这个接口是轮询接口，
+      // 上限必须由服务端兜住，不能只依赖 store 层（store 还会再夹一次）。
       const parsedLimit = query.limit !== undefined ? Number.parseInt(String(query.limit), 10) : 50;
-      const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;
+      const limit = Number.isFinite(parsedLimit)
+        ? Math.max(1, Math.min(TERMINAL_LIST_MAX_LIMIT, parsedLimit))
+        : 50;
       const terminals = listSessionTerminals({
         sessionId,
         userId: user.sub,

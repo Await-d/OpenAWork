@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { sqliteAll, sqliteGet } from '../infra/db.js';
 import { readResponseTextWithLimit, resolveHttpBodyLimitBytes } from '../infra/http-body-limit.js';
 import type { EffectiveSkill } from './skill-selection.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const skillInputSchema = z
   .object({
@@ -113,7 +114,7 @@ function tryParseManifest(raw: string): SkillManifestLike | null {
   try {
     return JSON.parse(raw) as SkillManifestLike;
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[skill-tools] installed_skills manifest_json 解析失败，已跳过：${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -259,7 +260,7 @@ function findCachedSkillEntry(
   try {
     return JSON.parse(row.entry_json) as SkillEntryLike;
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[skill-tools] registry_source_skill_cache entry_json 解析失败，已忽略缓存：${
         err instanceof Error ? err.message : String(err)
       }`,

@@ -13,9 +13,15 @@ import type {
   NotificationPreferenceRecord,
   NotificationRecord,
   NotificationView,
+  NotificationsListResult,
   PendingPermissionRequest,
   PermissionDecision,
 } from '@openAwork/web-client';
+import {
+  connectNotificationEvents,
+  disconnectNotificationEvents,
+  subscribeNotificationEvents,
+} from '../../../stores/notification-events.js';
 import { subscribeNotificationPreferenceRefresh } from '../../../utils/chat/notification-preference-events.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { requestSessionStreamResumeAttach } from '../../../utils/session/session-stream-resume-events.js';
@@ -115,7 +121,7 @@ export default function NotificationCenter({
    */
   const dismissedPermissionNotificationIdsRef = useRef<Set<string>>(new Set());
   const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
-  /** 轮询需要知道当前视图，否则用户在看归档时被 pending 数据覆盖。 */
+  /** 实时事件需要知道当前视图，否则用户在看归档时被 pending 数据覆盖。 */
   const viewRef = useRef<NotificationView>('pending');
 
   useEffect(() => {
@@ -219,6 +225,56 @@ export default function NotificationCenter({
     }
   }, [accessToken, gatewayUrl]);
 
+  /**
+   * 把一份「铃铛数据」落到 state —— HTTP 拉取与 WS 握手快照共用。
+   *
+   * 两者结构天然一致（服务端 `buildPendingNotificationSnapshot` 就是 HTTP 响应体形状），
+   * 共用一段落地逻辑意味着「快照」不会绕过本地已读/已忽略的过滤与系统通知去重。
+   */
+  const applyNotificationsResult = useCallback(
+    (result: NotificationsListResult, effectivePreferences: NotificationPreferenceMap) => {
+      // 过滤掉本地已判定 stale / 刚处理完但仍可能短暂未读的 permission 通知，
+      // 避免 markRead 与 list 之间的竞态把它们重新弹回列表。
+      const visible = result.notifications.filter(
+        (item) => !dismissedPermissionNotificationIdsRef.current.has(item.id),
+      );
+      setNotifications(visible);
+      setPendingActionableCount(result.pendingActionableCount);
+      setBrowserBroadcasts(result.browserBroadcasts ?? []);
+
+      // Browser notification when page hidden. Iterates actionable 待办 + 结果播报：
+      // 播报不在铃铛里占位，但用户离开页面时仍必须被告知任务已完成。
+      if (
+        typeof window !== 'undefined' &&
+        document.visibilityState === 'hidden' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        [...visible, ...(result.browserBroadcasts ?? [])].forEach((item) => {
+          if (seenIdsRef.has(item.id)) return;
+          seenIdsRef.add(item.id);
+          if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) return;
+          new Notification(item.title, {
+            body: (() => {
+              if (item.eventType !== 'permission_asked') return item.body;
+              const parsed = parsePermissionNotificationBody(item.body);
+              if (!parsed) return item.body;
+              return parsed.previewAction
+                ? `${parsed.reason}\n${parsed.previewAction}`
+                : parsed.reason;
+            })(),
+            tag: item.id,
+          });
+        });
+      } else {
+        [...visible, ...(result.browserBroadcasts ?? [])].forEach((item) =>
+          seenIdsRef.add(item.id),
+        );
+      }
+    },
+    [seenIdsRef],
+  );
+
   const loadNotifications = useCallback(
     async (options?: { preferences?: NotificationPreferenceMap; view?: NotificationView }) => {
       if (!accessToken) {
@@ -241,50 +297,13 @@ export default function NotificationCenter({
           view: effectiveView,
         });
         if (controller.signal.aborted) return;
-        // 过滤掉本地已判定 stale / 刚处理完但仍可能短暂未读的 permission 通知，
-        // 避免 markRead 与 list 之间的竞态把它们重新弹回列表。
-        const visible = result.notifications.filter(
-          (item) => !dismissedPermissionNotificationIdsRef.current.has(item.id),
-        );
-        setNotifications(visible);
-        setPendingActionableCount(result.pendingActionableCount);
-        setBrowserBroadcasts(result.browserBroadcasts ?? []);
-
-        // Browser notification when page hidden. Iterates actionable 待办 + 结果播报：
-        // 播报不在铃铛里占位，但用户离开页面时仍必须被告知任务已完成。
-        if (
-          typeof window !== 'undefined' &&
-          document.visibilityState === 'hidden' &&
-          'Notification' in window &&
-          Notification.permission === 'granted'
-        ) {
-          [...visible, ...(result.browserBroadcasts ?? [])].forEach((item) => {
-            if (seenIdsRef.has(item.id)) return;
-            seenIdsRef.add(item.id);
-            if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) return;
-            new Notification(item.title, {
-              body: (() => {
-                if (item.eventType !== 'permission_asked') return item.body;
-                const parsed = parsePermissionNotificationBody(item.body);
-                if (!parsed) return item.body;
-                return parsed.previewAction
-                  ? `${parsed.reason}\n${parsed.previewAction}`
-                  : parsed.reason;
-              })(),
-              tag: item.id,
-            });
-          });
-        } else {
-          [...visible, ...(result.browserBroadcasts ?? [])].forEach((item) =>
-            seenIdsRef.add(item.id),
-          );
-        }
+        applyNotificationsResult(result, effectivePreferences);
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
         setLoading(false);
       }
     },
-    [accessToken, gatewayUrl, seenIdsRef],
+    [accessToken, gatewayUrl, seenIdsRef, applyNotificationsResult],
   );
 
   /** 切换视图前必须掐断在途请求，否则它回来后会把旧视图数据写回当前视图。 */
@@ -308,8 +327,8 @@ export default function NotificationCenter({
   /**
    * 本地移除通知并同步递减红点。
    *
-   * 红点计数来自服务端且独立于列表，若只移除列表项，红点会一直显示旧数字直到下轮
-   * 轮询（15s）——用户已经处理完了，铃铛还亮着，这正是「通知处理不掉」的观感来源。
+   * 红点计数来自服务端且独立于列表，若只移除列表项，红点会一直显示旧数字直到下一轮
+   * 事件到达——用户已经处理完了，铃铛还亮着，这正是「通知处理不掉」的观感来源。
    * 注意不在 setState updater 内改另一个 state（严格模式下 updater 会被重复调用）。
    */
   const dropNotificationsLocally = useCallback(
@@ -620,7 +639,11 @@ export default function NotificationCenter({
   /** 被折叠的结果播报数——空态时告诉用户它们去了哪，否则空态看起来像消息丢了。 */
   const hiddenInformationalCount = view === 'pending' ? browserBroadcasts.length : 0;
 
-  // ── Initial fetch + polling ────────────────────────────
+  // ── Realtime (WS) ─────────────────────────────────────────
+  //
+  // 首屏数据由握手的 `sync` 全量快照交付，之后每次落库事件触发一次列表拉取——
+  // 空闲时零 HTTP 请求。事件只带「脏标记 + 权威红点数」，所以红点先即时生效，
+  // 列表内容随后由这次一次性拉取校正（WS 不复刻通知结构，避免与 REST 字段漂移）。
 
   useEffect(() => {
     if (!accessToken) {
@@ -630,31 +653,35 @@ export default function NotificationCenter({
       setPreferences(DEFAULT_NOTIFICATION_PREFERENCES);
       dismissedPermissionNotificationIdsRef.current.clear();
       permissionDetailsFetchedRef.current.clear();
-      return;
+      return undefined;
     }
 
-    let cancelled = false;
-    let intervalId: number | null = null;
+    // 偏好先落地再建连：快照会用它过滤浏览器系统通知，顺序反了会先用默认值放行一轮。
+    const preferencesReady = loadPreferences();
+    connectNotificationEvents(gatewayUrl, accessToken);
 
-    void (async () => {
-      const next = await loadPreferences();
-      if (cancelled) return;
-      await loadNotifications({ preferences: next, view: viewRef.current });
-      if (cancelled) return;
-      intervalId = window.setInterval(() => {
+    const unsubscribe = subscribeNotificationEvents({
+      onChange: (event) => {
+        // 红点先跟手：事件里带的是服务端权威计数，不等这一次拉取回来。
+        setPendingActionableCount(event.pendingActionableCount);
         void loadNotifications({ view: viewRef.current }).catch(() => undefined);
-      }, 15_000);
-    })().catch(() => undefined);
+      },
+      onSnapshot: (snapshot) => {
+        // 快照只在 pending 视图有效；用户正在看归档/全部时别把它塞进当前视图。
+        if (viewRef.current !== 'pending') return;
+        void preferencesReady
+          .then((preferences) => {
+            applyNotificationsResult(snapshot, preferences);
+          })
+          .catch(() => undefined);
+      },
+    });
 
     return () => {
-      cancelled = true;
-      if (intervalId !== null) window.clearInterval(intervalId);
-      if (abortRef.current) {
-        abortRef.current.abort();
-        abortRef.current = null;
-      }
+      unsubscribe();
+      disconnectNotificationEvents();
     };
-  }, [accessToken, loadPreferences, loadNotifications]);
+  }, [accessToken, gatewayUrl, applyNotificationsResult, loadNotifications, loadPreferences]);
 
   useEffect(() => {
     return subscribeNotificationPreferenceRefresh(() => {

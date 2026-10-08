@@ -25,6 +25,7 @@ import { basename, join } from 'node:path';
 import { createPlatformAdapter, resolveSkillsPaths } from '@openAwork/platform-adapter';
 import type { SkillManifest } from '@openAwork/skill-types';
 import { sqliteAll, sqliteRun } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export const SYSTEM_SOURCE_ID_PREFIX = 'local-system:';
 
@@ -376,7 +377,7 @@ export async function syncSystemSkillsForAllUsers(): Promise<{
       updated += result.updated;
       removed += result.removed;
     } catch (error) {
-      console.warn(
+      logGatewayWarn(
         `[system-skills] 为用户 ${user.id} 同步系统技能失败，已跳过：${
           error instanceof Error ? error.message : String(error)
         }`,

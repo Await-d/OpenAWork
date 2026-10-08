@@ -18,6 +18,7 @@ import { resolveAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
 import type { ResolvedAuxiliaryLlmConfig } from '../provider/auxiliary-llm-config.js';
 import { requestWorkflowLlmCompletion } from './workflow-llm.js';
 import { assignTeamModels, pickAnalysisModels } from '../team/team-model-assignment.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 type ErrorConstructor<T extends Error = Error> = new (...args: unknown[]) => T;
 type PromptOptimizerErrorLike = Error & { kind?: string };
@@ -234,7 +235,7 @@ function tryTemplateRowToView(row: TemplateRow): WorkflowTemplateView | null {
       updatedAt: row.updated_at,
     };
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[workflows] 模板 ${row.id} JSON 解析失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,

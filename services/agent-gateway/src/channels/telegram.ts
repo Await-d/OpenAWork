@@ -24,6 +24,7 @@ import {
 import { listTelegramBotCommands } from './channel-localization.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /**
  * Telegram long-poll uses `timeout=25`, so the upstream intentionally
@@ -103,7 +104,7 @@ export class TelegramChannelService implements MessagingChannelService {
     try {
       this.notify(event);
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[telegram] channel notify handler threw: ${
           err instanceof Error ? err.message : String(err)
         }`,
@@ -221,7 +222,7 @@ export class TelegramChannelService implements MessagingChannelService {
         console.warn(`[telegram] setMyCommands failed: HTTP ${res.status}`);
       }
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[telegram] setMyCommands failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -241,7 +242,7 @@ export class TelegramChannelService implements MessagingChannelService {
    */
   private dispatchUpdate(update: TelegramUpdate): void {
     void this.handleUpdate(update).catch((err) => {
-      console.warn('[telegram] update dispatch failed', {
+      logGatewayWarn('[telegram] update dispatch failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     });

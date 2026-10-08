@@ -19,6 +19,25 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   preloadRouteModuleByPath: vi.fn(),
   toast: vi.fn(),
+  /** 最近一次建连时 web-client 拿到的 handlers，用于测试主动推事件。 */
+  wsHandlers: null as null | {
+    onChange?: (event: { pendingActionableCount: number; reason: string }) => void;
+    onSnapshot?: (snapshot: {
+      browserBroadcasts: NotificationRecord[];
+      notifications: NotificationRecord[];
+      pendingActionableCount: number;
+    }) => void;
+  },
+  /**
+   * 握手快照的数据源。做成函数而非值：各用例在 render 之前替换 `currentNotifications`
+   * 指向新数组，闭包在**调用时**读取才能拿到最新数据。
+   */
+  wsSnapshotProvider: null as
+    | null
+    | (() => {
+        browserBroadcasts: NotificationRecord[];
+        notifications: NotificationRecord[];
+      }),
 }));
 
 vi.mock('react-router', () => ({
@@ -42,6 +61,24 @@ vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: () => ({
     get: mocks.getSession,
   }),
+  /**
+   * 忠实复刻服务端协议：建连即下发全量 `sync` 快照。首屏数据由此而来——
+   * 铃铛不再有任何定时轮询。
+   */
+  createNotificationEventsConnection: (input: { handlers: unknown }) => {
+    mocks.wsHandlers = input.handlers as typeof mocks.wsHandlers;
+    queueMicrotask(() => {
+      const source = mocks.wsSnapshotProvider?.();
+      if (!source) return;
+      mocks.wsHandlers?.onSnapshot?.({
+        ...source,
+        pendingActionableCount: source.notifications.filter(
+          (item) => item.kind === 'actionable' && item.status === 'unread',
+        ).length,
+      });
+    });
+    return { close: () => undefined, requestSnapshot: () => undefined };
+  },
 }));
 
 vi.mock('../../../utils/chat/notification-preference-events.js', () => ({
@@ -116,6 +153,11 @@ describe('NotificationCenter', () => {
     ];
     currentBroadcasts = [];
     currentArchiveView = [];
+    mocks.wsHandlers = null;
+    mocks.wsSnapshotProvider = () => ({
+      browserBroadcasts: currentBroadcasts,
+      notifications: currentNotifications,
+    });
 
     mocks.listNotifications.mockImplementation(
       async (_token: string, options?: { view?: string }) =>
@@ -147,9 +189,15 @@ describe('NotificationCenter', () => {
     render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
 
     const trigger = await screen.findByTitle('通知中心');
+
+    // 首屏来自握手快照，不经 HTTP —— 这是「零轮询」的直接体现。
+    expect(mocks.listNotifications).not.toHaveBeenCalled();
+
     fireEvent.click(trigger);
 
     await screen.findByText('等待权限 · bash');
+
+    const callsBeforeRefresh = mocks.listNotifications.mock.calls.length;
 
     currentNotifications = [];
 
@@ -161,7 +209,32 @@ describe('NotificationCenter', () => {
       expect(screen.queryByText('等待权限 · bash')).toBeNull();
     });
 
-    expect(mocks.listNotifications).toHaveBeenCalledTimes(3);
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
+  });
+
+  it('收到落库事件时红点用权威值即时更新，并只补拉一次列表', async () => {
+    render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
+
+    const trigger = await screen.findByTitle('通知中心');
+    fireEvent.click(trigger);
+
+    await screen.findByText('等待权限 · bash');
+    expect(trigger.textContent).toMatch(/1/);
+
+    // 打开面板本身会刷新一次；事件再补一次。
+    const callsBeforeEvent = mocks.listNotifications.mock.calls.length;
+
+    act(() => {
+      mocks.wsHandlers?.onChange?.({ pendingActionableCount: 7, reason: 'created' });
+    });
+
+    // 红点不等这一次拉取回来，先跟手。
+    await waitFor(() => {
+      expect(trigger.textContent).toMatch(/7/);
+    });
+    await waitFor(() => {
+      expect(mocks.listNotifications).toHaveBeenCalledTimes(callsBeforeEvent + 1);
+    });
   });
 
   it('listPending 为空时会自动标记已读并移出列表', async () => {
@@ -325,7 +398,7 @@ describe('NotificationCenter', () => {
     await screen.findByText('任务已完成 · build');
   });
 
-  it('忽略通知会立刻同步递减红点（不等下一轮轮询）', async () => {
+  it('忽略通知会立刻同步递减红点（不等下一次事件）', async () => {
     render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
 
     const trigger = await screen.findByTitle('通知中心');

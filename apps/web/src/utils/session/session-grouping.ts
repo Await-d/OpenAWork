@@ -15,6 +15,14 @@ export interface SessionWithWorkspaceLike {
 export interface WorkspaceSessionGroup<TSession extends SessionWithWorkspaceLike> {
   workspacePath: string | null;
   workspaceLabel: string;
+  /**
+   * 组内会话绑定的 SSH 连接 id。
+   *
+   * 非空即表示该工作区是远端目录（`workspacePath` 为远端主机的绝对路径），
+   * 会话列表据此渲染 SSH 标识，避免与同名本地目录混淆。
+   * 组内会话全部未绑定时为 `null`。
+   */
+  sshConnectionId?: string | null;
   sessions: TSession[];
 }
 
@@ -53,6 +61,22 @@ export function getWorkspaceGroupKey(workspacePath: string | null): string {
   return workspacePath ?? UNBOUND_WORKSPACE_GROUP_KEY;
 }
 
+/**
+ * 会话组展示名 = 用户自定义名称（别名）优先，回落到路径末段。
+ *
+ * 分组标题的默认值 {@link WorkspaceSessionGroup.workspaceLabel} 由纯函数计算，
+ * 读不到别名；别名来自 localStorage，只能由 UI 层通过 `useWorkspaceDisplayName`
+ * 注入解析函数。未绑定工作区的分组没有可命名的对象，直接沿用默认标签。
+ */
+export function resolveWorkspaceGroupDisplayName(
+  group: { workspacePath: string | null; workspaceLabel: string },
+  resolveDisplayName: (workspacePath: string | null) => string,
+): string {
+  return group.workspacePath === null
+    ? group.workspaceLabel
+    : resolveDisplayName(group.workspacePath);
+}
+
 export function countSessionsByWorkspace<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
 ): Map<string, number> {
@@ -79,52 +103,50 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
     compareSessionsByUpdatedAt(a, b, pinnedSessionIds),
   );
   const groups = new Map<string, WorkspaceSessionGroup<TSession>>();
-  const savedWorkspaceOrder = new Map<string, number>();
   const sessionsById = new Map(orderedSessions.map((session) => [session.id, session]));
   const resolvedBindingCache = new Map<string, SessionWorkspaceBinding>();
 
-  savedWorkspacePaths.forEach((path, index) => {
+  savedWorkspacePaths.forEach((path) => {
     const normalizedPath = normalizeWorkspacePath(path);
     if (!normalizedPath) {
       return;
-    }
-
-    if (!savedWorkspaceOrder.has(normalizedPath)) {
-      savedWorkspaceOrder.set(normalizedPath, index);
     }
 
     if (!groups.has(normalizedPath)) {
       groups.set(normalizedPath, {
         workspacePath: normalizedPath,
         workspaceLabel: basename(normalizedPath),
+        sshConnectionId: null,
         sessions: [],
       });
     }
   });
 
   for (const session of orderedSessions) {
-    const workspacePath = resolveSessionWorkspaceBinding(
-      session,
-      sessionsById,
-      resolvedBindingCache,
-    ).workspacePath;
+    const binding = resolveSessionWorkspaceBinding(session, sessionsById, resolvedBindingCache);
+    const workspacePath = binding.workspacePath;
     const groupKey = getWorkspaceGroupKey(workspacePath);
     const existing = groups.get(groupKey);
 
     if (existing) {
       existing.sessions.push(session);
+      // 组内首个解析出 SSH 绑定的会话决定整组的远端标识；后续会话不再覆盖。
+      if (existing.sshConnectionId === null && binding.sshConnectionId !== null) {
+        existing.sshConnectionId = binding.sshConnectionId;
+      }
       continue;
     }
 
     const nextGroup: WorkspaceSessionGroup<TSession> = {
       workspacePath,
       workspaceLabel: workspacePath ? basename(workspacePath) : UNBOUND_WORKSPACE_LABEL,
+      sshConnectionId: binding.sshConnectionId,
       sessions: [session],
     };
     groups.set(groupKey, nextGroup);
   }
 
-  return sortWorkspaceGroups(Array.from(groups.values()), savedWorkspaceOrder);
+  return sortWorkspaceGroups(Array.from(groups.values()));
 }
 
 export function groupSessionTreesByWorkspace<TSession extends SessionWithWorkspaceLike>(
@@ -309,14 +331,25 @@ function matchesSessionQuery<TSession extends SessionWithWorkspaceLike>(
   return (session.title ?? session.id).toLowerCase().includes(query);
 }
 
+/**
+ * 工作区分组排序。
+ *
+ * 规则：
+ * - 未绑定工作区的「会话」分组永远沉底，无论其会话多新；
+ * - 活跃分组（有会话）排在闲置分组之前；
+ * - 同为活跃或同为闲置时按名称字母序，保证多个工作区同时活跃也不会
+ *   因会话更新而互相抢位，列表位置稳定可预期。
+ *
+ * 排序键取 `workspaceLabel`（路径末段）而非用户自定义别名：别名是纯展示偏好，
+ * 用它排序会让「清空别名恢复默认名」时列表位置突然跳动。展示层用
+ * {@link resolveWorkspaceGroupDisplayName} 单独把别名渲染到标题上。
+ */
 function sortWorkspaceGroups<TSession extends SessionWithWorkspaceLike>(
   groups: WorkspaceSessionGroup<TSession>[],
-  savedWorkspaceOrder: Map<string, number>,
 ): WorkspaceSessionGroup<TSession>[] {
   const orderedGroups = [...groups];
 
   orderedGroups.sort((a, b) => {
-    // 会话的会话组永远沉底：无论组内会话多新、其他组是否为空。
     if (a.workspacePath === null && b.workspacePath !== null) return 1;
     if (a.workspacePath !== null && b.workspacePath === null) return -1;
 
@@ -387,13 +420,31 @@ export function resolveSessionWorkspaceBindingById<TSession extends SessionWithW
   sessions: readonly TSession[],
   sessionId: string,
 ): SessionWorkspaceBinding | undefined {
-  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
-  const targetSession = sessionsById.get(sessionId);
-  if (!targetSession) {
-    return undefined;
-  }
+  return createSessionWorkspaceBindingResolver(sessions)(sessionId);
+}
 
-  return resolveSessionWorkspaceBinding(targetSession, sessionsById, new Map());
+/**
+ * 批量解析会话工作区绑定的解析器。
+ *
+ * 会话列表要逐行取 SSH 标识时，若对每个会话调用
+ * {@link resolveSessionWorkspaceBindingById} 会重复构建 `sessionsById` 索引，
+ * 退化成 O(n²)。这里把索引与继承缓存提到闭包里按需构建，
+ * 列表规模较大（数百会话）时也能保持单次线性解析。
+ */
+export function createSessionWorkspaceBindingResolver<TSession extends SessionWithWorkspaceLike>(
+  sessions: readonly TSession[],
+): (sessionId: string) => SessionWorkspaceBinding | undefined {
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const resolvedBindingCache = new Map<string, SessionWorkspaceBinding>();
+
+  return (sessionId: string) => {
+    const targetSession = sessionsById.get(sessionId);
+    if (!targetSession) {
+      return undefined;
+    }
+
+    return resolveSessionWorkspaceBinding(targetSession, sessionsById, resolvedBindingCache);
+  };
 }
 
 function resolveSessionWorkspaceBinding<TSession extends SessionWithWorkspaceLike>(

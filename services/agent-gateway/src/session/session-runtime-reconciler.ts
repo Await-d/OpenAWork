@@ -19,6 +19,8 @@ export interface SessionRuntimeBatchReconciliationResult {
 
 export async function reconcileSessionRuntime(input: {
   nowMs?: number;
+  /** 见 `reconcileSessionStateStatus` 的同名参数：批量读路径传 false 以免写放大。 */
+  releaseStaleDeciding?: boolean;
   sessionId: string;
   userId: string;
 }): Promise<SessionRuntimeReconciliationResult> {

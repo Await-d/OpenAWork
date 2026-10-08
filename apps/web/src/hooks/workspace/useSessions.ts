@@ -103,6 +103,22 @@ export function useSessions() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  /**
+   * `navigate` 的稳定读取入口，刻意**不**把 `navigate` 列入任何 useCallback 依赖。
+   *
+   * 原因：应用挂在 `<BrowserRouter>` 下（非 data router，见 `main.tsx`），
+   * react-router 的 `useNavigateUnstable` 把 `locationPathname` 放进了
+   * `useCallback` 依赖，因此**每次路由跳转都会返回新的 navigate 引用**。
+   * 一旦把它写进 `fetchSessions` 依赖，依赖 `fetchSessions` 的挂载 effect
+   * 就会在每次路由跳转时重跑——而本 hook 在 fusion 布局下有 3 个常驻实例
+   * （`TitlebarTabStrip`、`FusionSidebar`、以及被无上限 `CachedRouteOutlet`
+   * 永久缓存的 `HomePage`），结果是每次切会话发 3 次 `/sessions`。
+   *
+   * `navigate` 在请求路径上只用于 401 跳登录（见 fetchSessions 的 catch），
+   * 完全可以用 ref 读取最新值，不该参与请求回调的依赖计算。
+   */
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
   const accessToken = useAuthStore((s) => s.accessToken);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -280,7 +296,7 @@ export function useSessions() {
         }
         if (err instanceof HttpError && err.status === 401) {
           clearAuth();
-          void navigate('/');
+          void navigateRef.current('/');
           return;
         }
         logger.error('Failed to fetch sessions:', err);
@@ -298,12 +314,13 @@ export function useSessions() {
       gatewayUrl,
       tokenStore,
       clearAuth,
-      navigate,
       mergeSavedWorkspacePaths,
       retainSubagentCollapsed,
       sessionListPathFilterEnabled,
       sessionListPathFilterFeatureEnabled,
       selectedWorkspacePath,
+      // 刻意不含 navigate —— 见 navigateRef 处的说明。移除后每次路由跳转
+      // 不再重跑挂载 effect，常驻的多个实例也不会各发一次 /sessions。
     ],
   );
 
@@ -339,9 +356,11 @@ export function useSessions() {
       });
 
       uiState.openDraftSession(resolvedWorkspace.workspacePath, resolvedWorkspace.sshConnectionId);
-      void navigate('/chat');
+      void navigateRef.current('/chat');
     },
-    [accessToken, location.pathname, navigate, sessions],
+    // 同样走 navigateRef：`navigate` 的引用随路由变化会让本回调（及其下游子组件）
+    // 无谓地重建。location.pathname 是解析当前会话的真实输入，保留。
+    [accessToken, location.pathname, sessions],
   );
 
   const startRename = useCallback((session: Session) => {

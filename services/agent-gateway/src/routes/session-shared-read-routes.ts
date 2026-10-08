@@ -76,6 +76,7 @@ interface SessionRow {
   user_id: string;
 }
 import { parseBody } from '../infra/parse-request.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface PermissionRequestRow {
   always_json: string | null;
@@ -150,7 +151,7 @@ function mapQuestionRequestRow(row: QuestionRequestRow) {
   try {
     questions = JSON.parse(row.questions_json) as QuestionToolInput['questions'];
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[shared-session] 提问请求 ${row.id} questions_json 解析失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,

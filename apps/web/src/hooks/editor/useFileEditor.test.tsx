@@ -81,7 +81,9 @@ describe('useFileEditor', () => {
     });
   });
 
-  it('SSH 远端身份下 saveFile 不调用本地写入，只设置错误提示', async () => {
+  it('SSH 远端身份下saveFile 带身份下发写请求（写回已打通）', async () => {
+    // 此前这里是「拦截并提示不支持」——网关 PUT /workspace/file 的 SSH 分支
+    // 补齐后该限制已成过时约束，改为下发身份走远端写入。
     useUIStateStore.getState().setReadIdentity({
       sessionId: 'sess-ssh-1',
       sshConnectionId: null,
@@ -98,8 +100,14 @@ describe('useFileEditor', () => {
       await result.current.saveFile(VALID_PATH);
     });
 
-    expect(workspaceClientMocks.writeFile).not.toHaveBeenCalled();
-    expect(result.current.saveError).toBe('SSH 远程会话暂不支持在工作区内保存文件。');
+    // 身份必须下发：缺它网关会写到本机同名路径（静默写错位置）。
+    expect(workspaceClientMocks.writeFile).toHaveBeenCalledWith(
+      expect.any(String),
+      VALID_PATH,
+      expect.any(String),
+      expect.objectContaining({ sessionId: 'sess-ssh-1', workspaceRoot: WORKSPACE_ROOT }),
+    );
+    expect(result.current.saveError).toBeNull();
 
     act(() => {
       useUIStateStore.getState().setOpenFilePathsForWorkspace(WORKSPACE_ROOT, []);

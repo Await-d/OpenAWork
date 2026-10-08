@@ -15,6 +15,7 @@ import { sqliteAll, sqliteRun } from '../infra/db.js';
 import { cancelHandoff } from '../handoff/store/handoff-store.js';
 import { findStaleHeartbeatCutoffIso, HEARTBEAT_STALE_AFTER_MS } from '../handoff/bus/heartbeat.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export interface ConsistencyFix {
   type:
@@ -124,7 +125,7 @@ export function preResumeConsistencyCheck(input: {
         detail: `parent ${session.parent_id} 已终态(${parent.substate})，child ${session.id} 仍 ${session.substate}，已置 cancelled`,
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[resume-consistency] orphan session 修复失败（${session.id}）：${
           err instanceof Error ? err.message : String(err)
         }`,
@@ -177,7 +178,7 @@ export function preResumeConsistencyCheck(input: {
         detail: `handoff ${handoff.id} state=${handoff.state} 但 to_session ${handoff.to_session_id ?? 'null'} 不存在`,
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[resume-consistency] zombie handoff 修复失败（${handoff.id}）：${
           err instanceof Error ? err.message : String(err)
         }`,
@@ -219,7 +220,7 @@ export function preResumeConsistencyCheck(input: {
           });
         }
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           `[resume-consistency] duplicate handoff 修复失败（${dup.id}）：${
             err instanceof Error ? err.message : String(err)
           }`,
@@ -263,7 +264,7 @@ export function preResumeConsistencyCheck(input: {
         detail: `handoff ${handoff.id} 心跳过期（last_heartbeat=${session.last_heartbeat ?? 'null'}），已退回 pending`,
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[resume-consistency] stale heartbeat 修复失败（${handoff.id}）：${
           err instanceof Error ? err.message : String(err)
         }`,
@@ -299,7 +300,7 @@ export function preResumeConsistencyCheck(input: {
         detail: `session ${session.id} state_status=running 但无活跃 handoff，已重置为 idle`,
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[resume-consistency] stuck running 修复失败（${session.id}）：${
           err instanceof Error ? err.message : String(err)
         }`,

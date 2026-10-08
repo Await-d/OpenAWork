@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceFileTreePanel } from './WorkspaceFileTreePanel.js';
+import type { FileTreeNode } from '../../common/modal/WorkspacePickerModal.js';
+import type { WorkspaceFileReadOptions } from '@openAwork/web-client';
 
 type MockContextTarget = {
   readonly directoryPath: string;
@@ -86,7 +88,18 @@ const sidebarHookCalls = vi.hoisted(() => ({
   lastOptions: null as {
     readonly expandedDirsArr: readonly string[];
     readonly expandedDirsSessionKey: string;
+    readonly fetchTree?: (path: string, depth?: number) => Promise<FileTreeNode[]>;
   } | null,
+}));
+
+/**
+ * SSH 读取身份（可覆写）。默认空身份 = 纯本地读取，请求与改动前一致。
+ */
+const readIdentity = vi.hoisted(() => ({
+  current: {
+    sessionId: null as string | null,
+    sshConnectionId: null as string | null,
+  },
 }));
 
 vi.mock('@openAwork/web-client', () => ({
@@ -119,6 +132,11 @@ vi.mock('../../../stores/ui/uiState.js', () => ({
   ) => {
     return typeof selector === 'function' ? selector(uiState) : uiState;
   },
+  /**
+   * SSH 读取身份。默认空身份 = 纯本地读取，请求参数与改动前一致；SSH 用例
+   * 通过覆写该 mock 注入会话 / 连接身份。
+   */
+  useWorkspaceReadIdentity: () => readIdentity.current,
 }));
 
 vi.mock('./use-session-sidebar-file-tree-state.js', () => ({
@@ -174,6 +192,8 @@ function renderPanel() {
 beforeEach(() => {
   vi.clearAllMocks();
   sidebarHookCalls.lastOptions = null;
+  readIdentity.current.sessionId = null;
+  readIdentity.current.sshConnectionId = null;
   uiState.fileTreeRootPath = '/workspace/demo';
   uiState.expandedDirsBySession = {};
   sidebarState.fileTree = [
@@ -244,6 +264,65 @@ describe('WorkspaceFileTreePanel', () => {
     renderPanel();
 
     expect(screen.queryByRole('button', { name: '切换工作区' })).toBeNull();
+  });
+
+  describe('SSH 远程工作区身份注入', () => {
+    /** 取出面板传给状态 hook 的 fetchTree 并调用，捕获它实际下发的身份参数。 */
+    async function captureFetchTreeCalls(
+      fetchTree: (
+        path: string,
+        depth?: number,
+        readOptions?: WorkspaceFileReadOptions,
+      ) => Promise<FileTreeNode[]>,
+    ): Promise<Array<WorkspaceFileReadOptions | undefined>> {
+      const seen: Array<WorkspaceFileReadOptions | undefined> = [];
+      const wrapped: (
+        path: string,
+        depth?: number,
+        readOptions?: WorkspaceFileReadOptions,
+      ) => Promise<FileTreeNode[]> = async (path, depth, readOptions) => {
+        seen.push(readOptions);
+        return fetchTree(path, depth, readOptions);
+      };
+
+      render(
+        <WorkspaceFileTreePanel
+          allowMutations={false}
+          fetchTree={wrapped}
+          onOpenFile={vi.fn()}
+          sessionId="sess-ssh"
+        />,
+      );
+
+      const injected = sidebarHookCalls.lastOptions?.fetchTree;
+      expect(injected).toBeTypeOf('function');
+      await injected?.('/home/await/project/demo', 1);
+      return seen;
+    }
+
+    it('会话身份优先下发 sessionId，使网关走 SSH 远端树', async () => {
+      readIdentity.current.sessionId = 'sess-1';
+
+      const seen = await captureFetchTreeCalls(vi.fn(async () => []));
+
+      expect(seen[0]).toMatchObject({ sessionId: 'sess-1' });
+    });
+
+    it('会话身份缺席时用连接身份', async () => {
+      readIdentity.current.sshConnectionId = 'conn-1';
+
+      const seen = await captureFetchTreeCalls(vi.fn(async () => []));
+
+      expect(seen[0]).toMatchObject({ sshConnectionId: 'conn-1' });
+    });
+
+    it('身份全空时仍是纯本地读取（不带任何 SSH 参数）', async () => {
+      const seen = await captureFetchTreeCalls(vi.fn(async () => []));
+
+      expect(seen[0]).toEqual({ workspaceRoot: '/workspace/demo' });
+      expect(seen[0]).not.toHaveProperty('sessionId');
+      expect(seen[0]).not.toHaveProperty('sshConnectionId');
+    });
   });
 
   it('普通错误不展示切换工作区按钮', () => {

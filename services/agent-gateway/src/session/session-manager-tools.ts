@@ -10,6 +10,7 @@ import { listSessionFileDiffs } from './session-file-diff-store.js';
 import { buildSessionFileChangesProjection } from './session-file-changes-projection.js';
 import { getRunEventRunId, listSessionRunEvents } from './session-run-events.js';
 import { listSessionSnapshots } from './session-snapshot-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   normalizeToolArgumentsForStorage,
   stringifyToolResultOutput,
@@ -285,7 +286,7 @@ export async function runSessionListTool(
         const runtime = await loadSessionRuntimeStatus({ sessionId: session.id, userId });
         return `| ${session.id} | ${messageCount} | ${formatDate(session.created_at)} | ${formatDate(session.updated_at)} | ${runtime.status ?? session.state_status} | ${truncateText(session.title ?? '')} |`;
       } catch (error) {
-        console.warn(
+        logGatewayWarn(
           `[session-manager] session_list 行 ${session.id} 运行时状态读取失败，降级为持久状态：${
             error instanceof Error ? error.message : String(error)
           }`,

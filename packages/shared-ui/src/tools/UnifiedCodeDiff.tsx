@@ -162,7 +162,11 @@ export interface UnifiedCodeDiffProps {
   filePath?: string;
   /** 隐藏内部头部（文件路径 + `+N / -M`）——由调用方渲染文件头时使用。 */
   hideHeader?: boolean;
-  maxHeight?: number;
+  /**
+   * 滚动区高度上限。`'fill'` 表示撑满父容器可用高度（父容器需为 flex/grid 子项且 `min-height: 0`），
+   * 用于「面板左右分栏」这类希望 diff 吃满剩余空间的场景——否则短 diff 下方会留大片空白。
+   */
+  maxHeight?: number | 'fill';
   revealFirstChange?: boolean;
   viewMode?: 'split' | 'unified';
 }
@@ -719,6 +723,7 @@ export function UnifiedCodeDiff({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [showAllRows, setShowAllRows] = useState(false);
   const isMinimalChrome = chrome === 'minimal';
+  const fillsHeight = maxHeight === 'fill';
   const usingSnapshot = typeof beforeText === 'string' || typeof afterText === 'string';
   const normalizedBefore = beforeText ?? '';
   const normalizedAfter = afterText ?? '';
@@ -849,6 +854,9 @@ export function UnifiedCodeDiff({
           padding: isMinimalChrome ? '4px 0' : '6px 10px',
           fontSize: 12,
           color: tokens.color.muted,
+          ...(fillsHeight
+            ? { display: 'flex', alignItems: 'center', height: '100%', minHeight: 0 }
+            : {}),
         }}
       >
         暂无可展示的 diff。
@@ -869,6 +877,8 @@ export function UnifiedCodeDiff({
         background: isMinimalChrome
           ? 'transparent'
           : `color-mix(in srgb, ${tokens.color.surface} 96%, transparent)`,
+        // fill 模式：作为 grid/flex 子项撑满父容器剩余高度，短 diff 不再留大片空白。
+        ...(fillsHeight ? { flex: '1 1 auto', minHeight: 0 } : {}),
       }}
     >
       {!hideHeader && (filePath || summary.added > 0 || summary.removed > 0) && (
@@ -883,6 +893,7 @@ export function UnifiedCodeDiff({
             background: isMinimalChrome
               ? 'transparent'
               : `color-mix(in srgb, ${tokens.color.surface} 12%, transparent)`,
+            flexShrink: 0,
           }}
         >
           <div
@@ -964,7 +975,8 @@ export function UnifiedCodeDiff({
         ref={scrollContainerRef}
         style={{
           overflow: 'auto',
-          maxHeight,
+          maxHeight: fillsHeight ? '100%' : maxHeight,
+          ...(fillsHeight ? { flex: '1 1 auto', minHeight: 0 } : {}),
         }}
       >
         <div style={{ minWidth: viewMode === 'split' ? 720 : undefined }}>

@@ -57,6 +57,8 @@ import {
   type SshPreviewResolution,
 } from '../workspace/ssh-workspace-preview.js';
 import { getSshService } from '../ssh/ssh-service.js';
+import { handleSshWorkspaceOp, sshIdentityFrom } from '../workspace/workspace-ssh-routes.js';
+import { workspaceSearchRoutes } from './workspace-search-routes.js';
 import { requireOwnedSshSession } from '../ssh/ssh-session-ownership.js';
 import { normalizeSshRemoteWorkingDirectory } from '../session/session-workspace-metadata.js';
 import { isPathInUserAllowlist } from '../workspace/user-workspace-allowlist.js';
@@ -178,8 +180,6 @@ const LARGE_PREVIEW_QUEUE_TIMEOUT_MS = 8_000;
 const SSH_PREVIEW_CONCURRENCY = 4;
 const SSH_PREVIEW_QUEUE_LIMIT = 12;
 const SSH_PREVIEW_QUEUE_TIMEOUT_MS = 10_000;
-const MAX_SEARCH_RESULTS = 50;
-const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
 /**
  * Sliding-window budget for `GET /workspace/files/search`, keyed per
@@ -376,11 +376,33 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.validate');
-      const schema = z.object({ path: z.string() });
+      const user = request.user as JwtPayload;
+      const schema = z.object({
+        path: z.string(),
+        workspaceRoot: z.string().optional(),
+        sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
+      });
 
       const parseStep = child('parse-query');
       const parsed = parseQuery(schema, request.query);
       parseStep.succeed();
+
+      // SSH 远端路径校验必须早于本地校验，否则远端 POSIX 路径会撞上
+      // 「无法访问 POSIX 路径」的 400。
+      if (
+        (
+          await handleSshWorkspaceOp({
+            reply,
+            user: user.sub,
+            op: 'validate',
+            identity: sshIdentityFrom(parsed),
+            path: parsed.path,
+          })
+        ).kind === 'handled'
+      ) {
+        return reply;
+      }
 
       const pathStep = child('path-safety');
       const safePath = validateWorkspacePathForRequest(parsed.path);
@@ -438,14 +460,37 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.tree');
+      const user = request.user as JwtPayload;
       const schema = z.object({
         path: z.string(),
         depth: z.coerce.number().int().min(1).max(MAX_DEPTH).default(2),
+        // SSH 远程工作区身份：与 `/workspace/file`、`/workspace/file/binary` 同构。
+        // 缺失时行为与改动前完全一致（纯本地树）。
+        workspaceRoot: z.string().optional(),
+        sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
       });
 
       const parseStep = child('parse-query');
       const parsed = parseQuery(schema, request.query);
       parseStep.succeed(undefined, { depth: parsed.depth });
+
+      // SSH 分支必须早于任何本地路径校验返回：命中 SSH 时提前回包，
+      // `local`（会话未绑定 SSH）才继续走本地逻辑。语义见 workspace-ssh-routes.ts。
+      if (
+        (
+          await handleSshWorkspaceOp({
+            reply,
+            user: user.sub,
+            op: 'tree',
+            identity: sshIdentityFrom(parsed),
+            path: parsed.path,
+            depth: parsed.depth,
+          })
+        ).kind === 'handled'
+      ) {
+        return reply;
+      }
 
       const pathStep = child('path-safety');
       const safePath = validateWorkspacePathForRequest(parsed.path);
@@ -1181,11 +1226,33 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.file.put');
-      const schema = z.object({ path: z.string(), content: z.string() });
+      const user = request.user as JwtPayload;
+      const schema = z.object({
+        path: z.string(),
+        content: z.string(),
+        sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
+        workspaceRoot: z.string().min(1).optional(),
+      });
 
       const parseStep = child('parse-body');
       const parsed = parseBody(schema, request.body);
       parseStep.succeed();
+
+      if (
+        (
+          await handleSshWorkspaceOp({
+            reply,
+            user: user.sub,
+            op: 'writeFile',
+            identity: sshIdentityFrom(parsed),
+            path: parsed.path,
+            content: parsed.content,
+          })
+        ).kind === 'handled'
+      ) {
+        return reply;
+      }
 
       const pathStep = child('path-safety');
       const safePath = validateWorkspacePathForRequest(parsed.path);
@@ -1218,11 +1285,34 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.file.post');
-      const schema = z.object({ path: z.string(), content: z.string().default('') });
+      const user = request.user as JwtPayload;
+      const schema = z.object({
+        path: z.string(),
+        content: z.string().default(''),
+        workspaceRoot: z.string().optional(),
+        sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
+      });
 
       const parseStep = child('parse-body');
       const parsed = parseBody(schema, request.body);
       parseStep.succeed();
+
+      if (
+        (
+          await handleSshWorkspaceOp({
+            reply,
+            user: user.sub,
+            op: 'writeFile',
+            identity: sshIdentityFrom(parsed),
+            path: parsed.path,
+            content: parsed.content,
+            mustNotExist: true,
+          })
+        ).kind === 'handled'
+      ) {
+        return reply;
+      }
 
       const pathStep = child('path-safety');
       const safePath = validateWorkspacePathForRequest(parsed.path);
@@ -1292,11 +1382,31 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { step, child } = startRequestWorkflow(request, 'workspace.directory.post');
-      const schema = z.object({ path: z.string() });
+      const user = request.user as JwtPayload;
+      const schema = z.object({
+        path: z.string(),
+        sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
+        workspaceRoot: z.string().min(1).optional(),
+      });
 
       const parseStep = child('parse-body');
       const parsed = parseBody(schema, request.body);
       parseStep.succeed();
+
+      if (
+        (
+          await handleSshWorkspaceOp({
+            reply,
+            user: user.sub,
+            op: 'createDirectory',
+            identity: sshIdentityFrom(parsed),
+            path: parsed.path,
+          })
+        ).kind === 'handled'
+      ) {
+        return reply;
+      }
 
       const pathStep = child('path-safety');
       const safePath = validateWorkspacePathForRequest(parsed.path);
@@ -1351,9 +1461,24 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const schema = z.object({
         path: z.string().min(1),
         sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
         workspaceRoot: z.string().min(1).optional(),
       });
       const parsed = parseQuery(schema, request.query);
+
+      if (
+        (
+          await handleSshWorkspaceOp({
+            reply,
+            user: user.sub,
+            op: 'deleteEntry',
+            identity: sshIdentityFrom(parsed),
+            path: parsed.path,
+          })
+        ).kind === 'handled'
+      ) {
+        return reply;
+      }
 
       const pathStep = child('path-safety');
       const { safePath, scopeRoot, missingSessionWorkspace } = resolveScopedWorkspacePath({
@@ -1426,9 +1551,25 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         oldPath: z.string().min(1),
         newPath: z.string().min(1),
         sessionId: z.string().min(1).optional(),
+        sshConnectionId: z.string().min(1).optional(),
         workspaceRoot: z.string().min(1).optional(),
       });
       const parsed = parseBody(schema, request.body);
+
+      if (
+        (
+          await handleSshWorkspaceOp({
+            reply,
+            user: user.sub,
+            op: 'renameEntry',
+            identity: sshIdentityFrom(parsed),
+            path: parsed.oldPath,
+            newPath: parsed.newPath,
+          })
+        ).kind === 'handled'
+      ) {
+        return reply;
+      }
 
       const pathStep = child('path-safety');
       const oldPathResolution = resolveScopedWorkspacePath({
@@ -1656,166 +1797,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.get(
-    '/workspace/find-by-name',
-    { preHandler: requireAuth },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      // Resolve a bare filename (e.g. `create_quotation.py`) to all
-      // file paths under `path` whose basename matches. Distinct from
-      // `/workspace/search` which is a content grep — for "user clicked
-      // a filename in chat, find the actual file" we need a basename
-      // lookup, not a content lookup.
-      //
-      // Returns up to `maxResults` matches. Callers (notably the chat
-      // path-ref click handler) should prefer the shortest path among
-      // exact basename matches when multiple are returned.
-      const { step, child } = startRequestWorkflow(request, 'workspace.find-by-name');
-      const schema = z.object({
-        name: z.string().min(1),
-        path: z.string(),
-        maxResults: z.coerce.number().int().min(1).max(50).default(8),
-      });
-      const parsed = parseQuery(schema, request.query);
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        step.fail('forbidden path');
-        return reply.status(403).send({
-          results: [],
-          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
-        });
-      }
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
-      await ensureIgnoreRulesLoadedForPath(safePath);
-
-      const { name, maxResults } = parsed;
-      const results: Array<{ path: string }> = [];
-      const scanStep = child('scan', undefined, { maxResults });
-
-      async function walk(dirPath: string): Promise<void> {
-        if (results.length >= maxResults) return;
-        let entries: Dirent[];
-        try {
-          entries = await fsp.readdir(dirPath, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const entry of entries) {
-          if (results.length >= maxResults) break;
-          if (IGNORED.has(entry.name)) continue;
-          const fullPath = join(dirPath, entry.name);
-          if (defaultIgnoreManager.shouldIgnore(fullPath)) continue;
-          if (entry.isDirectory()) {
-            await walk(fullPath);
-          } else if (entry.isFile() && entry.name === name) {
-            results.push({ path: fullPath });
-          }
-        }
-      }
-
-      await walk(safePath);
-      scanStep.succeed(undefined, { results: results.length });
-      step.succeed(undefined, { results: results.length });
-      return reply.send({ results });
-    },
-  );
-
-  app.get(
-    '/workspace/search',
-    { preHandler: requireAuth },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { step, child } = startRequestWorkflow(request, 'workspace.search');
-      const schema = z.object({
-        q: z.string().min(1),
-        path: z.string(),
-        maxResults: z.coerce.number().int().min(1).max(MAX_SEARCH_RESULTS).default(20),
-      });
-
-      const parseStep = child('parse-query');
-      const parsed = parseQuery(schema, request.query);
-      parseStep.succeed(undefined, { maxResults: parsed.maxResults });
-
-      const pathStep = child('path-safety');
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        pathStep.fail('forbidden path');
-        step.fail('forbidden path');
-        return reply.status(403).send({
-          results: [],
-          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
-        });
-      }
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
-      await ensureIgnoreRulesLoadedForPath(safePath);
-
-      const { maxResults, q } = parsed;
-      const results: Array<{ path: string; line: number; text: string }> = [];
-      let scannedFiles = 0;
-      let skippedLargeFiles = 0;
-
-      const scanStep = child('scan', undefined, { maxResults });
-      async function searchDirectory(dirPath: string): Promise<void> {
-        if (results.length >= maxResults) return;
-
-        let entries: Dirent[];
-        try {
-          entries = await fsp.readdir(dirPath, { withFileTypes: true });
-        } catch {
-          return;
-        }
-
-        for (const entry of entries) {
-          if (results.length >= maxResults) break;
-          if (IGNORED.has(entry.name)) continue;
-
-          const fullPath = join(dirPath, entry.name);
-          if (defaultIgnoreManager.shouldIgnore(fullPath)) continue;
-          if (entry.isDirectory()) {
-            await searchDirectory(fullPath);
-          } else if (entry.isFile()) {
-            let stat: Stats;
-            try {
-              stat = await fsp.stat(fullPath);
-            } catch {
-              continue;
-            }
-
-            scannedFiles++;
-            if (stat.size > MAX_SEARCH_FILE_BYTES) {
-              skippedLargeFiles++;
-              continue;
-            }
-
-            let content: string;
-            try {
-              content = await fsp.readFile(fullPath, 'utf8');
-            } catch {
-              continue;
-            }
-
-            const lines = content.split('\n');
-            for (let index = 0; index < lines.length && results.length < maxResults; index++) {
-              if (lines[index]!.includes(q)) {
-                results.push({ path: fullPath, line: index + 1, text: lines[index]!.trim() });
-              }
-            }
-          }
-        }
-      }
-
-      await searchDirectory(safePath);
-      scanStep.succeed(undefined, {
-        results: results.length,
-        scannedFiles,
-        skippedLargeFiles,
-      });
-      step.succeed(undefined, {
-        results: results.length,
-        scannedFiles,
-        skippedLargeFiles,
-      });
-
-      return reply.send({ results });
-    },
-  );
+  // 检索路由（find-by-name / search）拆到独立文件，见 workspace-search-routes.ts。
+  // 守卫以参数注入而非互相 import，避免两个路由文件形成环。
+  await workspaceSearchRoutes(app, {
+    checkUserWorkspaceAccess,
+    ensureIgnoreRulesLoadedForPath,
+    validateWorkspacePathForRequest,
+    forbiddenPathMessage: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+  });
 }

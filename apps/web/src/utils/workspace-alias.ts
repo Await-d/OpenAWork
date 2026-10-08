@@ -4,8 +4,8 @@ import { getPathBasename } from './workspace-path.js';
  * 工作区展示名（别名）持久化。
  *
  * 别名存放在 localStorage，key 形如 `ws-alias:/path/to/project`；
- * 侧栏面板头部与标题栏共用这里的读写实现，避免两处各自的 key 拼写漂移。
- * 写入时会广播自定义事件，使标题栏等只读消费方能实时刷新。
+ * 侧栏面板头部、标题栏与会话列表分组头共用这里的读写实现，避免各处各自的
+ * key 拼写与展示口径漂移。写入时会广播自定义事件，使其它消费方实时刷新。
  */
 const WORKSPACE_ALIAS_PREFIX = 'ws-alias:';
 const WORKSPACE_ALIAS_CHANGE_EVENT = 'openawork:workspace-alias-changed';
@@ -67,6 +67,36 @@ export function subscribeWorkspaceAlias(listener: () => void): () => void {
 /** 工作区展示名：别名优先，否则回落到路径末段。 */
 export function resolveWorkspaceDisplayName(workspacePath: string | null): string {
   return readWorkspaceAlias(workspacePath) || getPathBasename(workspacePath, 'OpenAWork');
+}
+
+/** 工作区别名长度上限：超出会撑破侧栏分组头并挤掉会话数徽标。 */
+export const WORKSPACE_ALIAS_MAX_LENGTH = 60;
+
+export type WorkspaceAliasValidation = { ok: true; alias: string } | { ok: false; reason: string };
+
+/**
+ * 校验重命名输入。
+ *
+ * 纯函数，便于重命名对话框与单测共用同一套规则：
+ * 空串视为「清除别名、恢复默认名」，其余按 trim + 长度上限判定。
+ */
+export function validateWorkspaceAlias(input: string): WorkspaceAliasValidation {
+  const alias = input.trim();
+
+  if (alias.length === 0) {
+    return { ok: true, alias: '' };
+  }
+
+  if (alias.length > WORKSPACE_ALIAS_MAX_LENGTH) {
+    return { ok: false, reason: `名称最长 ${WORKSPACE_ALIAS_MAX_LENGTH} 个字符` };
+  }
+
+  // 换行会让单行输入框与分组头的 ellipsis 截断行为不一致，直接拒绝。
+  if (/[\r\n\t]/u.test(alias)) {
+    return { ok: false, reason: '名称不能包含换行或制表符' };
+  }
+
+  return { ok: true, alias };
 }
 
 function broadcastWorkspaceAliasChange(): void {

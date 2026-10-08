@@ -25,6 +25,7 @@ import http, {
 } from 'node:http';
 import https from 'node:https';
 import { pipeline } from 'node:stream/promises';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 单次下载的进度快照。 */
 export interface DownloadProgress {
@@ -269,7 +270,7 @@ async function removePartialFile(destination: string): Promise<void> {
   try {
     await rm(destination, { force: true });
   } catch (error) {
-    console.warn(`[browser-download] 清理未完成的下载文件失败：${destination}`, error);
+    logGatewayWarn(`[browser-download] 清理未完成的下载文件失败：${destination}`, error);
   }
 }
 

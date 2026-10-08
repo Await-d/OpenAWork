@@ -124,6 +124,7 @@ import {
   loadCompanionSettingsForUser,
 } from '../workspace/companion-settings.js';
 import type { InputImageContent } from '@openAwork/shared';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export function resolveBlockedCalls(
   payload: ApprovedPermissionResumePayload,
@@ -358,7 +359,7 @@ async function continueFromApprovedToolResult(input: {
         }
       }
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[stream-runtime] flat MCP 注入失败（忽略，不阻塞）：${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -489,7 +490,7 @@ async function continueFromApprovedToolResult(input: {
           userId: input.userId,
         });
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           '[stream-runtime] runtime-thread heartbeat failed',
           err instanceof Error ? err.message : String(err),
         );
@@ -830,7 +831,7 @@ async function continueFromApprovedToolResult(input: {
               metadataJson: sessionContext.metadataJson,
             });
           } catch (error: unknown) {
-            console.warn('memory auto extraction failed after resume completion', error);
+            logGatewayWarn('memory auto extraction failed after resume completion', error);
           }
           // Session memory extraction (Layer 1 compaction support).
           // Fire-and-forget: extracts key session info for use by
@@ -999,7 +1000,7 @@ export async function resumeApprovedPermissionRequest(input: {
         userId: input.userId,
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         '[stream-runtime] resume runtime-thread heartbeat failed',
         err instanceof Error ? err.message : String(err),
       );

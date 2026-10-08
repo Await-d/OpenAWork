@@ -82,6 +82,7 @@ import {
   listRunningPm2AdjudicatorSessionIds,
 } from '../handoff/store/handoff-store.js';
 import { teamCrudRoutes } from './team-crud.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const TEAM_MEMBER_SPECIALTY_VALUES = Array.from(
   new Set<TeamMemberSpecialty>([
@@ -1463,7 +1464,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
               workspacePath,
             };
           } catch (error) {
-            console.warn(
+            logGatewayWarn(
               `[team] 会话 ${row.id} 任务投影构建失败，降级为空任务组：${
                 error instanceof Error ? error.message : String(error)
               }`,
@@ -3005,7 +3006,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
               workspacePath,
             };
           } catch (error) {
-            console.warn(
+            logGatewayWarn(
               `[team] 共享会话 ${sharedSession.session.id} 任务投影构建失败，降级为空任务组：${
                 error instanceof Error ? error.message : String(error)
               }`,

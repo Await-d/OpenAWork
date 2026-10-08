@@ -21,6 +21,7 @@ import { sniffImageMediaType } from '../media/image-signature.js';
 import { channelFetch } from './channel-http.js';
 import { normalizeInboundRaw, readRecord, readRecordArray, readString } from './inbound-utils.js';
 import type { ChannelImageAttachment, ChannelMessage } from './types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 入站图片上限（5 MiB）：超过则不下载，避免把大图塞进模型上下文。 */
 export const WHATSAPP_INBOUND_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -146,7 +147,7 @@ export async function downloadWhatsAppInboundImage(
       ...(input.fileName ? { fileName: input.fileName } : {}),
     };
   } catch (err) {
-    console.warn('[whatsapp] 入站图片下载失败', {
+    logGatewayWarn('[whatsapp] 入站图片下载失败', {
       mediaId: input.mediaId,
       error: err instanceof Error ? err.message : String(err),
     });

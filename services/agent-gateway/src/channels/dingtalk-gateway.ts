@@ -1,6 +1,7 @@
 import { DWClient, TOPIC_ROBOT } from 'dingtalk-stream';
 import type { DWClientDownStream } from 'dingtalk-stream';
 import type { ChannelEvent } from './types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export interface DingTalkGateway {
   start(): Promise<void>;
@@ -80,7 +81,7 @@ class OfficialDingTalkGateway implements DingTalkGateway {
     try {
       this.notify(event);
     } catch (error) {
-      console.warn('[dingtalk] gateway notify handler threw', {
+      logGatewayWarn('[dingtalk] gateway notify handler threw', {
         pluginId: this.pluginId,
         error: error instanceof Error ? error.message : String(error),
       });

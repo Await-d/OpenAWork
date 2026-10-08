@@ -1,5 +1,8 @@
 import type { SessionFileDiffEntry } from '@openAwork/web-client';
-import { ReviewPanelFileRowActions } from './ReviewPanelFileActions.js';
+import {
+  ReviewPanelDecisionBadge,
+  ReviewPanelFileRowActions,
+} from './ReviewPanelFileActions.js';
 import {
   formatFileStatus,
   getReviewPanelFileActionKey,
@@ -11,14 +14,29 @@ function formatScopeLabel(changeScope: ChangeScope): string {
   return changeScope === 'all' ? '全部轮次' : '当前轮次';
 }
 
+/**
+ * 目录前缀最多保留的段数。
+ *
+ * 侧栏左列固定约 380px，扣掉列表内边距、两个操作按钮和卡片自身内边距后，
+ * 路径行只剩 ~290px：一个 30+ 字符的文件名本身就吃掉 200px 以上，
+ * 目录再保留 2 段就注定把文件名截断。这里只保留最后 1 段，更浅的层级用「…」
+ * 代替——文件名优先完整，完整路径仍可通过 title 悬停查看。
+ */
+const MAX_DIR_SEGMENTS = 1;
+
 function splitFilePath(filePath: string): { readonly dir: string; readonly name: string } {
-  const separatorIndex = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
-  if (separatorIndex < 0) {
+  const segments = filePath.split(/[/\\]+/).filter((segment) => segment.length > 0);
+  const name = segments.at(-1);
+  if (name === undefined) {
     return { dir: '', name: filePath };
   }
+  const dirSegments = segments.slice(0, -1);
+  const keptDirSegments = dirSegments.slice(-MAX_DIR_SEGMENTS);
+  const separator = filePath.includes('\\') ? '\\' : '/';
+  const elided = keptDirSegments.length === 0 ? '' : `…${separator}`;
   return {
-    dir: filePath.slice(0, separatorIndex + 1),
-    name: filePath.slice(separatorIndex + 1),
+    dir: elided + keptDirSegments.join(separator) + (keptDirSegments.length > 0 ? separator : ''),
+    name,
   };
 }
 
@@ -47,14 +65,17 @@ function ReviewPanelFileButton({
       type="button"
     >
       <span className="review-panel-file-button__path" title={file.file}>
-        <span className="review-panel-file-button__dir">{dir}</span>
+        {dir ? <span className="review-panel-file-button__dir">{dir}</span> : null}
         <span className="review-panel-file-button__name">{name}</span>
       </span>
       <span className="review-panel-file-button__meta">
-        <span>{statusLabel}</span>
+        <ReviewPanelDecisionBadge file={file} />
+        <span className="review-panel-file-button__status">{statusLabel}</span>
         <span className="review-panel-file-button__additions">+{file.additions}</span>
         <span className="review-panel-file-button__deletions">-{file.deletions}</span>
-        {file.toolName ? <span>{file.toolName}</span> : null}
+        {file.toolName ? (
+          <span className="review-panel-file-button__tool">{file.toolName}</span>
+        ) : null}
       </span>
     </button>
   );

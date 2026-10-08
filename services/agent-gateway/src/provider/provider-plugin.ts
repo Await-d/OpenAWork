@@ -7,6 +7,7 @@
  */
 import type { AIProvider, AIModelConfig } from '@openAwork/agent-core';
 import type { UpstreamProtocol } from '../routes/upstream-protocol.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // ─── Hook 上下文类型 ───────────────────────────────────────────
 
@@ -99,7 +100,7 @@ export function runHookFirst<K extends keyof ProviderPluginHooks>(
       const result = fn(ctx);
       if (result !== undefined) return result as ReturnType<NonNullable<ProviderPluginHooks[K]>>;
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[provider-plugin] ${plugin.name}.${hookName} threw:`,
         err instanceof Error ? err.message : String(err),
       );
@@ -119,7 +120,7 @@ export function runHookAll<K extends keyof ProviderPluginHooks>(
     try {
       fn(ctx);
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[provider-plugin] ${plugin.name}.${hookName} threw:`,
         err instanceof Error ? err.message : String(err),
       );

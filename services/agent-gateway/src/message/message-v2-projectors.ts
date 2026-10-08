@@ -25,6 +25,7 @@ import {
   partToRowData,
 } from './message-v2-schema.js';
 import { buildToolOutputReferenceIdentity } from './tool-output-reference.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // ─── FK Constraint Tolerance ───
 // opencode pattern: ignore SQLITE_CONSTRAINT_FOREIGNKEY errors
@@ -45,7 +46,7 @@ function safeUpsert(fn: () => void, label: string, context: Record<string, strin
     fn();
   } catch (err) {
     if (isForeignKeyError(err)) {
-      console.warn(`[Projector] ignored late ${label}`, context);
+      logGatewayWarn(`[Projector] ignored late ${label}`, context);
       return;
     }
     throw err;

@@ -1,12 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { createWorkspaceClient } from '@openAwork/web-client';
+import { createWorkspaceClient, type WorkspaceFileReadOptions } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import {
   EMPTY_EXPANDED_DIRS,
   normalizeExpandedDirsSessionKey,
   useUIStateStore,
+  useWorkspaceReadIdentity,
 } from '../../../stores/ui/uiState.js';
+import {
+  buildPreviewReadAttempts,
+  runWithReadIdentityFallback,
+} from '../../../utils/file/preview-read-identity.js';
 import { useSessionSidebarFileTreeState } from './use-session-sidebar-file-tree-state.js';
 import FileTreeContextMenu from '../file-tree/FileTreeContextMenu.js';
 import {
@@ -48,8 +53,18 @@ const ICON_BTN_STYLE: React.CSSProperties = {
 export interface WorkspaceFileTreePanelProps {
   /** Called when the user clicks a file in the tree. */
   onOpenFile?: (path: string) => void;
-  /** Fetch tree data for a given path. */
-  fetchTree: (path: string, depth?: number) => Promise<FileTreeNode[]>;
+  /**
+   * Fetch tree data for a given path.
+   *
+   * 第三个参数是 SSH 远程工作区的读取身份，由本面板注入（见下方
+   * `fetchTreeWithIdentity`）：会话身份优先、其次连接身份。实现方可以忽略
+   * 该参数——忽略时退化为纯本地读取，请求与改动前一致。
+   */
+  fetchTree: (
+    path: string,
+    depth?: number,
+    readOptions?: WorkspaceFileReadOptions,
+  ) => Promise<FileTreeNode[]>;
   /** Whether the panel is actively visible (controls data loading). */
   active?: boolean;
   /** Optional callback to create a new session from a directory right-click. */
@@ -146,6 +161,28 @@ export function WorkspaceFileTreePanel({
   const { canOpen, unavailableReason, openInSystem } = useOpenPathInSystem();
   const hasSelectedWorkspace = fileTreeRootPath !== null;
 
+  const readIdentity = useWorkspaceReadIdentity();
+
+  /**
+   * 用 SSH 读取身份包装外部 `fetchTree`。
+   *
+   * 背景：文件树此前从不带身份请求，`/workspace/tree` 也没有 SSH 分支，于是
+   * SSH 绑定会话（网关在 Windows、工作区是远端 POSIX 路径）必然拿到 400
+   * 「当前网关运行在 Windows，无法访问 POSIX 路径：…」，并被原样渲染到面板上。
+   *
+   * 这里复用与文件预览完全相同的一套候选顺序（会话身份 → 连接身份 → 纯本地）
+   * 与回退判据（仅「跨主机路径不兼容」才换身份重试），因此侧边栏树与点击预览
+   * 的行为一致：SSH 会话读远端树，本地会话的请求参数与改动前逐字节相同。
+   */
+  const fetchTreeWithIdentity = useMemo(() => {
+    return async (path: string, depth?: number): Promise<FileTreeNode[]> => {
+      const attempts = buildPreviewReadAttempts(fileTreeRootPath, readIdentity);
+      return runWithReadIdentityFallback(attempts, (readOptions) =>
+        fetchTree(path, depth, readOptions),
+      );
+    };
+  }, [fetchTree, fileTreeRootPath, readIdentity]);
+
   const {
     applyCreatedEntry,
     applyDeletedEntry,
@@ -162,7 +199,7 @@ export function WorkspaceFileTreePanel({
     active,
     expandedDirsArr,
     expandedDirsSessionKey,
-    fetchTree,
+    fetchTree: fetchTreeWithIdentity,
     fileTreeRootPath,
     setExpandedDirs,
   });
@@ -185,28 +222,47 @@ export function WorkspaceFileTreePanel({
     [bumpWorkspaceTreeVersion, refreshDirectory],
   );
 
+  /**
+   * 写操作的 SSH 读取身份。
+   *
+   * 与读路径同一个来源（`readIdentity` + `fileTreeRootPath`）。缺失时网关按本机
+   * 路径写入，SSH 远端工作区下会「假成功」——远端并没有该条目，但 UI 仍把它
+   * 插进了树。
+   */
+  const writeIdentity = useMemo(() => {
+    // 面板的 `sessionId` prop 与 store 里的 readIdentity 可能不一致（例如面板
+    // 复用为只读浏览时），优先用 readIdentity 的会话身份。
+    const identitySessionId = readIdentity.sessionId ?? (sessionId ? String(sessionId) : null);
+    const sshConnectionId = readIdentity.sshConnectionId;
+    return {
+      ...(identitySessionId ? { sessionId: identitySessionId } : {}),
+      ...(!identitySessionId && sshConnectionId ? { sshConnectionId } : {}),
+      ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
+    };
+  }, [readIdentity.sessionId, readIdentity.sshConnectionId, fileTreeRootPath, sessionId]);
+
   const createWorkspaceFile = useCallback(
     async (path: string): Promise<void> => {
       try {
-        await workspaceClient.createFile(accessToken ?? '', path);
+        await workspaceClient.createFile(accessToken ?? '', path, '', writeIdentity);
       } catch (err) {
         const message = err instanceof Error ? err.message : '新建文件失败';
         throw new Error(message);
       }
     },
-    [accessToken, workspaceClient],
+    [accessToken, writeIdentity, workspaceClient],
   );
 
   const createWorkspaceDirectory = useCallback(
     async (path: string): Promise<void> => {
       try {
-        await workspaceClient.createDirectory(accessToken ?? '', path);
+        await workspaceClient.createDirectory(accessToken ?? '', path, writeIdentity);
       } catch (err) {
         const message = err instanceof Error ? err.message : '新建文件夹失败';
         throw new Error(message);
       }
     },
-    [accessToken, workspaceClient],
+    [accessToken, writeIdentity, workspaceClient],
   );
 
   const handleCreateEntry = useCallback(

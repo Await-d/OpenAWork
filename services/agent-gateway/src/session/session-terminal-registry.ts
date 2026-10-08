@@ -37,9 +37,49 @@ import type {
 } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { publishSessionRunEvent } from './session-run-events.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** Max bytes retained in `output_tail`. UTF-8 safe truncation enforced. */
 export const TERMINAL_OUTPUT_TAIL_BYTES = 8 * 1024;
+
+/**
+ * 列表接口（`GET /sessions/:id/terminals`）返回的 `outputTail` 字符上限。
+ *
+ * 该接口是**轮询接口**（前端活跃期每 5s 拉一次），而 `output_tail` 单行最长
+ * 8KB —— `limit=50` 时一次响应就是 ~400KB：SQLite 读、`JSON.stringify`（同步
+ * 阻塞事件循环）、传输、前端 `JSON.parse` 与 50 个终端卡片的 DOM 重建全部被放大，
+ * 多客户端叠加后会把网关事件循环压满，表现为其它请求排队超时。
+ *
+ * 完整输出有独立的、更合适的数据面：单终端详情 `GET /terminals/:id`、
+ * 重连快照 `GET /terminals/:id/stream`、以及每终端 WS/SSE 实时流。列表只需要给
+ * 卡片预览一小段尾巴，故在 SQL 层就裁掉，避免把整列读进 JS。
+ *
+ * SQLite 的 `substr()` 对 TEXT 按字符（而非字节）切片，天然不会切出半个 UTF-8
+ * 码位，因此不需要在 JS 侧再做 `tailUtf8` 兜底。
+ */
+export const TERMINAL_LIST_TAIL_CHARS = 1024;
+
+/** 列表接口单次返回的终端条数上限。 */
+export const TERMINAL_LIST_MAX_LIMIT = 100;
+
+/**
+ * `listOwnedTerminalPids` 单次扫描上限。端口归属匹配只需覆盖实际在监听的
+ * 终端数量（个位数到几十），给足冗余后封顶，避免异常账号把整表拉进内存。
+ */
+const OWNED_TERMINAL_PIDS_MAX_LIMIT = 500;
+
+/**
+ * 列表查询显式列清单。刻意不用 `SELECT *`：
+ * `output_tail` 通过 `substr` 裁剪后单独取，其余列逐个列出，
+ * 避免以后加列时无声地把大字段灌进每个轮询响应。
+ */
+const TERMINAL_LIST_COLUMNS = `
+  terminal_id, session_id, user_id, client_request_id, tool_name, kind,
+  command, description, name, cwd, pid, status, exit_code,
+  started_at_ms, ended_at_ms, last_activity_ms, output_bytes_total,
+  substr(output_tail, -${TERMINAL_LIST_TAIL_CHARS}) AS output_tail,
+  output_path, metadata_json
+`;
 
 /**
  * Max bytes retained in the per-terminal replay ring buffer. Reconnect
@@ -181,7 +221,7 @@ function notifyImmediateOutput(terminalId: string, chunk: TerminalOutputChunk): 
       listener(chunk);
     } catch (error) {
       // A listener failure must never break the PTY hot path.
-      console.warn(
+      logGatewayWarn(
         '[session-terminal-registry] immediate output listener failed:',
         error instanceof Error ? error.message : String(error),
       );
@@ -345,7 +385,7 @@ function emitRunEvent(
     publishSessionRunEvent(sessionId, event, clientRequestId ? { clientRequestId } : undefined);
   } catch (error) {
     // Never let a publish failure cascade into the bash tool's hot path.
-    console.warn(
+    logGatewayWarn(
       '[session-terminal-registry] publishSessionRunEvent failed:',
       error instanceof Error ? error.message : String(error),
     );
@@ -725,12 +765,19 @@ export interface ListSessionTerminalsInput {
   /** When false, only returns rows whose status === 'running'. Defaults to true. */
   includeClosed?: boolean;
   limit?: number;
+  /**
+   * `outputTail` 字符上限。省略时用 `TERMINAL_LIST_TAIL_CHARS`（列表预览用的
+   * 小尾巴）；传 `TERMINAL_OUTPUT_TAIL_BYTES` 量级的值可取回完整尾巴。
+   * 仅影响 `outputTail` 字段，`outputBytesTotal` 始终是完整累计字节数。
+   */
+  tailChars?: number;
 }
 
 export function listSessionTerminals(input: ListSessionTerminalsInput): SessionTerminalRecord[] {
   const includeClosed = input.includeClosed !== false;
-  const limit = Math.max(1, Math.min(200, input.limit ?? 50));
-  const baseQuery = `SELECT * FROM session_terminals
+  const limit = Math.max(1, Math.min(TERMINAL_LIST_MAX_LIMIT, input.limit ?? 50));
+  const tailChars = Math.max(0, Math.floor(input.tailChars ?? TERMINAL_LIST_TAIL_CHARS));
+  const baseQuery = `SELECT ${TERMINAL_LIST_COLUMNS} FROM session_terminals
                      WHERE session_id = ? AND user_id = ?`;
   // "Active" terminals include `running` (foreground/background bash
   // still streaming output) and `tmux-spawned` (live tmux sessions we
@@ -739,7 +786,18 @@ export function listSessionTerminals(input: ListSessionTerminalsInput): SessionT
     ? `${baseQuery} ORDER BY started_at_ms DESC LIMIT ?`
     : `${baseQuery} AND status IN ('running','tmux-spawned') ORDER BY started_at_ms DESC LIMIT ?`;
   const rows = sqliteAll<SessionTerminalRow>(finalQuery, [input.sessionId, input.userId, limit]);
-  return rows.map(rowToRecord);
+  if (tailChars >= TERMINAL_OUTPUT_TAIL_BYTES) {
+    return rows.map(rowToRecord);
+  }
+  // 列表默认按 `TERMINAL_LIST_TAIL_CHARS` 裁剪；这里再按调用方要求做一次
+  // UTF-8 安全的字符级截断（SQL 侧 substr 已保证码位完整，此处只裁字符数）。
+  return rows.map((row) =>
+    rowToRecord(
+      row.output_tail.length > tailChars
+        ? { ...row, output_tail: row.output_tail.slice(-tailChars) }
+        : row,
+    ),
+  );
 }
 
 export function listSessionTerminalSummaries(
@@ -761,11 +819,14 @@ export function listOwnedTerminalPids(userId: string): Array<{
   sessionId: string;
   terminalId: string;
 }> {
+  // 上界保护：这张表按 user 累积且 `user_id` 之前无索引，一次异常活跃的账号能
+  // 扫出整表行数并把 pid 全量拉进内存。端口归属匹配只需最新的若干条即可。
   const rows = sqliteAll<{ pid: number | null; session_id: string; terminal_id: string }>(
     `SELECT pid, session_id, terminal_id FROM session_terminals
       WHERE user_id = ? AND pid IS NOT NULL AND pid > 0
         AND status IN ('running', 'idle')
-      ORDER BY started_at_ms DESC`,
+      ORDER BY started_at_ms DESC
+      LIMIT ${OWNED_TERMINAL_PIDS_MAX_LIMIT}`,
     [userId],
   );
   const result: Array<{ pid: number; sessionId: string; terminalId: string }> = [];
@@ -893,7 +954,7 @@ export function reconcileStaleRunningTerminalsAtBoot(): number {
       );
       staleCount += 1;
     } catch (error) {
-      console.warn(
+      logGatewayWarn(
         `[session-terminals] boot 期标记陈旧终端失败，已跳过：${row.terminal_id}：${
           error instanceof Error ? error.message : String(error)
         }`,

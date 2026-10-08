@@ -26,6 +26,8 @@ export interface FusionChatGroupRow {
   key: string;
   workspacePath: string | null;
   workspaceLabel: string;
+  /** 组内会话绑定的 SSH 连接 id；非空表示该工作区是远端目录。置顶分区为 null。 */
+  sshConnectionId: string | null;
   sessionCount: number;
   roots: WorkspaceSessionTreeNode<Session>[];
   /** 置顶分区：不提供「在此工作区新建会话」入口 */
@@ -60,6 +62,7 @@ export function buildFusionChatGroups({
       key: getWorkspaceGroupKey(treeGroup.workspacePath),
       workspacePath: treeGroup.workspacePath,
       workspaceLabel: treeGroup.workspaceLabel,
+      sshConnectionId: treeGroup.sshConnectionId ?? null,
       sessionCount: treeGroup.sessions.length,
       roots: treeGroup.roots,
       isPinnedGroup: false,
@@ -76,7 +79,7 @@ export function buildFusionChatGroups({
     pinnedCountByGroupKey.set(groupKey, countPinnedNodes(treeGroup.roots, isPinned));
   }
 
-  const rows: WorkingGroupRow[] = groupedSessions.map((group) => {
+  const rows: FusionChatGroupRow[] = groupedSessions.map((group) => {
     const groupKey = getWorkspaceGroupKey(group.workspacePath);
     const treeGroup = findTreeGroup(group.workspacePath);
     const roots = stripPinnedNodes(treeGroup?.roots ?? [], isPinned);
@@ -86,22 +89,24 @@ export function buildFusionChatGroups({
       key: groupKey,
       workspacePath: group.workspacePath,
       workspaceLabel: group.workspaceLabel,
+      sshConnectionId: group.sshConnectionId ?? null,
       sessionCount: Math.max(0, (sessionCountByWorkspace.get(groupKey) ?? 0) - pinnedCount),
       roots,
       isPinnedGroup: false,
-      latestUpdatedAt: findLatestUpdatedAt(roots),
     };
   });
 
-  // 最近使用的项目排前面：有会话的先行，其后按组内最近活动时间倒序。
-  rows.sort(compareGroupsByRecentActivity);
-  const orderedRows: FusionChatGroupRow[] = rows.map(({ latestUpdatedAt: _latest, ...row }) => row);
+  // 活跃工作区排前面；同为活跃（或同为闲置）时按名称字母序，
+  // 让列表位置稳定可预期，不随会话更新而跳动。
+  rows.sort(compareWorkspaceGroups);
+  const orderedRows: FusionChatGroupRow[] = rows;
 
   if (pinnedNodes.length > 0) {
     orderedRows.unshift({
       key: PINNED_SESSION_GROUP_KEY,
       workspacePath: null,
       workspaceLabel: '置顶',
+      sshConnectionId: null,
       sessionCount: pinnedNodes.length,
       roots: pinnedNodes,
       isPinnedGroup: true,
@@ -123,13 +128,16 @@ export function countRunningSessions(nodes: readonly WorkspaceSessionTreeNode<Se
   return count;
 }
 
-interface WorkingGroupRow extends FusionChatGroupRow {
-  latestUpdatedAt: string | null;
-}
-
-function compareGroupsByRecentActivity(a: WorkingGroupRow, b: WorkingGroupRow): number {
-  // 会话的会话组永远沉底：不参与「最近活动」排序，
-  // 避免它的会话刚更新过就顶到已绑定工作区分组上方。
+/**
+ * 工作区分组排序。
+ *
+ * 规则：
+ * - 未绑定工作区的「会话」分组永远沉底，不参与字母排序；
+ * - 活跃分组（有会话）排在闲置分组之前；
+ * - 同为活跃或同为闲置时按名称字母序，保证多个工作区同时活跃也不会
+ *   因会话更新而互相抢位，列表位置稳定可预期。
+ */
+function compareWorkspaceGroups(a: FusionChatGroupRow, b: FusionChatGroupRow): number {
   const aUnbound = a.workspacePath === null;
   const bUnbound = b.workspacePath === null;
   if (aUnbound !== bUnbound) {
@@ -142,28 +150,7 @@ function compareGroupsByRecentActivity(a: WorkingGroupRow, b: WorkingGroupRow): 
     return aHasSessions ? -1 : 1;
   }
 
-  if (aHasSessions && bHasSessions) {
-    const byUpdatedAt = (b.latestUpdatedAt ?? '').localeCompare(a.latestUpdatedAt ?? '');
-    if (byUpdatedAt !== 0) {
-      return byUpdatedAt;
-    }
-  }
-
   return a.workspaceLabel.localeCompare(b.workspaceLabel, undefined, { sensitivity: 'base' });
-}
-
-function findLatestUpdatedAt(nodes: readonly WorkspaceSessionTreeNode<Session>[]): string | null {
-  let latest: string | null = null;
-  for (const node of nodes) {
-    if (latest === null || node.session.updated_at.localeCompare(latest) > 0) {
-      latest = node.session.updated_at;
-    }
-    const childLatest = findLatestUpdatedAt(node.children);
-    if (childLatest !== null && (latest === null || childLatest.localeCompare(latest) > 0)) {
-      latest = childLatest;
-    }
-  }
-  return latest;
 }
 
 function collectPinnedNodes(

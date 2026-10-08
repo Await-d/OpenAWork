@@ -35,7 +35,9 @@
   gap: var(--spacing-2, 8px);
   min-height: 0;
   overflow: hidden;
-  padding: var(--spacing-3, 12px);
+  /* 与右列 diff 容器同用 spacing-2，两侧内缩对称；header 与列表之间保留 spacing-2
+     作为唯一的段落分隔。 */
+  padding: var(--spacing-2, 8px);
 }
 
 .review-panel-file-list__header {
@@ -68,13 +70,19 @@
   align-content: start;
   display: grid;
   flex: 1 1 auto;
-  gap: var(--spacing-2, 8px);
+  /* 行间距收到 spacing-1：卡片本身已有描边 + 圆角提供边界，8px 间距过疏，
+     会把一屏可见的文件数从 ~13 个压到 ~10 个。 */
+  gap: var(--spacing-1, 4px);
   list-style: none;
   margin: 0;
   min-height: 0;
   overscroll-behavior: contain;
   overflow-y: auto;
   padding: 0;
+  /* 末行不要贴着容器边框被硬切，留一点缓冲让「还有更多」读起来是滚动而非断裂。
+     （不用 mask 渐隐：列表不满一屏时渐隐会误伤最后一行。） */
+  padding-bottom: var(--spacing-1, 4px);
+  scroll-padding-bottom: var(--spacing-2, 8px);
 }
 
 .review-panel-file-list__item {
@@ -97,7 +105,11 @@
   cursor: pointer;
   display: grid;
   gap: var(--spacing-1, 4px);
-  padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+  /* 上下收到 spacing-1：两行文字各约 15px，加 4px 行距与 4px 上下内缩后
+     卡片高 ~41px，行距 ~45px——18 个文件的清单一屏能看完。 */
+  padding: var(--spacing-1, 4px) var(--spacing-2, 8px);
+  /* 选中态的左侧强调轨以本元素为定位上下文。 */
+  position: relative;
   text-align: left;
   transition:
     background var(--dur-micro) var(--ease-micro),
@@ -122,9 +134,20 @@
 }
 
 .review-panel-file-button--selected {
-  background: var(--bg-overlay);
-  border-color: var(--border-default);
+  background: color-mix(in oklch, var(--accent) 10%, var(--bg-base));
+  border-color: var(--accent-border);
   box-shadow: var(--shadow-md);
+}
+
+/* 选中态加左侧强调轨：分栏窄列表里仅靠底色区分选中项不够醒目。 */
+.review-panel-file-button--selected::before {
+  background: var(--accent);
+  border-radius: 2px;
+  content: '';
+  inset-block: 6px;
+  inset-inline-start: 0;
+  position: absolute;
+  width: 2px;
 }
 
 .review-panel-file-button__path {
@@ -139,7 +162,9 @@
 
 .review-panel-file-button__dir {
   color: var(--fg-muted);
-  flex: 1 1 auto;
+  /* 目录已是压缩后的短前缀（见 splitFilePath），允许收缩并尾部省略；
+     文件名则固定不收缩，保证「哪个文件」始终完整可读。 */
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -149,7 +174,6 @@
 .review-panel-file-button__name {
   color: var(--fg-strong);
   flex: 0 0 auto;
-  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -159,9 +183,21 @@
   align-items: center;
   color: var(--fg-muted);
   display: flex;
-  flex-wrap: wrap;
-  font-size: 10px;
-  gap: var(--spacing-2, 8px);
+  /* 单行不换行：窄侧栏里一旦 wrap，`+N -N` 与工具名会各占一行，
+     行高从 ~34px 膨胀到 ~64px，一屏能看的文件数直接腰斩。 */
+  flex-wrap: nowrap;
+  /* 元信息行有 4~5 个元素，8px 间距会产生 32px 纯空白并挤压工具名 chip；
+     收到 spacing-1 让「已接受 修改 +136 -117 write」读作一组而非散落标签。 */
+  gap: var(--spacing-1, 4px);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.review-panel-file-button__status,
+.review-panel-file-button__additions,
+.review-panel-file-button__deletions {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .review-panel-file-button__additions {
@@ -174,12 +210,33 @@
   font-weight: 700;
 }
 
+/* 工具名（edit / write …）是次要元信息：做成弱化 chip，
+   且是元信息行里唯一允许被压缩/省略的元素——宽度紧张时它先让位给增删行数。 */
+.review-panel-file-button__tool {
+  background: var(--bg-hover);
+  border-radius: var(--radius-pill);
+  color: var(--fg-subtle);
+  flex: 0 1 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 var(--spacing-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .review-panel-diff-preview {
   background: var(--bg-base);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md, 8px);
   display: grid;
-  gap: var(--spacing-2, 8px);
+  /* 单行轨道 + minmax(0,1fr)：diff（maxHeight="fill"）据此撑满剩余高度并在内部滚动，
+     父级不再需要自己做纵向滚动，避免双层滚动条。 */
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
-  padding: var(--spacing-3, 12px);
+  min-width: 0;
+  overflow: hidden;
+  /* 与左列列表同用 spacing-2，两侧视觉内缩对称；diff 内容自带行背景，
+     多余内缩只会让长代码行更早触发横向滚动。 */
+  padding: var(--spacing-2, 8px);
 }

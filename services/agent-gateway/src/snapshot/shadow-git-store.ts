@@ -29,6 +29,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { resolveGatewayDataDir } from '../infra/storage-paths.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -678,7 +679,7 @@ class ShadowGitStoreImpl implements ShadowGitStore {
       });
       if (result.exitCode !== 0) {
         // gc 失败不致命
-        console.warn('[shadow-git] gc warning:', result.stderr.trim());
+        logGatewayWarn('[shadow-git] gc warning:', result.stderr.trim());
       }
     });
   }

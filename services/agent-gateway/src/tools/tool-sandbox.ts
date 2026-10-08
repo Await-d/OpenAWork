@@ -345,6 +345,7 @@ import {
   writeTool,
 } from './workspace-tools.js';
 import { rewriteLegacyToolRequest } from './legacy-tool-name-rewrite.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 function formatToolInputValidationOutput(
   toolName: string,
@@ -3694,7 +3695,7 @@ async function executeGatewayManagedToolImpl(
             subResult = await sandbox.execute(subRequest, signal, sessionId, subExecutionContext);
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            console.warn(
+            logGatewayWarn(
               `[batch] 子工具 ${tool}（#${index}）执行抛错，已降级为错误结果：${message}`,
             );
             const failProgress: BatchSubToolProgress = {
@@ -4677,7 +4678,7 @@ async function executeGatewayManagedToolImpl(
           }
         } catch (rollbackError) {
           releaseChildSessionActiveSlot({ childSessionId, userId });
-          console.warn(
+          logGatewayWarn(
             `[task] 子代理派发失败回滚未完成（childSessionId=${childSessionId}）：${
               rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
             }`,
@@ -7357,7 +7358,7 @@ export class ToolSandbox {
         });
       } catch (error) {
         // 兜底：解析工作区根等前置步骤异常也不能让 read 失败。
-        console.warn('[tool-sandbox] read 注入 AGENTS.md 失败，已跳过：', error);
+        logGatewayWarn('[tool-sandbox] read 注入 AGENTS.md 失败，已跳过：', error);
       }
     }
 
@@ -7427,7 +7428,7 @@ export function createDefaultSandbox(
             ...(policy.timeoutMs !== undefined ? { timeoutMs: policy.timeoutMs } : {}),
           };
         } catch (err) {
-          console.warn('[websearch-policy] resolve failed —', String(err));
+          logGatewayWarn('[websearch-policy] resolve failed —', String(err));
           return null;
         }
       },

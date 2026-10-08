@@ -13,7 +13,7 @@
  */
 import type { ReactNode } from 'react';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError, SESSIONS_LIST_PAGE_LIMIT } from '@openAwork/web-client';
 import { useSessions } from './useSessions.js';
@@ -44,12 +44,24 @@ function LocationProbe() {
   return <div data-testid="location-probe">{location.pathname}</div>;
 }
 
+/**
+ * 把 `useNavigate()` 捕获到模块级变量，供路由切换用例触发真实导航。
+ * 不用它就无法验证「navigate 引用随路由变化」这一行为本身。
+ */
+let capturedNavigate: ((path: string) => void) | null = null;
+
+function NavigateCapture() {
+  capturedNavigate = useNavigate();
+  return null;
+}
+
 function createWrapper(initialPath = '/chat/session-1') {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <MemoryRouter initialEntries={[initialPath]}>
         {children}
         <LocationProbe />
+        <NavigateCapture />
       </MemoryRouter>
     );
   };
@@ -60,6 +72,7 @@ function renderUseSessions(initialPath?: string) {
 }
 
 beforeEach(() => {
+  capturedNavigate = null;
   sessionsClientMocks.create.mockClear();
   sessionsClientMocks.list.mockClear();
   useAuthStore.setState({ accessToken: 'test-token', gatewayUrl: 'http://localhost:3000' });
@@ -405,5 +418,36 @@ describe('useSessions — 剪除失效的子代理折叠 ID', () => {
     await waitFor(() => expect(result.current.sessions).toHaveLength(SESSIONS_LIST_PAGE_LIMIT));
 
     expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual(['parent-beyond-limit']);
+  });
+});
+
+describe('useSessions — 路由切换不应重复拉取列表', () => {
+  /**
+   * 回归：`navigate` 曾被列入 `fetchSessions` 依赖。
+   *
+   * 应用挂在 `<BrowserRouter>`（非 data router）下，react-router 的
+   * `useNavigateUnstable` 把 `locationPathname` 放进了 useCallback 依赖，所以
+   * 每次路由跳转 `navigate` 都是新引用 → 依赖 `fetchSessions` 的挂载 effect
+   * 重跑。而本 hook 在 fusion 布局下有 3 个常驻实例（TitlebarTabStrip、
+   * FusionSidebar、被无上限 CachedRouteOutlet 永久缓存的 HomePage），于是每次
+   * 切会话都会发出 3 次 `/sessions`。修复方式是把 navigate 移出依赖、改用
+   * navigateRef（401 跳登录仍可用）。
+   */
+  it('MemoryRouter 导航到新会话时不再额外请求 /sessions', async () => {
+    sessionsClientMocks.list.mockResolvedValue([
+      { id: 'session-a', title: 'session-a', updated_at: '2026-01-02T00:00:00.000Z' },
+    ]);
+
+    const { result } = renderUseSessions('/chat/session-a');
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+    expect(sessionsClientMocks.list).toHaveBeenCalledTimes(1);
+
+    // 切到另一个会话（等价于 /chat/session-a → /chat/session-b 的路由变化）
+    await act(async () => {
+      capturedNavigate?.('/chat/session-b');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(sessionsClientMocks.list).toHaveBeenCalledTimes(1);
   });
 });

@@ -4,6 +4,8 @@ import fastifyStatic from '@fastify/static';
 import { join, dirname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, statSync } from 'fs';
+import { logNotFoundRequest } from '../infra/error-handler.js';
+import { REQUEST_ID_HEADER } from '../infra/request-diagnostics.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -69,7 +71,14 @@ async function webStaticPlugin(app: FastifyInstance): Promise<void> {
     const accept = String(request.headers['accept'] ?? '');
     const isHtmlNav = (method === 'GET' || method === 'HEAD') && accept.includes('text/html');
     if (!isHtmlNav) {
-      void reply.code(404).send({ error: 'not_found', path: request.url });
+      // API 型 404 不经过全局 errorHandler，若不在此记录就会彻底消失在服务端，
+      // 无法区分「客户端调用路径写错」与「客户端版本落后于网关」。复用全局处理器的
+      // 记录逻辑，保证两条 404 路径的日志形态一致。
+      const requestId = logNotFoundRequest(request);
+      void reply
+        .code(404)
+        .header(REQUEST_ID_HEADER, requestId)
+        .send({ error: 'not_found', path: request.url });
       return;
     }
     void reply.type('text/html').send(indexHtml);

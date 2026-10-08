@@ -98,6 +98,7 @@ function storedToolResultFromPart(part: ToolPart): StoredToolResult | null {
 
 // Ensure projectors are registered
 import './message-v2-projectors.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // ─── V1 → V2 Conversion ───
 
@@ -1174,7 +1175,7 @@ function parseClientRequestIdFromMessageRow(dataJson: string): string | null {
       ? data.clientRequestId
       : null;
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[message-v2] truncate: message_v2.data 解析失败，跳过回合归因：${
         error instanceof Error ? error.message : String(error)
       }`,

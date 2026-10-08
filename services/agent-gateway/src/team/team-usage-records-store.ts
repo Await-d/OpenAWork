@@ -15,6 +15,7 @@ import { sqliteAll, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { normalizeTokenCount } from '@openAwork/agent-core';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /**
  * team_usage_records 的按用户有界裁剪。回合键（client_request_id）进入聚合唯一键后，
@@ -89,7 +90,7 @@ function maybePruneTeamUsageRecords(userId: string): void {
       usageStoreDisabled = true;
       return;
     }
-    console.warn(
+    logGatewayWarn(
       `[team-usage-records-store] 裁剪 team_usage_records 失败（user=${userId}）：${
         error instanceof Error ? error.message : String(error)
       }`,

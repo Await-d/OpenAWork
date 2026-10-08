@@ -47,7 +47,7 @@ function RevertIcon() {
   );
 }
 
-function ReviewDecisionBadge({ file }: { readonly file: SessionFileDiffEntry }) {
+export function ReviewPanelDecisionBadge({ file }: { readonly file: SessionFileDiffEntry }) {
   if (isReviewPanelManualRevert(file)) {
     return (
       <span className="review-panel-review-badge review-panel-review-badge--reverted">已回滚</span>
@@ -102,9 +102,10 @@ function isRejectDisabled(props: ReviewPanelFileActionProps): boolean {
 export function ReviewPanelFileRowActions(props: ReviewPanelFileActionProps) {
   const { file, onAccept, onReject } = props;
 
+  // 只放操作按钮：审查状态徽章由调用方渲染到文件卡片的元信息行，
+  // 否则徽章会在窄侧栏里与文件名抢横向空间（见 ReviewPanelFileList）。
   return (
     <div className="review-panel-file-row-actions">
-      <ReviewDecisionBadge file={file} />
       <button
         aria-label={`接受 ${file.file}`}
         className="review-panel-file-row-actions__button review-panel-file-row-actions__button--accept"

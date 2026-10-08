@@ -33,6 +33,7 @@ import {
   type RunUpstreamGenerateResult,
 } from '../v2-runtime/upstream/index.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -347,7 +348,7 @@ export async function extractSessionMemory(input: {
     return { success: true };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'unknown error';
-    console.warn('[SESSION_MEMORY_EXTRACTOR] extraction failed:', message);
+    logGatewayWarn('[SESSION_MEMORY_EXTRACTOR] extraction failed:', message);
     return { success: false, error: message };
   }
 }

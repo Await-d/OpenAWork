@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const DEFAULT_BROWSER_LIVE_IDLE_TTL_MS = 120_000;
 
@@ -544,7 +545,7 @@ class BrowserLiveManagerImpl implements BrowserLiveManager {
     try {
       await session.close();
     } catch (error) {
-      console.warn('[browser-live-manager] failed to close live session', error);
+      logGatewayWarn('[browser-live-manager] failed to close live session', error);
     }
   }
 }

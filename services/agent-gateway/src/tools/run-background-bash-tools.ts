@@ -30,6 +30,7 @@ import { randomBytes } from 'node:crypto';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { deriveBashDescription, runBashCommand } from './bash-tools.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   getTerminal,
   killTerminal,
@@ -267,7 +268,7 @@ export async function dispatchRunBashInBackground(input: {
       },
     },
   }).catch((err: unknown) => {
-    console.warn(
+    logGatewayWarn(
       `[background-bash] runBashCommand rejected unexpectedly for ${terminalId}:`,
       err instanceof Error ? err.message : String(err),
     );

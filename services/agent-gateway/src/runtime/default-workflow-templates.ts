@@ -6,6 +6,7 @@ import {
   type TeamRuntimeLayer,
 } from '@openAwork/shared';
 import { sqliteAll, sqliteRun } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   findMissingTeamTemplateDefaultBindingRoles,
   type TeamTemplateDefaultBindings,
@@ -706,7 +707,7 @@ export function ensureDefaultWorkflowTemplatesForAllUsers(): void {
     try {
       ensureDefaultWorkflowTemplates(user.id);
     } catch (error) {
-      console.warn(
+      logGatewayWarn(
         `[default-workflow-templates] 为用户 ${user.id} 播种默认工作流模板失败，已跳过：${
           error instanceof Error ? error.message : String(error)
         }`,

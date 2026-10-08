@@ -22,6 +22,7 @@ import {
   updateTeamInitStep,
 } from '../team/init/team-init-store.js';
 import { runTeamInitStep } from '../team/init/team-init-runner.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 type TeamInitRouteErrorCode =
   | 'team_session_not_found'
@@ -182,7 +183,7 @@ function publishInitChanged(
       userId,
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team.session.init] publish event failed: ${err instanceof Error ? err.message : String(err)}`,
     );
   }

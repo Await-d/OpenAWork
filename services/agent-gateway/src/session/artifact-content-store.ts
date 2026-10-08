@@ -11,6 +11,7 @@ import type {
 import { computeArtifactLineDiff, detectArtifactContentType } from '@openAwork/artifacts';
 import { db, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import type { SqliteBindableValue } from '../infra/sqlite-bind-params.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface ArtifactRow {
   id: string;
@@ -77,7 +78,7 @@ function parseMetadata(metadataJson: string): ArtifactMetadata {
     }
     return {};
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[artifacts] metadata_json 解析失败，降级为空元数据：${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -91,7 +92,7 @@ function parseDiff(diffJson: string): ArtifactLineChange[] {
     const parsed = JSON.parse(diffJson) as unknown;
     return Array.isArray(parsed) ? (parsed as ArtifactLineChange[]) : [];
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[artifacts] diff_json 解析失败，降级为空 diff：${
         err instanceof Error ? err.message : String(err)
       }`,

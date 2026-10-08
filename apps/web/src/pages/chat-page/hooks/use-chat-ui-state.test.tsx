@@ -62,7 +62,6 @@ describe('useChatUiState — 初始值', () => {
     expect(result.current.toolFilter).toBe('all');
     expect(result.current.mcpServers).toEqual([]);
     expect(result.current.saving).toBe(false);
-    expect(result.current.showWorkspaceSelector).toBe(false);
     expect(result.current.showScrollToBottom).toBe(false);
     expect(result.current.companionPanelSignal).toBe(0);
   });

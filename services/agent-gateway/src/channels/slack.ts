@@ -12,6 +12,7 @@ import type {
 import { listBuiltinChannelCommands } from './channel-command-experience.js';
 import { parseSlackInboundMessage } from './inbound-parsers/slack.js';
 import { attachSlackInboundImages, sendSlackFile, type SlackUploadClient } from './slack-media.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 type SlackApp = {
   start(port?: number): Promise<unknown>;
@@ -275,7 +276,7 @@ export class SlackChannelService implements MessagingChannelService {
       const result = await this.client().auth.test();
       this.botUserId = result.user_id?.trim() || undefined;
     } catch (error) {
-      console.warn(
+      logGatewayWarn(
         `[slack] auth.test failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       this.botUserId = undefined;

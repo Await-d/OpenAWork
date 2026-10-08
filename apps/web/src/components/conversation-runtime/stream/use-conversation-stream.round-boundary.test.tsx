@@ -88,6 +88,92 @@ afterEach(() => {
   cleanup();
 });
 
+/**
+ * 事件幂等。
+ *
+ * 回归背景：`handleEvent` 的契约注释声明「同一 eventId 幂等」，但实现里对
+ * `text_delta` 无条件累加、对 `tool_call_delta` 无条件拼接入参。断线重连 / attach
+ * 重放已展示过的 chunk 时，正文会成倍重复、工具入参会被拼坏。
+ */
+describe('useConversationStream 事件幂等', () => {
+  it('同一 eventId 的 text_delta 重放只投递一次', () => {
+    const { result } = renderStream();
+    const event: RunEvent = { type: 'text_delta', delta: '同一段', eventId: 'run-1:evt:1' };
+
+    act(() => {
+      result.current.handleEvent(event);
+      result.current.handleEvent(event);
+      result.current.handleEvent(event);
+    });
+
+    expect(result.current.getAccumulatedText()).toBe('同一段');
+  });
+
+  it('不同 eventId 的 text_delta 正常累加', () => {
+    const { result } = renderStream();
+
+    act(() => {
+      result.current.handleEvent({ type: 'text_delta', delta: '甲', eventId: 'run-1:evt:1' });
+      result.current.handleEvent({ type: 'text_delta', delta: '乙', eventId: 'run-1:evt:2' });
+    });
+
+    expect(result.current.getAccumulatedText()).toBe('甲乙');
+  });
+
+  it('缺 eventId 的 text_delta 照常投递（正文允许合法重复，不能按内容去重）', () => {
+    const { result } = renderStream();
+
+    act(() => {
+      result.current.handleEvent({ type: 'text_delta', delta: '重复' });
+      result.current.handleEvent({ type: 'text_delta', delta: '重复' });
+    });
+
+    expect(result.current.getAccumulatedText()).toBe('重复重复');
+  });
+
+  it('同一 eventId 的 tool_call_delta 重放不重复拼接入参', () => {
+    const { result } = renderStream();
+    const event: RunEvent = {
+      type: 'tool_call_delta',
+      toolCallId: 'tool-1',
+      toolName: 'read',
+      inputDelta: '{"path":"a.ts"}',
+      eventId: 'run-1:evt:9',
+    };
+
+    act(() => {
+      result.current.handleEvent(event);
+      result.current.handleEvent(event);
+    });
+
+    const toolParts = result.current.getCurrentSegments().filter((part) => part.type === 'tool');
+    expect(toolParts).toHaveLength(1);
+    expect(toolParts[0]?.type === 'tool' ? toolParts[0].input : undefined).toEqual({
+      path: 'a.ts',
+    });
+  });
+
+  it('resetRoundAccumulators 后同一 eventId 可再次投递（新一轮不误判为重放）', () => {
+    const { result } = renderStream();
+    const event: RunEvent = { type: 'text_delta', delta: '新一轮', eventId: 'run-1:evt:1' };
+
+    act(() => {
+      result.current.handleEvent(event);
+    });
+    expect(result.current.getAccumulatedText()).toBe('新一轮');
+
+    act(() => {
+      result.current.resetRoundAccumulators();
+    });
+    expect(result.current.getAccumulatedText()).toBe('');
+
+    act(() => {
+      result.current.handleEvent(event);
+    });
+    expect(result.current.getAccumulatedText()).toBe('新一轮');
+  });
+});
+
 describe('useConversationStream 轮次边界', () => {
   it('工具结果落地后到达的正文开启新一轮，不与工具挤在同一条消息', () => {
     const { messages, result } = renderStream();

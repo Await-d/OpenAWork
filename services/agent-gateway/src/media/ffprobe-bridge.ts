@@ -15,6 +15,7 @@ import ffprobePath from 'ffprobe-static';
 import { runtimeBinaryUnavailableMessage } from '../infra/runtime-binary.js';
 import { getMediaCategory } from './media-codec.js';
 import { resolveMediaBinaryPath, resolveMediaResourcePath } from './media-binary-path.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const FFPROBE_PATH =
   resolveMediaBinaryPath({
@@ -71,7 +72,7 @@ async function removeTempFile(path: string): Promise<void> {
   try {
     await rm(path, { force: true });
   } catch (error) {
-    console.warn(`[ffprobe-bridge] 清理临时文件失败: ${path}`, error);
+    logGatewayWarn(`[ffprobe-bridge] 清理临时文件失败: ${path}`, error);
   }
 }
 

@@ -389,6 +389,113 @@ describe('useWorkspace', () => {
     expect(String(fileCall?.[0])).toContain('workspaceRoot=%2Fhome%2Fawait%2Fprojects%2Fdemo');
   });
 
+  it('fetchTree 在 SSH 会话下透传 sessionId 与 workspaceRoot', async () => {
+    // 回归锁：fetchTree 曾只声明 (path, depth) 两个形参，把调用方传入的第三参
+    // readOptions 静默丢弃 → 网关收到空身份、判为 local，于是用**网关本机** fs
+    // 读同名路径。SSH 远端工作区下表现为「文件树显示的是网关本机目录」，且在
+    // 网关为 Linux 且路径恰好存在时不报错，只是数据是错的。
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-remote')) {
+        return new Response(
+          JSON.stringify({
+            session: {
+              id: 'session-remote',
+              metadata_json: JSON.stringify({
+                workingDirectory: '/home/await/projects/demo',
+                sshConnectionId: 'conn-1',
+              }),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/workspace/root')) {
+        return new Response(JSON.stringify({ roots: ['/workspace/demo'] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/workspace/tree')) {
+        return new Response(JSON.stringify({ nodes: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace('session-remote'));
+
+    await waitFor(() => {
+      expect(result.current.workingDirectory).toBe('/home/await/projects/demo');
+    });
+
+    await act(async () => {
+      await result.current.fetchTree('/home/await/projects/demo', 1);
+    });
+
+    const treeCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes('/workspace/tree'),
+    );
+    const url = String(treeCall?.[0]);
+    expect(url).toContain('sessionId=session-remote');
+    expect(url).toContain('workspaceRoot=%2Fhome%2Fawait%2Fprojects%2Fdemo');
+  });
+
+  it('fetchTree 显式传入的 readOptions 优先于会话默认值', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-1')) {
+        return new Response(
+          JSON.stringify({
+            session: {
+              id: SESSION_ID,
+              metadata_json: JSON.stringify({ workingDirectory: '/workspace/demo' }),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/workspace/root')) {
+        return new Response(JSON.stringify({ roots: ['/workspace/demo'] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/workspace/tree')) {
+        return new Response(JSON.stringify({ nodes: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace(SESSION_ID));
+
+    await waitFor(() => {
+      expect(result.current.workingDirectory).toBe('/workspace/demo');
+    });
+
+    await act(async () => {
+      await result.current.fetchTree('/tmp/explicit', 1, {
+        sessionId: 'other-session',
+        workspaceRoot: '/tmp/explicit',
+      });
+    });
+
+    const treeCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes('/workspace/tree'),
+    );
+    const url = String(treeCall?.[0]);
+    expect(url).toContain('sessionId=other-session');
+    expect(url).toContain('workspaceRoot=%2Ftmp%2Fexplicit');
+    expect(url).not.toContain('sessionId=session-1');
+  });
+
   it('fetchWorkspaceRoots 在无可用根目录时抛中文错误', async () => {
     vi.stubGlobal(
       'fetch',

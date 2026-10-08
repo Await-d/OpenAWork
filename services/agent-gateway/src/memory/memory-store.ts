@@ -18,6 +18,7 @@ import {
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { scanMemoryWriteContent } from './memory-security-scanner.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface MemoryRow {
   id: string;
@@ -95,7 +96,7 @@ function parseMemoryRoleLayers(value: string | null): MemoryRoleLayer[] | null {
     );
     return normalizeMemoryRoleLayers(roleLayers);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[memory-store] role_layers_json 解析失败，已按全部层级处理：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -116,7 +117,7 @@ function memoryRowReadableByRoleLayer(row: MemoryRow, roleLayer: MemoryRoleLayer
     }
     return parsed.some((item) => item === roleLayer);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[memory-store] role_layers_json 解析失败，已从 ${roleLayer} 层过滤结果排除：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -843,7 +844,7 @@ export function upsertExtractedMemories(
       });
       created += 1;
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[memory-store] 自动抽取记忆写入失败，已跳过该条：${
           err instanceof Error ? err.message : String(err)
         }`,
@@ -859,7 +860,7 @@ export function upsertExtractedMemories(
       });
       updated += 1;
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[memory-store] 自动抽取记忆更新失败，已跳过该条：${
           err instanceof Error ? err.message : String(err)
         }`,
@@ -888,7 +889,7 @@ export function readMemorySettings(userId: string): MemorySettings {
   try {
     return parseMemorySettings(JSON.parse(row.value) as unknown);
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[memory-store] 读取记忆设置失败，已回退默认设置：${
         err instanceof Error ? err.message : String(err)
       }`,

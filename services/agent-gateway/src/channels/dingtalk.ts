@@ -11,6 +11,7 @@ import { listRecentChannelMessages } from './channel-message-cache.js';
 import { parseDingTalkInboundMessage } from './inbound-parsers/dingtalk.js';
 import { DingTalkReplyContext } from './dingtalk-reply-context.js';
 import { DingTalkCardStreamingClient } from './dingtalk-card-streaming.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   createOfficialDingTalkGateway,
   type DingTalkGateway,
@@ -108,7 +109,7 @@ export class DingTalkChannelService implements MessagingChannelService {
       try {
         return await this.sendViaSessionWebhook(webhookUrl, content);
       } catch (error) {
-        console.warn('[dingtalk] sessionWebhook reply failed, falling back', {
+        logGatewayWarn('[dingtalk] sessionWebhook reply failed, falling back', {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -252,7 +253,7 @@ export class DingTalkChannelService implements MessagingChannelService {
     try {
       this.notify(event);
     } catch (error) {
-      console.warn('[dingtalk] channel notify handler threw', {
+      logGatewayWarn('[dingtalk] channel notify handler threw', {
         pluginId: this.pluginId,
         error: error instanceof Error ? error.message : String(error),
       });

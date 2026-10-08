@@ -23,6 +23,7 @@ import { Effect } from 'effect';
 import type { UpstreamProtocolKind } from '../v2-runtime/upstream/native-model.js';
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const WORKFLOW_MAX_OUTPUT_TOKENS = 2048;
 
@@ -274,7 +275,7 @@ export async function requestWorkflowLlmCompletion(
             usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
           });
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[workflow-llm] persist monthly usage 失败：${err instanceof Error ? err.message : String(err)}`,
           );
         }
@@ -293,7 +294,7 @@ export async function requestWorkflowLlmCompletion(
           ...(costUsd !== undefined ? { costUsd } : {}),
         });
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           `[workflow-llm] publish team_usage 失败：${err instanceof Error ? err.message : String(err)}`,
         );
       }

@@ -17,6 +17,7 @@
  */
 
 import type { FileChangeGuaranteeLevel, FileDiffContent } from '@openAwork/shared';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 import {
   createShadowGitStore,
@@ -124,7 +125,7 @@ class SnapshotEngineImpl implements SnapshotEngine {
       };
     } catch (error) {
       // 捕获失败 → 降级为 noop，让旧路径接管
-      console.warn('[snapshot-engine] capture failed, falling back:', errorMessage(error));
+      logGatewayWarn('[snapshot-engine] capture failed, falling back:', errorMessage(error));
       return {
         ref: { kind: 'legacy', requestId: '' },
         guaranteeLevel: 'medium',

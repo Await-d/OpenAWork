@@ -27,6 +27,7 @@ import { publishSessionRunEvent } from '../session/session-run-events.js';
 import { shouldExitPlanModeFromAnswers } from '../tools/plan-mode-tools.js';
 import { setPersistedSessionStateStatus, type ApprovedPermissionResumePayload } from './stream.js';
 import { resumeAnsweredQuestionRequest } from './stream-runtime.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const replyQuestionSchema = z.object({
   requestId: z.string().min(1),
@@ -191,7 +192,7 @@ function mapPendingQuestionRequestRow(row: QuestionRequestRow) {
   try {
     questions = JSON.parse(row.questions_json) as QuestionToolInput['questions'];
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[questions] 提问请求 ${row.id} questions_json 解析失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -225,6 +226,8 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
+      // 同 `permissions/pending`：这里**刻意不**回收僵尸 `deciding`。释放职责归
+      // reconcile 与批量路由入口，不归单条列表查询——挂到轮询路径上只会制造写事务。
       const requests = sqliteAll<QuestionRequestRow>(
         `SELECT id, session_id, user_id, tool_name, title, questions_json, answer_json, request_payload_json, expires_at, status, created_at
          FROM question_requests

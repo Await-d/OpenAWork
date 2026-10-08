@@ -25,6 +25,7 @@ import {
 } from '../tools/ssh-remote-execution.js';
 import { peekSshService } from '../ssh/ssh-service.js';
 import { IGNORED_NAMES } from '../tools/workspace-tools.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export interface SshWorkspaceSearchResult {
   root: string;
@@ -125,7 +126,7 @@ async function buildSshWorkspaceFileIndex(
     stdout = result.stdout;
     stdoutTruncated = result.stdoutTruncated === true;
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       '[ssh-workspace-file-index] 远端 find 执行异常，返回空索引：',
       error instanceof Error ? error.message : String(error),
     );
@@ -227,7 +228,7 @@ export function invalidateSshWorkspaceFileIndexForSession(sessionId: string): vo
       if (key.startsWith(prefix)) sshFileIndexCache.delete(key);
     }
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       '[ssh-workspace-file-index] 失效 SSH 文件索引失败，已忽略：',
       error instanceof Error ? error.message : String(error),
     );

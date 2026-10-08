@@ -82,6 +82,7 @@ import {
   validateSessionWorkspacePath,
 } from '../workspace/workspace-safety.js';
 import { withNonInteractiveEnv } from '../workspace/non-interactive-env.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // Mirrors opencode's `DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000`.
 // We don't expose the experimental flag yet, but the env override hook keeps
@@ -1056,7 +1057,7 @@ void (async () => {
               if (info.mtimeMs < cutoff) {
                 await fsp.rm(file).catch((error: unknown) => {
                   if (process.env['OPENAWORK_DEBUG_TRUNCATION_CLEANUP'] === '1') {
-                    console.warn('Failed to remove stale bash truncation file', { error, file });
+                    logGatewayWarn('Failed to remove stale bash truncation file', { error, file });
                   }
                 });
               }

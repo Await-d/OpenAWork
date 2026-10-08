@@ -6,6 +6,7 @@ import {
   saveQQGatewaySession,
 } from './qq-gateway-session-store.js';
 import type { ChannelDiagnostics, ChannelEvent } from './types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const QQ_GATEWAY_INTENTS = {
   GUILD_MEMBERS: 1 << 1,
@@ -641,7 +642,7 @@ export class QQGatewayClient {
     try {
       this.notify(event);
     } catch (error) {
-      console.warn('[qq] gateway notify handler threw', {
+      logGatewayWarn('[qq] gateway notify handler threw', {
         pluginId: this.pluginId,
         error: error instanceof Error ? error.message : String(error),
       });

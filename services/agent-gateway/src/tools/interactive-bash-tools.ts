@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
 import { ensureUnboundSessionWorkspaceDirectory } from '../workspace/workspace-safety.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -204,7 +205,7 @@ export async function runInteractiveBashCommand(
         }
       }
     } catch (registryError) {
-      console.warn(
+      logGatewayWarn(
         '[interactive-bash] failed to mirror tmux lifecycle:',
         registryError instanceof Error ? registryError.message : String(registryError),
       );

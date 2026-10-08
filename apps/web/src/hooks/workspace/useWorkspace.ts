@@ -4,6 +4,7 @@ import {
   createSshClient,
   createWorkspaceClient,
   type Session,
+  type WorkspaceFileReadOptions,
 } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
@@ -345,14 +346,37 @@ export function useWorkspace(sessionId: string | null) {
   }, [fetchWorkspaceRoots]);
 
   const fetchTree = useCallback(
-    async (path: string, depth = 2): Promise<FileTreeNode[]> => {
-      const result = await workspaceClient.fetchTreeResult(accessToken ?? '', path, { depth });
+    async (
+      path: string,
+      depth = 2,
+      readOptions?: WorkspaceFileReadOptions,
+    ): Promise<FileTreeNode[]> => {
+      const result = await workspaceClient.fetchTreeResult(accessToken ?? '', path, {
+        depth,
+        // 身份映射与 fetchFile 同构：已有会话传 sessionId，草稿态退而传
+        // sshConnectionId，两者都无则为纯本地读取。
+        //
+        // 这三个参数缺一不可：缺了它们网关会判为 `local` 并用**网关本机** fs
+        // 读取同名路径 —— SSH 远端工作区下就会渲染出网关本机的目录（网关在
+        // Linux 且路径恰好存在时不报错，只是数据是错的）。
+        ...(readOptions ?? {}),
+        ...(readOptions?.workspaceRoot === undefined && resolvedWorkingDirectory
+          ? { workspaceRoot: resolvedWorkingDirectory }
+          : {}),
+        ...(readOptions?.sessionId === undefined && sessionId ? { sessionId } : {}),
+        ...(readOptions?.sshConnectionId === undefined &&
+        !sessionId &&
+        retainedSshConnectionId &&
+        readOptions?.sshConnectionId === undefined
+          ? { sshConnectionId: retainedSshConnectionId }
+          : {}),
+      });
       if (!result.ok) {
         throw new Error(result.errorMessage ?? '读取文件树失败。');
       }
       return result.nodes;
     },
-    [accessToken, workspaceClient],
+    [accessToken, resolvedWorkingDirectory, retainedSshConnectionId, sessionId, workspaceClient],
   );
 
   const searchFileIndex = useCallback(

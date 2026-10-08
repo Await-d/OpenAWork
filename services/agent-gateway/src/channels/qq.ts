@@ -15,6 +15,7 @@ import { parseQQInboundMessage } from './inbound-parsers/qq.js';
 import { parseQQChatId } from './qq-target.js';
 import { channelLogInfo, summarizeChannelMessage } from './channel-log.js';
 import { markQQWakeupSent, resolveQQWakeupEligibility } from './qq-wakeup-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 export { parseQQChatId } from './qq-target.js';
 
 function parseBooleanConfig(value: string | undefined): boolean {
@@ -65,7 +66,7 @@ export class QQChannelService implements MessagingChannelService {
     try {
       this.notify(event);
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[qq] channel notify handler threw: ${err instanceof Error ? err.message : String(err)}`,
       );
     }

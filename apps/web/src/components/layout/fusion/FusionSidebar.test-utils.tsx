@@ -49,14 +49,29 @@ interface FusionSidebarSessionsResult {
 }
 
 interface FusionSidebarMocks {
-  readonly createWorkspaceClient: Mock<() => Record<string, never>>;
+  readonly createWorkspaceClient: Mock<() => Record<string, unknown>>;
+  /** SSH 客户端：头部选择器的 SSH 来源要用它拉连接列表 / 建连/ 绑远端目录。 */
+  readonly createSshClient: Mock<() => Record<string, never>>;
+  readonly createSessionsClient: Mock<() => Record<string, never>>;
   readonly preloadRouteModuleByPath: Mock<() => void>;
   readonly useSessions: Mock<() => FusionSidebarSessionsResult>;
   readonly useTeamSidebarSessions: Mock<() => UseTeamSidebarSessionsResult>;
 }
 
+/** 与 OPENAWORK_PATH 同值的字面量：vi.hoisted 不能引用模块级常量。 */
+const MOCK_WORKSPACE_ROOT = '/home/await/project/OpenAWork';
+
 const fusionSidebarMocks = vi.hoisted((): FusionSidebarMocks => ({
-  createWorkspaceClient: vi.fn<() => Record<string, never>>(() => ({})),
+  // 工作区选择弹窗打开即拉根目录与目录树；返回空对象会让弹窗一直停在 busy，
+  // 「使用 SSH 远端目录」等按钮被禁用，集成测试就点不动了。
+  createWorkspaceClient: vi.fn<() => Record<string, unknown>>(() => ({
+    listRootsResult: async () => ({ ok: true, roots: [MOCK_WORKSPACE_ROOT] }),
+    fetchTreeResult: async () => ({ ok: true, nodes: [] }),
+    createDirectory: async () => undefined,
+    validatePath: async () => ({ valid: true, path: MOCK_WORKSPACE_ROOT }),
+  })),
+  createSshClient: vi.fn<() => Record<string, never>>(() => ({})),
+  createSessionsClient: vi.fn<() => Record<string, never>>(() => ({})),
   preloadRouteModuleByPath: vi.fn<() => void>(),
   useSessions: vi.fn<() => FusionSidebarSessionsResult>(),
   useTeamSidebarSessions: vi.fn<() => UseTeamSidebarSessionsResult>(),
@@ -64,6 +79,8 @@ const fusionSidebarMocks = vi.hoisted((): FusionSidebarMocks => ({
 
 vi.mock('@openAwork/web-client', () => ({
   createWorkspaceClient: fusionSidebarMocks.createWorkspaceClient,
+  createSshClient: fusionSidebarMocks.createSshClient,
+  createSessionsClient: fusionSidebarMocks.createSessionsClient,
 }));
 
 vi.mock('../../../hooks/workspace/useSessions.js', () => ({
@@ -187,6 +204,7 @@ function createTeamSidebarSessionsResult(): UseTeamSidebarSessionsResult {
 
 export function resetFusionSidebarUiState(leftSidebarOpen: boolean): void {
   useUIStateStore.setState({
+    activeSessionWorkspace: null,
     activeTeamSessionId: null,
     chatView: 'session',
     fileTreeRootPath: OPENAWORK_PATH,
@@ -231,10 +249,13 @@ function LocationProbe() {
   return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;
 }
 
-export function renderFusionSidebar(initialPath = '/chat/open-session'): void {
+export function renderFusionSidebar(
+  initialPath = '/chat/open-session',
+  accessToken: string | null = null,
+): void {
   render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <FusionSidebar accessToken={null} gatewayUrl="http://localhost:3000" />
+      <FusionSidebar accessToken={accessToken} gatewayUrl="http://localhost:3000" />
       <LocationProbe />
     </MemoryRouter>,
   );

@@ -56,6 +56,7 @@ import { readGrillConfirmation } from '../capability/grill-confirmation.js';
 import { computeFrontier, isGrillExhausted, needsConfirmation } from '@openAwork/agent-core';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
 import { extractComparablePathsFromText, parseAllTasks } from '../capability/dispatch-package.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -174,7 +175,7 @@ function safeAppendPm1Message(input: Parameters<typeof appendSessionMessageV2>[0
   try {
     appendSessionMessageV2(input);
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[artifact-chain] appendSessionMessageV2 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -576,7 +577,7 @@ async function callLlmWithRetry(
         if (attempt < delays.length) {
           const delay = delays[attempt]!;
           const reason = err instanceof Error ? err.message : String(err);
-          console.warn(
+          logGatewayWarn(
             `[artifact-chain] LLM 调用失败（${reason}），${delay / 1000} 秒后重试（第 ${attempt + 1}/${delays.length} 次）…`,
           );
           await sleep(delay);
@@ -594,7 +595,7 @@ async function callLlmWithRetry(
 
     if (isRetryableError(networkErr)) {
       // 可重试错误：先等 5 秒再开始指数退避重试（避免立即重试加剧限流）
-      console.warn(`[artifact-chain] LLM 服务暂时不可用（${reason}），5 秒后开始指数退避重试…`);
+      logGatewayWarn(`[artifact-chain] LLM 服务暂时不可用（${reason}），5 秒后开始指数退避重试…`);
       await sleep(5_000);
       first = await retryWithBackoff(() => callLlm(systemPrompt, userMessage));
     } else {
@@ -627,7 +628,7 @@ async function callLlmWithRetry(
       currentContent = await retryWithBackoff(() => callLlm(systemPrompt, userMessage + retryHint));
     } catch (networkErr) {
       // 修正失败后停止，不伪造可验收内容。
-      console.warn(
+      logGatewayWarn(
         `[artifact-chain] 格式重试 ${formatAttempt + 1} 失败：${networkErr instanceof Error ? networkErr.message : String(networkErr)}，停止自动规划。`,
       );
       return applyPatches(currentContent, rules);
@@ -942,7 +943,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
           },
         });
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           `[artifact-chain] escalation_request inbox 写入失败：${err instanceof Error ? err.message : String(err)}`,
         );
       }
@@ -961,7 +962,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
           setC(SUBSTATES_C.CANCELLED);
           throw err;
         }
-        console.warn(`[artifact-chain] clarification 等待异常：${message}`);
+        logGatewayWarn(`[artifact-chain] clarification 等待异常：${message}`);
       }
 
       if (roundAnswers.length === 0) {
@@ -1166,7 +1167,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
     }
   } catch (specReviewErr) {
     if (specReviewErr instanceof PlanningFailure) throw specReviewErr;
-    console.warn(
+    logGatewayWarn(
       `[artifact-chain] PM1 spec 自审失败：${specReviewErr instanceof Error ? specReviewErr.message : String(specReviewErr)}`,
     );
   }
@@ -1232,7 +1233,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
     }
   } catch (planReviewErr) {
     if (planReviewErr instanceof PlanningFailure) throw planReviewErr;
-    console.warn(
+    logGatewayWarn(
       `[artifact-chain] PM1 plan 自审失败：${planReviewErr instanceof Error ? planReviewErr.message : String(planReviewErr)}`,
     );
   }
@@ -1293,7 +1294,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
   } catch (reviewErr) {
     if (reviewErr instanceof PlanningFailure) throw reviewErr;
     // 自我复查失败不阻塞流程——PM2 会再做校验
-    console.warn(
+    logGatewayWarn(
       `[artifact-chain] PM1 自我复查失败：${reviewErr instanceof Error ? reviewErr.message : String(reviewErr)}`,
     );
   }

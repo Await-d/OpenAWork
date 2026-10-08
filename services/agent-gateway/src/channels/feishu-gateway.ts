@@ -1,6 +1,7 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { parseFeishuInboundMessage } from './inbound-parsers/feishu.js';
 import type { ChannelEvent, ChannelImageAttachment } from './types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const MAX_DEDUPED_MESSAGES = 500;
 
@@ -82,7 +83,7 @@ export async function parseFeishuGatewayEvent(
         };
       }
     } catch (error) {
-      console.warn('[feishu] failed to download inbound image', {
+      logGatewayWarn('[feishu] failed to download inbound image', {
         pluginId: context.pluginId,
         messageId: message.id,
         imageKey,
@@ -167,7 +168,7 @@ class OfficialFeishuGateway implements FeishuGateway {
     try {
       this.notify(event);
     } catch (error) {
-      console.warn('[feishu] gateway notify handler threw', {
+      logGatewayWarn('[feishu] gateway notify handler threw', {
         pluginId: this.pluginId,
         error: error instanceof Error ? error.message : String(error),
       });

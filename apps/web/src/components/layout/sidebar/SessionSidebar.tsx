@@ -24,16 +24,25 @@ import { useSessionContentSearch } from './use-session-content-search.js';
 import { WorkspaceFileTreePanel } from './WorkspaceFileTreePanel.js';
 import WorkspaceGroupMenu from '../workspace/WorkspaceGroupMenu.js';
 import { WorkspaceDeleteConfirmDialog } from '../workspace/WorkspaceDeleteConfirmDialog.js';
+import { WorkspaceRenameDialog } from '../workspace/WorkspaceRenameDialog.js';
+import { WorkspaceSshBadge } from '../workspace/WorkspaceSshBadge.js';
 import { WorkspaceGitBadge, FileTreeView, type FileTreeContextTarget } from './SidebarHelpers.js';
 import type { FileTreeNode } from '../../common/modal/WorkspacePickerModal.js';
 import { preloadRouteModuleByPath } from '../../../routes/preloadable-route-modules.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { dispatchComposerReference } from '../../../utils/chat/composer-reference-events.js';
 import {
+  renameWorkspaceDisplay,
+  useWorkspaceDisplayName,
+} from '../../../hooks/workspace/useWorkspaceAlias.js';
+import { useSshConnectionLabels } from '../../../hooks/workspace/useSshConnectionLabels.js';
+import { readWorkspaceAlias } from '../../../utils/workspace-alias.js';
+import {
   UNBOUND_WORKSPACE_GROUP_KEY,
   UNBOUND_WORKSPACE_LABEL,
   filterSessionTreeGroupsByMatcher,
   getWorkspaceGroupKey,
+  resolveWorkspaceGroupDisplayName,
 } from '../../../utils/session/session-grouping.js';
 
 const sessionIconBtnStyle: React.CSSProperties = {
@@ -158,6 +167,17 @@ export function SessionSidebar({
     workspaceLabel: string;
     workspacePath: string | null;
   } | null>(null);
+  const [renamingWorkspace, setRenamingWorkspace] = useState<{
+    workspacePath: string;
+    defaultName: string;
+  } | null>(null);
+
+  // 工作区展示名（别名）与 SSH 标识：分组头用别名替代路径末段，
+  // 并对远端工作区挂一枚 SSH 徽标，避免与同名本地目录混淆。
+  const resolveWorkspaceName = useWorkspaceDisplayName();
+  const sshConnectionLabels = useSshConnectionLabels(
+    sessionTreeGroups.some((group) => group.sshConnectionId != null),
+  );
 
   const [fileTreeFilter, setFileTreeFilter] = useState('');
   const [fileTreeContextMenu, setFileTreeContextMenu] = useState<FileTreeContextMenuState | null>(
@@ -737,6 +757,7 @@ export function SessionSidebar({
             const groupBodyId = `session-group-${encodeURIComponent(groupKey)}`;
             const actualSessionCount =
               sessionCountByWorkspace.get(getWorkspaceGroupKey(group.workspacePath)) ?? 0;
+            const groupDisplayName = resolveWorkspaceGroupDisplayName(group, resolveWorkspaceName);
             return (
               <div
                 key={groupKey}
@@ -818,9 +839,16 @@ export function SessionSidebar({
                         letterSpacing: '0.015em',
                         color: 'var(--fg-strong)',
                       }}
+                      title={group.workspacePath ?? groupDisplayName}
                     >
-                      {group.workspaceLabel}
+                      {groupDisplayName}
                     </span>
+                    {group.sshConnectionId != null && (
+                      <WorkspaceSshBadge
+                        connectionId={group.sshConnectionId}
+                        connections={sshConnectionLabels}
+                      />
+                    )}
                     {group.workspacePath && (
                       <WorkspaceGitBadge
                         workspacePath={group.workspacePath}
@@ -843,7 +871,7 @@ export function SessionSidebar({
                     <button
                       type="button"
                       onClick={() => void newSession(group.workspacePath)}
-                      title={`在 ${group.workspaceLabel} 中新建会话`}
+                      title={`在 ${groupDisplayName} 中新建会话`}
                       style={{
                         flexShrink: 0,
                         display: 'flex',
@@ -981,9 +1009,20 @@ export function SessionSidebar({
               workspaceContextMenu.workspacePath !== null ||
               workspaceContextMenu.actualSessionCount > 0
             }
+            hasCustomName={readWorkspaceAlias(workspaceContextMenu.workspacePath) !== ''}
             onClose={() => setWorkspaceContextMenu(null)}
             onNewSession={() => void newSession(workspaceContextMenu.workspacePath)}
             onToggleCollapse={() => toggleGroupCollapsed(workspaceContextMenu.groupKey)}
+            onRename={() => {
+              const workspacePath = workspaceContextMenu.workspacePath;
+              if (!workspacePath) {
+                return;
+              }
+              setRenamingWorkspace({
+                workspacePath,
+                defaultName: workspaceContextMenu.workspaceLabel,
+              });
+            }}
             onDelete={() => {
               setPendingWorkspaceDeletion({
                 groupKey: workspaceContextMenu.groupKey,
@@ -995,6 +1034,17 @@ export function SessionSidebar({
           />,
           document.body,
         )}
+      <WorkspaceRenameDialog
+        open={renamingWorkspace !== null}
+        workspacePath={renamingWorkspace?.workspacePath ?? null}
+        defaultName={renamingWorkspace?.defaultName ?? ''}
+        onCancel={() => setRenamingWorkspace(null)}
+        onSubmit={(alias) => {
+          renameWorkspaceDisplay(renamingWorkspace?.workspacePath ?? null, alias);
+          setRenamingWorkspace(null);
+          toast(alias ? '工作区已重命名' : '已恢复默认名称', 'success');
+        }}
+      />
       <WorkspaceDeleteConfirmDialog
         open={pendingWorkspaceDeletion !== null}
         workspaceLabel={pendingWorkspaceDeletion?.workspaceLabel ?? ''}

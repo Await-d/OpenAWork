@@ -7,6 +7,7 @@ import {
   type WorkflowStep,
 } from '@openAwork/logger';
 import { persistRequestWorkflowLog } from './request-workflow-log-store.js';
+import { attachRequestDiagnostics } from '../infra/request-diagnostics.js';
 
 type WorkflowFields = Record<string, string | number | boolean>;
 
@@ -208,11 +209,16 @@ function flushRequestWorkflow(request: FastifyRequest, statusCode: number, messa
 const requestWorkflowPluginImpl: FastifyPluginAsync = async (app): Promise<void> => {
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const workflowLogger = new WorkflowLogger();
+    // 先建立诊断上下文，再把其中的追踪 ID 交给 workflow 日志：这样
+    // request_workflow_logs 表、workflow 头部与全局错误日志三处引用同一个 ID，
+    // 客户端拿着报错里的 ID 可以直接串起整条链路。
+    const diagnostics = attachRequestDiagnostics(request);
     const workflowContext = createRequestContext(
       request.method,
       request.url,
       request.headers,
       request.ip,
+      diagnostics.requestId,
     );
     const workflowRequestStep = workflowLogger.start('request.handle', undefined, {
       method: request.method,

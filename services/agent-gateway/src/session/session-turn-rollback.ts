@@ -43,6 +43,7 @@ import {
 import { deleteTeamConvergeResultsByClientRequest } from '../team/team-converge.js';
 import { deleteTeamMessagesByClientRequest } from '../team/team-message-store.js';
 import { purgeRolledBackTurnTaskGraphNodes } from './session-turn-rollback-task-graph.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export interface RollbackReceipt {
   sessionId: string;
@@ -166,7 +167,7 @@ async function cancelTurnDerivedChain(input: { sessionId: string; userId: string
         userId: input.userId,
       });
     } catch (error) {
-      console.warn(
+      logGatewayWarn(
         `[turn-rollback] 团队树级联取消失败（不阻塞删除）：${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -181,7 +182,7 @@ async function cancelTurnDerivedChain(input: { sessionId: string; userId: string
       userId: input.userId,
     });
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[turn-rollback] 根会话停流失败（不阻塞删除）：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -196,7 +197,7 @@ async function cancelTurnDerivedChain(input: { sessionId: string; userId: string
       reason: 'ancestor_aborted',
     });
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[turn-rollback] task 子会话停流失败（不阻塞删除）：${
         error instanceof Error ? error.message : String(error)
       }`,

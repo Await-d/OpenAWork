@@ -17,6 +17,7 @@
  */
 
 import type { GatewayToolDefinition } from '../../tools/tool-definitions.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 const TEAM_LAYERS = ['reception', 'pm1', 'pm2', 'executor', 'reviewer'] as const;
 type TeamLayer = (typeof TEAM_LAYERS)[number];
@@ -101,7 +102,7 @@ export async function applyTeamLayerToolGate(input: {
     }
     return gated;
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[apply-team-layer-tools] 门控失败（fail-closed 退回只读）：${err instanceof Error ? err.message : String(err)}`,
     );
     try {

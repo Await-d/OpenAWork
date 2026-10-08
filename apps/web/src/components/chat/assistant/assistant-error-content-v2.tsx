@@ -105,7 +105,7 @@ export function AssistantErrorContent({
       aria-live="assertive"
     >
       <div className="chat-message-error-icon" aria-hidden="true">
-        <ErrorIcon size={16} />
+        <ErrorIcon size={14} />
       </div>
 
       <div className="chat-message-error-content">
@@ -145,8 +145,8 @@ export function AssistantErrorContent({
         {parsed.suggestion && (
           <div className="chat-message-error-suggestion">
             <svg
-              width="16"
-              height="16"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -172,8 +172,8 @@ export function AssistantErrorContent({
               onClick={onRetry}
             >
               <svg
-                width="14"
-                height="14"
+                width="12"
+                height="12"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"

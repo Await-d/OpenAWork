@@ -35,6 +35,7 @@ import {
 import { scanMemoryWriteContent } from '../../memory/memory-security-scanner.js';
 import { validateWorkspacePath } from '../../workspace/workspace-paths.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 import {
   loadTeamInitSessionContext,
   updateTeamInitStep,
@@ -150,7 +151,7 @@ function syncTeamInitKnowledge(input: {
       workspaceRoot,
     });
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[team-init-runner] ${input.label} 入库失败，初始化步骤继续：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -437,7 +438,7 @@ async function runInitLlm(
     const trimmed = text.trim();
     return trimmed.length > 0 ? trimmed : null;
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-init-runner] init LLM 调用失败，回落启发式：${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
@@ -775,7 +776,7 @@ async function execBindToolsPerLayer(ctx: TeamInitSessionContext): Promise<{
       tags: s.tags,
     }));
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-init-runner] discoverLocalSkills 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -790,7 +791,7 @@ async function execBindToolsPerLayer(ctx: TeamInitSessionContext): Promise<{
       .slice(0, 40)
       .map((server) => ({ id: server.id, name: server.name }));
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[team-init-runner] loadConfiguredMcpServersForUser 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }

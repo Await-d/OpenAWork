@@ -50,6 +50,7 @@ import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildFileDiff } from '../tools/file-diff-format.js';
 import { deleteSpilledToolOutputsForSession } from '../tools/tool-output-spill.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
+import { registerSessionClientErrorRoutes } from './session-client-error-routes.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
 import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
 import {
@@ -136,7 +137,10 @@ import {
   getFreshSessionRuntimeThread,
   hasFreshSessionRuntimeThread,
 } from '../session/session-runtime-thread-store.js';
-import { hasPendingSessionInteraction } from '../session/session-runtime-state.js';
+import {
+  hasPendingSessionInteraction,
+  releaseStaleDecidingSessionRecordsForUser,
+} from '../session/session-runtime-state.js';
 import {
   listSessionMessagesV2,
   listRuntimeSafeSessionMessagesV2,
@@ -149,6 +153,7 @@ import { publishSessionRolledBackEvent } from '../handoff/bus/team-events-bus.js
 import { countUserMessages } from '../message/message-store-v2.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
 import { buildWorkflowRuntimeState } from '../session/workflow-runtime-state.js';
+import { logGatewayError, logGatewayWarn } from '../infra/gateway-logger.js';
 
 const createSessionSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
@@ -664,7 +669,7 @@ async function readWorkspaceContentForPreview(input: {
       return { validPath: true, exists: false, content: '', safePath };
     }
     if (input.tolerateUnreadable) {
-      console.warn(
+      logGatewayWarn(
         `[sessions] 恢复预览读取工作区文件失败（${code ?? 'unknown'}），按缺失处理：${input.filePath}`,
       );
       return { validPath: true, exists: false, content: '', safePath };
@@ -1101,7 +1106,7 @@ async function deleteSessionTree(input: {
 
   try {
     for (const session of input.sessionsToDelete) {
-      const taskGraphProjectRoot = resolveTaskGraphProjectRoot(session.id);
+      const taskGraphProjectRoot = resolveTaskGraphProjectRootForDelete(session.id);
       const candidatePaths = collectSessionBackupStoragePaths({
         sessionId: session.id,
         userId: input.userId,
@@ -1136,10 +1141,94 @@ async function deleteSessionTree(input: {
       deleteSpilledToolOutputsForSession(session.id);
 
       backupStoragePaths.push(...candidatePaths);
-      await taskStore.deleteGraph(taskGraphProjectRoot, session.id);
+      // 跨主机场景下任务图根不可解析（null）：会话本体照常删除，
+      // 残留任务图交由备份 GC 处理，不阻塞删除。
+      if (taskGraphProjectRoot !== null) {
+        await taskStore.deleteGraph(taskGraphProjectRoot, session.id);
+      }
     }
   } finally {
     await garbageCollectBackupStoragePaths(backupStoragePaths);
+  }
+}
+
+/**
+ * 判定一个错误是否为「跨主机工作区不可访问」。
+ *
+ * `resolveTaskGraphProjectRoot` 内部调用 `assertWorkspacePathSupportedByCurrentHost`，
+ * 主机不兼容时抛的是**裸 `Error`**（文案是前端稳定契约，见 workspace-paths.ts）。
+ * 该裸 Error 一旦冒泡到全局 error-handler，会命中兜底分支被替换成
+ * 「服务器内部错误。」，导致前端拿不到可判定的文案。
+ */
+function isCrossHostWorkspaceError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('无法访问') && message.includes('路径');
+}
+
+/**
+ * 删除会话时的任务图根解析：跨主机不可访问时返回 null。
+ *
+ * 会话数据删除是本地 SQLite 操作，与任务图所在设备无关。若在此处抛错，
+ * 一个绑定在别的设备工作区上的会话将**永远删不掉**（删除路由整体 500），
+ * 因此降级为「任务图残留、交由 GC 处理」，不阻塞会话本体删除。
+ */
+function resolveTaskGraphProjectRootForDelete(sessionId: string): string | null {
+  try {
+    return resolveTaskGraphProjectRoot(sessionId);
+  } catch (error) {
+    if (!isCrossHostWorkspaceError(error)) {
+      throw error;
+    }
+    logGatewayWarn(
+      `[sessions] 会话 ${sessionId} 的任务图位于其他设备的文件系统上，删除时跳过任务图清理：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
+ * 任务图读取失败的降级闸门。
+ *
+ * 背景（SSH 开发场景）：会话绑定了 SSH 远端 POSIX 工作区时（`sshConnectionId`
+ * 存在时 metadata 读路径会跳过本地 workspace roots 校验，路径被原样保留，见
+ * session-workspace-metadata.ts 的 SSH 分支），若网关此刻运行在 Windows /
+ * macOS 上，`resolveTaskGraphProjectRoot` 内部的
+ * `assertWorkspacePathSupportedByCurrentHost` 会为**每个** graph session 抛
+ * 「当前网关运行在 X，无法访问 POSIX 路径：…」。
+ *
+ * 注意：非 SSH 会话绑定的异地路径走不到这里 —— metadata 读路径的
+ * `validateWorkspacePath` 会把它判为越界并直接删除该字段，`getSessionWorkingDirectory`
+ * 返回 null，转而回退到本机根目录。因此触发前提是 SSH 绑定 + 跨 OS 网关。
+ *
+ * 该错误原本在 `buildMergedSessionTaskProjection` 的 `Promise.all` 里整体冒泡，
+ * 命中全局 error-handler 的兜底分支被替换成「服务器内部错误。」，导致
+ * `GET /sessions/:id/recovery` / `status` / `tasks` 三处一并 500 —— 而任务列表
+ * 只是 recovery read model 的**附属数据**，会话消息本体完全可以正常渲染。
+ *
+ * 因此这里按 graph 粒度跳过并 warn：跨主机任务图读不到就降级为空列表，
+ * 不牵连会话预览。真正需要任务数据的**写操作**走 `findVisibleTaskEntry`，
+ * 那里仍以 `ApiError.badRequest` 明确拒绝。
+ */
+async function loadTaskGraphForRead(
+  graphSessionId: string,
+): Promise<Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>> | null> {
+  try {
+    return await taskManager.loadOrCreate(
+      resolveTaskGraphProjectRoot(graphSessionId),
+      graphSessionId,
+    );
+  } catch (error) {
+    if (!isCrossHostWorkspaceError(error)) {
+      throw error;
+    }
+    logGatewayWarn(
+      `[sessions] 会话 ${graphSessionId} 的任务图位于其他设备的文件系统上，已降级为不返回任务：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
   }
 }
 
@@ -1199,14 +1288,21 @@ export async function buildMergedSessionTaskProjection(input: {
     graphSessionIds.add(sessionId);
   });
 
-  const graphs = await Promise.all(
+  const loadedGraphs = await Promise.all(
     Array.from(graphSessionIds).map(async (graphSessionId) => ({
-      graph: await taskManager.loadOrCreate(
-        resolveTaskGraphProjectRoot(graphSessionId),
-        graphSessionId,
-      ),
+      graph: await loadTaskGraphForRead(graphSessionId),
       graphSessionId,
     })),
+  );
+  // 跨主机不可访问的 graph 已在 loadTaskGraphForRead 内降级为 null，
+  // 任务列表按剩余可见部分聚合，updatedAt 同理只取成功读到的 graph。
+  const graphs = loadedGraphs.filter(
+    (
+      entry,
+    ): entry is {
+      graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
+      graphSessionId: string;
+    } => entry.graph !== null,
   );
 
   return {
@@ -1260,10 +1356,23 @@ async function findVisibleTaskEntry(input: {
   const graphSessionIds = collectAncestorSessionIds(sessionsById, input.sessionId);
 
   for (const graphSessionId of graphSessionIds) {
-    const graph = await taskManager.loadOrCreate(
-      resolveTaskGraphProjectRoot(graphSessionId),
-      graphSessionId,
-    );
+    let graph: Awaited<ReturnType<AgentTaskManagerImpl['loadOrCreate']>>;
+    try {
+      graph = await taskManager.loadOrCreate(
+        resolveTaskGraphProjectRoot(graphSessionId),
+        graphSessionId,
+      );
+    } catch (error) {
+      // 写操作路径不能静默降级：任务必须被真正定位到才能变更。
+      // 但也不能让裸 Error 冒泡成 500 —— 转成 400 才能让前端挂出
+      // 「切换工作区 / SSH 绑定」恢复入口（依赖该稳定文案判定）。
+      if (!isCrossHostWorkspaceError(error)) {
+        throw error;
+      }
+      throw ApiError.badRequest(
+        error instanceof Error ? error.message : '当前设备无法访问该会话工作区。',
+      );
+    }
     const task = graph.tasks[input.taskId];
     if (!task) {
       continue;
@@ -1311,6 +1420,7 @@ const SESSION_PARENT_IMMUTABLE_ERROR = '当前会话已绑定父会话，不能�
 async function reconcileSessionRuntimeForResponse(
   session: SessionRow,
   userId: string,
+  options?: { releaseStaleDeciding?: boolean },
 ): Promise<SessionRow> {
   // Per-session resilience: reconcileSessionRuntime does DB writes plus
   // finalizeChildTaskRun and can throw. This runs inside
@@ -1321,9 +1431,13 @@ async function reconcileSessionRuntimeForResponse(
   // `reconcileAllSessionRuntimes` which collects failures rather than aborting.
   let reconciliation: Awaited<ReturnType<typeof reconcileSessionRuntime>>;
   try {
-    reconciliation = await reconcileSessionRuntime({ sessionId: session.id, userId });
+    reconciliation = await reconcileSessionRuntime({
+      releaseStaleDeciding: options?.releaseStaleDeciding,
+      sessionId: session.id,
+      userId,
+    });
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[sessions] 会话 ${session.id} 运行时协调失败，沿用持久状态：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -1356,9 +1470,10 @@ async function reconcileSessionRuntimeForResponse(
 async function reconcileSessionRuntimeRowsForResponse(
   sessions: SessionRow[],
   userId: string,
+  options?: { releaseStaleDeciding?: boolean },
 ): Promise<SessionRow[]> {
   return Promise.all(
-    sessions.map((session) => reconcileSessionRuntimeForResponse(session, userId)),
+    sessions.map((session) => reconcileSessionRuntimeForResponse(session, userId, options)),
   );
 }
 
@@ -1387,7 +1502,7 @@ function mapRecoveryQuestionRequestRow(row: RecoveryQuestionRequestRow) {
   try {
     questions = JSON.parse(row.questions_json) as unknown;
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[sessions] 恢复提问请求 ${row.id} questions_json 解析失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -1461,9 +1576,14 @@ async function buildSessionStatusReadModel(input: { session: SessionRow; userId:
     .map((childSessionId) => sessionRowsById.get(childSessionId) ?? null)
     .filter((session): session is SessionRow => session !== null);
 
+  // 移动端 chat 屏在会话活跃时以 1.8s 轮询本端点、空闲时退到 60s 兜底；无论哪一档，
+  // 回收僵尸 deciding 都在入口做一次，而不是对子树里每条会话各做一次。
+  releaseStaleDecidingSessionRecordsForUser(input.userId);
+
   const reconciledDescendants = await reconcileSessionRuntimeRowsForResponse(
     descendantRows,
     input.userId,
+    { releaseStaleDeciding: false },
   );
 
   const children = reconciledDescendants.map((session) =>
@@ -1522,7 +1642,13 @@ async function buildSessionRecoveryReadModel(input: {
   messageLimit?: number;
   since?: number;
 }) {
-  const reconciledSession = await reconcileSessionRuntimeForResponse(input.session, input.userId);
+  // `/recovery` 被团队会话快照（2.5s）与子会话详情（2.5s）轮询，且下面会对子树跑
+  // 两轮协调。回收僵尸 deciding 放在入口做一次，per-session 协调一律传 false。
+  releaseStaleDecidingSessionRecordsForUser(input.userId);
+
+  const reconciledSession = await reconcileSessionRuntimeForResponse(input.session, input.userId, {
+    releaseStaleDeciding: false,
+  });
   const sessionId = input.session.id;
   const sessions = sqliteAll<SessionRow>(
     `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
@@ -1536,6 +1662,7 @@ async function buildSessionRecoveryReadModel(input: {
       .map((childSessionId) => sessions.find((session) => session.id === childSessionId) ?? null)
       .filter((session): session is SessionRow => session !== null),
     input.userId,
+    { releaseStaleDeciding: false },
   );
   const children = childRows.map((session) =>
     toPublicSessionResponse(
@@ -1576,6 +1703,7 @@ async function buildSessionRecoveryReadModel(input: {
   const reconciledSessions = await reconcileSessionRuntimeRowsForResponse(
     sessions.filter((candidate) => visibleSessionIds.has(candidate.id)),
     input.userId,
+    { releaseStaleDeciding: false },
   );
   const reconciledSessionsById = new Map(
     reconciledSessions.map((candidate) => [candidate.id, candidate] as const),
@@ -1819,15 +1947,22 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           )
         : sanitized;
 
-      const sessions = await reconcileSessionRuntimeRowsForResponse(filtered, user.sub).then(
-        (rows) =>
-          rows.map((session) => ({
-            ...session,
-            fileChangesSummary: buildSessionFileChangesSummary({
-              sessionId: session.id,
-              userId: user.sub,
-            }),
-          })),
+      // 僵尸 `deciding` 的回收在这里一次性完成：它必须发生在 reconcile 之前，
+      // 否则 reconcile 会把「尚未回收」的僵尸当成未处理交互去判定 paused——虽然
+      // `hasPendingSessionInteraction` 的判定口径含 `deciding`、结果不受释放影响，但先释放
+      // 才能让状态真正自愈。回收范围是本批次的超集（该用户全部会话），语义只更强。
+      releaseStaleDecidingSessionRecordsForUser(user.sub);
+
+      const sessions = await reconcileSessionRuntimeRowsForResponse(filtered, user.sub, {
+        releaseStaleDeciding: false,
+      }).then((rows) =>
+        rows.map((session) => ({
+          ...session,
+          fileChangesSummary: buildSessionFileChangesSummary({
+            sessionId: session.id,
+            userId: user.sub,
+          }),
+        })),
       );
       step.succeed(undefined, {
         count: sessions.length,
@@ -1860,6 +1995,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
   await registerSessionSharedReadRoutes(app);
+  await registerSessionClientErrorRoutes(app);
 
   app.get(
     '/sessions/:sessionId/message-ratings',
@@ -2493,7 +2629,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
             filePath: body.filePath,
           });
         } catch (readBackError) {
-          console.error(
+          logGatewayError(
             '[sessions] 文件评审决策回读失败（决策已持久化，不回滚文件）。',
             readBackError,
           );
@@ -2547,7 +2683,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
               userId: user.sub,
             });
           } catch (rollbackError) {
-            console.error('[sessions] 撤销失败后的文件回滚未完成。', rollbackError);
+            logGatewayError('[sessions] 撤销失败后的文件回滚未完成。', rollbackError);
           }
         }
         throw error;
@@ -3348,6 +3484,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           .filter((session): session is SessionRow => session !== null)
           .slice(query.offset, query.offset + query.limit),
         user.sub,
+        { releaseStaleDeciding: false },
       );
 
       const children = childRows.map((session) =>

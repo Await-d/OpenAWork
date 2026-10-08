@@ -17,6 +17,7 @@
 import { createHash } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const DEBOUNCE_MS = 200;
 
@@ -97,7 +98,7 @@ export class PluginWatcher {
     try {
       await this.listeners.get(path)?.();
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[plugin] hot reload listener for "${path}" threw: ${err instanceof Error ? err.message : String(err)}`,
       );
     }

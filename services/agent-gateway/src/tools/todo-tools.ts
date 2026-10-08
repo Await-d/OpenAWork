@@ -226,11 +226,21 @@ export interface SessionTodoLanes {
   temp: SessionTodo[];
 }
 
+/**
+ * `session_todos` 的原始行。
+ *
+ * `status` / `priority` 必须声明为 `string` 而非枚举：建表时它们只是裸 TEXT
+ * （无 CHECK 约束），枚举只存在于应用层 schema。声明成枚举会让类型系统误以为
+ * DB 里一定是合法值，脏数据就能一路穿过 TS 检查直到 `.parse()` 才炸 ——
+ * 而那正是 `/sessions/:id/recovery` 500 的根因。取值合法性由
+ * `listSessionTodos` 内的 `safeParse` 负责收口。
+ */
 interface SessionTodoRow {
   lane: TodoLane;
   content: string;
-  status: SessionTodo['status'];
-  priority: SessionTodo['priority'];
+  position: number;
+  status: string;
+  priority: string;
 }
 
 const CJK_CONTENT_PATTERN = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/;
@@ -274,19 +284,37 @@ export function formatSubTodoReadValidationError(rawInput: unknown): string {
 }
 
 export function listSessionTodos(sessionId: string, lane: TodoLane = 'main'): SessionTodo[] {
-  return sqliteAll<SessionTodoRow>(
+  const rows = sqliteAll<SessionTodoRow>(
     `SELECT lane, content, status, priority
       FROM session_todos
       WHERE session_id = ? AND lane = ?
       ORDER BY position ASC`,
     [sessionId, lane],
-  ).map((row) =>
-    sessionTodoSchema.parse({
+  );
+
+  // 脏行容错（§0.89-§0.93 class）：`session_todos` 建表时 status / priority 只是
+  // 裸 TEXT，没有 CHECK 约束，schema 枚举只存在于应用层。历史版本、手改库、迁移
+  // 或磁盘损坏都可能留下枚举外的取值。此处此前用 `.parse()`，一行脏数据就会抛
+  // ZodError；而本函数被 `/sessions/:id/recovery` 单次请求调用 3 次（main +
+  // todoLanes 的 main/temp），且 `/sessions`、`/sessions/:id` 也各自依赖它，
+  // 于是**一条坏 todo 会让整个会话列表与预览一起 500**。
+  // 与 `mapRecoveryQuestionRequestRow` 同策略：跳过坏行 + warn，不牵连整表。
+  const todos: SessionTodo[] = [];
+  rows.forEach((row) => {
+    const parsed = sessionTodoSchema.safeParse({
       content: row.content,
       status: row.status,
       priority: row.priority,
-    }),
-  );
+    });
+    if (!parsed.success) {
+      console.warn(
+        `[todo-tools] 会话 ${sessionId} 的 ${lane} 道 todo ${row.position} 记录不合法，已跳过：${parsed.error.message}`,
+      );
+      return;
+    }
+    todos.push(parsed.data);
+  });
+  return todos;
 }
 
 export function listSessionTodoLanes(sessionId: string): SessionTodoLanes {

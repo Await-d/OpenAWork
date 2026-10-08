@@ -19,6 +19,7 @@ import type { ChatBackendUsageSnapshot } from '../../../components/conversation-
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import { extractWorkingDirectory } from '../../../utils/session/session-metadata.js';
+import { fetchSessionRecoveryOnce } from '../../../utils/session/session-recovery-flight.js';
 import type { SessionViewCacheReturn } from '../conversation/snapshot/use-session-view-cache.js';
 import {
   SESSION_SWITCH_DEFER_THRESHOLD,
@@ -43,7 +44,6 @@ import type {
   UpstreamStreamSummary,
   WorkflowRuntimeState,
 } from '@openAwork/shared';
-import { createSessionsClient } from '@openAwork/web-client';
 import type {
   PendingQuestionRequest,
   Session,
@@ -351,11 +351,13 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
   }
 
   if (shouldSoftReloadCurrentSession) {
-    createSessionsClient(gatewayUrl)
-      .getRecovery(token, requestedSessionId, {
-        messageLimit: INITIAL_TURN_LIMIT,
-        signal: runtimeSnapshotController.signal,
-      })
+    fetchSessionRecoveryOnce({
+      gatewayUrl,
+      token,
+      sessionId: requestedSessionId,
+      messageLimit: INITIAL_TURN_LIMIT,
+      signal: runtimeSnapshotController.signal,
+    })
       .then((recovery) => {
         if (cancelled || !isCurrentSessionView(requestedSessionId, sessionViewEpoch)) {
           return;
@@ -506,11 +508,13 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     setSessionStateStatus('running');
   }
 
-  createSessionsClient(gatewayUrl)
-    .getRecovery(token, requestedSessionId, {
-      messageLimit: INITIAL_TURN_LIMIT,
-      signal: runtimeSnapshotController.signal,
-    })
+  fetchSessionRecoveryOnce({
+    gatewayUrl,
+    token,
+    sessionId: requestedSessionId,
+    messageLimit: INITIAL_TURN_LIMIT,
+    signal: runtimeSnapshotController.signal,
+  })
     .then((recovery) => {
       console.log('[RECOVERY]', requestedSessionId, {
         activeStream: recovery.activeStream,

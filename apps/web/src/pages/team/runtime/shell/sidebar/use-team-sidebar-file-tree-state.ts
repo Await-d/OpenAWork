@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createWorkspaceClient, type FileTreeNode } from '@openAwork/web-client';
+import {
+  createWorkspaceClient,
+  type FileTreeNode,
+  type WorkspaceFileReadOptions,
+} from '@openAwork/web-client';
 import {
   computeExponentialRetryDelay,
   formatRecoverableLoadError,
@@ -131,6 +135,14 @@ interface UseTeamSidebarFileTreeStateOptions {
   gatewayUrl: string;
   token: string | null;
   workspacePath?: string | null;
+  /**
+   * SSH 读取身份。
+   *
+   * 缺省时网关按本机路径读，SSH 远端工作区下会渲染出**网关本机**的同名目录
+   * （网关为 Linux 且路径恰好存在时不报错，只是数据是错的）。因此团队侧边栏
+   * 与主文件树一样必须下发身份。
+   */
+  readIdentity?: WorkspaceFileReadOptions;
 }
 
 interface UseTeamSidebarFileTreeStateResult {
@@ -173,6 +185,17 @@ export function useTeamSidebarFileTreeState(
     [expandedDirsArr, setExpandedDirsForSession, treeExpandedSessionKey],
   );
   const previousExpandedSessionKeyRef = useRef(treeExpandedSessionKey);
+  /**
+   * SSH 读取身份的 ref。
+   *
+   * 用 ref 而非直接读 `options.readIdentity`：下面四个回调都已把 `options` 收进
+   * `useRef`，若直接读options 会让身份变化无法被依赖数组感知。这里保持同一
+   * 模式——身份最新值通过 ref 读取，回调本身不必因身份变化而重建。
+   */
+  const readIdentityRef = useRef(options.readIdentity);
+  useEffect(() => {
+    readIdentityRef.current = options.readIdentity;
+  }, [options.readIdentity]);
   const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
 
   useEffect(() => {
@@ -232,7 +255,10 @@ export function useTeamSidebarFileTreeState(
         if (!isPathWithinRoot(dirPath, rootPath)) {
           continue;
         }
-        const childResult = await workspaceClient.fetchTreeResult(token, dirPath, { depth: 1 });
+        const childResult = await workspaceClient.fetchTreeResult(token, dirPath, {
+          depth: 1,
+          ...(readIdentityRef.current ?? {}),
+        });
         if (cancelled) {
           return;
         }
@@ -266,7 +292,10 @@ export function useTeamSidebarFileTreeState(
     setTreeError(null);
 
     void workspaceClient
-      .fetchTreeResult(options.token, options.workspacePath, { depth: 1 })
+      .fetchTreeResult(options.token, options.workspacePath, {
+        depth: 1,
+        ...(readIdentityRef.current ?? {}),
+      })
       .then((result) => {
         if (cancelled) {
           return;
@@ -360,28 +389,33 @@ export function useTeamSidebarFileTreeState(
         return;
       }
       setTreeError(null);
-      void workspaceClient.fetchTreeResult(options.token, path, { depth: 1 }).then((result) => {
-        if (!result.ok) {
-          const nextRetryAtMs = scheduleRetry({
-            computeDelay: computeTeamSidebarFileTreeRetryDelay,
-            onRetry: () => {
-              setRefreshTick((current) => current + 1);
-            },
-            retryable: result.retryable,
-          });
-          setTreeError(
-            formatTeamSidebarFileTreeLoadError({
-              hasCachedTree: treeNodesRef.current.length > 0,
-              nextRetryAtMs,
-              result,
-            }),
-          );
-          return;
-        }
-        resetRetry();
-        setTreeNodes((current) => injectChildren(current, path, result.nodes));
-        setTreeError(null);
-      });
+      void workspaceClient
+        .fetchTreeResult(options.token, path, {
+          depth: 1,
+          ...(readIdentityRef.current ?? {}),
+        })
+        .then((result) => {
+          if (!result.ok) {
+            const nextRetryAtMs = scheduleRetry({
+              computeDelay: computeTeamSidebarFileTreeRetryDelay,
+              onRetry: () => {
+                setRefreshTick((current) => current + 1);
+              },
+              retryable: result.retryable,
+            });
+            setTreeError(
+              formatTeamSidebarFileTreeLoadError({
+                hasCachedTree: treeNodesRef.current.length > 0,
+                nextRetryAtMs,
+                result,
+              }),
+            );
+            return;
+          }
+          resetRetry();
+          setTreeNodes((current) => injectChildren(current, path, result.nodes));
+          setTreeError(null);
+        });
     },
     [options.token, resetRetry, scheduleRetry, workspaceClient],
   );
@@ -393,6 +427,7 @@ export function useTeamSidebarFileTreeState(
       }
 
       const result = await workspaceClient.fetchTreeResult(options.token, directoryPath, {
+        ...(readIdentityRef.current ?? {}),
         depth: 1,
       });
       if (!result.ok) {

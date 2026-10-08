@@ -12,6 +12,7 @@ import { parseSessionMetadataJson } from '../session/session-workspace-metadata.
 import { shouldExitPlanModeFromAnswers } from '../tools/plan-mode-tools.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../tools/question-tools.js';
 import type { ApprovedPermissionResumePayload } from '../routes/stream.js';
+import { logGatewayError } from '../infra/gateway-logger.js';
 
 const TASK_PARENT_DECISION_REQUEST_PREFIX = 'task-parent-decision:';
 const MAX_PARENT_DECISION_MESSAGE_LENGTH = 16000;
@@ -319,7 +320,7 @@ function safeReleasePendingInteraction(input: {
     releasePendingInteraction(input);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error('task parent auto-decision release failed', {
+    logGatewayError('task parent auto-decision release failed', {
       error: message,
       interactionId: input.id,
       interactionType: input.interactionType,

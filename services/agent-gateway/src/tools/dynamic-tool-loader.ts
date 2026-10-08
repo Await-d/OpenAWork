@@ -26,6 +26,7 @@ import { z, type ZodTypeAny } from 'zod';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { truncateToolOutputUniversal } from './tool-output-truncator.js';
 import type { GatewayToolDefinition } from './tool-definitions.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** Shape of a user-defined tool exported from a workspace tool module. */
 export interface DynamicToolDefinition {
@@ -189,7 +190,7 @@ async function loadToolModule(
     const importPath = pathToFileURL(filePath).href;
     mod = (await import(importPath)) as Record<string, unknown>;
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[dynamic-tool-loader] Failed to import ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return [];
@@ -267,7 +268,7 @@ export async function loadDynamicToolsForWorkspace(
       const entries = await loadToolModule(file, workspaceRoot, sessionId);
       allEntries.push(...entries);
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[dynamic-tool-loader] Error loading tool module ${file}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }

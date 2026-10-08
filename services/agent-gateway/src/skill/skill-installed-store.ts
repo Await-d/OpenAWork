@@ -6,6 +6,7 @@
  */
 
 import { sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export interface InstalledSkillRow {
   skill_id: string;
@@ -73,7 +74,7 @@ export function tryRowToInstalledSkill(row: InstalledSkillRow): InstalledSkillRe
   try {
     return rowToInstalledSkill(row);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[skills] installed skill ${row.skill_id} JSON 解析失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,

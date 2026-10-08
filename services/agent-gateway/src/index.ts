@@ -7,6 +7,7 @@ import { WorkflowLogger } from '@openAwork/logger';
 import { ConfigService, LoggerService, makeEffectRuntime } from './runtime/effect-runtime.js';
 import authPlugin from './infra/auth.js';
 import { registerErrorHandler } from './infra/error-handler.js';
+import { bindGatewayLogger } from './infra/gateway-logger.js';
 import { makeGatewayMetrics } from './infra/gateway-metrics.js';
 import { registerOpenApi } from './infra/openapi.js';
 import {
@@ -100,6 +101,7 @@ import { memoriesRoutes } from './routes/memories.js';
 import { pluginsRoutes } from './routes/plugins.js';
 import { promptSnippetsRoutes } from './routes/prompt-snippets.js';
 import { notificationsRoutes } from './routes/notifications.js';
+import { notificationEventsRoutes } from './routes/notification-events.js';
 import { sessionImagesRoutes } from './routes/session-images.js';
 import { sessionTerminalsRoutes } from './routes/session-terminals.js';
 import { portsRoutes } from './routes/ports.js';
@@ -114,6 +116,7 @@ import { pruneStaleSpilledToolOutputs } from './tools/tool-output-spill.js';
 
 // 方案 5：加载所有内置 provider 插件
 import './provider/plugins/index.js';
+import { logGatewayWarn } from './infra/gateway-logger.js';
 
 // 发布 CI 冒烟：在 Fastify 创建、DB 连接与 listen 之前拦截 `--print-browser-plan`，
 // 验证编译产物仍能解析 Playwright 内联的浏览器注册表元数据。
@@ -124,8 +127,15 @@ if (cliArgv.includes('--print-browser-plan')) {
   globalThis.process?.exit(exitCode);
 }
 
+/**
+ * 日志级别：默认 info；线上排障可设 `OPENAWORK_LOG_LEVEL=debug` 打开调试日志。
+ * 不配置任何覆盖点时无法在不动代码的前提下提高/降低日志量，这是「错误被埋没」
+ * 的常见成因之一。
+ */
+const GATEWAY_LOG_LEVEL = globalThis.process?.env?.['OPENAWORK_LOG_LEVEL']?.trim() || 'info';
+
 const app = Fastify({
-  logger: true,
+  logger: { level: GATEWAY_LOG_LEVEL },
   disableRequestLogging: true,
   // Raise the per-path-parameter length cap above the find-my-way default of
   // 100 so routes keyed by long composite ids (e.g. notification ids) match
@@ -137,6 +147,10 @@ const gatewayEnv = {
   ...globalThis.process?.env,
   GATEWAY_HOST: globalThis.process?.env['GATEWAY_HOST'] ?? '0.0.0.0',
 };
+
+// 让请求上下文之外的位置（流式执行深层 catch、后台定时器、团队运行时等）也能把错误
+// 写进同一条结构化日志，而不是退回无法按级别过滤的 console.*。
+bindGatewayLogger(app.log);
 
 const effectRuntime = makeEffectRuntime({
   config: { env: gatewayEnv },
@@ -264,6 +278,7 @@ await app.register(memoriesRoutes);
 await app.register(pluginsRoutes);
 await app.register(promptSnippetsRoutes);
 await app.register(notificationsRoutes);
+await app.register(notificationEventsRoutes);
 await app.register(sessionImagesRoutes);
 await app.register(sessionTerminalsRoutes);
 await app.register(portsRoutes);
@@ -415,7 +430,7 @@ try {
   // 工具输出 spill 目录兜底清理（会话删除是主路径；这里处理长期未删会话）。
   // fire-and-forget：磁盘清理失败不阻塞启动。
   void pruneStaleSpilledToolOutputs().catch((error: unknown) => {
-    console.warn(
+    logGatewayWarn(
       `[gateway] tool-output spill 清理失败（忽略）：${error instanceof Error ? error.message : String(error)}`,
     );
   });

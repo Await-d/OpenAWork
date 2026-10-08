@@ -8,6 +8,7 @@
 
 import type { PluginContext, StorageScanOptions, StorageScanResult } from '@openAwork/plugin-sdk';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const MAX_VALUE_BYTES = 256 * 1024;
 const DEFAULT_SCAN_LIMIT = 100;
@@ -22,7 +23,7 @@ function parseStoredValue(raw: string, key: string): unknown {
   try {
     return JSON.parse(raw) as unknown;
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[plugin] storage value for "${key}" is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
     );
     return undefined;

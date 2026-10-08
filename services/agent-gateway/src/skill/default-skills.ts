@@ -1,4 +1,5 @@
 import { sqliteAll, sqliteRun } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface UserRow {
   id: string;
@@ -81,7 +82,7 @@ export function ensureDefaultInstalledSkillsForAllUsers(): void {
     try {
       ensureDefaultInstalledSkills(user.id);
     } catch (error) {
-      console.warn(
+      logGatewayWarn(
         `[default-skills] 为用户 ${user.id} 播种默认技能失败，已跳过：${
           error instanceof Error ? error.message : String(error)
         }`,

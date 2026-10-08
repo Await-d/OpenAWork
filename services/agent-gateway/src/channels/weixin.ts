@@ -10,6 +10,7 @@ import { computeChannelRetryDelayMs } from './channel-http.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 import { isRecord, readString, readTimestamp } from './inbound-utils.js';
 import { parseWeixinInboundMessage } from './inbound-parsers/weixin.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   createWeixinApi,
   DEFAULT_WEIXIN_BASE_URL,
@@ -165,7 +166,7 @@ export class WeixinChannelService implements MessagingChannelService {
     try {
       this.notify(event);
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[weixin] channel notify handler threw: ${err instanceof Error ? err.message : String(err)}`,
       );
     }

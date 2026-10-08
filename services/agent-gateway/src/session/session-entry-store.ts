@@ -20,6 +20,7 @@ import {
   makeSessionEventId,
 } from './session-event.js';
 import { aggregateSessionEntries, type SessionEntry } from './session-entry.js';
+import { logGatewayError, logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface SessionEntryRow {
   id: string;
@@ -137,7 +138,7 @@ function maybePruneSessionEntries(sessionId: string): void {
       sessionEntryStoreDisabled = true;
       return;
     }
-    console.warn(
+    logGatewayWarn(
       `[session-entry] retention prune failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
@@ -301,7 +302,7 @@ function flushPendingSessionEntryQueue(sessionId: string): void {
     // Timer-driven flush: there is no caller to rethrow to. Drop the batch —
     // these rows are a best-effort mirror, and the transcript itself is
     // persisted through the message store.
-    console.error('[session-entry] batched flush failed', {
+    logGatewayError('[session-entry] batched flush failed', {
       error: error instanceof Error ? error.message : String(error),
       sessionId,
       queued: queued.length,

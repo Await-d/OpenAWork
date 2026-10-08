@@ -20,6 +20,7 @@ import {
 } from '../compaction/compaction-policy.js';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { writeAuditLog } from '../infra/audit-log.js';
+import { describeError, logGatewayError, logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   modelRequestSchema,
   type ModelRouteConfig,
@@ -1624,7 +1625,7 @@ export async function executeToolCalls(input: {
         }
       }
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[stream] Failed to load dynamic tools for ${effectiveWorkspaceRoot}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -2472,7 +2473,7 @@ export async function handleStreamRequest(input: {
           userId: input.user.sub,
         });
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           '[stream] runtime-thread heartbeat failed',
           err instanceof Error ? err.message : String(err),
         );
@@ -2589,7 +2590,7 @@ export async function handleStreamRequest(input: {
             input.sessionId,
           );
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[stream] Failed to load dynamic tools: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
@@ -2699,7 +2700,7 @@ export async function handleStreamRequest(input: {
           const built = buildFlatMcpToolDefinitions(catalogs);
           flatMcpDefs = built.definitions;
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[stream] Failed to build flat MCP tool defs: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
@@ -2886,7 +2887,7 @@ export async function handleStreamRequest(input: {
                 userId: input.user.sub,
               });
             } catch (recordErr) {
-              console.warn(
+              logGatewayWarn(
                 '[STREAM_TEAM_CONTROL] record incident failed (non-blocking):',
                 recordErr instanceof Error ? recordErr.message : String(recordErr),
               );
@@ -3203,7 +3204,7 @@ export async function handleStreamRequest(input: {
               metadataJson: input.sessionContext.metadataJson,
             });
           } catch (error: unknown) {
-            console.warn('memory auto extraction failed after stream completion', error);
+            logGatewayWarn('memory auto extraction failed after stream completion', error);
           }
           return {
             errorSummary:
@@ -3341,10 +3342,9 @@ export async function handleStreamRequest(input: {
               });
             }
           } catch (interactionCleanupErr) {
-            console.warn(
-              '[STREAM_ABORT_CASCADE] descendant interaction cleanup failed —',
-              input.sessionId,
-              String(interactionCleanupErr),
+            logGatewayWarn(
+              '[STREAM_ABORT_CASCADE] descendant interaction cleanup failed',
+              { sessionId: input.sessionId, error: interactionCleanupErr },
             );
           }
         }
@@ -3367,7 +3367,10 @@ export async function handleStreamRequest(input: {
           timedOut: cascade.timedOut,
         };
       } catch (cascadeErr) {
-        console.warn('[STREAM_ABORT_CASCADE] failed —', input.sessionId, String(cascadeErr));
+        logGatewayWarn('[STREAM_ABORT_CASCADE] failed', {
+          sessionId: input.sessionId,
+          error: cascadeErr,
+        });
       }
       emitChunk({
         type: 'done',
@@ -3385,7 +3388,18 @@ export async function handleStreamRequest(input: {
       return { statusCode: 200, stopReason: 'cancelled' as const };
     }
 
-    console.log('[STREAM_ERROR] session', input.sessionId, 'stream errored —', String(err));
+    const streamErrorDetail = describeError(err);
+    // 全流最致命的错误分支：原实现是 console.log（不进结构化日志、无法按级别过滤）
+    // 且只保留 message，堆栈丢失后几乎无法定位。现改为 error 级并保留堆栈。
+    logGatewayError(`[stream] 流式执行失败：${streamErrorDetail.errorMessage}`, {
+      kind: 'STREAM_ERROR',
+      sessionId: input.sessionId,
+      clientRequestId: requestData.clientRequestId,
+      userId: input.user.sub,
+      transport: input.transport,
+      model: route.model,
+      ...streamErrorDetail,
+    });
     setPersistedSessionStateStatus({
       sessionId: input.sessionId,
       status: 'idle',
@@ -3396,13 +3410,20 @@ export async function handleStreamRequest(input: {
       category: 'stream',
       sourceName: 'STREAM_ERROR',
       requestId: requestData.clientRequestId,
-      output: { message: String(err), code: 'STREAM_ERROR' },
+      output: {
+        message: streamErrorDetail.errorMessage,
+        code: 'STREAM_ERROR',
+        // 审计表同样保留堆栈：这是事后回溯「当时为什么炸」的唯一持久化证据。
+        stack: streamErrorDetail.errorStack,
+      },
     });
     appendSessionMessageV2({
       sessionId: input.sessionId,
       userId: input.user.sub,
       role: 'assistant',
-      content: buildErrorContent('STREAM_ERROR', String(err)),
+      // 用 describeError 的结果而非 `String(err)`：后者对非 Error 的抛出值会退化成
+      // "[object Object]"，用户在会话里看到的就是一句毫无信息量的话。
+      content: buildErrorContent('STREAM_ERROR', streamErrorDetail.errorMessage),
       clientRequestId: requestData.clientRequestId,
       status: 'error',
       replaceExisting: true,
@@ -3415,7 +3436,7 @@ export async function handleStreamRequest(input: {
     emitChunk(
       createStreamErrorChunk(
         'STREAM_ERROR',
-        String(err),
+        streamErrorDetail.errorMessage,
         runId,
         buildRouteOnlyUpstreamSummary(route, 'error'),
         requestData.clientRequestId,

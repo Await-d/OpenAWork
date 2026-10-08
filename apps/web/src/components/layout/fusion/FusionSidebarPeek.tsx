@@ -1,7 +1,9 @@
 import type { CSSProperties } from 'react';
 import type { Session } from '../../../hooks/workspace/useSessions.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session/session-grouping.js';
-import { getPathBasename } from '../../../utils/workspace-path.js';
+import { useWorkspaceDisplayName } from '../../../hooks/workspace/useWorkspaceAlias.js';
+import { readWorkspaceAlias } from '../../../utils/workspace-alias.js';
+import { formatWorkspacePathLabel } from '../../../utils/workspace-path.js';
 
 export interface FusionSidebarPeekProps {
   readonly activeSessionId: string | null;
@@ -57,7 +59,9 @@ const TITLE_STYLE: CSSProperties = {
 
 const SUBTITLE_STYLE: CSSProperties = {
   color: 'var(--fg-subtle)',
-  fontSize: 10,
+  fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+  fontSize: 10.5,
+  letterSpacing: '0.01em',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -117,10 +121,6 @@ const FOOTER_BUTTON_STYLE: CSSProperties = {
   justifyContent: 'center',
 };
 
-function basename(path: string | null): string {
-  return getPathBasename(path, 'OpenAWork');
-}
-
 interface FlattenedPeekNode {
   node: WorkspaceSessionTreeNode<Session>;
   depth: number;
@@ -157,6 +157,15 @@ export function FusionSidebarPeek({
   const visibleNodes = flattenedNodes.slice(0, MAX_VISIBLE_SESSIONS);
   const remainingCount = flattenedNodes.length - visibleNodes.length;
 
+  // 与展开态面板同一套展示口径：标题行给名字（别名优先），第二行给紧凑路径；
+  // 别名写入会广播事件，因此任一入口改名后这里也会同步。
+  const resolveDisplayName = useWorkspaceDisplayName();
+  const hasCustomWorkspaceName = readWorkspaceAlias(workspacePath) !== '';
+  const peekSubtitleText = workspacePath
+    ? formatWorkspacePathLabel(workspacePath, { includeBasename: hasCustomWorkspaceName }) ||
+      '本机文件系统根目录'
+    : '未选择工作区';
+
   return (
     <aside
       aria-label="工作区会话预览"
@@ -166,8 +175,10 @@ export function FusionSidebarPeek({
     >
       <div style={HEADER_STYLE}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-          <span style={TITLE_STYLE}>{basename(workspacePath)}</span>
-          <span style={SUBTITLE_STYLE}>{workspacePath ?? '未选择工作区'}</span>
+          <span style={TITLE_STYLE}>{resolveDisplayName(workspacePath)}</span>
+          <span style={SUBTITLE_STYLE} title={workspacePath ?? undefined}>
+            {peekSubtitleText}
+          </span>
         </div>
         <span style={COUNT_STYLE}>{flattenedNodes.length} 条</span>
       </div>

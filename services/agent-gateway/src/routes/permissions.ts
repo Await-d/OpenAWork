@@ -231,6 +231,15 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: '目标会话不存在。' });
       }
 
+      // 这里**刻意不**回收僵尸 `deciding`（父代理 claim 后崩掉的那些），尽管本接口的
+      // SQL 只认 `status = 'pending'`、不回收就看不到它们。原因是调用频率：
+      // `use-sub-session-detail` 以 2.5s 轮询本接口（N 个子会话面板 = N 倍），在这里
+      // 写库等于把写事务挂到高频轮询上。
+      //
+      // 覆盖由三处低频入口承担，缺一不可但都远比 2.5s 轮询稀疏：
+      //   - `GET /sessions/:sessionId` 内部的 reconcile（同一轮面板刷新里已经跑）
+      //   - `GET /sessions` 列表 / `GET /status` 入口的按用户批量释放
+      //   - 删除、启动对账、remediation 路径的 `reconcileSessionStateStatus`
       const requests = sqliteAll<PermissionRequestRow>(
         `SELECT id, session_id, tool_name, scope, reason, risk_level, preview_action, status, decision, request_payload_json, expires_at, always_json, created_at
          FROM permission_requests

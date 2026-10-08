@@ -8,6 +8,7 @@ import type { AIProvider, ActiveSelection } from '@openAwork/agent-core';
 import { ProviderManagerImpl } from '@openAwork/agent-core';
 import { sqliteGet } from '../infra/db.js';
 import { applyStoredActiveSelection } from './provider-config.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface UserSettingRow {
   key: string;
@@ -79,7 +80,7 @@ function parseStoredSettingValue(value: string | undefined, key: string): unknow
   try {
     return JSON.parse(value) as unknown;
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[provider-catalog] user_settings '${key}' JSON 解析失败，按未配置处理：${
         err instanceof Error ? err.message : String(err)
       }`,

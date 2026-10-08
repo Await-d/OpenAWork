@@ -3,11 +3,27 @@
  *
  * 由 FusionSidebar 主文件拆出：渲染工作区分组标题（可折叠、含计数与
  * 新建会话入口）以及组内会话行；置顶分区使用图钉图标且不提供新建入口。
+ *
+ * 分组标题额外承载两项工作区元信息：用户自定义名称（别名）与 SSH 远程标识——
+ * 远端目录与同名本地目录仅靠路径无法区分，必须在标题上显式标注来源。
  */
 
+import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SessionSidebarSessionRow } from '../sidebar/SessionSidebarSessionRow.js';
 import type { Session } from '../../../hooks/workspace/useSessions.js';
+import { useSshConnectionLabels } from '../../../hooks/workspace/useSshConnectionLabels.js';
+import {
+  renameWorkspaceDisplay,
+  useWorkspaceDisplayName,
+} from '../../../hooks/workspace/useWorkspaceAlias.js';
+import { readWorkspaceAlias } from '../../../utils/workspace-alias.js';
+import { resolveWorkspaceGroupDisplayName } from '../../../utils/session/session-grouping.js';
+import WorkspaceGroupMenu from '../workspace/WorkspaceGroupMenu.js';
+import { WorkspaceRenameDialog } from '../workspace/WorkspaceRenameDialog.js';
+import { WorkspaceSshBadge } from '../workspace/WorkspaceSshBadge.js';
 import { countRunningSessions, type FusionChatGroupRow } from './fusion-sidebar-session-groups.js';
+import { toast } from '../../common/feedback/ToastNotification.js';
 
 /** 会话行共享回调：由主组件一次性构造，避免逐行透传。 */
 export interface FusionChatSessionRowHandlers {
@@ -50,6 +66,20 @@ export function FusionSidebarChatGroupSection({
   onCreateSession,
   rowHandlers,
 }: FusionSidebarChatGroupSectionProps) {
+  const resolveWorkspaceName = useWorkspaceDisplayName();
+  const sshConnections = useSshConnectionLabels(
+    groups.some((group) => group.sshConnectionId !== null),
+  );
+  const [workspaceMenuTarget, setWorkspaceMenuTarget] = useState<{
+    group: FusionChatGroupRow;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [renamingWorkspace, setRenamingWorkspace] = useState<{
+    workspacePath: string;
+    defaultName: string;
+  } | null>(null);
+
   return (
     <>
       {groups.map((group) => {
@@ -57,6 +87,7 @@ export function FusionSidebarChatGroupSection({
         const isCollapsed = collapsedGroups.has(groupKey);
         const groupBodyId = `fusion-session-group-${encodeURIComponent(groupKey)}`;
         const runningCount = countRunningSessions(group.roots);
+        const groupDisplayName = resolveWorkspaceGroupDisplayName(group, resolveWorkspaceName);
 
         return (
           <div
@@ -76,6 +107,10 @@ export function FusionSidebarChatGroupSection({
                 aria-expanded={!isCollapsed}
                 aria-controls={groupBodyId}
                 onClick={() => toggleGroupCollapsed(groupKey)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setWorkspaceMenuTarget({ group, x: event.clientX, y: event.clientY });
+                }}
                 style={{
                   flex: 1,
                   display: 'flex',
@@ -141,9 +176,16 @@ export function FusionSidebarChatGroupSection({
                     letterSpacing: '0.015em',
                     color: 'var(--fg-strong)',
                   }}
+                  title={group.workspacePath ?? groupDisplayName}
                 >
-                  {group.workspaceLabel}
+                  {groupDisplayName}
                 </span>
+                {group.sshConnectionId !== null && (
+                  <WorkspaceSshBadge
+                    connectionId={group.sshConnectionId}
+                    connections={sshConnections}
+                  />
+                )}
                 {runningCount > 0 ? (
                   <span
                     style={{
@@ -182,8 +224,8 @@ export function FusionSidebarChatGroupSection({
               {!group.isPinnedGroup && (
                 <button
                   type="button"
-                  title={`在 ${group.workspaceLabel} 中新建会话`}
-                  aria-label={`在 ${group.workspaceLabel} 中新建会话`}
+                  title={`在 ${groupDisplayName} 中新建会话`}
+                  aria-label={`在 ${groupDisplayName} 中新建会话`}
                   onClick={() => onCreateSession(group.workspacePath)}
                   className="sidebar-icon-button"
                   style={{
@@ -258,6 +300,45 @@ export function FusionSidebarChatGroupSection({
           </div>
         );
       })}
+      {workspaceMenuTarget &&
+        createPortal(
+          <WorkspaceGroupMenu
+            workspacePath={workspaceMenuTarget.group.workspacePath}
+            workspaceLabel={workspaceMenuTarget.group.workspaceLabel}
+            sessionCount={workspaceMenuTarget.group.sessionCount}
+            x={workspaceMenuTarget.x}
+            y={workspaceMenuTarget.y}
+            isCollapsed={collapsedGroups.has(workspaceMenuTarget.group.key)}
+            // 融合侧栏不提供工作区删除入口（删除由会话管理页承载），
+            // 因此不传 canDelete / onDelete。
+            hasCustomName={readWorkspaceAlias(workspaceMenuTarget.group.workspacePath) !== ''}
+            onClose={() => setWorkspaceMenuTarget(null)}
+            onNewSession={() => onCreateSession(workspaceMenuTarget.group.workspacePath)}
+            onToggleCollapse={() => toggleGroupCollapsed(workspaceMenuTarget.group.key)}
+            onRename={() => {
+              const workspacePath = workspaceMenuTarget.group.workspacePath;
+              if (!workspacePath) {
+                return;
+              }
+              setRenamingWorkspace({
+                workspacePath,
+                defaultName: workspaceMenuTarget.group.workspaceLabel,
+              });
+            }}
+          />,
+          document.body,
+        )}
+      <WorkspaceRenameDialog
+        open={renamingWorkspace !== null}
+        workspacePath={renamingWorkspace?.workspacePath ?? null}
+        defaultName={renamingWorkspace?.defaultName ?? ''}
+        onCancel={() => setRenamingWorkspace(null)}
+        onSubmit={(alias) => {
+          renameWorkspaceDisplay(renamingWorkspace?.workspacePath ?? null, alias);
+          setRenamingWorkspace(null);
+          toast(alias ? '工作区已重命名' : '已恢复默认名称', 'success');
+        }}
+      />
     </>
   );
 }

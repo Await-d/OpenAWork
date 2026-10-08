@@ -86,6 +86,23 @@ const TrashIcon = () => (
   </svg>
 );
 
+const PencilIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+
 export interface WorkspaceGroupMenuProps {
   workspacePath: string | null;
   workspaceLabel: string;
@@ -99,6 +116,10 @@ export interface WorkspaceGroupMenuProps {
   onNewSession: () => void;
   onToggleCollapse: () => void;
   onDelete?: () => void;
+  /** 触发重命名工作区（仅改展示名）；未传或无工作区时不展示该入口。 */
+  onRename?: () => void;
+  /** 工作区是否已设置自定义名称：用于把菜单项文案区分为「重命名 / 清除名称」。 */
+  hasCustomName?: boolean;
 }
 
 const menuStyle: React.CSSProperties = {
@@ -188,6 +209,8 @@ export default function WorkspaceGroupMenu({
   onNewSession,
   onToggleCollapse,
   onDelete,
+  onRename,
+  hasCustomName = false,
 }: WorkspaceGroupMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const { canOpen: canOpenSystem, unavailableReason, openInSystem } = useOpenPathInSystem();
@@ -267,6 +290,18 @@ export default function WorkspaceGroupMenu({
             onClose();
           }}
         />
+        {onRename && (
+          <MenuItem
+            label={hasCustomName ? '修改工作区名称' : '重命名工作区'}
+            icon={<PencilIcon />}
+            disabled={workspacePath === null}
+            title={workspacePath === null ? '当前分组没有关联工作区目录' : undefined}
+            onClick={() => {
+              onRename();
+              onClose();
+            }}
+          />
+        )}
         {canDelete && onDelete && (
           <>
             <hr style={sepStyle} />

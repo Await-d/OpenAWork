@@ -119,7 +119,9 @@ describe('useWorkspaceIndexRefresh', () => {
       renderHook(() => useWorkspaceIndexRefresh({ enabled: true, workspacePath, onChange }));
 
       await flush();
-      expect(mocks.getFileIndexVersion).toHaveBeenCalledWith('token-1', '');
+      // 第三个参数是 SSH 读取身份：无身份时网关按本机路径查索引版本，远端会话
+      // 会得到 400 并让本 hook 永久 stop()，因此这里断言身份以空对象下发。
+      expect(mocks.getFileIndexVersion).toHaveBeenCalledWith('token-1', '', {});
       expect(onChange).not.toHaveBeenCalled();
     },
   );

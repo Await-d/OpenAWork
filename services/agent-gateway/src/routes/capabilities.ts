@@ -32,6 +32,7 @@ import { resolveChannelCapabilityToolGroup } from '../channels/channel-capabilit
 import { SUPPORTED_CHANNEL_PLATFORMS } from '../channels/types.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import type { ChannelCapabilityContextPromptInjections } from '../channels/types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface SessionMetadataRow {
   metadata_json: string;
@@ -249,7 +250,7 @@ function buildCapabilitiesForUser(input: ListCapabilitiesForUserInput): Capabili
             },
           ];
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `[capabilities] installed_skills manifest_json 解析失败，已跳过：${
               err instanceof Error ? err.message : String(err)
             }`,

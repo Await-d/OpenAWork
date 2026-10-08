@@ -26,6 +26,7 @@ import {
 import { loadTeamInitSessionContext, writeTeamInitState } from './team-init-store.js';
 import { runTeamInitStep } from './team-init-runner.js';
 import { publishTeamEvent } from '../../handoff/bus/team-events-bus.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 export interface EnsureTeamInitResult {
   /** 是否实际执行了至少一步初始化。 */
@@ -196,7 +197,7 @@ export async function ensureTeamInitBeforeTask(input: {
         userId: input.userId,
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[team-init-autorun] publish init.changed failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }

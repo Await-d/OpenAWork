@@ -210,6 +210,96 @@ export async function readRemoteBinaryFile(
 }
 
 /**
+ * 远端目录树节点。与 `routes/workspace.ts` 的 `FileTreeNode` 同构，
+ * 使 SSH 分支与本地分支共用同一份响应契约（`{ nodes }`）。
+ */
+export interface RemoteTreeNode {
+  path: string;
+  name: string;
+  type: 'file' | 'directory';
+  children?: RemoteTreeNode[];
+}
+
+/** 与本地 `readTree` 的 MAX_ENTRIES / MAX_DEPTH 对齐，避免远端把网关拖死。 */
+const REMOTE_TREE_MAX_ENTRIES = 500;
+const REMOTE_TREE_MAX_DEPTH = 4;
+
+/** 远端树跳过的目录/文件名，与本地忽略清单保持同一口径。 */
+const REMOTE_TREE_IGNORED_NAMES = new Set([
+  '.git',
+  '.DS_Store',
+  'node_modules',
+  '.next',
+  'dist',
+  'build',
+  '.turbo',
+  '.cache',
+]);
+
+function compareTreeNodes(left: RemoteTreeNode, right: RemoteTreeNode): number {
+  if (left.type === right.type) return left.name.localeCompare(right.name);
+  return left.type === 'directory' ? -1 : 1;
+}
+
+/**
+ * 通过 SSH 递归读取远端目录树。
+ *
+ * 与 `tools/ssh-remote-execution.ts` 的私有 `readRemoteTree` 同算法、同上限，
+ * 但导出到此处供 HTTP 层复用 —— 此前文件树接口只能读本地 fs，于是 SSH 工作区的
+ * 侧边栏树必然撞上 `assertWorkspacePathSupportedByCurrentHost` 的 400
+ * （「当前网关运行在 Windows，无法访问 POSIX 路径：…」）。
+ *
+ * 逐层 `listFiles` 都是远端调用，因此条目上限与深度都由调用方显式传入，不依赖
+ * 调用点自觉。顶层读取失败向上抛（路由层据此回 404/409），子目录失败降级为空
+ * 子节点 —— 单个无权限目录不应让整棵树失败。
+ */
+export async function readRemoteDirectoryTree(input: {
+  context: SshRemoteExecutionContext;
+  dirPath: string;
+  depth: number;
+  maxEntries: number;
+  counter: { count: number };
+}): Promise<RemoteTreeNode[]> {
+  const { context, dirPath, depth, maxEntries, counter } = input;
+  if (depth <= 0 || counter.count >= maxEntries || maxEntries > REMOTE_TREE_MAX_ENTRIES) {
+    return [];
+  }
+  if (depth > REMOTE_TREE_MAX_DEPTH) {
+    throw new SshPreviewError(400, `目录树深度超出上限（最大 ${REMOTE_TREE_MAX_DEPTH} 层）。`);
+  }
+
+  const isRootLevel = counter.count === 0;
+  let entries: Array<{ name: string; path: string; kind: 'file' | 'directory' }>;
+  try {
+    entries = await context.proxy.listFiles(dirPath);
+  } catch (error) {
+    if (isRootLevel) throw error;
+    return [];
+  }
+
+  const nodes: RemoteTreeNode[] = [];
+  for (const entry of entries) {
+    if (counter.count >= maxEntries) break;
+    if (REMOTE_TREE_IGNORED_NAMES.has(entry.name)) continue;
+
+    counter.count += 1;
+    const node: RemoteTreeNode = { path: entry.path, name: entry.name, type: entry.kind };
+    if (entry.kind === 'directory') {
+      node.children = await readRemoteDirectoryTree({
+        context,
+        dirPath: entry.path,
+        depth: depth - 1,
+        maxEntries,
+        counter,
+      });
+    }
+    nodes.push(node);
+  }
+
+  return nodes.sort(compareTreeNodes);
+}
+
+/**
  * 把远端读取阶段抛出的任意错误收敛为带状态码的 {@link SshPreviewError}。
  * 未知错误统一 500，并保留原始错误文案便于排查。
  */

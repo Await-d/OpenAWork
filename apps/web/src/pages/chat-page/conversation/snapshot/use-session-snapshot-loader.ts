@@ -25,9 +25,11 @@ import {
 } from '../render/chat-page-utils.js';
 import { getRecoveryPendingInteractions } from '../../../../components/conversation-runtime/session/recovery-read-model.js';
 import {
-  flattenSessionTodoLanes,
   mergeChildSessions,
   mergeSessionTasks,
+  mergeSessionTodoLanes,
+  preserveEqualList,
+  preserveEqualValue,
 } from '../../../../components/conversation-runtime/session/session-runtime.js';
 import { recoverActiveAssistantStream } from '../../../../components/conversation-runtime/stream/stream-recovery.js';
 
@@ -53,7 +55,12 @@ export interface SessionSnapshotLoaderSetters {
   ) => void;
   setChildSessions: (value: Session[] | ((prev: Session[]) => Session[])) => void;
   setSessionTasks: (value: SessionTask[] | ((prev: SessionTask[]) => SessionTask[])) => void;
-  setWorkflowRuntime: (value: WorkflowRuntimeState | null) => void;
+  setWorkflowRuntime: (
+    value:
+      | WorkflowRuntimeState
+      | null
+      | ((prev: WorkflowRuntimeState | null) => WorkflowRuntimeState | null),
+  ) => void;
   setPendingPermissions: (
     value:
       | PendingPermissionRequest[]
@@ -64,7 +71,12 @@ export interface SessionSnapshotLoaderSetters {
       PendingQuestionRequest[] | ((prev: PendingQuestionRequest[]) => PendingQuestionRequest[]),
   ) => void;
   setSessionStateStatus: (value: SessionStateStatus | null) => void;
-  setRecoveryActiveStream: (value: SessionActiveStream | null) => void;
+  setRecoveryActiveStream: (
+    value:
+      | SessionActiveStream
+      | null
+      | ((prev: SessionActiveStream | null) => SessionActiveStream | null),
+  ) => void;
   setLatestUpstreamSummary: (value: UpstreamStreamSummary | null) => void;
   setRecoveredStreamSnapshot: (
     value:
@@ -141,13 +153,21 @@ export function useSessionSnapshotLoader(
       });
       if (signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch)) return;
       const pendingInteractions = getRecoveryPendingInteractions(status);
-      setSessionTodos(flattenSessionTodoLanes(status.todoLanes));
+      // 全部走「值等则沿用旧引用」的 setter：本函数每 3s 跑一次，无条件写新对象
+      // 会让 ChatPage 每拍重渲染，并把不稳定的对象引用喂进依赖它们的 effect
+      // （attach effect 依赖 `recoveryActiveStream`；`taskToolRuntimeLookup` 依赖
+      // `childSessions`/`sessionTasks`，换新引用会击穿消息列表的 React.memo）。
+      setSessionTodos((previous) => mergeSessionTodoLanes(previous, status.todoLanes));
       setChildSessions((previous) => mergeChildSessions(previous, status.children));
       setSessionTasks((previous) => mergeSessionTasks(previous, status.tasks));
-      setPendingPermissions(pendingInteractions.pendingPermissions);
-      setPendingQuestions(pendingInteractions.pendingQuestions);
-      setRecoveryActiveStream(status.activeStream);
-      setWorkflowRuntime(status.workflowRuntime);
+      setPendingPermissions((previous) =>
+        preserveEqualList(previous, pendingInteractions.pendingPermissions),
+      );
+      setPendingQuestions((previous) =>
+        preserveEqualList(previous, pendingInteractions.pendingQuestions),
+      );
+      setRecoveryActiveStream((previous) => preserveEqualValue(previous, status.activeStream));
+      setWorkflowRuntime((previous) => preserveEqualValue(previous, status.workflowRuntime));
     },
     [
       gatewayUrl,
@@ -240,20 +260,38 @@ export function useSessionSnapshotLoader(
             reconcileSnapshotChatMessages(previous, prepared.normalizedMessages),
           );
         }
-        // 通知与消息同源解析，但走独立通道（synthetic 不进 transcript）。
-        setSubagentNotices(collectSubagentNotices(recovery.session?.messages ?? []));
-        setMessageRatings(prepared.messageRatings);
-        setRightPanelState(
-          buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
+        // 以下 setter 统一走「值等则沿用旧引用」，与上面 `loadSessionRuntimeSnapshot`
+        // 的 3s 轻量轮询同构。此前这条 1s 路径上只有 setMessages / setChildSessions
+        // / setSessionTasks 做了处理，其余每拍无条件换新对象——`rightPanelState` 尤其
+        // 昂贵，它一变就击穿整个右侧面板（含终端卡片）的 memo。
+        // 注意 setSessionTodos 不在此列：/status 返回的是 `SessionTodoLanes`（带
+        // main/temp）而 /recovery 返回扁平 `SessionTodoItem[]`，两者不是同一条路径
+        // 的两种写法，不能对齐成 merge——这里的直接替换是正确语义。
+        setMessageRatings((previous) => preserveEqualValue(previous, prepared.messageRatings));
+        setRightPanelState((previous) =>
+          preserveEqualValue(
+            previous,
+            buildRightPanelStateFromSessionSnapshot(prepared.session, prepared.normalizedMessages),
+          ),
         );
         setSessionTodos(prepared.sessionTodos);
-        setChildSessions(recovery.children);
-        setSessionTasks(recovery.tasks);
-        setWorkflowRuntime(prepared.session.workflowRuntime ?? null);
-        setPendingPermissions(prepared.pendingPermissions);
-        setPendingQuestions(prepared.pendingQuestions);
+        // 与轻量轮询同构：走 merge 让内容未变的子集复用引用。否则远端运行中
+        // （本地未接管流）时，本函数每 REMOTE_STREAM_RECOVERY_POLL_MS 一次整体替换，
+        // 换新的 `childSessions`/`sessionTasks` 会经 `taskToolRuntimeLookup` 击穿
+        // 消息列表里所有 `ChatGroupBlock` 的 memo。
+        // 语义变化：merge 是并集而非替换，因此「快照里已消失的子会话/任务」会保留在
+        // state 中。子代理集合在同一会话内只增不减（删除走 rollback 的替换路径，
+        // 会话切换前会先 `setChildSessions([])`），故实际不可观测。
+        setChildSessions((previous) => mergeChildSessions(previous, recovery.children));
+        setSessionTasks((previous) => mergeSessionTasks(previous, recovery.tasks));
+        setWorkflowRuntime((previous) =>
+          preserveEqualValue(previous, prepared.session.workflowRuntime ?? null),
+        );
+        setPendingPermissions((previous) => preserveEqualList(previous, prepared.pendingPermissions));
+        setPendingQuestions((previous) => preserveEqualList(previous, prepared.pendingQuestions));
+        // 标量，React 按 Object.is 自动跳过，无需 preserve。
         setSessionStateStatus(prepared.sessionStateStatus);
-        setRecoveryActiveStream(recovery.activeStream);
+        setRecoveryActiveStream((previous) => preserveEqualValue(previous, recovery.activeStream));
         syncRecoveredStreamSnapshot(
           prepared.session,
           prepared.sessionStateStatus,

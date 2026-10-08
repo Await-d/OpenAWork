@@ -3,6 +3,7 @@ import type { ToolCallObservabilityAnnotation } from '@openAwork/shared';
 import { sqliteAll, sqliteRun } from '../infra/db.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface RequestWorkflowLogRow {
   id: number;
@@ -87,7 +88,7 @@ function maybePruneRequestWorkflowLogs(): void {
       requestWorkflowLogStoreDisabled = true;
       return;
     }
-    console.warn(
+    logGatewayWarn(
       `[request-workflow-log-store] 裁剪 request_workflow_logs 失败：${
         error instanceof Error ? error.message : String(error)
       }`,

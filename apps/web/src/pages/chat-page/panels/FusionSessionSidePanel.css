@@ -294,27 +294,32 @@ button.fusion-side-panel__file-row:focus-visible {
   gap: var(--spacing-3);
   min-height: 0;
   overflow: auto;
-  padding: var(--spacing-3);
+  /* 外层内缩收到 spacing-2：审查区两列本身都带描边，再叠 12px 外缩等于
+     在窄侧栏里白白吃掉 24px 横向空间，而右列 diff 的长代码行最缺宽度。 */
+  padding: var(--spacing-2);
 }
 
 .fusion-side-panel__review-split {
   display: flex;
   flex: 1;
-  gap: var(--spacing-3);
+  gap: var(--spacing-2);
   min-height: 0;
 }
 
 .fusion-side-panel__review-split .review-panel-file-list {
-  flex: 0 1 42%;
+  /* 左列宽度固定：文件路径在窄列里会被逐级截断，宽度必须可预期。
+     关键在于右列用 `flex: 1 1 0%`——若右列用 `auto`，它的 max-content（长代码行）
+     会参与收缩权重计算，把左列一起压扁到 200px，导致文件名与增删行数被迫换行堆叠。 */
+  flex: 0 1 380px;
   max-width: 380px;
   min-height: 0;
-  min-width: 220px;
+  min-width: 240px;
 }
 
 .fusion-side-panel__review-split .review-panel-diff-preview {
-  flex: 1;
+  /* flex-basis: 0 → 只吃剩余空间，横向溢出交给内部滚动容器，不外溢挤压左列。 */
+  flex: 1 1 0%;
   min-width: 0;
-  overflow: auto;
 }
 
 @media (max-width: 1180px) {
@@ -330,6 +335,8 @@ button.fusion-side-panel__file-row:focus-visible {
     flex: 1 1 40%;
     max-height: 45%;
     min-height: 160px;
+    /* 竖排后列表独占整行宽，取消横排时的 380px 定宽。 */
+    max-width: none;
   }
 }
 
@@ -345,8 +352,8 @@ button.fusion-side-panel__file-row:focus-visible {
   }
 
   .fusion-side-panel__review-body {
-    gap: var(--spacing-2);
-    padding: var(--spacing-2);
+    gap: var(--spacing-1);
+    padding: var(--spacing-1);
   }
 
   .fusion-side-panel__ghost-button {
@@ -356,7 +363,8 @@ button.fusion-side-panel__file-row:focus-visible {
 
 @media (max-width: 520px) {
   .fusion-side-panel__review-split {
-    gap: var(--spacing-2);
+    /* 小屏竖排时列间距再收一档，与 640px 断点的 body 内缩保持同一密度。 */
+    gap: var(--spacing-1);
   }
 
   .fusion-side-panel__review-split .review-panel-file-list {
@@ -367,7 +375,9 @@ button.fusion-side-panel__file-row:focus-visible {
   }
 
   .fusion-side-panel__review-split .review-panel-diff-preview {
-    flex: 0 0 auto;
+    /* 竖排时仍保留可伸缩轨道：diff 内部自行滚动，避免长 diff 把整页撑到不可用。 */
+    flex: 1 1 auto;
+    min-height: 220px;
     width: 100%;
   }
 }

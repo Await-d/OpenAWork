@@ -46,6 +46,7 @@ import { setSubstate, SUBSTATES_D } from '../store/substate-store.js';
 import { resolveSessionWorkspacePath } from '../../session/session-workspace-resolution.js';
 import { assertCanWriteArtifactPhase } from '../capability/layer-capabilities.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 import {
   validatePlanOutput,
   validateSpecOutput,
@@ -64,7 +65,7 @@ function safeAppendPm2Message(input: Parameters<typeof appendSessionMessageV2>[0
   try {
     appendSessionMessageV2(input);
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[pm2-runner] appendSessionMessageV2 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -325,7 +326,7 @@ async function createReturnToPm1Handoff(input: {
       /* best-effort */
     }
   } catch (replanErr) {
-    console.warn(
+    logGatewayWarn(
       `[pm2-runner] 退回 PM1 失败（${input.step}）：${replanErr instanceof Error ? replanErr.message : String(replanErr)}`,
     );
   }
@@ -556,7 +557,7 @@ export function createPm2Runner(): HandoffTaskRunner {
                   }
                 }
               } catch (resumeErr) {
-                console.warn(
+                logGatewayWarn(
                   `[pm2-runner] 注入 resume context 失败：${resumeErr instanceof Error ? resumeErr.message : String(resumeErr)}`,
                 );
               }
@@ -610,7 +611,7 @@ export function createPm2Runner(): HandoffTaskRunner {
                   const delay = delays[attempt];
                   if (delay === undefined) throw err;
                   const reason = err instanceof Error ? err.message : String(err);
-                  console.warn(
+                  logGatewayWarn(
                     `[pm2-runner] LLM 调用失败（${reason}），${delay / 1000} 秒后重试（第 ${attempt + 1}/${delays.length} 次）…`,
                   );
                   await new Promise<void>((resolve) => setTimeout(resolve, delay));
@@ -692,7 +693,7 @@ export function createPm2Runner(): HandoffTaskRunner {
                 }
               } catch (fixErr) {
                 // 修正过程本身出错 → 退回 PM1 重新规划
-                console.warn(
+                logGatewayWarn(
                   `[pm2-runner] Constitution Check 自动修正失败，退回 PM1：${fixErr instanceof Error ? fixErr.message : String(fixErr)}`,
                 );
                 const ccFeedback = `Constitution Check 自动修正失败：${fixErr instanceof Error ? fixErr.message : String(fixErr)}`;
@@ -757,7 +758,7 @@ export function createPm2Runner(): HandoffTaskRunner {
               architectureMdLoaded = (architectureContent ?? '').trim().length > 0;
             }
           } catch (err) {
-            console.warn(
+            logGatewayWarn(
               `[pm2-runner] 读取 architecture.md 失败：${err instanceof Error ? err.message : String(err)}`,
             );
           }

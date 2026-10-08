@@ -113,6 +113,21 @@ const ACTIVE_TERMINAL_STATUSES: ReadonlySet<SessionTerminalStatus> = new Set([
   'tmux-spawned',
 ]);
 
+/**
+ * 终端卡片「详情」里渲染的输出预览字符上限。
+ *
+ * `<pre>` 的可视区只有 `maxHeight: 220px`（约 15–20 行），把 8KB 的
+ * `outputTail` 整段塞进去只是给 DOM 增加几百 KB 文本。完整输出请看终端面板的
+ * 实时视图（WS/SSE 流），那里才是全量的正确去处。
+ */
+const TERMINAL_PREVIEW_TAIL_CHARS = 2000;
+
+function terminalPreviewTail(outputTail: string): string {
+  if (outputTail.length === 0) return '(无输出)';
+  if (outputTail.length <= TERMINAL_PREVIEW_TAIL_CHARS) return outputTail;
+  return `…\n${outputTail.slice(-TERMINAL_PREVIEW_TAIL_CHARS)}`;
+}
+
 interface CompactionItem {
   id: string;
   summary: string;
@@ -1104,7 +1119,7 @@ function RightPanelTerminalsContent({
                     lineHeight: 1.45,
                   }}
                 >
-                  {terminal.outputTail || '(无输出)'}
+                  {terminalPreviewTail(terminal.outputTail)}
                 </pre>
               )}
             </div>

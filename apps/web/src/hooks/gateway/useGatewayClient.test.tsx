@@ -7,6 +7,7 @@ import {
   useGatewayClient,
   connectAttachEventSource,
   formatGatewayStreamErrorMessage,
+  readGatewayDeliveryIdentity,
   resolveChatWsLivenessAction,
   safeParseGatewayEventData,
   SSE_FALLBACK_RETRY_DELAYS_MS,
@@ -586,6 +587,73 @@ describe('attachActiveStreamSession', () => {
     expect(connectEventSource).not.toHaveBeenCalled();
     expect(closeExistingTransports).not.toHaveBeenCalled();
     expect(clearCallbacks).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * 投递身份推导。
+ *
+ * 回归背景：`eventId` 缺失时去重曾被整段跳过，WS→SSE 回退 / attach 重放会把同一段
+ * 正文再喂一次，而 `onDelta` 是无条件累加（`onThinkingDelta` 尚有 delivery key
+ * 兜底），表现为「同一段话出现两遍」。
+ */
+describe('readGatewayDeliveryIdentity', () => {
+  it('优先使用网关注入的 eventId', () => {
+    expect(
+      readGatewayDeliveryIdentity({
+        eventId: 'run-1:evt:7',
+        cursor: { clientRequestId: 'req-1', seq: 7 },
+      }),
+    ).toBe('run-1:evt:7');
+  });
+
+  it('eventId 缺失时用 cursor 合成稳定身份', () => {
+    expect(readGatewayDeliveryIdentity({ cursor: { clientRequestId: 'req-1', seq: 12 } })).toBe(
+      'run-seq:req-1:12',
+    );
+  });
+
+  it('同一 cursor 的重复投递得到同一身份（可被 Set 去重）', () => {
+    const first = readGatewayDeliveryIdentity({
+      type: 'text_delta',
+      delta: '你',
+      cursor: { clientRequestId: 'req-1', seq: 12 },
+    });
+    const replayed = readGatewayDeliveryIdentity({
+      type: 'text_delta',
+      delta: '你',
+      cursor: { clientRequestId: 'req-1', seq: 12 },
+    });
+
+    expect(first).toBe(replayed);
+    expect(first).not.toBeNull();
+  });
+
+  it('不同请求的相同 seq 不冲突', () => {
+    expect(readGatewayDeliveryIdentity({ cursor: { clientRequestId: 'req-1', seq: 3 } })).not.toBe(
+      readGatewayDeliveryIdentity({ cursor: { clientRequestId: 'req-2', seq: 3 } }),
+    );
+  });
+
+  it('既无 eventId 又无 cursor 时返回 null（不构造不稳定身份）', () => {
+    expect(readGatewayDeliveryIdentity({ type: 'text_delta', delta: '你' })).toBeNull();
+    expect(readGatewayDeliveryIdentity(null)).toBeNull();
+  });
+
+  it('seq 非法（0 / 负数 / 非安全整数）时不合成身份', () => {
+    expect(
+      readGatewayDeliveryIdentity({ cursor: { clientRequestId: 'req-1', seq: 0 } }),
+    ).toBeNull();
+    expect(
+      readGatewayDeliveryIdentity({ cursor: { clientRequestId: 'req-1', seq: -1 } }),
+    ).toBeNull();
+    expect(readGatewayDeliveryIdentity({ cursor: { clientRequestId: '', seq: 4 } })).toBeNull();
+  });
+
+  it('空 eventId 视为缺失，回落到 cursor 身份', () => {
+    expect(
+      readGatewayDeliveryIdentity({ eventId: '', cursor: { clientRequestId: 'req-1', seq: 5 } }),
+    ).toBe('run-seq:req-1:5');
   });
 });
 

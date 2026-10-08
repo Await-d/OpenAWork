@@ -37,6 +37,7 @@
 
 import { sqliteAll } from '../infra/db.js';
 import { stopAllInFlightStreamRequestsForSession } from '../routes/stream-cancellation.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export type CancelDescendantReason = 'parent_aborted' | 'ancestor_aborted' | 'user_aborted';
 
@@ -151,7 +152,7 @@ async function runWithTimeout(promise: Promise<number>, budgetMs: number): Promi
       promise.catch((err) => {
         // Per-descendant stop failures must not bubble up — log and
         // count as zero cancellations so the loop can continue.
-        console.warn('[CANCEL_DESCENDANT_STREAMS] stopForSession threw', String(err));
+        logGatewayWarn('[CANCEL_DESCENDANT_STREAMS] stopForSession threw', String(err));
         return 0;
       }),
       timeout,

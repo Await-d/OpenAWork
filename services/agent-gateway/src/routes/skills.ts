@@ -12,6 +12,7 @@ import type { RegistrySource, SkillEntry } from '@openAwork/skill-registry';
 import { BUILTIN_SKILLS } from '@openAwork/skills';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { trackEvent } from '../telemetry/telemetry-service.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   readResponseJsonWithLimit,
   readResponseTextWithLimit,
@@ -759,7 +760,7 @@ function tryParseCachedSkillEntry(row: RegistrySourceSkillCacheRow): SkillEntry 
   try {
     return parseCachedSkillEntry(row);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[skills] 缓存技能条目 JSON 解析失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,

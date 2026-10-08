@@ -21,6 +21,7 @@ import {
 import { channelLogInfo, channelLogWarn, summarizeChannelMessage } from './channel-log.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 import type { ChannelReplyLanguage } from './types.js';
+import { logGatewayError } from '../infra/gateway-logger.js';
 
 export type { ChannelCommandActions, ChannelCommandContext } from './channel-commands.js';
 
@@ -72,7 +73,7 @@ export class AutoReplyPipeline {
       await this.handleInternal(event);
     } catch (err) {
       const pluginId = event.type === 'message' ? event.pluginId : 'unknown';
-      console.error('[auto-reply] unhandled channel event failure', {
+      logGatewayError('[auto-reply] unhandled channel event failure', {
         pluginId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -344,7 +345,7 @@ export class AutoReplyPipeline {
     try {
       await send();
     } catch (err) {
-      console.error('[auto-reply] failed to deliver error notice to channel', {
+      logGatewayError('[auto-reply] failed to deliver error notice to channel', {
         pluginId,
         error: err instanceof Error ? err.message : String(err),
       });

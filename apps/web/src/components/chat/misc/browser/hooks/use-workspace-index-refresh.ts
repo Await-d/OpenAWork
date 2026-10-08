@@ -13,7 +13,11 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { HttpError, createWorkspaceClient } from '@openAwork/web-client';
+import {
+  HttpError,
+  createWorkspaceClient,
+  type WorkspaceFileReadOptions,
+} from '@openAwork/web-client';
 import { useAuthStore } from '../../../../../stores/auth/auth.js';
 import { WORKSPACE_INDEX_CHANGED_EVENT } from '../../../../../utils/file/file-preview.js';
 
@@ -55,6 +59,14 @@ export interface UseWorkspaceIndexRefreshOptions {
   onChange: () => void;
   /** 轮询间隔毫秒数，缺省 2500。 */
   intervalMs?: number;
+  /**
+   * SSH 读取身份。
+   *
+   * 缺失时网关按本机路径查索引版本，远端 POSIX 路径会得到 400；而本hook 对
+   * 400/403 是**直接 stop() 永久停轮询**的 —— 结果是 SSH 远端会话下内置浏览器
+   * 预览的自动刷新与 `WORKSPACE_INDEX_CHANGED_EVENT` 广播永久失效。
+   */
+  readIdentity?: WorkspaceFileReadOptions;
 }
 
 /**
@@ -68,12 +80,16 @@ export function useWorkspaceIndexRefresh({
   workspacePath,
   onChange,
   intervalMs = WORKSPACE_INDEX_REFRESH_DEFAULT_INTERVAL_MS,
+  readIdentity,
 }: UseWorkspaceIndexRefreshOptions): void {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   // 用 ref 持有最新回调，避免调用方每次渲染传入新函数导致轮询被反复重建。
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // 身份同样走 ref：轮询 effect 不应因身份对象重建而反复重启。
+  const readIdentityRef = useRef(readIdentity);
+  readIdentityRef.current = readIdentity;
 
   useEffect(() => {
     if (!enabled) return;
@@ -109,7 +125,9 @@ export function useWorkspaceIndexRefresh({
       if (disposed || inFlight) return;
       inFlight = true;
       try {
-        const { version } = await client.getFileIndexVersion(accessToken, path);
+        const { version } = await client.getFileIndexVersion(accessToken, path, {
+          ...(readIdentityRef.current ?? {}),
+        });
         if (disposed) return;
         if (lastVersion === null) {
           // 首次成功读取只建立基线，不触发刷新。

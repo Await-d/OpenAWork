@@ -35,6 +35,7 @@ import {
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { getRecoveryPendingInteractions } from '../../conversation-runtime/session/recovery-read-model.js';
 import { isWithinTerminalScope } from '../../../utils/terminal-scope.js';
+import { fetchSessionRecoveryOnce, SESSION_RECOVERY_MESSAGE_LIMIT } from '../../../utils/session/session-recovery-flight.js';
 
 type PendingQuestionReplyStatus = 'answered' | 'dismissed';
 
@@ -248,9 +249,16 @@ export function useLayoutShared(
         return;
       }
 
-      const recovery = await createSessionsClient(gatewayUrl).getRecovery(accessToken, sessionId, {
-        ...options,
-        messageLimit: 1,
+      // 走 recovery 在途单飞：同一时刻 ChatPage 的会话切换大 effect 也在读
+      // 同一份读模型，本调用直接复用它在途的那一次往返，不再单独发请求。
+      // messageLimit 必须与 ChatPage 对齐（见 SESSION_RECOVERY_MESSAGE_LIMIT）：
+      // 两边同值才能合并成一次请求，流量不增反减。
+      const recovery = await fetchSessionRecoveryOnce({
+        gatewayUrl,
+        token: accessToken,
+        sessionId,
+        messageLimit: SESSION_RECOVERY_MESSAGE_LIMIT,
+        ...(options?.signal ? { signal: options.signal } : {}),
       });
       const pendingInteractions = getRecoveryPendingInteractions(recovery);
       updatePendingPermission(

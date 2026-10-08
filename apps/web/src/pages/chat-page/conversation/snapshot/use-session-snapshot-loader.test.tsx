@@ -168,6 +168,78 @@ describe('useSessionSnapshotLoader', () => {
       await result.current.loadSessionRuntimeSnapshot('session-1');
     });
 
-    expect(setWorkflowRuntime).toHaveBeenCalledWith(workflowRuntime);
+    // 所有轮询写入都走函数式 setter，值等时沿用旧引用。
+    expect(setWorkflowRuntime).toHaveBeenCalledTimes(1);
+    const updater = setWorkflowRuntime.mock.calls[0]?.[0];
+    expect(typeof updater).toBe('function');
+    expect(updater(null)).toEqual(workflowRuntime);
+  });
+
+  it('快照未变化时轮询写入不产生新引用（避免每 3s 全量重渲染）', async () => {
+    const statusPayload = {
+      activeStream: { runId: 'run-1', startedAtMs: 1, clientRequestId: 'req-1' },
+      children: [{ id: 'child-1', updated_at: '2026-01-01T00:00:00.000Z' }],
+      pendingPermissions: [],
+      pendingQuestions: [],
+      tasks: [{ id: 'task-1', status: 'running', updatedAt: '2026-01-01T00:00:00.000Z' }],
+      todoLanes: { main: [{ id: 'todo-1', content: 'x' }], temp: [] },
+      workflowRuntime: { mode: 'execution' },
+    };
+    clientMocks.getStatus.mockResolvedValue(statusPayload);
+
+    // 模拟 React state：setter 收到函数时对 previous 求值，并按 Object.is 决定是否通知。
+    const state = {
+      todos: [] as unknown[],
+      children: [] as unknown[],
+      tasks: [] as unknown[],
+      activeStream: null as unknown,
+      workflowRuntime: null as unknown,
+    };
+    const renderCounts = { activeStream: 0 };
+    function apply(key: keyof typeof state, next: unknown): void {
+      const resolved =
+        typeof next === 'function' ? (next as (prev: unknown) => unknown)(state[key]) : next;
+      if (Object.is(resolved, state[key])) {
+        return;
+      }
+      (state as Record<string, unknown>)[key] = resolved;
+      if (key === 'activeStream') {
+        renderCounts.activeStream += 1;
+      }
+    }
+
+    const refs = {
+      currentSessionViewRef: { current: { epoch: 1, sessionId: 'session-1' } },
+      streamingRef: { current: false },
+    };
+    const setters: SessionSnapshotLoaderSetters = {
+      ...createSetters(),
+      setSessionTodos: (value) => apply('todos', value),
+      setChildSessions: (value) => apply('children', value),
+      setSessionTasks: (value) => apply('tasks', value),
+      setRecoveryActiveStream: (value) => apply('activeStream', value),
+      setWorkflowRuntime: (value) => apply('workflowRuntime', value),
+    };
+
+    const { result } = renderHook(() =>
+      useSessionSnapshotLoader('https://gateway.test', 'token', () => true, refs, setters),
+    );
+
+    // 第一拍：建立基线状态
+    await act(async () => {
+      await result.current.loadSessionRuntimeSnapshot('session-1');
+    });
+    expect(renderCounts.activeStream).toBe(1);
+    const baselineActiveStream = state.activeStream;
+    const baselineChildren = state.children;
+
+    // 第二拍：内容完全相同 —— 不得再产生任何新引用
+    await act(async () => {
+      await result.current.loadSessionRuntimeSnapshot('session-1');
+    });
+
+    expect(renderCounts.activeStream).toBe(1);
+    expect(state.activeStream).toBe(baselineActiveStream);
+    expect(state.children).toBe(baselineChildren);
   });
 });

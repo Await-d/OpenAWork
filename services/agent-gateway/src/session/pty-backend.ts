@@ -22,6 +22,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { Buffer } from 'node:buffer';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export type TerminalBackendKind = 'pty' | 'pipe';
 
@@ -199,7 +200,7 @@ export function loadBunPtyModule(): BunPtyModuleLike | null {
       process.platform === 'win32' && process.arch === 'arm64'
         ? '（bun-pty 的 Windows 预编译库目前仅 x64，ARM64 上只能回退管道）'
         : '';
-    console.warn(
+    logGatewayWarn(
       `[pty-backend] bun-pty 加载失败，回退管道${hint}：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -278,7 +279,7 @@ export function spawnTerminalProcess(input: SpawnTerminalProcessInput): Terminal
       try {
         return spawnBunPtyModule(input, bunPty);
       } catch (error) {
-        console.warn(
+        logGatewayWarn(
           `[pty-backend] bun-pty 启动失败，回退管道：${
             error instanceof Error ? error.message : String(error)
           }`,

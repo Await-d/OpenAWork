@@ -17,7 +17,11 @@ function redact(value: string): string {
   return result;
 }
 
+let initialized = false;
+
 export function initSentry(dsn: string, release?: string): void {
+  if (initialized || !dsn) return;
+  initialized = true;
   Sentry.init({
     dsn,
     release,
@@ -47,7 +51,15 @@ export function initSentry(dsn: string, release?: string): void {
   });
 }
 
+/**
+ * 记录一条错误。
+ *
+ * `initialized` 守卫不可省：未配置 DSN 时 Sentry 未初始化，若仍调用
+ * `captureException`，SDK 可能尝试向空地址发请求（每次崩溃一次），既无意义又耗电。
+ * 本地记录不受影响——那部分在 `error-recorder` 中无条件完成。
+ */
 export function captureError(error: unknown, context?: Record<string, unknown>): void {
+  if (!initialized) return;
   Sentry.withScope((scope) => {
     if (context) {
       const sanitized: Record<string, unknown> = {};
@@ -61,13 +73,16 @@ export function captureError(error: unknown, context?: Record<string, unknown>):
 }
 
 export function captureMessage(message: string, level: Sentry.SeverityLevel = 'info'): void {
+  if (!initialized) return;
   Sentry.captureMessage(redact(message), level);
 }
 
 export function setUserContext(userId: string): void {
+  if (!initialized) return;
   Sentry.setUser({ id: userId });
 }
 
 export function clearUserContext(): void {
+  if (!initialized) return;
   Sentry.setUser(null);
 }

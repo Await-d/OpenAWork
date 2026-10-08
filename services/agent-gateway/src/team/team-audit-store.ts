@@ -1,5 +1,6 @@
 import { sqliteAll, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
 import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /**
  * team_audit_logs 是治理审计汇聚点：handoff 控制、共享、评论、route 决策、runtime
@@ -69,7 +70,7 @@ function maybePruneTeamAuditLogs(userId: string): void {
   try {
     pruneTeamAuditLogs(userId, limit);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[team-audit-store] 裁剪 team_audit_logs 失败（user=${userId}）：${
         error instanceof Error ? error.message : String(error)
       }`,

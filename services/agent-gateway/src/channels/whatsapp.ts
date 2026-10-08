@@ -12,6 +12,7 @@ import { channelFetch } from './channel-http.js';
 import { parseWhatsAppInboundMessage } from './inbound-parsers/whatsapp.js';
 import { attachWhatsAppInboundImages, sendWhatsAppMedia } from './whatsapp-media.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 出站图片入参，与 `MessagingChannelService.sendImage` / `replyImage` 的契约一致。 */
 interface WhatsAppImageSendInput {
@@ -52,7 +53,7 @@ export class WhatsAppChannelService implements MessagingChannelService {
     try {
       this.notify(event);
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[whatsapp] channel notify handler threw: ${
           err instanceof Error ? err.message : String(err)
         }`,

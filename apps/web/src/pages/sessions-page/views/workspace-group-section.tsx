@@ -1,7 +1,13 @@
 import { memo, useCallback, type CSSProperties, type KeyboardEvent } from 'react';
 import { SessionCard, SESSION_CARD_ACTION_BUTTON_STYLE } from './session-card.js';
 import type { SessionRow } from '../state/session-page-types.js';
-import { UNBOUND_WORKSPACE_PATH_LABEL } from '../../../utils/session/session-grouping.js';
+import {
+  UNBOUND_WORKSPACE_PATH_LABEL,
+  resolveWorkspaceGroupDisplayName,
+} from '../../../utils/session/session-grouping.js';
+import { useSshConnectionLabels } from '../../../hooks/workspace/useSshConnectionLabels.js';
+import { useWorkspaceDisplayName } from '../../../hooks/workspace/useWorkspaceAlias.js';
+import { WorkspaceSshBadge } from '../../../components/layout/workspace/WorkspaceSshBadge.js';
 
 const SECTION_STYLE: CSSProperties = {
   display: 'flex',
@@ -73,6 +79,8 @@ interface WorkspaceGroupSectionProps {
   groupKey: string;
   workspaceLabel: string;
   workspacePath: string | null;
+  /** 组内会话绑定的 SSH 连接 id；非空时标题旁展示远端标识。 */
+  sshConnectionId?: string | null;
   sessions: SessionRow[];
   actualSessionCount: number;
   collapsed: boolean;
@@ -113,6 +121,7 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
   groupKey,
   workspaceLabel,
   workspacePath,
+  sshConnectionId = null,
   sessions,
   actualSessionCount,
   collapsed,
@@ -138,6 +147,12 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
 }: WorkspaceGroupSectionProps) {
   const headerLabelId = `sessions-group-${groupKey}-label`;
   const listId = `sessions-group-${groupKey}-list`;
+  const resolveWorkspaceName = useWorkspaceDisplayName();
+  const sshConnections = useSshConnectionLabels(sshConnectionId !== null);
+  const displayLabel = resolveWorkspaceGroupDisplayName(
+    { workspacePath, workspaceLabel },
+    resolveWorkspaceName,
+  );
 
   const toggleCollapsed = useCallback(() => {
     onToggleCollapsed(groupKey);
@@ -172,7 +187,6 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
       y: event.clientY,
     });
   };
-
   return (
     <section style={SECTION_STYLE} aria-labelledby={headerLabelId} data-workspace-group={groupKey}>
       <header style={HEADER_STYLE}>
@@ -184,7 +198,7 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
           onContextMenu={onContextMenu}
           onKeyDown={onHeaderKeyDown}
           title={
-            workspacePath || actualSessionCount > 0 ? `右键管理工作区 ${workspaceLabel}` : undefined
+            workspacePath || actualSessionCount > 0 ? `右键管理工作区 ${displayLabel}` : undefined
           }
           style={HEADER_BUTTON_STYLE}
         >
@@ -213,17 +227,33 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
             }}
           >
             <span
-              id={headerLabelId}
               style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: 'var(--fg-default)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                minWidth: 0,
               }}
             >
-              {workspaceLabel}
+              <span
+                id={headerLabelId}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: 'var(--fg-default)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {displayLabel}
+              </span>
+              {sshConnectionId !== null && (
+                <WorkspaceSshBadge
+                  connectionId={sshConnectionId}
+                  connections={sshConnections}
+                  showConnectionName
+                />
+              )}
             </span>
             <span
               style={{
@@ -258,7 +288,7 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
           <button
             type="button"
             onClick={() => onCreateInWorkspace(workspacePath)}
-            title={`在 ${workspaceLabel} 中新建会话`}
+            title={`在 ${displayLabel} 中新建会话`}
             className="omo-group-new-btn"
             style={NEW_BUTTON_STYLE}
           >

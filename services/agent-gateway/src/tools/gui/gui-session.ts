@@ -28,6 +28,7 @@ import type { BatchSubToolProgress } from '@openAwork/shared';
 import { sqliteRun } from '../../infra/db.js';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
 import { publishSessionRunEvent } from '../../session/session-run-events.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 /** 子会话标题（与 `look_at` 的 `createLookAtChildSession` 同范式）。 */
 export const GUI_SESSION_TITLE = 'computer_use';
@@ -145,7 +146,7 @@ function insertChildSession(input: CreateGuiSessionInput, sessionId: string): bo
     return true;
   } catch (error) {
     // 子会话创建失败不阻断 GUI 任务：后续跳过子会话写库，父会话进度照发。
-    console.warn(`[gui-session] 创建 GUI 子会话失败，降级为仅上报进度：${describeError(error)}`);
+    logGatewayWarn(`[gui-session] 创建 GUI 子会话失败，降级为仅上报进度：${describeError(error)}`);
     return false;
   }
 }
@@ -176,7 +177,7 @@ export function createGuiSession(input: CreateGuiSessionInput): GuiSessionHandle
       });
     } catch (error) {
       childWritesEnabled = false;
-      console.warn(
+      logGatewayWarn(
         `[gui-session] 写入子会话消息失败，后续步骤不再落库（进度照发）：${describeError(error)}`,
       );
     }
@@ -200,7 +201,7 @@ export function createGuiSession(input: CreateGuiSessionInput): GuiSessionHandle
       });
     } catch (error) {
       // 进度上报失败只降级为告警：GUI 任务本身的成败不依赖它。
-      console.warn(
+      logGatewayWarn(
         `[gui-session] 发布 tool_progress 失败（不影响 GUI 任务）：${describeError(error)}`,
       );
     }

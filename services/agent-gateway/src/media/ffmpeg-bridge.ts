@@ -15,6 +15,7 @@ import * as ffmpegStaticModule from 'ffmpeg-static';
 import { runtimeBinaryUnavailableMessage } from '../infra/runtime-binary.js';
 import { MIME_TO_CODEC, FORMAT_TO_MIME } from './media-codec.js';
 import { resolveMediaBinaryPath, resolveMediaResourcePath } from './media-binary-path.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const FFMPEG_PATH =
   resolveMediaBinaryPath({
@@ -73,7 +74,7 @@ async function removeTempPath(path: string): Promise<void> {
   try {
     await rm(path, { force: true });
   } catch (error) {
-    console.warn(`[ffmpeg-bridge] 清理临时文件失败: ${path}`, error);
+    logGatewayWarn(`[ffmpeg-bridge] 清理临时文件失败: ${path}`, error);
   }
 }
 

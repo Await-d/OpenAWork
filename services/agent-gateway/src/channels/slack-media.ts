@@ -19,6 +19,7 @@ import { sniffImageMediaType } from '../media/image-signature.js';
 import { channelFetch } from './channel-http.js';
 import { readRecordArray, readString } from './inbound-utils.js';
 import type { ChannelImageAttachment, ChannelMessage } from './types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 入站图片上限（4 MiB）：超过则不下载，避免把大图塞进模型上下文。 */
 export const SLACK_INBOUND_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
@@ -138,7 +139,7 @@ export async function downloadSlackInboundImage(input: {
       ...(input.fileName ? { fileName: input.fileName } : {}),
     };
   } catch (err) {
-    console.warn('[slack] 入站图片下载失败', {
+    logGatewayWarn('[slack] 入站图片下载失败', {
       url: input.url,
       error: err instanceof Error ? err.message : String(err),
     });

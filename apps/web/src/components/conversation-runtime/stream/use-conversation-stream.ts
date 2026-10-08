@@ -190,6 +190,31 @@ interface RoundAccumulator {
   startedAt: number;
   firstTokenObservedAt: number | null;
   firstTokenLatencyAttached: boolean;
+  /**
+   * 已投递事件的 `eventId`（网关按 `${runId}:evt:${seq}` 保证同一 run 内唯一）。
+   *
+   * 断线重连 / attach 会重放已展示过的 chunk，而本文件对 `text_delta` 是无条件
+   * 累加、对 `tool_call_delta` 是无条件拼接入参——没有这道闸，重放会让正文与工具
+   * 入参成倍损坏。轮次重置时一并清空，与流的新一轮对齐。
+   */
+  deliveredEventIds: Set<string>;
+}
+
+/**
+ * 已投递事件的 `eventId` 上界。Set 只增不减，而多轮团队会话未必每轮都调
+ * `resetRoundAccumulators`，长跑任务的 Set 会无界增长。超界时淘汰最旧的记录 ——
+ * 重放窗口（断线重连 / attach 回补）远小于该上界，因此淘汰最旧项是安全的。
+ */
+const MAX_TRACKED_DELIVERY_IDS = 8192;
+
+function rememberDeliveredEventId(deliveredEventIds: Set<string>, eventId: string): void {
+  deliveredEventIds.add(eventId);
+  if (deliveredEventIds.size > MAX_TRACKED_DELIVERY_IDS) {
+    const oldest = deliveredEventIds.values().next();
+    if (!oldest.done) {
+      deliveredEventIds.delete(oldest.value);
+    }
+  }
 }
 
 function makeAccumulator(startedAt: number): RoundAccumulator {
@@ -206,6 +231,7 @@ function makeAccumulator(startedAt: number): RoundAccumulator {
     startedAt,
     firstTokenObservedAt: null,
     firstTokenLatencyAttached: false,
+    deliveredEventIds: new Set<string>(),
   };
 }
 
@@ -233,6 +259,7 @@ export function useConversationStream(
     acc.reasoningMeta.clear();
     acc.liveToolCalls.clear();
     acc.toolCallIds.clear();
+    acc.deliveredEventIds.clear();
     acc.currentRoundIndex = 1;
     acc.lastCompletedRound = null;
     acc.startedAt = Date.now();
@@ -401,6 +428,16 @@ export function useConversationStream(
       const acc = accumulatorRef.current;
       const closingMessageId = refs.currentAssistantStreamMessageIdRef.current;
       if (!closingMessageId) return;
+
+      // 幂等闸：同一 `eventId` 只投递一次。缺 `eventId` 的事件无法构造稳定身份，
+      // 照常处理（不回退到内容比较——正文 delta 允许合法重复）。
+      const eventId = event.eventId;
+      if (typeof eventId === 'string' && eventId.length > 0) {
+        if (acc.deliveredEventIds.has(eventId)) {
+          return;
+        }
+        rememberDeliveredEventId(acc.deliveredEventIds, eventId);
+      }
 
       // ─── text_delta ───────────────────────────────────────────────
       if (event.type === 'text_delta') {

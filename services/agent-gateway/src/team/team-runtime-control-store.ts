@@ -2,6 +2,7 @@ import { cancelHandoff, pauseHandoff, resumeHandoff } from '../handoff/store/han
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { buildSqlitePlaceholders } from '../infra/sqlite-batch.js';
 import { submitInboundMessage } from '../handoff/store/inbound-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /**
  * 一次团队运行时控制（取消 / 暂停 / 恢复）波及的会话数上限；回合回退的受影响子树
@@ -302,7 +303,7 @@ export function resumeTeamRuntimeTree(input: {
           },
         });
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           `[resume-tree] 写用户阻塞提示失败（${row.id}）：${
             err instanceof Error ? err.message : String(err)
           }`,

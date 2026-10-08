@@ -409,11 +409,6 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
     async (path: string) => {
       const file = openFiles.find((f) => f.path === path);
       if (!file) return;
-      // SSH 远端工作区的写回尚未打通：客户端兜底拦截，避免把本地路径写请求发给网关。
-      if (readIdentity.remote) {
-        setSaveError('SSH 远程会话暂不支持在工作区内保存文件。');
-        return;
-      }
       // 超限文件只加载了前缀，写回会把源文件永久截短——必须在发起请求前拦死。
       if (file.truncated) {
         setSaveError(
@@ -423,7 +418,17 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
       }
       setSaveError(null);
       try {
-        await workspaceClient.writeFile(token ?? '', path, file.content);
+        // SSH 远端会话必须下发身份：网关 PUT /workspace/file 的 SSH 分支据此写
+        // 远端文件；缺身份时会写到网关本机的同名路径（静默写错位置）。
+        await workspaceClient.writeFile(token ?? '', path, file.content, {
+          ...(readIdentity.sessionId ? { sessionId: readIdentity.sessionId } : {}),
+          ...(!readIdentity.sessionId && readIdentity.sshConnectionId
+            ? { sshConnectionId: readIdentity.sshConnectionId }
+            : {}),
+          // 用 workspacePath（真实路径）而非 persistenceWorkspaceScope（持久化桶
+          // 键，可能是 `__session__:xxx`，不是路径）。
+          ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+        });
         setOpenFiles((prev) =>
           prev.map((f) => (f.path === path ? { ...f, originalContent: f.content } : f)),
         );
@@ -431,7 +436,7 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
         setSaveError(err instanceof Error ? err.message : '保存失败');
       }
     },
-    [openFiles, readIdentity, token, workspaceClient],
+    [openFiles, readIdentity, token, workspaceClient, workspacePath],
   );
 
   const activeFile = openFiles.find((f) => f.path === activeFilePath) ?? null;

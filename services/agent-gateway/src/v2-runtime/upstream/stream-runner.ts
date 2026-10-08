@@ -25,6 +25,7 @@ import {
   withUpstreamStreamRetry,
 } from './stream-retry-policy.js';
 import { withOpencodeSessionHeader } from './session-affinity.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 type NativeToolSet = Record<string, ToolDefinition>;
 
@@ -248,7 +249,7 @@ function reportFinish(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn('[stream-runner] onFinish callback failed', message);
+    logGatewayWarn('[stream-runner] onFinish callback failed', message);
   }
 }
 

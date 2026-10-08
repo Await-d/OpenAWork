@@ -512,7 +512,7 @@ describe('message-v2 compatibility regressions', () => {
     );
 
     expect(streamRouteSource).toMatch(
-      /buildErrorContent\('STREAM_ERROR', String\(err\)\)[\s\S]*?replaceExisting: true/,
+      /buildErrorContent\('STREAM_ERROR', [\w.]+(?:, [\w.]+)?\)[\s\S]*?replaceExisting: true/,
     );
     // The error message argument was refactored behind
     // `buildUserFacingStreamErrorMessage(...)`; the invariant guarded here is

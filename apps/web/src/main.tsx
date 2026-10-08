@@ -1,5 +1,10 @@
+// 必须是第一条 import：把错误捕获的安装时点提到整个应用依赖树之前，
+// 否则依赖树里任何模块的顶层抛错（Monaco 初始化、Worker 探测等）都会静默丢失。
+// 详见 utils/log/error-capture-install.ts。
+import './utils/log/error-capture-install.js';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
+import { AppErrorBoundary } from '@openAwork/shared-ui';
 import App from './App.js';
 import './styles/layout-tokens.css';
 import './index.css';
@@ -9,6 +14,10 @@ import { installMonacoAsyncErrorFilter } from './components/file-editor/editor/M
 import { installExtensionNoiseFilter } from './lib/filter/extension-noise-filter.js';
 import { installMonacoI18n } from './lib/monaco/monaco-i18n.js';
 import { isTauriRuntime } from './utils/gateway/desktop-gateway.js';
+import {
+  clientErrorRecorder,
+  exportClientErrorDiagnostics,
+} from './utils/log/error-capture.js';
 
 // Configure Monaco to load from local bundle instead of CDN.
 // This prevents "Monaco initialization: error" when the CDN is unreachable.
@@ -125,7 +134,30 @@ function mountApp(): void {
   // thin one) and re-enable StrictMode at that point.
   createRoot(root).render(
     <BrowserRouter>
-      <App />
+      <AppErrorBoundary
+        onError={(error, componentStack) => {
+          clientErrorRecorder.record({
+            source: 'react-boundary',
+            error,
+            context: componentStack
+              ? { componentStack: componentStack.slice(0, 2_000) }
+              : undefined,
+          });
+        }}
+        // 诊断正文带上完整的历史错误：白屏时用户往往同时丢了触发点，
+        // 只报最后一个错误常常定位不到根因。
+        buildDiagnostics={(error) => {
+          const sections = [
+            `错误：${error.name}: ${error.message}`,
+            error.stack ? `堆栈：\n${error.stack}` : '',
+            '── 本次会话错误记录 ──',
+            exportClientErrorDiagnostics(),
+          ].filter(Boolean);
+          return sections.join('\n\n');
+        }}
+      >
+        <App />
+      </AppErrorBoundary>
     </BrowserRouter>,
   );
 }

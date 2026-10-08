@@ -38,6 +38,13 @@
           "speechRecognitionPermission": "允许 OpenAWork 使用语音识别将语音转换为文本。",
           "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
         }
+      ],
+      [
+        "@sentry/react-native",
+        {
+          "organization": "openawork",
+          "project": "openawork-mobile"
+        }
       ]
     ],
     "extra": {

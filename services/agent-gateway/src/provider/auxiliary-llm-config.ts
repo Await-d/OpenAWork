@@ -29,6 +29,7 @@
 
 import type { AIProvider } from '@openAwork/agent-core';
 import { sqliteGet } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   getActiveChatProviderConfig,
   getFastProviderConfig,
@@ -58,7 +59,7 @@ function parseUserSettingValue(value: string | undefined, key: string): unknown 
   try {
     return JSON.parse(value);
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[auxiliary-llm-config] user_settings '${key}' JSON 解析失败，按未配置处理：${
         err instanceof Error ? err.message : String(err)
       }`,

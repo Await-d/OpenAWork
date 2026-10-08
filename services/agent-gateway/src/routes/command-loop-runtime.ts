@@ -13,6 +13,7 @@ import {
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { recordUlwVerificationEvidence } from '../session/ulw-verification-evidence.js';
 import { withWorkflowRuntimeEvidenceArtifact } from '../session/workflow-runtime-state.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const execFileAsync = promisify(execFile);
 const activeLoopExecutions = new Map<string, ActiveLoopRuntime>();
@@ -122,7 +123,7 @@ export function scheduleLoopExecution(config: LoopExecutionConfig): void {
         // Last-resort backstop: runLoopExecution already guards itself, so
         // this should never fire — but a stray rejection from this
         // fire-and-forget launch must never become an unhandled rejection.
-        console.warn(
+        logGatewayWarn(
           `[command-loop] 循环执行未捕获异常：${
             error instanceof Error ? error.message : String(error)
           }`,
@@ -167,7 +168,7 @@ function safeUnlinkLoopStateFile(filePath: string): void {
       unlinkSync(filePath);
     }
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[command-loop] 清理循环状态文件失败，已跳过：${filePath}：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -185,7 +186,7 @@ function safeClearActiveLoopState(config: LoopExecutionConfig): void {
   try {
     clearPersistedLoopState(config.workspaceRoot, config.sessionId);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[command-loop] 降级清理持久化循环状态失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -206,7 +207,7 @@ function safeClearActiveLoopState(config: LoopExecutionConfig): void {
       );
     }
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[command-loop] 降级清理 active-loop 元数据失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -471,7 +472,7 @@ async function runLoopExecution(
     // this guard exists so a future regression there can't escape this
     // fire-and-forget path as an unhandled rejection. Degrade gracefully so
     // the session is not left wedged showing a running loop.
-    console.warn(
+    logGatewayWarn(
       `[command-loop] 循环执行异常，已执行降级清理：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -487,7 +488,7 @@ async function runLoopExecution(
     // guard; a throw here would otherwise reject this fire-and-forget promise
     // (unhandled rejection) AND leave the session's active-loop marker set,
     // so the UI shows a loop that never finishes. Log + best-effort de-wedge.
-    console.warn(
+    logGatewayWarn(
       `[command-loop] 循环收尾失败，已执行降级清理：${
         error instanceof Error ? error.message : String(error)
       }`,

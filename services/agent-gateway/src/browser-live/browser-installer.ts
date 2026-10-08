@@ -33,6 +33,7 @@ import { resolveGatewayDataDir } from '../infra/storage-paths.js';
 import type { downloadFile } from './browser-download.js';
 import { createChromiumDownloader } from './chromium-downloader.js';
 import type { ChromiumDownloader } from './chromium-downloader.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 安装状态机的状态。 */
 export type BrowserInstallState = 'idle' | 'running' | 'succeeded' | 'failed' | 'unavailable';
@@ -417,7 +418,7 @@ function defaultResetAvailabilityCache(): void {
       module.resetLiveBrowserAvailabilityCache();
     })
     .catch((error: unknown) => {
-      console.warn('[browser-installer] failed to reset availability cache', error);
+      logGatewayWarn('[browser-installer] failed to reset availability cache', error);
     });
 }
 

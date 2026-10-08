@@ -9,6 +9,7 @@ import {
   type ReconcilePm2QualityReviewResult,
 } from '../handoff/runner/pm2-quality-review-reconciler.js';
 import { isRecoverableFailedHandoff, retryFailedHandoff } from '../handoff/store/handoff-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export const TEAM_RUNTIME_REMEDIATION_CODES = [
   'handoff-failure',
@@ -278,7 +279,7 @@ async function runPendingQualityReviewRemediation(input: {
       });
     } catch (err) {
       failedSessionIds.push(candidate.handoffId);
-      console.warn(
+      logGatewayWarn(
         `[team-remediation] pm2 质量评审 ${candidate.handoffId} 协调抛错，计为失败并继续本轮：${
           err instanceof Error ? err.message : String(err)
         }`,

@@ -18,6 +18,10 @@ services:
       JWT_SECRET: change-me-in-production-min-32-chars
       JWT_EXPIRES_IN: 15m
       OPENAWORK_DATA_DIR: /var/lib/openawork
+      # 网关日志级别：info（默认）/ debug / warn / error。
+      # 排障时调成 debug 可看到被默认级别过滤掉的中间日志；注意 debug 会显著放大
+      # 日志量与磁盘占用，需配合下方 logging 的轮转上限。
+      OPENAWORK_LOG_LEVEL: ${OPENAWORK_LOG_LEVEL:-info}
       # 浏览器实时预览（跨域页面也能采集控制台与网络）。
       # 默认关闭；开启前需保证容器内有 Chromium（系统 Chrome/Edge，或 npx playwright install chromium），
       # 否则 /browser-live/status 返回 browser-missing，前端回退 iframe 预览。
@@ -29,6 +33,13 @@ services:
       # FAKE_IP_CIDRS: '198.18.0.0/15'
     volumes:
       - gateway_data:/var/lib/openawork
+    # 日志轮转：不设上限时 json-file 驱动会一直写到磁盘写满——容器被 kill 的
+    # 时候往往正好是最需要日志排障的时候，所以上限必须配。
+    logging:
+      driver: json-file
+      options:
+        max-size: '50m'
+        max-file: '5'
 
   web:
     build:
@@ -38,6 +49,11 @@ services:
       - '5173:80'
     depends_on:
       - gateway
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
 
 # 本栈不含 Redis：网关当前不连接真实 Redis（进程内 Map 桩，见
 # services/agent-gateway/src/infra/db.ts），REDIS_URL 仅用于终端面板的端口过滤。

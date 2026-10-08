@@ -19,6 +19,7 @@
  */
 
 import { lspManager } from '../lsp/router.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** Numeric / string LSP diagnostic codes that mean "definitely dead code". */
 export const DEFAULT_DEAD_CODE_CODES: ReadonlySet<string | number> = new Set<string | number>([
@@ -103,7 +104,7 @@ export async function collectDeadCodeDiagnostics(
     // Diagnostics is best-effort — a 500 from the LSP layer must not
     // crash the slash command. The executor falls back to a "no LSP
     // signal" message in that case.
-    console.warn('[remove-deadcode] LSP diagnostics fetch failed —', String(err));
+    logGatewayWarn('[remove-deadcode] LSP diagnostics fetch failed —', String(err));
     return [];
   }
 

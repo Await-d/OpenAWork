@@ -178,6 +178,8 @@ export { AttributionConfigUI } from './misc/AttributionConfigUI.js';
 export type { AttributionConfigUIProps, AttributionConfig } from './misc/AttributionConfigUI.js';
 export { LogViewer } from './misc/LogViewer.js';
 export type { LogViewerProps, LogEntry, LogLevel } from './misc/LogViewer.js';
+export { AppErrorBoundary } from './feedback/AppErrorBoundary.js';
+export type { AppErrorBoundaryProps } from './feedback/AppErrorBoundary.js';
 export { TelemetryConsentModal } from './telemetry/TelemetryConsentModal.js';
 export type { TelemetryConsentModalProps } from './telemetry/TelemetryConsentModal.js';
 export { SkillMarketHome } from './skills/SkillMarketHome.js';

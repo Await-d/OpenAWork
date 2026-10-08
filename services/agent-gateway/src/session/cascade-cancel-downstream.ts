@@ -21,6 +21,7 @@ import { setSubstate } from '../handoff/store/substate-store.js';
 import { publishHandoffEvent } from '../handoff/bus/team-events-bus.js';
 import { logTeamAudit } from '../team/team-audit-store.js';
 import { stopAllInFlightStreamRequestsForSession } from '../routes/stream-cancellation.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export async function cascadeCancelDownstream(input: {
   rootSessionId: string;
@@ -46,21 +47,21 @@ export async function cascadeCancelDownstream(input: {
         payload: { reason: 'cascade-cancel', rootSessionId: input.rootSessionId },
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[cascade-cancel] cascade cancel_signal 注入失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
       );
     }
     try {
       await stopAllInFlightStreamRequestsForSession({ sessionId, userId: input.userId });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[cascade-cancel] cascade 停流失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
       );
     }
     try {
       setSubstate({ sessionId, substate: 'cancelled', userId: input.userId });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[cascade-cancel] cascade setSubstate('cancelled') 失败（${sessionId}）：${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -95,7 +96,7 @@ export async function cascadeCancelDownstream(input: {
       userId: input.userId,
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[cascade-cancel] cascade 审计日志写入失败（不阻塞）：${err instanceof Error ? err.message : String(err)}`,
     );
   }

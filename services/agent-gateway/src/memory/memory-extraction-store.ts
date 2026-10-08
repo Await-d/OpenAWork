@@ -6,6 +6,7 @@ import type {
 import { deduplicateMemories, evaluateMemoryCandidateForPersistence } from '@openAwork/agent-core';
 import { createMemory, listMemories, updateMemory } from './memory-store.js';
 import { scanMemoryWriteContent } from './memory-security-scanner.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export interface UpsertExtractedMemoriesResult {
   readonly created: number;
@@ -74,7 +75,7 @@ export function upsertExtractedMemories(
       });
       created += 1;
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[memory-store] 自动抽取记忆写入失败，已跳过该条：${
           err instanceof Error ? err.message : String(err)
         }`,
@@ -90,7 +91,7 @@ export function upsertExtractedMemories(
       });
       updated += 1;
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[memory-store] 自动抽取记忆更新失败，已跳过该条：${
           err instanceof Error ? err.message : String(err)
         }`,

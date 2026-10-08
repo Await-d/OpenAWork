@@ -1,6 +1,7 @@
 import { TelemetryManager, type TelemetryEventName } from '@openAwork/telemetry';
 import type { TeamRuntimeHealth } from './team-failure-policy.js';
 import type { TeamRuntimeIncident } from './team-runtime-diagnostics-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface TelemetrySink {
   isEnabled(): boolean;
@@ -172,7 +173,7 @@ function safeTrack(
     sink.track(name, properties);
     return true;
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[team-runtime-telemetry] track ${name} 失败：${error instanceof Error ? error.message : String(error)}`,
     );
     return false;

@@ -177,8 +177,16 @@ function createBaseProps(): Omit<FusionSessionSidePanelProps, 'activeTab'> {
   };
 }
 
+/**
+ * 按「文件是否出现在变更列表里」查找行按钮。
+ *
+ * 不用 `textContent` 匹配：列表里的路径为了适配窄侧栏只渲染压缩后的目录前缀
+ * （`…\appearance\Foo.cs`），完整路径放在 `aria-label` 上供无障碍与测试使用。
+ */
 function getListedFilePathElements(filePath: string): HTMLElement[] {
-  return screen.getAllByText((_, element) => element?.textContent === filePath);
+  return screen
+    .getAllByRole('button')
+    .filter((element) => element.getAttribute('aria-label')?.startsWith(`${filePath}，`));
 }
 
 function makeSubAgentItem(

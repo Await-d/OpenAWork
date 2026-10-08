@@ -6,10 +6,10 @@ import { parseBody, parseQuery } from '../infra/parse-request.js';
 import {
   archiveNotification,
   archiveNotifications,
+  buildPendingNotificationSnapshot,
   countPendingActionableNotifications,
   listNotificationPreferences,
   listNotifications,
-  listUnreadBroadcastNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   NOTIFICATION_PREFERENCE_CHANNELS,
@@ -67,34 +67,27 @@ export async function notificationsRoutes(app: FastifyInstance): Promise<void> {
       const { step } = startRequestWorkflow(request, 'notifications.list');
 
       const view = query.view ?? 'pending';
-      // `view=pending` 只含 actionable 待办 —— rows 与 pendingActionableCount 口径一致，
-      // 结果播报不在铃铛里占位。
-      const notifications = listNotifications({
-        kind: view === 'pending' ? 'actionable' : undefined,
-        limit: query.limit,
-        status: query.status,
-        userId: user.sub,
-        view,
-      });
-      // 红点只被「真的需要用户动手」的 actionable 待办点亮；结果播报不该抢注意力。
-      const pendingActionableCount = countPendingActionableNotifications(user.sub);
-      // 结果播报仅在待处理视图额外交付：客户端页面隐藏时据此弹系统通知，
-      // 让「不进铃铛」不等于「不告知」。
-      const browserBroadcasts =
+      const payload =
         view === 'pending'
-          ? listUnreadBroadcastNotifications({ limit: query.limit, userId: user.sub })
-          : [];
+          ? // pending 是铃铛与权限浮窗的主口径，与 WS 握手快照共用同一份实现。
+            buildPendingNotificationSnapshot(user.sub, query.limit, query.status)
+          : {
+              browserBroadcasts: [],
+              notifications: listNotifications({
+                limit: query.limit,
+                status: query.status,
+                userId: user.sub,
+                view,
+              }),
+              pendingActionableCount: countPendingActionableNotifications(user.sub),
+            };
       step.succeed(undefined, {
-        count: notifications.length,
-        pendingActionableCount,
-        broadcastCount: browserBroadcasts.length,
+        count: payload.notifications.length,
+        pendingActionableCount: payload.pendingActionableCount,
+        broadcastCount: payload.browserBroadcasts.length,
         view,
       });
-      return reply.send({
-        browserBroadcasts,
-        notifications,
-        pendingActionableCount,
-      });
+      return reply.send(payload);
     },
   );
 

@@ -35,6 +35,7 @@ import {
 import type { PluginFactory, V1PluginHooks } from './v1-shim.js';
 import { isPluginGuarded } from './supervisor.js';
 import { PluginWatcher } from './watcher.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 function isEffectOrPromisePlugin(value: unknown): value is PluginDefinition {
   if (typeof value !== 'object' || value === null) return false;
@@ -273,7 +274,7 @@ export async function loadPlugins(
   try {
     config = await loadPluginConfigFile(configPath);
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[plugin] failed to parse config "${configPath}": ${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -285,7 +286,7 @@ export async function loadPlugins(
   const localCandidates: Candidate[] = [];
   const pluginsDir = options.pluginsDir ?? resolveGatewayPluginsDir();
   const discovered = await discoverPluginDirectories(pluginsDir).catch((err: unknown) => {
-    console.warn(
+    logGatewayWarn(
       `[plugin] failed to scan "${pluginsDir}": ${err instanceof Error ? err.message : String(err)}`,
     );
     return [] as string[];

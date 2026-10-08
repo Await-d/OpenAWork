@@ -6,6 +6,7 @@ import React, {
   useState,
   type CSSProperties,
 } from 'react';
+import { useWorkspaceReadIdentity } from '../../../stores/ui/uiState.js';
 import { BrowserConsolePanel } from './browser/BrowserConsolePanel.js';
 import { BrowserContentArea } from './browser/engines/browser-content-area.js';
 import { copyTextToClipboard, insertTextIntoComposer } from './browser/browser-clipboard.js';
@@ -86,6 +87,23 @@ export function BuiltInBrowser({
   workspacePath,
   hidden = false,
 }: BuiltInBrowserProps) {
+  /**
+   * SSH 读取身份（与主文件树同源）。
+   *
+   * 内置浏览器预览的自动刷新靠索引版本轮询，而该轮询遇 400/403 会永久停止 ——
+   * 缺身份时远端 POSIX 路径被判本机越界，预览刷新与内容缓存失效广播都会停摆。
+   */
+  const storeReadIdentity = useWorkspaceReadIdentity();
+  const workspaceReadIdentity = useMemo(
+    () => ({
+      ...(storeReadIdentity.sessionId ? { sessionId: storeReadIdentity.sessionId } : {}),
+      ...(!storeReadIdentity.sessionId && storeReadIdentity.sshConnectionId
+        ? { sshConnectionId: storeReadIdentity.sshConnectionId }
+        : {}),
+      ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+    }),
+    [storeReadIdentity.sessionId, storeReadIdentity.sshConnectionId, workspacePath],
+  );
   // ── Tabs state (with persistence) ───────────────────────────────────
   // 初始化:从当前 workspace 的 storage 读取(若有);否则用 previewUrl 或 default。
   const [tabs, setTabs] = useState<BrowserTab[]>(() => {
@@ -632,6 +650,9 @@ export function BuiltInBrowser({
     enabled: !hidden && Boolean(workspacePath),
     workspacePath: workspacePath ?? null,
     onChange: () => setRefreshKey((value) => value + 1),
+    // SSH 远端工作区必须下发身份：该 hook 遇 400/403 会 stop() 永久停轮询，
+    // 缺身份时远端路径被判本机越界 → 预览自动刷新永久失效。
+    readIdentity: workspaceReadIdentity,
   });
   // Tauri 原生窗口没有 `CdpLiveEngine` 来同步 URL：由这个 hook 把当前标签页的
   // 地址 / 刷新信号下发给远端采集页面，否则采集到的永远是空白页。不可见时不下发

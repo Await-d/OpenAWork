@@ -1,6 +1,7 @@
 import { trackTeamRuntimeIncident } from './team-runtime-telemetry.js';
 import { logTeamAudit } from './team-audit-store.js';
 import { sqliteAll } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export type TeamRuntimeIncidentCategory =
   | 'architecture_review'
@@ -370,7 +371,7 @@ function safeWriteTeamRuntimeIncidentAudit(input: TeamRuntimeIncident): void {
   try {
     writeTeamRuntimeIncidentAudit(input);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[team-runtime-diagnostics] 写 runtime incident audit 失败：${formatErrorMessage(error)}`,
     );
   }
@@ -380,7 +381,7 @@ function safeTrackTeamRuntimeIncident(input: TeamRuntimeIncident): void {
   try {
     trackTeamRuntimeIncident(input);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[team-runtime-diagnostics] 上报 runtime incident telemetry 失败：${formatErrorMessage(error)}`,
     );
   }

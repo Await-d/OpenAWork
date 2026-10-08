@@ -16,6 +16,7 @@
  */
 
 import type { HookCallback, PluginHookEvents, PluginHookName } from '@openAwork/plugin-sdk';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** Handle returned by `register`; `dispose()` unregisters the callback. */
 export interface HookRegistration {
@@ -80,7 +81,7 @@ export class PluginHooksRegistry {
       try {
         await entry.invoke(event);
       } catch (err) {
-        console.warn(
+        logGatewayWarn(
           `[plugin] "${entry.source}" hook "${name}" threw: ${err instanceof Error ? err.message : String(err)}`,
         );
       }

@@ -1,26 +1,31 @@
 /* ═══════════════════════════════════════════════════════════════
  * Chat Message Error Banner V2
- * 扁平、紧凑的错误卡片：
- *   一个容器 · 一条 1px 描边 · 一处 danger 语义色 · 无内嵌浮层
+ * 紧凑的错误提示条（贴在对话流里，不是弹窗）：
+ *   · 结构靠「左 danger 轨 + 极淡 danger 面 + 背景层级」表达，
+ *     不再套一整圈红色描边和阴影，避免在消息流里过度抢眼
+ *   · 语义色只留给危险信号（轨 / 图标 / 焦点前的强调），
+ *     「重试」是卡片里唯一的 CTA，走 accent；辅助信息走 fg-muted / aux
+ *   · 所有颜色引用 E·Nebula token（src/index.css），
+ *     间距 / 圆角引用 --spacing-* / --radius-*（src/styles/layout-tokens.css）
  * ═══════════════════════════════════════════════════════════════ */
 
 .chat-message-error-banner-v2 {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--spacing-1);
   min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--danger-border);
-  border-radius: 8px;
-  background: color-mix(in oklch, var(--danger) 5%, var(--bg-overlay));
-  box-shadow: 0 1px 2px color-mix(in oklch, var(--danger) 6%, transparent);
-  animation: error-banner-slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid color-mix(in srgb, var(--danger) 60%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 4%, var(--bg-overlay));
+  animation: error-banner-slide-in var(--dur-normal) var(--ease-normal);
 }
 
 @keyframes error-banner-slide-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-2px);
   }
   to {
     opacity: 1;
@@ -28,24 +33,20 @@
   }
 }
 
-/* 图标底座：双向居中，避免图标贴顶 */
+/* 图标：裸图标，不加底座方框（避免「盒中盒」的噪声） */
 .chat-message-error-icon {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid color-mix(in oklch, var(--danger) 7%, transparent);
-  border-radius: 6px;
-  background: var(--danger-muted);
+  margin-top: 2px;
   color: var(--danger);
 }
 
 .chat-message-error-content {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--spacing-1);
   flex: 1;
   min-width: 0;
 }
@@ -54,73 +55,72 @@
 .chat-message-error-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-1);
   min-width: 0;
-  min-height: 24px;
 }
 
 .chat-message-error-title {
   flex: 1;
   min-width: 0;
   color: var(--fg-strong);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.45;
   letter-spacing: -0.01em;
 }
 
-/* 错误码：安静的单色 chip，贴右且不与标题争抢视觉权重 */
+/* 错误码：只留描边的元数据 chip，不加填充底 */
 .chat-message-error-label {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
   margin-left: auto;
-  height: 18px;
-  padding: 0 8px;
-  border: 1px solid var(--border-default);
-  border-radius: 4px;
-  background: var(--bg-raised);
+  height: 16px;
+  padding: 0 var(--spacing-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: none;
   color: var(--fg-muted);
   font-family: ui-monospace, SFMono-Regular, 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  line-height: 1;
   white-space: nowrap;
 }
 
-/* 友好摘要：纯文本，不再套一层带底带边的盒子 */
+/* 友好摘要：纯文本行，与标题同级密度 */
 .chat-message-error-detail-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
 .chat-message-error-detail {
   color: var(--fg-default);
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-/* 展开 / 收起：安静的文字按钮 */
+/* 展开 / 收起：安静的文字按钮，hover 才升到强调色 */
 .chat-message-error-toggle {
   align-self: flex-start;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: none;
-  color: var(--aux);
-  font-size: 11.5px;
+  color: var(--fg-muted);
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
-  transition: color 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color var(--dur-micro) var(--ease-micro);
 }
 
 .chat-message-error-toggle:hover {
-  color: var(--aux-hover);
+  color: var(--accent);
   text-decoration: underline;
 }
 
@@ -133,22 +133,22 @@
 /* 原始技术详情：默认折叠，展开后是卡片里唯一的代码块 */
 .chat-message-error-technical-detail {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.5;
 }
 
 .chat-message-error-technical-detail summary {
   width: fit-content;
-  border-radius: 4px;
-  color: var(--aux);
-  font-size: 12px;
+  border-radius: var(--radius-xs);
+  color: var(--fg-muted);
+  font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: color 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color var(--dur-micro) var(--ease-micro);
 }
 
 .chat-message-error-technical-detail summary:hover {
-  color: var(--aux-hover);
+  color: var(--accent);
 }
 
 .chat-message-error-technical-detail summary:focus-visible {
@@ -158,12 +158,12 @@
 }
 
 .chat-message-error-technical-detail pre {
-  margin: 8px 0 0;
-  max-block-size: 200px;
+  margin: var(--spacing-1) 0 0;
+  max-block-size: 180px;
   overflow: auto;
-  padding: 8px 12px;
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
   background: var(--bg-raised);
   color: var(--fg-default);
   font: inherit;
@@ -171,19 +171,20 @@
   word-break: break-word;
 }
 
-/* 建议：一行安静的 info 文本，无填充无描边 */
+/* 建议：一行安静的中性文本，仅图标保留 info 语义 */
 .chat-message-error-suggestion {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  color: color-mix(in oklch, var(--info) 70%, var(--fg-default));
-  font-size: 12px;
+  gap: var(--spacing-1);
+  color: var(--fg-muted);
+  font-size: 11.5px;
   line-height: 1.5;
 }
 
 .chat-message-error-suggestion svg {
   flex-shrink: 0;
-  color: var(--info);
+  margin-top: 1px;
+  color: var(--aux);
 }
 
 .chat-message-error-suggestion span {
@@ -194,42 +195,47 @@
 .chat-message-error-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-2);
 }
 
+/* 重试是本卡片唯一 CTA：accent 语义（danger 只留给危险信号本身） */
 .chat-message-error-retry {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--danger-border);
-  border-radius: 6px;
-  background: var(--danger-muted);
-  color: color-mix(in oklch, var(--danger) 78%, var(--fg-strong));
-  font-size: 11.5px;
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-xs);
+  background: var(--accent-muted);
+  color: color-mix(in srgb, var(--accent) 82%, var(--fg-strong));
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 100ms cubic-bezier(0.4, 0, 0.2, 1),
-    border-color 100ms cubic-bezier(0.4, 0, 0.2, 1),
-    color 100ms cubic-bezier(0.4, 0, 0.2, 1);
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro);
 }
 
 .chat-message-error-retry:hover {
-  border-color: color-mix(in oklch, var(--danger) 45%, var(--border-default));
-  background: color-mix(in oklch, var(--danger) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.chat-message-error-retry:active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .chat-message-error-retry:focus-visible {
-  outline: 2px solid var(--danger);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px var(--danger-muted);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
 }
 
 @media (max-width: 640px) {
   .chat-message-error-banner-v2 {
-    padding: 8px 12px;
+    padding: var(--spacing-1);
   }
 }
 

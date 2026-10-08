@@ -13,6 +13,7 @@
 import { TelemetryManager, type TelemetryEventName } from '@openAwork/telemetry';
 import { getTelemetryConsent } from './telemetry-consent-store.js';
 import { syncErrorToGitHub } from './github-sync.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface TelemetrySink {
   isEnabled(): boolean;
@@ -99,7 +100,7 @@ function safeTrack(
   try {
     manager.track(name, properties);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[telemetry-service] track ${name} 失败：${error instanceof Error ? error.message : String(error)}`,
     );
   }

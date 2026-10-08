@@ -1,5 +1,6 @@
 import { parseDiscordInboundMessage } from './inbound-parsers/discord.js';
 import type { ChannelEvent, ChannelInstance } from './types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const DEFAULT_DISCORD_GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const DISCORD_GATEWAY_INTENTS = (1 << 9) | (1 << 12) | (1 << 15);
@@ -306,7 +307,7 @@ export class DiscordGatewayClient {
     try {
       this.notify(event);
     } catch (error) {
-      console.warn('[discord] gateway notify handler threw', {
+      logGatewayWarn('[discord] gateway notify handler threw', {
         pluginId: this.pluginId,
         error: error instanceof Error ? error.message : String(error),
       });

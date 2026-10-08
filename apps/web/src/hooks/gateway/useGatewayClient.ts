@@ -59,6 +59,11 @@ interface GatewayClient {
     sessionId: string,
     callbacks: StreamCallbacks,
   ) => Promise<AttachActiveStreamResult>;
+  /**
+   * 幂等掐断本地 WS / SSE 传输，不通知网关停止 run。
+   * 用于会话切换等纯客户端生命周期收尾（用户主动停止请用 `stopStream`）。
+   */
+  closeTransports: () => void;
   getActiveStreamClientRequestId: () => string | null;
   getActiveStreamSessionId: () => string | null;
   stream: (sessionId: string, message: string, callbacks: StreamCallbacks) => void;
@@ -441,15 +446,15 @@ export function connectAttachEventSource(
         // The envelope sequence is the stable identity for replayed events.
         // The nested event often has no eventId, so forwarding it unchanged
         // makes attach/reconnect deliver the same thinking/tool delta twice.
+        // 复用主路径的同一套身份推导，避免两处实现漂移。
         const event = parsed.payload.event;
+        const nestedIdentity =
+          typeof event === 'object' && event !== null ? readGatewayDeliveryIdentity(event) : null;
         handleChunk(
           typeof event === 'object' && event !== null
             ? {
                 ...event,
-                eventId:
-                  typeof (event as { eventId?: unknown }).eventId === 'string'
-                    ? (event as { eventId: string }).eventId
-                    : `run-seq:${cursorSeq}`,
+                eventId: nestedIdentity ?? `run-seq:${cursorSeq}`,
               }
             : event,
         );
@@ -662,6 +667,43 @@ function readGatewayCursor(value: unknown): RunEventCursor | null {
   return { clientRequestId, seq };
 }
 
+/**
+ * 去重身份的最大记录数。Set 只增不减，长会话下会无界增长；这里用 FIFO 淘汰最旧
+ * 记录。窗口只需覆盖「一次传输内的重放范围」，因此远大于任何真实的重放间隔。
+ */
+const MAX_TRACKED_DELIVERY_IDS = 4096;
+
+function rememberDeliveredIdentity(deliveredEventIds: Set<string>, identity: string): void {
+  deliveredEventIds.add(identity);
+  if (deliveredEventIds.size > MAX_TRACKED_DELIVERY_IDS) {
+    const oldest = deliveredEventIds.values().next();
+    if (!oldest.done) {
+      deliveredEventIds.delete(oldest.value);
+    }
+  }
+}
+
+/**
+ * 事件投递的唯一身份，用于跨 WS/SSE/attach 重放去重。
+ *
+ * 网关为 run 内事件注入 `eventId`（`${runId}:evt:${seq}`），但并非每个 chunk 都带
+ * 它。此前 `eventId` 缺失时去重被整段跳过，于是 WS→SSE 回退或 attach 重放会把
+ * 同一段正文再喂一次——而 `onDelta` 是无条件累加（`onThinkingDelta` 尚有 delivery
+ * key 兜底），直接表现为「同一段话出现两遍」。这里在缺失时用 cursor 合成稳定身份，
+ * 与 attach 路径的 `run-seq:` 语义保持一致。
+ *
+ * 只有既无 `eventId` 又无 cursor 的 chunk 无法去重：这类 unscoped 事件不写入
+ * run events 表，attach 的 `afterSeq` 不会重放它们。
+ */
+export function readGatewayDeliveryIdentity(value: unknown): string | null {
+  const eventId = readGatewayEventId(value);
+  if (eventId) {
+    return eventId;
+  }
+  const cursor = readGatewayCursor(value);
+  return cursor ? `run-seq:${cursor.clientRequestId}:${cursor.seq}` : null;
+}
+
 function isThinkingDeltaChunk(value: unknown): value is StreamThinkingChunk {
   if (!value || typeof value !== 'object') {
     return false;
@@ -728,12 +770,12 @@ function createGatewayChunkDispatcher(input: {
   return (chunk) => {
     if (isSettled()) return;
 
-    const eventId = readGatewayEventId(chunk);
-    if (eventId && deliveredEventIds) {
-      if (deliveredEventIds.has(eventId)) {
+    const deliveryIdentity = readGatewayDeliveryIdentity(chunk);
+    if (deliveryIdentity && deliveredEventIds) {
+      if (deliveredEventIds.has(deliveryIdentity)) {
         return;
       }
-      deliveredEventIds.add(eventId);
+      rememberDeliveredIdentity(deliveredEventIds, deliveryIdentity);
     }
 
     if (isThinkingStartChunk(chunk)) {
@@ -858,6 +900,27 @@ export function useGatewayClient(token: string | null): GatewayClient {
     }
   }, []);
 
+  /**
+   * 幂等地掐断本地 WS / SSE 传输，并让所有在途的 WS 世代失效。
+   *
+   * 与 `stopStream` 的区别：本方法**只**关闭浏览器侧的连接并作废世代号，
+   * 不通知网关停止 run —— 因此适合作为「切换会话 / 组件卸载」这类
+   * 纯客户端生命周期收尾使用。用户主动停止仍必须走 `stopStream`。
+   *
+   * 会话切换时必须显式调用：attach 传输的唯一关闭点原本内嵌在
+   * `attachToActiveStream` 内部（只在新 attach 发起时触发），切到
+   * 不需要 attach 的会话时旧 EventSource 会永久泄漏，并继续触发
+   * `requestSessionListRefresh()` 造成「幽灵 /sessions」。
+   */
+  const closeTransports = useCallback(() => {
+    streamGenerationRef.current += 1;
+    clearSseRetryTimer();
+    wsRef.current?.close();
+    sseRef.current?.close();
+    wsRef.current = null;
+    sseRef.current = null;
+  }, [clearSseRetryTimer]);
+
   const syncActiveRequest = useCallback((snapshot: ActiveStreamSnapshot | null) => {
     activeRequestRef.current = snapshot;
     setActiveStreamSessionId(snapshot?.sessionId ?? null);
@@ -878,13 +941,8 @@ export function useGatewayClient(token: string | null): GatewayClient {
           callbacksRef.current = null;
         },
         closeExistingTransports: () => {
-          streamGenerationRef.current += 1;
+          closeTransports();
           console.log('[ATTACH] closeExistingTransports gen:', streamGenerationRef.current);
-          clearSseRetryTimer();
-          wsRef.current?.close();
-          sseRef.current?.close();
-          wsRef.current = null;
-          sseRef.current = null;
         },
         gatewayUrl,
         getCurrentActiveRequest: () => activeRequestRef.current,
@@ -906,7 +964,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         token: token ?? '',
       });
     },
-    [clearSseRetryTimer, token],
+    [closeTransports, token],
   );
 
   const stopStream = useCallback(async (): Promise<boolean> => {
@@ -1341,6 +1399,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
   return useMemo(
     () => ({
       attachToActiveStream,
+      closeTransports,
       getActiveStreamClientRequestId,
       getActiveStreamSessionId,
       stream,
@@ -1348,6 +1407,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
     }),
     [
       attachToActiveStream,
+      closeTransports,
       getActiveStreamClientRequestId,
       getActiveStreamSessionId,
       stream,

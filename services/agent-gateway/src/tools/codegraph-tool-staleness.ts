@@ -3,6 +3,7 @@ import { openCodegraphStore } from '../codegraph/store.js';
 import { resolveGatewayCodegraphDatabasePath } from '../infra/storage-paths.js';
 import { getSessionWorkingDirectory } from '../workspace/workspace-safety.js';
 import { isPathWithinRoot } from '../workspace/workspace-paths.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const STALE_MARKER_LIMIT = 50;
 
@@ -52,7 +53,7 @@ export async function markCodegraphFilesStaleBestEffort(input: {
     });
   } catch (error) {
     if (error instanceof Error) {
-      console.warn(`[codegraph] stale marker best-effort failed: ${error.message}`);
+      logGatewayWarn(`[codegraph] stale marker best-effort failed: ${error.message}`);
       return;
     }
     throw error;

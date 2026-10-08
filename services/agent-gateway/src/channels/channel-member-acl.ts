@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ChannelInstance, ChannelPermissions } from './types.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export const CHANNEL_MEMBER_ACL_CONFIG_KEY = 'memberAclJson';
 
@@ -120,7 +121,7 @@ function parseChannelMemberAclRules(channel: ChannelInstance): readonly ChannelM
     const parsed = channelMemberAclDocumentSchema.parse(JSON.parse(rawValue) as unknown);
     return Array.isArray(parsed) ? parsed : parsed.rules;
   } catch (error) {
-    console.warn('[channels] member ACL JSON parse failed, ignore runtime ACL override', {
+    logGatewayWarn('[channels] member ACL JSON parse failed, ignore runtime ACL override', {
       channelId: channel.id,
       error: error instanceof Error ? error.message : String(error),
     });

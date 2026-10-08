@@ -92,7 +92,9 @@ import type {
 } from '@openAwork/shared';
 import {
   createPendingPermissionRequestSnapshot,
+  createClientErrorReporter,
   dedupePendingPermissionRequests,
+  isClientSyntheticStreamErrorCode,
 } from '@openAwork/web-client';
 import type {
   PendingQuestionRequest,
@@ -113,6 +115,15 @@ export interface SessionAttachDeps {
   ) => void;
   readonly attachAttemptedSessionRef: RefObject<string | null>;
   readonly attachEligibilitySignatureRef: RefObject<string | null>;
+  /**
+   * 当前已建立 attach 传输的会话 id；无 attach 在途时为 null。
+   *
+   * 必须与 `attachAttemptedSessionRef` 分开：后者在重试调度、终态复位等
+   * 路径上会被置空，无法表达「传输仍属于哪个会话」。cleanup 需要据此判断
+   * 「本次 effect 重跑只是 token delta」还是「用户真的切走了会话」——前者
+   * 必须保留传输，后者必须掐断它。
+   */
+  readonly attachOwnerSessionIdRef: RefObject<string | null>;
   readonly attachRetryExhausted: boolean;
   readonly attachRetryScheduledSessionId: string | null;
   readonly cancelAttachRetry: () => void;
@@ -208,6 +219,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     appendAssistantEventMessages,
     attachAttemptedSessionRef,
     attachEligibilitySignatureRef,
+    attachOwnerSessionIdRef,
     attachRetryExhausted,
     attachRetryScheduledSessionId,
     cancelAttachRetry,
@@ -302,6 +314,30 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     });
   }
 
+  /**
+   * 本次 effect 运行的清理：只在「用户真的切走了会话」时掐断 attach 传输。
+   *
+   * 本 effect 因 token delta 高频重跑（`streaming` / `sessionStateStatus`
+   * 每次变更都触发），因此 cleanup **不能** 无条件关闭传输 —— 否则流式进行中
+   * 会被自己反复掐断。判据是传输归属的会话（`attachOwnerSessionIdRef`，
+   * 跨运行持久的 ref）与本次运行的 `currentSessionId` 是否一致：
+   *
+   * - 一致 → 只是 delta 引发的重跑，传输保留
+   * - 不一致 → 切走了会话，旧 EventSource 必须关闭
+   *
+   * 此前该 effect 的所有出口都是 `return;`，从不返回 cleanup，导致切到
+   * 不需要 attach 的会话时旧 SSE 永久泄漏，并继续触发
+   * `requestSessionListRefresh()` 造成「幽灵 /sessions」。
+   */
+  const cleanupAttachTransport = () => {
+    const ownerSessionId = attachOwnerSessionIdRef.current;
+    if (ownerSessionId === null || ownerSessionId === currentSessionId) {
+      return;
+    }
+    attachOwnerSessionIdRef.current = null;
+    client.closeTransports();
+  };
+
   switch (
     resolveAttachEffectDisposition({
       eligibility: attachEligibility,
@@ -319,13 +355,13 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
           replaceMessages: true,
         }).catch(() => undefined);
       }
-      return;
+      return cleanupAttachTransport;
     }
 
     case 'cancel_retry': {
       cancelAttachRetry();
       attachAttemptedSessionRef.current = null;
-      return;
+      return cleanupAttachTransport;
     }
 
     case 'skip': {
@@ -339,7 +375,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
       ) {
         attachAttemptedSessionRef.current = null;
       }
-      return;
+      return cleanupAttachTransport;
     }
 
     case 'proceed':
@@ -348,17 +384,17 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
 
   // proceed 分支由 shouldAttemptAttachToSession 保证，此处仅为类型收窄。
   if (!currentSessionId) {
-    return;
+    return cleanupAttachTransport;
   }
 
   if (attachAttemptedSessionRef.current === currentSessionId) {
-    return;
+    return cleanupAttachTransport;
   }
 
   // 如果本地流式刚开始（2秒内），阻止 attach 触发，避免覆盖本地刚添加的用户消息。
   // 这个保护确保用户发送第一条消息后，本地状态有足够时间稳定，不会被 attach 流程覆盖。
   if (activeStreamStartedAt !== null && Date.now() - activeStreamStartedAt < 2000) {
-    return;
+    return cleanupAttachTransport;
   }
 
   attachAttemptedSessionRef.current = currentSessionId;
@@ -366,6 +402,8 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
   console.log('[ATTACH_ELIGIBILITY] proceeding with attach for', currentSessionId);
 
   const sid = currentSessionId;
+  // 传输归属登记：cleanup 依赖它区分「delta 重跑」与「切走会话」。
+  attachOwnerSessionIdRef.current = sid;
   const attachSessionViewEpoch = currentSessionViewRef.current.epoch;
   const initialText = recoveredStreamSnapshot?.text ?? '';
   const initialThinkingBlocks = recoveredStreamSnapshot?.thinkingBlocks ?? [];
@@ -378,6 +416,34 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
   // attach 连接建立后从 gatewayClient 读取本次活跃流的 rid；提交闭包在事件
   // 到达时才执行，因此先声明、attach resolve 后赋值。
   let attachStreamClientRequestId: string | null = null;
+  // 与主链路一致：客户端合成的传输错误在网关侧没有记录，靠 best-effort 上报
+  // 补一条 `status='error'` 消息，否则刷新页面后 attach 期间的错误会消失。
+  const clientErrorReporter = createClientErrorReporter(gatewayUrl);
+  const reportClientSideStreamError = (
+    code: string,
+    resolvedMessage: string,
+    technicalDetail: string | undefined,
+  ): void => {
+    if (!token || !isClientSyntheticStreamErrorCode(code)) return;
+    const clientRequestId = attachStreamClientRequestId;
+    if (!clientRequestId) return;
+    void clientErrorReporter
+      .reportClientStreamError(token, {
+        clientRequestId,
+        code,
+        message: resolvedMessage,
+        sessionId: sid,
+        ...(technicalDetail ? { technicalDetail } : {}),
+      })
+      .then((result) => {
+        if (!result.ok) {
+          logger.warn(
+            'attach stream error report failed',
+            `${code}: ${result.errorMessage ?? '未知原因'}`,
+          );
+        }
+      });
+  };
   const recoveredModifiedFilesSummary = recoveredStreamSnapshot?.modifiedFilesSummary;
   const requestTextCodePoints = Array.from(initialText);
   let attachStateInitialized = false;
@@ -1226,6 +1292,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         const resolvedMessage = formatGatewayStreamErrorMessage(code, message, technicalDetail);
         const errorContent = `[错误: ${code}] ${resolvedMessage}`;
         logger.error('attach stream error', `${code}: ${resolvedMessage}`);
+        reportClientSideStreamError(code, resolvedMessage, technicalDetail);
         const attachErrorMsgId =
           currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
         const resolvedMessageModel = resolveRoundModelLabel(latestRoundUpstreamSummary);
@@ -1342,4 +1409,6 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         }
       }
     });
+
+  return cleanupAttachTransport;
 }

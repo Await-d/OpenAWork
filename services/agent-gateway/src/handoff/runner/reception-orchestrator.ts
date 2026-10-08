@@ -30,6 +30,7 @@ import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js
 import { recordLatency } from '../bus/latency-monitor.js';
 import { setSubstate, SUBSTATES_RECEPTION } from '../store/substate-store.js';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 import {
   routeByRules,
   routeByLlm,
@@ -216,7 +217,7 @@ export function persistReceptionUserMessage(input: {
       clientRequestId: input.streamClientRequestId ?? null,
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[reception-orchestrator] persistReceptionUserMessage 失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -513,7 +514,7 @@ async function runReceptionOrchestrationBody(
         },
       });
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[reception-orchestrator] reception direct/light stream 失败：${err instanceof Error ? err.message : String(err)}`,
       );
       if (persistAck) {
@@ -642,7 +643,7 @@ async function runReceptionOrchestrationBody(
         }
       }
     } catch (err) {
-      console.warn(
+      logGatewayWarn(
         `[reception-orchestrator] auto-init 失败，跳过初始化继续派发：${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -706,7 +707,7 @@ async function runReceptionOrchestrationBody(
       },
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[reception-orchestrator] LLM 调用失败：${err instanceof Error ? err.message : String(err)}`,
     );
     setSubstate({
@@ -880,7 +881,7 @@ function writeAck(userId: string, sessionId: string, text: string): void {
       content: [{ type: 'text', text }],
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[reception-orchestrator] 写 ack 消息失败：${err instanceof Error ? err.message : String(err)}`,
     );
   }
@@ -938,7 +939,7 @@ async function buildRouteLlmContext(input: {
       incompleteTaskCount: resumeContext.incompleteTasks.length,
     };
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[reception-orchestrator] 构建 LLM 路由上下文失败：${err instanceof Error ? err.message : String(err)}`,
     );
     return null;
@@ -997,7 +998,7 @@ async function tryResumePreviousWork(input: {
       userId: input.userId,
     });
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[reception-orchestrator] 构建 resume context 失败：${err instanceof Error ? err.message : String(err)}`,
     );
     return { handled: false };

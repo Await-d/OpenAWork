@@ -14,6 +14,7 @@
 import { MCPClientAdapterImpl } from '@openAwork/mcp-client';
 import type { MCPServerRef, SkillManifest } from '@openAwork/skill-types';
 import { sqliteAll } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // ---------------------------------------------------------------------------
 // Environment cleaner (ported from oh-my-opencode env-cleaner.ts)
@@ -123,7 +124,7 @@ class SkillMcpConnectionPool {
         try {
           await listener(input);
         } catch (err) {
-          console.warn(
+          logGatewayWarn(
             `MCP tool-list-changed listener threw for ${input.userId}/${input.mcpName}:`,
             err,
           );
@@ -159,7 +160,7 @@ class SkillMcpConnectionPool {
     const cleanupAndExit = (): void => {
       void cleanup()
         .catch((error: unknown) => {
-          console.warn('Failed to clean up Skill MCP connections before exit', error);
+          logGatewayWarn('Failed to clean up Skill MCP connections before exit', error);
         })
         .finally(() => {
           proc.process?.exit?.(0);
@@ -173,7 +174,7 @@ class SkillMcpConnectionPool {
     if (this.cleanupInterval) return;
     this.cleanupInterval = setInterval(() => {
       void this.cleanupIdleConnections().catch((error: unknown) => {
-        console.warn('Failed to clean up idle Skill MCP connections', error);
+        logGatewayWarn('Failed to clean up idle Skill MCP connections', error);
       });
     }, CLEANUP_INTERVAL_MS);
 
@@ -301,7 +302,7 @@ class SkillMcpConnectionPool {
       // (it just never fires), but if the SDK rejects the schema
       // for any reason we log and move on rather than failing the
       // connect. The pool stays usable for everything else.
-      console.warn(`Failed to subscribe to tool-list-changed for ${serverRef.id}:`, err);
+      logGatewayWarn(`Failed to subscribe to tool-list-changed for ${serverRef.id}:`, err);
     }
 
     this.connections.set(key, {

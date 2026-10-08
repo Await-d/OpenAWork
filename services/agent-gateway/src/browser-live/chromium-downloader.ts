@@ -30,6 +30,7 @@ import type { ManagedBrowserTarget } from '@openAwork/browser-automation';
 
 import { downloadFile } from './browser-download.js';
 import type { DownloadProgress } from './browser-download.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 标记文件：语义与 Playwright 官方安装器一致。 */
 const INSTALLATION_COMPLETE_MARKER = 'INSTALLATION_COMPLETE';
@@ -352,7 +353,7 @@ async function safeRemove(
   try {
     await rm(targetPath, options);
   } catch (error) {
-    console.warn(`[chromium-downloader] 清理失败：${targetPath}`, error);
+    logGatewayWarn(`[chromium-downloader] 清理失败：${targetPath}`, error);
   }
 }
 

@@ -9,6 +9,7 @@ import { parseBody } from '../infra/parse-request.js';
 import { LayerCapabilityViolationError } from '../handoff/capability/layer-capabilities.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { logTeamAudit, type TeamAuditAction } from '../team/team-audit-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // L1.3 §1.3 反向消息通道载荷 schema（与 packages/web-client/src/team-inbound.ts 协议对齐）
 const inboundSubmitSchema = z.object({
@@ -215,7 +216,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
                 userId: user.sub,
               });
             } catch (err) {
-              console.warn(
+              logGatewayWarn(
                 `[team.session.inbound] resolve clarification(answered) failed: ${err instanceof Error ? err.message : String(err)}`,
               );
             }
@@ -257,7 +258,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
               userId: user.sub,
             });
           } catch (err) {
-            console.warn(
+            logGatewayWarn(
               `[team.session.inbound] audit log failed: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
@@ -276,7 +277,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
                 clientRequestId: streamClientRequestId ?? null,
               });
             } catch (err) {
-              console.warn(
+              logGatewayWarn(
                 `[team.session.inbound] persist user msg failed: ${err instanceof Error ? err.message : String(err)}`,
               );
             }
@@ -325,7 +326,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
                 persistUserMessage: false,
               });
             } catch (err) {
-              console.warn(
+              logGatewayWarn(
                 `[team.session.inbound] orchestrate (async) failed: ${err instanceof Error ? err.message : String(err)}`,
               );
               // 🔴#3 端到端健壮性：编排是 fire-and-forget（不阻塞 inbound 入库），
@@ -348,7 +349,7 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
                   clientRequestId: null,
                 });
               } catch (ackErr) {
-                console.warn(
+                logGatewayWarn(
                   `[team.session.inbound] orchestrate failure ack write failed: ${ackErr instanceof Error ? ackErr.message : String(ackErr)}`,
                 );
               }

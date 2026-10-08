@@ -227,6 +227,10 @@ export function TeamConversationView({
         token: token ?? '',
         // team 会话一定已有 id，SSH 绑定交给网关沿父会话链解析。
         sessionId,
+        // 兜底：会话绑定解析为 unbound 时（子会话继承远端目录但继承不到 SSH
+        // 绑定），用连接身份直读远端索引，否则 `@` 菜单会列出网关本机文件。
+        ...(mentionSshConnectionId ? { sshConnectionId: mentionSshConnectionId } : {}),
+        ...(mentionWorkspaceDirectory ? { workspaceRoot: mentionWorkspaceDirectory } : {}),
       }),
     [mentionWorkspaceDirectory, gatewayUrl, token, sessionId],
   );

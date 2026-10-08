@@ -9,6 +9,7 @@
  */
 
 import { makeOrderedMessageId, makeOrderedPartId } from '../infra/ordered-id.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 // ─── IDs ───
 
@@ -431,7 +432,7 @@ export function tryMessageInfoFromRow(row: MessageV2Row): MessageInfo | null {
   try {
     return messageInfoFromRow(row);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[message-v2] message ${row.id} data 列 JSON 解析失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -444,7 +445,7 @@ export function tryPartFromRow(row: PartV2Row): MessagePart | null {
   try {
     return partFromRow(row);
   } catch (error) {
-    console.warn(
+    logGatewayWarn(
       `[message-v2] part ${row.id} data 列 JSON 解析失败，已跳过：${
         error instanceof Error ? error.message : String(error)
       }`,

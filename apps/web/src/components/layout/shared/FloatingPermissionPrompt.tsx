@@ -18,7 +18,13 @@ import {
   createPermissionsClient,
   createSessionsClient,
 } from '@openAwork/web-client';
+import type { NotificationRecord } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
+import {
+  connectNotificationEvents,
+  disconnectNotificationEvents,
+  subscribeNotificationEvents,
+} from '../../../stores/notification-events.js';
 import {
   getSessionPendingInteractionSnapshot,
   requestCurrentSessionRefresh,
@@ -185,63 +191,105 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
     let cancelled = false;
     const notificationsClient = createNotificationsClient(gatewayUrl);
     const permissionsClient = createPermissionsClient(gatewayUrl);
+    /**
+     * 在途的 `hydrateFromUnreadNotifications` Promise，用于并发去重。
+     *
+     * 此前只有「发起前检查 `pendingPermissionRef.current !== null`」这一道守卫，
+     * 而常态下没有待审批项 → 该守卫恒不命中，于是每个触发源都会发一次完整的
+     * `GET /notifications?view=pending&limit=20`。而一次审批动作会同时点燃两条
+     * 触发路径（`subscribeSessionPendingPermission` 的 null 广播 + WS `onChange`
+     * 的落库事件），两者并发进入时守卫都还没生效 → 并发两次相同请求。
+     *
+     * 复用同一个在途 Promise 后，并发触发被合并为一次网络往返。
+     */
+    let hydrationInFlight: Promise<void> | null = null;
 
-    const hydrateFromUnreadNotifications = async (): Promise<void> => {
+    /**
+     * 从未读通知里恢复待审批项。
+     *
+     * `seed` 允许直接吃 WS 握手快照里的通知列表——那份数据与服务端 `list(view=pending)`
+     * 同源同口径，于是「刚连上就能弹出待审批」不需要额外一次 HTTP。
+     */
+    const hydrateFromUnreadNotifications = async (
+      seed?: readonly NotificationRecord[],
+    ): Promise<void> => {
       if (pendingPermissionRef.current !== null) {
         return;
       }
-
-      const { notifications } = await notificationsClient.list(accessToken, {
-        limit: 20,
-        view: 'pending',
-      });
-      if (cancelled || pendingPermissionRef.current !== null) {
-        return;
+      // 已有一次 hydrate 在途：复用它，不再发第二次相同请求。
+      if (hydrationInFlight) {
+        return hydrationInFlight;
       }
 
-      for (const notification of notifications) {
-        if (notification.eventType !== 'permission_asked' || !notification.sessionId) {
-          continue;
-        }
-
-        const pendingRequests = await permissionsClient.listPending(
-          accessToken,
-          notification.sessionId,
-        );
+      const run = async (): Promise<void> => {
+        const notifications =
+          seed ??
+          (
+            await notificationsClient.list(accessToken, {
+              limit: 20,
+              view: 'pending',
+            })
+          ).notifications;
         if (cancelled || pendingPermissionRef.current !== null) {
           return;
         }
 
-        const matched = matchPendingPermissionForNotification(notification, pendingRequests);
-        if (!matched) {
-          continue;
-        }
+        for (const notification of notifications) {
+          if (notification.eventType !== 'permission_asked' || !notification.sessionId) {
+            continue;
+          }
 
-        updatePendingPermission(toSessionPendingPermissionStateFromRequest(matched));
-        return;
-      }
+          const pendingRequests = await permissionsClient.listPending(
+            accessToken,
+            notification.sessionId,
+          );
+          if (cancelled || pendingPermissionRef.current !== null) {
+            return;
+          }
+
+          const matched = matchPendingPermissionForNotification(notification, pendingRequests);
+          if (!matched) {
+            continue;
+          }
+
+          updatePendingPermission(toSessionPendingPermissionStateFromRequest(matched));
+          return;
+        }
+      };
+
+      hydrationInFlight = run().finally(() => {
+        hydrationInFlight = null;
+      });
+      return hydrationInFlight;
     };
 
-    void hydrateFromUnreadNotifications().catch(() => undefined);
+    connectNotificationEvents(gatewayUrl, accessToken);
 
-    const intervalId = window.setInterval(() => {
-      if (pendingPermissionRef.current !== null) {
-        return;
-      }
-      void hydrateFromUnreadNotifications().catch(() => undefined);
-    }, 15_000);
+    const unsubscribePendingPermission = subscribeSessionPendingPermission(
+      (_sessionId, permission) => {
+        updatePendingPermission(permission);
+        if (permission === null) {
+          void hydrateFromUnreadNotifications().catch(() => undefined);
+        }
+      },
+    );
 
-    const unsubscribe = subscribeSessionPendingPermission((_sessionId, permission) => {
-      updatePendingPermission(permission);
-      if (permission === null) {
+    // 落库事件：只带脏标记与红点数，因此这里补一次列表拉取即可。
+    const unsubscribeEvents = subscribeNotificationEvents({
+      onChange: () => {
         void hydrateFromUnreadNotifications().catch(() => undefined);
-      }
+      },
+      // 握手 / 每次重连后的全量快照——直接复用，省掉一次 HTTP。
+      onSnapshot: (snapshot) => {
+        void hydrateFromUnreadNotifications(snapshot.notifications).catch(() => undefined);
+      },
     });
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
-      unsubscribe();
+      unsubscribeEvents();
+      unsubscribePendingPermission();
+      disconnectNotificationEvents();
     };
   }, [accessToken, gatewayUrl, updatePendingPermission]);
 

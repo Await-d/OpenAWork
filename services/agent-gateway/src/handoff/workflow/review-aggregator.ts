@@ -30,6 +30,7 @@ import {
   SUBMIT_REVIEW_REPORT_PROTOCOL,
 } from '../capability/completion-protocol-contract.js';
 import { normalizeReviewOutput } from './review-output-normalization.js';
+import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 export interface ReviewInput {
   userId: string;
@@ -518,7 +519,7 @@ function parseChildPayloadJson(json: string | null | undefined): unknown {
   try {
     return JSON.parse(json);
   } catch (err) {
-    console.warn(
+    logGatewayWarn(
       `[review-aggregator] 子 handoff payload_json 解析失败，降级为 null：${
         err instanceof Error ? err.message : String(err)
       }`,
