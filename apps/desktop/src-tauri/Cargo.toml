@@ -18,7 +18,9 @@ stable-channel = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "unstable"] }
+# `macos-private-api` 必须与 tauri.conf.json 的 `app.macOSPrivateApi`（灵动岛透明
+# 窗口在 macOS 上依赖它）成对出现，否则 tauri 的 build script 会直接拒绝构建。
+tauri = { version = "2", features = ["tray-icon", "unstable", "macos-private-api"] }
 tauri-plugin-shell = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
