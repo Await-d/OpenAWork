@@ -213,7 +213,7 @@
 **状态**: ✅ 已交付并验证（2026-09-23，协调者 + 1 条并行流）
 **复杂度**: Full orchestration（score +4）
 **方案文档**: [workflow/done/260923-后台任务常驻入口.md](workflow/done/260923-后台任务常驻入口.md)
-**运行计划**: `.agentdocs/runtime/260923-后台任务常驻入口/master_plan.md`（临时目录）
+**运行计划**: 已随归档清理（原 `.agentdocs/runtime/260923-后台任务常驻入口/master_plan.md`；2026-10-09 按 cleanup-policy 删除）
 **交付**: ① 输入框上方左侧（`composerFooterSlot`，classic/fusion 共用）常驻「后台 N」胶囊（脉冲点 + 悬停细目）→ 展开 320px 列表：子代理行（打开/停止）+ 命令行（查看/终止）+ 头部「全部停止」+ 底部「打开后台面板」（fusion → 侧栏 background tab；classic → 右栏后台任务 tab）；**仅在有活跃任务时渲染**。② `SubAgentRunList` 升级：表头「后台任务 + 总数」、折叠胶囊「后台 N 运行中」、可选 `shellItems` 第二组「后台命令」（查看/终止，终止仅 running）——缺省逐字节零变化（team 端零回归）。
 **关键约束**: 组件内不发请求（复用 `useBackgroundTaskPanel` + 既有回调）；**三入口（胶囊/浮动栏/面板）共用同一确认弹窗**（`background-task-confirm-dialog.tsx`）；计数一律由活跃行派生。
 **验证**: 胶囊 13 例 + rail 19 例（含既有 10 例未动）+ 面板 17 例；`apps/web` 全量 **525 文件 / 5199 用例**绿、typecheck 0、prettier 全净；rail harness **63/0**、panel/chip harness **157 断言 × 3 视口**全绿；实机只读冒烟（Fusion 默认）：rail 显示「子代理 9 + 后台命令 3」、胶囊 0 活跃不出现、0 页面错误。
@@ -224,7 +224,7 @@
 **状态**: ✅ 已交付并验证（2026-09-23，3 条并行流 + 协调者收口）
 **复杂度**: Full orchestration（score +6）
 **方案文档**: [workflow/done/260923-后台任务统一管理面板.md](workflow/done/260923-后台任务统一管理面板.md)
-**运行计划**: `.agentdocs/runtime/260923-后台任务统一管理面板/master_plan.md`（临时目录）
+**运行计划**: 已随归档清理（原 `.agentdocs/runtime/260923-后台任务统一管理面板/master_plan.md`；2026-10-09 按 cleanup-policy 删除）
 **交付**: `BackgroundTaskPanel`（汇总条 + 子代理任务区 + 后台命令区 + 三态 + 逐行确认弹窗 + 可复制 `task_id`/`terminalId`）；入口**两套布局都登记**——classic `ChatRightPanel` 的「后台任务」tab 与 Fusion `FusionSessionSidePanel` 的「后台」tab；操作＝打开子会话 / 停止（单 + 全停）/ 查看终端 / 终止，破坏性操作二次确认；**v1 零网关改动**（复用 `sessionTasks` + `useSessionTerminals`）
 **验证**: 定向测试 81 例（W1+W2）＋面板/接线新增用例 → `apps/web` 全量 **524 文件 / 5177 用例**绿、typecheck 0、prettier 全净；真实浏览器 harness **124 断言 × 3 视口**全绿（`apps/web/harness/verify-background-task-panel.ts`）；真实应用只读冒烟（Fusion 默认布局：12 行实数据、0 页面错误）
 **Wave 3 偏差（已补）**: ① 默认布局是 fusion，`ChatRightPanel` 在 Fusion 下不渲染 → 补 `FusionSessionSidePanel` 入口（`SidePanelTabId`/`PANEL_TAB_ORDER`/`SIDE_PANEL_ACTIVE_TABS`/分组 props）；② 终态行原本仍渲染「停止/终止」→ 改为仅活跃行渲染（对齐 `SubAgentRunList` 口径）
@@ -498,61 +498,15 @@
 - ✅ 高风险动作词覆盖配置改写、生产操作、排查诊断等场景。
 - ✅ 路由 AbortSignal 已透传到底层 workflow LLM，reception 只读工具契约已固定。
 
-## 未完成与近期收口任务（明细）
+> **归位说明（2026-10-09 清理整理）**：以下 8 条原位于「未完成与近期收口任务」区，均为已完成 / 已终止 / 已归档状态，现归位至本区（内容原样保留，未改写）。
 
-> 本节保留「未完成 / 阻塞」任务，以及**已完成但细节量大、不重复搬入上方登记区**的任务明细。已完成条目的权威登记见上方「已完成的任务」。
-
-### 🟢 260924-AI自助管理扩展（四域）- 技能安装 / 定时任务 / 记忆 / 自定义 Agent·团队模板（总览）
-**状态**: ✅ **四域全部交付归档**（含顺延项 `team_workspace_manage`，2026-09-24）；本条目保留为总览，子任务权威登记见上方「已完成的任务」
+### ✅ 260924-AI自助管理扩展（四域）- 技能安装 / 定时任务 / 记忆 / 自定义 Agent·团队模板（总览）
+**状态**: ✅ **四域全部交付归档**（含顺延项 `team_workspace_manage`，2026-09-24）；总览文档已更新最终状态并移入 `done/`（2026-10-09），本条目保留为总览，子任务权威登记见上方「已完成的任务」
 **复杂度**: Full orchestration（批次 score +5；四域共享热点文件 → 串行，一域一验收）
 **开始日期**: 2026-09-24（规划）
-**方案文档**: [workflow/260924-AI自助管理扩展四域.md](workflow/260924-AI自助管理扩展四域.md)
+**方案文档**: [workflow/done/260924-AI自助管理扩展四域.md](workflow/done/260924-AI自助管理扩展四域.md)
 **已完成子任务**: [记忆管理工具](workflow/done/260924-记忆管理工具.md) · [技能管理工具](workflow/done/260924-技能管理工具.md) · [定时任务持久化与工具](workflow/done/260924-定时任务持久化与工具.md) · [自定义 Agent 管理工具](workflow/done/260924-自定义Agent管理工具.md) · [团队工作区管理工具](workflow/done/260924-团队工作区管理工具.md)
 **目标**: 复用 MCP 工具范式（9 件清单：工具名常量 / 管理模块 / 权限类别 / 派生器 / 白名单 / 可见性 / 沙箱分支 / 能力目录提示 / 测试四件套），按「记忆 → 技能安装 → 定时任务（先持久化）→ 自定义 Agent / 团队模板」逐个交付。
-
-### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口
-**状态**: 🟢 **Phase 1/2 已交付并验证**（2026-09-21，多并发实施）；**Phase 3（CodeMode）未开始**
-**复杂度**: Full orchestration（score +6）
-**开始日期**: 2026-09-21
-**方案文档**: [workflow/260921-opencode-v2能力对齐.md](workflow/260921-opencode-v2能力对齐.md)
-**附录 A**: [workflow/260921-opencode-v2能力对齐-附录A-browser操作面.md](workflow/260921-opencode-v2能力对齐-附录A-browser操作面.md) —— 上游 `browser.*` 43 个操作逐条对照 + T-06 两批划分
-**附录 B**: [workflow/260921-opencode-v2能力对齐-附录B-codemode解释器选型.md](workflow/260921-opencode-v2能力对齐-附录B-codemode解释器选型.md) —— 解释器 5 方案对比，首选移植上游自研解释器
-**运行计划**: `.agentdocs/runtime/260921-opencode-v2能力对齐/master_plan.md`（临时目录）
-
-**目标**: 以 `@temp/opencode`（tag `v2.0.12`，commit `2670273`）为基线，补齐本仓在工具面与设计面上的缺口，分三阶段交付。
-
-**关键结论（已双向核实）**:
-- **完全缺失**：`execute`（CodeMode 受限 JS 运行时 + 目录预算 + `search` + 资源限额）。
-- **有机器未接线**：`read` 读时注入最近 AGENTS.md（`DirectoryAgentsInjectorImpl` 仅被 `/init-deep` 调用）；`browser` 的 `evaluate`/`console`/`network` 底层已有但未暴露为工具动作。
-- **无模型可见工具**：`opencode.models` / `session_rename`（仅 HTTP 路由）；`session_move` 本仓**已有底层能力**（`PATCH /sessions/:sessionId/workspace`）但无工具，D-3 已核实可行。
-- **缺中间层**：`ToolInputRepairPlugin`（本仓已有 `tool.execute.before` 钩子总线，缺内置 schema 修复层）；`webfetch` 缺 Cloudflare 挑战换 UA 重试。
-- **明确不落后（勿误判为缺口）**：`edit` 多级模糊匹配本仓 **9 级策略** > 上游 3 级；模型自适应工具裁剪、输出截断+引用回读均已具备；本仓另有桌面控制/媒体生成/21 渠道/codegraph/10 个 LSP 等上游没有的能力。
-
-**Gate 0 决策（2026-09-21）**: D-1 CodeMode **全量立项**；D-2 **扩展现有 `desktop_automation`**（evaluate/console/network/find/tabs）；D-3 `session_move` **已核实可行**——本仓已有 `PATCH /sessions/:sessionId/workspace`（`routes/sessions.ts:3252`，`{workingDirectory, force}` + immutable-lock + `force` warp + `workspaceWarpHistory` 审计 + SSH 解绑），缺的只是模型可见工具与安全边界语义；D-4 AGENTS.md 注入**按会话 + 文件路径去重**。
-
-**分阶段路线**: Phase 0 Gate 0 已完成 → Phase 1 低成本高收益（T-01 `models` / T-02 read 注入 AGENTS.md / T-03 webfetch 重试 / T-04 `session_rename` / T-13 `session_move`，可独立发版）→ Phase 2 中间层与检查面（T-05 输入修复 / T-06 desktop_automation 动作 / T-07 目录增量指令化）→ Phase 3 CodeMode 全量立项（T-08…T-12）。
-
-**交付结果（2026-09-21，多并发）**: Phase 1/2 全部落地——`models`（模型搜索）、`read` 读时注入 AGENTS.md（会话+路径去重）、`webfetch` Cloudflare 换 UA 重试、`session_rename`、`session_move`（复用 workspace warp）、schema 驱动工具输入修复（落 `ToolRegistry.execute`）、`desktop_automation` 新增 7 个检查动作。验证：agent-core / agent-gateway typecheck ✅；网关工具测试 **63 文件/470 测试**、agent-core 权限+工具 **9 文件/229 测试** 全通过；改动文件 ESLint 0 error。
-
-**复查跟进（2026-09-21 第二轮）**: 修复 #2 路由标题 trim 语义回归（trim 下沉到工具侧）、#3 webfetch 首次请求恢复零行为变更（仅重试换 UA）、#4 `models` 加入 clarify 只读允许集、#6 补齐 `desktop_automation` 的 `network_list`/`network_get`（有界环形捕获 200 条、请求体 ≤8KB、响应体默认不捕获）；#9（T-07 工具目录增量指令化）分析后确认**延后至 Phase 3**（本仓无「工具目录指令面」，无消费者，不做投机基建）。第二轮验证：网关定向 7 文件/50 测试、browser-automation 15 测试通过，双包 typecheck ✅、ESLint 0 error。**复查后收口**：仅处理本轮新增代码（network 查询改为返回快照副本、明确 `truncated` 语义），既有 `restart()` 死代码按「只管理本轮调整」原则不动。
-
-**Phase 3（CodeMode）未开始**。
-
-**基线升级（2026-09-22）**: 上游已发布 **v2.0.13**（本地对照目录由 `temp/opencode-v2.0.12` 原地重命名为 `temp/opencode-v2.0.13`，tag `v2.0.13` / commit `3180aab`）。Phase 3 的移植基线改用 **v2.0.13**：其 codemode 解释器语义补齐一大截（Iterator helpers + `Iterator.from`、`Promise.withResolvers`、`Promise.try`、ToPropertyKey 全量、生成器 `prototype` 与参数同步绑定、`delete` 非引用、函数重声明等），test262 `skipped.txt` 收缩 149 行。**移植时必须补上游漏掉的 `limits`**：上游 `packages/core/src/codemode/tool.ts` 接线时未把 `ExecutionLimits` 传给 `CodeMode.make`，导致 `execute` 实际**无超时、无工具调用上限、无输出字节上限**（限额能力已实现但未启用）——照抄会把该缺陷一起带过来。另注意 v2.0.13 重写了 codemode 指令 prompt（明确「工具只能在 `execute` 内调用、`search` 同步、不要猜工具名」），移植时以新版措辞为准。
-
-**再升级（2026-09-23）**: 上游 **v2.0.14** 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.14`，tag `v2.0.14` / commit `08462140`）。该版本距 v2.0.13 仅约 3 小时、共 5 个提交，实质代码约 80 行：① Electron renderer IPC 负载剔除 `undefined` 字段；② TUI 打开对话框过滤 git worktree 项目；③ models.dev 快照刷新；④ Console API 参考文档（Inference/BYOK/Usage/Budgets）。**经逐项核实无适用本仓的借鉴项**（我们无 Electron IPC 边界、无 TUI、用自建 provider catalog、无 Console 面），既有对齐结论不受影响。唯一可留存的通用原则：跨序列化边界时 **structured clone 保留 `undefined` 键、而 JSON codec 要求键缺席**——将来引入 Worker/MessagePort + JSON 解码时必须按 `JSON.stringify` 语义递归剔除 undefined，且不要把二进制放进该路径。
-
-**再升级（2026-09-23，v2.0.15）**: 上游 v2.0.15 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.15`，tag `v2.0.15` / commit `6f3639d82e`；42 提交 / 250 文件 / +6782−2549）。要点：① **codemode 解释器继续向 native 语义收敛**——新增 tagged templates + `String.raw`、`for...in` 任意左值（成员表达式/解构模式）、`match`/`matchAll`/`search`/`split` 接受任意值并按模式串强制转换、重复参数名 last-wins、Date setter 与单参构造走对象自身 `valueOf`/`toString`（支持矩阵同步更新，Phase 3 移植基线再次变好）；② **ai 包新增媒体基础**（`Media.Source` 四态 `bytes|base64|url|ref` + `Media.Asset` 惰性 `bytes()`/过期时间/providerMetadata；设计文档 `packages/ai/docs/media-design.md`；媒体执行形态是路由策略而非 API 形态：inline / async job / 双向流；不支持项报错而非静默丢弃），图片协议按此重写；评测 API 增 gateway provider 且 action→`run`；③ session 支持自由 metadata 更新 + `session.metadata.updated` 事件；项目按最近活跃排序；git 插件支持分支子目录安装（pacote 补丁同步升级）。
-**本版发现一项适用本仓的缺口（待办）**：上游 `fix(ai): ignore bare null SSE frames` 修的正是我们同样存在的行为——`packages/opencode-llm/src/protocols/shared.ts` 的 `sseFraming` 只过滤空串与 `[DONE]`，裸 `data: null` 帧会走到 `stream/processor.ts` 的 `JSON.parse('null')` → `parseEventSync(null)` 抛错 → **整条上游流中断**（部分 OpenAI 兼容代理会在事件之间或 `[DONE]` 之后发 `data: null`；`sseFraming` 是 SSE 的唯一咽喉，单点修复即可）。修法同上游：过滤条件加 `event.data !== 'null'` + 补测试。
-**其余项经查不适用**：client 的「`new URL('/api/…', base)` 丢 base 路径前缀」我们无该拼接模式；技能安装走 `git clone` 不涉及 pacote 的 `::path:`/200+HTML 陷阱（但**不支持子目录 skill**，属特性缺口）；未发现 MCP OAuth 日志存在「只留分类、丢 message」的等价物。
-
-**副本重建与上游分支拓扑（2026-09-24）**: `temp/` 目录（含 `@temp/opencode`）已被清理，对照副本重建为 `temp/opencode-v2.0.15`（浅克隆 + 深化，含全部 v2.0.x tag 与 `origin/v2`）。**上游分支拓扑（避免重复踩坑）**：默认分支 `dev` 是 **1.x 线**（历史含 `sync release versions for v1.18.32`），**不是**对照对象；**2.0 线在 `v2` 分支**；`2.0` 分支是 2026-04 的旧探索分支（勿用）。发布 tag 是主线的旁支提交，算差集直接 `git log v2.0.15..origin/v2`（已验证发布点的父提交是 `v2` 的祖先，故该区间精确）。**当前未发布差集：39 提交 / 218 文件 / +14667−1093**，要点：ai 媒体面继续扩张（queued image routes + BFL/fal/Replicate/Stability、speech generation、transcription）、codemode（Uint8Array 回调方法、resources 作为 codemode 工具）、core（V1 会话迁移标注重命名工具、Copilot responses-only 路由、WS idle timeout 放宽并尊重 `chunkTimeout`、read 支持引号/重音变体、凭据脱敏）、client 错误信息带 detail。**待评估三项**：① `fix(ai): ignore Vertex keepalives sent as SSE data`——与已修的裸 `data: null` 同属 SSE keepalive 家族，需核查我们的解析是否也会把 keepalive 当事件；② `fix(core): relax websocket idle timeout and honor chunkTimeout`；③ 调试配置的**凭据脱敏**（我们的 devtools/调试导出是否有同类泄漏面）。
-
-**再升级（2026-09-24，v2.0.16）**: 上游 v2.0.16 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.16`，tag `v2.0.16` / commit `3a103fe0`；63 提交 / 561 文件 / +54585−4330，含此前记录的 39 个未发布提交）。要点：① **codemode 继续大补齐**——`Object.freeze/seal/preventExtensions` + `isFrozen/isSealed/isExtensible`、`Object.create/getPrototypeOf`、**`structuredClone`**（`stdlib/web.ts`）、`Uint8Array` 回调方法、`indexOf` start 强制转换、**`==`/`!=` 改为 IsLooselyEqual**（消除「深走操作数」的性能陷阱；`[1] == 1`、`[1,2] == "1,2"` 为 true，`switch` 用 `===`）；② **ai 媒体三件套落地**——video generation（queued media routes）、speech generation（streaming）、transcription（inline/streamed/queued），另有 queued image routes + BFL/fal/Replicate/Stability；③ core——MCP Code Mode 默认值（`mcp-codemode-defaults.ts` 取代 exclusion）、read 报告长度并限制上限/长行、GitLab OAuth、V1 会话迁移标注重命名工具、Copilot responses-only 路由、WS idle timeout 放宽为 30 分钟并尊重 `chunkTimeout`、Vertex keepalive 修复、调试配置凭据脱敏。
-
-**上述三项待评估的处置（2026-09-24）**：① SSE keepalive **已修**（`fix(opencode-llm): 忽略Vertex以data keepalive形式发送的心跳帧`，含反向验证；`sseFraming` 现丢弃空串 / `[DONE]` / 裸 `null` / `: keepalive`）；② WS 超时**不适用**——我们生产路径 `DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1_800_000`（30 分钟）已与上游新值一致，`StreamProcessor` 的 60s 默认无生产消费者（仅遗留公共 API）；③ 凭据脱敏**已修**（`fix(web): 排障包导出前脱敏诊断与日志载荷中的凭据`：新增 `devtools-redact.ts`，排障包的 input/output 与网关地址接入脱敏，含反向验证）。
-
-**范围边界**: 不含本轮已单独交付的 `openai-chat.ts` 空 assistant 报文兼容修复；不照抄上游的权限 defect 隧道与 tree-sitter shell 解析（语义/依赖差异，属独立议题）。
 
 ### ✅ 260922-子代理对标opencode改造方案 - 子代理结果回流收敛为 Job → 合成消息 → 唤醒 单闭环
 **状态**: ✅ **已归档（2026-09-22）→ `workflow/done/`**。T-01…T-32 全部完成：Phase 1 ✅（519/3974）；**Phase 2 ✅**（523/3993）；**Phase 3 ✅**（Notice 契约下沉 `packages/shared`、`SubagentNoticeRow`、Web 数据层、**Web 渲染交错 T-16b**、移动端接入 + 实时通道 T-29）；**Phase 4 ✅**（T-18 · T-22 · T-23 · **T-23b** · T-19b-1…5 全链）；**T-27 ✅**；**T-31 ✅**（旧 auto-resume 机制按正确边界清理）；**T-32 ✅**（补回自动唤醒预算，关闭 Q3/R-12）。**收口复盘 SR-1…SR-10 已完成**：**SR-3 与 SR-10 为真实回归/险情并已修**（前者：`task` 误入 legacy 重写表致子会话不再创建；后者：差点删掉 `task-parent-auto-decision` 仍在消费的上下文表）。**三视口验收 T-30 已以组件级真实浏览器通过**（真实 Chromium，**61 断言 × 3 视口**，含两条真实祖先链路与**兜底/主题两条色彩链**；资产 `apps/web/harness/`）。**最终验证**：网关全量 **532 文件 / 4069 用例 EXIT=0** · **9 条 task 验收脚本单次连续全 ok** · web **513 / 4972 EXIT=0** · mobile **13 / 273** · shared/shared-ui **9/9 · 18/18** · `check:fastify-alignment` **exit 0**。**唯一未覆盖**：T-30 的**端到端**变体（真实 LLM 驱动的数据路径）——`AI_API_KEY` 为空，属**环境阻塞且已明确处置**（探针证据 + 就绪步骤已记录），非待办。⚠️ 环境：bun 迁移进行中
@@ -581,30 +535,6 @@
 **分阶段路线（5 phase / 28 task）**: Phase 1 Job 骨架（T-01…T-04，只增不改行为）→ **Phase 2 `synthetic` role 全链路（T-05…T-13）** → **Phase 3 前端渲染展示（T-14…T-17，上游 Notice 契约）** → Phase 4 单通道交付与上游命名对齐（T-18…T-24）→ Phase 5 切换、恢复与清理（T-25…T-28）。
 
 **范围边界**: 只动 `task/` + `session/` + `message/` + shared 类型 + 前端 role 白名单与 Notice 组件；不含子代理模型选择策略、team 层编排、`.NET` 镜像（已废弃）；结果抽取丰富度**有意保留本仓更强实现**。
-
-### 🟡 260921-ChatPage组装层瘦身方案 - 把 7347 行的 ChatPage 降到 1500 硬上限内
-**状态**: 🏁 **阶段性收尾（用户决定，2026-09-21）** — P0…P4c 全部提交；ChatPage **7347 → 3973（−45.9%）**，零行为变更；**未达 <1500 目标**（仍 4203 行），原因与后续路径见方案文档「阶段性收尾」节
-**复杂度**: Full orchestration（score +6）
-**开始日期**: 2026-09-21
-**方案文档**: [workflow/260921-ChatPage组装层瘦身方案.md](workflow/260921-ChatPage组装层瘦身方案.md)
-
-**目标**: `apps/web/src/pages/chat-page/ChatPage.tsx` **7347 行**（超 AGENTS.md 1500 硬上限 **4.9 倍**）→ 压至硬上限内（目标 600–900），并消灭「双份 150+ prop surface」，**零行为变更**。
-
-**关键前提纠正**: `docs/architecture/chat-page-split-plan.md` 的**域抽取阶段（D/A/C/B/E）已全部完成**（B = `conversation/render/use-chat-streaming.ts` :474 接线、E = `hooks/use-chat-retry-and-edit.ts` :4011 接线）——该旧计划的序列已走完，本方案针对**残留组装层**，非其续作（旧文档状态已按事实修正）。
-
-**实测事实（一手核实）**:
-- 残余 hook：**34 `useState` / 33 `useEffect` / 34 `useCallback` / 26 `useMemo` / 25 `useRef`**（常引用的 35/36/36/27/26 是含 import/注释的裸 token 计数，已校准）
-- 最大耦合块：**会话切换巨型 effect `:1817`**（重置几乎每个簇）+ `:809` resetToWelcome + `:1140` 按会话重置 + `:4026` 附着 effect（26 deps）+ `sendMessage`（约 :2806–3805）
-- 双份 prop 面：`<ChatConversationView` 于 **`:6318`（融合）/ `:6774`（经典）**，prop 行数 **218 / 234**
-- **无任何 ChatPage 级回归测试**（`ChatPage.test.tsx` 不存在；仅 `desktop/src/App.tsx:22` 与 `preloadable-route-modules.ts:64` import）→ 纯 rewiring 回归会整包静默通过
-
-**主策略（Oracle 定）**: 分层组合——**粗粒度「会话作用域编排 hook」+ 单一 props-builder + 区域容器（Fusion/Classic）**，页面退化为薄 JSX。**否决**：单个 `useChatPageAssembly`（只是搬成 god hook）、纯渲染区域拆分（命中不了 1500）、继续加细粒度 domain hook、`ChatConversationView` 的 "Step 4d 状态下移"。
-
-**分阶段（每阶段一 PR、单一提交边界）**: P0 tripwire（**必须先建**，否则无守卫）→ P1 props-builder+区域容器（预期 −700~−900 行）→ P2 会话 hook 原样搬家 → P3 reset 解耦（`use-session-reset` + epoch）→ P4 composer/弹窗 → P5 `sendMessage`/`ensureSession`（最高风险，必须最后）→ P6 收尾至 <1500。
-
-**投资估算**: Large（3d+），含测试约 2–4 周。
-
-**范围边界**: 只动 `ChatPage.tsx` + `chat-page/{hooks,conversation,layout,state}` 新文件；`panels/` 三大文件（1219 / 1166 / 1099）当前**均未违规**，本轮只读。
 
 ### ✅ 260921-GUI-Agent集成方案 - 借鉴 UI-TARS 为 OpenAWork 补齐 GUI Agent（computer-use）闭环
 **状态**: **已归档**（2026-09-22）——Phase 0 / Phase 1 / Phase 2 全部完成并验证通过；**T-16 真实端到端验证待用户环境**（本机缺 `xdotool` / `AI_API_KEY` / grounding 模型）
@@ -642,8 +572,8 @@
 ### ⛔ 260921-多模态媒体引用通路 - 为图片补齐官方协议的「引用通路」（provider file_id）——**已终止**
 **状态**: **已终止（2026-09-21，用户决策）**。原因：平台上游多为第三方中转/自建，**不保证实现 Files API**，引用通路在中转场景不可靠。已写代码**手工回退**（禁止 git 回滚指令），仅保留与功能解耦的 `protocols/index.ts` 常量命名导出；回退验证：`opencode-llm` 488/488、`agent-gateway` typecheck EXIT=0、全仓无残留引用
 **开始日期**: 2026-09-21
-**方案文档**: [workflow/260921-多模态媒体引用通路.md](workflow/260921-多模态媒体引用通路.md)
-**运行计划**: `.agentdocs/runtime/260921-多模态媒体引用通路/master_plan.md`（临时目录，`.gitignore` 已含 `.agentdocs/runtime/`）
+**方案文档**: [workflow/done/260921-多模态媒体引用通路.md](workflow/done/260921-多模态媒体引用通路.md)
+**运行计划**: 已随终止决议清理（原 `.agentdocs/runtime/260921-多模态媒体引用通路/master_plan.md`；2026-10-09 按 cleanup-policy 删除）
 
 **目标**: 在现有「一律 base64 内联」之外补引用通路——OpenAI Responses `input_image.file_id` / Anthropic `source.type='file'`（Files API）——使长多轮对话不再每轮重传图片字节，并让超过内联上限的图片可用而非必然失败。
 
@@ -656,31 +586,6 @@
 - 协议适配器为 `if (part.type === …)` 顺序链、**无 `assertNever`**，新增 part 变体不会触发编译错误；靠 `shared.ts:355-368` 的 `supportsContent`/`unsupportedContent` 白名单兜底（T-02 逐协议核对）。
 
 **安全硬约束**: Anthropic 上传文件对整个 workspace 可见、不按用户隔离 → **绝不接受客户端传入的 `file_id`**，只由网关上传产生；`provider_files` 表带 `user_id`，默认不跨用户复用。
-
-### 🟢 260921-移动端图片查看器方案 - 移动端自建图片查看器（可点击放大 + 图集左右切换 + 缩放旋转）
-**状态**: **代码层完成，待真机验收**（Gate 0/1 已放行并实施完毕；23 个 T-XX 中 T-12 取消、T-18/19 未纳入、**T-13/T-17 待用户真机走查**；**未归档**，TODO 未全勾）
-**门禁**: `mobile typecheck` exit 0 ｜ `mobile test` **12 文件 / 252 例全绿**（基线 7/35）｜ ESLint 0 ｜ **两道静态审查 PASS/PASS** ｜ **零新增依赖**（`package.json`/锁文件未改）｜ 范围红线 PASS（`app/**` 未触碰）
-**开始日期**: 2026-09-21
-**方案文档**: [workflow/260921-移动端图片查看器方案.md](workflow/260921-移动端图片查看器方案.md)（文末含**交付状态 + 9 条真机走查清单 + 跨会话沉淀**）
-**运行计划**: `.agentdocs/runtime/260921-移动端图片查看器方案/master_plan.md`（临时目录，`.gitignore` 已含 `.agentdocs/runtime/`）
-
-**目标**: 让 `apps/mobile` 能点击图片放大（含缩放/旋转/下载/关闭），并在**同一条消息的多张图片**之间左右切换。Web 端同名能力已交付，但实现基于 DOM（`createPortal`/CSS/键盘/`getBoundingClientRect`），**RN 无法复用**，故单独立项——只复用其**行为契约**（A/B 组共 40 条对齐条目）与 3 个测试基线。
-
-**现状核实（已确认，含两个"看不见图"的根因）**:
-- 全应用**唯一光栅图片渲染点**是 `src/components/chat-message-bubble.tsx:73` 的 `<Image>`（180×180，**无点击处理**）。
-- 根因①：`imageUrl` 唯一来源是本地 `file://`（`attachment.localUri`）；**从网关历史加载的消息只有 `artifactId`** → 气泡永远只显示占位符「图片已附加」。
-- 根因②：assistant 生成的图片产物**不进气泡**，只进文字 chip；`app/artifacts.tsx` 只用 Ionicons 图标，不加载图片内容。
-- 按 artifactId 取内容的客户端能力**已存在但从未被调用**：`web-client` 的 `createArtifactsClient().get(token, artifactId)`（`GET /artifacts/:id`，图片含 base64）。
-- **零手势依赖**：无 `gesture-handler`/`reanimated`/`expo-image`/`image-viewing`；且 `apps/mobile` **无 `babel.config.js`** → 引依赖需 babel 插件 + 原生重建（高风险）。
-- 图集数据前提**已满足**：`collectInputImages()` 保序、不去重、不限量；气泡按数组顺序渲染。
-- 测试基建：`vitest run --passWithNoTests`，7 个**纯逻辑**测试；**无 `@testing-library/react-native`** → 组件级测试今日不可用，UI 须真机/EAS preview 走查。
-- 文档漂移：实际活路由是 **Expo Router**（`app/_layout.tsx`），而 `src/navigation/AppNavigator.tsx` 与 `src/utils/artifact-platform-adapter.ts` 均为**孤儿代码**，但 `apps/mobile/AGENTS.md` 仍声称使用手动状态机。
-
-**待用户拍板（Gate 0）**: D-1 手势依赖路线（**A 零依赖 · 推荐** / B 引入 gesture-handler+reanimated）；D-2 覆盖范围（**1 仅聊天 · 推荐** / 2 +产物页 / 3 +图片工作台）；D-3 取数策略（**落盘临时文件+LRU · 推荐** / `data:` URI 直显）；D-4 是否顺带修正 `apps/mobile/AGENTS.md` 导航漂移（**建议是**）。
-
-**范围红线**: 移动端文档内嵌图、HTML/CSV/SVG 产物预览、图片编辑、网关新缩略图端点**均不在本方案**，需另行立项。
-
-- **独立待办（本方案承诺记录，原先缺跟踪）**: `apps/mobile` **无 `@testing-library/react-native`、无 jest** → 全部 UI/手势接线**无自动化回归**，正确性只能靠真机走查（方案 T-20 明确要求"记为独立待办"，此前仅在「现状核实」记了事实、未列为待办）。若要补：须先做**原生/构建链探针**（`apps/mobile` 目前**无 `babel.config.js`**，引测试库会牵动 Metro/babel → 可能需原生重建）；风险与取舍见方案文档 §验证策略 + R4。
 
 ### ✅ 260915-澄清完成自动切换编程模式 - 澄清模式设计完成后自动切到编程模式（+ 方案文档对齐 agentdocs 规范）
 **状态**: 已完成并归档（2026-09-16）——T-01…T-15 全部完成并验证；**代码变更仍在工作树中待提交**
@@ -865,6 +770,274 @@
 
 ---
 
+## 未完成与近期收口任务
+
+> 本节仅保留**真实未完成 / 阻塞 / 在途**任务；已完成条目一律登记于上方「已完成的任务」区与「归档全量索引」（2026-10-09 清理整理完成归位，原「（明细）」章节取消）。
+
+### 🟢 261009-tool-sandbox 拆分 - 7540 行单文件降为「薄门面 + 按域模块」
+**状态**: ✅ **已交付**（2026-10-09；P0 tripwire + P1 公共模块 + P2 全量 handler 抽取（批一~批四）+ P4 `delegation` 全部完成；P3 派发器按条件未触发）
+**复杂度**: Full orchestration(score +5;跨 5 个子域、单一热点文件串行接线、最高风险块需专门验证门)
+**开始日期**: 2026-10-09
+**方案文档**: [workflow/261009-tool-sandbox拆分方案.md](workflow/261009-tool-sandbox拆分方案.md)
+**目标**: `tool-sandbox.ts`(超 1500 行硬上限 5.0 倍)拆为薄门面 ≤1200 行 + 按域模块各 ≤1000 行,**零行为变更、公共导出面完全不变**。
+**约束**: 不在本轮拆 `tool-definitions.ts` / `db.ts` / 双网关;不改权限阶梯语义与派发顺序;不引入新依赖。
+**已交付**:
+- P0 `__tests__/tools/tool-sandbox-dispatch-coverage.test.ts` 派发覆盖率 tripwire(漏分支即红)。
+- P1 `src/tools/sandbox/` 公共模块 8 个：`whitelist`(337) / `context`(268，含 `SandboxHandlerContext`) / `session-context`(248) / `permission-ladder`(582) / `child-session`(542) / `task-reference`(159) / `task-background`(921) / `create-default-sandbox`(206)；门面 import + 再导出，33 个生产消费方 import 路径不变。
+- P2+P4 `src/tools/sandbox/handlers/` 14 个域：todo 124 / desktop 245 / media 281 / session 478 / task-graph 107 / workspace 122 / mcp 235 / admin 289 / edit 287 / batch 225 / interactive 280 / background 345 / bash 211 / delegation 880（61 个 `handleXxxTool(handlerContext)` 调用点 ↔ 61 个 handler 导出，双向无孤儿）。
+- **`tool-sandbox.ts` 7540 → 1312 行（−82.6%）**；派发仍是保序 if 链，63 项条件顺序逐字一致，`isTaskToolName` 谓词块与 `workspace_*` 前置重写位置零变化。
+**门禁**: typecheck / eslint / prettier / `__tests__/tools/`（84 文件 685 用例）/ delegation 专项 `__tests__/task/` + `__tests__/session/`（87 文件 628 用例：625 passed / 3 skipped）全绿。
+**未完成（非阻塞）**: Phase 3 派发器（触发条件为「Phase 2 后 >1500 行」，实测 1312 未触发）；门面 1312 行较 Gate 0 D-5 的 ≤1200 差 112 行，如需达标须启动 Phase 3。
+**踩坑**: ① 禁止用 sed 按原始行号连续删块（行号漂移会误删），改为一次性按区间过滤重建；② 禁止并发编辑同一文件（read-modify-write 覆盖）；③ 子模块反向 import 门面会造成运行时循环，常量与类型须下沉到子模块；④ handler 从主文件复制导入块时，src 级模块必须 `../../../<dir>/x.js`（层级写错会一次性报上百个 TS2307）；⑤ 搬迁后必须跑 `bunx organize-imports-cli <改动文件>`，否则 lint 会累积上千个 `no-unused-vars`（本轮清理 1786 处）。
+
+### 🟢 261009-桌面端灵动岛 - Tauri 多窗口浮窗实时展示 Agent 状态与网关健康
+**状态**: ✅ **已交付**（2026-10-09；T-01~T-13 完成 + **第二轮独立复核修复 5 处真实缺口**；T-14 三端手工验证待真机执行）
+**复杂度**: Full orchestration（score +6；Rust 窗口架构成型 + 前端入口分流 + 跨窗口状态同步三层，串行执行）
+**开始日期**: 2026-10-09（规划）
+**方案文档**: [workflow/261009-desktop-dynamic-island.md](workflow/261009-desktop-dynamic-island.md)
+**运行计划**: [runtime/261009-desktop-dynamic-island/master_plan.md](runtime/261009-desktop-dynamic-island/master_plan.md)
+**目标**: 主显示器顶部中央新增 `island` 浮窗（pill 220×48，置顶 / 无边框 / 透明 / 不抢焦点），实时展示 Agent 状态脉冲与网关健康；hover 展开为卡片（420×140）显示会话标题 + 最后消息预览 + 「打开会话」；设置页可开关，`Alt+Shift+I` 全局快捷键切换。
+**关键约束**: Windows 透明窗口需前端 `border-radius` 模拟 pill 形状；跨窗口 Zustand 不共享 → 全部走 Tauri `emit`/`listen`；island WebView 未就绪前 emit 会丢 → 就绪标记 + 缓存补发。
+**交付**: T-01~T-13 全部完成（Rust 窗口/命令/快捷键 + island 前端入口/store/组件 + 设置页 + 23 个单测）；第二轮复核补齐：① `Alt+Shift+I` 此前**没有接线**（只有注册，handler 无分支）已补；② 方案承诺的 **Linux 每 10s 位置校正**此前缺失，已补（仅 Linux、窗口可见才校正、隐藏/退出清理、`Arc<AtomicBool>` 停止信号）；③ 定位改用 `Monitor::work_area()`（原用整块显示器，macOS 菜单栏会遮挡）；④ `tauri-plugin-window-state` 加 `with_denylist(["island"])`（否则插件回写尺寸/位置，跨重启会出现「窗口 420×140 但状态折叠」）；⑤ host-ready 前上报的 Agent 状态此前被直接丢弃，改为缓存 + 就绪补发。
+**验证**: 本机复跑 `apps/web` / `apps/desktop` tsc 与 `src/island` 单测（23 用例）全绿；**本机无 cargo/rustc**，Rust 改动未经编译验证（已对照 docs.rs 核对 `work_area` / `with_denylist` / `inner_size(f64,f64)` / `position(f64,f64)` 签名，与 tauri 2.11.5 / 插件 2.4.1 一致）；真机第一步应先 `cargo check`。T-14 手工验证清单保留（macOS / Windows / Linux：置顶居中、脉冲变色、hover 展开、点击跳转、设置开关、Alt+Shift+I、网关异常红点、Linux 拖动后 10s 自动回位）。
+
+### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口
+**状态**: 🟢 **Phase 1/2 已交付并验证**（2026-09-21，多并发实施）；**Phase 3（CodeMode）未开始**
+**复杂度**: Full orchestration（score +6）
+**开始日期**: 2026-09-21
+**方案文档**: [workflow/260921-opencode-v2能力对齐.md](workflow/260921-opencode-v2能力对齐.md)
+**附录 A**: [workflow/260921-opencode-v2能力对齐-附录A-browser操作面.md](workflow/260921-opencode-v2能力对齐-附录A-browser操作面.md) —— 上游 `browser.*` 43 个操作逐条对照 + T-06 两批划分
+**附录 B**: [workflow/260921-opencode-v2能力对齐-附录B-codemode解释器选型.md](workflow/260921-opencode-v2能力对齐-附录B-codemode解释器选型.md) —— 解释器 5 方案对比，首选移植上游自研解释器
+**运行计划**: `.agentdocs/runtime/260921-opencode-v2能力对齐/master_plan.md`（临时目录）
+
+**目标**: 以 `@temp/opencode`（tag `v2.0.12`，commit `2670273`）为基线，补齐本仓在工具面与设计面上的缺口，分三阶段交付。
+
+**关键结论（已双向核实）**:
+- **完全缺失**：`execute`（CodeMode 受限 JS 运行时 + 目录预算 + `search` + 资源限额）。
+- **有机器未接线**：`read` 读时注入最近 AGENTS.md（`DirectoryAgentsInjectorImpl` 仅被 `/init-deep` 调用）；`browser` 的 `evaluate`/`console`/`network` 底层已有但未暴露为工具动作。
+- **无模型可见工具**：`opencode.models` / `session_rename`（仅 HTTP 路由）；`session_move` 本仓**已有底层能力**（`PATCH /sessions/:sessionId/workspace`）但无工具，D-3 已核实可行。
+- **缺中间层**：`ToolInputRepairPlugin`（本仓已有 `tool.execute.before` 钩子总线，缺内置 schema 修复层）；`webfetch` 缺 Cloudflare 挑战换 UA 重试。
+- **明确不落后（勿误判为缺口）**：`edit` 多级模糊匹配本仓 **9 级策略** > 上游 3 级；模型自适应工具裁剪、输出截断+引用回读均已具备；本仓另有桌面控制/媒体生成/21 渠道/codegraph/10 个 LSP 等上游没有的能力。
+
+**Gate 0 决策（2026-09-21）**: D-1 CodeMode **全量立项**；D-2 **扩展现有 `desktop_automation`**（evaluate/console/network/find/tabs）；D-3 `session_move` **已核实可行**——本仓已有 `PATCH /sessions/:sessionId/workspace`（`routes/sessions.ts:3252`，`{workingDirectory, force}` + immutable-lock + `force` warp + `workspaceWarpHistory` 审计 + SSH 解绑），缺的只是模型可见工具与安全边界语义；D-4 AGENTS.md 注入**按会话 + 文件路径去重**。
+
+**分阶段路线**: Phase 0 Gate 0 已完成 → Phase 1 低成本高收益（T-01 `models` / T-02 read 注入 AGENTS.md / T-03 webfetch 重试 / T-04 `session_rename` / T-13 `session_move`，可独立发版）→ Phase 2 中间层与检查面（T-05 输入修复 / T-06 desktop_automation 动作 / T-07 目录增量指令化）→ Phase 3 CodeMode 全量立项（T-08…T-12）。
+
+**交付结果（2026-09-21，多并发）**: Phase 1/2 全部落地——`models`（模型搜索）、`read` 读时注入 AGENTS.md（会话+路径去重）、`webfetch` Cloudflare 换 UA 重试、`session_rename`、`session_move`（复用 workspace warp）、schema 驱动工具输入修复（落 `ToolRegistry.execute`）、`desktop_automation` 新增 7 个检查动作。验证：agent-core / agent-gateway typecheck ✅；网关工具测试 **63 文件/470 测试**、agent-core 权限+工具 **9 文件/229 测试** 全通过；改动文件 ESLint 0 error。
+
+**复查跟进（2026-09-21 第二轮）**: 修复 #2 路由标题 trim 语义回归（trim 下沉到工具侧）、#3 webfetch 首次请求恢复零行为变更（仅重试换 UA）、#4 `models` 加入 clarify 只读允许集、#6 补齐 `desktop_automation` 的 `network_list`/`network_get`（有界环形捕获 200 条、请求体 ≤8KB、响应体默认不捕获）；#9（T-07 工具目录增量指令化）分析后确认**延后至 Phase 3**（本仓无「工具目录指令面」，无消费者，不做投机基建）。第二轮验证：网关定向 7 文件/50 测试、browser-automation 15 测试通过，双包 typecheck ✅、ESLint 0 error。**复查后收口**：仅处理本轮新增代码（network 查询改为返回快照副本、明确 `truncated` 语义），既有 `restart()` 死代码按「只管理本轮调整」原则不动。
+
+**Phase 3（CodeMode）未开始**。
+
+**基线升级（2026-09-22）**: 上游已发布 **v2.0.13**（本地对照目录由 `temp/opencode-v2.0.12` 原地重命名为 `temp/opencode-v2.0.13`，tag `v2.0.13` / commit `3180aab`）。Phase 3 的移植基线改用 **v2.0.13**：其 codemode 解释器语义补齐一大截（Iterator helpers + `Iterator.from`、`Promise.withResolvers`、`Promise.try`、ToPropertyKey 全量、生成器 `prototype` 与参数同步绑定、`delete` 非引用、函数重声明等），test262 `skipped.txt` 收缩 149 行。**移植时必须补上游漏掉的 `limits`**：上游 `packages/core/src/codemode/tool.ts` 接线时未把 `ExecutionLimits` 传给 `CodeMode.make`，导致 `execute` 实际**无超时、无工具调用上限、无输出字节上限**（限额能力已实现但未启用）——照抄会把该缺陷一起带过来。另注意 v2.0.13 重写了 codemode 指令 prompt（明确「工具只能在 `execute` 内调用、`search` 同步、不要猜工具名」），移植时以新版措辞为准。
+
+**再升级（2026-09-23）**: 上游 **v2.0.14** 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.14`，tag `v2.0.14` / commit `08462140`）。该版本距 v2.0.13 仅约 3 小时、共 5 个提交，实质代码约 80 行：① Electron renderer IPC 负载剔除 `undefined` 字段；② TUI 打开对话框过滤 git worktree 项目；③ models.dev 快照刷新；④ Console API 参考文档（Inference/BYOK/Usage/Budgets）。**经逐项核实无适用本仓的借鉴项**（我们无 Electron IPC 边界、无 TUI、用自建 provider catalog、无 Console 面），既有对齐结论不受影响。唯一可留存的通用原则：跨序列化边界时 **structured clone 保留 `undefined` 键、而 JSON codec 要求键缺席**——将来引入 Worker/MessagePort + JSON 解码时必须按 `JSON.stringify` 语义递归剔除 undefined，且不要把二进制放进该路径。
+
+**再升级（2026-09-23，v2.0.15）**: 上游 v2.0.15 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.15`，tag `v2.0.15` / commit `6f3639d82e`；42 提交 / 250 文件 / +6782−2549）。要点：① **codemode 解释器继续向 native 语义收敛**——新增 tagged templates + `String.raw`、`for...in` 任意左值（成员表达式/解构模式）、`match`/`matchAll`/`search`/`split` 接受任意值并按模式串强制转换、重复参数名 last-wins、Date setter 与单参构造走对象自身 `valueOf`/`toString`（支持矩阵同步更新，Phase 3 移植基线再次变好）；② **ai 包新增媒体基础**（`Media.Source` 四态 `bytes|base64|url|ref` + `Media.Asset` 惰性 `bytes()`/过期时间/providerMetadata；设计文档 `packages/ai/docs/media-design.md`；媒体执行形态是路由策略而非 API 形态：inline / async job / 双向流；不支持项报错而非静默丢弃），图片协议按此重写；评测 API 增 gateway provider 且 action→`run`；③ session 支持自由 metadata 更新 + `session.metadata.updated` 事件；项目按最近活跃排序；git 插件支持分支子目录安装（pacote 补丁同步升级）。
+**本版发现一项适用本仓的缺口（待办）**：上游 `fix(ai): ignore bare null SSE frames` 修的正是我们同样存在的行为——`packages/opencode-llm/src/protocols/shared.ts` 的 `sseFraming` 只过滤空串与 `[DONE]`，裸 `data: null` 帧会走到 `stream/processor.ts` 的 `JSON.parse('null')` → `parseEventSync(null)` 抛错 → **整条上游流中断**（部分 OpenAI 兼容代理会在事件之间或 `[DONE]` 之后发 `data: null`；`sseFraming` 是 SSE 的唯一咽喉，单点修复即可）。修法同上游：过滤条件加 `event.data !== 'null'` + 补测试。
+**其余项经查不适用**：client 的「`new URL('/api/…', base)` 丢 base 路径前缀」我们无该拼接模式；技能安装走 `git clone` 不涉及 pacote 的 `::path:`/200+HTML 陷阱（但**不支持子目录 skill**，属特性缺口）；未发现 MCP OAuth 日志存在「只留分类、丢 message」的等价物。
+
+**副本重建与上游分支拓扑（2026-09-24）**: `temp/` 目录（含 `@temp/opencode`）已被清理，对照副本重建为 `temp/opencode-v2.0.15`（浅克隆 + 深化，含全部 v2.0.x tag 与 `origin/v2`）。**上游分支拓扑（避免重复踩坑）**：默认分支 `dev` 是 **1.x 线**（历史含 `sync release versions for v1.18.32`），**不是**对照对象；**2.0 线在 `v2` 分支**；`2.0` 分支是 2026-04 的旧探索分支（勿用）。发布 tag 是主线的旁支提交，算差集直接 `git log v2.0.15..origin/v2`（已验证发布点的父提交是 `v2` 的祖先，故该区间精确）。**当前未发布差集：39 提交 / 218 文件 / +14667−1093**，要点：ai 媒体面继续扩张（queued image routes + BFL/fal/Replicate/Stability、speech generation、transcription）、codemode（Uint8Array 回调方法、resources 作为 codemode 工具）、core（V1 会话迁移标注重命名工具、Copilot responses-only 路由、WS idle timeout 放宽并尊重 `chunkTimeout`、read 支持引号/重音变体、凭据脱敏）、client 错误信息带 detail。**待评估三项**：① `fix(ai): ignore Vertex keepalives sent as SSE data`——与已修的裸 `data: null` 同属 SSE keepalive 家族，需核查我们的解析是否也会把 keepalive 当事件；② `fix(core): relax websocket idle timeout and honor chunkTimeout`；③ 调试配置的**凭据脱敏**（我们的 devtools/调试导出是否有同类泄漏面）。
+
+**再升级（2026-09-24，v2.0.16）**: 上游 v2.0.16 发布（本地对照目录再原地重命名为 `temp/opencode-v2.0.16`，tag `v2.0.16` / commit `3a103fe0`；63 提交 / 561 文件 / +54585−4330，含此前记录的 39 个未发布提交）。要点：① **codemode 继续大补齐**——`Object.freeze/seal/preventExtensions` + `isFrozen/isSealed/isExtensible`、`Object.create/getPrototypeOf`、**`structuredClone`**（`stdlib/web.ts`）、`Uint8Array` 回调方法、`indexOf` start 强制转换、**`==`/`!=` 改为 IsLooselyEqual**（消除「深走操作数」的性能陷阱；`[1] == 1`、`[1,2] == "1,2"` 为 true，`switch` 用 `===`）；② **ai 媒体三件套落地**——video generation（queued media routes）、speech generation（streaming）、transcription（inline/streamed/queued），另有 queued image routes + BFL/fal/Replicate/Stability；③ core——MCP Code Mode 默认值（`mcp-codemode-defaults.ts` 取代 exclusion）、read 报告长度并限制上限/长行、GitLab OAuth、V1 会话迁移标注重命名工具、Copilot responses-only 路由、WS idle timeout 放宽为 30 分钟并尊重 `chunkTimeout`、Vertex keepalive 修复、调试配置凭据脱敏。
+
+**上述三项待评估的处置（2026-09-24）**：① SSE keepalive **已修**（`fix(opencode-llm): 忽略Vertex以data keepalive形式发送的心跳帧`，含反向验证；`sseFraming` 现丢弃空串 / `[DONE]` / 裸 `null` / `: keepalive`）；② WS 超时**不适用**——我们生产路径 `DEFAULT_STREAM_IDLE_TIMEOUT_MS = 1_800_000`（30 分钟）已与上游新值一致，`StreamProcessor` 的 60s 默认无生产消费者（仅遗留公共 API）；③ 凭据脱敏**已修**（`fix(web): 排障包导出前脱敏诊断与日志载荷中的凭据`：新增 `devtools-redact.ts`，排障包的 input/output 与网关地址接入脱敏，含反向验证）。
+
+**范围边界**: 不含本轮已单独交付的 `openai-chat.ts` 空 assistant 报文兼容修复；不照抄上游的权限 defect 隧道与 tree-sitter shell 解析（语义/依赖差异，属独立议题）。
+
+### 🟡 260921-ChatPage组装层瘦身方案 - 把 7347 行的 ChatPage 降到 1500 硬上限内
+**状态**: 🏁 **阶段性收尾（用户决定，2026-09-21）** — P0…P4c 全部提交；ChatPage **7347 → 3973（−45.9%）**，零行为变更；**未达 <1500 目标**（仍 4203 行），原因与后续路径见方案文档「阶段性收尾」节
+**复杂度**: Full orchestration（score +6）
+**开始日期**: 2026-09-21
+**方案文档**: [workflow/260921-ChatPage组装层瘦身方案.md](workflow/260921-ChatPage组装层瘦身方案.md)
+
+**目标**: `apps/web/src/pages/chat-page/ChatPage.tsx` **7347 行**（超 AGENTS.md 1500 硬上限 **4.9 倍**）→ 压至硬上限内（目标 600–900），并消灭「双份 150+ prop surface」，**零行为变更**。
+
+**关键前提纠正**: `docs/architecture/chat-page-split-plan.md` 的**域抽取阶段（D/A/C/B/E）已全部完成**（B = `conversation/render/use-chat-streaming.ts` :474 接线、E = `hooks/use-chat-retry-and-edit.ts` :4011 接线）——该旧计划的序列已走完，本方案针对**残留组装层**，非其续作（旧文档状态已按事实修正）。
+
+**实测事实（一手核实）**:
+- 残余 hook：**34 `useState` / 33 `useEffect` / 34 `useCallback` / 26 `useMemo` / 25 `useRef`**（常引用的 35/36/36/27/26 是含 import/注释的裸 token 计数，已校准）
+- 最大耦合块：**会话切换巨型 effect `:1817`**（重置几乎每个簇）+ `:809` resetToWelcome + `:1140` 按会话重置 + `:4026` 附着 effect（26 deps）+ `sendMessage`（约 :2806–3805）
+- 双份 prop 面：`<ChatConversationView` 于 **`:6318`（融合）/ `:6774`（经典）**，prop 行数 **218 / 234**
+- **无任何 ChatPage 级回归测试**（`ChatPage.test.tsx` 不存在；仅 `desktop/src/App.tsx:22` 与 `preloadable-route-modules.ts:64` import）→ 纯 rewiring 回归会整包静默通过
+
+**主策略（Oracle 定）**: 分层组合——**粗粒度「会话作用域编排 hook」+ 单一 props-builder + 区域容器（Fusion/Classic）**，页面退化为薄 JSX。**否决**：单个 `useChatPageAssembly`（只是搬成 god hook）、纯渲染区域拆分（命中不了 1500）、继续加细粒度 domain hook、`ChatConversationView` 的 "Step 4d 状态下移"。
+
+**分阶段（每阶段一 PR、单一提交边界）**: P0 tripwire（**必须先建**，否则无守卫）→ P1 props-builder+区域容器（预期 −700~−900 行）→ P2 会话 hook 原样搬家 → P3 reset 解耦（`use-session-reset` + epoch）→ P4 composer/弹窗 → P5 `sendMessage`/`ensureSession`（最高风险，必须最后）→ P6 收尾至 <1500。
+
+**投资估算**: Large（3d+），含测试约 2–4 周。
+
+**范围边界**: 只动 `ChatPage.tsx` + `chat-page/{hooks,conversation,layout,state}` 新文件；`panels/` 三大文件（1219 / 1166 / 1099）当前**均未违规**，本轮只读。
+
+### 🟢 260921-移动端图片查看器方案 - 移动端自建图片查看器（可点击放大 + 图集左右切换 + 缩放旋转）
+**状态**: **代码层完成，待真机验收**（Gate 0/1 已放行并实施完毕；23 个 T-XX 中 T-12 取消、T-18/19 未纳入、**T-13/T-17 待用户真机走查**；**未归档**，TODO 未全勾）
+**门禁**: `mobile typecheck` exit 0 ｜ `mobile test` **12 文件 / 252 例全绿**（基线 7/35）｜ ESLint 0 ｜ **两道静态审查 PASS/PASS** ｜ **零新增依赖**（`package.json`/锁文件未改）｜ 范围红线 PASS（`app/**` 未触碰）
+**开始日期**: 2026-09-21
+**方案文档**: [workflow/260921-移动端图片查看器方案.md](workflow/260921-移动端图片查看器方案.md)（文末含**交付状态 + 9 条真机走查清单 + 跨会话沉淀**）
+**运行计划**: `.agentdocs/runtime/260921-移动端图片查看器方案/master_plan.md`（临时目录，`.gitignore` 已含 `.agentdocs/runtime/`）
+
+**目标**: 让 `apps/mobile` 能点击图片放大（含缩放/旋转/下载/关闭），并在**同一条消息的多张图片**之间左右切换。Web 端同名能力已交付，但实现基于 DOM（`createPortal`/CSS/键盘/`getBoundingClientRect`），**RN 无法复用**，故单独立项——只复用其**行为契约**（A/B 组共 40 条对齐条目）与 3 个测试基线。
+
+**现状核实（已确认，含两个"看不见图"的根因）**:
+- 全应用**唯一光栅图片渲染点**是 `src/components/chat-message-bubble.tsx:73` 的 `<Image>`（180×180，**无点击处理**）。
+- 根因①：`imageUrl` 唯一来源是本地 `file://`（`attachment.localUri`）；**从网关历史加载的消息只有 `artifactId`** → 气泡永远只显示占位符「图片已附加」。
+- 根因②：assistant 生成的图片产物**不进气泡**，只进文字 chip；`app/artifacts.tsx` 只用 Ionicons 图标，不加载图片内容。
+- 按 artifactId 取内容的客户端能力**已存在但从未被调用**：`web-client` 的 `createArtifactsClient().get(token, artifactId)`（`GET /artifacts/:id`，图片含 base64）。
+- **零手势依赖**：无 `gesture-handler`/`reanimated`/`expo-image`/`image-viewing`；且 `apps/mobile` **无 `babel.config.js`** → 引依赖需 babel 插件 + 原生重建（高风险）。
+- 图集数据前提**已满足**：`collectInputImages()` 保序、不去重、不限量；气泡按数组顺序渲染。
+- 测试基建：`vitest run --passWithNoTests`，7 个**纯逻辑**测试；**无 `@testing-library/react-native`** → 组件级测试今日不可用，UI 须真机/EAS preview 走查。
+- 文档漂移：实际活路由是 **Expo Router**（`app/_layout.tsx`），而 `src/navigation/AppNavigator.tsx` 与 `src/utils/artifact-platform-adapter.ts` 均为**孤儿代码**，但 `apps/mobile/AGENTS.md` 仍声称使用手动状态机。
+
+**待用户拍板（Gate 0）**: D-1 手势依赖路线（**A 零依赖 · 推荐** / B 引入 gesture-handler+reanimated）；D-2 覆盖范围（**1 仅聊天 · 推荐** / 2 +产物页 / 3 +图片工作台）；D-3 取数策略（**落盘临时文件+LRU · 推荐** / `data:` URI 直显）；D-4 是否顺带修正 `apps/mobile/AGENTS.md` 导航漂移（**建议是**）。
+
+**范围红线**: 移动端文档内嵌图、HTML/CSV/SVG 产物预览、图片编辑、网关新缩略图端点**均不在本方案**，需另行立项。
+
+- **独立待办（本方案承诺记录，原先缺跟踪）**: `apps/mobile` **无 `@testing-library/react-native`、无 jest** → 全部 UI/手势接线**无自动化回归**，正确性只能靠真机走查（方案 T-20 明确要求"记为独立待办"，此前仅在「现状核实」记了事实、未列为待办）。若要补：须先做**原生/构建链探针**（`apps/mobile` 目前**无 `babel.config.js`**，引测试库会牵动 Metro/babel → 可能需原生重建）；风险与取舍见方案文档 §验证策略 + R4。
+
+## 归档全量索引（workflow/done/）
+
+> **全量检索入口**：`workflow/done/` 下所有归档方案一行一条（`YYMMDD-` 前缀即日期），一个不缺；语义摘要见上方「已完成的任务」区或各归档文档自身。
+> **维护约定**：新方案归档时**必须**在本清单追加一行（与移入 `done/` 同一步完成）。
+
+### 2026-04（27）
+
+- [260415-team-page-收口方案](workflow/done/260415-team-page-收口方案.md)
+- [260417-net10-settings-第二批只读迁移](workflow/done/260417-net10-settings-第二批只读迁移.md)
+- [260417-net10-settings-首批只读迁移](workflow/done/260417-net10-settings-首批只读迁移.md)
+- [260417-net10-网关框架搭建实施方案](workflow/done/260417-net10-网关框架搭建实施方案.md)
+- [260418-permission-第三阶段内核收口](workflow/done/260418-permission-第三阶段内核收口.md)
+- [260418-permission-第二阶段协议收口](workflow/done/260418-permission-第二阶段协议收口.md)
+- [260418-permission-第四阶段收尾评估](workflow/done/260418-permission-第四阶段收尾评估.md)
+- [260418-permission-统一使用方式改造](workflow/done/260418-permission-统一使用方式改造.md)
+- [260419-permission-第五阶段兼容面退役评估](workflow/done/260419-permission-第五阶段兼容面退役评估.md)
+- [260419-permission-第六阶段公开导出收缩](workflow/done/260419-permission-第六阶段公开导出收缩.md)
+- [260420-message-runtime-assistant-trace-协议下沉实施](workflow/done/260420-message-runtime-assistant-trace-协议下沉实施.md)
+- [260420-message-runtime-compaction-结构收口实施](workflow/done/260420-message-runtime-compaction-结构收口实施.md)
+- [260420-message-runtime-前端运行时协议收口实施](workflow/done/260420-message-runtime-前端运行时协议收口实施.md)
+- [260420-message-runtime-参考库稳定结构移植实施](workflow/done/260420-message-runtime-参考库稳定结构移植实施.md)
+- [260420-message-runtime-对话存储与上游格式收敛方案](workflow/done/260420-message-runtime-对话存储与上游格式收敛方案.md)
+- [260420-net10-wave2-commands-execute迁移](workflow/done/260420-net10-wave2-commands-execute迁移.md)
+- [260420-net10-wave2-permissions-pause-resume迁移](workflow/done/260420-net10-wave2-permissions-pause-resume迁移.md)
+- [260420-net10-wave2-stop-active迁移](workflow/done/260420-net10-wave2-stop-active迁移.md)
+- [260421-net10-wave2-data-014-task-parent-auto-resume-contexts迁移](workflow/done/260421-net10-wave2-data-014-task-parent-auto-resume-contexts迁移.md)
+- [260421-net10-wave2-run-003-child-lineage-read-surface迁移](workflow/done/260421-net10-wave2-run-003-child-lineage-read-surface迁移.md)
+- [260421-net10-wave2-run-007-permanent-permission-materialization迁移](workflow/done/260421-net10-wave2-run-007-permanent-permission-materialization迁移.md)
+- [260421-net10-wave2-run-008-question-reply-resume迁移](workflow/done/260421-net10-wave2-run-008-question-reply-resume迁移.md)
+- [260421-net10-wave2-run-010-task-child-runtime-reconcile迁移](workflow/done/260421-net10-wave2-run-010-task-child-runtime-reconcile迁移.md)
+- [260422-gpt-image2-集成方案](workflow/done/260422-gpt-image2-集成方案.md)
+- [260422-net10-wave2-run-002-sessions-search迁移](workflow/done/260422-net10-wave2-run-002-sessions-search迁移.md)
+- [260422-net10-wave2-run-009-init-deep迁移](workflow/done/260422-net10-wave2-run-009-init-deep迁移.md)
+- [260422-net10-wave2-run-009-refactor迁移](workflow/done/260422-net10-wave2-run-009-refactor迁移.md)
+
+### 2026-05（21）
+
+- [260507-web-图片生成工作台实施](workflow/done/260507-web-图片生成工作台实施.md)
+- [260509-opencode借鉴升级总览](workflow/done/260509-opencode借鉴升级总览.md)
+- [260509-p0-provider兼容性修复批](workflow/done/260509-p0-provider兼容性修复批.md)
+- [260509-p1-compaction锚点摘要升级](workflow/done/260509-p1-compaction锚点摘要升级.md)
+- [260509-p1-scout-agent与repo研究工具](workflow/done/260509-p1-scout-agent与repo研究工具.md)
+- [260509-p1-子任务取消正确传播](workflow/done/260509-p1-子任务取消正确传播.md)
+- [260509-p2-task工具schema与slashcommand补齐](workflow/done/260509-p2-task工具schema与slashcommand补齐.md)
+- [260509-p2-并行websearch-rollout](workflow/done/260509-p2-并行websearch-rollout.md)
+- [260509-p3-session-warping评估](workflow/done/260509-p3-session-warping评估.md)
+- [260509-p3-会话路径过滤与devbrowser-skill](workflow/done/260509-p3-会话路径过滤与devbrowser-skill.md)
+- [260509-session-warping-ADR](workflow/done/260509-session-warping-ADR.md)
+- [260515-team-phase-a-实施方案](workflow/done/260515-team-phase-a-实施方案.md)
+- [260515-team-phase-b-实施方案](workflow/done/260515-team-phase-b-实施方案.md)
+- [260515-team-phase-c-实施方案](workflow/done/260515-team-phase-c-实施方案.md)
+- [260516-team-page-重构调整方案](workflow/done/260516-team-page-重构调整方案.md)
+- [260516-team-phase-d-实施方案](workflow/done/260516-team-phase-d-实施方案.md)
+- [260516-team-phase-e-实施方案](workflow/done/260516-team-phase-e-实施方案.md)
+- [260522-team-explicit-task-profile-markers](workflow/done/260522-team-explicit-task-profile-markers.md)
+- [260522-team-fixed-roster-specialists](workflow/done/260522-team-fixed-roster-specialists.md)
+- [260522-team-task-classification-taxonomy](workflow/done/260522-team-task-classification-taxonomy.md)
+- [260530-team-page-内容区功能加强方案](workflow/done/260530-team-page-内容区功能加强方案.md)
+
+### 2026-06（1）
+
+- [260627-sidebar-layout-refactor-plan](workflow/done/260627-sidebar-layout-refactor-plan.md)
+
+### 2026-07（16）
+
+- [260704-companion-linkage-enhancement](workflow/done/260704-companion-linkage-enhancement.md)
+- [260704-composer-optimization](workflow/done/260704-composer-optimization.md)
+- [260704-display-settings-expansion](workflow/done/260704-display-settings-expansion.md)
+- [260704-telemetry-consent-implementation](workflow/done/260704-telemetry-consent-implementation.md)
+- [260706-desktop-control-plugin-integration](workflow/done/260706-desktop-control-plugin-integration.md)
+- [260706-lazycodex-native-workflow](workflow/done/260706-lazycodex-native-workflow.md)
+- [260707-omo-mcp-adapter-integration](workflow/done/260707-omo-mcp-adapter-integration.md)
+- [260708-layout-isolation-refactor](workflow/done/260708-layout-isolation-refactor.md)
+- [260708-opencowork-tooling-integration-plan](workflow/done/260708-opencowork-tooling-integration-plan.md)
+- [260709-资源能力集成使用方案](workflow/done/260709-资源能力集成使用方案.md)
+- [260712-multi-theme-system](workflow/done/260712-multi-theme-system.md)
+- [260715-composer-input-history-recall](workflow/done/260715-composer-input-history-recall.md)
+- [260723-mobile-pen-visual-alignment](workflow/done/260723-mobile-pen-visual-alignment.md)
+- [260723-team-lifecycle-hard-contract-tools](workflow/done/260723-team-lifecycle-hard-contract-tools.md)
+- [260724-media-rendering](workflow/done/260724-media-rendering.md)
+- [260725-team-layer-todo-workbench](workflow/done/260725-team-layer-todo-workbench.md)
+
+### 2026-08（7）
+
+- [260813-chat-right-panel-completion](workflow/done/260813-chat-right-panel-completion.md)
+- [260814-session-recovery-enhancement](workflow/done/260814-session-recovery-enhancement.md)
+- [260814-tool-prompt-system](workflow/done/260814-tool-prompt-system.md)
+- [260816-team-lightweight-routing](workflow/done/260816-team-lightweight-routing.md)
+- [260816-team-routing-safety-hardening](workflow/done/260816-team-routing-safety-hardening.md)
+- [260817-提交前收口](workflow/done/260817-提交前收口.md)
+- [260830-auto-compaction-presets](workflow/done/260830-auto-compaction-presets.md)
+
+### 2026-09（44）
+
+- [260905-tool-context-optimization](workflow/done/260905-tool-context-optimization.md)
+- [260905-tool-context](workflow/done/260905-tool-context.md)
+- [260906-chat-order-followup](workflow/done/260906-chat-order-followup.md)
+- [260906-chat-tool-ordering](workflow/done/260906-chat-tool-ordering.md)
+- [260906-opencode-context-pruning-parity](workflow/done/260906-opencode-context-pruning-parity.md)
+- [260914-grill-clarification-enhancement](workflow/done/260914-grill-clarification-enhancement.md)
+- [260915-文件提及索引架构](workflow/done/260915-文件提及索引架构.md)
+- [260915-浏览器预览功能增强](workflow/done/260915-浏览器预览功能增强.md)
+- [260915-澄清完成自动切换编程模式](workflow/done/260915-澄清完成自动切换编程模式.md)
+- [260915-终端-vscode-能力对齐](workflow/done/260915-终端-vscode-能力对齐.md)
+- [260916-agentdocs归档审计与runtime清理](workflow/done/260916-agentdocs归档审计与runtime清理.md)
+- [260916-会话权限阶梯](workflow/done/260916-会话权限阶梯.md)
+- [260916-层级可视化重构](workflow/done/260916-层级可视化重构.md)
+- [260916-终端面板-vscode布局对齐](workflow/done/260916-终端面板-vscode布局对齐.md)
+- [260921-GUI-Agent集成方案](workflow/done/260921-GUI-Agent集成方案.md)
+- [260921-多模态媒体引用通路](workflow/done/260921-多模态媒体引用通路.md)
+- [260921-权限暂停全批收集改造](workflow/done/260921-权限暂停全批收集改造.md)
+- [260922-pnpm全量迁移bun](workflow/done/260922-pnpm全量迁移bun.md)
+- [260922-子代理对标opencode改造方案-附录A-唤醒原语设计](workflow/done/260922-子代理对标opencode改造方案-附录A-唤醒原语设计.md)
+- [260922-子代理对标opencode改造方案](workflow/done/260922-子代理对标opencode改造方案.md)
+- [260923-PluginSendFile通用工具与三平台文件发送](workflow/done/260923-PluginSendFile通用工具与三平台文件发送.md)
+- [260923-后台任务常驻入口](workflow/done/260923-后台任务常驻入口.md)
+- [260923-后台任务统一管理面板](workflow/done/260923-后台任务统一管理面板.md)
+- [260923-回退文件变更必选交互](workflow/done/260923-回退文件变更必选交互.md)
+- [260923-子代理数量限制设置页可调](workflow/done/260923-子代理数量限制设置页可调.md)
+- [260923-对话模式提示词收口-P1](workflow/done/260923-对话模式提示词收口-P1.md)
+- [260923-对话模式提示词收口-P2](workflow/done/260923-对话模式提示词收口-P2.md)
+- [260923-对话模式提示词收口](workflow/done/260923-对话模式提示词收口.md)
+- [260923-渠道入站图片与出站发图](workflow/done/260923-渠道入站图片与出站发图.md)
+- [260923-渠道入站图片第二批-Slack-WhatsApp-企业微信](workflow/done/260923-渠道入站图片第二批-Slack-WhatsApp-企业微信.md)
+- [260923-渠道出站媒体第四批-Slack-WhatsApp-企业微信-QQ](workflow/done/260923-渠道出站媒体第四批-Slack-WhatsApp-企业微信-QQ.md)
+- [260923-渠道收尾清理第五批](workflow/done/260923-渠道收尾清理第五批.md)
+- [260924-AI插件管理工具](workflow/done/260924-AI插件管理工具.md)
+- [260924-AI自助管理扩展四域](workflow/done/260924-AI自助管理扩展四域.md)
+- [260924-MCP自助管理工具](workflow/done/260924-MCP自助管理工具.md)
+- [260924-团队工作区管理工具](workflow/done/260924-团队工作区管理工具.md)
+- [260924-定时任务持久化与工具](workflow/done/260924-定时任务持久化与工具.md)
+- [260924-工具展开可视化优化](workflow/done/260924-工具展开可视化优化.md)
+- [260924-技能管理工具](workflow/done/260924-技能管理工具.md)
+- [260924-插件市场与在线安装](workflow/done/260924-插件市场与在线安装.md)
+- [260924-插件技能MCP管理界面重构](workflow/done/260924-插件技能MCP管理界面重构.md)
+- [260924-插件系统v2完整集成方案](workflow/done/260924-插件系统v2完整集成方案.md)
+- [260924-自定义Agent管理工具](workflow/done/260924-自定义Agent管理工具.md)
+- [260924-记忆管理工具](workflow/done/260924-记忆管理工具.md)
+
+### 2026-10（2）
+
+- [261009-agentdocs清理整理](workflow/done/261009-agentdocs清理整理.md)
+- [261009-agentdocs清理整理.tasks-cleanup-list](workflow/done/261009-agentdocs清理整理.tasks-cleanup-list.md)
+
 ## 项目记忆
 
 ### 插件平台 v2（2026-09-24）
@@ -935,7 +1108,7 @@
 - [2026-09-23] **对话模式提示词 P2 收口**：模式提示词拆到 `services/agent-gateway/src/routes/dialogue-mode-prompts/`（shared/clarify/coding/programmer/index），`stream-system-prompts.ts` 仅 re-export 保持公共面；**不采用 `.md` 资源文件**（tsc 不搬运非 TS 资源，构建期搬运成本高于收益）。契约测试新增长度预算（clarify ≤4000 / coding ≤1800 / programmer ≤2200 / 共享合计 ≤1000，调高需评审说明）与 Web 文案同步锚点（网关侧测试期读取 `apps/web/src/pages/chat-page/mode/dialogue-mode.ts`，生产零依赖）。
 - [2026-09-23] **不采纳「`dialogueMode` 缺省兜底」**：`resolveStreamInteractionModes` 保持「请求 > metadata，双缺省则未指定」——既有契约测试明确锁定该语义（`stream-interaction-modes.test.ts`「metadata 与请求都未指定时保持未指定」），渠道 / API / legacy 会话依赖它（不注入模式纪律、不做工具面收敛）；若未来需要兜底，应在**会话创建边界**写入 metadata（SSOT），而不是在提示词边界默认。
 - [2026-09-22] **自动唤醒必须有预算上限，且只统计「真正发生的唤醒」**：单通道交付的唤醒是**事件驱动**的（子代理结算 → 投递通知 → 唤醒父会话），若被唤醒的父会话又委派新的后台子代理，其完成会再次唤醒它 → **无界自激**。落点 `services/agent-gateway/src/task/task-wake-budget.ts`（上限 10，与旧机制同值）：由 `deliverTaskCompletion` 在**决策为「要唤醒」之后**才消费预算（`resume:false` / 父会话在飞 / 父会话 paused 均不计入），耗尽时**仍然投递通知**（已落库 ⇒ 用户下次自然发言模型依然看得到，**不丢信息**），只返回 `wake:'skipped'` + `deferReason:'budget-exhausted'`；计数只在**非网关内部请求**时重置（复用 `isGatewayInternalRequestKey`——否则唤醒自身会把计数清零，上限永远触发不了）。进程内存储，重启即清零（可接受：重启后首次唤醒总是允许的）。
-- [2026-09-22] **包管理器全量由 pnpm 切到 bun（bun@1.4.2）**：`bun.lock` 为唯一事实来源（`pnpm-lock.yaml` / `pnpm-workspace.yaml` 已删，workspace 用根 `package.json` 的 `workspaces` 字段）。`pnpm.onlyBuiltDependencies` → 顶层 `trustedDependencies`、`pnpm.patchedDependencies` → 顶层 `patchedDependencies`（playwright-core 补丁实测生效）；`peerDependencyRules` / `allowedDeprecatedVersions` / `.npmrc auto-install-peers` 无等价物已删。CI（7 个 workflow）、两个 Dockerfile、桌面脚本、活跃文档同步切换；**测试运行器仍是 Vitest**（23 包、692 处 `vi.*`），bun 只替代「装包」这一层。网关/客户端里「识别第三方项目包管理器」的探测列表（lsp root markers、repo-overview、bash-arity、ERR_PNPM 提示、workspace 根标记）**保留 pnpm 项并新增 bun 项**——产品需同时支持两种仓库。方案与实测数据见 `workflow/260922-pnpm全量迁移bun.md`。
+- [2026-09-22] **包管理器全量由 pnpm 切到 bun（bun@1.4.2）**：`bun.lock` 为唯一事实来源（`pnpm-lock.yaml` / `pnpm-workspace.yaml` 已删，workspace 用根 `package.json` 的 `workspaces` 字段）。`pnpm.onlyBuiltDependencies` → 顶层 `trustedDependencies`、`pnpm.patchedDependencies` → 顶层 `patchedDependencies`（playwright-core 补丁实测生效）；`peerDependencyRules` / `allowedDeprecatedVersions` / `.npmrc auto-install-peers` 无等价物已删。CI（7 个 workflow）、两个 Dockerfile、桌面脚本、活跃文档同步切换；**测试运行器仍是 Vitest**（23 包、692 处 `vi.*`），bun 只替代「装包」这一层。网关/客户端里「识别第三方项目包管理器」的探测列表（lsp root markers、repo-overview、bash-arity、ERR_PNPM 提示、workspace 根标记）**保留 pnpm 项并新增 bun 项**——产品需同时支持两种仓库。方案与实测数据见 `workflow/done/260922-pnpm全量迁移bun.md`。
 - [2026-09-21] **批量工具权限暂停语义 = 只读兄弟放行 + 整批收集 + 批末统一 pause**：`isPermissionSafeSiblingTool` 白名单（read/list/glob/grep/webfetch/websearch/look_at/lsp）内的只读工具在待批期间继续执行；其余兄弟被扣住并入 pending payload 的 `blockedToolCalls`；批准后按 `tool_use` 顺序整批恢复，且仅当无残留 pending 才续轮。理由：上游 `tool_result` 顺序 + 整批 barrier 保证 prompt cache 前缀稳定，同时不丢只读兄弟。落点：`services/agent-gateway`（`routes/stream.ts` / `routes/stream-runtime.ts` / `tools/tool-sandbox.ts` / `permission/permission-contract.ts`）。**不照抄 opencode 的阻塞 await**——其 run 与请求解耦（durable drain），OpenAWork 的 run 绑在 SSE 请求上。
 - [2026-09-15] `@` 文件提及的**索引与检索放在网关**：BFS 递归扁平索引（无层数限制）+ 进程内缓存（15s TTL / 16 根上限 / 写路径失效），检索排序（目录逐级 / 相关性）也在服务端，前端只渲染命中小结果集、不做全量加载与本地匹配；全量清单端点因零生产消费者被删除。理由：本仓约 1.28 万文件，全量扁平清单 301KB，单次查询命中仅 68B–1.3KB。
 - [2026-09-15] 工作区忽略规则必须**按工作区根隔离**（`getWorkspaceIgnoreManager(root)` 的 per-root 实例），不能依赖 `defaultIgnoreManager`：它把 `projectRoot` 存为进程全局单值，多根并发时后服务的根会顶掉先前根的规则，锚定 `.gitignore` 项静默失效（实测泄漏 1007 条 → 修复后 0）。同一缺陷也存在于 `/workspace/tree` 等既有消费方。
@@ -1100,6 +1273,7 @@
 - [2026-09-16] **agentdocs 归档必须「移动 + index 同步」成对完成**：只 `mv` 到 `done/` 而不改 `index.md`，会产生悬空链接与幽灵条目（实测 index 仅登记 8/83，另发现 1 个幽灵方案 + 10 个悬空 runtime 链接）。`runtime/` 属临时目录（`.gitignore`），归档后应按 cleanup-policy 清理；**清理保护规则**：活跃方案对应目录、`index.md` 引用目录、近 60 分钟被改动目录（并发会话）、大体积/备份/演示类，一律保留。
 - [2026-09-16] 归档审计期间实证并发写入：另一会话正实时归档 `260916-终端面板-vscode布局对齐` 并改写本文件 → 对本文件必须「最后读、唯一字符串锚点替换、改完复验」，**不得整文件覆写**。
 - [2026-09-15] **本仓可能同时有多个 Agent 会话并行写入**：实测存在 3 个长驻 `opencode` 进程 + 既有 `gateway dev`(tsx watch) + `vite --port 5199`，且 `apps/web`（`BrowserConsolePanel.tsx` / `NetworkWaterfall.tsx` / `BuiltInBrowser.tsx` 等）在实施期间被并发修改。因此：① 动手前先做并发探测（`ps` 看进程 + `find -mmin` 看改动）并避开争用文件域；② 绝不 `pkill`/`killall`，只按 PID 结束自己启动的进程；③ 严禁任何 git 回滚类指令，也不得"整理"无关的工作树修改。
+- [2026-10-09] **agentdocs 清理整理约定（本轮定型）**：① 归档 = 移入 `done/` + 顶部归档说明 + 「归档全量索引」追加一行（三者同一步完成）；② runtime 清理判据沿用 P1–P4；有长期参考价值的产物（冻结契约 / 最终报告）可先迁 `done/` 再删目录；③ 「未完成与近期收口任务」区只放真实未完成/在途条目，完成即归位到「已完成的任务」区；④ 归档/清理后必须扫描 index 与归档文档内的相对链接（0 悬空），并核对「归档全量索引」计数与 `done/` 实际文件数一致；⑤ 若发现另一会话并发执行同一清理：**先停写 → 盘点双方已完成项 → 由用户定夺归属**；接手方用「锚点/脚本化原子替换 + 备份 + mtime 复验」续做，不静默覆盖对方。
 - Claude Code 源码位置: `E:\01.Projects\OpenAWork\temp\claude-code-sourcemap\restored-src`
 - 系统提示词构建参考: `src/constants/prompts.ts`
 - 工具提示词参考: `src/tools/*/prompt.ts`
@@ -1128,22 +1302,24 @@
 ### 目录结构
 ```
 .agentdocs/
-├── index.md              # 本文件：知识入口
+├── index.md              # 本文件：知识入口（含「归档全量索引」与「项目记忆」）
 ├── workflow/             # 任务规划（持久化，提交到 git）
-│   ├── done/             # 已完成任务归档（唯一归档位；根目录不再保留方案）
-│   │   └── 260814-tool-prompt-system.md
-│   └── [活跃任务].md     # 仅"进行中"方案可留此；归档一律移入 done/
-└── runtime/              # 执行协调（临时，.gitignore）
-    └── 260814-tool-prompt-system/
-        ├── master_plan.md
-        ├── agent_tasks/   # 5个开发者的详细任务
-        └── results/       # 实施报告和质量报告
+│   ├── done/             # 已完成任务归档（唯一归档位；根目录只留活跃/在途方案）
+│   │   └── [YYMMDD-任务名].md
+│   └── [活跃任务].md     # 仅"进行中 / 在途 / 待人工 gate"方案可留此；归档一律移入 done/
+├── runtime/              # 执行协调（临时，.gitignore；收口后按 cleanup-policy 回收）
+│   └── [任务]/
+│       ├── master_plan.md
+│       ├── agent_tasks/
+│       └── results/
+└── tasks/                # 任务工具会话账本（临时，.gitignore，非本流程维护）
 ```
 
 ### Git 配置
 请确保 `.gitignore` 包含：
 ```
 .agentdocs/runtime/
+**/.agentdocs/tasks/
 ```
 
 ### 更新记录
@@ -1155,3 +1331,5 @@
 - 2026-09-22: **子代理对标 opencode 改造（已交付）沉淀记忆**——「架构决策」新增 4 条（单通道交付 = synthetic + 显式唤醒 / 本仓原先无「不落用户轮跑一轮」能力及解法 / synthetic 角色契约含 `description`+`metadata` 与可见性规则 / **Web 渲染注入内容时扩群组协议而非扩 `ChatMessage.role`**）；「已知陷阱」新增 9 条（web vitest mock `shared-ui`、`shared` 的 `dist` 解析与 CI 构建顺序、TS interface 无隐式索引签名、zod `.transform()` 使 `.shape` 失效、内部键守卫两处盲区、验收脚本全局计数断言假失败、`check:fastify-alignment` 判定机制、`vi.fn` 初始实现决定推断类型、同文件编辑须串行）。方案见 `workflow/done/260922-子代理对标opencode改造方案.md` + 附录 A。
 - 2026-09-22: **该方案收口（T-32 + T-30 + 归档）**——① **T-32 补回自动唤醒预算**（关闭开放问题 Q3 / 风险 R-12）：T-31 删除旧计数器后唤醒路径**无任何上限**，而唤醒是事件驱动的，被唤醒的父会话若再委派后台子代理即形成**无界自激**；新增 `task/task-wake-budget.ts`（上限 10，与旧值一致），由 `deliverTaskCompletion` 在**真正要唤醒时**消费，耗尽则**只投递不唤醒**（通知已落库 ⇒ 不丢信息），`routes/stream.ts` 仅在**非网关内部请求**时重置计数。② **T-30 三视口验收以组件级真实浏览器通过**（真实 Chromium，61 断言 × 3 视口）：新建可复现资产 `apps/web/harness/`；**推翻了此前「组件级也不可行」的判定**——该判定把「需要桌面端浏览器工具」当成了必要条件，实际仓库自带 Playwright + Chromium。③ **方案归档** → `workflow/done/`，`AGENTS.md` 架构说明新增「子代理结果交付（单通道）」条目。④ **收口自查又发现 1 处真实问题（SR-11）并修**：两条验收脚本断言全过但退出码 1——同步唤醒启动的父会话后台流与脚本收尾竞态（关库后 flush 报 `Database has closed`）；已按 `verify-task-tool-auto-run` 既有隔离手法（父会话 `state_status='paused'`）修复，并沉淀为已知陷阱。**唯一未覆盖**：端到端变体（`AI_API_KEY` 为空的环境阻塞，非待办）。
 - 2026-09-24: **插件/技能/MCP 管理界面重构（已交付）沉淀记忆**——「架构决策」新增 1 条（管理面重构三条硬约束：单一数据 hook / shared-ui props 先兼容后重写 / 配置+状态合并单列表）；「已知陷阱补充」新增 3 条（harness 容器必须 `minmax(0, 1fr)`、`:focus-visible` 断言需先建立键盘模态、同名按钮导致选择器歧义）。方案与三视口验收见 `workflow/done/260924-插件技能MCP管理界面重构.md` + `apps/web/harness/verify-plugin-manager-3viewports.ts`（52 断言 × 3 视口）。
+- 2026-10-09: **归档同步与 runtime 清理**——① 渠道收尾清理第五批最终版入档（覆盖 `done/` 旧版，T-05/T-06 已勾选）；② 四域总览文档更新最终状态（Phase 2/3/4 全部交付）并移入 `done/`；③ 清理 5 个已完成/终止任务的 runtime 残留（260706 / 260921-GUI / 260921-多模态 / 260923-后台任务常驻入口 / 260923-后台任务统一管理面板）；保留 260922（含记忆同步 final_output）、260915/260916（index 活链接）与全部活跃任务 runtime（opencode-v2 / 移动端图片查看器 / desktop-dynamic-island）。
+- 2026-10-09: **清理整理（续；接手并发会话剩余）**——① `260921-多模态媒体引用通路`（已终止）与 `260922-pnpm全量迁移bun`（已交付）归档 `done/`；② 新增「归档全量索引（workflow/done/）」：**全量 118 条**一行一条，修复原 67 条无检索入口；③ 「未完成与近期收口任务」区 8 条已完成/已终止条目归位至「已完成的任务」区（章节去掉「（明细）」）；④ `.agentdocs/tasks/` 旧账清理：删除全终态且 >14 天未更新的 **156** 个文件（532 → 376），清单备档 `done/261009-agentdocs清理整理.tasks-cleanup-list.md`；⑤ runtime 保留决定维持（260915 / 260916 / 260922 不迁不删）；⑥ 本清理方案归档 `done/261009-agentdocs清理整理.md`。

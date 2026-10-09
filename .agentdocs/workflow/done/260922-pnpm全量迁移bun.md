@@ -1,5 +1,7 @@
 # 260922 pnpm 全量迁移 bun
 
+> **归档（2026-10-09）**：迁移已完全落地（仓库现用 `bun@1.4.2`，`bun.lock` 为唯一锁文件）；T-18（EAS 预览云构建 / 桌面三平台打包 / GitHub Actions 实跑）保留为外部人工 gate。
+
 ## Task Overview
 
 把仓库的包管理器层从 pnpm 10.25.0 全量切到 bun 1.3.12：锁文件、`package.json` 配置字段、workspace scripts、辅助脚本、Docker 构建、GitHub Actions、桌面/移动端打包链路、活跃文档。**不迁移**测试运行器（保持 Vitest）与构建器（tsc / vite / metro），因为它们不是包管理器的一部分。
