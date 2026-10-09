@@ -3,6 +3,7 @@ import {
   resolveClassicConversationLayoutState,
   resolveFusionConversationLayoutState,
   resolveResponsiveContentMaxWidth,
+  SPLIT_CONTENT_MAX_WIDTH_RATIO_PERCENT,
 } from './conversation-layout-state.js';
 
 describe('resolveClassicConversationLayoutState', () => {
@@ -43,13 +44,23 @@ describe('resolveFusionConversationLayoutState', () => {
 });
 
 describe('resolveResponsiveContentMaxWidth', () => {
-  it('基准宽度作下限、容器 88% 作中间值、基准 1.5 倍作上限', () => {
-    expect(resolveResponsiveContentMaxWidth(1024)).toBe('clamp(1024px, 88%, 1536px)');
-    expect(resolveResponsiveContentMaxWidth(820)).toBe('clamp(820px, 88%, 1230px)');
-    expect(resolveResponsiveContentMaxWidth(720)).toBe('clamp(720px, 88%, 1080px)');
+  it('窄/中屏按容器 80% 收窄，超宽屏放宽到基准 1.6 倍', () => {
+    expect(resolveResponsiveContentMaxWidth(1024)).toBe('min(1638px, max(80%, 420px))');
+    expect(resolveResponsiveContentMaxWidth(820)).toBe('min(1312px, max(80%, 420px))');
+    expect(resolveResponsiveContentMaxWidth(720)).toBe('min(1152px, max(80%, 420px))');
   });
 
   it('上限取整，不出现小数 px', () => {
-    expect(resolveResponsiveContentMaxWidth(683)).toBe('clamp(683px, 88%, 1025px)');
+    expect(resolveResponsiveContentMaxWidth(683)).toBe('min(1093px, max(80%, 420px))');
+  });
+
+  it('基准抬高后收敛到 1800px 硬顶，不再无限放大', () => {
+    expect(resolveResponsiveContentMaxWidth(1536)).toBe('min(1800px, max(80%, 420px))');
+  });
+
+  it('split 布局用 96% 占比，尽量吃满容器给左右分列留出行宽', () => {
+    expect(resolveResponsiveContentMaxWidth(1536, SPLIT_CONTENT_MAX_WIDTH_RATIO_PERCENT)).toBe(
+      'min(1800px, max(96%, 420px))',
+    );
   });
 });

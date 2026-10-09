@@ -63,7 +63,10 @@ import {
   CHAT_SCROLL_BOTTOM_PADDING,
   CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
 } from './render/chat-page-utils.js';
-import { resolveResponsiveContentMaxWidth } from '../layout/conversation-layout-state.js';
+import {
+  resolveResponsiveContentMaxWidth,
+  SPLIT_CONTENT_MAX_WIDTH_RATIO_PERCENT,
+} from '../layout/conversation-layout-state.js';
 import type { ChatImageGenerationReferenceArtifact } from '../../../components/chat/image/ChatImageGenerationControls.js';
 import HistoryEditInlineEditor from './views/history-edit-dialog.js';
 import RetryModeDialog from './views/retry-mode-dialog.js';
@@ -664,8 +667,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     minHeight: 0,
     scrollPaddingBottom: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
   };
-  // 内容列最大宽度 = 「随可用宽度自适应」的 clamp（见 resolveResponsiveContentMaxWidth）：
-  // 窄容器与固定上限时代一致，宽容器按 88% 比例加宽至基准的 1.5 倍封顶。
+  // 内容列最大宽度 = 「随可用宽度自适应」（见 resolveResponsiveContentMaxWidth）：
+  // 窄/中屏按容器占比收窄居中（行长可控），超宽屏放宽到「基准 × 1.6 / 1800px硬顶」。
   const baseContentMaxWidthPx: number | null =
     contentMaxWidth === 'fluid'
       ? null
@@ -687,7 +690,10 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
   const effectiveContentMaxWidth: CSSProperties['maxWidth'] =
     contentColumnBaselinePx === null
       ? '100%'
-      : resolveResponsiveContentMaxWidth(contentColumnBaselinePx);
+      : resolveResponsiveContentMaxWidth(
+          contentColumnBaselinePx,
+          messageLayout === 'split' ? SPLIT_CONTENT_MAX_WIDTH_RATIO_PERCENT : undefined,
+        );
 
   const shouldCenterContent = centerContent ?? !compact;
   const scrollRegionClassName = showWelcome
