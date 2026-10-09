@@ -56,6 +56,7 @@
 - `services/**/package.json`
 - `apps/mobile/app.json`
 - `apps/desktop/src-tauri/Cargo.toml`
+- `apps/desktop/src-tauri/Cargo.lock`（仅同步 `openAwork-desktop` 的版本号，保证 `cargo --locked` 不因 lock 过期失败）
 
 > `apps/desktop/src-tauri/tauri.conf.json` 已直接读取根 `package.json`，无需单独写入。
 

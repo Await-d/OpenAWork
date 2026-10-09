@@ -12,6 +12,7 @@ const rootDir = resolve(__dirname, '../..');
 const rootPackageJsonPath = resolve(rootDir, 'package.json');
 const mobileAppJsonPath = resolve(rootDir, 'apps/mobile/app.json');
 const desktopCargoTomlPath = resolve(rootDir, 'apps/desktop/src-tauri/Cargo.toml');
+const desktopCargoLockPath = resolve(rootDir, 'apps/desktop/src-tauri/Cargo.lock');
 
 const workspaceRoots = ['apps', 'packages', 'services'];
 const ignoredDirectories = new Set([
@@ -244,6 +245,36 @@ function updateDesktopCargoVersion(nextVersion, dryRun) {
   return true;
 }
 
+/**
+ * 同步 `Cargo.lock` 中本工作区 crate 的版本。
+ *
+ * `Cargo.lock` 的 `[[package]]` 条目记录每个 crate 的解析版本；`Cargo.toml` 的
+ * `[package] version` 提升后若不同步，`cargo check/build --locked` 会因 lock 过期
+ * 直接失败。这里只改 `openAwork-desktop`（本仓库唯一的 Rust crate）的版本号，
+ * 不触碰依赖解析结果。
+ */
+function updateDesktopCargoLockVersion(nextVersion, dryRun) {
+  if (!existsSync(desktopCargoLockPath)) {
+    return false;
+  }
+
+  const content = readFileSync(desktopCargoLockPath, 'utf8');
+  const updated = content.replace(
+    /(name = "openAwork-desktop"\nversion = ")([^"]+)(")/,
+    `$1${nextVersion}$3`,
+  );
+
+  if (updated === content) {
+    return false;
+  }
+
+  if (!dryRun) {
+    writeFileSync(desktopCargoLockPath, updated, 'utf8');
+  }
+
+  return true;
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
   const allowedBumps = new Set(['auto', 'patch', 'minor', 'major']);
@@ -277,6 +308,10 @@ function main() {
 
   if (existsSync(desktopCargoTomlPath) && updateDesktopCargoVersion(nextVersion, options.dryRun)) {
     updatedFiles.push(desktopCargoTomlPath);
+  }
+
+  if (updateDesktopCargoLockVersion(nextVersion, options.dryRun)) {
+    updatedFiles.push(desktopCargoLockPath);
   }
 
   const result = {
