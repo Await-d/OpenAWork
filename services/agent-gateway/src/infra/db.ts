@@ -3166,7 +3166,10 @@ function repairLegacyMigratedPartOrder(): void {
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
-      logGatewayWarn(`[V2_MIGRATION] Failed to repair legacy part order for ${candidate.id}`, error);
+      logGatewayWarn(
+        `[V2_MIGRATION] Failed to repair legacy part order for ${candidate.id}`,
+        error,
+      );
     }
   }
 }

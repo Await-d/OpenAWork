@@ -116,7 +116,12 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
   }
 
   private handleRetry = (): void => {
-    this.setState((prev) => ({ error: null, componentStack: null, copied: false, retryKey: prev.retryKey + 1 }));
+    this.setState((prev) => ({
+      error: null,
+      componentStack: null,
+      copied: false,
+      retryKey: prev.retryKey + 1,
+    }));
   };
 
   private handleCopy = (): void => {
@@ -177,7 +182,11 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     const { error, copied, retryKey } = this.state;
     if (!error) {
       // retryKey 作为子树 key：重试时整棵子树重新挂载，状态彻底重置。
-      return <div key={retryKey} style={{ display: 'contents' }}>{this.props.children}</div>;
+      return (
+        <div key={retryKey} style={{ display: 'contents' }}>
+          {this.props.children}
+        </div>
+      );
     }
 
     const diagnostics = this.buildDiagnostics(error);
@@ -274,7 +283,11 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
           </div>
 
           <details
-            style={{ textAlign: 'left', borderTop: `1px solid ${color.borderSubtle}`, paddingTop: spacing[3] }}
+            style={{
+              textAlign: 'left',
+              borderTop: `1px solid ${color.borderSubtle}`,
+              paddingTop: spacing[3],
+            }}
           >
             <summary
               style={{

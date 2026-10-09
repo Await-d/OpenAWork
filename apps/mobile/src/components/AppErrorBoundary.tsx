@@ -39,7 +39,9 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     try {
       recordMobileError(
         error,
-        errorInfo.componentStack ? { componentStack: errorInfo.componentStack.slice(0, 2_000) } : undefined,
+        errorInfo.componentStack
+          ? { componentStack: errorInfo.componentStack.slice(0, 2_000) }
+          : undefined,
         'react-boundary',
       );
     } catch {
@@ -61,7 +63,11 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 
     if (!error) {
       // retryKey 作为 key：重试时整棵子树重新挂载，避免复用已损坏的组件状态。
-      return <View key={retryKey} style={styles.fill}>{this.props.children}</View>;
+      return (
+        <View key={retryKey} style={styles.fill}>
+          {this.props.children}
+        </View>
+      );
     }
 
     return (

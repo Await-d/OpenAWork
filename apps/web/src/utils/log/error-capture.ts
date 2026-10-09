@@ -67,10 +67,7 @@ export function resetClientErrorCaptureForTest(): void {
 }
 
 /** 手动记录一条错误（用于 catch 块里已知但未冒泡的错误）。 */
-export function recordClientError(
-  error: unknown,
-  context?: Record<string, string>,
-): void {
+export function recordClientError(error: unknown, context?: Record<string, string>): void {
   clientErrorRecorder.record({
     source: 'manual',
     error,

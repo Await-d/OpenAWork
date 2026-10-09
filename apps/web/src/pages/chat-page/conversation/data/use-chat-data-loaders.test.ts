@@ -24,9 +24,7 @@ type LoaderProps = Parameters<typeof useChatDataLoaders>[0];
 /** 复用同一批 mock，避免每次 rerender 换引用（那会掩盖依赖稳定性问题）。 */
 function createHarness() {
   const setWorkspaceFileItems = vi.fn<(value: WorkspaceFileMentionItem[]) => void>();
-  const depsFor = (
-    overrides: Partial<LoaderProps> = {},
-  ): LoaderProps => ({
+  const depsFor = (overrides: Partial<LoaderProps> = {}): LoaderProps => ({
     currentSessionId: 's1',
     effectiveWorkingDirectory: WS_A,
     workspace: { fetchTree },

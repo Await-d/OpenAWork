@@ -115,7 +115,9 @@ export function useSubSessionDetail(
       const requestId = refreshNonceRef.current + 1;
       refreshNonceRef.current = requestId;
       setState((previous) =>
-        previous.loading && previous.error === null ? previous : { ...previous, error: null, loading: true },
+        previous.loading && previous.error === null
+          ? previous
+          : { ...previous, error: null, loading: true },
       );
 
       try {

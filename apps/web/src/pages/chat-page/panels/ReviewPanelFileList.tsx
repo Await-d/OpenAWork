@@ -1,8 +1,5 @@
 import type { SessionFileDiffEntry } from '@openAwork/web-client';
-import {
-  ReviewPanelDecisionBadge,
-  ReviewPanelFileRowActions,
-} from './ReviewPanelFileActions.js';
+import { ReviewPanelDecisionBadge, ReviewPanelFileRowActions } from './ReviewPanelFileActions.js';
 import {
   formatFileStatus,
   getReviewPanelFileActionKey,

@@ -106,11 +106,7 @@ export function readRequestId(response: Response): string | undefined {
  * 注意 `message` 保持 `${label} failed: ${status}` 原样——上层有若干处依赖该格式做
  * 分支判断，改写会波及行为。可读原因放在 `serverMessage` 上按需取用。
  */
-function buildHttpError<T>(
-  label: string,
-  response: Response,
-  data: T | undefined,
-): HttpError<T> {
+function buildHttpError<T>(label: string, response: Response, data: T | undefined): HttpError<T> {
   const requestId = readRequestId(response);
   const serverMessage = extractJsonErrorMessage(data as JsonErrorData | undefined);
   return new HttpError(`${label} failed: ${response.status}`, response.status, data, {
@@ -210,8 +206,8 @@ export async function fetchWithTimeout(
     }
   }
   // 超时 reason 刻意包含 "aborted"：既让日志能区分「超时」与「调用方主动取消」，
-// 又能被 isGenericFetchErrorMessage 的 /\babort/i 命中，从而维持既有的
-// 「超时 → 折叠为友好文案」行为不变。
+  // 又能被 isGenericFetchErrorMessage 的 /\babort/i 命中，从而维持既有的
+  // 「超时 → 折叠为友好文案」行为不变。
   const timer = setTimeout(() => {
     if (typeof controller.abort === 'function') {
       controller.abort(new Error(`Request aborted: gateway timeout after ${timeoutMs}ms`));

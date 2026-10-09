@@ -70,9 +70,7 @@ describe('registerErrorHandler', () => {
     expect(response.body).not.toContain('底层炸了');
     expect(response.headers['x-request-id']).toBeTruthy();
 
-    expect(
-      hasEntry(entries, LEVEL_ERROR, (entry) => entry.msg.includes('/boom')),
-    ).toBe(true);
+    expect(hasEntry(entries, LEVEL_ERROR, (entry) => entry.msg.includes('/boom'))).toBe(true);
     const errorEntry = entries.find((entry) => entry.level === LEVEL_ERROR);
     // 堆栈是「无法排查」的另一半：只有 message 时定位不到代码位置。
     expect(errorEntry?.err?.stack).toContain('error-handler.test');

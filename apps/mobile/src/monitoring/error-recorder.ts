@@ -249,6 +249,10 @@ export function installGlobalErrorHandlers(): void {
   };
   target.addEventListener?.('unhandledrejection', (event: unknown) => {
     const reason = (event as { reason?: unknown } | undefined)?.reason;
-    recordMobileError(reason ?? '未处理的 Promise 拒绝（无 reason）', undefined, 'unhandled-rejection');
+    recordMobileError(
+      reason ?? '未处理的 Promise 拒绝（无 reason）',
+      undefined,
+      'unhandled-rejection',
+    );
   });
 }

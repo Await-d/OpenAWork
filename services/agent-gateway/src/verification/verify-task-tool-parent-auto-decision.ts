@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
 import { subscribeSessionRunEvents } from '../session/session-run-events.js';
-import { hasPendingSessionInteraction } from '../session/session-runtime-state.js';
+import {
+  hasPendingSessionInteraction,
+  releaseStaleDecidingSessionRecordsForUser,
+} from '../session/session-runtime-state.js';
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import { tryResolveTaskPendingInteractionWithParent } from '../task/task-parent-auto-decision.js';
 import {
@@ -460,6 +463,9 @@ async function verifyLateQuestionDecisionFallback(): Promise<void> {
                WHERE id = ? AND session_id = ?`,
               [questionResult.pendingPermissionRequestId, childSessionId],
             );
+            // 读路径的 `hasPendingSessionInteraction` 已改为纯读（避免 `/sessions` 列表
+            // 对每条会话各写一次库），僵尸 deciding 的释放由写路径显式承担。
+            releaseStaleDecidingSessionRecordsForUser(userId);
             assert(
               hasPendingSessionInteraction(childSessionId),
               'stale deciding question should be released to pending and still block as pending interaction',

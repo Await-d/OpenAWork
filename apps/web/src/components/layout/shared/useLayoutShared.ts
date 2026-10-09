@@ -35,7 +35,10 @@ import {
 import { toast } from '../../common/feedback/ToastNotification.js';
 import { getRecoveryPendingInteractions } from '../../conversation-runtime/session/recovery-read-model.js';
 import { isWithinTerminalScope } from '../../../utils/terminal-scope.js';
-import { fetchSessionRecoveryOnce, SESSION_RECOVERY_MESSAGE_LIMIT } from '../../../utils/session/session-recovery-flight.js';
+import {
+  fetchSessionRecoveryOnce,
+  SESSION_RECOVERY_MESSAGE_LIMIT,
+} from '../../../utils/session/session-recovery-flight.js';
 
 type PendingQuestionReplyStatus = 'answered' | 'dismissed';
 

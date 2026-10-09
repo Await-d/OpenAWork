@@ -6,9 +6,8 @@ vi.mock('@openAwork/web-client', () => ({
   createSessionsClient: () => ({ getRecovery }),
 }));
 
-const { fetchSessionRecoveryOnce, resetSessionRecoveryFlightsForTesting } = await import(
-  './session-recovery-flight.js'
-);
+const { fetchSessionRecoveryOnce, resetSessionRecoveryFlightsForTesting } =
+  await import('./session-recovery-flight.js');
 
 function makeRecovery(messages: unknown[]) {
   return { activeStream: null, children: [], messages, session: { id: 's1' } };

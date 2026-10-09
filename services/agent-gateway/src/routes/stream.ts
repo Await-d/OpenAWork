@@ -3342,10 +3342,10 @@ export async function handleStreamRequest(input: {
               });
             }
           } catch (interactionCleanupErr) {
-            logGatewayWarn(
-              '[STREAM_ABORT_CASCADE] descendant interaction cleanup failed',
-              { sessionId: input.sessionId, error: interactionCleanupErr },
-            );
+            logGatewayWarn('[STREAM_ABORT_CASCADE] descendant interaction cleanup failed', {
+              sessionId: input.sessionId,
+              error: interactionCleanupErr,
+            });
           }
         }
         // Surface the cascade as a structured payload on the `done`

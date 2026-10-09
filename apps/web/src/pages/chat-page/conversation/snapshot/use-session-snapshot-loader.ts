@@ -287,7 +287,9 @@ export function useSessionSnapshotLoader(
         setWorkflowRuntime((previous) =>
           preserveEqualValue(previous, prepared.session.workflowRuntime ?? null),
         );
-        setPendingPermissions((previous) => preserveEqualList(previous, prepared.pendingPermissions));
+        setPendingPermissions((previous) =>
+          preserveEqualList(previous, prepared.pendingPermissions),
+        );
         setPendingQuestions((previous) => preserveEqualList(previous, prepared.pendingQuestions));
         // 标量，React 按 Object.is 自动跳过，无需 preserve。
         setSessionStateStatus(prepared.sessionStateStatus);

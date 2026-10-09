@@ -86,8 +86,12 @@ export function describeClientError(error: unknown): DescribeClientErrorResult {
   }
 
   // 其余原始值（number / boolean / symbol 等）：走安全序列化而非 `String()`——
-// 后者对 Symbol 会直接抛错，把「记录错误」本身变成新的错误源。
-return { name: 'NonError', message: safeStringify(error).slice(0, MAX_MESSAGE_CHARS), stack: null };
+  // 后者对 Symbol 会直接抛错，把「记录错误」本身变成新的错误源。
+  return {
+    name: 'NonError',
+    message: safeStringify(error).slice(0, MAX_MESSAGE_CHARS),
+    stack: null,
+  };
 }
 
 function safeStringify(value: unknown): string {
@@ -126,7 +130,10 @@ export class ClientErrorRecorder {
 
   constructor(options: ClientErrorRecorderOptions = {}) {
     this.capacity = Math.max(1, Math.floor(options.capacity ?? DEFAULT_CAPACITY));
-    this.dedupeWindowMs = Math.max(0, Math.floor(options.dedupeWindowMs ?? DEFAULT_DEDUPE_WINDOW_MS));
+    this.dedupeWindowMs = Math.max(
+      0,
+      Math.floor(options.dedupeWindowMs ?? DEFAULT_DEDUPE_WINDOW_MS),
+    );
     this.now = options.now ?? (() => Date.now());
   }
 
@@ -274,9 +281,7 @@ export interface InstallGlobalErrorCaptureOptions {
  * 返回卸载函数。在不支持 `addEventListener` 的环境（如 React Native）返回空函数
  * 而不是抛错——移动端有独立的 Sentry 通道。
  */
-export function installGlobalErrorCapture(
-  options: InstallGlobalErrorCaptureOptions,
-): () => void {
+export function installGlobalErrorCapture(options: InstallGlobalErrorCaptureOptions): () => void {
   const target = options.target ?? (globalThis as unknown as GlobalEventTargetLike);
   if (!target || typeof target.addEventListener !== 'function') {
     return () => undefined;
@@ -299,9 +304,7 @@ export function installGlobalErrorCapture(
     // 非 JS 抛出的错误（资源加载失败等）没有 `error` 字段，只能退化为事件自带的
     // message；仍取不到时给出明确文案，而不是产出无信息量的 "[object Object]"。
     const fallbackMessage =
-      typeof rawMessage === 'string' && rawMessage.length > 0
-        ? rawMessage
-        : '未捕获的运行时错误';
+      typeof rawMessage === 'string' && rawMessage.length > 0 ? rawMessage : '未捕获的运行时错误';
 
     options.recorder.record({
       source: 'uncaught',

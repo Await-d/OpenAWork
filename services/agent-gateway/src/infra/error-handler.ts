@@ -142,7 +142,10 @@ export function registerErrorHandler(app: FastifyInstance): void {
       if (isNotFound) {
         request.log.warn(payload, `[error-handler] 路由未命中 ${request.method} ${request.url}`);
       } else {
-        request.log.info(payload, `[error-handler] ${request.method} ${request.url} → ${statusCode}`);
+        request.log.info(
+          payload,
+          `[error-handler] ${request.method} ${request.url} → ${statusCode}`,
+        );
       }
       return reply.status(statusCode).send({
         name: isNotFound ? 'NotFound' : 'BadRequest',

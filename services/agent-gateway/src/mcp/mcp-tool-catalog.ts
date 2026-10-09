@@ -216,7 +216,10 @@ function installPoolListenerOnce(): void {
       const tools = await adapter.listTools(serverId);
       setCatalogSnapshot(userId, mcpName, serverId, tools);
     } catch (err) {
-      logGatewayWarn(`Failed to refresh MCP tool catalog after push for ${userId}/${mcpName}:`, err);
+      logGatewayWarn(
+        `Failed to refresh MCP tool catalog after push for ${userId}/${mcpName}:`,
+        err,
+      );
       clearCatalogSnapshot(userId, mcpName);
     }
   };

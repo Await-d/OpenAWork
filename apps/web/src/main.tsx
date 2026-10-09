@@ -14,10 +14,7 @@ import { installMonacoAsyncErrorFilter } from './components/file-editor/editor/M
 import { installExtensionNoiseFilter } from './lib/filter/extension-noise-filter.js';
 import { installMonacoI18n } from './lib/monaco/monaco-i18n.js';
 import { isTauriRuntime } from './utils/gateway/desktop-gateway.js';
-import {
-  clientErrorRecorder,
-  exportClientErrorDiagnostics,
-} from './utils/log/error-capture.js';
+import { clientErrorRecorder, exportClientErrorDiagnostics } from './utils/log/error-capture.js';
 
 // Configure Monaco to load from local bundle instead of CDN.
 // This prevents "Monaco initialization: error" when the CDN is unreachable.

@@ -68,9 +68,7 @@ describe('ClientErrorRecorder', () => {
     recorder.subscribe(() => {
       throw new Error('sink 挂了');
     });
-    expect(() =>
-      recorder.record({ source: 'manual', error: new Error('真实故障') }),
-    ).not.toThrow();
+    expect(() => recorder.record({ source: 'manual', error: new Error('真实故障') })).not.toThrow();
     expect(recorder.count()).toBe(1);
   });
 

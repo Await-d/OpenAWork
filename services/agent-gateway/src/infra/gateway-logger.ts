@@ -80,7 +80,11 @@ function resolveMethod(level: keyof GatewayLogMethods): GatewayLogFn {
 function toFieldBag(fields: unknown): Record<string, unknown> {
   if (fields === undefined || fields === null) return {};
   if (fields instanceof Error) {
-    return { errorName: fields.name, errorMessage: fields.message, errorStack: fields.stack ?? null };
+    return {
+      errorName: fields.name,
+      errorMessage: fields.message,
+      errorStack: fields.stack ?? null,
+    };
   }
   if (typeof fields === 'object') return fields as Record<string, unknown>;
   return { detail: fields };
@@ -90,7 +94,9 @@ function toFieldBag(fields: unknown): Record<string, unknown> {
  * 把任意值收敛为脱敏函数可接受的基本类型。
  * `Error` 实例展开为堆栈（保留排障所需的调用链），其余对象序列化为 JSON。
  */
-function normalizeFields(fields: Record<string, unknown>): Record<string, string | number | boolean> {
+function normalizeFields(
+  fields: Record<string, unknown>,
+): Record<string, string | number | boolean> {
   const normalized: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined || value === null) continue;

@@ -6,9 +6,8 @@ vi.mock('@openAwork/web-client', () => ({
   createArtifactsClient: () => ({ listForSession }),
 }));
 
-const { fetchSessionArtifactsOnce, resetSessionArtifactFlightsForTesting } = await import(
-  './session-artifacts-flight.js'
-);
+const { fetchSessionArtifactsOnce, resetSessionArtifactFlightsForTesting } =
+  await import('./session-artifacts-flight.js');
 
 const BASE = {
   gatewayUrl: 'http://localhost:3000',
