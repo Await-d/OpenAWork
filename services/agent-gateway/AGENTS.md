@@ -33,24 +33,27 @@ src/
 
 ## 查找指引
 
-| 任务           | 位置                                             |
-| -------------- | ------------------------------------------------ |
-| 新增 HTTP 路由 | `src/routes/`（参考 sessions.ts）                |
-| SSE 流式逻辑   | `src/routes/stream.ts`                           |
-| JWT 认证       | `src/auth.ts`                                    |
-| SQLite 查询    | `src/db.ts` — `sqliteGet` / `sqliteRun`          |
-| 新增消息渠道   | `src/channels/` — 实现 `MessagingChannelService` |
-| 渠道管理       | `src/channels/manager.ts`                        |
-| LSP 代理       | `src/lsp/router.ts`                              |
-| GitHub Webhook | `src/github/router.ts`                           |
-| 定时任务       | `src/cron/router.ts`                             |
-| 工具沙箱       | `src/tool-sandbox.ts`                            |
-| 验收脚本       | `src/verification/verify-*.ts`                   |
-| 子代理交付     | `src/task/task-job-delivery.ts`（单通道交付）    |
-| 子代理生命周期 | `src/task/task-job.ts` + `task-job-recovery.ts`  |
-| 子代理数量限制 | `src/task/subagent-limits.ts`（用户级可调）      |
-| 子代理深度限制 | `src/task/subagent-depth.ts`                     |
-| 子代理工具定义 | `src/task/task-tools.ts`                         |
+| 任务                | 位置                                                                                                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 新增 HTTP 路由      | `src/routes/`（参考 sessions.ts）                                                                                                                                           |
+| SSE 流式逻辑        | `src/routes/stream.ts`                                                                                                                                                      |
+| JWT 认证            | `src/auth.ts`                                                                                                                                                               |
+| SQLite 查询         | `src/db.ts` — `sqliteGet` / `sqliteRun`                                                                                                                                     |
+| 新增消息渠道        | `src/channels/` — 实现 `MessagingChannelService`                                                                                                                            |
+| 渠道管理            | `src/channels/manager.ts`                                                                                                                                                   |
+| LSP 代理            | `src/lsp/router.ts`                                                                                                                                                         |
+| GitHub Webhook      | `src/github/router.ts`                                                                                                                                                      |
+| 定时任务            | `src/cron/router.ts`                                                                                                                                                        |
+| 工具沙箱            | `src/tools/tool-sandbox.ts`(薄门面:公共导出 + `ToolSandbox` 类 + **保序 if 派发链**,~1312 行)                                                                               |
+| 工具沙箱·公共模块   | `src/tools/sandbox/`(`whitelist` / `context` / `session-context` / `permission-ladder` / `child-session` / `task-reference` / `task-background` / `create-default-sandbox`) |
+| 工具沙箱·域 handler | `src/tools/sandbox/handlers/<域>.ts`(14 个域 / 61 个 `handleXxxTool(ctx)`;门面原位调用点的出现顺序 = 派发顺序)                                                              |
+| 子会话终态/超时     | `src/tools/sandbox/child-session.ts`(`terminateChildSession`、`CHILD_SESSION_TERMINAL_REASON_KEY`)                                                                          |
+| 验收脚本            | `src/verification/verify-*.ts`                                                                                                                                              |
+| 子代理交付          | `src/task/task-job-delivery.ts`（单通道交付）                                                                                                                               |
+| 子代理生命周期      | `src/task/task-job.ts` + `task-job-recovery.ts`                                                                                                                             |
+| 子代理数量限制      | `src/task/subagent-limits.ts`（用户级可调）                                                                                                                                 |
+| 子代理深度限制      | `src/task/subagent-depth.ts`                                                                                                                                                |
+| 子代理工具定义      | `src/task/task-tools.ts`                                                                                                                                                    |
 
 ## 架构说明
 
@@ -88,7 +91,7 @@ src/
 - **唤醒轮的路由/档位继承（2026-09-24）**：`continueSessionFromHistory`（子代理完成唤醒父会话、任务自动续跑）构造的是**空 requestData**（无 `model` / `thinkingEnabled` / `reasoningEffort`）；非 team 会话此前只读请求值 → 唤醒轮退化为「未启用思考」，使 stable system 段的 `thinkingLanguagePrompt` 槽位在唤醒轮与正常轮之间翻转，**整段历史 prompt-cache 被反复打断**。现在：① 正常用户轮（非 `continueFromHistory`）由 `session/session-route-selection.ts` 的 `persistSessionRouteSelection` 把解析结果写回 `sessions.metadata_json`（`modelId` / `providerId` / `thinkingEnabled` / `reasoningEffort`，与客户端 PATCH 同键；`'default'` 占位模型不落库）；② 档位解析统一走 `resolveEffectiveThinkingSelection`（team 权威绑定 > 请求显式值 > 会话 metadata 回退）；③ 唤醒轮只读不写。验收：`__tests__/session/session-route-selection.test.ts`。
 - **「留库待消费」的记录会在被消费后清理**：若通知之后同会话已出现 `user`/`assistant` 消息（用户/模型已翻过它），记录即被清除，避免重启后**重复唤醒旧通知**——判定在 `task/task-job.ts` 的 `completeConsumedBackgroundJobs`（按 `time_created` + `id` 比较、`role IN ('user','assistant')`、排除 `running`）；调用点两处：用户真实交互时（`routes/stream.ts` 的 `handleStreamRequest`，与唤醒预算重置同一分支）与启动恢复扫描前（`task/task-job-recovery.ts`）。
 - **重启恢复的三种处置**（`task/task-job-recovery.ts`）：① 通知已被消费 → 跳过并清记录；② 持久记录仍为 `running`（执行被重启打断）→ 置 `error` 并投递「子代理执行被网关重启中断。」，**不得**当作完成；③ `cancelled` → 传 `resume:false` 只投递不唤醒。
-- **通知必须覆盖所有终态路径，且注册前移到 spawn 时**：`tools/tool-sandbox.ts` 的 `settleChildTaskNotification` 统一「settle + 投递」，覆盖 `terminateChildSession` 与 `cancelBackgroundTaskEntry`——漏掉这两条会让取消/终止的子代理在父会话里**无声消失**；`registerBackgroundChildTask` 在 spawn 时与函数入口各注册一次（`task/task-job.ts` 的 `start()` 对 `running` 幂等），用于覆盖「进程在 `setTimeout` 触发前退出」的窗口。
+- **通知必须覆盖所有终态路径，且注册前移到 spawn 时**：`tools/sandbox/child-session.ts` 的 `settleChildTaskNotification` 统一「settle + 投递」，覆盖 `terminateChildSession` 与 `cancelBackgroundTaskEntry`——漏掉这两条会让取消/终止的子代理在父会话里**无声消失**；`registerBackgroundChildTask` 在 spawn 时与函数入口各注册一次（`task/task-job.ts` 的 `start()` 对 `running` 幂等），用于覆盖「进程在 `setTimeout` 触发前退出」的窗口。
 - **唤醒失败保留记录、预算前置消耗**：`continueSessionFromHistory` 非 200 时返回 `deferReason: 'wake-failed'` + `wake: 'deferred'`（**不**清理记录，交重启恢复补偿）；唤醒预算在**调用前**消耗——前置消耗才能并发安全（成功后消耗会让并发投递同时通过检查），失败不回退（用户任一次真实发言即重置），见 `task/task-job-delivery.ts`。
 - **关库竞态的错误措辞必须按运行时覆盖**：`isIgnorableChildFinalizeError`（`tools/tool-sandbox.ts`）除 `database is not open` 外还须匹配 bun:sqlite 的 `Cannot use a closed database`，否则网关关停 / 脚本收尾时后台终结算器会以 unhandled rejection 抛出（现象：验收脚本**断言全过却退出码 1**）。
 - **`synthetic` 消息角色契约**：`role: 'synthetic'` 对模型**可见**（`message/message-to-model-messages.ts` 保留，`v2-runtime/upstream/native-message-bridge.ts` 降级为上游 `user`），客户端**不得**按用户输入渲染；`Message.description` + `metadata = { source:'subagent', childID, agent, state }` 是客户端 notice 契约（`packages/shared/src/subagent-notice.ts` 是提取语义的 SSOT）。通知正文带参考库的 `<subagent sessionID state description>` 标签（模型侧需要它区分来源）；`parseSubagentNotice` 解析时会**剥离该包裹**，客户端 `notice.text` 保持纯正文。**读路径必须回传 `description`/`metadata`**（`v2ToV1Message` 曾漏，属静默缺陷）。
@@ -110,6 +113,8 @@ src/
 - **ZAI / Zhipu 流式工具调用**：`ModelCompatibility.zaiToolStream` + `detectZaiToolStream`（含网关的 `zhipu` 平台类型与 `open.bigmodel.cn`）；有可用工具时下发 `tool_stream: true`（GLM 4.5 系列除外）。
 - **仍未移植（明确记录）**：参考库的 **in-band compaction**（`compact_20260112` 编辑、`CompactionPart`、`LLMEvent.compaction`、`CompactionResponse` / `CompactionCheckpointResponse`、路由 `compact` 操作子系统）——它需要参考库的 compaction operations 体系与网关集成，而网关已有自己的（out-of-band）压缩管线，属独立工作流；`flattenToolRequest` 不适用（我们的 schema 无 tool namespace 概念）。
 - **发布顺序约束**：会话 metadata PATCH 校验是 `.strict()`（`src/session/session-workspace-metadata.ts:136`，`permissionMode` 在 :175），未知键直接报错；.NET 侧同语义（`services/agent-gateway-dotnet/src/OpenAWork.Gateway.Application/Features/Sessions/SessionMetadataSupport.cs:222`，未知键返回 `unrecognized_keys`）。因此网关（含 .NET 校验）必须先于客户端发送 `permissionMode` 上线；回滚时先回滚客户端。
+- **根 404 处理器只能注册一次（2026-10-09，桌面端 sidecar 启动即崩的事故）**：Fastify 对同一封装上下文重复调用 `setNotFoundHandler` 直接抛 `FST_ERR_NOT_FOUND_HANDLER_ALREADY_SET`；若该异常发生在顶层 `await app.register(...)` 的插件体内，会终止 ESM 入口求值——**即使 process-safety 处理器只记录不退出，进程同样会死**（现象：带 `OPENAWORK_WEB_DIST` 启动的网关 5s 内消失、健康检查永远不通过）。因此根 404 处理器由 `infra/error-handler.ts` 的 `registerErrorHandler` 独占注册（返回 `SpaFallbackSink`），`app/web-static.ts` 只通过注入点提供 SPA `index.html`，**不得**再自行 `setNotFoundHandler`；静态托管作为可选能力，初始化失败只降级为 API-only。验收：`__tests__/app/web-static.test.ts`。
+- **tool-sandbox 拆分后的派发顺序契约（2026-10-09，7540 → 1312 行）**：`tool-sandbox.ts` 已拆为**薄门面 + `tools/sandbox/`（公共模块 + `handlers/<域>.ts`）**，但派发仍是**保序 if 链**——门面里 `if (request.toolName === X) return handleXxxTool(handlerContext)` 的**出现顺序就是派发顺序**，任何重排都会静默改变行为。三条易踩的顺序敏感点：① `isTaskToolName` 谓词块必须在 `enter_plan_mode`/`exit_plan_mode` 之后、`background_*` 之前；② flat MCP 别名、`'bash'`/`'edit'`/`'mcp_call'` 等**字面名条件一字不能改**；③ `workspace_*` 前置重写仍在 `executeToolCall` 内、派发**之前**。handler 只依赖 `sandbox/context.ts` 的 `SandboxHandlerContext` 与叶子模块，**禁止**反向 `import ... from '../tool-sandbox.js'`（运行时循环）；公共导出面由门面 re-export 保持，33 个生产消费方路径不变。护栏：`__tests__/tools/tool-sandbox-dispatch-coverage.test.ts`（漏分支即红）。
 - **ESLint**：此包参与代码检查（严格 TS 规则，与 `apps/` 不同）。
 
 ## 环境变量
