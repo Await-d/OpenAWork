@@ -61,8 +61,6 @@ function attachRequestIdHeader(reply: FastifyReply, requestId: string): void {
  * **必须显式注册 `setNotFoundHandler`**：Fastify 对未匹配路由走自己的 404 路径，
  * **不会**经过 `setErrorHandler`，因此 404 在此之前完全不产生任何服务端记录——
  * 「客户端打错路径」「客户端版本落后于网关」这两类高频问题无从发现。
- *
- * 提取为独立函数供 `app/web-static.ts` 的 SPA 兜底复用，避免两处 404 逻辑分叉。
  */
 export function logNotFoundRequest(request: FastifyRequest): string {
   const requestId = resolveTraceId(request);
@@ -73,10 +71,37 @@ export function logNotFoundRequest(request: FastifyRequest): string {
   return requestId;
 }
 
-export function registerErrorHandler(app: FastifyInstance): void {
-  // API-only 场景（桌面端 sidecar、纯网关部署）没有 web-static 插件接管 404，
-  // 这里兜底记录。web-static 注册在之后，会覆盖本处理器并复用同一记录逻辑。
+/**
+ * SPA 兜底注入点。
+ *
+ * Fastify 的根 404 处理器**只能注册一次**：同一封装上下文内重复调用
+ * `setNotFoundHandler` 会直接抛 `FST_ERR_NOT_FOUND_HANDLER_ALREADY_SET`，
+ * 异常沿启动链路冒泡，会把整个网关进程打挂（桌面端 sidecar 因此永远等不到健康检查）。
+ * 所以根 404 处理器由本模块独占注册，`app/web-static.ts` 只能通过这个接口注入
+ * `index.html`，不得自行注册 404 处理器。
+ */
+export interface SpaFallbackSink {
+  /** 注入 SPA 的 `index.html`；传 `null` 撤销兜底（回到纯 JSON 404）。 */
+  setSpaIndexHtml(html: string | null): void;
+}
+
+export function registerErrorHandler(app: FastifyInstance): SpaFallbackSink {
+  // SPA 导航兜底与 API 型 404 记录合并为同一个根 404 处理器：
+  // - 浏览器导航（GET/HEAD 且明确接受 HTML）→ 返回 index.html 交给前端 router；
+  // - 其余（API 客户端，Accept 为 */* 或 application/json）→ 记录 warn 并回 JSON 404，
+  //   避免把误打的 API 路径伪装成成功的 HTML 响应，破坏下游的错误处理。
+  // API-only 场景（桌面端 sidecar 未托管前端、纯网关部署）始终走 JSON 分支。
+  let spaIndexHtml: string | null = null;
+
   app.setNotFoundHandler((request: FastifyRequest, reply: FastifyReply) => {
+    const method = request.method.toUpperCase();
+    const accept = String(request.headers['accept'] ?? '');
+    const isHtmlNav = (method === 'GET' || method === 'HEAD') && accept.includes('text/html');
+    if (spaIndexHtml !== null && isHtmlNav) {
+      void reply.type('text/html').send(spaIndexHtml);
+      return;
+    }
+
     const requestId = logNotFoundRequest(request);
     // 响应体逐字段对齐 Fastify 默认 notFoundHandler 的形状
     // （`{ statusCode, error, message }`）。这里刻意不套用 ApiError 的 `{ name, data }`：
@@ -166,4 +191,10 @@ export function registerErrorHandler(app: FastifyInstance): void {
       data: { message: '服务器内部错误。' },
     });
   });
+
+  return {
+    setSpaIndexHtml(html: string | null): void {
+      spaIndexHtml = html;
+    },
+  };
 }

@@ -1,13 +1,21 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
 import { join, dirname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, statSync } from 'fs';
-import { logNotFoundRequest } from '../infra/error-handler.js';
-import { REQUEST_ID_HEADER } from '../infra/request-diagnostics.js';
+import type { SpaFallbackSink } from '../infra/error-handler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export interface WebStaticPluginOptions {
+  /**
+   * 根 404 处理器的 SPA 注入点（`registerErrorHandler` 的返回值）。Fastify 禁止在同一
+   * 封装上下文重复注册 404 处理器，SPA 兜底只能经由此接口注入，插件内不得自行
+   * `setNotFoundHandler`。
+   */
+  spaFallback: SpaFallbackSink;
+}
 
 /**
  * 解析 Web 前端静态资源目录。优先级：
@@ -28,14 +36,17 @@ function resolveWebDistPath(): string | null {
     }
   }
 
-  // 源码布局：services/agent-gateway/src/web-static.ts → ../../../apps/web/dist
-  const fromSource = join(__dirname, '../../../apps/web/dist');
+  // 源码布局：services/agent-gateway/src/app/web-static.ts → ../../../../apps/web/dist
+  const fromSource = join(__dirname, '../../../../apps/web/dist');
   if (existsSync(fromSource)) return fromSource;
 
   return null;
 }
 
-async function webStaticPlugin(app: FastifyInstance): Promise<void> {
+async function webStaticPlugin(
+  app: FastifyInstance,
+  options: WebStaticPluginOptions,
+): Promise<void> {
   const webDistPath = resolveWebDistPath();
 
   if (!webDistPath) {
@@ -54,35 +65,23 @@ async function webStaticPlugin(app: FastifyInstance): Promise<void> {
     return;
   }
 
-  await app.register(fastifyStatic, {
-    root: webDistPath,
-    prefix: '/',
-    decorateReply: true,
-  });
+  try {
+    await app.register(fastifyStatic, {
+      root: webDistPath,
+      prefix: '/',
+      decorateReply: true,
+    });
 
-  const indexHtml = readFileSync(indexHtmlPath, 'utf8');
-
-  // SPA 历史模式兜底：仅对浏览器发起的 GET/HEAD 且明确接受 HTML 的请求
-  // 返回 index.html 让前端 router 接管。API 客户端（curl/axios 默认 Accept: */*、
-  // 或显式 Accept: application/json）维持 JSON 404，避免把误打的 API 路径
-  // 伪装成成功的 HTML 响应，破坏下游的错误处理。
-  app.setNotFoundHandler((request: FastifyRequest, reply: FastifyReply) => {
-    const method = request.method.toUpperCase();
-    const accept = String(request.headers['accept'] ?? '');
-    const isHtmlNav = (method === 'GET' || method === 'HEAD') && accept.includes('text/html');
-    if (!isHtmlNav) {
-      // API 型 404 不经过全局 errorHandler，若不在此记录就会彻底消失在服务端，
-      // 无法区分「客户端调用路径写错」与「客户端版本落后于网关」。复用全局处理器的
-      // 记录逻辑，保证两条 404 路径的日志形态一致。
-      const requestId = logNotFoundRequest(request);
-      void reply
-        .code(404)
-        .header(REQUEST_ID_HEADER, requestId)
-        .send({ error: 'not_found', path: request.url });
-      return;
-    }
-    void reply.type('text/html').send(indexHtml);
-  });
+    // SPA 历史模式兜底（仅浏览器 GET/HEAD 且接受 HTML 时返回 index.html，API 型 404
+    // 维持 JSON）由根 404 处理器统一实现，这里只注入 index.html——Fastify 同一封装
+    // 上下文重复注册 404 处理器会直接抛错，插件内不得再调用 `setNotFoundHandler`。
+    options.spaFallback.setSpaIndexHtml(readFileSync(indexHtmlPath, 'utf8'));
+  } catch (error) {
+    // 静态托管是可选能力：初始化失败时降级为 API-only，绝不连带网关启动一起失败
+    // （历史事故：404 处理器重复注册抛出的异常直接打挂桌面端 sidecar 进程）。
+    app.log.warn({ err: error, webDistPath }, 'web-static: 初始化失败，降级为 API-only');
+    return;
+  }
 
   app.log.info({ webDistPath }, 'web-static: serving Web frontend');
 }

@@ -232,8 +232,11 @@ await app.register(websocket, { options: { maxPayload: resolveWsMaxPayloadBytes(
 // 方案 4：自动 OpenAPI 文档（/docs 路径）
 await registerOpenApi(app);
 
-// 方案 2：统一错误处理（在路由注册之前）
-registerErrorHandler(app);
+// 方案 2：统一错误处理（在路由注册之前）。
+// 根 404 处理器由这里独占注册（Fastify 同一封装上下文重复注册会直接抛
+// FST_ERR_NOT_FOUND_HANDLER_ALREADY_SET 打挂进程）；返回的 SPA 注入点必须转交给
+// web-static，插件据此提供前端兜底而不再自行注册 404 处理器。
+const errorHandlerControls = registerErrorHandler(app);
 
 await app.register(requestWorkflowPlugin);
 await app.register(authPlugin);
@@ -255,7 +258,7 @@ await app.register(teamHandoffsRoutes);
 await app.register(teamWorkflowsCrudRoutes);
 await app.register(settingsRoutes);
 await app.register(workflowRoutes);
-await app.register(webStaticPlugin);
+await app.register(webStaticPlugin, { spaFallback: errorHandlerControls });
 await app.register(lspRoutes);
 await app.register(channelRoutes);
 await app.register(cronRoutes);
