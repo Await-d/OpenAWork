@@ -1,4 +1,4 @@
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { getPairingQr, login, type PairingQrResponse } from '@openAwork/web-client';
 import { PairingPanel } from '@openAwork/shared-ui';
@@ -173,6 +173,42 @@ function ErrorIcon() {
 
 /* ─── Desktop Onboarding ─── */
 
+/**
+ * 「启动本地网关」整条流程的**外层看门狗**上限。
+ *
+ * 这条流程内部的三段等待各自都有硬上界（原生侧 `STARTUP_HEALTH_WAIT_TIMEOUT`
+ * 15s、`waitForGatewayHealth` 15s、`authenticate_desktop_gateway` 30s），但那只是
+ * 「超时后会 reject」。如果 Tauri IPC 的响应丢失（Rust task 被 drop / panic 后
+ * 没有回包），`await` 会**永远挂起**，按钮就永久停在「正在启动并进入…」。
+ *
+ * 与 `App.tsx::useDesktopGatewayBootstrap` 的注释保持同一意图：任何异常都必须
+ * 落到可展示的失败态，不允许遮罩/按钮永久停在 starting。此处 45s 明显大于内部
+ * 三段之和，留出冷启动余量的同时又能兜住 IPC 悬挂。
+ */
+const LOCAL_GATEWAY_START_WATCHDOG_MS = 45_000;
+
+/**
+ * 给一个可能永不 settle 的 Promise 套上固定超时。
+ *
+ * 超时后抛出 `message`，由调用方统一落失败态；原 Promise 后续若再 settle，
+ * 只会走已注册的成功分支（resolve 无副作用），不会覆盖超时结果。
+ */
+function withStartupWatchdog<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error(message)), timeoutMs);
+    work.then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (workError: unknown) => {
+        globalThis.clearTimeout(timer);
+        reject(workError instanceof Error ? workError : new Error(String(workError)));
+      },
+    );
+  });
+}
+
 function DesktopGatewayOnboarding({ onComplete }: Props) {
   const { gatewayUrl, setGatewayUrl, setAuth, setWebAccess, webPort } = useAuthStore();
   const initialPort = readGatewayPortFromUrl(gatewayUrl, webPort || DEFAULT_GATEWAY_PORT);
@@ -205,9 +241,19 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
     completeDesktopOnboarding(url, 'local', port, tokenPair, DESKTOP_DEFAULT_EMAIL);
   }
 
+  /**
+   * 启动尝试的序号。取消 / 重试时自增，让仍在飞行的旧异步流程在回调时
+   * 发现自己已过期并放弃写状态——否则「取消」之后，旧 promise 迟到的
+   * catch/finally 会把 UI 又改回 starting 或 fail。
+   */
+  const localAttemptRef = useRef(0);
+
   async function chooseLocalGateway() {
     const port = parseGatewayPort(portInput, DEFAULT_GATEWAY_PORT);
     const url = localGatewayUrl(port);
+
+    localAttemptRef.current += 1;
+    const attempt = localAttemptRef.current;
 
     setLocalStatus('starting');
     setRemoteStatus('idle');
@@ -215,18 +261,55 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
     setPortInput(String(port));
     setUrlInput(url);
 
-    try {
-      await startDesktopGateway(port);
-      if (!(await waitForGatewayHealth(url))) {
-        throw new Error('本地网关已启动，但健康检查暂未通过。');
-      }
+    // 与 `App.tsx::useDesktopGatewayBootstrap` 保持同一份预算：start_gateway 自身
+    // 最多耗时 15s（原生侧 STARTUP_HEALTH_WAIT_TIMEOUT），必须计入等待预算，
+    // 否则两层各自 15s 计时会让失败场景空等 2 倍时间才报错。
+    const startedAt = Date.now();
 
+    try {
+      await withStartupWatchdog(
+        (async () => {
+          await startDesktopGateway(port);
+          if (!(await waitForGatewayHealth(url, { startedAt }))) {
+            throw new Error(
+              '本地网关健康检查未通过。请确认该端口未被其他程序占用，或改用其它端口后重试。',
+            );
+          }
+
+          await completeLocalDesktopOnboarding(url, port);
+        })(),
+        LOCAL_GATEWAY_START_WATCHDOG_MS,
+        '启动本地网关超时（45 秒）。内置网关可能未能启动，请重试；若反复失败请改用「连接远程网关」。',
+      );
+
+      if (localAttemptRef.current !== attempt) {
+        return;
+      }
       setLocalStatus('ok');
-      await completeLocalDesktopOnboarding(url, port);
     } catch (eventualError: unknown) {
+      if (localAttemptRef.current !== attempt) {
+        return;
+      }
       setLocalStatus('fail');
       setError(eventualError instanceof Error ? eventualError.message : '无法启动本地网关。');
     }
+  }
+
+  /**
+   * 取消正在进行的本地网关启动。
+   *
+   * 自增 attempt 让旧流程自行放弃写状态（无需卸载组件），再停掉可能已经
+   * 拉起但迟迟不健康的 sidecar——否则用户取消后端口仍被占着，重试会撞上
+   * 「端口已被占用」。
+   */
+  function cancelLocalGateway() {
+    localAttemptRef.current += 1;
+    setLocalStatus('idle');
+    setError(null);
+
+    void stopDesktopGateway().catch((eventualError: unknown) => {
+      logger.warn('Failed to stop local desktop gateway after cancel', eventualError);
+    });
   }
 
   function chooseRemoteGateway() {
@@ -309,18 +392,33 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
                   onChange={(event) => setPortInput(event.target.value)}
                 />
               </div>
-              <button
-                type="button"
-                onClick={() => void chooseLocalGateway()}
-                disabled={localStatus === 'starting'}
-                className="onboarding-mode-action"
-              >
-                {localStatus === 'starting'
-                  ? '正在启动并进入…'
-                  : localStatus === 'ok'
-                    ? '本地网关已就绪'
-                    : '使用本地网关'}
-              </button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+                <button
+                  type="button"
+                  onClick={() => void chooseLocalGateway()}
+                  disabled={localStatus === 'starting' || localStatus === 'ok'}
+                  className="onboarding-mode-action"
+                  style={{ flex: 1, width: 'auto', marginTop: 0 }}
+                >
+                  {localStatus === 'starting'
+                    ? '正在启动并进入…'
+                    : localStatus === 'ok'
+                      ? '本地网关已就绪'
+                      : localStatus === 'fail'
+                        ? '重试启动本地网关'
+                        : '使用本地网关'}
+                </button>
+                {localStatus === 'starting' ? (
+                  <button
+                    type="button"
+                    onClick={cancelLocalGateway}
+                    className="onboarding-mode-action onboarding-mode-action--secondary"
+                    style={{ flex: '0 0 auto', width: 'auto', marginTop: 0 }}
+                  >
+                    取消
+                  </button>
+                ) : null}
+              </div>
             </section>
 
             <section className="onboarding-mode-card">

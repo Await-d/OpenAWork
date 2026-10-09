@@ -274,8 +274,11 @@ function useDesktopGatewayBootstrap(
           setWebAccess(true, port);
           // bind host 必须与用户选择一致：LAN 模式下若仍以 127.0.0.1 启动，
           // 原生侧幂等短路会因 host 变化而反复重启 sidecar 并静默关闭 LAN 共享。
+          // startedAt 覆盖 start_gateway 的耗时:启动 + 等待共用同一份固定预算,
+          // 否则两层各自计时会让启动遮罩的最长停留时间叠加成 2 倍。
+          const startedAt = Date.now();
           await startDesktopGateway(port, webExposeLan ? 'lan' : 'localhost');
-          if (!(await waitForGatewayHealth(localUrl))) {
+          if (!(await waitForGatewayHealth(localUrl, { startedAt }))) {
             throw new Error('本地 Gateway 健康检查失败');
           }
         }
@@ -317,6 +320,21 @@ function useDesktopGatewayBootstrap(
 
   return phase;
 }
+
+/**
+ * sidecar 崩溃自动重启的退避阶梯与固定总预算。
+ *
+ * 崩溃重启是后台静默行为,不该长时间反复尝试:从 `gateway:crashed` 触发起
+ * 固定 30s 封顶,期间最多 2 轮(2s / 5s 退避)。用尽后保留 Failed 状态,
+ * 交由用户在设置页手动处理。
+ */
+const CRASH_RESTART_BACKOFF_MS = [2_000, 5_000];
+const CRASH_RESTART_TOTAL_BUDGET_MS = 30_000;
+/**
+ * 单次 `start_gateway` 的预算下界,与 Rust 侧 `STARTUP_HEALTH_WAIT_TIMEOUT`(15s)
+ * 对齐:`invoke` 不可中断,只有预算还够覆盖一次完整尝试时才值得再试。
+ */
+const CRASH_RESTART_ATTEMPT_BUDGET_MS = 15_000;
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
@@ -516,8 +534,8 @@ export default function App() {
     };
   }, [desktopRuntime, navigate]);
 
-  // sidecar 崩溃自动重试：Rust 端 emit 'gateway:crashed' 后这里按 2s/5s/10s
-  // 退避调用 start_gateway 重启 3 次。3 次失败则保留 Failed 健康状态供托盘显示。
+  // sidecar 崩溃自动重试：Rust 端 emit 'gateway:crashed' 后这里按 2s/5s 退避调用
+  // start_gateway 最多重启 2 次,并共用同一份固定总预算(超预算或失败即保留 Failed 状态)。
   // 用户可在「设置 → 连接与模型」手动触发或在「设置 → 桌面端」查看状态。
   // 重启时按当前 store 中的 webExposeLan 决定 host，避免 LAN 共享设置在崩溃恢复后丢失。
   const desktopRuntimeWebPort = useAuthStore((s) => s.webPort);
@@ -531,19 +549,26 @@ export default function App() {
         const fn = await listenTauriEvent<{ port: number }>('gateway:crashed', (event) => {
           const port = event.payload.port ?? desktopRuntimeWebPort;
           const host = desktopRuntimeWebExposeLan ? '0.0.0.0' : '127.0.0.1';
-          // 退避重试：2s / 5s / 10s。Linux/AppImage 场景下 sidecar 需要解压
+          // 退避重试：2s / 5s,最多 2 轮,并受固定总预算封顶。Linux/AppImage 场景下 sidecar 需要解压
           // gzip payload，首次启动可能需要数秒，因此退避间隔适当加大。
           void (async () => {
-            for (const delay of [2000, 5000, 10000]) {
-              await new Promise((r) => setTimeout(r, delay));
+            const deadline = Date.now() + CRASH_RESTART_TOTAL_BUDGET_MS;
+            for (const backoffMs of CRASH_RESTART_BACKOFF_MS) {
+              // `start_gateway` 在 Rust 侧最多等 15s 才返回且不可中断,预算不够覆盖
+              // 一次完整尝试时直接放弃,否则实际耗时仍会突破封顶。
+              if (deadline - Date.now() < CRASH_RESTART_ATTEMPT_BUDGET_MS) {
+                break;
+              }
+
+              await new Promise((r) => setTimeout(r, Math.min(backoffMs, deadline - Date.now())));
               try {
                 await tauriInvoke('start_gateway', { port, host });
                 return;
               } catch {
-                // 失败继续下一轮。
+                // 失败继续下一档退避。
               }
             }
-            // 3 次都失败：保留 Failed，用户可通过「设置→连接与模型」手动操作。
+            // 重试用尽或超预算：保留 Failed，用户可通过「设置→连接与模型」手动操作。
           })();
         });
         if (cancelled) fn();

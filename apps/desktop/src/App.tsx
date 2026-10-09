@@ -257,10 +257,13 @@ function useDesktopGatewayBootstrap(
           setWebAccess(true, port);
 
           console.log('[bootstrap] 正在启动网关...');
+          // startedAt 覆盖 start_gateway 的耗时:启动 + 等待共用同一份固定预算,
+          // 否则两层各自计时会让启动遮罩的最长停留时间叠加成 2 倍。
+          const startedAt = Date.now();
           await startDesktopGateway(port, bindMode);
           console.log('[bootstrap] 网关启动命令已发送，等待健康检查...');
 
-          const healthy = await waitForGatewayHealth(localUrl);
+          const healthy = await waitForGatewayHealth(localUrl, { startedAt });
           console.log('[bootstrap] 健康检查结果:', healthy);
 
           if (!healthy) {
