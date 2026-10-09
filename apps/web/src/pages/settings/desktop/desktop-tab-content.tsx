@@ -66,6 +66,7 @@ interface DesktopSettingsView {
   idleLockMinutes: number | null;
   pinDigits: number;
   updateChannel: 'preview' | 'stable';
+  islandEnabled: boolean;
 }
 
 /** 关闭行为选项预设列表。 */
@@ -174,6 +175,7 @@ export function DesktopTabContent() {
         idleLockMinutes: null,
         pinDigits: 4,
         updateChannel: 'stable',
+        islandEnabled: false,
       });
       setError(null);
       setLoading(false);
@@ -456,6 +458,18 @@ export function DesktopTabContent() {
     }
   }, []);
 
+  const updateIslandEnabled = useCallback(async (next: boolean) => {
+    if (!isTauri) return;
+    try {
+      const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
+        patch: { islandEnabled: next },
+      });
+      setView(updated);
+    } catch (err) {
+      logger.error('update_desktop_settings(island_enabled) failed', err);
+    }
+  }, []);
+
   const handleSetCloseBehavior = useCallback(
     async (next: CloseBehaviorValue) => {
       if (!view) return;
@@ -620,6 +634,36 @@ export function DesktopTabContent() {
           onChange={(next) => void updateChannel(next)}
           ariaLabel="选择更新渠道"
         />
+      </section>
+
+      <section style={SS}>
+        <h3 style={ST}>灵动岛</h3>
+        <div style={SETTINGS_CARD_ROW_STYLE}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-strong)' }}>
+              在屏幕顶部显示灵动岛浮窗
+            </div>
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: 'var(--fg-muted)',
+              }}
+            >
+              置顶浮窗实时展示 Agent 状态与网关健康;悬停展开会话摘要,点击可跳转。 快捷键 Alt+Shift+I
+              可随时显示 / 隐藏。
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <SettingsToggle
+              ariaLabel="灵动岛"
+              checked={view.islandEnabled}
+              disabled={migrationInFlight}
+              onChange={() => void updateIslandEnabled(!view.islandEnabled)}
+            />
+          </div>
+        </div>
       </section>
 
       <section style={SS}>

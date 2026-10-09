@@ -45,6 +45,7 @@ import { ToastContainer } from './components/common/feedback/ToastNotification.j
 import UpdateBanner from './components/common/feedback/UpdateBanner.js';
 import { usePrefersReducedMotion } from './hooks/ui/usePrefersReducedMotion.js';
 import { PRELOADABLE_ROUTE_MODULES } from './routes/preloadable-route-modules.js';
+import { IslandReporter } from './island/island-reporter.js';
 import {
   DEFAULT_FILE_ICON_THEME,
   FileIconThemeProvider,
@@ -736,6 +737,7 @@ export default function App() {
       />
       <ToastContainer />
       <UpdateBanner />
+      <IslandReporter />
       <Routes>
         <Route
           path="/"

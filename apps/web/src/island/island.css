@@ -1,0 +1,234 @@
+/*
+ * 灵动岛浮窗样式。
+ *
+ * 窗口是 Tauri 无边框 + 透明窗口,因此:
+ * - html / body / #root 必须透明,否则 WebView 会露出底色,药丸圆角失效;
+ * - 玻璃层(背景 / 前景 / 描边)用 island 作用域变量固定为深色高对比 ——
+ *   浮窗悬在任意壁纸与任意应用之上,若跟随应用亮 / 暗主题,会出现「浅壁纸 +
+ *   浅药丸」这类不可读组合;强调色(`--primary` / `--success` / `--danger`)
+ *   仍复用全局设计 token,不另造色。
+ */
+html.island-html,
+body.island-body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  overflow: hidden;
+}
+
+body.island-body #root {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.island-root {
+  --island-bg: rgba(13, 17, 27, 0.82);
+  --island-bg-expanded: rgba(13, 17, 27, 0.95);
+  --island-fg: rgba(244, 246, 252, 0.96);
+  --island-fg-muted: rgba(244, 246, 252, 0.6);
+  --island-line: rgba(255, 255, 255, 0.1);
+  --island-fill: rgba(255, 255, 255, 0.06);
+  --island-fill-hover: rgba(255, 255, 255, 0.12);
+  --island-shadow: 0 12px 32px rgba(4, 8, 18, 0.5);
+
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  padding: 0;
+  font: inherit;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.island-pill {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 24px;
+  border: 1px solid var(--island-line);
+  background: var(--island-bg);
+  color: var(--island-fg);
+  box-shadow: var(--island-shadow);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  overflow: hidden;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.island-pill.is-expanded {
+  background: var(--island-bg-expanded);
+}
+
+.island-header {
+  flex: 0 0 auto;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  cursor: default;
+  outline: none;
+}
+
+.island-header[role='button'] {
+  cursor: pointer;
+}
+
+.island-header[role='button']:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+  border-radius: 24px;
+}
+
+.island-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--island-fg-muted);
+}
+
+.island-dot-active {
+  background: hsl(var(--primary));
+  animation: island-pulse 1.4s ease-out infinite;
+}
+
+.island-dot-done {
+  background: var(--success);
+}
+
+.island-dot-error {
+  background: var(--danger);
+}
+
+@keyframes island-pulse {
+  0% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px hsl(var(--primary) / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-dot-active {
+    animation: none;
+  }
+}
+
+.island-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.island-spacer {
+  flex: 1 1 auto;
+}
+
+.island-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.16);
+  border: 1px solid hsl(var(--primary) / 0.32);
+}
+
+.island-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 14px 12px;
+}
+
+.island-title {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.island-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--island-fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.island-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.island-btn {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--island-line);
+  background: var(--island-fill);
+  color: var(--island-fg);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.island-btn:hover:not(:disabled) {
+  background: var(--island-fill-hover);
+}
+
+.island-btn:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.island-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.island-btn-primary {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.island-btn-primary:hover:not(:disabled) {
+  background: hsl(var(--primary) / 0.88);
+}
+
+.island-btn-primary:disabled {
+  background: hsl(var(--primary) / 0.4);
+  border-color: transparent;
+}

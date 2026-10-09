@@ -50,6 +50,27 @@ const WEBVIEW_CACHE_PURGE_MARKER: &str = ".webview-cache-purge";
 /// `DEFAULT_GATEWAY_DATA_SUBDIR` 对齐。
 const GATEWAY_SUBDIR: &str = "agent-gateway";
 
+/// 灵动岛浮窗窗口 label。
+const ISLAND_WINDOW_LABEL: &str = "island";
+/// 灵动岛折叠态尺寸(逻辑像素)。
+const ISLAND_COLLAPSED_WIDTH: f64 = 220.0;
+const ISLAND_COLLAPSED_HEIGHT: f64 = 48.0;
+/// 灵动岛展开态尺寸(逻辑像素)。
+const ISLAND_EXPANDED_WIDTH: f64 = 420.0;
+const ISLAND_EXPANDED_HEIGHT: f64 = 140.0;
+/// 灵动岛距主显示器**可用区域**顶部的间距(逻辑像素),提供视觉呼吸。
+const ISLAND_TOP_OFFSET: f64 = 12.0;
+/// Linux 下位置校正间隔(秒)。
+///
+/// 部分 Linux WM 会移动 / 忽略 `always_on_top` 浮窗的初始定位,按方案「关键风险
+/// 与规避」每 10s 用 `setPosition()` 校正一次;Windows / macOS 实测稳定,不启用
+/// (见 `start_island_reposition` 的平台判断)。
+const ISLAND_REPOSITION_INTERVAL_SECS: u64 = 10;
+/// 事件名:主窗口 → island 窗口的 Agent 状态推送。
+const EVT_ISLAND_AGENT_STATE: &str = "island:agent-state";
+/// 事件名:island 窗口 → 主窗口的「打开会话」请求。
+const EVT_ISLAND_NAVIGATE: &str = "island:navigate";
+
 struct GatewayState {
     child: Option<CommandChild>,
     port: Option<u16>,
@@ -228,6 +249,34 @@ fn is_dialog_host_ready(app: &tauri::AppHandle, channel: DialogChannel) -> bool 
         .unwrap_or(false)
 }
 
+/// 灵动岛运行期状态(managed by Tauri,内存态,不持久化)。
+#[derive(Default)]
+struct IslandState {
+    /// 当前是否展开(驱动窗口尺寸,供 `island_get_state` 回读)。
+    expanded: AtomicBool,
+    /// island WebView 是否已完成挂载 —— 未就绪时 emit 会丢失,必须先置位。
+    host_ready: AtomicBool,
+    /// 最近一次主窗口上报的 Agent 状态。
+    ///
+    /// island 未就绪(`host_ready == false`)时只更新这里、不 emit;等
+    /// `mark_island_host_ready` 到达后补发一次,避免「先有状态、后挂载」时丢事件。
+    last_agent_state: Mutex<Option<serde_json::Value>>,
+    /// Linux 位置校正任务的停止信号(`None` = 当前没有任务在跑)。
+    reposition_stop: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+/// 前端读取灵动岛状态的视图。
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IslandStateView {
+    /// 配置层面是否启用。
+    enabled: bool,
+    /// 窗口当前是否可见。
+    visible: bool,
+    /// 当前是否展开。
+    expanded: bool,
+}
+
 /// gateway sidecar 健康状态——驱动托盘 tooltip emoji 与前端状态显示。
 ///
 /// 状态机：Stopped → Starting → Healthy → Restarting → (Healthy | Failed)。
@@ -284,6 +333,9 @@ struct PersistedSettings {
     /// 更新渠道："preview" | "stable"。`None` = 默认 "preview"。
     #[serde(default)]
     update_channel: Option<String>,
+    /// 灵动岛浮窗是否启用。`None` = 未显式设置(默认启用)。
+    #[serde(default)]
+    island_enabled: Option<bool>,
 }
 
 /// 暴露给前端的设置视图——把 effective 路径与 autostart/pin 状态一起返回，
@@ -311,6 +363,8 @@ struct DesktopSettingsView {
     pin_digits: usize,
     /// 当前生效的更新渠道。
     update_channel: String,
+    /// 灵动岛浮窗当前是否启用（未显式设置时默认启用）。
+    island_enabled: bool,
 }
 
 /// 前端读解锁状态用的视图。
@@ -335,6 +389,8 @@ struct DesktopSettingsPatch {
     #[serde(default, deserialize_with = "deserialize_opt_opt_u32")]
     idle_lock_minutes: Option<Option<u32>>,
     update_channel: Option<String>,
+    /// 灵动岛浮窗开关。`Some(true/false)` 生效,`None` 表示不改动。
+    island_enabled: Option<bool>,
 }
 
 /// 区分前端传 `null`（显式重置）与字段缺失（不修改）。serde 默认无法
@@ -741,6 +797,18 @@ fn apply_autostart(app: &tauri::AppHandle, enable: bool) {
         let _ = handles.autostart.set_checked(autostart_enabled(app));
     }
 }
+
+/// sidecar 启动命令返回前的健康等待**固定总上限**。
+///
+/// 旧实现是「次数 × 间隔」(60 次、前 10 次 200ms、之后 500ms ≈ 27s),单次探测
+/// 自身的耗时不计入预算,启动遮罩的实际停留时间会随之漂移。现在按 deadline
+/// 计时,与前端 `waitForGatewayHealth` 的固定超时保持同一语义。
+///
+/// 注意:等待超时**不等于**启动失败——此处只决定是否立即标记 Healthy,
+/// 最终成败由前端轮询(共用同一份预算)判定。
+const STARTUP_HEALTH_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
+/// 启动等待期的探测间隔(未监听端口会立即 connection refused,探测本身很快)。
+const STARTUP_HEALTH_PROBE_INTERVAL: Duration = Duration::from_millis(250);
 
 async fn is_local_gateway_healthy(port: u16) -> bool {
     match reqwest::Client::new()
@@ -1205,12 +1273,12 @@ async fn spawn_gateway_sidecar(
         let _ = app_for_task.emit("gateway:crashed", serde_json::json!({ "port": port }));
     });
 
-    // 健康等待循环。
+    // 健康等待循环:固定总上限(见 STARTUP_HEALTH_WAIT_TIMEOUT)。
     let startup_healthy = {
+        let deadline = std::time::Instant::now() + STARTUP_HEALTH_WAIT_TIMEOUT;
         let mut healthy = false;
-        for attempt in 0..60 {
-            let interval = if attempt < 10 { 200 } else { 500 };
-            tokio::time::sleep(Duration::from_millis(interval)).await;
+        while std::time::Instant::now() < deadline {
+            tokio::time::sleep(STARTUP_HEALTH_PROBE_INTERVAL).await;
 
             if process_exited.load(std::sync::atomic::Ordering::Acquire) {
                 break;
@@ -1354,6 +1422,102 @@ async fn stop_gateway(
     Ok(())
 }
 
+/// 读取灵动岛当前状态(供前端挂载 / 设置页回读)。
+#[tauri::command]
+fn island_get_state(app: tauri::AppHandle) -> Result<IslandStateView, String> {
+    let enabled = app
+        .try_state::<SettingsState>()
+        .and_then(|state| state.0.lock().ok().map(|guard| island_is_enabled(&guard)))
+        .unwrap_or(true);
+    let expanded = app
+        .try_state::<IslandState>()
+        .map(|state| state.expanded.load(Ordering::Relaxed))
+        .unwrap_or(false);
+    Ok(IslandStateView {
+        enabled,
+        visible: island_is_visible(&app),
+        expanded,
+    })
+}
+
+/// 展开 / 折叠灵动岛窗口。
+#[tauri::command]
+fn island_set_expanded(app: tauri::AppHandle, expanded: bool) -> Result<(), String> {
+    apply_island_expanded(&app, expanded);
+    Ok(())
+}
+
+/// 切换灵动岛显示 / 隐藏。返回切换后是否可见。
+#[tauri::command]
+fn island_toggle_visible(app: tauri::AppHandle) -> Result<bool, String> {
+    Ok(toggle_island_visible(&app))
+}
+
+/// island WebView 挂载完成后调用,置位就绪标记(未就绪前 Rust 不转发状态)。
+///
+/// 就绪时补发一次挂载前缓存的最后一个状态:island 窗口刚创建时主窗口可能已经
+/// 上报过(启动竞态),不补发浮窗会一直停在默认的「待机」。
+#[tauri::command]
+fn mark_island_host_ready(app: tauri::AppHandle) -> Result<(), String> {
+    let Some(state) = app.try_state::<IslandState>() else {
+        return Err("灵动岛状态未初始化".to_string());
+    };
+    state.host_ready.store(true, Ordering::Relaxed);
+    // 先取出再 emit:不持锁做跨窗口发送。
+    let pending = match state.last_agent_state.lock() {
+        Ok(cached) => (*cached).clone(),
+        Err(_) => None,
+    };
+    if let Some(payload) = pending {
+        let _ = app.emit_to(ISLAND_WINDOW_LABEL, EVT_ISLAND_AGENT_STATE, payload);
+    }
+    Ok(())
+}
+
+/// 主窗口上报 Agent 运行状态 → 由 Rust 转发给 island 窗口。
+///
+/// 走 Rust 转发而非前端直发:主窗口 capability 显式 `deny-emit`,且跨窗口
+/// emit 由原生侧统一出口更易排查。island 未就绪时只缓存状态、不 emit(host-ready
+/// 前 WebView 还没有监听方,发了必丢)。
+#[tauri::command]
+fn island_report_agent_state(
+    app: tauri::AppHandle,
+    state: String,
+    session_id: Option<String>,
+    title: Option<String>,
+    preview: Option<String>,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "state": state,
+        "sessionId": session_id,
+        "title": title,
+        "preview": preview,
+    });
+    let Some(island) = app.try_state::<IslandState>() else {
+        return Ok(());
+    };
+    if let Ok(mut cached) = island.last_agent_state.lock() {
+        *cached = Some(payload.clone());
+    }
+    if !island.host_ready.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    let _ = app.emit_to(ISLAND_WINDOW_LABEL, EVT_ISLAND_AGENT_STATE, payload);
+    Ok(())
+}
+
+/// island 窗口请求打开某个会话:唤回主窗口并转发导航事件。
+#[tauri::command]
+fn island_navigate(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    restore_main_window(&app);
+    let _ = app.emit_to(
+        "main",
+        EVT_ISLAND_NAVIGATE,
+        serde_json::json!({ "sessionId": session_id }),
+    );
+    Ok(())
+}
+
 #[tauri::command]
 async fn restart_app(
     app: tauri::AppHandle,
@@ -1478,6 +1642,7 @@ async fn get_desktop_settings(
             .update_channel
             .clone()
             .unwrap_or_else(|| "preview".to_string()),
+        island_enabled: island_is_enabled(&snapshot),
     })
 }
 
@@ -1661,6 +1826,26 @@ async fn update_desktop_settings(
             }
         }
     }
+    if let Some(enabled) = patch.island_enabled {
+        if let Some(state) = app.try_state::<SettingsState>() {
+            if let Ok(mut guard) = state.0.lock() {
+                guard.island_enabled = Some(enabled);
+                save_settings(&app, &guard);
+            }
+        }
+        // 开关即时生效:开启则创建/显示,关闭则隐藏(不销毁窗口,便于再次开启)。
+        if enabled {
+            if ensure_island_window(&app) {
+                if let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) {
+                    let _ = window.show();
+                }
+                start_island_reposition(&app);
+            }
+        } else if let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) {
+            let _ = window.hide();
+            stop_island_reposition(&app);
+        }
+    }
     let state = app.state::<SettingsState>();
     get_desktop_settings(app.clone(), state).await
 }
@@ -1820,6 +2005,212 @@ async fn migrate_data_root(
 
     let state = app.state::<SettingsState>();
     get_desktop_settings(app.clone(), state).await
+}
+
+/// 灵动岛是否启用(未显式设置时默认启用)。
+fn island_is_enabled(settings: &PersistedSettings) -> bool {
+    settings.island_enabled.unwrap_or(true)
+}
+
+/// 计算 island 浮窗在主显示器上的逻辑坐标(可用区域顶部水平居中)。
+///
+/// 用 `primary_monitor` 的**可用区域**(`work_area`:已排除 macOS 菜单栏、
+/// Windows 任务栏、Linux 面板)的物理坐标 ÷ 缩放因子换算成逻辑像素,保证跨
+/// DPI 一致且不被系统栏遮挡;拿不到显示器信息时退回左上角附近,避免 panic。
+fn island_logical_position(app: &tauri::AppHandle, width: f64) -> (f64, f64) {
+    match app.primary_monitor().ok().flatten() {
+        Some(monitor) => {
+            let raw_scale = monitor.scale_factor();
+            let scale = if raw_scale > 0.0 { raw_scale } else { 1.0 };
+            let area = monitor.work_area();
+            let origin_x = area.position.x as f64 / scale;
+            let origin_y = area.position.y as f64 / scale;
+            let area_width = area.size.width as f64 / scale;
+            let x = origin_x + (area_width - width) / 2.0;
+            (x, origin_y + ISLAND_TOP_OFFSET)
+        }
+        None => (0.0, ISLAND_TOP_OFFSET),
+    }
+}
+
+/// 创建灵动岛浮窗(置顶 / 无边框 / 透明 / 不抢焦点 / 不占任务栏)。
+///
+/// 通过 `initialization_script` 注入 `window.__OPENAWORK_WINDOW_MODE__ = 'island'`,
+/// 让前端复用同一份 bundle 区分 island 与主窗口 —— 避免多入口构建与 URL query
+/// (`WebviewUrl::App` 下 query 在 Windows 上不可靠)两条更脆弱的路径。
+fn create_island_window(app: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+    let width = ISLAND_COLLAPSED_WIDTH;
+    let (x, y) = island_logical_position(app, width);
+
+    tauri::WebviewWindowBuilder::new(
+        app,
+        ISLAND_WINDOW_LABEL,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("OpenAWork")
+    .inner_size(width, ISLAND_COLLAPSED_HEIGHT)
+    .position(x, y)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .focused(false)
+    .initialization_script("window.__OPENAWORK_WINDOW_MODE__ = 'island';")
+    .build()
+}
+
+/// 确保灵动岛窗口存在(不存在则创建并显示)。返回是否最终存在。
+fn ensure_island_window(app: &tauri::AppHandle) -> bool {
+    if app.get_webview_window(ISLAND_WINDOW_LABEL).is_some() {
+        // 窗口可能刚从隐藏态被 show 回来:确保位置校正任务在跑(幂等)。
+        start_island_reposition(app);
+        return true;
+    }
+    match create_island_window(app) {
+        Ok(window) => {
+            let _ = window.show();
+            start_island_reposition(app);
+            true
+        }
+        Err(err) => {
+            eprintln!("[desktop] 创建灵动岛窗口失败: {err}");
+            false
+        }
+    }
+}
+
+/// 启动灵动岛位置校正任务(仅 Linux 生效,其它平台直接返回)。
+///
+/// 背景:方案「关键风险与规避」要求规避「Linux 下 WM 可能移动 always_on_top
+/// 浮窗」——每 10s 用 `setPosition()` 校正一次。实现要点:
+/// - 平台判断:`cfg!` 运行时守卫,非 Linux 不创建任何任务;
+/// - 线程安全:任务跑在 tauri 异步运行时(不阻塞主线程),停止信号是
+///   `Arc<AtomicBool>`,运行态经 `Mutex` 保护;
+/// - 幂等:同一时间最多一个任务,重复 `ensure` / `show` 不会叠加;
+/// - 坐标换算:复用 `island_logical_position`(物理 → 逻辑像素,展开态用展开宽度
+///   保持水平居中),避免 DPI 缩放导致漂移;
+/// - 清理:窗口隐藏 / 应用退出时由 `stop_island_reposition` 置位停止信号。
+fn start_island_reposition(app: &tauri::AppHandle) {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let Some(state) = app.try_state::<IslandState>() else {
+        return;
+    };
+    let Ok(mut slot) = state.reposition_stop.lock() else {
+        return;
+    };
+    if slot.is_some() {
+        return;
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    *slot = Some(stop.clone());
+    // 先释放锁再起任务,避免任务首轮与本函数争锁。
+    drop(slot);
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(ISLAND_REPOSITION_INTERVAL_SECS)).await;
+            if stop.load(Ordering::Relaxed) {
+                return; // 窗口已隐藏 / 应用正在退出。
+            }
+            let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) else {
+                return; // 窗口已销毁,任务自然结束。
+            };
+            if !window.is_visible().unwrap_or(false) {
+                continue; // 隐藏期间不做无谓的 setPosition。
+            }
+            let expanded = app
+                .try_state::<IslandState>()
+                .map(|state| state.expanded.load(Ordering::Relaxed))
+                .unwrap_or(false);
+            let width = if expanded {
+                ISLAND_EXPANDED_WIDTH
+            } else {
+                ISLAND_COLLAPSED_WIDTH
+            };
+            let (x, y) = island_logical_position(&app, width);
+            let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+        }
+    });
+}
+
+/// 停止灵动岛位置校正任务(窗口隐藏 / 应用退出时调用)。
+///
+/// 只置位停止信号:任务最多再等一个间隔就自然退出,不做线程级强杀。
+fn stop_island_reposition(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<IslandState>() else {
+        return;
+    };
+    let Ok(mut slot) = state.reposition_stop.lock() else {
+        return;
+    };
+    if let Some(stop) = slot.take() {
+        stop.store(true, Ordering::Relaxed);
+    }
+}
+
+/// island 窗口当前是否可见。
+fn island_is_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window(ISLAND_WINDOW_LABEL)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false)
+}
+
+/// 折叠 / 展开灵动岛:切换窗口尺寸并保持顶部水平居中。
+fn apply_island_expanded(app: &tauri::AppHandle, expanded: bool) {
+    let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) else {
+        return;
+    };
+    let (width, height) = if expanded {
+        (ISLAND_EXPANDED_WIDTH, ISLAND_EXPANDED_HEIGHT)
+    } else {
+        (ISLAND_COLLAPSED_WIDTH, ISLAND_COLLAPSED_HEIGHT)
+    };
+    let (x, y) = island_logical_position(app, width);
+    let _ = window.set_size(tauri::LogicalSize::new(width, height));
+    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+    if let Some(state) = app.try_state::<IslandState>() {
+        state.expanded.store(expanded, Ordering::Relaxed);
+    }
+}
+
+/// 切换灵动岛可见性;关闭态下调用会重新启用并显示。返回切换后是否可见。
+fn toggle_island_visible(app: &tauri::AppHandle) -> bool {
+    let enabled_now = app
+        .try_state::<SettingsState>()
+        .and_then(|state| state.0.lock().ok().map(|guard| island_is_enabled(&guard)))
+        .unwrap_or(true);
+
+    if !enabled_now {
+        // 关闭态下快捷键 / 命令仍应能重新打开:开启并持久化。
+        if let Some(state) = app.try_state::<SettingsState>() {
+            if let Ok(mut guard) = state.0.lock() {
+                guard.island_enabled = Some(true);
+                save_settings(app, &guard);
+            }
+        }
+        let created = ensure_island_window(app);
+        if let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) {
+            let _ = window.show();
+        }
+        return created;
+    }
+
+    if let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+            stop_island_reposition(app);
+            return false;
+        }
+        let _ = window.show();
+        start_island_reposition(app);
+        return true;
+    }
+
+    ensure_island_window(app)
 }
 
 /// 把主窗口从隐藏/最小化状态恢复并聚焦。
@@ -2233,8 +2624,17 @@ pub fn run() {
         ))
         .plugin(updater_plugin)
         // C-8 窗口状态记忆：自动持久化窗口大小/位置，下次启动恢复。
-        .plugin(tauri_plugin_window_state::Builder::default().build())
-        // C-7 全局快捷键：Alt+Shift+O 唤醒主窗口，Alt+Shift+P 显示配对 QR。
+        // 灵动岛不参与记忆：它的位置每次启动由 `island_logical_position` 按主
+        // 显示器可用区域实时计算（跨 DPI / 换显示器都正确），尺寸由展开态驱动；
+        // 若被记忆值覆盖，会出现「上次退出时是展开态 → 下次启动窗口仍 420×140、
+        // 但状态是折叠」这类尺寸与状态不一致。
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&[ISLAND_WINDOW_LABEL])
+                .build(),
+        )
+        // C-7 全局快捷键：Alt+Shift+O 唤醒主窗口，Alt+Shift+P 显示配对 QR，
+        // Alt+Shift+I 切换灵动岛显隐（关闭态下按一次即重新开启并持久化）。
         // Windows 用 Alt+Shift 避免与第三方应用 Ctrl+Shift 冲突。
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -2246,12 +2646,17 @@ pub fn run() {
                         shortcut.matches(Modifiers::ALT | Modifiers::SHIFT, Code::KeyO);
                     let matches_pair =
                         shortcut.matches(Modifiers::ALT | Modifiers::SHIFT, Code::KeyP);
+                    let matches_island =
+                        shortcut.matches(Modifiers::ALT | Modifiers::SHIFT, Code::KeyI);
                     if matches_wake {
                         restore_main_window(app);
                     }
                     if matches_pair {
                         restore_main_window(app);
                         let _ = app.emit("tray:show-pairing-qr", ());
+                    }
+                    if matches_island {
+                        toggle_island_visible(app);
                     }
                 })
                 .build(),
@@ -2293,6 +2698,12 @@ pub fn run() {
             mark_dialog_host_ready,
             close_browser_webview,
             close_stale_browser_webviews,
+            island_get_state,
+            island_set_expanded,
+            island_toggle_visible,
+            island_report_agent_state,
+            island_navigate,
+            mark_island_host_ready,
         ])
         .setup(|app| {
             // 先加载持久化设置并 manage 全局 state，setup_tray 会读取它来初始化菜单
@@ -2300,13 +2711,20 @@ pub fn run() {
             let handle = app.handle().clone();
             let persisted = load_settings(&handle);
             let initial_locked = persisted.pin_hash.is_some();
+            let initial_island_enabled = island_is_enabled(&persisted);
             handle.manage(SettingsState(Arc::new(Mutex::new(persisted))));
+            handle.manage(IslandState::default());
             // 启动时有 PIN 则默认锁定（场景 1：每次应用启动）。
             handle.manage(LockState(Arc::new(Mutex::new(LockInner {
                 locked: initial_locked,
                 ..Default::default()
             }))));
             setup_tray(&handle)?;
+
+            // 灵动岛:默认启用时随主窗口一并创建(关闭态下可由设置 / 快捷键再打开)。
+            if initial_island_enabled {
+                let _ = ensure_island_window(&handle);
+            }
 
             // identifier 漂移会让 WebView 缓存清理定位不到数据目录，直接提示出来。
             if app.config().identifier != DESKTOP_BUNDLE_IDENTIFIER {
@@ -2322,7 +2740,7 @@ pub fn run() {
             // C-7 注册全局快捷键。
             let _ = handle
                 .global_shortcut()
-                .register_multiple(["Alt+Shift+O", "Alt+Shift+P"]);
+                .register_multiple(["Alt+Shift+O", "Alt+Shift+P", "Alt+Shift+I"]);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -2337,7 +2755,14 @@ pub fn run() {
                     let _ = window.app_handle().emit("theme-changed", name);
                 }
                 WindowEvent::CloseRequested { api, .. } => {
-                    handle_window_close_request(window, api);
+                    // 灵动岛是常驻浮窗:系统关闭请求一律拦截为隐藏,避免误关后再也回不来。
+                    if window.label() == ISLAND_WINDOW_LABEL {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        stop_island_reposition(window.app_handle());
+                    } else {
+                        handle_window_close_request(window, api);
+                    }
                 }
                 _ => {}
             }
@@ -2354,6 +2779,8 @@ pub fn run() {
         if matches!(event, tauri::RunEvent::Exit) {
             // 退出前兜底回收漏关的浏览器子 webview，避免原生表面残留。
             let _ = close_stale_browser_webviews(app_handle.clone());
+            // 停掉 Linux 位置校正任务（进程即将结束，避免留下悬空定时任务）。
+            stop_island_reposition(app_handle);
             shutdown_gateway_child(app_handle);
         }
     });

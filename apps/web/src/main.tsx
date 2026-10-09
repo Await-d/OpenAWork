@@ -15,6 +15,7 @@ import { installExtensionNoiseFilter } from './lib/filter/extension-noise-filter
 import { installMonacoI18n } from './lib/monaco/monaco-i18n.js';
 import { isTauriRuntime } from './utils/gateway/desktop-gateway.js';
 import { clientErrorRecorder, exportClientErrorDiagnostics } from './utils/log/error-capture.js';
+import { readDesktopWindowMode } from './island/window-mode.js';
 
 // Configure Monaco to load from local bundle instead of CDN.
 // This prevents "Monaco initialization: error" when the CDN is unreachable.
@@ -159,20 +160,29 @@ function mountApp(): void {
   );
 }
 
-// 桌面端：先做缓存自愈再挂载。需要强刷时用带版本号的 URL 重新加载，
-// 让 WebView 无法再拿缓存里的旧 index.html。版本号 gate 防止无限 reload。
-void healDesktopStaleCaches()
-  .then((needsReload) => {
-    if (needsReload) {
-      // 旧 SW controller 可能仍在当前文档生命周期内生效，重载后才会彻底脱离；
-      // 多一个 query 的新 URL 必然绕开 HTTP 缓存，replace 不留历史记录。
-      const url = new URL(window.location.href);
-      url.searchParams.set('v', __APP_VERSION__);
-      window.location.replace(url.toString());
-      return;
-    }
-    mountApp();
-  })
-  .catch(() => {
-    mountApp();
-  });
+// 灵动岛窗口：复用同一份 bundle，只挂载浮窗 UI（动态导入，主窗口不为此付加载成本）。
+if (readDesktopWindowMode() === 'island') {
+  void import('./island/mount-island.js')
+    .then((module) => {
+      module.mountIslandApp();
+    })
+    .catch((error: unknown) => {
+      console.error('[island] 挂载失败', error);
+    });
+} else {
+  void healDesktopStaleCaches()
+    .then((needsReload) => {
+      if (needsReload) {
+        // 旧 SW controller 可能仍在当前文档生命周期内生效，重载后才会彻底脱离；
+        // 多一个 query 的新 URL 必然绕开 HTTP 缓存，replace 不留历史记录。
+        const url = new URL(window.location.href);
+        url.searchParams.set('v', __APP_VERSION__);
+        window.location.replace(url.toString());
+        return;
+      }
+      mountApp();
+    })
+    .catch(() => {
+      mountApp();
+    });
+}

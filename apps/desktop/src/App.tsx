@@ -23,6 +23,7 @@ import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
 import SessionsPage from '../../web/src/pages/sessions-page/SessionsPage.js';
 import SettingsPage from '../../web/src/pages/settings/SettingsPage.js';
 import Layout from './components/layout/Layout.js';
+import { IslandReporter } from '../../web/src/island/island-reporter.js';
 import { CloseConfirmDialog } from '../../web/src/components/common/modal/CloseConfirmDialog.js';
 import { AboutDialog } from '../../web/src/components/common/modal/AboutDialog.js';
 import {
@@ -440,6 +441,7 @@ export default function App() {
       <CloseConfirmDialog />
       <AboutDialog />
       <NotificationListener />
+      <IslandReporter />
       <Layout>
         <Routes>
           <Route path="/onboarding" element={<Navigate to="/sessions" replace />} />
