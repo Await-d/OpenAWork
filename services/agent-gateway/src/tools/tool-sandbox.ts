@@ -1,4 +1,5 @@
 import type { ToolCallRequest, ToolCallResult, ToolDefinition } from '@openAwork/agent-core';
+import { formatAgentIgnoreDenial } from '../workspace/agentignore-denial.js';
 import {
   defaultIgnoreManager,
   ToolNotFoundError,
@@ -1108,7 +1109,7 @@ export class ToolSandbox {
         const result: ToolCallResult = {
           toolCallId: request.toolCallId,
           toolName: request.toolName,
-          output: `Access denied: file "${safeFilePath}" is protected by agentignore rules`,
+          output: formatAgentIgnoreDenial('file', safeFilePath),
           isError: true,
           durationMs: 0,
         };

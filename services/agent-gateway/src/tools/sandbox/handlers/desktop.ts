@@ -83,7 +83,12 @@ export async function handleDesktopAutomationTool(
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: await runDesktopAutomationTool(parsed.data),
+      // 传入 (sessionId, toolCallId) 后,content 超限会把整页 HTML 源头裁剪为
+      // 预览并落盘,模型可用 read_tool_output 按 toolCallId 取回全文。
+      output: await runDesktopAutomationTool(parsed.data, desktopAutomationManager, {
+        sessionId,
+        toolCallId: request.toolCallId,
+      }),
       isError: false,
       durationMs: 0,
     };

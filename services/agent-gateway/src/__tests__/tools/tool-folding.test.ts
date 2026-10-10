@@ -157,6 +157,39 @@ describe('tool_invoke 解包决策', () => {
     expect(decision.kind).toBe('reject');
   });
 
+  it('不可见的 MCP 工具名附带可执行的排查指引', () => {
+    const decision = resolveToolInvokeRequest({
+      toolName: TOOL_INVOKE_TOOL_NAME,
+      rawInput: { tool: 'mcp__pencil__execute', arguments: {} },
+      allowlist: [],
+      isToolEnabled: () => true,
+    });
+    expect(decision.kind).toBe('reject');
+    expect((decision as { message: string }).message).toContain('action="enable"');
+  });
+
+  it('mcp_manage_servers 自身不可见时不给出循环指引', () => {
+    const decision = resolveToolInvokeRequest({
+      toolName: TOOL_INVOKE_TOOL_NAME,
+      rawInput: { tool: 'mcp_manage_servers', arguments: {} },
+      allowlist: [],
+      isToolEnabled: () => true,
+    });
+    expect(decision.kind).toBe('reject');
+    expect((decision as { message: string }).message).not.toContain('action="enable"');
+  });
+
+  it('非 MCP 工具名不附带 MCP 指引', () => {
+    const decision = resolveToolInvokeRequest({
+      toolName: TOOL_INVOKE_TOOL_NAME,
+      rawInput: { tool: 'session_read', arguments: {} },
+      allowlist: [],
+      isToolEnabled: () => true,
+    });
+    expect(decision.kind).toBe('reject');
+    expect((decision as { message: string }).message).not.toContain('action="enable"');
+  });
+
   it('会话内已禁用 → 拒绝（defense in depth）', () => {
     const decision = resolveToolInvokeRequest({
       toolName: TOOL_INVOKE_TOOL_NAME,

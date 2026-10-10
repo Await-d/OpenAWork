@@ -2,6 +2,7 @@ import { promises as fsp, type Dirent, type Stats } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import type { ToolDefinition } from '@openAwork/agent-core';
+import { formatAgentIgnoreDenial } from '../workspace/agentignore-denial.js';
 import type { FileBackupRef } from '@openAwork/shared';
 import { z } from 'zod';
 import { WORKSPACE_ROOT } from '../infra/db.js';
@@ -255,7 +256,7 @@ function assertAccessibleWorkspacePath(
   }
 
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
-    throw new Error(`Access denied: ${target} "${safePath}" is protected by agentignore rules`);
+    throw new Error(formatAgentIgnoreDenial(target, safePath));
   }
 
   return safePath;
@@ -274,7 +275,7 @@ function assertWritableWorkspacePath(
   }
 
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
-    throw new Error(`Access denied: ${target} "${safePath}" is protected by agentignore rules`);
+    throw new Error(formatAgentIgnoreDenial(target, safePath));
   }
 
   return safePath;
@@ -963,7 +964,7 @@ export async function executeWorkspaceReviewDiff(
   const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);
   const absoluteFilePath = join(safePath, relativeFilePath);
   if (defaultIgnoreManager.shouldIgnore(absoluteFilePath)) {
-    throw new Error(`Access denied: file "${absoluteFilePath}" is protected by agentignore rules`);
+    throw new Error(formatAgentIgnoreDenial('file', absoluteFilePath));
   }
 
   const diff = await getWorkspaceReviewDiff(safePath, relativeFilePath);
@@ -1158,7 +1159,7 @@ export async function executeWorkspaceReviewRevert(
   const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);
   const absoluteFilePath = join(safePath, relativeFilePath);
   if (defaultIgnoreManager.shouldIgnore(absoluteFilePath)) {
-    throw new Error(`Access denied: file "${absoluteFilePath}" is protected by agentignore rules`);
+    throw new Error(formatAgentIgnoreDenial('file', absoluteFilePath));
   }
 
   await revertWorkspaceReviewPath(safePath, relativeFilePath);

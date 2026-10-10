@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import type { FileBackupRef } from '@openAwork/shared';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
+import { formatAgentIgnoreDenial } from '../workspace/agentignore-denial.js';
 import { z } from 'zod';
 import { buildFileDiff, fileBackupRefSchema, fileDiffSchema } from './file-diff-format.js';
 import { deriveUpdatedText, ensureTrailingNewline, parsePatchText } from './patch-text.js';
@@ -64,7 +65,7 @@ function describeError(error: unknown): string {
 function assertPatchPath(path: string, sessionId: string): string {
   const safePath = assertSessionWorkspacePath({ path, sessionId });
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
-    throw new Error(`Access denied: file "${safePath}" is protected by agentignore rules`);
+    throw new Error(formatAgentIgnoreDenial('file', safePath));
   }
   return safePath;
 }

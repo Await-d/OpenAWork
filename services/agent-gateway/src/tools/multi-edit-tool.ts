@@ -9,6 +9,7 @@
 import { promises as fsp } from 'node:fs';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
+import { formatAgentIgnoreDenial } from '../workspace/agentignore-denial.js';
 import { z } from 'zod';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
@@ -64,7 +65,7 @@ const multiEditOutputSchema = z.object({
 function assertEditableWorkspacePath(sessionId: string, filePath: string): string {
   const safePath = assertSessionWorkspacePath({ path: filePath, sessionId });
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
-    throw new Error(`Access denied: file "${safePath}" is protected by agentignore rules`);
+    throw new Error(formatAgentIgnoreDenial('file', safePath));
   }
   return safePath;
 }

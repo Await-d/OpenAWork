@@ -1,4 +1,5 @@
 import { defaultIgnoreManager } from '@openAwork/agent-core';
+import { formatAgentIgnoreDenial } from '../workspace/agentignore-denial.js';
 import { promises as fsp } from 'node:fs';
 import { basename } from 'node:path';
 import { channelFetch } from '../channels/channel-http.js';
@@ -97,7 +98,7 @@ export async function readChannelMedia(input: {
   const safePath = assertSessionWorkspacePath({ path: input.filePath, sessionId: input.sessionId });
   await ensureIgnoreRulesLoadedForPath(safePath);
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
-    throw new Error(`Access denied: file "${safePath}" is protected by agentignore rules`);
+    throw new Error(formatAgentIgnoreDenial('file', safePath));
   }
   return { buffer: await fsp.readFile(safePath), fileName: basename(safePath) };
 }

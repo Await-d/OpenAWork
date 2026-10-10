@@ -331,6 +331,19 @@ export function renderToolCatalog(
   return [header, ...lines].join('\n');
 }
 
+/**
+ * MCP 相关工具名的可执行排查指引。
+ *
+ * 模型常凭记忆调用 `mcp__<server>__<tool>`(或 `mcp_call` / `mcp_list_tools`),
+ * 但 MCP 工具只在「已配置 + 已启用 + 已连接」时才对会话可见。给出确定性的下一步,
+ * 避免它反复重试同一个不可见工具(在诊断面板里刷出大量无效错误)。
+ */
+function mcpAvailabilityHint(toolName: string): string {
+  if (toolName === 'mcp_manage_servers') return '';
+  if (!toolName.startsWith('mcp__') && !toolName.startsWith('mcp_')) return '';
+  return ' 若这是 MCP 工具:先用 mcp_manage_servers({action:"list"}) 查看已配置的服务器,再用 action="enable" 启用并连接;连接成功后其工具会在下一轮对本会话可见。';
+}
+
 export type ToolInvokeDecision =
   | { readonly kind: 'pass' }
   | { readonly kind: 'rewrite'; readonly toolName: string; readonly rawInput: unknown }
@@ -370,7 +383,9 @@ export function resolveToolInvokeRequest(input: {
   if (!input.allowlist.includes(toolName)) {
     return {
       kind: 'reject',
-      message: `Tool "${toolName}" is not available in this session; use tool_search to find an available folded tool.`,
+      message:
+        `Tool "${toolName}" is not available in this session; use tool_search to find an available folded tool.` +
+        mcpAvailabilityHint(toolName),
     };
   }
   if (!input.isToolEnabled(toolName)) {
