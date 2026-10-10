@@ -32,7 +32,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { clearPendingOAuthFlow, findOAuthEntryByState } from '../mcp/mcp-oauth-store.js';
 import { finalizeOAuthFromCallback, McpOAuthProvider } from '../mcp/mcp-oauth-provider.js';
-import { getConfiguredServerByIdForUser } from '../mcp/mcp-runtime.js';
+import {
+  getConfiguredServerByIdForUser,
+  invalidateMcpServerConnectionForUser,
+} from '../mcp/mcp-runtime.js';
 
 const HTML_SUCCESS = `<!DOCTYPE html>
 <html>
@@ -173,6 +176,10 @@ export async function mcpOAuthRoutes(app: FastifyInstance): Promise<void> {
         { userId: found.userId, mcpId: found.mcpId },
         'MCP OAuth code exchange succeeded',
       );
+      // Drop any adapter pooled before this (re-)authorization so the
+      // next session turn reconnects with the freshly-saved tokens
+      // instead of reusing a connection that failed while unauthorized.
+      await invalidateMcpServerConnectionForUser(found.userId, server);
       reply.code(200).type('text/html').send(HTML_SUCCESS);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

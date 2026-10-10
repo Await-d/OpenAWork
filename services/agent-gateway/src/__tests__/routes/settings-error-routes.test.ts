@@ -20,6 +20,8 @@ vi.mock('../../mcp/mcp-runtime.js', () => ({
   listMcpToolsForUser: mocks.listMcpToolsForUser,
   loadConfiguredMcpServersForUser: vi.fn(() => []),
   retryMcpConnectionForUser: mocks.retryMcpConnectionForUser,
+  getMcpPoolKey: vi.fn((server: { id?: string }) => `pool-${server.id ?? 'unknown'}`),
+  invalidateMcpServerConnectionForUser: vi.fn(async () => undefined),
 }));
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({

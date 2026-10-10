@@ -43,6 +43,8 @@ import { resolveSubagentLimitsForUser } from '../task/subagent-limits.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { listRequestWorkflowLogs } from '../runtime/request-workflow-log-store.js';
 import {
+  getMcpPoolKey,
+  invalidateMcpServerConnectionForUser,
   isMcpServerConnectedForUser,
   listMcpToolsForUser,
   loadConfiguredMcpServersForUser,
@@ -1808,6 +1810,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const body = parseBody(mcpServersBodySchema, request.body);
 
+      // Snapshot the pre-save config so we can tear down the old pooled
+      // connections after persisting. A session that already cached a
+      // broken adapter (connect succeeded once, then auth/transport
+      // started failing) would otherwise keep reusing it and stay in the
+      // `error` state even after the user fixes the server here.
+      const previousServers = loadConfiguredMcpServersForUser(user.sub);
+
       const saveStep = child('save');
       sqliteRun(
         `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'mcp_servers', ?)
@@ -1815,6 +1824,22 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         [user.sub, JSON.stringify(body.servers)],
       );
       saveStep.succeed(undefined, { servers: body.servers.length });
+
+      // Invalidate both the previous and the freshly-saved connections so
+      // the next session turn reconnects from scratch. Re-reading the
+      // config yields the merged `ConfiguredMCPServer[]` (builtins +
+      // persisted) that the pool keys are derived from.
+      const invalidateStep = child('invalidate-connections');
+      const nextServers = loadConfiguredMcpServersForUser(user.sub);
+      const invalidatedKeys = new Set<string>();
+      for (const server of [...previousServers, ...nextServers]) {
+        const poolKey = getMcpPoolKey(server);
+        if (invalidatedKeys.has(poolKey)) continue;
+        invalidatedKeys.add(poolKey);
+        await invalidateMcpServerConnectionForUser(user.sub, server);
+      }
+      invalidateStep.succeed(undefined, { connections: invalidatedKeys.size });
+
       step.succeed(undefined, { servers: body.servers.length });
 
       return reply.send({ ok: true, servers: body.servers });

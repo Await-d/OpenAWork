@@ -185,6 +185,14 @@ export function getMcpServerFingerprint(server: ConfiguredMCPServer): string {
     required: server.required ?? false,
     builtin: server.builtin ?? false,
     disabledTools: server.disabledTools ?? [],
+    // `headers` / `oauth` MUST participate in the fingerprint. Users
+    // routinely fix a broken MCP server by adding/replacing an auth
+    // header or enabling OAuth; if those fields were excluded, the
+    // pool key would be unchanged and the session would keep reusing
+    // the already-cached (broken) adapter forever. See the pool-key
+    // docstring in {@link getMcpPoolKey}.
+    headers: server.headers ?? {},
+    oauth: server.oauth ?? null,
   });
 
   return createHash('sha256').update(fingerprintSource).digest('hex').slice(0, 16);
@@ -276,6 +284,31 @@ function toMcpServerRef(
  */
 export function getMcpPoolKey(server: ConfiguredMCPServer): string {
   return `${server.id}:${getMcpServerFingerprint(server)}`;
+}
+
+/**
+ * Tear down the pooled connection + cached tool catalog for a single
+ * MCP server configuration, so the next session turn rebuilds the
+ * connection from the latest config instead of reusing a stale
+ * adapter.
+ *
+ * Why this is needed even with the config fingerprint baked into the
+ * pool key: a *successful* connect is cached in the pool; if that
+ * adapter later starts failing with an error that the pool's
+ * `withOperationRetry` reconnect heuristic doesn't recognise as
+ * connection-related (e.g. a 401 / JSON-RPC error), the bad adapter
+ * stays cached and every subsequent turn keeps returning the same
+ * error. Editing the server config in settings is the user's repair
+ * action, so the save path must proactively drop both the old (pre-save)
+ * and the new connections.
+ */
+export async function invalidateMcpServerConnectionForUser(
+  userId: string,
+  server: ConfiguredMCPServer,
+): Promise<void> {
+  const poolKey = getMcpPoolKey(server);
+  await mcpConnectionPool.disconnectUserConnection(userId, poolKey);
+  clearCatalogSnapshot(userId, poolKey);
 }
 
 function filterEnabledMcpTools(

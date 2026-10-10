@@ -57,6 +57,8 @@ export type {
   ChannelCapabilityCatalogToolGroupCounts,
   ChannelCapabilityPreviewInput,
   ChannelCapabilityPreviewPermissions,
+  SessionCapabilitiesResult,
+  SessionMcpServerDetail,
 } from './session/capabilities.js';
 export { RESOURCE_USAGE_DEFAULTS, createResourcesClient } from './session/resources.js';
 export type {

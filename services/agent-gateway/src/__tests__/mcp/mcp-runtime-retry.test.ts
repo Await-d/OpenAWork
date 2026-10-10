@@ -490,3 +490,39 @@ describe('callMcpToolForSession virtual builtins', () => {
     expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
   });
 });
+
+describe('getMcpPoolKey config fingerprint', () => {
+  it('rotates the pool key when auth headers change', () => {
+    const withoutAuth = getMcpPoolKey({ ...STDIO_BASE });
+    const withAuth = getMcpPoolKey({
+      ...STDIO_BASE,
+      headers: { authorization: 'Bearer fixed' },
+    });
+
+    expect(withAuth).not.toBe(withoutAuth);
+  });
+
+  it('rotates the pool key when the OAuth config changes', () => {
+    const sseBase: ConfiguredMCPServer = {
+      id: 'remote',
+      name: 'remote',
+      transport: 'sse',
+      url: 'https://example.com/mcp',
+      enabled: true,
+    };
+    const withoutOauth = getMcpPoolKey(sseBase);
+    const withOauth = getMcpPoolKey({
+      ...sseBase,
+      oauth: { clientId: 'client-1', scope: 'read' },
+    });
+
+    expect(withOauth).not.toBe(withoutOauth);
+  });
+
+  it('produces a stable key for an unchanged config', () => {
+    const first = getMcpPoolKey({ ...STDIO_BASE, headers: { a: 'b' } });
+    const second = getMcpPoolKey({ ...STDIO_BASE, headers: { a: 'b' } });
+
+    expect(second).toBe(first);
+  });
+});

@@ -61,6 +61,27 @@ export interface CapabilitiesClient {
     token: string,
     input: ChannelCapabilityPreviewInput,
   ): Promise<ChannelCapabilityCatalogCounts>;
+  /** 会话级生效能力清单(含 MCP 连接状态与工具目录)。 */
+  sessionDetail(token: string, sessionId: string): Promise<SessionCapabilitiesResult>;
+}
+
+/** 会话下单个 MCP server 的生效明细(与网关 `SessionMcpServerDetail` 对齐)。 */
+export interface SessionMcpServerDetail {
+  readonly id: string;
+  readonly name: string;
+  readonly transport: 'sse' | 'stdio';
+  readonly enabled: boolean;
+  readonly status: 'connected' | 'disabled' | 'error';
+  readonly toolCount: number;
+  readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+  readonly builtin: boolean;
+  readonly error?: string;
+}
+
+export interface SessionCapabilitiesResult {
+  readonly skills: CapabilityDescriptor[];
+  readonly tools: CapabilityDescriptor[];
+  readonly mcpServers: SessionMcpServerDetail[];
 }
 
 function isRetryableCapabilitiesStatus(status: number): boolean {
@@ -191,6 +212,27 @@ export function createCapabilitiesClient(baseUrl: string): CapabilitiesClient {
         return data.counts;
       } catch (error) {
         throw normalizeCapabilitiesActionError('预览通道能力目录', error);
+      }
+    },
+
+    async sessionDetail(token: string, sessionId: string): Promise<SessionCapabilitiesResult> {
+      try {
+        const response = await fetchWithTimeout(
+          `${baseUrl}/capabilities/session/${encodeURIComponent(sessionId)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (!response.ok) {
+          const data = await readJsonErrorData<JsonErrorData>(response);
+          throw new Error(buildCapabilitiesListErrorMessage(response.status, data));
+        }
+        const data = (await response.json()) as Partial<SessionCapabilitiesResult>;
+        return {
+          skills: data.skills ?? [],
+          tools: data.tools ?? [],
+          mcpServers: data.mcpServers ?? [],
+        };
+      } catch (error) {
+        throw normalizeCapabilitiesError(error);
       }
     },
 

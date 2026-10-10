@@ -26,6 +26,7 @@ import type {
   WorkspaceFileMentionItem,
 } from '../../../components/conversation-runtime/messages/support.js';
 import type { DialogueMode } from '../mode/dialogue-mode.js';
+import { SessionInjectedToolsSection } from './session-injected-tools-section.js';
 import {
   buildUpstreamSummaryGroupContextText,
   formatCompactionShortLabel,
@@ -520,6 +521,10 @@ export function ChatOverviewTabContent(props: ChatOverviewTabContentProps) {
         contextUsageSnapshot={contextUsageSnapshot}
         metaRows={metaRows}
       />
+
+      <OverviewSection title="注入工具">
+        <SessionInjectedToolsSection sessionId={currentSessionId} />
+      </OverviewSection>
 
       <TodosAndTasksSection
         mainActiveCount={mainActiveCount}

@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => {
     }),
     finalizeMock: vi.fn(),
     getServerMock: vi.fn(),
+    invalidateConnectionMock: vi.fn(async () => undefined),
   };
 });
 
@@ -53,6 +54,7 @@ vi.mock('../../infra/db.js', () => ({
 
 vi.mock('../../mcp/mcp-runtime.js', () => ({
   getConfiguredServerByIdForUser: mocks.getServerMock,
+  invalidateMcpServerConnectionForUser: mocks.invalidateConnectionMock,
 }));
 
 vi.mock('../../mcp/mcp-oauth-provider.js', async () => {
@@ -235,6 +237,8 @@ describe('GET /mcp/oauth/callback', () => {
         url: '/mcp/oauth/callback?state=redirect-state&code=any',
       });
       expect(replay.statusCode).toBe(400);
+      // REDIRECT is not a completed authorization — nothing to invalidate.
+      expect(mocks.invalidateConnectionMock).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

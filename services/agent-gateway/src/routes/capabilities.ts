@@ -16,7 +16,7 @@ import {
   getEffectiveSkillsForUser,
 } from '../skill/skill-selection-context.js';
 import { BUILTIN_MCP_IDS } from '../mcp/builtin-mcps.js';
-import { loadConfiguredMcpServersForUser } from '../mcp/mcp-runtime.js';
+import { listMcpToolsForSession, loadConfiguredMcpServersForUser } from '../mcp/mcp-runtime.js';
 import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../mcp/mcp-manage-tool-name.js';
 import { MEMORY_MANAGE_TOOL_NAME } from '../memory/memory-manage-tool-name.js';
 import { SKILL_MANAGE_TOOL_NAME } from '../skill/skill-manage-tool-name.js';
@@ -31,11 +31,30 @@ import {
 import { resolveChannelCapabilityToolGroup } from '../channels/channel-capability-tool-groups.js';
 import { SUPPORTED_CHANNEL_PLATFORMS } from '../channels/types.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { buildSessionMcpExecutionScope } from '../tools/sandbox/task-reference.js';
 import type { ChannelCapabilityContextPromptInjections } from '../channels/types.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 interface SessionMetadataRow {
   metadata_json: string;
+}
+
+/**
+ * 单个 MCP server 在该会话下的生效明细(设置页「会话概览」用)。
+ *
+ * 与 `MCPServerToolCatalog` 的差异:这里只暴露前端渲染所需的最小字段,
+ * 并显式带上 `builtin` 标记,避免把内部池键 / 指纹泄漏给客户端。
+ */
+export interface SessionMcpServerDetail {
+  readonly id: string;
+  readonly name: string;
+  readonly transport: 'sse' | 'stdio';
+  readonly enabled: boolean;
+  readonly status: 'connected' | 'disabled' | 'error';
+  readonly toolCount: number;
+  readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+  readonly builtin: boolean;
+  readonly error?: string;
 }
 
 interface BuildCapabilityContextOptions {
@@ -539,6 +558,66 @@ export async function capabilitiesRoutes(app: FastifyInstance): Promise<void> {
 
       step.succeed(undefined, { count: capabilities.length });
       return reply.send({ capabilities });
+    },
+  );
+
+  // 会话级能力清单:返回该会话**实际生效**的 Skill / MCP(含连接状态与工具)/
+  // 工具,供「会话概览」展示。与 `/capabilities` 的区别:
+  //   - MCP 走 `listMcpToolsForSession`,按会话 `requestedMcpServers` 白名单过滤,
+  //     且带上连接状态(status)与工具目录;队/子会话的最小授权语义与 stream 一致。
+  //   - Skill / tool 复用 `buildCapabilitiesForUser`(已按会话 metadata 过滤)。
+  app.get(
+    '/capabilities/session/:sessionId',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'capabilities.sessionDetail');
+      const user = request.user as { sub: string };
+      const params = (request.params ?? {}) as { sessionId?: string };
+      const sessionId = params.sessionId?.trim();
+      if (!sessionId) {
+        step.fail('missing sessionId');
+        return reply.status(400).send({ error: '缺少会话标识。' });
+      }
+
+      const row = sqliteGet<SessionMetadataRow>(
+        'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!row) {
+        step.fail('session not found');
+        return reply.status(404).send({ error: '会话不存在。' });
+      }
+
+      const capabilities = buildCapabilitiesForUser({ userId: user.sub, sessionId });
+      const skills = capabilities.filter((cap) => cap.kind === 'skill');
+      const tools = capabilities.filter((cap) => cap.kind === 'tool');
+
+      const builtinMcpIdSet = new Set<string>(BUILTIN_MCP_IDS);
+      const catalogs = await listMcpToolsForSession(
+        sessionId,
+        buildSessionMcpExecutionScope(sessionId),
+      );
+      const mcpServers: SessionMcpServerDetail[] = catalogs.map((catalog) => ({
+        id: catalog.serverId,
+        name: catalog.serverName,
+        transport: catalog.transport,
+        enabled: catalog.enabled,
+        status: catalog.status,
+        toolCount: catalog.tools.length,
+        tools: catalog.tools.map((tool) => ({
+          name: tool.name,
+          ...(tool.description ? { description: tool.description } : {}),
+        })),
+        builtin: builtinMcpIdSet.has(catalog.serverId),
+        ...(catalog.error ? { error: catalog.error } : {}),
+      }));
+
+      step.succeed(undefined, {
+        skills: skills.length,
+        mcps: mcpServers.length,
+        tools: tools.length,
+      });
+      return reply.send({ sessionId, skills, tools, mcpServers });
     },
   );
 

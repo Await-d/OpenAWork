@@ -131,7 +131,8 @@ export const mcpManageServersToolDefinition: ToolDefinition<
     '管理当前用户的 MCP 服务器配置。action=list 列举全部（含禁用项）；add/update 新增或覆盖自定义 SSE / stdio MCP；remove 移除用户配置（内置项移除后恢复默认）；enable/disable 启停。' +
     '变更类操作需要用户批准，写入后立即尝试连接并返回结果，下一轮即可使用新的 MCP 工具。' +
     '系统内置 MCP（websearch / grep_app）与受保护内置（codegraph / git_bash / lsp / omo）不支持覆盖端点，只能启停或调整 disabledTools。' +
-    'update 时未提供的字段（env / headers / oauth / disabledTools / enabled）保留原值。',
+    'update 时未提供的字段（env / headers / oauth / disabledTools / enabled）保留原值。' +
+    '要验证某服务器的连通性用 action=enable(会立即连接并把结果放在返回的 connect 字段;已启用时等同于连通性探测)——没有单独的 test 动作。',
   inputSchema: mcpManageServersInputSchema,
   outputSchema: z.string(),
   timeout: 120000,

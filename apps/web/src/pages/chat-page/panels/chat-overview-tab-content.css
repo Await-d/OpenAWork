@@ -647,6 +647,92 @@
 
 /* ─── 响应式：沿用面板既有断点 1180 / 640 / 520 ──────────────────── */
 
+/* ─── 注入工具(Skill / MCP / 工具) ─────────────────────────────── */
+
+.chat-overview__injected-note {
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.chat-overview__injected-note--error {
+  color: var(--danger);
+}
+
+.chat-overview__injected-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chat-overview__injected-row {
+  align-items: center;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  display: flex;
+  gap: var(--spacing-2);
+  min-width: 0;
+  padding: var(--spacing-1) var(--spacing-2);
+}
+
+.chat-overview__injected-name {
+  color: var(--fg-strong);
+  flex: 1;
+  font-size: 11px;
+  font-weight: 650;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-overview__injected-meta {
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.chat-overview__injected-tools summary {
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 650;
+  list-style: none;
+  padding: var(--spacing-1) 0;
+}
+
+.chat-overview__injected-tools summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-overview__injected-tools summary:hover {
+  color: var(--fg-strong);
+}
+
+.chat-overview__injected-tools summary:focus-visible {
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-overview__injected-tools[open] summary {
+  margin-bottom: var(--spacing-1);
+}
+
+.chat-overview__injected-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
 @media (max-width: 1180px) {
   .chat-overview__metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));

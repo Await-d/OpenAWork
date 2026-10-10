@@ -6,11 +6,22 @@ import { registerErrorHandler } from '../../infra/error-handler.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as SettingsRoutesModule from '../../routes/settings.js';
 
+const mcpRuntimeMock = vi.hoisted(() => ({
+  isMcpServerConnectedForUserMock: vi.fn(() => false),
+  listMcpToolsForUserMock: vi.fn(),
+  loadConfiguredMcpServersForUserMock: vi.fn(() => [] as unknown[]),
+  retryMcpConnectionForUserMock: vi.fn(),
+  getMcpPoolKeyMock: vi.fn((server: { id?: string }) => `pool-${server.id ?? 'unknown'}`),
+  invalidateMcpServerConnectionForUserMock: vi.fn(async () => undefined),
+}));
+
 vi.mock('../../mcp/mcp-runtime.js', () => ({
-  isMcpServerConnectedForUser: vi.fn(() => false),
-  listMcpToolsForUser: vi.fn(),
-  loadConfiguredMcpServersForUser: vi.fn(() => []),
-  retryMcpConnectionForUser: vi.fn(),
+  isMcpServerConnectedForUser: mcpRuntimeMock.isMcpServerConnectedForUserMock,
+  listMcpToolsForUser: mcpRuntimeMock.listMcpToolsForUserMock,
+  loadConfiguredMcpServersForUser: mcpRuntimeMock.loadConfiguredMcpServersForUserMock,
+  retryMcpConnectionForUser: mcpRuntimeMock.retryMcpConnectionForUserMock,
+  getMcpPoolKey: mcpRuntimeMock.getMcpPoolKeyMock,
+  invalidateMcpServerConnectionForUser: mcpRuntimeMock.invalidateMcpServerConnectionForUserMock,
 }));
 
 vi.mock('../../provider/auxiliary-llm-config.js', () => ({
@@ -72,6 +83,9 @@ beforeEach(() => {
     USER_ID,
     `${USER_ID}@example.com`,
   ]);
+  mcpRuntimeMock.loadConfiguredMcpServersForUserMock.mockReset();
+  mcpRuntimeMock.loadConfiguredMcpServersForUserMock.mockReturnValue([]);
+  mcpRuntimeMock.invalidateMcpServerConnectionForUserMock.mockClear();
 });
 
 afterAll(async () => {
@@ -170,6 +184,50 @@ describe('settings MCP route contracts', () => {
         headers: { authorization: bearer(app) },
       });
       expect(getResponse.json<SettingsMcpServersResponse>().servers).toEqual(putBody.servers);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PUT /settings/mcp-servers 保存后会失效旧的 MCP 连接与工具目录缓存', async () => {
+    mcpRuntimeMock.loadConfiguredMcpServersForUserMock.mockReturnValue([
+      {
+        id: 'remote-user-sse',
+        name: 'Remote user sse',
+        transport: 'sse',
+        url: 'https://example.com/mcp',
+        enabled: true,
+      },
+    ]);
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/settings/mcp-servers',
+        headers: { authorization: bearer(app) },
+        payload: {
+          servers: [
+            {
+              id: 'remote-user-sse',
+              name: 'Remote user sse',
+              transport: 'sse',
+              url: 'https://example.com/mcp',
+              headers: { authorization: 'Bearer fixed' },
+              enabled: true,
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      // Saved + pre-save configs share the same id in this mock, so the
+      // dedupe-by-pool-key loop still invalidates exactly once.
+      expect(mcpRuntimeMock.invalidateMcpServerConnectionForUserMock).toHaveBeenCalledTimes(1);
+      expect(mcpRuntimeMock.invalidateMcpServerConnectionForUserMock).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({ id: 'remote-user-sse' }),
+      );
     } finally {
       await app.close();
     }
