@@ -200,6 +200,47 @@ describe('ssh routes error mapping', () => {
     await app.close();
   });
 
+  it('GET /ssh/file 在远端文件超过预览上限时返回 413', async () => {
+    sshServiceModule.__resetSshServiceForTests(
+      buildFakeService({
+        connections: [],
+        failReadFile: () =>
+          new Error('SSH file too large to preview: 999999 bytes exceeds limit 16777216 bytes'),
+      }),
+    );
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/ssh/file?connectionId=ssh-1&path=/tmp/huge.bin',
+      headers: { authorization: bearer(app) },
+    });
+
+    expect(res.statusCode).toBe(413);
+    expect(res.json()).toMatchObject({ error: '远端文件过大,无法预览。' });
+    await app.close();
+  });
+
+  it('GET /ssh/file 在 SFTP 超时时返回 504', async () => {
+    sshServiceModule.__resetSshServiceForTests(
+      buildFakeService({
+        connections: [],
+        failReadFile: () => new Error('SSH SFTP readFile timed out after 60000ms'),
+      }),
+    );
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/ssh/file?connectionId=ssh-1&path=/tmp/slow.txt',
+      headers: { authorization: bearer(app) },
+    });
+
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toMatchObject({ error: 'SSH 操作超时,请稍后重试。' });
+    await app.close();
+  });
+
   it('POST /ssh/upload 在未知异常时返回 500 + 原始消息', async () => {
     sshServiceModule.__resetSshServiceForTests(
       buildFakeService({

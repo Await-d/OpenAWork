@@ -100,6 +100,15 @@ function classifySshRouteError(error: unknown, actionLabel: string): ClassifiedS
   if (errno === 'ENOENT') {
     return { statusCode: 404, error: '远端文件不存在。' };
   }
+  // SFTP 预览的内存守卫(见 ssh-connection-manager 的 stat-first 上限):属客户端可纠正的
+  // 请求问题,应回 413 而非 500,便于 UI/模型区分「文件太大」与「网关故障」。
+  if (message.startsWith('SSH file too large to preview')) {
+    return { statusCode: 413, error: '远端文件过大,无法预览。' };
+  }
+  // SFTP 操作墙钟超时:语义上等同于上游超时,回 504。
+  if (message.startsWith('SSH SFTP') && message.includes('timed out')) {
+    return { statusCode: 504, error: 'SSH 操作超时,请稍后重试。' };
+  }
 
   return {
     statusCode: 500,
