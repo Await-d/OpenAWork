@@ -13,16 +13,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { PermissionPrompt } from '@openAwork/shared-ui';
 import type { AlwaysScopeLevel, PermissionDecision } from '@openAwork/shared-ui';
-import {
-  createNotificationsClient,
-  createPermissionsClient,
-  createSessionsClient,
-} from '@openAwork/web-client';
+import { createPermissionsClient, createSessionsClient } from '@openAwork/web-client';
 import type { NotificationRecord } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import {
   connectNotificationEvents,
   disconnectNotificationEvents,
+  requestNotificationEventsSnapshot,
   subscribeNotificationEvents,
 } from '../../../stores/notification-events.js';
 import {
@@ -85,6 +82,19 @@ function resolveSessionNavigationTarget(input: {
   };
 }
 
+/**
+ * 快照里是否真的存在「等待权限」待办。
+ *
+ * 用于把「切换会话的 null 广播」变成零成本操作:缓存里没有任何待审批项时,切换会话
+ * 只是「无事发生」,连一次 WS 快照往返都可以省掉——这正是「不再每次切会话就发请求」的落点。
+ */
+function hasPendingPermissionNotification(notifications: readonly NotificationRecord[]): boolean {
+  return notifications.some(
+    (notification) =>
+      notification.eventType === 'permission_asked' && Boolean(notification.sessionId),
+  );
+}
+
 export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermissionPromptProps) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -100,6 +110,13 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
   const [sessionTarget, setSessionTarget] = useState<FloatingPermissionSessionTarget | null>(null);
 
   const pendingPermissionRef = useRef<SessionPendingPermissionState | null>(null);
+  /**
+   * 最近一次 WS 快照里的通知列表(握手 / 重连 / 脏事件后主动索要都会刷新它)。
+   *
+   * 待审批恢复一律读这里,不再走 `GET /notifications?view=pending`——于是切换会话这条
+   * 高频路径在「无事发生」时零网络往返,有变化时也走 WS 而非 HTTP。
+   */
+  const snapshotNotificationsRef = useRef<readonly NotificationRecord[]>([]);
 
   const updatePendingPermission = useCallback(
     (next: SessionPendingPermissionState | null) => {
@@ -177,6 +194,8 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
   // Subscribe to permission events
   useEffect(() => {
     if (!accessToken) {
+      // 登出即清空 WS 快照缓存,避免换账号后拿上一个账号的旧列表做「是否需要索要快照」的判断。
+      snapshotNotificationsRef.current = [];
       updatePendingPermission(null);
       return;
     }
@@ -189,26 +208,21 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
     }
 
     let cancelled = false;
-    const notificationsClient = createNotificationsClient(gatewayUrl);
     const permissionsClient = createPermissionsClient(gatewayUrl);
     /**
-     * 在途的 `hydrateFromUnreadNotifications` Promise，用于并发去重。
+     * 在途的 `hydrateFromUnreadNotifications` Promise,用于并发去重。
      *
-     * 此前只有「发起前检查 `pendingPermissionRef.current !== null`」这一道守卫，
-     * 而常态下没有待审批项 → 该守卫恒不命中，于是每个触发源都会发一次完整的
-     * `GET /notifications?view=pending&limit=20`。而一次审批动作会同时点燃两条
-     * 触发路径（`subscribeSessionPendingPermission` 的 null 广播 + WS `onChange`
-     * 的落库事件），两者并发进入时守卫都还没生效 → 并发两次相同请求。
-     *
-     * 复用同一个在途 Promise 后，并发触发被合并为一次网络往返。
+     * 一次审批动作会同时点燃两条触发路径(`subscribeSessionPendingPermission` 的 null
+     * 广播 + WS `onChange` 的落库事件),两者并发进入时守卫都还没生效;复用同一个在途
+     * Promise 可把并发的 `listPending` 压成一次。
      */
     let hydrationInFlight: Promise<void> | null = null;
 
     /**
-     * 从未读通知里恢复待审批项。
+     * 从 WS 快照的通知列表里恢复待审批项。
      *
-     * `seed` 允许直接吃 WS 握手快照里的通知列表——那份数据与服务端 `list(view=pending)`
-     * 同源同口径，于是「刚连上就能弹出待审批」不需要额外一次 HTTP。
+     * 数据只来自 WS:`seed` 是本次快照,缺省则读 `snapshotNotificationsRef` 中的最近快照,
+     * 因此「刚连上就能弹出待审批」与「切换会话后恢复」都不需要额外一次 HTTP。
      */
     const hydrateFromUnreadNotifications = async (
       seed?: readonly NotificationRecord[],
@@ -216,20 +230,13 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
       if (pendingPermissionRef.current !== null) {
         return;
       }
-      // 已有一次 hydrate 在途：复用它，不再发第二次相同请求。
+      // 已有一次 hydrate 在途:复用它,避免并发重复发起 listPending。
       if (hydrationInFlight) {
         return hydrationInFlight;
       }
 
       const run = async (): Promise<void> => {
-        const notifications =
-          seed ??
-          (
-            await notificationsClient.list(accessToken, {
-              limit: 20,
-              view: 'pending',
-            })
-          ).notifications;
+        const notifications = seed ?? snapshotNotificationsRef.current;
         if (cancelled || pendingPermissionRef.current !== null) {
           return;
         }
@@ -268,19 +275,26 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
     const unsubscribePendingPermission = subscribeSessionPendingPermission(
       (_sessionId, permission) => {
         updatePendingPermission(permission);
-        if (permission === null) {
-          void hydrateFromUnreadNotifications().catch(() => undefined);
+        if (
+          permission === null &&
+          hasPendingPermissionNotification(snapshotNotificationsRef.current)
+        ) {
+          // 切换会话 / 待办清空时广播 null。只有当 WS 快照里确实还存在待审批项时才需要行动,
+          // 否则这是一次「无事发生」的切换,连一次 WS 往返都不必发。有则向 WS 再要一份最新
+          // 快照——绝不读可能已过期的本地缓存,也绝不发 HTTP,避免把刚处理完的审批又弹回来。
+          requestNotificationEventsSnapshot();
         }
       },
     );
 
-    // 落库事件：只带脏标记与红点数，因此这里补一次列表拉取即可。
+    // 通知数据只走 WS:落库事件只带「脏标记 + 权威红点数」,列表内容由快照交付。
     const unsubscribeEvents = subscribeNotificationEvents({
       onChange: () => {
-        void hydrateFromUnreadNotifications().catch(() => undefined);
+        requestNotificationEventsSnapshot();
       },
-      // 握手 / 每次重连后的全量快照——直接复用，省掉一次 HTTP。
+      // 握手 / 每次重连 / 每次主动索要后的全量快照——落缓存并直接复用,无需任何 HTTP。
       onSnapshot: (snapshot) => {
+        snapshotNotificationsRef.current = snapshot.notifications;
         void hydrateFromUnreadNotifications(snapshot.notifications).catch(() => undefined);
       },
     });

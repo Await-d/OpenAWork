@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   preloadRouteModuleByPath: vi.fn(),
   toast: vi.fn(),
+  /** 记录「向 WS 主动索要快照」的次数。 */
+  wsRequestSnapshot: vi.fn(),
   /** 最近一次建连时 web-client 拿到的 handlers，用于测试主动推事件。 */
   wsHandlers: null as null | {
     onChange?: (event: { pendingActionableCount: number; reason: string }) => void;
@@ -77,7 +79,10 @@ vi.mock('@openAwork/web-client', () => ({
         ).length,
       });
     });
-    return { close: () => undefined, requestSnapshot: () => undefined };
+    return {
+      close: () => undefined,
+      requestSnapshot: () => mocks.wsRequestSnapshot(),
+    };
   },
 }));
 
@@ -212,7 +217,7 @@ describe('NotificationCenter', () => {
     expect(mocks.listNotifications).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
   });
 
-  it('收到落库事件时红点用权威值即时更新，并只补拉一次列表', async () => {
+  it('收到落库事件时红点即时更新,并走 WS 快照校正列表(不再补 HTTP)', async () => {
     render(<NotificationCenter accessToken="token-test" gatewayUrl="https://gateway.test" />);
 
     const trigger = await screen.findByTitle('通知中心');
@@ -221,20 +226,19 @@ describe('NotificationCenter', () => {
     await screen.findByText('等待权限 · bash');
     expect(trigger.textContent).toMatch(/1/);
 
-    // 打开面板本身会刷新一次；事件再补一次。
+    // 打开面板本身会刷新一次;此后事件不再触发 HTTP。
     const callsBeforeEvent = mocks.listNotifications.mock.calls.length;
 
     act(() => {
       mocks.wsHandlers?.onChange?.({ pendingActionableCount: 7, reason: 'created' });
     });
 
-    // 红点不等这一次拉取回来，先跟手。
+    // 红点不等快照回来,先跟手。
     await waitFor(() => {
       expect(trigger.textContent).toMatch(/7/);
     });
-    await waitFor(() => {
-      expect(mocks.listNotifications).toHaveBeenCalledTimes(callsBeforeEvent + 1);
-    });
+    expect(mocks.wsRequestSnapshot).toHaveBeenCalled();
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(callsBeforeEvent);
   });
 
   it('listPending 为空时会自动标记已读并移出列表', async () => {

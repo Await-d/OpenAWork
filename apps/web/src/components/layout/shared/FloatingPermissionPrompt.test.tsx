@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   replyPermissionRequest: vi.fn(async () => undefined),
   toast: vi.fn(),
   sessionsClientGet: vi.fn(),
+  /** 记录「向 WS 主动索要快照」的次数——用于断言切换会话时不再发 HTTP。 */
+  requestSnapshotSpy: vi.fn(),
   /** 握手快照的数据源（服务端 `sync` 帧）。默认无通知。 */
   wsSnapshotProvider: null as null | (() => { notifications: unknown[] }),
 }));
@@ -83,7 +85,10 @@ vi.mock('@openAwork/web-client', () => ({
       if (!source) return;
       handlers.onSnapshot?.({ ...source, browserBroadcasts: [], pendingActionableCount: 0 });
     });
-    return { close: () => undefined, requestSnapshot: () => undefined };
+    return {
+      close: () => undefined,
+      requestSnapshot: () => mocks.requestSnapshotSpy(),
+    };
   },
 }));
 
@@ -224,5 +229,27 @@ describe('FloatingPermissionPrompt', () => {
     });
     // 快照已含完整通知列表，恢复弹层不必再走一次 HTTP。
     expect(mocks.createNotificationsList).not.toHaveBeenCalled();
+  });
+
+  it('切换会话的 null 广播不触发 HTTP,且无待审批时不做多余 WS 往返', async () => {
+    // 初始快照为空 → 没有任何可恢复的待审批项,切换会话应完全静默。
+    mocks.wsSnapshotProvider = () => ({ notifications: [] });
+    mocks.subscribeSessionPendingPermission.mockImplementation(
+      (onChange: (sessionId: string, permission: unknown) => void) => {
+        onChange('switched-session', null);
+        return () => undefined;
+      },
+    );
+
+    render(<FloatingPermissionPrompt />);
+
+    await waitFor(() => {
+      expect(mocks.subscribeSessionPendingPermission).toHaveBeenCalled();
+    });
+
+    // 既不发 GET /notifications,也不向 WS 索要快照——这是「不每次切会话就发请求」的核心断言。
+    expect(mocks.createNotificationsList).not.toHaveBeenCalled();
+    expect(mocks.requestSnapshotSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '允许一次' })).toBeNull();
   });
 });

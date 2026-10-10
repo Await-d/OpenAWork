@@ -20,6 +20,7 @@ import type {
 import {
   connectNotificationEvents,
   disconnectNotificationEvents,
+  requestNotificationEventsSnapshot,
   subscribeNotificationEvents,
 } from '../../../stores/notification-events.js';
 import { subscribeNotificationPreferenceRefresh } from '../../../utils/chat/notification-preference-events.js';
@@ -641,9 +642,9 @@ export default function NotificationCenter({
 
   // ── Realtime (WS) ─────────────────────────────────────────
   //
-  // 首屏数据由握手的 `sync` 全量快照交付，之后每次落库事件触发一次列表拉取——
-  // 空闲时零 HTTP 请求。事件只带「脏标记 + 权威红点数」，所以红点先即时生效，
-  // 列表内容随后由这次一次性拉取校正（WS 不复刻通知结构，避免与 REST 字段漂移）。
+  // 首屏数据由握手的 `sync` 全量快照交付;此后落库事件只带「脏标记 + 权威红点数」,
+  // pending 视图直接向 WS 再要一份快照校正列表(不再走 HTTP);其余视图按各自 view 拉取一次。
+  // 空闲时零请求,数据口径由服务端 `buildPendingNotificationSnapshot` 单一来源保证。
 
   useEffect(() => {
     if (!accessToken) {
@@ -662,8 +663,12 @@ export default function NotificationCenter({
 
     const unsubscribe = subscribeNotificationEvents({
       onChange: (event) => {
-        // 红点先跟手：事件里带的是服务端权威计数，不等这一次拉取回来。
+        // 红点先跟手:事件里带的是服务端权威计数,不等快照回来。
         setPendingActionableCount(event.pendingActionableCount);
+        if (viewRef.current === 'pending') {
+          requestNotificationEventsSnapshot();
+          return;
+        }
         void loadNotifications({ view: viewRef.current }).catch(() => undefined);
       },
       onSnapshot: (snapshot) => {
