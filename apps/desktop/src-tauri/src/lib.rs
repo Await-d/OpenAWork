@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
@@ -52,14 +52,22 @@ const GATEWAY_SUBDIR: &str = "agent-gateway";
 
 /// 灵动岛浮窗窗口 label。
 const ISLAND_WINDOW_LABEL: &str = "island";
-/// 灵动岛折叠态尺寸(逻辑像素)。
-const ISLAND_COLLAPSED_WIDTH: f64 = 220.0;
-const ISLAND_COLLAPSED_HEIGHT: f64 = 48.0;
-/// 灵动岛展开态尺寸(逻辑像素)。
-const ISLAND_EXPANDED_WIDTH: f64 = 420.0;
-const ISLAND_EXPANDED_HEIGHT: f64 = 140.0;
-/// 灵动岛距主显示器**可用区域**顶部的间距(逻辑像素),提供视觉呼吸。
-const ISLAND_TOP_OFFSET: f64 = 12.0;
+/// 灵动岛折叠态尺寸(逻辑像素)。与 `island.css` 折叠态一致。
+const ISLAND_COLLAPSED_WIDTH: f64 = 164.0;
+const ISLAND_COLLAPSED_HEIGHT: f64 = 28.0;
+/// 灵动岛展开态尺寸(逻辑像素)。与 `island.css` 展开态一致。
+const ISLAND_EXPANDED_WIDTH: f64 = 380.0;
+const ISLAND_EXPANDED_HEIGHT: f64 = 92.0;
+/// 灵动岛距主显示器**可用区域**顶部的间距(逻辑像素)。0 = 完全贴顶。
+const ISLAND_TOP_OFFSET: f64 = 0.0;
+/// 展开补间总时长(毫秒)。与前端 CSS 的内容错峰延迟对齐(先横后纵)。
+const ISLAND_EXPAND_MS: u64 = 460;
+/// 折叠补间总时长(毫秒):收起比展开干脆。
+const ISLAND_COLLAPSE_MS: u64 = 240;
+/// 补间步长(毫秒),约 60fps。
+const ISLAND_TWEEN_STEP_MS: u64 = 16;
+/// 默认水平锚点比例(居中)。
+const ISLAND_DEFAULT_ANCHOR_RATIO: f64 = 0.5;
 /// Linux 下位置校正间隔(秒)。
 ///
 /// 部分 Linux WM 会移动 / 忽略 `always_on_top` 浮窗的初始定位,按方案「关键风险
@@ -250,7 +258,6 @@ fn is_dialog_host_ready(app: &tauri::AppHandle, channel: DialogChannel) -> bool 
 }
 
 /// 灵动岛运行期状态(managed by Tauri,内存态,不持久化)。
-#[derive(Default)]
 struct IslandState {
     /// 当前是否展开(驱动窗口尺寸,供 `island_get_state` 回读)。
     expanded: AtomicBool,
@@ -263,6 +270,25 @@ struct IslandState {
     last_agent_state: Mutex<Option<serde_json::Value>>,
     /// Linux 位置校正任务的停止信号(`None` = 当前没有任务在跑)。
     reposition_stop: Mutex<Option<Arc<AtomicBool>>>,
+    /// 当前水平锚点比例(0 = 贴左、1 = 贴右),由拖动 / 双击复位更新。
+    anchor_ratio: Mutex<f64>,
+    /// 补间代次:每次展开 / 折叠 +1,让仍在跑的旧补间自行退出,
+    /// 避免快速进出时两段补间互相拉扯。
+    tween_generation: AtomicU64,
+}
+
+impl IslandState {
+    /// 用持久化的锚点比例初始化(启动时从设置读出)。
+    fn new(anchor_ratio: f64) -> Self {
+        Self {
+            expanded: AtomicBool::new(false),
+            host_ready: AtomicBool::new(false),
+            last_agent_state: Mutex::new(None),
+            reposition_stop: Mutex::new(None),
+            anchor_ratio: Mutex::new(anchor_ratio.clamp(0.0, 1.0)),
+            tween_generation: AtomicU64::new(0),
+        }
+    }
 }
 
 /// 前端读取灵动岛状态的视图。
@@ -275,6 +301,19 @@ struct IslandStateView {
     visible: bool,
     /// 当前是否展开。
     expanded: bool,
+}
+
+/// 前端读取灵动岛锚点的视图。
+///
+/// 前端拿这两个值就能把拖动位移本地换算成比例(不必每次移动都问 Rust),
+/// 只在比例变化时回传 `island_set_anchor`。
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IslandAnchorView {
+    /// 当前锚点比例(0 = 贴左、1 = 贴右、0.5 = 居中)。
+    ratio: f64,
+    /// 浮窗可水平移动的行程(逻辑像素)。
+    travel_px: f64,
 }
 
 /// gateway sidecar 健康状态——驱动托盘 tooltip emoji 与前端状态显示。
@@ -336,6 +375,10 @@ struct PersistedSettings {
     /// 灵动岛浮窗是否启用。`None` = 未显式设置(默认启用)。
     #[serde(default)]
     island_enabled: Option<bool>,
+    /// 灵动岛浮窗的水平锚点比例(0 = 贴左、1 = 贴右、0.5 = 居中)。
+    /// `None` = 未设置(默认居中),由拖动 / 双击复位写入。
+    #[serde(default)]
+    island_anchor_ratio: Option<f64>,
 }
 
 /// 暴露给前端的设置视图——把 effective 路径与 autostart/pin 状态一起返回，
@@ -1440,6 +1483,49 @@ fn island_get_state(app: tauri::AppHandle) -> Result<IslandStateView, String> {
     })
 }
 
+/// 读取灵动岛锚点(当前比例 + 可移动行程),供前端做拖动换算。
+#[tauri::command]
+fn island_get_anchor(app: tauri::AppHandle) -> Result<IslandAnchorView, String> {
+    Ok(IslandAnchorView {
+        ratio: island_anchor_ratio(&app),
+        travel_px: island_travel(&app, ISLAND_COLLAPSED_WIDTH),
+    })
+}
+
+/// 设置灵动岛水平锚点。
+///
+/// `persist = false` 用于拖动过程中的高频更新(只移动窗口、不写盘);
+/// `persist = true` 用于松手落位与双击复位(写入 desktop-settings.json)。
+#[tauri::command]
+fn island_set_anchor(app: tauri::AppHandle, ratio: f64, persist: bool) -> Result<(), String> {
+    if !ratio.is_finite() {
+        return Err("锚点比例必须是有限数值".to_string());
+    }
+    let clamped = ratio.clamp(0.0, 1.0);
+    if let Some(state) = app.try_state::<IslandState>() {
+        if let Ok(mut guard) = state.anchor_ratio.lock() {
+            *guard = clamped;
+        }
+    }
+    if persist {
+        if let Some(state) = app.try_state::<SettingsState>() {
+            if let Ok(mut guard) = state.0.lock() {
+                guard.island_anchor_ratio = Some(clamped);
+                save_settings(&app, &guard);
+            }
+        }
+    }
+    // 尺寸保持当前值,避免把正在跑的展开 / 折叠补间打断。
+    if let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) {
+        let width = island_window_logical_size(&window)
+            .map(|(current_width, _)| current_width)
+            .unwrap_or(ISLAND_COLLAPSED_WIDTH);
+        let (x, y) = island_position_for(&app, width, clamped);
+        let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+    }
+    Ok(())
+}
+
 /// 展开 / 折叠灵动岛窗口。
 #[tauri::command]
 fn island_set_expanded(app: tauri::AppHandle, expanded: bool) -> Result<(), String> {
@@ -2012,25 +2098,173 @@ fn island_is_enabled(settings: &PersistedSettings) -> bool {
     settings.island_enabled.unwrap_or(true)
 }
 
-/// 计算 island 浮窗在主显示器上的逻辑坐标(可用区域顶部水平居中)。
+/// 主显示器**可用区域**(逻辑像素):`(origin_x, origin_y, width, height)`。
 ///
-/// 用 `primary_monitor` 的**可用区域**(`work_area`:已排除 macOS 菜单栏、
-/// Windows 任务栏、Linux 面板)的物理坐标 ÷ 缩放因子换算成逻辑像素,保证跨
-/// DPI 一致且不被系统栏遮挡;拿不到显示器信息时退回左上角附近,避免 panic。
-fn island_logical_position(app: &tauri::AppHandle, width: f64) -> (f64, f64) {
-    match app.primary_monitor().ok().flatten() {
-        Some(monitor) => {
-            let raw_scale = monitor.scale_factor();
-            let scale = if raw_scale > 0.0 { raw_scale } else { 1.0 };
-            let area = monitor.work_area();
-            let origin_x = area.position.x as f64 / scale;
-            let origin_y = area.position.y as f64 / scale;
-            let area_width = area.size.width as f64 / scale;
-            let x = origin_x + (area_width - width) / 2.0;
-            (x, origin_y + ISLAND_TOP_OFFSET)
+/// 用 `primary_monitor` 的 `work_area`(已排除 macOS 菜单栏、Windows 任务栏、
+/// Linux 面板)的物理坐标 ÷ 缩放因子换算成逻辑像素,保证跨 DPI 一致且不被系统
+/// 栏遮挡;拿不到显示器信息时返回 `None`,由调用方各自兜底。
+fn island_work_area(app: &tauri::AppHandle) -> Option<(f64, f64, f64, f64)> {
+    let monitor = app.primary_monitor().ok().flatten()?;
+    let raw_scale = monitor.scale_factor();
+    let scale = if raw_scale > 0.0 { raw_scale } else { 1.0 };
+    let area = monitor.work_area();
+    Some((
+        area.position.x as f64 / scale,
+        area.position.y as f64 / scale,
+        area.size.width as f64 / scale,
+        area.size.height as f64 / scale,
+    ))
+}
+
+/// 浮窗可水平移动的行程(逻辑像素)= 可用区域宽 − 窗口宽(不小于 0)。
+fn island_travel(app: &tauri::AppHandle, width: f64) -> f64 {
+    island_work_area(app)
+        .map(|(_, _, area_width, _)| (area_width - width).max(0.0))
+        .unwrap_or(0.0)
+}
+
+/// 依据锚点比例算浮窗左上角的逻辑坐标。
+///
+/// 比例作用在「可移动行程」上:0 = 贴可用区域左侧、1 = 贴右侧、0.5 = 居中,
+/// 因此比值天然收敛在可用区域内,展开变宽也不会溢出屏外。
+fn island_position_for(app: &tauri::AppHandle, width: f64, ratio: f64) -> (f64, f64) {
+    let ratio = ratio.clamp(0.0, 1.0);
+    match island_work_area(app) {
+        Some((origin_x, origin_y, area_width, _)) => {
+            let travel = (area_width - width).max(0.0);
+            (origin_x + travel * ratio, origin_y + ISLAND_TOP_OFFSET)
         }
         None => (0.0, ISLAND_TOP_OFFSET),
     }
+}
+
+/// 读取当前浮窗的逻辑尺寸(物理尺寸 ÷ 缩放因子)。
+fn island_window_logical_size(window: &tauri::WebviewWindow) -> Option<(f64, f64)> {
+    let size = window.inner_size().ok()?;
+    let scale = match window.scale_factor().ok() {
+        Some(value) if value > 0.0 => value,
+        _ => 1.0,
+    };
+    Some((size.width as f64 / scale, size.height as f64 / scale))
+}
+
+/// 当前锚点比例(未初始化时回落到居中)。
+fn island_anchor_ratio(app: &tauri::AppHandle) -> f64 {
+    app.try_state::<IslandState>()
+        .and_then(|state| state.anchor_ratio.lock().ok().map(|guard| *guard))
+        .unwrap_or(ISLAND_DEFAULT_ANCHOR_RATIO)
+        .clamp(0.0, 1.0)
+}
+
+/// 折叠 / 展开对应的目标窗口尺寸。
+fn island_target_size(expanded: bool) -> (f64, f64) {
+    if expanded {
+        (ISLAND_EXPANDED_WIDTH, ISLAND_EXPANDED_HEIGHT)
+    } else {
+        (ISLAND_COLLAPSED_WIDTH, ISLAND_COLLAPSED_HEIGHT)
+    }
+}
+
+fn island_lerp(from: f64, to: f64, t: f64) -> f64 {
+    from + (to - from) * t
+}
+
+fn island_ease_out_cubic(t: f64) -> f64 {
+    1.0 - (1.0 - t).powi(3)
+}
+
+fn island_ease_in_out_cubic(t: f64) -> f64 {
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+    }
+}
+
+/// 补间插值:由归一化进度算出当前窗口尺寸。
+///
+/// 展开是「先横后纵」两段式:宽度在进度 0–56% 内完成,高度在 33%–100% 内完成;
+/// 折叠反转为「先收高度、再收宽度」,与前端 CSS 的节奏一致。
+fn island_tween_size(
+    from_width: f64,
+    from_height: f64,
+    to_width: f64,
+    to_height: f64,
+    expanded: bool,
+    progress: f64,
+) -> (f64, f64) {
+    let p = progress.clamp(0.0, 1.0);
+    if expanded {
+        let width_t = island_ease_out_cubic((p / 0.56).clamp(0.0, 1.0));
+        let height_t = island_ease_out_cubic(((p - 0.33) / 0.67).clamp(0.0, 1.0));
+        (
+            island_lerp(from_width, to_width, width_t),
+            island_lerp(from_height, to_height, height_t),
+        )
+    } else {
+        let height_t = island_ease_in_out_cubic((p / 0.85).clamp(0.0, 1.0));
+        let width_t = island_ease_in_out_cubic(((p - 0.4) / 0.6).clamp(0.0, 1.0));
+        (
+            island_lerp(from_width, to_width, width_t),
+            island_lerp(from_height, to_height, height_t),
+        )
+    }
+}
+
+/// 该代次是否仍是最新补间(不是则说明已被新的展开 / 折叠取代)。
+fn island_tween_is_current(app: &tauri::AppHandle, generation: u64) -> bool {
+    app.try_state::<IslandState>()
+        .map(|state| state.tween_generation.load(Ordering::Relaxed) == generation)
+        .unwrap_or(false)
+}
+
+/// 逐帧补间窗口尺寸与位置。
+///
+/// 原生窗口的 `set_size` 是瞬时的,直接切尺寸会「窗口先跳、内容后动」,折叠时还会
+/// 把仍在动画的内容裁掉。这里按约 60fps 把窗口本身当作盒子推进尺寸,并同步跟随
+/// 锚点位置,前端只负责内容层的错峰浮现。
+async fn run_island_tween(
+    app: tauri::AppHandle,
+    from_width: f64,
+    from_height: f64,
+    expanded: bool,
+    generation: u64,
+) {
+    let duration_ms = if expanded {
+        ISLAND_EXPAND_MS
+    } else {
+        ISLAND_COLLAPSE_MS
+    };
+    let (to_width, to_height) = island_target_size(expanded);
+    let started = Instant::now();
+    loop {
+        if !island_tween_is_current(&app, generation) {
+            return;
+        }
+        let elapsed = started.elapsed().as_millis() as f64;
+        let progress = (elapsed / duration_ms as f64).clamp(0.0, 1.0);
+        let (width, height) =
+            island_tween_size(from_width, from_height, to_width, to_height, expanded, progress);
+
+        let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) else {
+            return;
+        };
+        let (x, y) = island_position_for(&app, width, island_anchor_ratio(&app));
+        if window.set_size(tauri::LogicalSize::new(width, height)).is_err() {
+            return;
+        }
+        let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+
+        if progress >= 1.0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(ISLAND_TWEEN_STEP_MS)).await;
+    }
+}
+
+/// 折叠态窗口尺寸(逻辑像素)。创建浮窗与补间起点兜底都用它。
+fn island_collapsed_size() -> (f64, f64) {
+    (ISLAND_COLLAPSED_WIDTH, ISLAND_COLLAPSED_HEIGHT)
 }
 
 /// 创建灵动岛浮窗(置顶 / 无边框 / 透明 / 不抢焦点 / 不占任务栏)。
@@ -2039,8 +2273,8 @@ fn island_logical_position(app: &tauri::AppHandle, width: f64) -> (f64, f64) {
 /// 让前端复用同一份 bundle 区分 island 与主窗口 —— 避免多入口构建与 URL query
 /// (`WebviewUrl::App` 下 query 在 Windows 上不可靠)两条更脆弱的路径。
 fn create_island_window(app: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> {
-    let width = ISLAND_COLLAPSED_WIDTH;
-    let (x, y) = island_logical_position(app, width);
+    let (width, height) = island_collapsed_size();
+    let (x, y) = island_position_for(app, width, island_anchor_ratio(app));
 
     tauri::WebviewWindowBuilder::new(
         app,
@@ -2048,7 +2282,7 @@ fn create_island_window(app: &tauri::AppHandle) -> tauri::Result<tauri::WebviewW
         tauri::WebviewUrl::App("index.html".into()),
     )
     .title("OpenAWork")
-    .inner_size(width, ISLAND_COLLAPSED_HEIGHT)
+    .inner_size(width, height)
     .position(x, y)
     .resizable(false)
     .decorations(false)
@@ -2088,8 +2322,8 @@ fn ensure_island_window(app: &tauri::AppHandle) -> bool {
 /// - 线程安全:任务跑在 tauri 异步运行时(不阻塞主线程),停止信号是
 ///   `Arc<AtomicBool>`,运行态经 `Mutex` 保护;
 /// - 幂等:同一时间最多一个任务,重复 `ensure` / `show` 不会叠加;
-/// - 坐标换算:复用 `island_logical_position`(物理 → 逻辑像素,展开态用展开宽度
-///   保持水平居中),避免 DPI 缩放导致漂移;
+/// - 坐标换算:复用 `island_position_for`(物理 → 逻辑像素,按持久化的锚点比例
+///   定位),避免 DPI 缩放导致漂移;只校正位置、不改尺寸,以免打断补间;
 /// - 清理:窗口隐藏 / 应用退出时由 `stop_island_reposition` 置位停止信号。
 fn start_island_reposition(app: &tauri::AppHandle) {
     if !cfg!(target_os = "linux") {
@@ -2122,16 +2356,12 @@ fn start_island_reposition(app: &tauri::AppHandle) {
             if !window.is_visible().unwrap_or(false) {
                 continue; // 隐藏期间不做无谓的 setPosition。
             }
-            let expanded = app
-                .try_state::<IslandState>()
-                .map(|state| state.expanded.load(Ordering::Relaxed))
-                .unwrap_or(false);
-            let width = if expanded {
-                ISLAND_EXPANDED_WIDTH
-            } else {
-                ISLAND_COLLAPSED_WIDTH
-            };
-            let (x, y) = island_logical_position(&app, width);
+            // 只校正位置、不改尺寸:尺寸可能正处在展开 / 折叠补间中途,
+            // 强行写目标尺寸会把动画打断。宽度取当前实际值算行程即可。
+            let width = island_window_logical_size(&window)
+                .map(|(current_width, _)| current_width)
+                .unwrap_or(ISLAND_COLLAPSED_WIDTH);
+            let (x, y) = island_position_for(&app, width, island_anchor_ratio(&app));
             let _ = window.set_position(tauri::LogicalPosition::new(x, y));
         }
     });
@@ -2159,22 +2389,32 @@ fn island_is_visible(app: &tauri::AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// 折叠 / 展开灵动岛:切换窗口尺寸并保持顶部水平居中。
+/// 折叠 / 展开灵动岛:启动一段原生窗口补间(先横后纵 / 先收高度再收宽度)。
+///
+/// 起点取窗口**当前**尺寸:快速 hover 进出时上一段补间可能还没跑完,从当前值接着
+/// 插值才不会跳变;同时把 `tween_generation` +1,让旧补间在下一帧自行退出。
 fn apply_island_expanded(app: &tauri::AppHandle, expanded: bool) {
     let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) else {
         return;
     };
-    let (width, height) = if expanded {
-        (ISLAND_EXPANDED_WIDTH, ISLAND_EXPANDED_HEIGHT)
-    } else {
-        (ISLAND_COLLAPSED_WIDTH, ISLAND_COLLAPSED_HEIGHT)
+    let generation = match app.try_state::<IslandState>() {
+        Some(state) => {
+            state.expanded.store(expanded, Ordering::Relaxed);
+            state.tween_generation.fetch_add(1, Ordering::Relaxed) + 1
+        }
+        None => 0,
     };
-    let (x, y) = island_logical_position(app, width);
-    let _ = window.set_size(tauri::LogicalSize::new(width, height));
-    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
-    if let Some(state) = app.try_state::<IslandState>() {
-        state.expanded.store(expanded, Ordering::Relaxed);
-    }
+    let (from_width, from_height) = island_window_logical_size(&window).unwrap_or_else(|| {
+        if expanded {
+            island_collapsed_size()
+        } else {
+            island_target_size(true)
+        }
+    });
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        run_island_tween(app, from_width, from_height, expanded, generation).await;
+    });
 }
 
 /// 切换灵动岛可见性;关闭态下调用会重新启用并显示。返回切换后是否可见。
@@ -2624,7 +2864,7 @@ pub fn run() {
         ))
         .plugin(updater_plugin)
         // C-8 窗口状态记忆：自动持久化窗口大小/位置，下次启动恢复。
-        // 灵动岛不参与记忆：它的位置每次启动由 `island_logical_position` 按主
+        // 灵动岛不参与记忆：它的位置每次启动由 `island_position_for` 按主
         // 显示器可用区域实时计算（跨 DPI / 换显示器都正确），尺寸由展开态驱动；
         // 若被记忆值覆盖，会出现「上次退出时是展开态 → 下次启动窗口仍 420×140、
         // 但状态是折叠」这类尺寸与状态不一致。
@@ -2699,6 +2939,8 @@ pub fn run() {
             close_browser_webview,
             close_stale_browser_webviews,
             island_get_state,
+            island_get_anchor,
+            island_set_anchor,
             island_set_expanded,
             island_toggle_visible,
             island_report_agent_state,
@@ -2712,8 +2954,12 @@ pub fn run() {
             let persisted = load_settings(&handle);
             let initial_locked = persisted.pin_hash.is_some();
             let initial_island_enabled = island_is_enabled(&persisted);
+            let initial_anchor_ratio = persisted
+                .island_anchor_ratio
+                .unwrap_or(ISLAND_DEFAULT_ANCHOR_RATIO)
+                .clamp(0.0, 1.0);
             handle.manage(SettingsState(Arc::new(Mutex::new(persisted))));
-            handle.manage(IslandState::default());
+            handle.manage(IslandState::new(initial_anchor_ratio));
             // 启动时有 PIN 则默认锁定（场景 1：每次应用启动）。
             handle.manage(LockState(Arc::new(Mutex::new(LockInner {
                 locked: initial_locked,

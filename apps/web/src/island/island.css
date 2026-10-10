@@ -1,13 +1,24 @@
 /*
- * 灵动岛浮窗样式。
+ * 灵动岛浮窗样式(B2 · 流光渐变 / 先横后纵展开)。
  *
- * 窗口是 Tauri 无边框 + 透明窗口,因此:
- * - html / body / #root 必须透明,否则 WebView 会露出底色,药丸圆角失效;
- * - 玻璃层(背景 / 前景 / 描边)用 island 作用域变量固定为深色高对比 ——
- *   浮窗悬在任意壁纸与任意应用之上,若跟随应用亮 / 暗主题,会出现「浅壁纸 +
- *   浅药丸」这类不可读组合;强调色(`--primary` / `--success` / `--danger`)
- *   仍复用全局设计 token,不另造色。
+ * 窗口是 Tauri 无边框 + 透明窗口,**窗口边界恰好等于浮窗边界**(Rust 侧按
+ * `ISLAND_*_WIDTH/HEIGHT` 精确设置),因此:
+ * - html / body / #root 必须透明,否则 WebView 会露底色、圆角失效;
+ * - 不能使用外阴影 / 外发光:任何绘制在浮窗矩形之外的效果都会被窗口裁掉,
+ *   深度感改由「渐变描边 + 内高光 + 内描边环」表达;
+ * - 浮窗尺寸 / 位置由 Rust 补间驱动,这里只做 100% 填充与内部内容编排,
+ *   因此 **不要** 给 width / height 加 transition(会与原生补间打架)。
+ *
+ * 玻璃层用 island 作用域变量固定为深色 —— 浮窗悬在任意壁纸与应用之上,
+ * 跟随应用亮 / 暗主题会出现「浅壁纸 + 浅药丸」这类不可读组合;强调色仍复用
+ * 全局设计 token(`--accent` / `--success` / `--danger` / `--aux` / `--contrast`)。
+ *
+ * 强调色统一取 `--accent`(E · Nebula 靛青),与 `BrandLogo` 同源。灵动岛窗口不设
+ * `data-theme`,恒定命中 `:root:not([data-theme])` 那一块,因此无论主窗口用哪套
+ * 主题,浮窗都稳定拿到同一组暗色 token。注意:web 包里**没有** `--primary`,
+ * 不要再写回 `hsl(var(--primary))`(计算值阶段失效会让背景变透明)。
  */
+
 html.island-html,
 body.island-body {
   margin: 0;
@@ -25,110 +36,127 @@ body.island-body #root {
 }
 
 .island-root {
-  --island-bg: rgba(13, 17, 27, 0.82);
-  --island-bg-expanded: rgba(13, 17, 27, 0.95);
-  --island-fg: rgba(244, 246, 252, 0.96);
-  --island-fg-muted: rgba(244, 246, 252, 0.6);
-  --island-line: rgba(255, 255, 255, 0.1);
+  --island-glass: rgba(13, 17, 27, 0.72);
+  --island-fg: rgba(244, 246, 252, 0.94);
+  --island-fg-muted: rgba(244, 246, 252, 0.55);
   --island-fill: rgba(255, 255, 255, 0.06);
-  --island-fill-hover: rgba(255, 255, 255, 0.12);
-  --island-shadow: 0 12px 32px rgba(4, 8, 18, 0.5);
+  --island-fill-hover: rgba(255, 255, 255, 0.13);
+  --island-hairline: rgba(255, 255, 255, 0.09);
+  /* 顶边无描边(贴顶),描边色只出现在左 / 右 / 下 */
+  --island-edge: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--accent) 60%, transparent),
+    color-mix(in srgb, var(--aux, var(--accent)) 45%, transparent) 55%,
+    color-mix(in srgb, var(--contrast, var(--accent)) 45%, transparent)
+  );
+  --island-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --island-ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
 
   box-sizing: border-box;
   width: 100%;
   height: 100%;
   display: flex;
-  padding: 0;
   font: inherit;
   user-select: none;
   -webkit-user-select: none;
 }
 
-.island-pill {
+/* ---------- 浮窗本体:贴顶、上两角直角、只留底部圆角 ---------- */
+.island {
   box-sizing: border-box;
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  border-radius: 24px;
-  border: 1px solid var(--island-line);
-  background: var(--island-bg);
+  border-radius: 0 0 14px 14px;
+  border: 1px solid transparent;
+  border-top: 0;
+  background:
+    linear-gradient(var(--island-glass), var(--island-glass)) padding-box,
+    var(--island-edge) border-box;
   color: var(--island-fg);
-  box-shadow: var(--island-shadow);
-  backdrop-filter: blur(20px) saturate(1.5);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  backdrop-filter: blur(28px) saturate(1.8);
   overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  /* 折叠:先收高度再收宽度(反向的收纳感),与 Rust 折叠补间同节奏 */
   transition:
-    background 160ms ease,
-    box-shadow 160ms ease;
+    border-radius 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.24s ease,
+    transform 0.2s ease;
 }
 
-.island-pill.is-expanded {
-  background: var(--island-bg-expanded);
+.island.is-expanded {
+  border-radius: 0 0 20px 20px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  /* 展开:等纵向落下(约 0.16s)后再放大圆角 */
+  transition:
+    border-radius 0.34s var(--island-ease-soft) 0.16s,
+    box-shadow 0.3s ease,
+    transform 0.2s ease;
+  /* 展开瞬间的一圈内描边环,替代被窗口裁掉的外发光 */
+  animation: island-open-ring 0.6s ease-out;
 }
 
-.island-header {
-  flex: 0 0 auto;
-  height: 46px;
+@keyframes island-open-ring {
+  0% {
+    box-shadow:
+      inset 0 0 0 0 transparent,
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  45% {
+    box-shadow:
+      inset 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+}
+
+.island-root.is-dragging .island {
+  cursor: grabbing;
+  transform: scale(0.985);
+  transform-origin: top center;
+}
+
+/* ---------- 头部(与折叠高度一致,保证形变连续) ---------- */
+.island-head {
+  flex: 0 0 28px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 14px;
-  cursor: default;
+  padding: 0 12px;
+  white-space: nowrap;
   outline: none;
 }
 
-.island-header[role='button'] {
+.island-head[role='button'] {
   cursor: pointer;
 }
 
-.island-header[role='button']:focus-visible {
-  outline: 2px solid hsl(var(--primary));
+.island-head[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
-  border-radius: 24px;
+  border-radius: 0 0 14px 14px;
 }
 
-.island-dot {
+/* 品牌图标替代原来的状态圆点:占据头部首位,靠左对齐 */
+.island-brand {
   flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--island-fg-muted);
-}
-
-.island-dot-active {
-  background: hsl(var(--primary));
-  animation: island-pulse 1.4s ease-out infinite;
-}
-
-.island-dot-done {
-  background: var(--success);
-}
-
-.island-dot-error {
-  background: var(--danger);
-}
-
-@keyframes island-pulse {
-  0% {
-    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.5);
-  }
-  70% {
-    box-shadow: 0 0 0 6px hsl(var(--primary) / 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .island-dot-active {
-    animation: none;
-  }
+  display: block;
 }
 
 .island-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -140,24 +168,135 @@ body.island-body #root {
   flex: 1 1 auto;
 }
 
-.island-badge {
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.16);
-  border: 1px solid hsl(var(--primary) / 0.32);
+/* 活跃态波形 */
+.island-wave {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  height: 11px;
 }
 
+.island-tone-active .island-wave {
+  display: flex;
+  animation: island-wave-in 0.3s ease;
+}
+
+.island-wave i {
+  width: 2.5px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent), var(--aux, var(--accent)));
+  animation: island-wave-bounce 1.05s ease-in-out infinite;
+}
+
+.island-wave i:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.island-wave i:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+.island-wave i:nth-child(4) {
+  animation-delay: 0.36s;
+}
+
+@keyframes island-wave-bounce {
+  0%,
+  100% {
+    height: 4px;
+    opacity: 0.6;
+  }
+  50% {
+    height: 11px;
+    opacity: 1;
+  }
+}
+
+@keyframes island-wave-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.island-caret {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  color: rgba(244, 246, 252, 0.4);
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.island.is-expanded .island-caret {
+  transform: rotate(180deg);
+  transition: transform 0.4s var(--island-ease-soft) 0.12s;
+}
+
+/* ---------- 展开区:盒体先长,内容后错峰浮现 ---------- */
 .island-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 2px 14px 12px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 13px;
+  opacity: 0;
+  transform: translateY(10px);
+  filter: blur(6px);
+  pointer-events: none;
+  /* 折叠时内容先撤,不拖泥带水 */
+  transition:
+    opacity 0.12s ease,
+    transform 0.16s ease,
+    filter 0.12s ease;
+}
+
+.island.is-expanded .island-body {
+  opacity: 1;
+  transform: none;
+  filter: blur(0);
+  pointer-events: auto;
+  /* 原生补间纵向落下接近完成(约 0.3s)后才浮现 */
+  transition:
+    opacity 0.28s ease 0.3s,
+    transform 0.4s var(--island-ease-out) 0.3s,
+    filter 0.28s ease 0.3s;
+}
+
+.island-body-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.island-title,
+.island-preview,
+.island-actions {
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.island.is-expanded .island-title {
+  opacity: 1;
+  transform: none;
+  transition-delay: 0.3s;
+}
+
+.island.is-expanded .island-preview {
+  opacity: 1;
+  transform: none;
+  transition-delay: 0.34s;
+}
+
+.island.is-expanded .island-actions {
+  opacity: 1;
+  transform: none;
+  transition-delay: 0.38s;
 }
 
 .island-title {
@@ -169,47 +308,53 @@ body.island-body #root {
 }
 
 .island-preview {
-  flex: 1 1 auto;
-  min-height: 0;
+  margin-top: 2px;
   font-size: 11px;
-  line-height: 1.45;
   color: var(--island-fg-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .island-actions {
   flex: 0 0 auto;
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  gap: 6px;
 }
 
 .island-btn {
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--island-line);
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid var(--island-hairline);
   background: var(--island-fill);
-  color: var(--island-fg);
+  color: rgba(244, 246, 252, 0.9);
   cursor: pointer;
   transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    opacity 120ms ease;
+    background 0.15s ease,
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.island-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .island-btn:hover:not(:disabled) {
   background: var(--island-fill-hover);
 }
 
+.island-btn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
 .island-btn:focus-visible {
-  outline: 2px solid hsl(var(--primary));
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -218,17 +363,89 @@ body.island-body #root {
   cursor: not-allowed;
 }
 
-.island-btn-primary {
-  background: hsl(var(--primary));
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-}
-
-.island-btn-primary:hover:not(:disabled) {
-  background: hsl(var(--primary) / 0.88);
-}
-
-.island-btn-primary:disabled {
-  background: hsl(var(--primary) / 0.4);
+.island-btn-accent {
+  background: linear-gradient(
+    135deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 72%, transparent)
+  );
   border-color: transparent;
+  color: var(--fg-on-accent, #ffffff);
+}
+
+.island-btn-accent:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+/* 底部进度线(展开 + 运行中) */
+.island-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.3s ease 0.4s;
+  pointer-events: none;
+}
+
+.island.is-expanded.island-tone-active .island-progress {
+  opacity: 1;
+}
+
+.island-progress span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 42%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--aux, var(--accent)));
+  animation: island-progress-slide 1.6s ease-in-out infinite;
+}
+
+@keyframes island-progress-slide {
+  0% {
+    left: -45%;
+  }
+  100% {
+    left: 105%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-wave i {
+    animation: none !important;
+  }
+
+  .island.is-expanded {
+    animation: none;
+  }
+
+  .island-progress span {
+    animation: none;
+    left: 0;
+    width: 60%;
+  }
+
+  .island,
+  .island.is-expanded {
+    transition-duration: 0.01s !important;
+    transition-delay: 0s !important;
+  }
+
+  .island-title,
+  .island-preview,
+  .island-actions,
+  .island-body,
+  .island-caret {
+    transition: none !important;
+  }
+
+  .island-body {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
 }

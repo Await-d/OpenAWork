@@ -87,3 +87,50 @@ export function presentIslandStatus(
       return { label: '待机', tone: 'idle' };
   }
 }
+
+/** 灵动岛水平锚点比例:0 = 贴左、1 = 贴右、0.5 = 居中。 */
+export type IslandAnchorRatio = number;
+
+/** 默认锚点(居中)。 */
+export const ISLAND_DEFAULT_ANCHOR_RATIO = 0.5;
+
+/** 松手时离中心多近就直接吸附回正中(逻辑像素)。 */
+export const ISLAND_SNAP_TO_CENTER_PX = 36;
+
+/** 把任意值收敛为合法锚点比例;非有限值回落到居中。 */
+export function clampAnchorRatio(value: unknown): IslandAnchorRatio {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return ISLAND_DEFAULT_ANCHOR_RATIO;
+  }
+  return Math.min(Math.max(value, 0), 1);
+}
+
+/**
+ * 由拖动位移换算新的锚点比例。
+ *
+ * `travelPx` 是浮窗可水平移动的行程(可用区域宽 − 窗口宽);行程非正(窗口比
+ * 区域还宽)时保持起始比例,避免除零。
+ */
+export function ratioFromDrag(
+  startRatio: IslandAnchorRatio,
+  deltaXPx: number,
+  travelPx: number,
+): IslandAnchorRatio {
+  if (!Number.isFinite(travelPx) || travelPx <= 0 || !Number.isFinite(deltaXPx)) {
+    return clampAnchorRatio(startRatio);
+  }
+  return clampAnchorRatio(clampAnchorRatio(startRatio) + deltaXPx / travelPx);
+}
+
+/** 松手时是否应吸附回正中(按比例与行程折算成像素距离判定)。 */
+export function shouldSnapToCenter(
+  ratio: IslandAnchorRatio,
+  travelPx: number,
+  snapPx: number = ISLAND_SNAP_TO_CENTER_PX,
+): boolean {
+  if (!Number.isFinite(travelPx) || travelPx <= 0) {
+    return false;
+  }
+  const distancePx = Math.abs(clampAnchorRatio(ratio) - ISLAND_DEFAULT_ANCHOR_RATIO) * travelPx;
+  return distancePx < snapPx;
+}

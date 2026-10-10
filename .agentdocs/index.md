@@ -796,9 +796,9 @@
 **开始日期**: 2026-10-09（规划）
 **方案文档**: [workflow/261009-desktop-dynamic-island.md](workflow/261009-desktop-dynamic-island.md)
 **运行计划**: [runtime/261009-desktop-dynamic-island/master_plan.md](runtime/261009-desktop-dynamic-island/master_plan.md)
-**目标**: 主显示器顶部中央新增 `island` 浮窗（pill 220×48，置顶 / 无边框 / 透明 / 不抢焦点），实时展示 Agent 状态脉冲与网关健康；hover 展开为卡片（420×140）显示会话标题 + 最后消息预览 + 「打开会话」；设置页可开关，`Alt+Shift+I` 全局快捷键切换。
+**目标**: 主显示器顶部中央新增 `island` 浮窗（pill 164×28，置顶 / 无边框 / 透明 / 不抢焦点），实时展示 Agent 状态脉冲与网关健康；hover 展开为卡片（380×92）显示会话标题 + 最后消息预览 + 「打开会话」；设置页可开关，`Alt+Shift+I` 全局快捷键切换。
 **关键约束**: Windows 透明窗口需前端 `border-radius` 模拟 pill 形状；跨窗口 Zustand 不共享 → 全部走 Tauri `emit`/`listen`；island WebView 未就绪前 emit 会丢 → 就绪标记 + 缓存补发。
-**交付**: T-01~T-13 全部完成（Rust 窗口/命令/快捷键 + island 前端入口/store/组件 + 设置页 + 23 个单测）；第二轮复核补齐：① `Alt+Shift+I` 此前**没有接线**（只有注册，handler 无分支）已补；② 方案承诺的 **Linux 每 10s 位置校正**此前缺失，已补（仅 Linux、窗口可见才校正、隐藏/退出清理、`Arc<AtomicBool>` 停止信号）；③ 定位改用 `Monitor::work_area()`（原用整块显示器，macOS 菜单栏会遮挡）；④ `tauri-plugin-window-state` 加 `with_denylist(["island"])`（否则插件回写尺寸/位置，跨重启会出现「窗口 420×140 但状态折叠」）；⑤ host-ready 前上报的 Agent 状态此前被直接丢弃，改为缓存 + 就绪补发。
+**交付**: T-01~T-13 全部完成（Rust 窗口/命令/快捷键 + island 前端入口/store/组件 + 设置页 + 23 个单测）；第二轮复核补齐：① `Alt+Shift+I` 此前**没有接线**（只有注册，handler 无分支）已补；② 方案承诺的 **Linux 每 10s 位置校正**此前缺失，已补（仅 Linux、窗口可见才校正、隐藏/退出清理、`Arc<AtomicBool>` 停止信号）；③ 定位改用 `Monitor::work_area()`（原用整块显示器，macOS 菜单栏会遮挡）；④ `tauri-plugin-window-state` 加 `with_denylist(["island"])`（否则插件回写尺寸/位置，跨重启会出现「窗口 380×92 但状态折叠」）；⑤ host-ready 前上报的 Agent 状态此前被直接丢弃，改为缓存 + 就绪补发。
 **验证**: 本机复跑 `apps/web` / `apps/desktop` tsc 与 `src/island` 单测（23 用例）全绿；**本机无 cargo/rustc**，Rust 改动未经编译验证（已对照 docs.rs 核对 `work_area` / `with_denylist` / `inner_size(f64,f64)` / `position(f64,f64)` 签名，与 tauri 2.11.5 / 插件 2.4.1 一致）；真机第一步应先 `cargo check`。T-14 手工验证清单保留（macOS / Windows / Linux：置顶居中、脉冲变色、hover 展开、点击跳转、设置开关、Alt+Shift+I、网关异常红点、Linux 拖动后 10s 自动回位）。
 
 ### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口

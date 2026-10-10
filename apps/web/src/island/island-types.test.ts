@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clampAnchorRatio,
   normalizeAgentState,
   normalizeGatewayHealth,
   presentIslandStatus,
+  ratioFromDrag,
+  shouldSnapToCenter,
 } from './island-types.js';
 
 describe('normalizeAgentState', () => {
@@ -76,5 +79,54 @@ describe('presentIslandStatus', () => {
       label: '待机',
       tone: 'idle',
     });
+  });
+});
+
+describe('clampAnchorRatio', () => {
+  it('把越界值收敛到 [0, 1]', () => {
+    expect(clampAnchorRatio(-0.4)).toBe(0);
+    expect(clampAnchorRatio(1.7)).toBe(1);
+    expect(clampAnchorRatio(0.25)).toBe(0.25);
+  });
+
+  it('非有限值回落到居中', () => {
+    expect(clampAnchorRatio(Number.NaN)).toBe(0.5);
+    expect(clampAnchorRatio(Number.POSITIVE_INFINITY)).toBe(0.5);
+    expect(clampAnchorRatio('0.2')).toBe(0.5);
+    expect(clampAnchorRatio(null)).toBe(0.5);
+  });
+});
+
+describe('ratioFromDrag', () => {
+  it('按行程把位移换算成比例', () => {
+    expect(ratioFromDrag(0.5, 100, 1000)).toBeCloseTo(0.6);
+    expect(ratioFromDrag(0.5, -100, 1000)).toBeCloseTo(0.4);
+  });
+
+  it('拖出边界时被夹住', () => {
+    expect(ratioFromDrag(0.5, 9000, 1000)).toBe(1);
+    expect(ratioFromDrag(0.5, -9000, 1000)).toBe(0);
+  });
+
+  it('行程非正时保持起始比例', () => {
+    expect(ratioFromDrag(0.3, 500, 0)).toBe(0.3);
+    expect(ratioFromDrag(0.3, 500, -10)).toBe(0.3);
+  });
+});
+
+describe('shouldSnapToCenter', () => {
+  it('距中心小于阈值时吸附', () => {
+    // 行程 1000px,阈值 36px → 比例差 < 0.036
+    expect(shouldSnapToCenter(0.5, 1000)).toBe(true);
+    expect(shouldSnapToCenter(0.53, 1000)).toBe(true);
+  });
+
+  it('超出阈值时不吸附', () => {
+    expect(shouldSnapToCenter(0.55, 1000)).toBe(false);
+    expect(shouldSnapToCenter(0, 1000)).toBe(false);
+  });
+
+  it('行程非正时不吸附', () => {
+    expect(shouldSnapToCenter(0.5, 0)).toBe(false);
   });
 });
