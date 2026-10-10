@@ -191,6 +191,12 @@ export async function captureBeforeWriteBackup(input: {
   try {
     return await persistSessionFileBackup(input);
   } catch (error) {
+    // 二进制内容(图片 / 压缩包 / 带 NUL 字节的文件)属于「本就不支持备份的内容类型」,
+    // 是「不适用」而非「捕获失败」。这里一律跳过,避免一个 .png 就把整个工具回合 /
+    // 子代理打断(此前默认 `block` 策略会 rethrow 到 executeToolCalls)。
+    if (error instanceof FileBackupUnsupportedContentError) {
+      return undefined;
+    }
     if (resolveFileBackupFailurePolicy() === 'degrade') {
       return undefined;
     }
