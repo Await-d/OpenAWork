@@ -132,7 +132,10 @@ async function resolveSessionWorkspaceWithParentFallback(input: {
   while (currentSessionId && !seenSessionIds.has(currentSessionId)) {
     seenSessionIds.add(currentSessionId);
 
+    // 这里只需要 metadata(workingDirectory / sshConnectionId / parentSessionId),
+    // 不读转录:否则沿父链每级都要把全量消息历史 + run event 拉回来。
     const result = await input.sessionsClient.getResult(input.token, currentSessionId, {
+      includeMessages: false,
       signal: input.signal,
     });
     if (!result.ok || !result.session) {

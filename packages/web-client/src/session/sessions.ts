@@ -551,9 +551,18 @@ export interface SessionsClient {
   getResult(
     token: string,
     sessionId: string,
-    options?: { signal?: AbortSignal },
+    options?: { includeMessages?: boolean; signal?: AbortSignal },
   ): Promise<SessionLoadResult>;
-  get(token: string, sessionId: string): Promise<Session>;
+  /**
+   * `includeMessages: false` 只取会话元数据(parentSessionId / workingDirectory /
+   * sshConnectionId 等),跳过全量转录 / run event / 文件变更聚合 —— 供只需元数据的
+   * 调用方(如沿父链解析工作区)避免把每一级的全量转录都拉回来。
+   */
+  get(
+    token: string,
+    sessionId: string,
+    options?: { includeMessages?: boolean; signal?: AbortSignal },
+  ): Promise<Session>;
   getSharedWithMe(
     token: string,
     sessionId: string,
@@ -956,13 +965,21 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
   const getResult = async (
     token: string,
     sessionId: string,
-    options?: { signal?: AbortSignal },
+    options?: { includeMessages?: boolean; signal?: AbortSignal },
   ): Promise<SessionLoadResult> => {
     try {
-      const res = await fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}`, {
-        headers: authHeader(token),
-        signal: options?.signal,
-      });
+      const params = new URLSearchParams();
+      if (options?.includeMessages === false) {
+        params.set('messages', '0');
+      }
+      const query = params.toString();
+      const res = await fetchWithTimeout(
+        `${gatewayUrl}/sessions/${sessionId}${query.length > 0 ? `?${query}` : ''}`,
+        {
+          headers: authHeader(token),
+          signal: options?.signal,
+        },
+      );
       if (!res.ok) {
         return {
           ok: false,
@@ -1094,8 +1111,8 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
 
     getResult,
 
-    async get(token, sessionId) {
-      const result = await getResult(token, sessionId);
+    async get(token, sessionId, options) {
+      const result = await getResult(token, sessionId, options);
       if (!result.ok || !result.session) {
         throw new HttpError(result.errorMessage ?? '加载会话失败', result.status ?? 500);
       }

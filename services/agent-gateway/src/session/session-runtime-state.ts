@@ -160,6 +160,54 @@ export function releaseStaleDecidingSessionRecordsForUser(userId: string): void 
   releaseStaleDecidingRecords('question_requests', owned, [userId]);
 }
 
+/**
+ * 高频读路径(`/status`、`/recovery`)专用的按用户节流版本。
+ *
+ * 批量释放本身幂等(只有超时僵尸才会被改),但这两个端点在会话活跃时以 1.8–3s 轮询,
+ * 每次都执行 2 条 `UPDATE`(permission_requests / question_requests),等于把写事务挂在
+ * 高频轮询上抢 SQLite 写锁——正是本模块注释反复警告的写放大。
+ *
+ * 释放有一个**对外可见**的效果:把僵尸从 `deciding` 改回 `pending`,从而可能进入
+ * `/status` / `/recovery` 的 pending 列表。因此节流的代价是「僵尸最多晚一个窗口
+ * (10s)浮现为可操作待办」,相对于 10 分钟的僵尸判定阈值可忽略;而判定口径
+ * (`hasPendingSessionInteraction`)本就含 `deciding`,不受释放时机影响。需要即时释放的
+ * 入口(pending 列表接口、启动对账、非节流的批量路由)仍走
+ * `releaseStaleDecidingSessionRecordsForUser`。
+ */
+const STALE_DECIDING_RELEASE_THROTTLE_MS = 10_000;
+/**
+ * 上限兜底:窗口内的活跃用户数理论上有限,但 Map 只增不减会随用户数无界增长。
+ * 超过上限时先清理已过期条目,仍超则按插入顺序淘汰最早的条目(最旧的那批本来就
+ * 即将过期,重建代价可忽略)。
+ */
+const STALE_DECIDING_RELEASE_THROTTLE_MAX_USERS = 5_000;
+const lastBulkReleaseAtByUser = new Map<string, number>();
+
+export function releaseStaleDecidingSessionRecordsForUserThrottled(userId: string): void {
+  const nowMs = Date.now();
+  const lastAt = lastBulkReleaseAtByUser.get(userId);
+  if (lastAt !== undefined && nowMs - lastAt < STALE_DECIDING_RELEASE_THROTTLE_MS) {
+    return;
+  }
+
+  lastBulkReleaseAtByUser.set(userId, nowMs);
+  if (lastBulkReleaseAtByUser.size > STALE_DECIDING_RELEASE_THROTTLE_MAX_USERS) {
+    for (const [trackedUserId, trackedAt] of lastBulkReleaseAtByUser) {
+      if (nowMs - trackedAt >= STALE_DECIDING_RELEASE_THROTTLE_MS) {
+        lastBulkReleaseAtByUser.delete(trackedUserId);
+      }
+    }
+    for (const oldestUserId of lastBulkReleaseAtByUser.keys()) {
+      if (lastBulkReleaseAtByUser.size <= STALE_DECIDING_RELEASE_THROTTLE_MAX_USERS) {
+        break;
+      }
+      lastBulkReleaseAtByUser.delete(oldestUserId);
+    }
+  }
+
+  releaseStaleDecidingSessionRecordsForUser(userId);
+}
+
 function countPendingSessionRecords(
   table: 'permission_requests' | 'question_requests',
   sessionId: string,

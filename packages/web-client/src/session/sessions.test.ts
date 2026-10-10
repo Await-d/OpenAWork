@@ -34,6 +34,26 @@ describe('createSessionsClient.getRecoveryResult', () => {
     expect(result.session?.id).toBe('session-1');
   });
 
+  it('includeMessages=false 时下发 messages=0,缺省不下发', async () => {
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(typeof input === 'string' ? input : input.toString());
+      return {
+        ok: true,
+        json: async () => ({ session: { id: 'session-1' } }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    await client.getResult('token-1', 'session-1', { includeMessages: false });
+    await client.getResult('token-1', 'session-1');
+
+    expect(urls).toEqual([
+      'http://localhost:3000/sessions/session-1?messages=0',
+      'http://localhost:3000/sessions/session-1',
+    ]);
+  });
+
   it('getResult 失败时返回结构化错误信息', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

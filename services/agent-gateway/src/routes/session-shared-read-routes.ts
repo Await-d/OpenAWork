@@ -24,10 +24,7 @@ import {
   touchSharedSessionPresence,
 } from '../session/session-shared-presence-store.js';
 import { filterVisibleSessionMessages } from '../session/session-message-store.js';
-import {
-  listSessionMessagesV2,
-  listRuntimeSafeSessionMessagesV2,
-} from '../message/message-v2-adapter.js';
+import { readSessionMessagesWithRuntimeSplit } from '../message/message-v2-adapter.js';
 import {
   getSharedSessionForRecipient,
   listSharedSessionsForRecipient,
@@ -362,16 +359,14 @@ async function buildSharedSessionDetailResponse(input: {
     sessionRow,
     input.sharedAccess.ownerUserId,
   );
-  const sessionMessages = mergeRuntimeSafeSessionMessages({
-    legacyMessages: listSessionMessagesV2({
+  // 单次读取 + 内存切分:legacy / runtime 曾各读一遍同一张 message_v2 + part_v2,
+  // 而 runtime 集恒为 legacy 子集(见 readSessionMessagesWithRuntimeSplit)。
+  const sessionMessages = mergeRuntimeSafeSessionMessages(
+    readSessionMessagesWithRuntimeSplit({
       sessionId: input.sessionId,
       userId: input.sharedAccess.ownerUserId,
     }),
-    runtimeMessages: listRuntimeSafeSessionMessagesV2({
-      sessionId: input.sessionId,
-      userId: input.sharedAccess.ownerUserId,
-    }),
-  });
+  );
 
   const session = toPublicSessionResponse(
     {

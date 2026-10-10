@@ -140,10 +140,11 @@ import {
 import {
   hasPendingSessionInteraction,
   releaseStaleDecidingSessionRecordsForUser,
+  releaseStaleDecidingSessionRecordsForUserThrottled,
 } from '../session/session-runtime-state.js';
 import {
   listSessionMessagesV2,
-  listRuntimeSafeSessionMessagesV2,
+  readSessionMessagesWithRuntimeSplit,
 } from '../message/message-v2-adapter.js';
 import {
   rollbackSessionTurn,
@@ -163,7 +164,11 @@ const createSessionSchema = z.object({
 export interface SessionRow {
   id: string;
   user_id: string;
-  messages_json: string;
+  /**
+   * 历史遗留的大字段(导入会话可含数百 KB)。状态读模型从不读取它,故按需从 SELECT
+   * 中跳过(`buildSafeSessionSelectColumns({ includeMessages: false })`),缺席时为 undefined。
+   */
+  messages_json?: string;
   state_status: string;
   paused?: number | null;
   metadata_json: string;
@@ -345,6 +350,40 @@ function buildSessionFileChangesSummary(input: { sessionId: string; userId: stri
     fileDiffs: listSessionFileDiffs({ sessionId: input.sessionId, userId: input.userId }),
     snapshots: listSessionSnapshots({ sessionId: input.sessionId, userId: input.userId }),
   }).summary;
+}
+
+/**
+ * `GET /sessions/:sessionId` 的查询参数。
+ *
+ * `messages=false` 只回会话元数据(不读转录 / run event),供只需要
+ * `metadata_json`(parentSessionId / workingDirectory / sshConnectionId)的调用方
+ * 沿父链逐级解析时避免把每一级的全量转录都拉回来。缺省(含无法识别取值)按
+ * 「包含消息」处理,保持既有行为。
+ */
+const sessionGetQuerySchema = z.object({
+  // 宽容解析:无法识别的取值一律按「包含消息」处理,避免给既有 / 未来调用方带来
+  // 看不见的 400(例如遗留客户端或新增查询参数的写法差异)。
+  messages: z
+    .string()
+    .optional()
+    .transform((value) => value !== '0' && value !== 'false'),
+});
+
+/**
+ * 只回「当前活跃线程」的 run event。
+ *
+ * run event 是流式重放缓存:已完成轮次的工具结果已落在 message 里,历史事件冗余;
+ * 前端唯一消费者 `recoverActiveAssistantStream` 也只取**最新 run**。空闲会话回空,
+ * 避免把整个 replay 日志(每个 delta chunk 一行,长会话可达数万行)全量读出并逐行
+ * `JSON.parse` —— 这正是 `GET /sessions/:id` 此前的同步阻塞主因。
+ */
+function listActiveSessionRunEvents(input: { sessionId: string; userId: string }): RunEvent[] {
+  const activeThread = getFreshSessionRuntimeThread(input);
+  if (!activeThread) return [];
+  return listSessionRunEventsByRequest({
+    sessionId: input.sessionId,
+    clientRequestId: activeThread.clientRequestId,
+  });
 }
 
 function toPublicFileDiff(
@@ -923,11 +962,13 @@ async function applyRestoreOperations(input: {
  * migrate() 的 ensureTeamSchemaSafe() 兜底块会补上这些列，但为了在
  * migrate 尚未执行或部分失败的过渡期内保持可用性，这里仍做防御。
  */
-function buildSafeSessionSelectColumns(): string {
+function buildSafeSessionSelectColumns(options?: { includeMessages?: boolean }): string {
   const baseColumns = [
     'id',
     'user_id',
-    'messages_json',
+    // `messages_json` 是历史遗留的大字段(导入会话可含数百 KB)。状态读模型从不读取它,
+    // 允许调用方按需跳过,避免把整列大字段读进内存。默认保留以不影响既有调用点。
+    ...(options?.includeMessages === false ? [] : ['messages_json']),
     'state_status',
     'metadata_json',
     'title',
@@ -955,9 +996,30 @@ function buildSafeSessionSelectColumns(): string {
     'pr_url',
     'pr_repository',
   ];
-  const existing = new Set(
-    sqliteAll<{ name: string }>('PRAGMA table_info(sessions)').map((row) => row.name),
-  );
+  return buildSafeSessionColumns(baseColumns, optionalColumns, resolveExistingSessionColumns());
+}
+
+/**
+ * `PRAGMA table_info(sessions)` 的结果在进程内视为不变(`migrate()` 在 `app.listen` 之前完成),
+ * 而 `buildSafeSessionSelectColumns` 每次请求会被调用多次(含 reconcile 的逐会话刷新、
+ * `/status` / `/recovery` 的多处 SELECT),缓存掉 PRAGMA 是纯去重,不改变任何列集合。
+ */
+let cachedExistingSessionColumns: Set<string> | null = null;
+
+function resolveExistingSessionColumns(): Set<string> {
+  if (cachedExistingSessionColumns === null) {
+    cachedExistingSessionColumns = new Set(
+      sqliteAll<{ name: string }>('PRAGMA table_info(sessions)').map((row) => row.name),
+    );
+  }
+  return cachedExistingSessionColumns;
+}
+
+function buildSafeSessionColumns(
+  baseColumns: string[],
+  optionalColumns: string[],
+  existing: ReadonlySet<string>,
+): string {
   const safeColumns = [...baseColumns];
   for (const col of optionalColumns) {
     if (existing.has(col)) {
@@ -1563,7 +1625,9 @@ function listRecoveryQuestionRequests(sessionIds: string[]) {
 
 async function buildSessionStatusReadModel(input: { session: SessionRow; userId: string }) {
   const sessionId = input.session.id;
-  const safeSessionCols = buildSafeSessionSelectColumns();
+  // 状态读模型只用到 id / metadata_json / team_parent_session_id 等轻字段(子会话消息走空数组),
+  // 因此跳过 messages_json 大字段:本次扫描是「该用户全部会话」,带上大字段会把整列读进内存。
+  const safeSessionCols = buildSafeSessionSelectColumns({ includeMessages: false });
   const allSessions = sqliteAll<SessionRow>(
     `SELECT ${safeSessionCols} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
     [input.userId],
@@ -1578,7 +1642,7 @@ async function buildSessionStatusReadModel(input: { session: SessionRow; userId:
 
   // 移动端 chat 屏在会话活跃时以 1.8s 轮询本端点、空闲时退到 60s 兜底；无论哪一档，
   // 回收僵尸 deciding 都在入口做一次，而不是对子树里每条会话各做一次。
-  releaseStaleDecidingSessionRecordsForUser(input.userId);
+  releaseStaleDecidingSessionRecordsForUserThrottled(input.userId);
 
   const reconciledDescendants = await reconcileSessionRuntimeRowsForResponse(
     descendantRows,
@@ -1644,14 +1708,16 @@ async function buildSessionRecoveryReadModel(input: {
 }) {
   // `/recovery` 被团队会话快照（2.5s）与子会话详情（2.5s）轮询，且下面会对子树跑
   // 两轮协调。回收僵尸 deciding 放在入口做一次，per-session 协调一律传 false。
-  releaseStaleDecidingSessionRecordsForUser(input.userId);
+  releaseStaleDecidingSessionRecordsForUserThrottled(input.userId);
 
   const reconciledSession = await reconcileSessionRuntimeForResponse(input.session, input.userId, {
     releaseStaleDeciding: false,
   });
   const sessionId = input.session.id;
+  // `/recovery` 返回体同样经 `toPublicSessionResponse` 白名单构造(消息走 listSessionMessagesV2,
+  // 不含 messages_json),因此与 `/status` 一样跳过该大字段:本扫描覆盖该用户全部会话。
   const sessions = sqliteAll<SessionRow>(
-    `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
+    `SELECT ${buildSafeSessionSelectColumns({ includeMessages: false })} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
     [input.userId],
   );
   const descendantSessionIds = [...collectDescendantSessionIds(sessions, sessionId)].filter(
@@ -1684,10 +1750,10 @@ async function buildSessionRecoveryReadModel(input: {
                 ? input.messageLimit
                 : undefined,
           }),
-          runtimeMessages: listRuntimeSafeSessionMessagesV2({
-            sessionId: session.id,
-            userId: input.userId,
-          }),
+          // runtime 集恒为 legacy 的同窗子集(二者读同一张 message_v2,仅多一道
+          // `isRuntimeSafeV2Message` 过滤),而 merge 又以 legacy 优先 —— 它不贡献任何
+          // 消息。显式置空,免去对同一张表 + 全部 part 行的第二次全量读取。
+          runtimeMessages: [],
         }),
       ),
     ),
@@ -1732,10 +1798,9 @@ async function buildSessionRecoveryReadModel(input: {
         userId: input.userId,
         turnLimit: hasTurnLimit ? input.messageLimit : undefined,
       }),
-      runtimeMessages: listRuntimeSafeSessionMessagesV2({
-        sessionId,
-        userId: input.userId,
-      }),
+      // runtime 集恒为 legacy 的同窗子集(见子会话路径注释),merge 又以 legacy
+      // 优先 —— 它不贡献任何消息。显式置空,免去第二次全量读取。
+      runtimeMessages: [],
     }),
   );
   const totalTurnCount = hasTurnLimit
@@ -2065,6 +2130,10 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { sessionId } = request.params as { sessionId: string };
+      const { messages: includeMessages } = parseQuery(
+        sessionGetQuerySchema,
+        (request as FastifyRequest & { query: unknown }).query,
+      );
       const { step } = startRequestWorkflow(request, 'session.get', undefined, { sessionId });
 
       const session = sqliteGet<SessionRow>(
@@ -2078,30 +2147,37 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const reconciledSession = await reconcileSessionRuntimeForResponse(session, user.sub);
       step.succeed();
       const todos = listSessionTodos(sessionId);
+      // 全量转录路径:legacy / runtime 只读一次(见 readSessionMessagesWithRuntimeSplit),
+      // run event 只回当前活跃线程(listActiveSessionRunEvents)。二者共同消掉此前每次
+      // 请求把「全量历史 + 全部 part 行」读两遍、并把整个 replay 日志全量 JSON.parse 的
+      // 同步阻塞。`messages=0` 时连转录 / run event / 文件变更聚合一并跳过,只回元数据。
+      const messages = includeMessages
+        ? filterVisibleSessionMessages(
+            mergeRuntimeSafeSessionMessages(
+              readSessionMessagesWithRuntimeSplit({ sessionId, userId: user.sub }),
+            ),
+          )
+        : [];
       const response = toPublicSessionResponse(
         {
           ...reconciledSession,
           metadata_json: sanitizeSessionMetadataJson(reconciledSession.metadata_json),
         },
-        filterVisibleSessionMessages(
-          mergeRuntimeSafeSessionMessages({
-            legacyMessages: listSessionMessagesV2({
-              sessionId,
-              userId: user.sub,
-            }),
-            runtimeMessages: listRuntimeSafeSessionMessagesV2({
-              sessionId,
-              userId: user.sub,
-            }),
-          }),
-        ),
+        messages,
         todos,
-        listSessionRunEvents(sessionId),
+        includeMessages ? listActiveSessionRunEvents({ sessionId, userId: user.sub }) : [],
       );
       return reply.send({
         session: {
           ...response,
-          fileChangesSummary: buildSessionFileChangesSummary({ sessionId, userId: user.sub }),
+          ...(includeMessages
+            ? {
+                fileChangesSummary: buildSessionFileChangesSummary({
+                  sessionId,
+                  userId: user.sub,
+                }),
+              }
+            : {}),
         },
       });
     },
@@ -2117,8 +2193,9 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
       });
 
+      // 状态读模型不读取 messages_json(子会话消息以空数组返回),跳过该大字段。
       const session = sqliteGet<SessionRow>(
-        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
+        `SELECT ${buildSafeSessionSelectColumns({ includeMessages: false })} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
         [sessionId, user.sub],
       );
 

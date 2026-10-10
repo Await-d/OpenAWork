@@ -1270,7 +1270,7 @@ function isAssistantEventText(text: string): boolean {
   }
 }
 
-function isRuntimeSafeV2Message(message: Message): boolean {
+export function isRuntimeSafeV2Message(message: Message): boolean {
   return message.content.some((content) => {
     if (content.type === 'tool_call' || content.type === 'tool_result') {
       return true;
@@ -1286,15 +1286,56 @@ export function listRuntimeSafeSessionMessagesV2(input: {
   sessionId: string;
   userId: string;
   limit?: number;
+  /**
+   * 与 `listSessionMessagesV2` 的 `turnLimit` 同语义:只取最近 N 个回合
+   * (按 user 消息计)之后的 runtime 安全消息。
+   *
+   * `/recovery?messageLimit=N` 会同时限制 legacy 与 runtime 两条读取路径 ——
+   * 二者读的是同一张 `message_v2`,不设上限时 runtime 分支会把**整个历史**的
+   * 工具消息(每个被 slim 后仍可达数千字符)并入窗口化的 legacy,使这个被
+   * 活跃会话高频轮询的接口随会话长度无界膨胀。
+   */
+  turnLimit?: number;
 }): Message[] {
-  return listMessagesWithParts({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    limit: input.limit,
-  })
+  const rawMessages =
+    typeof input.turnLimit === 'number' && input.turnLimit > 0
+      ? listMessagesWithPartsByTurnLimit({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          turnLimit: input.turnLimit,
+        })
+      : listMessagesWithParts({
+          sessionId: input.sessionId,
+          userId: input.userId,
+          limit: input.limit,
+        });
+  return rawMessages
     .map((message) => v2ToV1Message(message))
     .filter((message) => message.content.length > 0)
     .filter((message) => isRuntimeSafeV2Message(message));
+}
+
+/**
+ * 单次读取 `message_v2` + `part_v2`,并在内存里切出 runtime 安全子集。
+ *
+ * `listRuntimeSafeSessionMessagesV2` 与 `listSessionMessagesV2` 读的是同一张表、
+ * 同一窗口,后者只是多了 `isRuntimeSafeV2Message` 过滤 —— 即 runtime 集恒为 legacy
+ * 集的子集。此前的全量路由(如 `GET /sessions/:id`)两条路径各读一遍,把同一批
+ * message/part 行重复 `JSON.parse` 两次。此函数只读一次,返回的两组与分别调用两个
+ * 读取函数逐字节一致,可直接喂给 `mergeRuntimeSafeSessionMessages`。
+ */
+export function readSessionMessagesWithRuntimeSplit(input: {
+  sessionId: string;
+  userId: string;
+  statuses?: string[];
+  limit?: number;
+  turnLimit?: number;
+}): { legacyMessages: Message[]; runtimeMessages: Message[] } {
+  const legacyMessages = listSessionMessagesV2(input);
+  return {
+    legacyMessages,
+    runtimeMessages: legacyMessages.filter((message) => isRuntimeSafeV2Message(message)),
+  };
 }
 
 export function appendReasoningDelta(input: {

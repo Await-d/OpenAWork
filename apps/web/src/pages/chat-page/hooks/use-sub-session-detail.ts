@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPermissionsClient, createSessionsClient } from '@openAwork/web-client';
-import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
+import type {
+  PendingPermissionRequest,
+  Session,
+  SessionStatusReadModel,
+  SessionTask,
+} from '@openAwork/web-client';
 import type { Message } from '@openAwork/shared';
 import {
   normalizeChatMessages,
@@ -100,6 +105,11 @@ export function useSubSessionDetail(
   /** 上一拍的消息指纹与归一化结果，供等价时复用。 */
   const lastFingerprintRef = useRef<string | null>(null);
   const lastNormalizedRef = useRef<ChatMessage[]>([]);
+  /**
+   * 上一拍全量刷新观察到的「子代理是否处于活跃态」(running / paused)。
+   * 轻量 `/status` 探针用它判定是否值得补一次全量 `GET /sessions/:id`。
+   */
+  const lastKnownRunningRef = useRef(false);
 
   const runRefresh = useCallback(
     async (options: { force: boolean }) => {
@@ -149,6 +159,8 @@ export function useSubSessionDetail(
           lastNormalizedRef.current = messages;
         }
 
+        lastKnownRunningRef.current =
+          session.state_status === 'running' || session.state_status === 'paused';
         setState((previous) => ({
           error: null,
           loading: false,
@@ -166,6 +178,10 @@ export function useSubSessionDetail(
 
         lastFingerprintRef.current = null;
         lastNormalizedRef.current = [];
+        // 读取失败时不再假设子代理仍在运行:否则若它其实已结束、而轻量探针又读到
+        // activeStream，本 hook 会每拍补一次全量刷新。子代理确实在跑时,`/status`
+        // 的 activeStream 会让探针自行恢复全量刷新,故这里清零不丢实时性。
+        lastKnownRunningRef.current = false;
         setState({
           error: error instanceof Error ? error.message : '加载子代理详情失败',
           loading: false,
@@ -184,10 +200,40 @@ export function useSubSessionDetail(
   /** 手动 / 外部触发的刷新：总是发起新请求，不受单飞限制。 */
   const refresh = useCallback(() => runRefresh({ force: true }), [runRefresh]);
 
+  /**
+   * 轻量探针:轮询 `GET /sessions/:id/status`,只在「确有事情发生」时才补一次全量
+   * `GET /sessions/:id`。
+   *
+   * 全量端点拉的是无分页上限的全量历史 + run event;子代理跑完后绝大多数拍返回值
+   * 完全一致,此前每 2.5s 无条件拉一次纯属浪费。这里改判:存在活跃流、上一拍状态为
+   * running/paused、或有待处理审批 / 提问时才拉全量,静止期只花一次轻量状态查询。
+   */
+  const pollStatus = useCallback(async () => {
+    if (!childSessionId || !token) return;
+    // 全量刷新在途时跳过这一拍,避免与 runRefresh 抢同一份 state。
+    if (inFlightRef.current) return;
+    let status: SessionStatusReadModel;
+    try {
+      status = await createSessionsClient(gatewayUrl).getStatus(token, childSessionId);
+    } catch {
+      // 轻量探针失败不改变 UI:下一拍重试,避免轮询失败刷屏错误态。
+      return;
+    }
+    const isActive =
+      status.activeStream !== null ||
+      lastKnownRunningRef.current ||
+      status.pendingPermissions.length > 0 ||
+      status.pendingQuestions.length > 0;
+    if (isActive) {
+      void runRefresh({ force: false });
+    }
+  }, [childSessionId, gatewayUrl, runRefresh, token]);
+
   useEffect(() => {
     if (!childSessionId || !token) {
       lastFingerprintRef.current = null;
       lastNormalizedRef.current = [];
+      lastKnownRunningRef.current = false;
       setState(EMPTY_STATE);
       return;
     }
@@ -197,13 +243,13 @@ export function useSubSessionDetail(
       // 页面不可见时跳过：每个打开的子会话面板各有一条 2.5s 轮询，
       // 后台叠加会成为多会话场景下的请求风暴。
       if (typeof document !== 'undefined' && document.hidden) return;
-      void runRefresh({ force: false });
+      void pollStatus();
     }, 2500);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [childSessionId, runRefresh, token]);
+  }, [childSessionId, pollStatus, runRefresh, token]);
 
   return {
     ...state,

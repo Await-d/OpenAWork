@@ -200,3 +200,38 @@ describe('僵尸 deciding 的回收能力未丢失', () => {
     expect(statusOf('perm-bulk')?.status).toBe('deciding');
   });
 });
+
+describe('releaseStaleDecidingSessionRecordsForUserThrottled 按用户节流', () => {
+  it('窗口内第二次调用不再写库,且不波及别的用户', () => {
+    const throttledUser = 'u-throttled';
+    const otherUser = 'u-throttled-other';
+    dbModule.sqliteRun('INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
+      throttledUser,
+      `${throttledUser}@example.com`,
+      'x',
+    ]);
+    dbModule.sqliteRun('INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, ?)', [
+      otherUser,
+      `${otherUser}@example.com`,
+      'x',
+    ]);
+    seedSession('sess-throttled', throttledUser);
+    seedSession('sess-throttled-other', otherUser);
+
+    // 第一拍:窗口内首次调用,正常释放。
+    seedZombieDeciding({ id: 'perm-throttled-1', sessionId: 'sess-throttled' });
+    runtimeState.releaseStaleDecidingSessionRecordsForUserThrottled(throttledUser);
+    expect(statusOf('perm-throttled-1')?.status).toBe('pending');
+
+    // 第二拍(同一用户、仍在窗口内):被节流跳过——新种的僵尸保持 deciding。
+    // 这条断言就是「写放大被削掉」的证明:若节流失效,它会被改成 pending。
+    seedZombieDeciding({ id: 'perm-throttled-2', sessionId: 'sess-throttled' });
+    runtimeState.releaseStaleDecidingSessionRecordsForUserThrottled(throttledUser);
+    expect(statusOf('perm-throttled-2')?.status).toBe('deciding');
+
+    // 另一用户的节流桶相互独立:它的首次调用仍然即时释放。
+    seedZombieDeciding({ id: 'perm-throttled-other', sessionId: 'sess-throttled-other' });
+    runtimeState.releaseStaleDecidingSessionRecordsForUserThrottled(otherUser);
+    expect(statusOf('perm-throttled-other')?.status).toBe('pending');
+  });
+});
