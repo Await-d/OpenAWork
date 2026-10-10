@@ -43,8 +43,11 @@ describe('GatewaySSEClient', () => {
         type: 'error',
         code: 'SSE_ERROR',
         message: 'SSE 连接异常。',
-        technicalDetail:
-          '连接在收到 SSE 响应前中断。Gateway：http://localhost:3000；会话：session-1。浏览器没有提供底层失败原因。',
+        // 诊断详情含非确定性的「连接时长」,故只对该段放宽为 \d+ms;
+        // 其余(地址 / 会话 / 事件数 / readyState / 常见原因)仍逐段严格断言。
+        technicalDetail: expect.stringMatching(
+          /^Gateway：http:\/\/localhost:3000；会话：session-1；已接收事件数：0；连接时长：\d+ms；浏览器没有提供底层失败原因；readyState=unknown；常见原因：网关未启动、地址\/端口错误、登录已失效、网络中断。$/,
+        ),
       }),
     );
   });
