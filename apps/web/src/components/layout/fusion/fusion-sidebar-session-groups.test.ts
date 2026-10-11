@@ -8,6 +8,7 @@ import type {
 import {
   UNBOUND_WORKSPACE_GROUP_KEY,
   UNBOUND_WORKSPACE_LABEL,
+  getWorkspaceGroupKey,
 } from '../../../utils/session/session-grouping.js';
 import {
   PINNED_SESSION_GROUP_KEY,
@@ -36,6 +37,7 @@ function makeGroup(
   sshConnectionId: string | null = null,
 ): WorkspaceSessionGroup<Session> {
   return {
+    groupKey: getWorkspaceGroupKey(workspacePath, sshConnectionId),
     workspacePath,
     workspaceLabel: workspacePath ?? UNBOUND_WORKSPACE_LABEL,
     sshConnectionId,
@@ -46,6 +48,7 @@ function makeGroup(
 function makeTreeGroup(
   workspacePath: string | null,
   roots: WorkspaceSessionTreeNode<Session>[],
+  sshConnectionId: string | null = null,
 ): WorkspaceSessionTreeGroup<Session> {
   const sessions: Session[] = [];
   const visit = (node: WorkspaceSessionTreeNode<Session>) => {
@@ -55,8 +58,10 @@ function makeTreeGroup(
   roots.forEach(visit);
 
   return {
+    groupKey: getWorkspaceGroupKey(workspacePath, sshConnectionId),
     workspacePath,
     workspaceLabel: workspacePath ?? UNBOUND_WORKSPACE_LABEL,
+    sshConnectionId,
     sessions,
     roots,
   };
@@ -187,20 +192,54 @@ describe('buildFusionChatGroups', () => {
         makeGroup('/repo/local', [localSession]),
       ],
       groupedSessionTrees: [
-        makeTreeGroup('/repo/remote', [makeNode(sshSession)]),
+        makeTreeGroup('/repo/remote', [makeNode(sshSession)], 'ssh-1'),
         makeTreeGroup('/repo/local', [makeNode(localSession)]),
       ],
       sessionCountByWorkspace: new Map([
-        ['/repo/remote', 1],
+        [getWorkspaceGroupKey('/repo/remote', 'ssh-1'), 1],
         ['/repo/local', 1],
       ]),
       isSearching: false,
       isPinned: () => false,
     });
 
-    expect(rows.map((row) => row.key)).toEqual(['/repo/local', '/repo/remote']);
+    // 远端组的键带连接维度：两台主机的同名目录因此不会挤进同一个分组。
+    expect(rows.map((row) => row.key)).toEqual([
+      '/repo/local',
+      getWorkspaceGroupKey('/repo/remote', 'ssh-1'),
+    ]);
     expect(rows[0]?.sshConnectionId).toBeNull();
     expect(rows[1]?.sshConnectionId).toBe('ssh-1');
+  });
+
+  it('非搜索态：两台主机上的同名远端目录各自成组，互不合并', () => {
+    const hostASession: Session = makeSession('host-a', 'A 机会话');
+    const hostBSession: Session = makeSession('host-b', 'B 机会话');
+
+    const rows = buildFusionChatGroups({
+      groupedSessions: [
+        makeGroup('/srv/app', [hostASession], 'ssh-a'),
+        makeGroup('/srv/app', [hostBSession], 'ssh-b'),
+      ],
+      groupedSessionTrees: [
+        makeTreeGroup('/srv/app', [makeNode(hostASession)], 'ssh-a'),
+        makeTreeGroup('/srv/app', [makeNode(hostBSession)], 'ssh-b'),
+      ],
+      sessionCountByWorkspace: new Map([
+        [getWorkspaceGroupKey('/srv/app', 'ssh-a'), 1],
+        [getWorkspaceGroupKey('/srv/app', 'ssh-b'), 1],
+      ]),
+      isSearching: false,
+      isPinned: () => false,
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.sshConnectionId).sort()).toEqual(['ssh-a', 'ssh-b']);
+    // 每组各自带回本主机的会话树。
+    expect(rows.flatMap((row) => row.roots.map((node) => node.session.id)).sort()).toEqual([
+      'host-a',
+      'host-b',
+    ]);
   });
 
   it('非搜索态：未指定工作区的会话组永远沉底，不参与最近活动排序', () => {

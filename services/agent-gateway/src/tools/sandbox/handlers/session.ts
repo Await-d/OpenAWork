@@ -403,6 +403,10 @@ export async function handleReadToolOutputTool(
     };
   }
 
+  const hasExplicitReference = Boolean(parsed.data.toolCallId ?? parsed.data.toolCallRef);
+  // 只传选择参数（lineStart / jsonPath / charStart …）= 续读上一页的意图，
+  // 此时回退到最近一次被引用的大输出，而不是直接判参数缺失。
+  const useLatestReference = parsed.data.useLatestReferenced === true || !hasExplicitReference;
   const resolvedStored = parsed.data.toolCallId
     ? getSessionToolResultByCallId({
         sessionId,
@@ -415,19 +419,25 @@ export async function handleReadToolOutputTool(
           userId,
           toolCallRef: parsed.data.toolCallRef,
         })
-      : parsed.data.useLatestReferenced
+      : useLatestReference
         ? getLatestReferencedToolResult({ sessionId, userId })
         : null;
   if (!resolvedStored) {
+    const output = parsed.data.toolCallId
+      ? `Tool result ${parsed.data.toolCallId} was not found in the current session`
+      : parsed.data.useLatestReferenced === true
+        ? [
+            'No large referenced tool result was found in the current session.',
+            'If the current session history already contains a toolCallId, call read_tool_output with that toolCallId instead of useLatestReferenced=true.',
+          ].join(' ')
+        : [
+            '本次调用未提供 toolCallId / toolCallRef，已回退到「最近一次被引用的大输出」，但当前会话中没有可回退的记录。',
+            '若当前会话历史里出现了 toolCallId，请显式传 toolCallId；超长调用 ID 传 toolCallRef。',
+          ].join(' ');
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: parsed.data.toolCallId
-        ? `Tool result ${parsed.data.toolCallId} was not found in the current session`
-        : [
-            'No large referenced tool result was found in the current session.',
-            'If the current session history already contains a toolCallId, call read_tool_output with that toolCallId instead of useLatestReferenced=true.',
-          ].join(' '),
+      output,
       isError: true,
       durationMs: 0,
     };
@@ -456,10 +466,9 @@ export async function handleReadToolOutputTool(
     request: parsed.data,
     sizeBytes,
   });
-  const latestReferenceNote =
-    !parsed.data.toolCallId && parsed.data.useLatestReferenced
-      ? `已自动解析为最近一个被引用的大输出：${resolvedStored.toolCallId}。${response.note ? ` ${response.note}` : ''}`
-      : response.note;
+  const latestReferenceNote = !hasExplicitReference
+    ? `已自动解析为最近一个被引用的大输出：${resolvedStored.toolCallId}。${response.note ? ` ${response.note}` : ''}`
+    : response.note;
   // 落盘取回时补一句来源说明，便于模型理解「这里能拿到超过持久化上限的全文」。
   const noteParts = [spilledOutput ? '（全文来自落盘文件）' : '', latestReferenceNote ?? ''].filter(
     (part) => part.length > 0,

@@ -27,6 +27,18 @@ function makeRow(id: string, workingDirectory: string | undefined): PathFilterab
   return { id, metadata_json: JSON.stringify(metadata) };
 }
 
+/** SSH 远端工作区行：`workingDirectory` 是**该主机上**的绝对路径。 */
+function makeRemoteRow(
+  id: string,
+  workingDirectory: string,
+  sshConnectionId: string,
+): PathFilterableSession {
+  return {
+    id,
+    metadata_json: JSON.stringify({ workingDirectory, sshConnectionId }),
+  };
+}
+
 describe('normaliseFilterPath', () => {
   it('returns empty for blank input', () => {
     expect(normaliseFilterPath('')).toBe('');
@@ -110,6 +122,52 @@ describe('sessionMatchesPath — strict (includeDescendants=false)', () => {
         includeDescendants: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe('filterSessionsByPath — ssh host scoping', () => {
+  // 两台主机上各有 `/srv/app`：只按路径过滤会把它们混成同一个工作区的会话列表。
+  const remoteRows = [
+    makeRemoteRow('host-a-root', '/srv/app', 'ssh-a'),
+    makeRemoteRow('host-a-sub', '/srv/app/src', 'ssh-a'),
+    makeRemoteRow('host-b-root', '/srv/app', 'ssh-b'),
+  ];
+  const localRows = [makeRow('local-root', '/srv/app')];
+
+  it('scopes the filter to the requested SSH connection', () => {
+    const filtered = filterSessionsByPath(remoteRows, {
+      path: '/srv/app',
+      sshConnectionId: 'ssh-a',
+    });
+    expect(filtered.map((row) => row.id)).toEqual(['host-a-root', 'host-a-sub']);
+  });
+
+  it('does not leak sessions from other hosts sharing the path', () => {
+    const filtered = filterSessionsByPath(remoteRows, {
+      path: '/srv/app',
+      includeDescendants: false,
+      sshConnectionId: 'ssh-b',
+    });
+    expect(filtered.map((row) => row.id)).toEqual(['host-b-root']);
+  });
+
+  it('returns nothing when no session matches the requested connection', () => {
+    const filtered = filterSessionsByPath(remoteRows, {
+      path: '/srv/app',
+      sshConnectionId: 'ssh-missing',
+    });
+    expect(filtered).toEqual([]);
+  });
+
+  it('omitting sshConnectionId keeps the legacy path-only behaviour', () => {
+    const filtered = filterSessionsByPath(remoteRows, { path: '/srv/app' });
+    expect(filtered.map((row) => row.id)).toEqual(['host-a-root', 'host-a-sub', 'host-b-root']);
+  });
+
+  it('sessions with no SSH binding never match a connection-scoped filter', () => {
+    expect(filterSessionsByPath(localRows, { path: '/srv/app', sshConnectionId: 'ssh-a' })).toEqual(
+      [],
+    );
   });
 });
 

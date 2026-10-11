@@ -127,6 +127,119 @@ describe('tool-sandbox read_tool_output', () => {
     );
   });
 
+  it('仅传选择参数（续读意图）时回退到最近一次被引用的输出', async () => {
+    // 回归背景：模型续读上一页时只给分页参数，旧 schema 的 superRefine 直接判
+    // 「toolCallId 和 useLatestReferenced 至少提供一个」，把合法续读打成参数错误。
+    mocks.getLatestReferencedToolResultMock.mockReturnValueOnce({
+      toolCallId: 'call-large-1',
+      toolName: 'bash',
+      output: 'line1\nline2\nline3\nline4',
+      isError: false,
+    });
+
+    const sandbox = createDefaultSandbox();
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-read-continue',
+        toolName: 'read_tool_output',
+        rawInput: { lineStart: 3, lineCount: 2 },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(mocks.getLatestReferencedToolResultMock).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      userId: 'user-1',
+    });
+    expect(result.output).toMatchObject({
+      toolCallId: 'call-large-1',
+      output: 'line3\nline4',
+      totalLines: 4,
+    });
+    // 必须告诉模型实际解析到了哪个 toolCallId，否则它无法确认自己在读哪份输出。
+    expect(JSON.stringify(result.output)).toContain('call-large-1');
+    // 续读 note 应点明「这次解析到了哪个输出精确定位」，而不是像旧文案那样
+    // 暗示「只改 lineStart 就能续读」——那正是模型只传选择参数不带引用的诱因。
+    const note = (result.output as { note?: string }).note ?? '';
+    // 回退场景下 handler 会给 note 追加「已自动解析为最近一个被引用的大输出：
+    // {toolCallId}」的前缀，模型据此能确知在读哪份输出。
+    expect(note).toContain('call-large-1');
+    // 旧的续读措辞（仅改 lineStart 就能续读）不应再出现，避免误导模型下次
+    // 只传选择参数不带引用。
+    expect(note).not.toContain('可继续增加');
+  });
+
+  it('仅传 itemStart / itemCount 时同样回退到最近引用', async () => {
+    mocks.getLatestReferencedToolResultMock.mockReturnValueOnce({
+      toolCallId: 'call-array-1',
+      toolName: 'websearch',
+      output: [{ a: 1 }, { a: 2 }, { a: 3 }, { a: 4 }],
+      isError: false,
+    });
+
+    const sandbox = createDefaultSandbox();
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-read-items',
+        toolName: 'read_tool_output',
+        rawInput: { itemStart: 2, itemCount: 2 },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toMatchObject({
+      toolCallId: 'call-array-1',
+      totalItems: 4,
+      output: [{ a: 3 }, { a: 4 }],
+    });
+  });
+
+  it('无引用且无可回退记录时，返回可操作的中文指引', async () => {
+    const sandbox = createDefaultSandbox();
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-read-fallback-miss',
+        toolName: 'read_tool_output',
+        rawInput: { charCount: 8000 },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('已回退到「最近一次被引用的大输出」');
+    expect(result.output).toContain('toolCallRef');
+  });
+
+  it('显式传 toolCallId 时仍优先精确查找，不走最近引用回退', async () => {
+    // 该 mock 是文件级共享的，先清零历史调用再断言「本次未走回退」。
+    mocks.getLatestReferencedToolResultMock.mockClear();
+    mocks.getSessionToolResultByCallIdMock.mockReturnValueOnce({
+      toolCallId: 'call-explicit-2',
+      toolName: 'bash',
+      output: 'exact',
+      isError: false,
+    });
+
+    const sandbox = createDefaultSandbox();
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-read-explicit-priority',
+        toolName: 'read_tool_output',
+        rawInput: { toolCallId: 'call-explicit-2', lineStart: 1, lineCount: 10 },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    expect(result.isError).toBe(false);
+    expect(mocks.getLatestReferencedToolResultMock).not.toHaveBeenCalled();
+  });
+
   it('通过稳定 toolCallRef 精确读取超长调用 ID 的结果', async () => {
     const toolCallRef = 'a'.repeat(64);
     mocks.getSessionToolResultByReferenceMock.mockReturnValueOnce({

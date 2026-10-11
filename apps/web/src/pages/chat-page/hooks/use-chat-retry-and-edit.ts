@@ -291,7 +291,9 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
       setStreamError(null);
       const effectiveInputParts = editedInputParts ?? historyEditPrompt?.inputParts;
       await sendMessage(text, {
-        ...(effectiveInputParts ? { existingInputParts: effectiveInputParts } : {}),
+        ...(effectiveInputParts && effectiveInputParts.length > 0
+          ? { existingInputParts: effectiveInputParts }
+          : {}),
         forcedSessionId: targetSessionId,
       });
     },

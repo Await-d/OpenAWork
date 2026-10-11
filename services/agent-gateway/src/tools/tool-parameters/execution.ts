@@ -129,7 +129,7 @@ export function buildExecutionParameters(name: string): ToolParameters | undefin
           toolCallId: {
             type: 'string',
             description:
-              '可选的明确 toolCallId，来自当前会话中之前的 tool_result 引用；有时优先使用它',
+              '推荐：精确定位要读的 tool_result（来自会话历史中的 toolCallId）。续读上一页时若不传，系统自动回退到最近一次被引用的输出；只有明确描述时要换一份不同输出，才必须显式传它。',
           },
           toolCallRef: {
             type: 'string',
@@ -139,7 +139,7 @@ export function buildExecutionParameters(name: string): ToolParameters | undefin
           useLatestReferenced: {
             type: 'boolean',
             description:
-              '仅作兼底：为 true 且未传 toolCallId 时，读取当前会话中被 [tool_output_reference] 替换掉的最近一次大输出',
+              '兜底开关：为 true 且未传 toolCallId 时，读取当前会话中被 [tool_output_reference] 替换掉的最近一次大输出；只传选择参数（lineStart/jsonPath/charStart/itemStart 等）续读上一页时也会自动走此回退。',
           },
           jsonPath: {
             type: 'string',
@@ -190,7 +190,8 @@ export function buildExecutionParameters(name: string): ToolParameters | undefin
         properties: {
           task_id: {
             type: 'string',
-            description: '要查看的后台任务 id。task_id / taskId / runId 中传其一。',
+            description:
+              '后台任务 id（task_id / taskId / runId 中传其一）。优先传子代理通知标签里的 task 主键；若手上只有子代理通知里的 sessionID，也可直接传入，工具会自动按子会话反查对应任务。',
           },
           taskId: { type: 'string', description: 'task_id 的别名。' },
           runId: { type: 'string', description: '后台任务的 run id 别名。' },

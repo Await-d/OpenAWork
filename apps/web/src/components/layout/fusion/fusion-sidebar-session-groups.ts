@@ -12,7 +12,6 @@
  */
 
 import type { Session } from '../../../hooks/workspace/useSessions.js';
-import { getWorkspaceGroupKey } from '../../../utils/session/session-grouping.js';
 import type {
   WorkspaceSessionGroup,
   WorkspaceSessionTreeGroup,
@@ -49,17 +48,13 @@ export function buildFusionChatGroups({
   isSearching,
   isPinned,
 }: BuildFusionChatGroupsParams): FusionChatGroupRow[] {
-  const findTreeGroup = (workspacePath: string | null) => {
-    const groupKey = getWorkspaceGroupKey(workspacePath);
-    return groupedSessionTrees.find(
-      (candidate) => getWorkspaceGroupKey(candidate.workspacePath) === groupKey,
-    );
-  };
+  const findTreeGroup = (groupKey: string) =>
+    groupedSessionTrees.find((candidate) => candidate.groupKey === groupKey);
 
   // 搜索态：只渲染有命中的分组，计数为命中数。
   if (isSearching) {
     return groupedSessionTrees.map((treeGroup) => ({
-      key: getWorkspaceGroupKey(treeGroup.workspacePath),
+      key: treeGroup.groupKey,
       workspacePath: treeGroup.workspacePath,
       workspaceLabel: treeGroup.workspaceLabel,
       sshConnectionId: treeGroup.sshConnectionId ?? null,
@@ -75,13 +70,12 @@ export function buildFusionChatGroups({
   }
   const pinnedCountByGroupKey = new Map<string, number>();
   for (const treeGroup of groupedSessionTrees) {
-    const groupKey = getWorkspaceGroupKey(treeGroup.workspacePath);
-    pinnedCountByGroupKey.set(groupKey, countPinnedNodes(treeGroup.roots, isPinned));
+    pinnedCountByGroupKey.set(treeGroup.groupKey, countPinnedNodes(treeGroup.roots, isPinned));
   }
 
   const rows: FusionChatGroupRow[] = groupedSessions.map((group) => {
-    const groupKey = getWorkspaceGroupKey(group.workspacePath);
-    const treeGroup = findTreeGroup(group.workspacePath);
+    const groupKey = group.groupKey;
+    const treeGroup = findTreeGroup(groupKey);
     const roots = stripPinnedNodes(treeGroup?.roots ?? [], isPinned);
     const pinnedCount = pinnedCountByGroupKey.get(groupKey) ?? 0;
 

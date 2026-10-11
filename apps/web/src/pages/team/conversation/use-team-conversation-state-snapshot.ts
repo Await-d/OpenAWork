@@ -40,6 +40,7 @@ import {
   resolveSessionSidebarRunState,
   TEAM_CONVERSATION_INITIAL_TURN_LIMIT,
   TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT,
+  TEAM_RECOVERY_RUN_EVENT_LIMIT,
   toTeamRoleLayer,
 } from './team-conversation-load-policy.js';
 import { useRecoverableRetryController } from '../hooks/use-recoverable-retry.js';
@@ -256,6 +257,12 @@ export function useTeamConversationSnapshot(
       const sessionsClient = createSessionsClient(gatewayUrl);
       const result = await sessionsClient.getRecoveryResult(token, reloadSessionId, {
         messageLimit: requestedTurnLimitRef.current,
+        // 这里的 runEvents 只喂 TeamRunEventsPreview（合并文本事件后取最后 8 条），
+        // 不参与任何累加重建，因此按有界窗口取即可。省略它会让服务端在会话 running
+        // 期间每 2.5s 全量读 + 逐行 JSON.parse + 整包回传本轮 run 的全部 delta 行 ——
+        // 而活跃 scope 的行数只增不减（retention 只按 scope 保留，在飞 scope 永不清理），
+        // 正是「会话活跃时 /recovery 容易超时」的主因。
+        runEventLimit: TEAM_RECOVERY_RUN_EVENT_LIMIT,
       });
       if (reloadSessionId !== latestSessionIdRef.current) {
         return;

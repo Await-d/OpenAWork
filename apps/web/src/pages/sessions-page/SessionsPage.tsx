@@ -14,8 +14,8 @@ import { logger } from '../../utils/log/logger.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import {
   buildWorkspaceSessionCollections,
-  getWorkspaceGroupKey,
-  listWorkspacePathsFromSessions,
+  isWorkspaceGroupCollapsed,
+  listWorkspaceIdentitiesFromSessions,
   UNBOUND_WORKSPACE_GROUP_KEY,
   UNBOUND_WORKSPACE_LABEL,
 } from '../../utils/session/session-grouping.js';
@@ -110,9 +110,9 @@ export default function SessionsPage() {
     }),
     [],
   );
-  const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
-  const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
-  const removeSavedWorkspacePath = useUIStateStore((s) => s.removeSavedWorkspacePath);
+  const savedWorkspaces = useUIStateStore((s) => s.savedWorkspaces);
+  const mergeSavedWorkspaces = useUIStateStore((s) => s.mergeSavedWorkspaces);
+  const removeSavedWorkspace = useUIStateStore((s) => s.removeSavedWorkspace);
   const persistedListPaneWidth = useUIStateStore((s) => s.sessionsListPaneWidth);
   const setSessionsListPaneWidth = useUIStateStore((s) => s.setSessionsListPaneWidth);
   const collapsedWorkspaceGroupKeys = useUIStateStore((s) => s.sessionsCollapsedWorkspaceGroups);
@@ -143,6 +143,8 @@ export default function SessionsPage() {
     sessionCount: number;
     workspaceLabel: string;
     workspacePath: string | null;
+    /** 分组所属 SSH 连接 id（本地工作区为 null）：别名与删除都必须按主机隔离。 */
+    sshConnectionId: string | null;
     x: number;
     y: number;
   } | null>(null);
@@ -151,9 +153,11 @@ export default function SessionsPage() {
     sessionIds: string[];
     workspaceLabel: string;
     workspacePath: string | null;
+    sshConnectionId: string | null;
   } | null>(null);
   const [renamingWorkspace, setRenamingWorkspace] = useState<{
     workspacePath: string;
+    sshConnectionId: string | null;
     defaultName: string;
   } | null>(null);
   const [deletingWorkspaceGroupKeys, setDeletingWorkspaceGroupKeys] = useState<Set<string>>(
@@ -211,7 +215,7 @@ export default function SessionsPage() {
           // 只保留用户创建的根会话（包括 team 根会话和个人会话）。
           (session) => !session.team_parent_session_id,
         );
-        mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
+        mergeSavedWorkspaces(listWorkspaceIdentitiesFromSessions(nextSessions));
         setSessions(nextSessions);
       } catch {
         return;
@@ -221,7 +225,7 @@ export default function SessionsPage() {
         }
       }
     },
-    [gatewayUrl, token, mergeSavedWorkspacePaths],
+    [gatewayUrl, token, mergeSavedWorkspaces],
   );
 
   useEffect(() => {
@@ -261,8 +265,14 @@ export default function SessionsPage() {
    *
    * 工作区按「点击来源」解析：分组 / 工作区菜单等显式入口传路径；通用入口继承
    * 当前激活会话标签的工作区；都不可解析时回落全局选中值。
+   *
+   * `inheritSshConnectionId` 是显式入口所属分组的 SSH 连接：远端分组的「+」必须
+   * 与路径成对传入，否则新建会话会以裸路径落库，丢掉 SSH 标识。
    */
-  async function createSession(inheritWorkspacePath?: string | null) {
+  async function createSession(
+    inheritWorkspacePath?: string | null,
+    inheritSshConnectionId?: string | null,
+  ) {
     if (!token) return;
 
     const uiState = useUIStateStore.getState();
@@ -270,12 +280,16 @@ export default function SessionsPage() {
     const contextSessionId = activeTab?.type === 'session' ? activeTab.sessionId : null;
     const resolvedWorkspace = resolveNewSessionWorkspace({
       ...(inheritWorkspacePath !== undefined
-        ? { explicitWorkspacePath: inheritWorkspacePath }
+        ? {
+            explicitWorkspacePath: inheritWorkspacePath,
+            explicitSshConnectionId: inheritSshConnectionId,
+          }
         : {}),
       contextSessionId,
       activeSessionWorkspace: uiState.activeSessionWorkspace,
       sessions,
       fallbackWorkspacePath: uiState.selectedWorkspacePath,
+      fallbackSshConnectionId: uiState.selectedSshConnectionId,
     });
 
     uiState.openDraftSession(resolvedWorkspace.workspacePath, resolvedWorkspace.sshConnectionId);
@@ -352,6 +366,7 @@ export default function SessionsPage() {
       workspaceLabel: string,
       groupKey: string,
       sessionIds: string[],
+      sshConnectionId: string | null,
     ) => {
       if (!workspacePath && sessionIds.length === 0) {
         return;
@@ -384,7 +399,7 @@ export default function SessionsPage() {
 
         if (failedCount === 0) {
           if (workspacePath) {
-            removeSavedWorkspacePath(workspacePath);
+            removeSavedWorkspace({ workspacePath, sshConnectionId });
           }
           toast(
             sessionCount > 0
@@ -417,7 +432,7 @@ export default function SessionsPage() {
         });
       }
     },
-    [deleteSession, removeSavedWorkspacePath],
+    [deleteSession, removeSavedWorkspace],
   );
 
   const startRename = useCallback((session: SessionRow) => {
@@ -493,12 +508,12 @@ export default function SessionsPage() {
   }, [sessions, teamSessionIds]);
 
   const personalCollections = useMemo(
-    () => buildWorkspaceSessionCollections(partitionedSessions.personal, savedWorkspacePaths),
-    [partitionedSessions.personal, savedWorkspacePaths],
+    () => buildWorkspaceSessionCollections(partitionedSessions.personal, savedWorkspaces),
+    [partitionedSessions.personal, savedWorkspaces],
   );
   const teamCollections = useMemo(
-    () => buildWorkspaceSessionCollections(partitionedSessions.team, savedWorkspacePaths),
-    [partitionedSessions.team, savedWorkspacePaths],
+    () => buildWorkspaceSessionCollections(partitionedSessions.team, savedWorkspaces),
+    [partitionedSessions.team, savedWorkspaces],
   );
 
   const filtered = useMemo(
@@ -648,6 +663,7 @@ export default function SessionsPage() {
       groupKey: string;
       workspaceLabel: string;
       workspacePath: string | null;
+      sshConnectionId: string | null;
       sessionCount: number;
       x: number;
       y: number;
@@ -658,8 +674,8 @@ export default function SessionsPage() {
   );
 
   const handleCreateInWorkspace = useCallback(
-    (workspacePath: string | null) => {
-      void createSession(workspacePath);
+    (workspacePath: string | null, sshConnectionId: string | null) => {
+      void createSession(workspacePath, sshConnectionId);
     },
     // createSession is stable enough within a render closure; including it
     // would force this callback to re-create whenever sessions change.
@@ -671,9 +687,12 @@ export default function SessionsPage() {
   // button, since team sessions need to be started from the team page where
   // the user picks a workflow / member roster. We pass a no-op so the
   // shared section component can keep its prop contract.
-  const noopCreateInWorkspace = useCallback((_workspacePath: string | null) => {
-    /* team sessions are created from the team page */
-  }, []);
+  const noopCreateInWorkspace = useCallback(
+    (_workspacePath: string | null, _sshConnectionId: string | null) => {
+      /* team sessions are created from the team page */
+    },
+    [],
+  );
 
   const isFiltering = searchQuery.trim().length > 0;
   const hasNoSearchMatches =
@@ -713,7 +732,8 @@ export default function SessionsPage() {
         onSelect={async (path) => {
           setPendingWorkspacePath(path);
           setShowWorkspacePicker(false);
-          await createSession(path);
+          // 该 picker 只列本地目录：显式给 null，让草稿退出可能残留的远端绑定。
+          await createSession(path, null);
         }}
         fetchRootPath={workspacePickerDataSource.fetchRootPath}
         fetchWorkspaceRoots={workspacePickerDataSource.fetchWorkspaceRoots}
@@ -781,19 +801,26 @@ export default function SessionsPage() {
                     sessionCount={scopeView.totalSessionCount}
                   >
                     {scopeView.groups.map((group) => {
-                      const groupKey = getWorkspaceGroupKey(group.workspacePath);
+                      // 计数 Map、折叠态与批量删除都按 group.groupKey 存取，键由分组
+                      // 构造时统一算出：这里自己重算会漏掉连接维度，让远端分组计数
+                      // 静默变成 0、折叠失效。
+                      const groupKey = group.groupKey;
                       const actualSessionCount =
                         scopeView.sessionCountByWorkspace.get(groupKey) ?? 0;
                       return (
                         <WorkspaceGroupSection
-                          key={`${scopeView.kind}::${group.workspacePath ?? '__unbound__'}`}
+                          key={`${scopeView.kind}::${groupKey}`}
                           groupKey={groupKey}
                           workspaceLabel={group.workspaceLabel}
                           workspacePath={group.workspacePath}
                           sshConnectionId={group.sshConnectionId}
                           sessions={group.sessions}
                           actualSessionCount={actualSessionCount}
-                          collapsed={collapsedWorkspaceGroupKeySet.has(groupKey)}
+                          collapsed={isWorkspaceGroupCollapsed(
+                            collapsedWorkspaceGroupKeySet,
+                            group.workspacePath,
+                            group.sshConnectionId,
+                          )}
                           selectedId={selectedId}
                           hoveredId={hoveredId}
                           renamingId={renamingId}
@@ -863,9 +890,19 @@ export default function SessionsPage() {
             canDelete={
               workspaceContextMenu.workspacePath !== null || workspaceContextMenu.sessionCount > 0
             }
-            hasCustomName={readWorkspaceAlias(workspaceContextMenu.workspacePath) !== ''}
+            hasCustomName={
+              readWorkspaceAlias(
+                workspaceContextMenu.workspacePath,
+                workspaceContextMenu.sshConnectionId,
+              ) !== ''
+            }
             onClose={() => setWorkspaceContextMenu(null)}
-            onNewSession={() => void createSession(workspaceContextMenu.workspacePath)}
+            onNewSession={() =>
+              void createSession(
+                workspaceContextMenu.workspacePath,
+                workspaceContextMenu.sshConnectionId,
+              )
+            }
             onToggleCollapse={() => undefined}
             onRename={() => {
               const workspacePath = workspaceContextMenu.workspacePath;
@@ -874,6 +911,7 @@ export default function SessionsPage() {
               }
               setRenamingWorkspace({
                 workspacePath,
+                sshConnectionId: workspaceContextMenu.sshConnectionId,
                 defaultName: workspaceContextMenu.workspaceLabel,
               });
             }}
@@ -887,6 +925,7 @@ export default function SessionsPage() {
                 sessionIds: personalScopeView.sessionIdsByGroupKey.get(groupKey) ?? [],
                 workspaceLabel: workspaceContextMenu.workspaceLabel,
                 workspacePath: workspaceContextMenu.workspacePath,
+                sshConnectionId: workspaceContextMenu.sshConnectionId,
               });
             }}
           />,
@@ -895,10 +934,15 @@ export default function SessionsPage() {
       <WorkspaceRenameDialog
         open={renamingWorkspace !== null}
         workspacePath={renamingWorkspace?.workspacePath ?? null}
+        sshConnectionId={renamingWorkspace?.sshConnectionId ?? null}
         defaultName={renamingWorkspace?.defaultName ?? ''}
         onCancel={() => setRenamingWorkspace(null)}
         onSubmit={(alias) => {
-          renameWorkspaceDisplay(renamingWorkspace?.workspacePath ?? null, alias);
+          renameWorkspaceDisplay(
+            renamingWorkspace?.workspacePath ?? null,
+            alias,
+            renamingWorkspace?.sshConnectionId ?? null,
+          );
           setRenamingWorkspace(null);
           toast(alias ? '工作区已重命名' : '已恢复默认名称', 'success');
         }}
@@ -939,6 +983,7 @@ export default function SessionsPage() {
             pendingWorkspaceDeletion.workspaceLabel,
             pendingWorkspaceDeletion.groupKey,
             pendingWorkspaceDeletion.sessionIds,
+            pendingWorkspaceDeletion.sshConnectionId,
           ).finally(() => {
             workspaceDeletionSubmitLockRef.current = false;
             setPendingWorkspaceDeletion(null);

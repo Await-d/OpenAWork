@@ -11,6 +11,7 @@ import type {
   WorkspaceSessionGroup,
   WorkspaceSessionTreeGroup,
 } from '../../../utils/session/session-grouping.js';
+import { getWorkspaceGroupKey } from '../../../utils/session/session-grouping.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { FusionSidebar } from './FusionSidebar.js';
 
@@ -109,12 +110,14 @@ const openAWorkSession = createSession('open-session', 'OpenAWork plan', OPENAWO
 const marketSession = createSession('market-session', 'Market roadmap', MARKET_PATH);
 
 const openAWorkGroup: WorkspaceSessionGroup<Session> = {
+  groupKey: getWorkspaceGroupKey(OPENAWORK_PATH),
   sessions: [openAWorkSession],
   workspaceLabel: 'OpenAWork',
   workspacePath: OPENAWORK_PATH,
 };
 
 const marketGroup: WorkspaceSessionGroup<Session> = {
+  groupKey: getWorkspaceGroupKey(MARKET_PATH),
   sessions: [marketSession],
   workspaceLabel: 'MarketAgent',
   workspacePath: MARKET_PATH,
@@ -124,12 +127,14 @@ const chatGroups: WorkspaceSessionGroup<Session>[] = [openAWorkGroup, marketGrou
 
 const chatTreeGroups: WorkspaceSessionTreeGroup<Session>[] = [
   {
+    groupKey: getWorkspaceGroupKey(OPENAWORK_PATH),
     roots: [{ children: [], session: openAWorkSession }],
     sessions: [openAWorkSession],
     workspaceLabel: 'OpenAWork',
     workspacePath: OPENAWORK_PATH,
   },
   {
+    groupKey: getWorkspaceGroupKey(MARKET_PATH),
     roots: [{ children: [], session: marketSession }],
     sessions: [marketSession],
     workspaceLabel: 'MarketAgent',
@@ -209,7 +214,10 @@ export function resetFusionSidebarUiState(leftSidebarOpen: boolean): void {
     chatView: 'session',
     fileTreeRootPath: OPENAWORK_PATH,
     leftSidebarOpen,
-    savedWorkspacePaths: [OPENAWORK_PATH, MARKET_PATH],
+    savedWorkspaces: [
+      { workspacePath: OPENAWORK_PATH, sshConnectionId: null },
+      { workspacePath: MARKET_PATH, sshConnectionId: null },
+    ],
     selectedWorkspacePath: OPENAWORK_PATH,
     teamNewSessionSignal: null,
     teamNewWorkspaceSignal: null,

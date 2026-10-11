@@ -708,22 +708,52 @@ function mergeToolCallProviderMetadata(
   return merged;
 }
 
+/**
+ * 把流式累积的 tool_call arguments 文本解析为对象。
+ *
+ * 上游在流式中途断掉时(内网兼容网关丢 delta、stall、max_tokens 截断),累积文本会
+ * 停在半截 JSON 上。此时若直接退化成 `{ raw }`,所有必填字段都会校验失败(例如
+ * bash 的 `command: Required`),模型拿不到任何可自纠的反馈。因此先做 partial-JSON
+ * 恢复(与 opencode-llm `tool-stream` 的既有策略一致),恢复结果仍非对象时才落
+ * `{ raw }` 兜底。
+ */
 function parseToolInput(raw: string): Record<string, unknown> {
   const normalized = raw.trim();
   if (normalized.length === 0) {
     return {};
   }
 
-  try {
-    const parsed = JSON.parse(normalized) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    return { raw: normalized };
-  }
+  const direct = tryParseJsonObject(normalized);
+  if (direct) return direct;
+
+  const recovered = tryParsePartialJsonObject(normalized);
+  if (recovered) return recovered;
 
   return { raw: normalized };
+}
+
+/** 严格 JSON 解析;非对象(数组 / 标量)或解析失败时返回 null。 */
+function tryParseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return isJsonObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** partial-JSON 恢复:尽力从半截文本里取回已完成的键。 */
+function tryParsePartialJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const recovered = OpenCodeLLM.parsePartialJSON(text);
+    return isJsonObject(recovered) ? recovered : null;
+  } catch {
+    return null;
+  }
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function buildAssistantContent(

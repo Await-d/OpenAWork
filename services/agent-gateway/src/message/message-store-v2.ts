@@ -178,9 +178,12 @@ export function listMessagesByTurnLimit(input: {
   userId: string;
   turnLimit: number;
 }): MessageInfo[] {
+  // 边界查询走 (session_id, user_id, role, time_created, id) 索引定位第 turnLimit 个
+  // user 消息，`OFFSET` 因此只扫描索引条目而不再逐行读取 `data` 大 blob 比对
+  // `LIKE '%"role":"user"%'`（该模式见 `infra/db.ts` 里 role 列的落地说明）。
   const boundary = sqliteGet<Pick<MessageV2Row, 'time_created'>>(
     `SELECT time_created FROM message_v2
-     WHERE session_id = ? AND user_id = ? AND data LIKE '%"role":"user"%'
+     WHERE session_id = ? AND user_id = ? AND role = 'user'
      ORDER BY time_created DESC, id DESC
      LIMIT 1 OFFSET ?`,
     [input.sessionId, input.userId, input.turnLimit - 1],
@@ -210,7 +213,7 @@ export function countMessages(input: { sessionId: string; userId: string }): num
 
 export function countUserMessages(input: { sessionId: string; userId: string }): number {
   const row = sqliteGet<{ cnt: number }>(
-    `SELECT COUNT(*) AS cnt FROM message_v2 WHERE session_id = ? AND user_id = ? AND data LIKE '%"role":"user"%'`,
+    `SELECT COUNT(*) AS cnt FROM message_v2 WHERE session_id = ? AND user_id = ? AND role = 'user'`,
     [input.sessionId, input.userId],
   );
   return row?.cnt ?? 0;

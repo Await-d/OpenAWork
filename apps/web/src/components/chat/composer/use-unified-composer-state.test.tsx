@@ -23,6 +23,120 @@ vi.mock('../../../pages/chat-page/conversation/composer/queued-composer-file-sto
   deleteQueuedComposerFiles: async () => undefined,
 }));
 
+interface FakeQueueItem {
+  attachmentItems: never[];
+  enqueuedAt: number;
+  id: string;
+  requiresAttachmentRebind: boolean;
+  text: string;
+}
+
+/**
+ * 假网关队列。
+ *
+ * 待发队列的真相源已从 localStorage 迁到网关，测试因此必须断言「网关里有什么」，
+ * 而不是「浏览器快照里有什么」。用 `vi.hoisted` 提前实例化，保证 mock 工厂执行时
+ * 该对象已可用（`vi.mock` 会被提升到 import 之前）。
+ */
+const { fakeQueue } = vi.hoisted(() => ({
+  fakeQueue: {
+    /** 置 true 后 enqueue 一律失败，用于验证「入队落库失败」的回滚路径。 */
+    enqueueShouldFail: false,
+    enqueueCalls: [] as Array<{ itemId: string; sessionId: string }>,
+    /** 置 true 后 claim 一律返回 false，模拟「另一端正在处理」。 */
+    claimHeldByOther: false,
+    claimAttempts: 0,
+    claimCalls: [] as Array<{ clientId: string; itemId: string; sessionId: string }>,
+    itemsBySession: new Map<string, FakeQueueItem[]>(),
+    listCalls: 0,
+    /** claim 抛错，用于验证「没问成」时条目必须保留而不是消失。 */
+    claimShouldThrow: false,
+    releaseCalls: [] as Array<{ clientId: string; itemId: string; sessionId: string }>,
+    removeCalls: [] as Array<{ itemId: string; sessionId: string }>,
+  },
+}));
+
+vi.mock('@openAwork/web-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@openAwork/web-client')>();
+  return {
+    ...actual,
+    createComposerQueueClient: () => ({
+      claim: async (
+        _token: string,
+        sessionId: string,
+        itemId: string,
+        input: { clientId: string },
+      ) => {
+        // 无论成败都计数：抛错路径进不了 claimCalls，缺了它就分不清
+        // 「条目被移除」和「claim 被反复重试」。
+        fakeQueue.claimAttempts += 1;
+        if (fakeQueue.claimShouldThrow) {
+          throw new Error('网关不可达');
+        }
+        fakeQueue.claimCalls.push({ clientId: input.clientId, itemId, sessionId });
+        return !fakeQueue.claimHeldByOther;
+      },
+      clear: async () => 0,
+      enqueue: async (
+        _token: string,
+        sessionId: string,
+        input: {
+          itemId: string;
+          requiresAttachmentRebind: boolean;
+          text: string;
+        },
+      ) => {
+        if (fakeQueue.enqueueShouldFail) {
+          throw new Error('网关不可用');
+        }
+        fakeQueue.enqueueCalls.push({ itemId: input.itemId, sessionId });
+        const items = fakeQueue.itemsBySession.get(sessionId) ?? [];
+        // 与网关一致：同一 itemId 重复入队幂等，不覆盖既有入队时间。
+        const existing = items.find((item) => item.id === input.itemId);
+        if (existing) {
+          return { created: false, item: { ...existing } };
+        }
+        const item: FakeQueueItem = {
+          attachmentItems: [],
+          enqueuedAt: items.length + 1,
+          id: input.itemId,
+          requiresAttachmentRebind: input.requiresAttachmentRebind,
+          text: input.text,
+        };
+        fakeQueue.itemsBySession.set(sessionId, [...items, item]);
+        return { created: true, item: { ...item } };
+      },
+      list: async (_token: string, sessionId: string) => {
+        fakeQueue.listCalls += 1;
+        return (fakeQueue.itemsBySession.get(sessionId) ?? []).map((item) => ({ ...item }));
+      },
+      releaseClaim: async (_token: string, sessionId: string, itemId: string, clientId: string) => {
+        fakeQueue.releaseCalls.push({ clientId, itemId, sessionId });
+        return true;
+      },
+      remove: async (_token: string, sessionId: string, itemId: string) => {
+        fakeQueue.removeCalls.push({ itemId, sessionId });
+        const items = fakeQueue.itemsBySession.get(sessionId) ?? [];
+        const next = items.filter((item) => item.id !== itemId);
+        fakeQueue.itemsBySession.set(sessionId, next);
+        return next.length !== items.length;
+      },
+    }),
+  };
+});
+
+/** 预置网关侧队列，替代旧测试里对 localStorage 快照的 seeding。 */
+function seedBackendQueue(sessionId: string, items: FakeQueueItem[]): void {
+  fakeQueue.itemsBySession.set(
+    sessionId,
+    items.map((item) => ({ ...item })),
+  );
+}
+
+function backendQueue(sessionId: string): FakeQueueItem[] {
+  return fakeQueue.itemsBySession.get(sessionId) ?? [];
+}
+
 const TEST_FEATURES = {
   attachments: false,
   voice: false,
@@ -122,6 +236,18 @@ function UnifiedComposerStateHarness(props: HarnessProps) {
       </button>
       <button
         type="button"
+        onClick={() =>
+          state.appendFiles([new File(['binary'], 'screenshot.png', { type: 'image/png' })])
+        }
+      >
+        attach
+      </button>
+      <span data-testid="attachment-count">{state.attachmentItems.length}</span>
+      {/* 队列条数探针：断言「条目是否还在」比匹配文本更稳，也不会被输入框残留干扰。 */}
+      <span data-testid="queue-count">{state.queuedComposerPreviews.length}</span>
+      <span data-testid="stream-error">{state.streamError ?? ''}</span>
+      <button
+        type="button"
         onClick={() => {
           const combined = '折叠的粘贴文本\n\n用户追加的输入';
           setInput(combined);
@@ -148,6 +274,16 @@ afterEach(() => {
   hydrationGate = null;
   useComposerInputHistoryStore.setState((state) => ({ ...state, historyByScope: {} }));
   useChatQueueStore.setState({ queuesByScope: {} });
+  fakeQueue.itemsBySession.clear();
+  fakeQueue.enqueueCalls.length = 0;
+  fakeQueue.removeCalls.length = 0;
+  fakeQueue.enqueueShouldFail = false;
+  fakeQueue.claimCalls.length = 0;
+  fakeQueue.claimAttempts = 0;
+  fakeQueue.claimHeldByOther = false;
+  fakeQueue.claimShouldThrow = false;
+  fakeQueue.listCalls = 0;
+  fakeQueue.releaseCalls.length = 0;
   vi.restoreAllMocks();
 });
 
@@ -356,7 +492,7 @@ describe('useUnifiedComposerState', () => {
 
     fireEvent.click(view.getByText('queue'));
     await waitFor(() => {
-      expect(useChatQueueStore.getState().queuesByScope[SCOPE_A]).toHaveLength(1);
+      expect(backendQueue('session-1')).toHaveLength(1);
     });
     expect(onSubmit).not.toHaveBeenCalled();
 
@@ -371,13 +507,13 @@ describe('useUnifiedComposerState', () => {
     );
 
     await waitFor(() => {
-      expect(useChatQueueStore.getState().queuesByScope[SCOPE_B]).toBeUndefined();
+      expect(backendQueue('session-2')).toHaveLength(0);
     });
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('从 A 切到已有持久化队列的 B 时，不会用 A 的陈旧队列覆盖 B', async () => {
-    useChatQueueStore.getState().replaceQueue(SCOPE_B, [
+  it('从 A 切到已有队列的 B 时，不会用 A 的陈旧队列覆盖 B', async () => {
+    seedBackendQueue('session-2', [
       {
         attachmentItems: [],
         enqueuedAt: 1,
@@ -399,7 +535,7 @@ describe('useUnifiedComposerState', () => {
 
     fireEvent.click(view.getByText('queue'));
     await waitFor(() => {
-      expect(useChatQueueStore.getState().queuesByScope[SCOPE_A]).toHaveLength(1);
+      expect(backendQueue('session-1')).toHaveLength(1);
     });
 
     view.rerender(
@@ -411,24 +547,17 @@ describe('useUnifiedComposerState', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(useChatQueueStore.getState().queuesByScope[SCOPE_B]?.map((item) => item.id)).toEqual([
-        'persisted-b',
-      ]);
-    });
-
     // B 空闲，flush 只应发送 B 自己的队列消息（A 的陈旧队列不得被发送）
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: 'B 原有的排队消息' }));
-    expect(
-      useChatQueueStore.getState().queuesByScope[SCOPE_A]?.map((item) => item.id),
-    ).toHaveLength(1);
+    // A 的条目仍留在 A 名下，不会被 B 的 flush 带走。
+    expect(backendQueue('session-1').map((item) => item.id)).toHaveLength(1);
   });
 
-  it('切到已有持久化队列的 B 后，在水合完成前入队的新消息不会被水合结果覆盖', async () => {
-    useChatQueueStore.getState().replaceQueue(SCOPE_B, [
+  it('切到已有队列的 B 后，在水合完成前入队的新消息不会被水合结果覆盖', async () => {
+    seedBackendQueue('session-2', [
       {
         attachmentItems: [],
         enqueuedAt: 1,
@@ -457,7 +586,7 @@ describe('useUnifiedComposerState', () => {
 
     fireEvent.click(view.getByText('queue'));
     await waitFor(() => {
-      expect(useChatQueueStore.getState().queuesByScope[SCOPE_A]).toHaveLength(1);
+      expect(backendQueue('session-1')).toHaveLength(1);
     });
 
     view.rerender(
@@ -474,13 +603,194 @@ describe('useUnifiedComposerState', () => {
     fireEvent.click(view.getByText('queue'));
 
     await waitFor(() => {
-      expect(useChatQueueStore.getState().queuesByScope[SCOPE_B]?.map((item) => item.text)).toEqual(
-        ['B 原有 1', 'B 原有 2', 'B 新入队消息'],
-      );
+      expect(backendQueue('session-2').map((item) => item.text)).toEqual([
+        'B 原有 1',
+        'B 原有 2',
+        'B 新入队消息',
+      ]);
     });
-    expect(useChatQueueStore.getState().queuesByScope[SCOPE_A]?.map((item) => item.text)).toEqual([
-      'A 的排队消息',
-    ]);
+    expect(backendQueue('session-1').map((item) => item.text)).toEqual(['A 的排队消息']);
+  });
+
+  it('入队落库失败时，文本与附件一起退回输入框', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="带附件的排队消息"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('attach'));
+    await waitFor(() => {
+      expect(view.getByTestId('attachment-count').textContent).toBe('1');
+    });
+
+    fakeQueue.enqueueShouldFail = true;
+    fireEvent.click(view.getByText('queue'));
+
+    // 文本必须回到输入框：clearComposerDraft 在入队时已清空过，不回滚就是静默丢失。
+    await waitFor(() => {
+      expect(getComposer(view).value).toBe('带附件的排队消息');
+    });
+    // 附件同样要回来——只还文本等于连带把文件丢了，比丢文本更严重。
+    await waitFor(() => {
+      expect(view.getByTestId('attachment-count').textContent).toBe('1');
+    });
+    // 队列不留残影，服务端也不该有这条记录。
+    expect(backendQueue('session-1')).toHaveLength(0);
+    expect(view.getByTestId('stream-error').textContent).toContain('退回输入框');
+    // 流式中不得被自动 flush 出去。
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('入队落库失败时，纯文本消息也会退回并给出提示', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="纯文本排队"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fakeQueue.enqueueShouldFail = true;
+    fireEvent.click(view.getByText('queue'));
+
+    await waitFor(() => {
+      expect(getComposer(view).value).toBe('纯文本排队');
+    });
+    expect(backendQueue('session-1')).toHaveLength(0);
+    expect(fakeQueue.enqueueCalls).toHaveLength(0);
+  });
+
+  it('发送权被另一端持有时，本端不发送且丢弃本地副本', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="另一端正在发的消息"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(backendQueue('session-1')).toHaveLength(1);
+    });
+
+    // 切到空闲触发 flush，但服务端报告该条目已被另一端持有
+    fakeQueue.claimHeldByOther = true;
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-1"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fakeQueue.claimCalls).toHaveLength(1);
+    });
+    // 核心断言：绝不重复发送同一条。
+    expect(onSubmit).not.toHaveBeenCalled();
+    // 本地副本作废，避免下一轮又去 claim 同一条形成死循环。
+    await waitFor(() => {
+      expect(view.queryByText('另一端正在发的消息')).toBeNull();
+    });
+    // 服务端记录仍在——由持有权的那一端负责发出并删除。
+    expect(backendQueue('session-1')).toHaveLength(1);
+  });
+
+  it('发送权没问成时，保留本地条目而不是让它消失', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="网关暂时不可达"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(backendQueue('session-1')).toHaveLength(1);
+    });
+    expect(view.getByTestId('queue-count').textContent).toBe('1');
+
+    fakeQueue.claimShouldThrow = true;
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-1"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fakeQueue.claimAttempts).toBe(1);
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+    // 与「他人持有」相反：所有权未知时必须保留条目，否则消息会静默消失。
+    expect(view.getByTestId('queue-count').textContent).toBe('1');
+
+    // 网关恢复后应能自动补发，无需用户重新操作。
+    fakeQueue.claimShouldThrow = false;
+    await waitFor(
+      () => {
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 5_000 },
+    );
+  });
+
+  it('发送失败时交还发送权并回填队首', async () => {
+    // 第一次失败、第二次成功：模拟真实的一次抖动。
+    // 这里刻意不让 onSubmit 永远返回 false——那会暴露 flush 的紧密重试问题，
+    // 属于既有缺陷、不在本次改动范围，测试不去固化那种行为。
+    const onSubmit = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="发不出去的消息"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(backendQueue('session-1')).toHaveLength(1);
+    });
+
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-1"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    // 第一次失败后立即回填并自动重试，第二次成功——两跳之间没有可稳定观察的中间态，
+    // 因此只断言最终结果：交还过发送权、共发送两次、队列清空。
+    await waitFor(() => {
+      expect(fakeQueue.releaseCalls).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(2);
+    });
+    expect(view.getByTestId('queue-count').textContent).toBe('0');
   });
 
   it('flush 发送期间切走且 onSubmit 返回 false 时，消息回填到原会话而不是新会话', async () => {
@@ -543,7 +853,7 @@ describe('useUnifiedComposerState', () => {
     });
 
     // 切到 B，B 立即 flush 自己的队列
-    useChatQueueStore.getState().replaceQueue(SCOPE_B, [
+    seedBackendQueue('session-2', [
       {
         attachmentItems: [],
         enqueuedAt: 1,

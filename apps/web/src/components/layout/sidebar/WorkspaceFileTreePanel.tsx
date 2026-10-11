@@ -129,7 +129,6 @@ export function WorkspaceFileTreePanel({
     setExpandedDirsForSession,
     activeFilePathByWorkspace,
     bumpWorkspaceTreeVersion,
-    removeSavedWorkspacePath,
   } = useUIStateStore();
 
   const expandedDirsSessionKey = normalizeExpandedDirsSessionKey(sessionId);
@@ -389,8 +388,6 @@ export function WorkspaceFileTreePanel({
   const handleNodeContextMenu = useCallback((target: FileTreeContextTarget) => {
     setFileTreeContextMenu({ ...target, targetType: target.type });
   }, []);
-
-  void removeSavedWorkspacePath;
 
   // ── Variant-driven styles ──────────────────────────────────────────
   const isEmbedded = variant === 'embedded';

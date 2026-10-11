@@ -12,17 +12,39 @@ export interface SessionWithWorkspaceLike {
   metadata_json?: string;
 }
 
+/**
+ * 工作区身份：路径 + 所属 SSH 连接。
+ *
+ * 工作区的完整身份是 `(sshConnectionId, workspacePath)` 二元组。远端目录路径
+ * 只在**单台主机内**唯一——两台不同服务器的 `/srv/app` 是两个毫不相干的工作区，
+ * 只按路径分组会把它们的会话合成一个组，并连带共享折叠态、别名与批量删除集合。
+ * 本地工作区的 `sshConnectionId` 恒为 `null`。
+ */
+export interface WorkspaceIdentity {
+  readonly workspacePath: string | null;
+  readonly sshConnectionId: string | null;
+}
+
 export interface WorkspaceSessionGroup<TSession extends SessionWithWorkspaceLike> {
   workspacePath: string | null;
   workspaceLabel: string;
   /**
    * 组内会话绑定的 SSH 连接 id。
    *
-   * 非空即表示该工作区是远端目录（`workspacePath` 为远端主机的绝对路径），
-   * 会话列表据此渲染 SSH 标识，避免与同名本地目录混淆。
+   * 非空即表示该工作区是远端目录（`workspacePath` 为**该主机上**的绝对路径），
+   * 会话列表据此渲染 SSH 标识与连接名，避免与同名本地目录或其它主机的同名目录混淆。
    * 组内会话全部未绑定时为 `null`。
    */
   sshConnectionId?: string | null;
+  /**
+   * 本组的身份键，由 {@link getWorkspaceGroupKey} 从 `workspacePath` 与
+   * `sshConnectionId` 统一算出。
+   *
+   * 渲染层一律用这个字段，不要自己重算：折叠态、会话计数、批量删除集合都由本键
+   * 存取，而这三者的 Map 键同样来自本函数——一旦某处用裸路径重算，远端分组的
+   * 计数会静默变成 0、折叠失效，且不报任何错。
+   */
+  readonly groupKey: string;
   sessions: TSession[];
 }
 
@@ -47,6 +69,74 @@ export interface WorkspaceSessionCollections<TSession extends SessionWithWorkspa
 export const UNBOUND_WORKSPACE_GROUP_KEY = '__unbound__';
 
 /**
+ * 分组键内部字段分隔符。
+ *
+ * 用 U+0000（路径与 SSH 连接 id 中都不可能出现）而非 `/` 或 `:`，避免连接 id
+ * 与路径拼接后产生可歧义的字符串——`getWorkspaceGroupKey` 的输出同时被当作
+ * localStorage 折叠态键与 DOM id，歧义会直接导致分组串位。
+ */
+const WORKSPACE_GROUP_KEY_SEPARATOR = '\u0000';
+
+/**
+ * 工作区分组键：**完整工作区身份**（SSH 连接 + 路径）。
+ *
+ * 远端工作区必须带上 `sshConnectionId`——否则两台服务器的同名目录会落进同一个
+ * 分组，表现为「新建的 ssh 工作区把旧的那个合并了」。
+ *
+ * `workspacePath` 为 `null`（未绑定工作区）时返回固定占位键，与连接维度无关；
+ * 本地工作区（`sshConnectionId` 为空）返回裸路径，与历史键保持一致，
+ * 使已持久化的本地分组折叠态继续有效。
+ */
+export function getWorkspaceGroupKey(
+  workspacePath: string | null,
+  sshConnectionId?: string | null,
+): string {
+  if (workspacePath === null) {
+    return UNBOUND_WORKSPACE_GROUP_KEY;
+  }
+
+  const connectionId = sshConnectionId?.trim();
+  return connectionId
+    ? `${connectionId}${WORKSPACE_GROUP_KEY_SEPARATOR}${workspacePath}`
+    : workspacePath;
+}
+
+/**
+ * 该工作区是否处于折叠态。
+ *
+ * 远端分组键在引入连接维度后由裸路径升级为复合键，旧持久化数据里存的仍是裸路径。
+ * 这里同时比对两个键，让升级前的折叠偏好对**远端工作区**继续生效；
+ * 读取侧兼容即可，无需重写历史存储。
+ */
+export function isWorkspaceGroupCollapsed(
+  collapsedGroupKeys: ReadonlySet<string>,
+  workspacePath: string | null,
+  sshConnectionId?: string | null,
+): boolean {
+  if (collapsedGroupKeys.has(getWorkspaceGroupKey(workspacePath, sshConnectionId))) {
+    return true;
+  }
+
+  // 仅远端分组需要回落：本地分组的新旧键本就相同。
+  if (sshConnectionId && workspacePath !== null && collapsedGroupKeys.has(workspacePath)) {
+    return true;
+  }
+
+  return false;
+}
+
+/** 两个工作区是否指向同一个工作区身份。 */
+export function isSameWorkspace(
+  left: Pick<WorkspaceIdentity, 'workspacePath' | 'sshConnectionId'>,
+  right: Pick<WorkspaceIdentity, 'workspacePath' | 'sshConnectionId'>,
+): boolean {
+  return (
+    (left.sshConnectionId ?? null) === (right.sshConnectionId ?? null) &&
+    left.workspacePath === right.workspacePath
+  );
+}
+
+/**
  * 会话的会话组标题。
  *
  * 会话列表分组标题、/sessions 分组标题、首页项目名与相关删除确认文案统一取此值，
@@ -57,10 +147,6 @@ export const UNBOUND_WORKSPACE_LABEL = '会话';
 /** 会话的路径占位文案（分组副标题 / 项目路径行）。 */
 export const UNBOUND_WORKSPACE_PATH_LABEL = '未指定路径';
 
-export function getWorkspaceGroupKey(workspacePath: string | null): string {
-  return workspacePath ?? UNBOUND_WORKSPACE_GROUP_KEY;
-}
-
 /**
  * 会话组展示名 = 用户自定义名称（别名）优先，回落到路径末段。
  *
@@ -69,12 +155,12 @@ export function getWorkspaceGroupKey(workspacePath: string | null): string {
  * 注入解析函数。未绑定工作区的分组没有可命名的对象，直接沿用默认标签。
  */
 export function resolveWorkspaceGroupDisplayName(
-  group: { workspacePath: string | null; workspaceLabel: string },
-  resolveDisplayName: (workspacePath: string | null) => string,
+  group: { workspacePath: string | null; workspaceLabel: string; sshConnectionId?: string | null },
+  resolveDisplayName: (workspacePath: string | null, sshConnectionId?: string | null) => string,
 ): string {
   return group.workspacePath === null
     ? group.workspaceLabel
-    : resolveDisplayName(group.workspacePath);
+    : resolveDisplayName(group.workspacePath, group.sshConnectionId ?? null);
 }
 
 export function countSessionsByWorkspace<TSession extends SessionWithWorkspaceLike>(
@@ -85,9 +171,8 @@ export function countSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
   const counts = new Map<string, number>();
 
   for (const session of sessions) {
-    const groupKey = getWorkspaceGroupKey(
-      resolveSessionWorkspaceBinding(session, sessionsById, resolvedBindingCache).workspacePath,
-    );
+    const binding = resolveSessionWorkspaceBinding(session, sessionsById, resolvedBindingCache);
+    const groupKey = getWorkspaceGroupKey(binding.workspacePath, binding.sshConnectionId);
     counts.set(groupKey, (counts.get(groupKey) ?? 0) + 1);
   }
 
@@ -96,7 +181,7 @@ export function countSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
 
 export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
-  savedWorkspacePaths: readonly string[] = [],
+  savedWorkspaces: readonly WorkspaceIdentity[] = [],
   pinnedSessionIds: readonly string[] = [],
 ): WorkspaceSessionGroup<TSession>[] {
   const orderedSessions = [...sessions].sort((a, b) =>
@@ -106,17 +191,19 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
   const sessionsById = new Map(orderedSessions.map((session) => [session.id, session]));
   const resolvedBindingCache = new Map<string, SessionWorkspaceBinding>();
 
-  savedWorkspacePaths.forEach((path) => {
-    const normalizedPath = normalizeWorkspacePath(path);
+  savedWorkspaces.forEach((workspace) => {
+    const normalizedPath = normalizeWorkspacePath(workspace.workspacePath);
     if (!normalizedPath) {
       return;
     }
 
-    if (!groups.has(normalizedPath)) {
-      groups.set(normalizedPath, {
+    const groupKey = getWorkspaceGroupKey(normalizedPath, workspace.sshConnectionId);
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        groupKey,
         workspacePath: normalizedPath,
         workspaceLabel: basename(normalizedPath),
-        sshConnectionId: null,
+        sshConnectionId: workspace.sshConnectionId ?? null,
         sessions: [],
       });
     }
@@ -125,19 +212,19 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
   for (const session of orderedSessions) {
     const binding = resolveSessionWorkspaceBinding(session, sessionsById, resolvedBindingCache);
     const workspacePath = binding.workspacePath;
-    const groupKey = getWorkspaceGroupKey(workspacePath);
+    const groupKey = getWorkspaceGroupKey(workspacePath, binding.sshConnectionId);
     const existing = groups.get(groupKey);
 
     if (existing) {
       existing.sessions.push(session);
-      // 组内首个解析出 SSH 绑定的会话决定整组的远端标识；后续会话不再覆盖。
-      if (existing.sshConnectionId === null && binding.sshConnectionId !== null) {
-        existing.sshConnectionId = binding.sshConnectionId;
-      }
+      // 不再按「组内首个解析出 SSH 绑定的会话」升级整组标识：分组键已含连接维度，
+      // 能命中同一组的会话必然来自同一台主机，升级分支既不会触发，真触发时反而会让
+      // `groupKey` 与 `sshConnectionId` 指向不同工作区。
       continue;
     }
 
     const nextGroup: WorkspaceSessionGroup<TSession> = {
+      groupKey,
       workspacePath,
       workspaceLabel: workspacePath ? basename(workspacePath) : UNBOUND_WORKSPACE_LABEL,
       sshConnectionId: binding.sshConnectionId,
@@ -151,26 +238,24 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
 
 export function groupSessionTreesByWorkspace<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
-  savedWorkspacePaths: readonly string[] = [],
+  savedWorkspaces: readonly WorkspaceIdentity[] = [],
   pinnedSessionIds: readonly string[] = [],
 ): WorkspaceSessionTreeGroup<TSession>[] {
-  return buildWorkspaceSessionCollections(sessions, savedWorkspacePaths, pinnedSessionIds)
-    .treeGroups;
+  return buildWorkspaceSessionCollections(sessions, savedWorkspaces, pinnedSessionIds).treeGroups;
 }
 
 export function buildWorkspaceSessionCollections<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
-  savedWorkspacePaths: readonly string[] = [],
+  savedWorkspaces: readonly WorkspaceIdentity[] = [],
   pinnedSessionIds: readonly string[] = [],
 ): WorkspaceSessionCollections<TSession> {
-  const groups = groupSessionsByWorkspace(sessions, savedWorkspacePaths, pinnedSessionIds);
+  const groups = groupSessionsByWorkspace(sessions, savedWorkspaces, pinnedSessionIds);
   const sessionCountByWorkspace = new Map<string, number>();
   const sessionIdsByGroupKey = new Map<string, string[]>();
   const treeGroups = groups.map((group) => {
-    const groupKey = getWorkspaceGroupKey(group.workspacePath);
-    sessionCountByWorkspace.set(groupKey, group.sessions.length);
+    sessionCountByWorkspace.set(group.groupKey, group.sessions.length);
     sessionIdsByGroupKey.set(
-      groupKey,
+      group.groupKey,
       group.sessions.map((session) => session.id),
     );
 
@@ -188,30 +273,42 @@ export function buildWorkspaceSessionCollections<TSession extends SessionWithWor
   };
 }
 
-export function listWorkspacePathsFromSessions<TSession extends SessionWithWorkspaceLike>(
+/**
+ * 从会话列表反推出现过的全部工作区身份。
+ *
+ * 必须连同 `sshConnectionId` 一起返回：闲置工作区占位组若只按路径建组，
+ * 远端目录会先被建成本地空组，随后被真正的主机会话「吸附」进去，
+ * 于是不同主机的同名目录又合并到一起。
+ */
+export function listWorkspaceIdentitiesFromSessions<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
-): string[] {
+): WorkspaceIdentity[] {
   const orderedSessions = [...sessions].sort(compareSessionsByUpdatedAt);
   const sessionsById = new Map(orderedSessions.map((session) => [session.id, session]));
   const resolvedBindingCache = new Map<string, SessionWorkspaceBinding>();
-  const workspacePaths: string[] = [];
-  const seenWorkspacePaths = new Set<string>();
+  const workspaces: WorkspaceIdentity[] = [];
+  const seenWorkspaces = new Set<string>();
 
   for (const session of orderedSessions) {
-    const workspacePath = resolveSessionWorkspaceBinding(
-      session,
-      sessionsById,
-      resolvedBindingCache,
-    ).workspacePath;
-    if (!workspacePath || seenWorkspacePaths.has(workspacePath)) {
+    const binding = resolveSessionWorkspaceBinding(session, sessionsById, resolvedBindingCache);
+    if (!binding.workspacePath) {
       continue;
     }
 
-    seenWorkspacePaths.add(workspacePath);
-    workspacePaths.push(workspacePath);
+    const identity: WorkspaceIdentity = {
+      workspacePath: binding.workspacePath,
+      sshConnectionId: binding.sshConnectionId,
+    };
+    const identityKey = getWorkspaceGroupKey(identity.workspacePath, identity.sshConnectionId);
+    if (seenWorkspaces.has(identityKey)) {
+      continue;
+    }
+
+    seenWorkspaces.add(identityKey);
+    workspaces.push(identity);
   }
 
-  return workspacePaths;
+  return workspaces;
 }
 
 export function filterSessionTreeGroupsByQuery<TSession extends SessionWithWorkspaceLike>(
@@ -405,10 +502,7 @@ function getLatestUpdatedAt<TSession extends SessionWithWorkspaceLike>(
  * 两个字段各自沿父会话链继承（与 `useWorkspace` / 网关解析口径一致）：
  * 只继承远端路径而丢掉连接 id 会让新建的会话落到错误的校验分支。
  */
-export interface SessionWorkspaceBinding {
-  readonly workspacePath: string | null;
-  readonly sshConnectionId: string | null;
-}
+export type SessionWorkspaceBinding = WorkspaceIdentity;
 
 /**
  * 按会话 id 从已加载的会话列表解析工作区绑定（与分组共用同一套父会话继承规则）。
@@ -495,8 +589,8 @@ function resolveSessionWorkspaceBinding<TSession extends SessionWithWorkspaceLik
   return resolvedBinding;
 }
 
-function normalizeWorkspacePath(path: string): string | null {
-  const normalized = path.trim();
+function normalizeWorkspacePath(path: string | null): string | null {
+  const normalized = path?.trim() ?? '';
   return normalized.length > 0 ? normalized : null;
 }
 

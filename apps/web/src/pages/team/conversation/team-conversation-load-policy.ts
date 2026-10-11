@@ -13,6 +13,19 @@ const TEAM_CONVERSATION_PROVIDERS_RETRY_MAX_MS = 30_000;
 export const TEAM_CONVERSATION_INITIAL_TURN_LIMIT = 50;
 /** 上滑无感加载：每次再扩 50 轮。 */
 export const TEAM_CONVERSATION_LOAD_MORE_TURN_INCREMENT = 50;
+/**
+ * 团队会话快照轮询时，向 `/recovery` 索取的活跃 run events 条数上限。
+ *
+ * 该 hook 的 runEvents 只喂 `TeamRunEventsPreview`：先把连续 `text_delta` 合并成条目，
+ * 再 `slice(-8)` 取最后 8 条渲染。原始 delta 的条数远多于条目数，200 条原始事件已经
+ * 覆盖远超 8 条合并后条目所需的窗口，同时把单次响应钉在常数体积。
+ *
+ * 取有界窗口是**必需**的而非优化：活跃 scope（clientRequestId）的 run event 行数随这一
+ * 轮 run 的时长只增不减（每个 delta chunk 一行，retention 只按 scope 保留、在飞 scope
+ * 永不清理），而本 hook 在 `sessionStateStatus === 'running'` 期间每 2.5s 轮询一次。
+ * 不设上限时单次请求要全量读 + 逐行 JSON.parse + 整包回传，轮询越久越慢。
+ */
+export const TEAM_RECOVERY_RUN_EVENT_LIMIT = 200;
 
 export function computeTeamConversationRecoveryRetryDelay(attempt: number): number {
   return computeExponentialRetryDelay({

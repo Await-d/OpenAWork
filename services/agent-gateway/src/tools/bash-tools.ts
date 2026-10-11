@@ -152,7 +152,7 @@ const DISALLOWED_PATTERNS: ReadonlyArray<{
   {
     pattern: /[\r\n]/,
     message:
-      'Multi-line commands are not allowed; chain with && (bash/pwsh) or `; if ($?) { ... }` (Windows PowerShell 5.1).',
+      'Multi-line commands are not allowed; chain with && (bash/pwsh) or `; if ($?) { ... }` (Windows PowerShell 5.1). For multi-line logic, write a script file with the write tool and then run it with a single-line command (e.g. python3 script.py).',
     powerShellExempt: true,
   },
 ];

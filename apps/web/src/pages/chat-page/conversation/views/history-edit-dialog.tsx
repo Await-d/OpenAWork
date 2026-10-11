@@ -103,7 +103,10 @@ export default function HistoryEditInlineEditor({
 
   if (!open) return null;
 
-  const effectiveInputParts = draftInputParts.length > 0 ? draftInputParts : undefined;
+  // 附件集合即权威值:即使全部移除也回传空数组(而非 undefined)。
+  // 这样消费方能把「用户主动清空」与「未提供」区分开——否则回退重发时
+  // 处理函数会回退到原始附件,把用户删掉的历史图片重新带回去。
+  const effectiveInputParts = draftInputParts;
   const canCreateBranch = onCreateBranch !== undefined;
 
   return (

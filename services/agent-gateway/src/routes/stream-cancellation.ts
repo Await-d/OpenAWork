@@ -16,6 +16,10 @@ export interface InFlightStreamRequestEntry {
   execution: Promise<{ statusCode: number }>;
   userId: string;
   /**
+   * 登记时刻(ms 时间戳),供 TTL 回收使用。见 `STREAM_REQUEST_LOCK_TTL_MS`。
+   */
+  startedAt: number;
+  /**
    * Set by `stop*` helpers right before `abort()` fires so the
    * stream's catch handler can read the reason synchronously and
    * forward it onto the emitted `done` chunk's cancellation summary.
@@ -33,20 +37,49 @@ export interface InFlightStreamReservation {
   resolve: (value: { statusCode: number }) => void;
 }
 
-const inFlightStreamRequests = new Map<string, InFlightStreamRequestEntry>();
-
 const NOOP_RESOLVE = (_value: { statusCode: number }): void => undefined;
 const NOOP_REJECT = (_reason: unknown): void => undefined;
 
+/**
+ * 运行锁 TTL —— `execution` 永不 settle 时的最后防线。
+ *
+ * 锁的正常释放点是 `stream.ts` 的 `finally { clearReservation() }`。若某一轮因上游
+ * stall、SSH 阻塞等原因既 resolve 也不 reject,该 entry 会永久驻留,导致该会话后续
+ * 所有请求恒定返回 409 `SESSION_ALREADY_RUNNING`,直到网关重启。
+ *
+ * TTL 取值远大于任何合法回合时长(上游 idle 看门狗为 30 分钟),仅用于回收这类
+ * 已判定死亡的 entry,正常请求永远不会被它误伤。
+ */
+export const STREAM_REQUEST_LOCK_TTL_MS = 2 * 60 * 60 * 1000;
+
+const inFlightStreamRequests = new Map<string, InFlightStreamRequestEntry>();
+
 function getStreamRequestKey(sessionId: string, clientRequestId: string): string {
   return `${sessionId}:${clientRequestId}`;
+}
+
+/**
+ * 判定 entry 是否已超过 TTL。
+ *
+ * 若 `startedAt` 因异常路径缺失,`now - undefined` 为 NaN,与 TTL 的比较恒为 false
+ * ——即按「未过期」处理,不会把可能仍存活的锁提前回收。
+ */
+function isExpiredStreamRequest(entry: InFlightStreamRequestEntry, now: number): boolean {
+  return now - entry.startedAt >= STREAM_REQUEST_LOCK_TTL_MS;
 }
 
 export function getInFlightStreamRequest(
   sessionId: string,
   clientRequestId: string,
 ): InFlightStreamRequestEntry | undefined {
-  return inFlightStreamRequests.get(getStreamRequestKey(sessionId, clientRequestId));
+  const key = getStreamRequestKey(sessionId, clientRequestId);
+  const entry = inFlightStreamRequests.get(key);
+  if (!entry) return undefined;
+  if (isExpiredStreamRequest(entry, Date.now())) {
+    inFlightStreamRequests.delete(key);
+    return undefined;
+  }
+  return entry;
 }
 
 export function reserveInFlightStreamRequest(input: {
@@ -57,13 +90,19 @@ export function reserveInFlightStreamRequest(input: {
   const key = getStreamRequestKey(input.sessionId, input.clientRequestId);
   const existing = inFlightStreamRequests.get(key);
   if (existing) {
-    return {
-      abortController: existing.abortController,
-      execution: existing.execution,
-      owner: false,
-      reject: NOOP_REJECT,
-      resolve: NOOP_RESOLVE,
-    };
+    // 未过期的同 clientRequestId 请求:single-flight,复用其 execution。
+    // 已过 TTL 的 entry 视为死亡锁:回收后由本次调用重新登记为 owner,
+    // 否则同 id 的重试会在 stream.ts 的等待循环里永远挂住。
+    if (!isExpiredStreamRequest(existing, Date.now())) {
+      return {
+        abortController: existing.abortController,
+        execution: existing.execution,
+        owner: false,
+        reject: NOOP_REJECT,
+        resolve: NOOP_RESOLVE,
+      };
+    }
+    inFlightStreamRequests.delete(key);
   }
 
   let resolveExecution: (value: { statusCode: number }) => void = NOOP_RESOLVE;
@@ -78,6 +117,7 @@ export function reserveInFlightStreamRequest(input: {
     abortController,
     clientRequestId: input.clientRequestId,
     execution,
+    startedAt: Date.now(),
     userId: input.userId,
   });
 
@@ -101,6 +141,7 @@ export function registerInFlightStreamRequest(input: {
     abortController: input.abortController,
     clientRequestId: input.clientRequestId,
     execution: input.execution,
+    startedAt: Date.now(),
     userId: input.userId,
   });
 }
@@ -110,8 +151,15 @@ export function getAnyInFlightStreamRequestForSession(input: {
   sessionId: string;
   userId: string;
 }): InFlightStreamRequestEntry | undefined {
+  const now = Date.now();
   for (const [key, entry] of inFlightStreamRequests.entries()) {
     if (!key.startsWith(`${input.sessionId}:`) || entry.userId !== input.userId) {
+      continue;
+    }
+
+    // 顺手回收本会话下的死亡锁:避免它们冒充「正在运行」而让后续请求恒定 409。
+    if (isExpiredStreamRequest(entry, now)) {
+      inFlightStreamRequests.delete(key);
       continue;
     }
 

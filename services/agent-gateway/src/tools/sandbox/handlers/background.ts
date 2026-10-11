@@ -27,6 +27,7 @@ import {
   readChildSessionTerminalReason,
   readChildSessionTimeoutSource,
 } from '../child-session.js';
+import { findTaskBySessionId } from '../task-reference.js';
 import type { SandboxHandlerContext } from '../context.js';
 import { getSessionMetadata, getSessionOwnerUserId } from '../session-context.js';
 import {
@@ -38,6 +39,69 @@ import {
   reconcileResumedTaskChildSession,
   waitForTaskTerminalState,
 } from '../task-background.js';
+
+export type BackgroundTaskGraph = Awaited<ReturnType<typeof loadTaskGraphForSession>>;
+export type BackgroundTaskEntry = BackgroundTaskGraph['tasks'][string];
+
+/** 单条任务在「找不到」提示里展示的字段，保持可读且不泄漏无关元数据。 */
+function describeBackgroundTaskForRecovery(task: BackgroundTaskEntry): string {
+  const agent = task.assignedAgent ?? 'task';
+  const sessionId = task.sessionId ?? '-';
+  return `- task_id=${task.id} | status=${task.status} | agent=${agent} | sessionId=${sessionId}`;
+}
+
+/**
+ * 解析 `background_output` 的任务引用。
+ *
+ * 模型手里通常只有**子会话 ID**——子代理完成通知 `<subagent sessionID state …>`
+ * 暴露的就是它，而不是 task 图主键。只按 `task_id` 主键查会必然 miss，并把模型
+ * 逼进「换一个 ID 再盲试」的循环（同一子会话反复试 4 次仍全部失败）。
+ * 因此先按主键精确命中，未命中再按子会话 ID 反查（与 delegation / task-background
+ * 复用同一个 `findTaskBySessionId`）。
+ */
+export function resolveBackgroundTask(
+  graph: BackgroundTaskGraph,
+  reference: string,
+): BackgroundTaskEntry | null {
+  return graph.tasks[reference] ?? findTaskBySessionId(graph, reference);
+}
+
+/**
+ * 任务引用解析失败时的诊断文案。
+ *
+ * 必须回答模型的两个问题：**我传错了什么**（多半是 sessionID 当 taskId）、
+ * **正确的值是什么**（列出当前会话真实可用的 task_id）。只回一句
+ * "was not found" 不含任何可操作信息，模型只能继续盲试。
+ */
+export function buildBackgroundTaskNotFoundMessage(input: {
+  graph: BackgroundTaskGraph;
+  reference: string;
+  sessionId: string;
+}): string {
+  const tasks = Object.values(input.graph.tasks).sort(
+    (left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0),
+  );
+  const lines = [
+    `后台任务 ${input.reference} 在会话 ${input.sessionId} 中不存在。`,
+    `注意：${input.reference} 看起来是子会话 ID。task_id / taskId / runId 必须传任务图主键（task.id）；子会话 ID（sessionID）只用于关联，不能直接当 task_id 使用。`,
+  ];
+
+  if (tasks.length === 0) {
+    lines.push(
+      '当前会话没有任何后台任务记录。若只是想查看子代理结果，请等待子代理完成通知，或直接读取子会话内容，不要用子会话 ID 调 background_output。',
+    );
+    return lines.join('\n');
+  }
+
+  lines.push('当前会话可用的后台任务：');
+  for (const task of tasks.slice(0, 20)) {
+    lines.push(describeBackgroundTaskForRecovery(task));
+  }
+  if (tasks.length > 20) {
+    lines.push(`（仅列出最近 20 个，共 ${tasks.length} 个）`);
+  }
+  return lines.join('\n');
+}
 
 export async function handleBackgroundOutputTool(
   ctx: SandboxHandlerContext,
@@ -67,12 +131,16 @@ export async function handleBackgroundOutputTool(
 
   const taskManager = new AgentTaskManagerImpl();
   let graph = await loadTaskGraphForSession(taskManager, sessionId);
-  let task = graph.tasks[parsed.data.task_id];
+  let task = resolveBackgroundTask(graph, parsed.data.task_id);
   if (!task) {
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: `Background task ${parsed.data.task_id} was not found in session ${sessionId}`,
+      output: buildBackgroundTaskNotFoundMessage({
+        graph,
+        reference: parsed.data.task_id,
+        sessionId,
+      }),
       isError: true,
       durationMs: 0,
     };
@@ -82,11 +150,13 @@ export async function handleBackgroundOutputTool(
   if (parsed.data.block) {
     const waitResult = await waitForTaskTerminalState({
       sessionId,
-      taskId: parsed.data.task_id,
+      // 传已解析出的任务主键：调用方可能给的是子会话 ID，而等待逻辑按主键查图。
+      taskId: task.id,
       timeoutMs: parsed.data.timeout,
       signal,
     });
-    task = waitResult.task;
+    // 等待逻辑按主键查图，未命中时返回 undefined；归一化为 null 保持单一空值语义。
+    task = waitResult.task ?? null;
     waitTimedOut = waitResult.timedOut;
     graph = await loadTaskGraphForSession(taskManager, sessionId);
   }
@@ -95,7 +165,11 @@ export async function handleBackgroundOutputTool(
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: `Background task ${parsed.data.task_id} no longer exists`,
+      output: buildBackgroundTaskNotFoundMessage({
+        graph,
+        reference: parsed.data.task_id,
+        sessionId,
+      }),
       isError: true,
       durationMs: 0,
     };
@@ -106,7 +180,7 @@ export async function handleBackgroundOutputTool(
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: `Background task ${parsed.data.task_id} has no child session`,
+      output: `后台任务 ${task.id} 没有关联的子会话，无法读取其输出。`,
       isError: true,
       durationMs: 0,
     };
@@ -124,12 +198,16 @@ export async function handleBackgroundOutputTool(
       userId,
     });
     graph = await loadTaskGraphForSession(taskManager, sessionId);
-    task = graph.tasks[parsed.data.task_id];
+    task = resolveBackgroundTask(graph, parsed.data.task_id);
     if (!task) {
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
-        output: `Background task ${parsed.data.task_id} no longer exists`,
+        output: buildBackgroundTaskNotFoundMessage({
+          graph,
+          reference: parsed.data.task_id,
+          sessionId,
+        }),
         isError: true,
         durationMs: 0,
       };
@@ -244,14 +322,18 @@ export async function handleBackgroundCancelTool(
 
   const taskManager = new AgentTaskManagerImpl();
   const graph = await loadTaskGraphForSession(taskManager, sessionId);
+  // 与 background_output 保持同一套引用解析：模型可能直接传子会话 ID。
+  const resolvedTaskId = parsed.data.taskId
+    ? (resolveBackgroundTask(graph, parsed.data.taskId)?.id ?? parsed.data.taskId)
+    : undefined;
   const targetTaskIds = parsed.data.all
     ? Object.values(graph.tasks)
         .filter(
           (task) => task.sessionId && (task.status === 'pending' || task.status === 'running'),
         )
         .map((task) => task.id)
-    : parsed.data.taskId
-      ? [parsed.data.taskId]
+    : resolvedTaskId
+      ? [resolvedTaskId]
       : [];
 
   if (targetTaskIds.length === 0) {
@@ -260,7 +342,11 @@ export async function handleBackgroundCancelTool(
       toolName: request.toolName,
       output: parsed.data.all
         ? 'No running or pending background tasks to cancel.'
-        : `[ERROR] Task not found: ${parsed.data.taskId}`,
+        : buildBackgroundTaskNotFoundMessage({
+            graph,
+            reference: parsed.data.taskId ?? '',
+            sessionId,
+          }),
       isError: parsed.data.all !== true,
       durationMs: 0,
     };
@@ -296,7 +382,11 @@ export async function handleBackgroundCancelTool(
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
-        output: `[ERROR] Task not found: ${parsed.data.taskId}`,
+        output: buildBackgroundTaskNotFoundMessage({
+          graph,
+          reference: resolvedTaskId ?? parsed.data.taskId ?? '',
+          sessionId,
+        }),
         isError: true,
         durationMs: 0,
       };
@@ -306,7 +396,7 @@ export async function handleBackgroundCancelTool(
       return {
         toolCallId: request.toolCallId,
         toolName: request.toolName,
-        output: `[ERROR] Cannot cancel task: current status is "${target.previousStatus}".\nOnly running or pending tasks can be cancelled.`,
+        output: `[ERROR] 无法取消任务：当前状态为 "${target.previousStatus}"。只有 pending 或 running 状态的任务可以取消。`,
         isError: true,
         durationMs: 0,
       };

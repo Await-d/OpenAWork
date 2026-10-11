@@ -1,6 +1,6 @@
 import { createRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ChatMessageGroupList,
@@ -382,5 +382,129 @@ describe('ChatMessageGroupList virtualized offsets', () => {
     expect(
       view.container.querySelector<HTMLElement>('[data-virtual-group-key="group-1"]')?.style.top,
     ).toBe(`${MEASURED_STREAMING_HEIGHT + GROUP_GAP_PX}px`);
+  });
+});
+
+const COARSE_SCROLL_VIEWPORT_HEIGHT = 600;
+const COARSE_SCROLL_CONTENT_HEIGHT = 8000;
+const COARSE_SCROLL_TARGET_INDEX = 20;
+/** 与组件内部 `OVERSCAN_PX` 对齐：挂载窗口 = 视口 ± overscan。 */
+const VIRTUAL_OVERSCAN_PX = 720;
+
+/**
+ * 所有组高度一致：虚拟视口无论走实测还是估算，偏移都均匀递增，
+ * 断言只依赖「目标落进视口」这一结果，不绑定具体估算公式。
+ */
+function installUniformHeightMocks(): void {
+  vi.stubGlobal('ResizeObserver', MockResizeObserver);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return createDomRect(this.dataset.virtualGroupKey ? FILLER_MEASURED_HEIGHT : 0);
+  });
+}
+
+function createScrollRegion(): HTMLDivElement {
+  const region = document.createElement('div');
+  Object.defineProperty(region, 'clientHeight', {
+    configurable: true,
+    value: COARSE_SCROLL_VIEWPORT_HEIGHT,
+  });
+  Object.defineProperty(region, 'scrollHeight', {
+    configurable: true,
+    value: COARSE_SCROLL_CONTENT_HEIGHT,
+  });
+  Object.defineProperty(region, 'scrollTop', { configurable: true, writable: true, value: 0 });
+  document.body.appendChild(region);
+  return region;
+}
+
+function createCoarseScrollGroups(): ChatRenderGroup[] {
+  return Array.from({ length: VIRTUALIZATION_GROUP_COUNT }, (_, index) => ({
+    kind: 'messages' as const,
+    entries: [
+      {
+        message: {
+          content: 'x'.repeat(90),
+          id: `scroll-target-${index}`,
+          role: 'assistant' as const,
+          status: 'completed' as const,
+        },
+        renderContent: () => <span />,
+      },
+    ],
+    key: `group-${index}`,
+    role: 'assistant' as const,
+  }));
+}
+
+function buildCoarseScrollList(
+  scrollRegionRef: React.RefObject<HTMLDivElement | null>,
+  nonce: number,
+) {
+  return (
+    <ChatMessageGroupList
+      activeModelId="gpt-5.4"
+      activeProviderId="openai"
+      bottomRef={createRef<HTMLDivElement>()}
+      currentUserEmail="user@example.com"
+      groups={createCoarseScrollGroups()}
+      pendingMessageScroll={{ messageId: `scroll-target-${COARSE_SCROLL_TARGET_INDEX}`, nonce }}
+      scrollRegionRef={scrollRegionRef}
+    />
+  );
+}
+
+describe('ChatMessageGroupList pendingMessageScroll', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('按目标组偏移粗滚动，把离屏目标带进挂载窗口', () => {
+    // Given: 32 组虚拟列表 + 位于挂载窗口之外的目标（索引 20）
+    installUniformHeightMocks();
+    const region = createScrollRegion();
+    const scrollRegionRef = createRef<HTMLDivElement>();
+    scrollRegionRef.current = region;
+
+    // When
+    const view = render(buildCoarseScrollList(scrollRegionRef, 1));
+    act(() => {
+      region.dispatchEvent(new Event('scroll'));
+    });
+
+    // Then: 目标组已挂载,且落在虚拟视口的渲染窗口内(粗滚动的目的)。
+    // 注意:目标挂载后由实测高度替换估算高度,偏移会回缩,因此最终位置可能略偏
+    // 视口上方——精确居中由调用方的 scrollIntoView 负责,这里只保证目标被挂载。
+    const targetNode = view.container.querySelector<HTMLElement>(
+      `[data-virtual-group-key="group-${COARSE_SCROLL_TARGET_INDEX}"]`,
+    );
+    expect(targetNode).not.toBeNull();
+    const targetTop = Number.parseFloat(targetNode?.style.top ?? '0');
+    const targetBottom = targetTop + FILLER_MEASURED_HEIGHT;
+    expect(region.scrollTop).toBeGreaterThan(0);
+    expect(targetTop).toBeLessThanOrEqual(
+      region.scrollTop + COARSE_SCROLL_VIEWPORT_HEIGHT + VIRTUAL_OVERSCAN_PX,
+    );
+    expect(targetBottom).toBeGreaterThanOrEqual(region.scrollTop - VIRTUAL_OVERSCAN_PX);
+  });
+
+  it('同一 nonce 重复渲染不会再次滚动', () => {
+    // Given: 已消费过一次请求（nonce = 7）
+    installUniformHeightMocks();
+    const region = createScrollRegion();
+    const scrollRegionRef = createRef<HTMLDivElement>();
+    scrollRegionRef.current = region;
+    const view = render(buildCoarseScrollList(scrollRegionRef, 7));
+    expect(region.scrollTop).toBeGreaterThan(0);
+
+    // When: 同一 nonce 重新渲染（例如流式更新触发的重渲染）
+    region.scrollTop = 0;
+    view.rerender(buildCoarseScrollList(scrollRegionRef, 7));
+
+    // Then: 不应再次抢滚动
+    expect(region.scrollTop).toBe(0);
   });
 });

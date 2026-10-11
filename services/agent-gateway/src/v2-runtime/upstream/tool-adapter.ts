@@ -47,6 +47,21 @@ const zodTypeName = (value: unknown): string | undefined => {
 const zodToJsonSchema = (value: unknown): OpenCodeLLM.JsonSchema => {
   const definition = isRecord(value) && isRecord(value['_def']) ? value['_def'] : undefined;
   switch (zodTypeName(value)) {
+    // zod v3 下 `.refine()/.superRefine()/.transform()` 会把 schema 包成
+    // ZodEffects。缺这个分支时，`read_tool_output`、`background_output`、
+    // `background_cancel` 等所有带跨字段校验的 schema 都会落到 default 分支
+    // 变成 `{"type":"string"}`，模型因此完全看不到参数名——只能靠描述猜，
+    // 于是频繁出现「只传分页参数不传 toolCallId」「把 sessionID 当 task_id」
+    // 这类调用。effects 只做校验/变换，不改变 JSON Schema 的结构描述，
+    // 因此直接解包到内层 schema。
+    case 'ZodEffects':
+      return zodToJsonSchema(definition?.['schema']);
+    // 同理：`.default()` / `.optional()` / `.nullable()` 只包裹内层类型，
+    // JSON Schema 层面描述的是内层类型本身。
+    case 'ZodDefault':
+    case 'ZodOptional':
+    case 'ZodNullable':
+      return zodToJsonSchema(definition?.['innerType']);
     case 'ZodObject': {
       const shapeValue = definition?.['shape'];
       const shape = typeof shapeValue === 'function' ? shapeValue() : shapeValue;
@@ -55,7 +70,9 @@ const zodToJsonSchema = (value: unknown): OpenCodeLLM.JsonSchema => {
       if (isRecord(shape)) {
         for (const [key, field] of Object.entries(shape)) {
           properties[key] = zodToJsonSchema(field);
-          if (zodTypeName(field) !== 'ZodOptional') required.push(key);
+          // `.default()` / `.optional()` 包裹的字段同样不算必填。
+          const fieldType = zodTypeName(field);
+          if (fieldType !== 'ZodOptional' && fieldType !== 'ZodDefault') required.push(key);
         }
       }
       return {
@@ -95,6 +112,44 @@ const zodToJsonSchema = (value: unknown): OpenCodeLLM.JsonSchema => {
         anyOf: Array.isArray(options) ? options.map((option) => zodToJsonSchema(option)) : [],
       };
     }
+    // ZodDiscriminatedUnion.options 在本 zod 版本（^3.25）是 schema 数组；
+    // 个别旧实现是 { [discriminator值]: schema } map。两种都映射为 anyOf。
+    case 'ZodDiscriminatedUnion': {
+      const options = definition?.['options'];
+      const schemas = Array.isArray(options)
+        ? options.map((option) => zodToJsonSchema(option))
+        : isRecord(options)
+          ? Object.values(options).map((option) => zodToJsonSchema(option))
+          : [];
+      return { anyOf: schemas };
+    }
+    // ZodIntersection 的 JSON Schema 近似：任一分支成立即可。
+    case 'ZodIntersection':
+      return {
+        anyOf: [zodToJsonSchema(definition?.['left']), zodToJsonSchema(definition?.['right'])],
+      };
+    case 'ZodRecord':
+      return {
+        type: 'object',
+        additionalProperties: zodToJsonSchema(definition?.['valueType']),
+      };
+    case 'ZodTuple': {
+      const items = definition?.['items'];
+      return {
+        type: 'array',
+        prefixItems: Array.isArray(items) ? items.map((item) => zodToJsonSchema(item)) : [],
+      };
+    }
+    // ZodBranded / ZodReadonly / ZodCatch 只做类型装饰，不改变结构描述。
+    case 'ZodBranded':
+    case 'ZodReadonly':
+    case 'ZodCatch':
+      return zodToJsonSchema(definition?.['innerType'] ?? definition?.['type']);
+    // ZodAny / ZodUnknown：JSON Schema 里不加约束即等价。
+    case 'ZodAny':
+    case 'ZodUnknown':
+      return {};
+    // 其余未覆盖类型保持历史的 string 兜底，避免把未知结构「猜」成错误形状。
     default:
       return { type: 'string' };
   }

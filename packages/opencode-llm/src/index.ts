@@ -44,3 +44,8 @@ export * as Providers from './providers/index.js';
 
 // 工具调用协议适配
 export * as Tools from './tools/index.js';
+
+// 流式 tool_call arguments 的容错解析:支持半截 JSON 恢复。
+// 网关侧累积 delta 文本后需要同样的恢复能力(见 stream-model-round.ts),
+// 故在包入口导出,消费方不得直接引用内部模块路径。
+export { parseJSON as parsePartialJSON } from './protocols/utils/partial-json.js';

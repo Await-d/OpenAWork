@@ -41,7 +41,7 @@ import {
   UNBOUND_WORKSPACE_GROUP_KEY,
   UNBOUND_WORKSPACE_LABEL,
   filterSessionTreeGroupsByMatcher,
-  getWorkspaceGroupKey,
+  isWorkspaceGroupCollapsed,
   resolveWorkspaceGroupDisplayName,
 } from '../../../utils/session/session-grouping.js';
 
@@ -103,7 +103,7 @@ export function SessionSidebar({
     fileTreeRootPath,
     activeFilePathByWorkspace,
     bumpWorkspaceTreeVersion,
-    removeSavedWorkspacePath,
+    removeSavedWorkspace,
   } = useUIStateStore();
   const uiActiveFilePath =
     activeFilePathByWorkspace[
@@ -151,6 +151,8 @@ export function SessionSidebar({
   const [workspaceContextMenu, setWorkspaceContextMenu] = useState<{
     allSessionIds: string[];
     workspacePath: string | null;
+    /** 分组所属 SSH 连接 id（本地工作区为 null）：别名与删除都必须按主机隔离。 */
+    sshConnectionId: string | null;
     workspaceLabel: string;
     groupKey: string;
     sessionCount: number;
@@ -166,9 +168,12 @@ export function SessionSidebar({
     sessionIds: string[];
     workspaceLabel: string;
     workspacePath: string | null;
+    /** 分组所属 SSH 连接 id（本地工作区为 null）：删除与改名都必须按主机隔离。 */
+    sshConnectionId: string | null;
   } | null>(null);
   const [renamingWorkspace, setRenamingWorkspace] = useState<{
     workspacePath: string;
+    sshConnectionId: string | null;
     defaultName: string;
   } | null>(null);
 
@@ -262,6 +267,7 @@ export function SessionSidebar({
       workspaceLabel: string,
       groupKey: string,
       sessionIds: string[],
+      sshConnectionId: string | null,
     ) => {
       if (!workspacePath && sessionIds.length === 0) {
         return;
@@ -295,7 +301,7 @@ export function SessionSidebar({
 
         if (failedCount === 0) {
           if (workspacePath) {
-            removeSavedWorkspacePath(workspacePath);
+            removeSavedWorkspace({ workspacePath, sshConnectionId });
           }
           toast(
             sessionCount > 0
@@ -328,7 +334,7 @@ export function SessionSidebar({
         deletingWorkspaceGroupKeysRef.current.delete(groupKey);
       }
     },
-    [quickDeleteSession, removeSavedWorkspacePath],
+    [quickDeleteSession, removeSavedWorkspace],
   );
 
   const refreshDirectoryWithVersion = useCallback(
@@ -752,11 +758,14 @@ export function SessionSidebar({
         )}
         {sidebarTab === 'sessions' &&
           searchedSessionTreeGroups.map((group) => {
-            const groupKey = getWorkspaceGroupKey(group.workspacePath);
-            const isCollapsed = collapsedGroups.has(groupKey);
+            const groupKey = group.groupKey;
+            const isCollapsed = isWorkspaceGroupCollapsed(
+              collapsedGroups,
+              group.workspacePath,
+              group.sshConnectionId,
+            );
             const groupBodyId = `session-group-${encodeURIComponent(groupKey)}`;
-            const actualSessionCount =
-              sessionCountByWorkspace.get(getWorkspaceGroupKey(group.workspacePath)) ?? 0;
+            const actualSessionCount = sessionCountByWorkspace.get(groupKey) ?? 0;
             const groupDisplayName = resolveWorkspaceGroupDisplayName(group, resolveWorkspaceName);
             return (
               <div
@@ -775,6 +784,7 @@ export function SessionSidebar({
                       setWorkspaceContextMenu({
                         allSessionIds: workspaceSessionIdsByGroupKey.get(groupKey) ?? [],
                         workspacePath: group.workspacePath,
+                        sshConnectionId: group.sshConnectionId ?? null,
                         workspaceLabel: group.workspaceLabel,
                         groupKey,
                         sessionCount: group.sessions.length,
@@ -870,7 +880,7 @@ export function SessionSidebar({
                   {group.workspacePath && (
                     <button
                       type="button"
-                      onClick={() => void newSession(group.workspacePath)}
+                      onClick={() => void newSession(group.workspacePath, group.sshConnectionId)}
                       title={`在 ${groupDisplayName} 中新建会话`}
                       style={{
                         flexShrink: 0,
@@ -1004,14 +1014,28 @@ export function SessionSidebar({
             sessionCount={workspaceContextMenu.actualSessionCount}
             x={workspaceContextMenu.x}
             y={workspaceContextMenu.y}
-            isCollapsed={collapsedGroups.has(workspaceContextMenu.groupKey)}
+            isCollapsed={isWorkspaceGroupCollapsed(
+              collapsedGroups,
+              workspaceContextMenu.workspacePath,
+              workspaceContextMenu.sshConnectionId,
+            )}
             canDelete={
               workspaceContextMenu.workspacePath !== null ||
               workspaceContextMenu.actualSessionCount > 0
             }
-            hasCustomName={readWorkspaceAlias(workspaceContextMenu.workspacePath) !== ''}
+            hasCustomName={
+              readWorkspaceAlias(
+                workspaceContextMenu.workspacePath,
+                workspaceContextMenu.sshConnectionId,
+              ) !== ''
+            }
             onClose={() => setWorkspaceContextMenu(null)}
-            onNewSession={() => void newSession(workspaceContextMenu.workspacePath)}
+            onNewSession={() =>
+              void newSession(
+                workspaceContextMenu.workspacePath,
+                workspaceContextMenu.sshConnectionId,
+              )
+            }
             onToggleCollapse={() => toggleGroupCollapsed(workspaceContextMenu.groupKey)}
             onRename={() => {
               const workspacePath = workspaceContextMenu.workspacePath;
@@ -1020,6 +1044,7 @@ export function SessionSidebar({
               }
               setRenamingWorkspace({
                 workspacePath,
+                sshConnectionId: workspaceContextMenu.sshConnectionId,
                 defaultName: workspaceContextMenu.workspaceLabel,
               });
             }}
@@ -1029,6 +1054,7 @@ export function SessionSidebar({
                 sessionIds: workspaceContextMenu.allSessionIds,
                 workspaceLabel: workspaceContextMenu.workspaceLabel,
                 workspacePath: workspaceContextMenu.workspacePath,
+                sshConnectionId: workspaceContextMenu.sshConnectionId,
               });
             }}
           />,
@@ -1037,10 +1063,15 @@ export function SessionSidebar({
       <WorkspaceRenameDialog
         open={renamingWorkspace !== null}
         workspacePath={renamingWorkspace?.workspacePath ?? null}
+        sshConnectionId={renamingWorkspace?.sshConnectionId ?? null}
         defaultName={renamingWorkspace?.defaultName ?? ''}
         onCancel={() => setRenamingWorkspace(null)}
         onSubmit={(alias) => {
-          renameWorkspaceDisplay(renamingWorkspace?.workspacePath ?? null, alias);
+          renameWorkspaceDisplay(
+            renamingWorkspace?.workspacePath ?? null,
+            alias,
+            renamingWorkspace?.sshConnectionId ?? null,
+          );
           setRenamingWorkspace(null);
           toast(alias ? '工作区已重命名' : '已恢复默认名称', 'success');
         }}
@@ -1082,6 +1113,7 @@ export function SessionSidebar({
             pendingWorkspaceDeletion.workspaceLabel,
             pendingWorkspaceDeletion.groupKey,
             pendingWorkspaceDeletion.sessionIds,
+            pendingWorkspaceDeletion.sshConnectionId,
           ).finally(() => {
             workspaceDeletionSubmitLockRef.current = false;
             setPendingWorkspaceDeletion(null);

@@ -139,7 +139,9 @@ describe('TeamConversationLayout', () => {
     fireEvent.click(screen.getByLabelText('打开模型设置与思考等级'));
 
     expect(screen.getByText('Fast 快速模型')).toBeTruthy();
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: /high/i }).disabled).toBe(false);
+    // 思考等级已改为滑块:可配置时滑条不应禁用(档位标签现为中文短名,不再是有名按钮)
+    const slider = screen.getByLabelText('思考等级') as HTMLInputElement;
+    expect(slider.disabled).toBe(false);
   });
 
   it('renders beforeMessages above the scroll region inside the main conversation column', () => {

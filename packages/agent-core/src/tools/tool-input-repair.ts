@@ -77,6 +77,11 @@ function repairObject(value: unknown, schema: ZodTypeAny, depth: number): unknow
   const source = parseJsonString(value, 'object');
   if (!isPlainObject(source)) return value;
 
+  // 上游流式中断时的降级形态 `{ raw: "<半截或完整的 JSON 文本>" }`。能还原成对象时
+  // 按还原结果继续修复,否则保持原样交给 safeParse 报字段级错误。
+  const unwrapped = unwrapRawJsonObject(source, schema);
+  if (unwrapped) return repairValue(unwrapped, schema, depth + 1);
+
   const shape = readObjectShape(schema);
   if (!shape) return source === value ? value : source;
 
@@ -349,6 +354,35 @@ function parseJsonString(value: unknown, expected: 'object' | 'array'): unknown 
   if (expected === 'object' && isPlainObject(parsed)) return parsed;
   if (expected === 'array' && Array.isArray(parsed)) return parsed;
   return value;
+}
+
+/**
+ * 还原上游流式中断留下的降级形态 `{ raw: "<JSON 文本>" }`。
+ *
+ * 触发条件全部满足才展开,避免误伤:
+ * 1. 对象只有 `raw` 一个键;
+ * 2. `raw` 是字符串,且首字符为 `{`;
+ * 3. 该字符串能解析为普通对象;
+ * 4. schema **未**声明 `raw` 字段(否则 `raw` 是真实入参,不能动)。
+ *
+ * 不满足时返回 null,调用方保持原始输入。
+ */
+function unwrapRawJsonObject(
+  source: Record<string, unknown>,
+  schema: ZodTypeAny,
+): Record<string, unknown> | null {
+  const keys = Object.keys(source);
+  if (keys.length !== 1 || keys[0] !== 'raw') return null;
+
+  const rawText = source['raw'];
+  if (typeof rawText !== 'string') return null;
+  if (!rawText.trim().startsWith('{')) return null;
+
+  const shape = readObjectShape(schema);
+  if (shape?.['raw']) return null;
+
+  const parsed = parseJsonString(rawText, 'object');
+  return isPlainObject(parsed) ? parsed : null;
 }
 
 /** `z.lazy()` 等包装器的内层 schema 读取；无包装时返回 undefined。 */

@@ -111,6 +111,7 @@ import type {
 } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import {
+  createComposerQueueClient,
   createPendingPermissionRequestSnapshot,
   createClientErrorReporter,
   dedupePendingPermissionRequests,
@@ -119,6 +120,49 @@ import {
 import type { PendingQuestionRequest, Session, SessionTask } from '@openAwork/web-client';
 
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
+
+/**
+ * 待发队列条目已被真正发出 / 执行后，清理它在两端的残留。
+ *
+ * 挂在「消费成功」而不是「出队」时刻是刻意的：flush 会先把队首从内存摘掉再发送，
+ * 发送失败时还要放回去。若出队即抹掉服务端记录，失败重试就会凭空丢消息——这是
+ * `use-unified-composer-state.ts` 里 requeue 语义的前提。
+ *
+ * **所有返回 true 的分支都必须调用它。** 服务端记录只在显式调用时才会删除（队列已
+ * 改为后端落库，不再有 persist effect 自动同步），漏掉任何一条都会让条目在下一次
+ * 水合时复活。当前调用点：图片生成、标准聊天流、内置 `/open`、client slash command、
+ * server slash command。
+ *
+ * 两端都要清：本地是附件 Blob（IndexedDB，scope 为空时无附件可清），远端是队列
+ * 记录（网关 SQLite）。远端清理失败只记日志——此时消息已进会话历史，队列残留只是
+ * 冗余记录，不该反过来影响发送结果。
+ */
+function cleanupConsumedQueuedMessage(input: {
+  gatewayUrl: string;
+  queuedComposerScope: string | null;
+  queuedMessageId: string | undefined;
+  /** 未进入任何会话时为 null，此时只清本地附件、不动远端。 */
+  sessionId: string | null;
+  token: string | null;
+}): void {
+  const { gatewayUrl, queuedComposerScope, queuedMessageId, sessionId, token } = input;
+  if (!queuedMessageId) {
+    return;
+  }
+
+  if (queuedComposerScope) {
+    void deleteQueuedComposerFiles({ queueId: queuedMessageId, scope: queuedComposerScope });
+  }
+
+  if (!sessionId || !token || gatewayUrl.length === 0) {
+    return;
+  }
+  void createComposerQueueClient(gatewayUrl)
+    .remove(token, sessionId, queuedMessageId)
+    .catch((error: unknown) => {
+      logger.warn('待发队列消费后清理失败', error);
+    });
+}
 
 export interface SendMessageDeps {
   readonly activeModelOption: ChatSettingsModel | undefined;
@@ -386,6 +430,13 @@ export async function runSendMessage(
       setBrowserPreviewUrl(normalizedUrl);
       setEditorMode(true);
       toast(`已在浏览器中打开 ${normalizedUrl}`, 'success');
+      cleanupConsumedQueuedMessage({
+        gatewayUrl,
+        queuedComposerScope,
+        queuedMessageId: options?.queuedMessageId,
+        sessionId: requestOriginSessionId,
+        token,
+      });
       return true;
     }
   }
@@ -449,14 +500,14 @@ export async function runSendMessage(
         setStreamError(message);
         toast(message, 'error');
       },
-      onQueuedMessageConsumed: () => {
-        if (options?.queuedMessageId && queuedComposerScope) {
-          void deleteQueuedComposerFiles({
-            queueId: options.queuedMessageId,
-            scope: queuedComposerScope,
-          });
-        }
-      },
+      onQueuedMessageConsumed: () =>
+        cleanupConsumedQueuedMessage({
+          gatewayUrl,
+          queuedComposerScope,
+          queuedMessageId: options?.queuedMessageId,
+          sessionId: sid,
+          token,
+        }),
       requestSessionListRefresh,
       sessionId: sid,
       setLatestGeneratedImageResult,
@@ -469,6 +520,13 @@ export async function runSendMessage(
 
   if (matchedClientCommand?.action.kind === 'open_companion_panel') {
     bumpCompanionPanelSignal();
+    cleanupConsumedQueuedMessage({
+      gatewayUrl,
+      queuedComposerScope,
+      queuedMessageId: options?.queuedMessageId,
+      sessionId: requestOriginSessionId,
+      token,
+    });
     return true;
   }
 
@@ -506,6 +564,13 @@ export async function runSendMessage(
       },
     });
     requestSessionListRefresh();
+    cleanupConsumedQueuedMessage({
+      gatewayUrl,
+      queuedComposerScope,
+      queuedMessageId: options?.queuedMessageId,
+      sessionId: requestOriginSessionId,
+      token,
+    });
     return true;
   }
 

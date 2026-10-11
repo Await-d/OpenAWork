@@ -3,41 +3,58 @@ import { getPathBasename } from './workspace-path.js';
 /**
  * 工作区展示名（别名）持久化。
  *
- * 别名存放在 localStorage，key 形如 `ws-alias:/path/to/project`；
- * 侧栏面板头部、标题栏与会话列表分组头共用这里的读写实现，避免各处各自的
- * key 拼写与展示口径漂移。写入时会广播自定义事件，使其它消费方实时刷新。
+ * 别名存放在 localStorage，key 形如 `ws-alias:/path/to/project`（远端工作区为
+ * `ws-alias:<sshConnectionId>:/path/to/project`）；侧栏面板头部、标题栏与会话列表
+ * 分组头共用这里的读写实现，避免各处各自的 key 拼写与展示口径漂移。
+ * 写入时会广播自定义事件，使其它消费方实时刷新。
+ *
+ * 远端工作区的 key **必须**带 SSH 连接 id：别名是展示偏好，但共享槽位意味着
+ * 在 A 主机改名会连带改掉 B 主机同名目录的显示名。
  */
 const WORKSPACE_ALIAS_PREFIX = 'ws-alias:';
 const WORKSPACE_ALIAS_CHANGE_EVENT = 'openawork:workspace-alias-changed';
 
-function aliasKey(workspacePath: string): string {
-  return `${WORKSPACE_ALIAS_PREFIX}${workspacePath}`;
+/** 连接 id 与路径的分隔符：两者都不会包含 NUL，故拼接无歧义。 */
+const WORKSPACE_ALIAS_CONNECTION_SEPARATOR = ':';
+
+function aliasKey(workspacePath: string, sshConnectionId?: string | null): string {
+  const connectionId = sshConnectionId?.trim();
+  return connectionId
+    ? `${WORKSPACE_ALIAS_PREFIX}${connectionId}${WORKSPACE_ALIAS_CONNECTION_SEPARATOR}${workspacePath}`
+    : `${WORKSPACE_ALIAS_PREFIX}${workspacePath}`;
 }
 
 /** 读取工作区别名；未设置或 localStorage 不可用时返回空串。 */
-export function readWorkspaceAlias(workspacePath: string | null): string {
+export function readWorkspaceAlias(
+  workspacePath: string | null,
+  sshConnectionId?: string | null,
+): string {
   if (!workspacePath) {
     return '';
   }
 
   try {
-    return localStorage.getItem(aliasKey(workspacePath)) ?? '';
+    return localStorage.getItem(aliasKey(workspacePath, sshConnectionId)) ?? '';
   } catch {
     return '';
   }
 }
 
 /** 写入工作区别名；传空串表示清除别名（展示名回落到路径末段）。 */
-export function writeWorkspaceAlias(workspacePath: string | null, alias: string): void {
+export function writeWorkspaceAlias(
+  workspacePath: string | null,
+  alias: string,
+  sshConnectionId?: string | null,
+): void {
   if (!workspacePath) {
     return;
   }
 
   try {
     if (alias) {
-      localStorage.setItem(aliasKey(workspacePath), alias);
+      localStorage.setItem(aliasKey(workspacePath, sshConnectionId), alias);
     } else {
-      localStorage.removeItem(aliasKey(workspacePath));
+      localStorage.removeItem(aliasKey(workspacePath, sshConnectionId));
     }
   } catch {
     // localStorage 不可用时静默失败：别名只是展示层偏好，不影响主流程。
@@ -65,8 +82,14 @@ export function subscribeWorkspaceAlias(listener: () => void): () => void {
 }
 
 /** 工作区展示名：别名优先，否则回落到路径末段。 */
-export function resolveWorkspaceDisplayName(workspacePath: string | null): string {
-  return readWorkspaceAlias(workspacePath) || getPathBasename(workspacePath, 'OpenAWork');
+export function resolveWorkspaceDisplayName(
+  workspacePath: string | null,
+  sshConnectionId?: string | null,
+): string {
+  return (
+    readWorkspaceAlias(workspacePath, sshConnectionId) ||
+    getPathBasename(workspacePath, 'OpenAWork')
+  );
 }
 
 /** 工作区别名长度上限：超出会撑破侧栏分组头并挤掉会话数徽标。 */

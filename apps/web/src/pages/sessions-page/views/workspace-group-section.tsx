@@ -96,11 +96,17 @@ interface WorkspaceGroupSectionProps {
   renameValue: string;
   deletingSessionIds: Set<string>;
   onToggleCollapsed: (groupKey: string) => void;
-  onCreateInWorkspace: (workspacePath: string | null) => void;
+  /**
+   * 在本组工作区新建会话。`sshConnectionId` 是分组所属的 SSH 连接：远端分组
+   * 必须与路径成对传出去，否则新会话会以裸路径落库，丢掉 SSH 标识。
+   */
+  onCreateInWorkspace: (workspacePath: string | null, sshConnectionId: string | null) => void;
   onRequestContextMenu: (args: {
     groupKey: string;
     workspaceLabel: string;
     workspacePath: string | null;
+    /** 分组所属 SSH 连接 id（本地工作区为 null）：删除与改名都必须按主机隔离。 */
+    sshConnectionId: string | null;
     sessionCount: number;
     x: number;
     y: number;
@@ -150,7 +156,7 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
   const resolveWorkspaceName = useWorkspaceDisplayName();
   const sshConnections = useSshConnectionLabels(sshConnectionId !== null);
   const displayLabel = resolveWorkspaceGroupDisplayName(
-    { workspacePath, workspaceLabel },
+    { workspacePath, workspaceLabel, sshConnectionId },
     resolveWorkspaceName,
   );
 
@@ -182,6 +188,7 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
       groupKey,
       workspaceLabel,
       workspacePath,
+      sshConnectionId,
       sessionCount: actualSessionCount,
       x: event.clientX,
       y: event.clientY,
@@ -287,7 +294,7 @@ export const WorkspaceGroupSection = memo(function WorkspaceGroupSection({
         {showCreateButton && workspacePath && (
           <button
             type="button"
-            onClick={() => onCreateInWorkspace(workspacePath)}
+            onClick={() => onCreateInWorkspace(workspacePath, sshConnectionId)}
             title={`在 ${displayLabel} 中新建会话`}
             className="omo-group-new-btn"
             style={NEW_BUTTON_STYLE}

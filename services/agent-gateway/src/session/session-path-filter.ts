@@ -17,6 +17,7 @@
 import { posix, win32 } from 'node:path';
 
 import {
+  extractSessionSshConnectionId,
   extractSessionWorkingDirectory,
   parseSessionMetadataJson,
 } from './session-workspace-metadata.js';
@@ -37,6 +38,16 @@ export interface SessionPathFilterInput {
    * filter path exactly.
    */
   includeDescendants?: boolean;
+  /**
+   * Scope the filter to a single SSH connection.
+   *
+   * `path` alone is ambiguous for remote sessions: two hosts can each host
+   * `/srv/app`, and both would match a filter for `/srv/app`. Callers that
+   * know which workspace is selected pass the connection id so the filter
+   * stays host-scoped. Omitted / `null` keeps the legacy path-only behaviour
+   * (matches local sessions and remote sessions from any host).
+   */
+  sshConnectionId?: string | null;
 }
 
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/;
@@ -73,9 +84,17 @@ export function sessionMatchesPath(
   const normalisedFilter = normaliseFilterPath(filter.path);
   if (!normalisedFilter) return false;
 
-  const workingDirectory = extractSessionWorkingDirectory(
-    parseSessionMetadataJson(row.metadata_json),
-  );
+  const metadata = parseSessionMetadataJson(row.metadata_json);
+
+  // Host scoping runs before path matching: two SSH hosts can each hold an
+  // identical `/srv/app`, so a path-only filter would otherwise sweep in
+  // sessions from every host that happens to have that directory.
+  const expectedConnectionId = filter.sshConnectionId?.trim();
+  if (expectedConnectionId && extractSessionSshConnectionId(metadata) !== expectedConnectionId) {
+    return false;
+  }
+
+  const workingDirectory = extractSessionWorkingDirectory(metadata);
   if (!workingDirectory) return false;
 
   const normalisedSession = normaliseFilterPath(workingDirectory);

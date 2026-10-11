@@ -89,10 +89,10 @@ function CapabilityTag({
 }
 
 function resolveFloatingPanelPosition(
-  anchorRect: DOMRect,
+  anchorRect: { left: number; right: number; top: number; bottom: number },
   width: number,
   maxDesiredHeight: number,
-  align: 'start' | 'end',
+  align: 'start' | 'end' | 'center',
   preferAbove = false,
 ) {
   const margin = 12;
@@ -102,7 +102,11 @@ function resolveFloatingPanelPosition(
 
   // Horizontal: clamp panel within viewport
   const leftCandidate =
-    align === 'start' ? anchorRect.left : Math.max(margin, anchorRect.right - width);
+    align === 'start'
+      ? anchorRect.left
+      : align === 'center'
+        ? (anchorRect.left + anchorRect.right) / 2 - width / 2
+        : Math.max(margin, anchorRect.right - width);
   const left = Math.min(
     Math.max(margin, leftCandidate),
     Math.max(margin, viewportWidth - width - margin),
@@ -124,7 +128,12 @@ function resolveFloatingPanelPosition(
       left,
       top: Math.min(anchorRect.bottom + gap, viewportHeight - margin - effectiveHeight),
       maxHeight: effectiveHeight,
-      transformOrigin: align === 'start' ? ('top left' as const) : ('top right' as const),
+      transformOrigin:
+        align === 'start'
+          ? ('top left' as const)
+          : align === 'center'
+            ? ('top center' as const)
+            : ('top right' as const),
     };
   }
 
@@ -134,7 +143,12 @@ function resolveFloatingPanelPosition(
     left,
     top: Math.max(margin, anchorRect.top - effectiveHeight - gap),
     maxHeight: effectiveHeight,
-    transformOrigin: align === 'start' ? ('bottom left' as const) : ('bottom right' as const),
+    transformOrigin:
+      align === 'start'
+        ? ('bottom left' as const)
+        : align === 'center'
+          ? ('bottom center' as const)
+          : ('bottom right' as const),
   };
 }
 
@@ -167,7 +181,7 @@ export function ModelPicker({
   const [left, setLeft] = React.useState(0);
   const [maxHeight, setMaxHeight] = React.useState(430);
   const [transformOrigin, setTransformOrigin] = React.useState<
-    'top left' | 'top right' | 'bottom left' | 'bottom right'
+    'top left' | 'top center' | 'top right' | 'bottom left' | 'bottom center' | 'bottom right'
   >('bottom right');
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
@@ -799,8 +813,8 @@ export function ModelSettingsPopover({
   const [left, setLeft] = React.useState(0);
   const [maxHeight, setMaxHeight] = React.useState(320);
   const [transformOrigin, setTransformOrigin] = React.useState<
-    'top left' | 'top right' | 'bottom left' | 'bottom right'
-  >('bottom right');
+    'top left' | 'top center' | 'top right' | 'bottom left' | 'bottom center' | 'bottom right'
+  >('bottom center');
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
   const titleId = React.useId();
@@ -816,7 +830,22 @@ export function ModelSettingsPopover({
       const el = anchorRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      const next = resolveFloatingPanelPosition(rect, 320, 360, 'end', true);
+      // 水平居中于「输入框」上方:以 composer 外壳宽度为水平锚点,
+      // 垂直仍锚定按钮上方(找不到外壳时回退到按钮右对齐的旧范式)。
+      const shell = el.closest<HTMLElement>('.composer-shell');
+      const shellRect = shell?.getBoundingClientRect();
+      // DOMRect 的 left/right/top/bottom 是原型上的 getter,不能靠展开拷贝
+      // ({...rect} 会得到空对象,导致后续计算出 NaN),这里显式取四个值。
+      const anchor =
+        shell && shellRect
+          ? {
+              left: shellRect.left,
+              right: shellRect.right,
+              top: rect.top,
+              bottom: rect.bottom,
+            }
+          : { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+      const next = resolveFloatingPanelPosition(anchor, 320, 360, 'center', true);
       setLeft(next.left);
       setTop(next.top);
       setMaxHeight(next.maxHeight);

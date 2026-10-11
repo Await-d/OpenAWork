@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { TerminalLayout } from '../../components/chat/terminal/layout/types.js';
+import { isSameWorkspace, type WorkspaceIdentity } from '../../utils/session/session-grouping.js';
 
 /**
  * Throttled localStorage adapter for the persist middleware.
@@ -251,10 +253,18 @@ export interface UIStateStore {
   setFileTreeRootPath: (path: string | null) => void;
   workspaceTreeVersion: number;
   bumpWorkspaceTreeVersion: () => void;
-  savedWorkspacePaths: string[];
-  addSavedWorkspacePath: (path: string) => void;
-  mergeSavedWorkspacePaths: (paths: readonly string[]) => void;
-  removeSavedWorkspacePath: (path: string) => void;
+  /**
+   * 已出现过的全部工作区身份（闲置工作区占位组的数据源）。
+   *
+   * 必须连同 `sshConnectionId` 存储：远端目录路径只在单台主机内唯一，裸路径列表
+   * 会让两台服务器的同名目录共用同一个占位组，重新并回一体。
+   */
+  savedWorkspaces: WorkspaceIdentity[];
+  addSavedWorkspace: (workspace: WorkspaceIdentity) => void;
+  mergeSavedWorkspaces: (workspaces: readonly WorkspaceIdentity[]) => void;
+  removeSavedWorkspace: (
+    workspace: Pick<WorkspaceIdentity, 'workspacePath' | 'sshConnectionId'>,
+  ) => void;
   selectedWorkspacePath: string | null;
   setSelectedWorkspacePath: (path: string | null) => void;
   /**
@@ -492,9 +502,80 @@ export interface UIStateStore {
   ) => void;
 }
 
-function normalizeWorkspacePath(path: string): string | null {
-  const normalized = path.trim();
+function normalizeWorkspacePath(path: string | null): string | null {
+  const normalized = path?.trim() ?? '';
   return normalized.length > 0 ? normalized : null;
+}
+
+/**
+ * 工作区身份归一化：路径去空白，空路径视为无效；连接 id 同样归一为
+ * `null | 非空串`，让「无绑定」只有一种表示，避免去重时出现两个等价键。
+ */
+function toWorkspaceIdentity(workspace: WorkspaceIdentity): WorkspaceIdentity | null {
+  const workspacePath = normalizeWorkspacePath(workspace.workspacePath);
+  if (!workspacePath) {
+    return null;
+  }
+
+  const sshConnectionId = workspace.sshConnectionId?.trim() ?? '';
+  return { workspacePath, sshConnectionId: sshConnectionId.length > 0 ? sshConnectionId : null };
+}
+
+/** 工作区身份的比较键：连接与路径全等才视为同一个工作区。 */
+function toWorkspaceIdentityKey(workspace: WorkspaceIdentity): string {
+  return `${workspace.sshConnectionId ?? ''} ${workspace.workspacePath}`;
+}
+
+function isWorkspaceIdentityShape(value: unknown): value is WorkspaceIdentity {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.workspacePath === 'string' &&
+    (record.sshConnectionId === null || typeof record.sshConnectionId === 'string')
+  );
+}
+
+/**
+ * 持久化工作区列表的结构校验与旧格式归一化。
+ *
+ * v27 及更早版本存的是裸路径数组 `string[]`；v28 起改为身份对象。两种形态都要
+ * 能安全读入：旧格式按**本地**工作区（无连接）归一，升级后闲置占位组不会凭空消失，
+ * 而真正的远端工作区会在会话列表反推时补上正确的连接维度。
+ *
+ * 脏数据（手改存储、同版本残留）一律丢弃无效项并按身份去重，不让非法结构进入渲染期。
+ */
+function normalizeWorkspaceIdentities(value: unknown): WorkspaceIdentity[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const identities: WorkspaceIdentity[] = [];
+  const seenIdentityKeys = new Set<string>();
+
+  for (const entry of value) {
+    const identity =
+      typeof entry === 'string'
+        ? toWorkspaceIdentity({ workspacePath: entry, sshConnectionId: null })
+        : isWorkspaceIdentityShape(entry)
+          ? toWorkspaceIdentity(entry)
+          : null;
+    if (!identity) {
+      continue;
+    }
+
+    const identityKey = toWorkspaceIdentityKey(identity);
+    if (seenIdentityKeys.has(identityKey)) {
+      continue;
+    }
+
+    seenIdentityKeys.add(identityKey);
+    identities.push(identity);
+  }
+
+  return identities;
 }
 
 function normalizeChatPath(path: string | null): string | null {
@@ -1171,7 +1252,9 @@ export const useUIStateStore = create<UIStateStore>()(
         const state = get();
         state.setSelectedWorkspacePath(workspacePath);
         if (workspacePath) {
-          state.addSavedWorkspacePath(workspacePath);
+          // 草稿会话的工作区身份必须带上连接：远端目录若只按路径登记，
+          // 它的占位组会和同名的其它主机目录重新合并。
+          state.addSavedWorkspace({ workspacePath, sshConnectionId: sshConnectionId ?? null });
         }
         if (sshConnectionId !== undefined) {
           state.setSelectedSshConnectionId(sshConnectionId);
@@ -1424,61 +1507,104 @@ export const useUIStateStore = create<UIStateStore>()(
       workspaceTreeVersion: 0,
       bumpWorkspaceTreeVersion: () =>
         set((state) => ({ workspaceTreeVersion: state.workspaceTreeVersion + 1 })),
-      savedWorkspacePaths: [],
-      addSavedWorkspacePath: (path) =>
+      savedWorkspaces: [],
+      addSavedWorkspace: (workspace) =>
         set((state) => {
-          const normalized = normalizeWorkspacePath(path);
-          if (!normalized) {
+          const identity = toWorkspaceIdentity(workspace);
+          if (!identity) {
             return state;
           }
 
           return {
-            savedWorkspacePaths: [
-              normalized,
-              ...state.savedWorkspacePaths.filter((entry) => entry !== normalized),
+            savedWorkspaces: [
+              identity,
+              ...state.savedWorkspaces.filter((entry) => !isSameWorkspace(entry, identity)),
             ],
           };
         }),
-      mergeSavedWorkspacePaths: (paths) =>
+      mergeSavedWorkspaces: (workspaces) =>
         set((state) => {
-          const normalizedPaths = paths
-            .map((path) => normalizeWorkspacePath(path))
-            .filter((path): path is string => path !== null);
-          if (normalizedPaths.length === 0) {
+          const identities = workspaces
+            .map((workspace) => toWorkspaceIdentity(workspace))
+            .filter((identity): identity is WorkspaceIdentity => identity !== null);
+          if (identities.length === 0) {
             return state;
           }
 
-          const uniquePaths = Array.from(new Set(normalizedPaths));
-          const nextSavedWorkspacePaths = [
-            ...uniquePaths,
-            ...state.savedWorkspacePaths.filter((entry) => !uniquePaths.includes(entry)),
+          const mergedKeys = new Set(identities.map(toWorkspaceIdentityKey));
+
+          // 反推的身份来自会话 metadata，是权威信息。旧结构（v27 及更早）的
+          // `savedWorkspacePaths` 没有连接维度，迁移时只能一律按本地归一，于是远端
+          // 目录会留下一条「本地 /srv/app」的残条；它会混进本地投影，被工作区选择器
+          // 当成本机目录绑定，重新制造「远端工作区变成本地路径」的问题。
+          //
+          // 这里以反推结果为准清理：某路径只有远端证据（没有本地会话）时，删掉同路径
+          // 的本地残条；同路径本地、远端都有会话则两者都是真实工作区，必须都保留。
+          //
+          // 已知限制：若某个远端工作区已无任何会话，其残条会缺少证据而残留，直到用户
+          // 再次在该主机上创建会话或手动移除。
+          const locallyEvidencedPaths = new Set(
+            identities
+              .filter((identity) => identity.sshConnectionId === null)
+              .map((identity) => identity.workspacePath),
+          );
+          const supersededLocalPaths = new Set(
+            identities
+              .filter(
+                (identity) =>
+                  identity.sshConnectionId !== null &&
+                  !locallyEvidencedPaths.has(identity.workspacePath),
+              )
+              .map((identity) => identity.workspacePath),
+          );
+
+          const nextSavedWorkspaces = [
+            ...identities,
+            ...state.savedWorkspaces.filter(
+              (entry) =>
+                !mergedKeys.has(toWorkspaceIdentityKey(entry)) &&
+                !(entry.sshConnectionId === null && supersededLocalPaths.has(entry.workspacePath)),
+            ),
           ];
 
+          const nextIdentityKeys = nextSavedWorkspaces.map(toWorkspaceIdentityKey);
+          const currentIdentityKeys = state.savedWorkspaces.map(toWorkspaceIdentityKey);
           if (
-            nextSavedWorkspacePaths.length === state.savedWorkspacePaths.length &&
-            nextSavedWorkspacePaths.every(
-              (entry, index) => entry === state.savedWorkspacePaths[index],
-            )
+            nextIdentityKeys.length === currentIdentityKeys.length &&
+            nextIdentityKeys.every((key, index) => key === currentIdentityKeys[index])
           ) {
             return state;
           }
 
           return {
-            savedWorkspacePaths: nextSavedWorkspacePaths,
+            savedWorkspaces: nextSavedWorkspaces,
           };
         }),
-      removeSavedWorkspacePath: (path) =>
+      removeSavedWorkspace: (workspace) =>
         set((state) => {
-          const normalized = normalizeWorkspacePath(path);
-          if (!normalized) {
+          const targetKey = toWorkspaceIdentityKey(workspace);
+          const removedPath =
+            normalizeWorkspacePath(workspace.workspacePath) ??
+            state.savedWorkspaces.find((entry) => toWorkspaceIdentityKey(entry) === targetKey)
+              ?.workspacePath ??
+            null;
+          if (!removedPath) {
             return state;
           }
 
           return {
-            savedWorkspacePaths: state.savedWorkspacePaths.filter((entry) => entry !== normalized),
+            savedWorkspaces: state.savedWorkspaces.filter(
+              (entry) => toWorkspaceIdentityKey(entry) !== targetKey,
+            ),
+            // 选中态与文件树根随「同一个工作区」一起清除；本地工作区的连接维度
+            // 恒为 null，这里只比对连接 id，避免误清另一台主机的选中项。
             selectedWorkspacePath:
-              state.selectedWorkspacePath === normalized ? null : state.selectedWorkspacePath,
-            fileTreeRootPath: state.fileTreeRootPath === normalized ? null : state.fileTreeRootPath,
+              state.selectedWorkspacePath === removedPath &&
+              (state.selectedSshConnectionId ?? null) === (workspace.sshConnectionId ?? null)
+                ? null
+                : state.selectedWorkspacePath,
+            fileTreeRootPath:
+              state.fileTreeRootPath === removedPath ? null : state.fileTreeRootPath,
           };
         }),
       selectedWorkspacePath: null,
@@ -1741,7 +1867,7 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: 'openAwork-ui-state',
-      version: 27,
+      version: 28,
       // editorMode 不持久化——每次启动默认关闭；reviewPanelOpened 现已作为布局偏好
       // 持久化（刷新后保持上次展开态，缺省与脏数据回落 false，见 merge 兜底）。
       // closedSessionTabIds 属于瞬态标记（只在路由切走前有效），同样不持久化。
@@ -1785,6 +1911,10 @@ export const useUIStateStore = create<UIStateStore>()(
         merged.readIdentity = EMPTY_READ_IDENTITY;
         // 瞬态模式：无论存储里出现什么（旧数据 / 手改），启动态一律 false。
         merged.terminalPanelMaximized = false;
+        // 工作区身份列表：同 v28 脏数据（手改存储）也可能残留旧键或非法结构，
+        // 这里统一归一并丢弃旧键，保证非法值进不了渲染期。
+        merged.savedWorkspaces = normalizeWorkspaceIdentities(merged.savedWorkspaces);
+        delete (merged as unknown as Record<string, unknown>).savedWorkspacePaths;
         // 覆盖方向是 persisted 盖 currentState，所以 currentState 的空桶不会冲掉已持久化的
         // 布局；但同 version 的脏数据不会走 migrate，这里再兜一次结构校验，保证任何来源的
         // 非法桶值都进不了 state（成本只有一次小块遍历）。
@@ -1986,6 +2116,21 @@ export const useUIStateStore = create<UIStateStore>()(
           nextState.collapsedSubagentParentIds = [];
         }
 
+        // v28:savedWorkspacePaths(裸路径数组)更名为 savedWorkspaces(工作区身份数组),
+        // 为的是让闲置工作区占位组也带上 SSH 连接维度——远端目录路径只在单台主机内唯一,
+        // 旧结构会让两台服务器的同名目录共用同一个占位组并重新合并。旧值按本地工作区
+        // 归一(丢失的远端身份会在会话列表反推时补回),并清掉旧键避免脏数据回灌。
+        if (version < 28) {
+          const legacyWorkspacePaths = nextState.savedWorkspacePaths;
+          delete nextState.savedWorkspacePaths;
+          nextState.savedWorkspaces = Array.isArray(legacyWorkspacePaths)
+            ? legacyWorkspacePaths.filter((entry): entry is string => typeof entry === 'string')
+            : [];
+        }
+
+        // 迁移之外仍需归一:旧格式与同版本手改 / 未来脏数据都不会被上面的分支覆盖。
+        nextState.savedWorkspaces = normalizeWorkspaceIdentities(nextState.savedWorkspaces);
+
         nextState.expandedDirsBySession = normalizeExpandedDirsBySession(
           nextState.expandedDirsBySession,
         );
@@ -1996,10 +2141,6 @@ export const useUIStateStore = create<UIStateStore>()(
 
         if (!isStringArray(nextState.collapsedSubagentParentIds)) {
           nextState.collapsedSubagentParentIds = [];
-        }
-
-        if (!isStringArray(nextState.savedWorkspacePaths)) {
-          nextState.savedWorkspacePaths = [];
         }
 
         if (typeof nextState.selectedWorkspacePath !== 'string') {
@@ -2124,4 +2265,25 @@ export const useUIStateStore = create<UIStateStore>()(
  */
 export function useWorkspaceReadIdentity(): WorkspaceReadIdentity {
   return useUIStateStore((s) => s.readIdentity);
+}
+
+/**
+ * 本地工作区路径清单（`savedWorkspaces` 中本地部分的投影）。
+ *
+ * 相当一部分消费方语义上就是「本地目录」——文件树根、工作区快捷选择菜单、
+ * 会话 warp 候选列表——它们不需要 SSH 维度。把它们投影成 `string[]` 既保持
+ * 原有类型与调用方式，又避免为同一份数据另开一个本地路径清单（两份数据源必然漂移）。
+ *
+ * 用 `useShallow` 做浅比较：内容不变时返回同一引用，避免每次 store 变更都重建数组。
+ */
+export function useLocalSavedWorkspacePaths(): string[] {
+  return useUIStateStore(
+    useShallow((state) =>
+      state.savedWorkspaces.flatMap((workspace) =>
+        workspace.sshConnectionId === null && workspace.workspacePath !== null
+          ? [workspace.workspacePath]
+          : [],
+      ),
+    ),
+  );
 }

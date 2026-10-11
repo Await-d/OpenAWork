@@ -22,6 +22,8 @@ interface MessageRow {
   session_id: string;
   user_id: string;
   time_created: number;
+  /** 反规范化自 data.role 的索引列（见 message-v2-projectors 的 upsert）。 */
+  role: string;
   data: string;
 }
 
@@ -77,11 +79,13 @@ vi.mock('../../infra/db.js', () => ({
         session_id: params[1] as string,
         user_id: params[2] as string,
         time_created: params[3] as number,
-        data: params[4] as string,
+        role: params[4] as string,
+        data: params[5] as string,
       };
       const existing = messageRows.findIndex((r) => r.id === row.id);
       if (existing >= 0) {
-        // ON CONFLICT DO UPDATE SET data = excluded.data
+        // ON CONFLICT DO UPDATE SET role = excluded.role, data = excluded.data
+        messageRows[existing]!.role = row.role;
         messageRows[existing]!.data = row.data;
       } else {
         messageRows.push(row);
@@ -288,6 +292,7 @@ describe('message-store-v2 single write path (Phase 2.1)', () => {
       session_id: SESSION_ID,
       user_id: USER_ID,
       time_created: 100,
+      role: 'user',
     });
     expect(eventLog.map((e) => e.type)).toEqual(['message.created']);
     expect(eventLog[0]!.aggregate_id).toBe(SESSION_ID);

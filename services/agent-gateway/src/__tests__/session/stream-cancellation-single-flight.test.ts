@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  STREAM_REQUEST_LOCK_TTL_MS,
   clearInFlightStreamRequest,
+  getAnyInFlightStreamRequestForSession,
   getInFlightStreamRequest,
   reserveInFlightStreamRequest,
 } from '../../routes/stream-cancellation.js';
@@ -49,5 +51,67 @@ describe('stream request single-flight reservation', () => {
     const retry = reserveInFlightStreamRequest({ sessionId, clientRequestId, userId });
     expect(retry.owner).toBe(true);
     retry.resolve({ statusCode: 200 });
+  });
+});
+
+describe('stream request run lock TTL', () => {
+  const sessionId = 'ttl-session';
+  const clientRequestId = 'ttl-request';
+  const userId = 'ttl-user';
+
+  afterEach(() => {
+    vi.useRealTimers();
+    const current = getInFlightStreamRequest(sessionId, clientRequestId);
+    if (current) {
+      clearInFlightStreamRequest({
+        clientRequestId,
+        execution: current.execution,
+        sessionId,
+      });
+    }
+  });
+
+  it('TTL 内仍是单飞:同 clientRequestId 复用同一 execution', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+
+    const first = reserveInFlightStreamRequest({ sessionId, clientRequestId, userId });
+    vi.setSystemTime(new Date(Date.now() + STREAM_REQUEST_LOCK_TTL_MS - 1));
+    const follower = reserveInFlightStreamRequest({ sessionId, clientRequestId, userId });
+
+    expect(follower.owner).toBe(false);
+    expect(follower.execution).toBe(first.execution);
+
+    first.resolve({ statusCode: 200 });
+  });
+
+  it('超过 TTL 的死亡锁被回收:同会话不再被判定为「正在运行」', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+
+    const first = reserveInFlightStreamRequest({ sessionId, clientRequestId, userId });
+    expect(getAnyInFlightStreamRequestForSession({ sessionId, userId })).toBeDefined();
+
+    vi.setSystemTime(new Date(Date.now() + STREAM_REQUEST_LOCK_TTL_MS));
+
+    expect(getAnyInFlightStreamRequestForSession({ sessionId, userId })).toBeUndefined();
+    expect(getInFlightStreamRequest(sessionId, clientRequestId)).toBeUndefined();
+
+    first.resolve({ statusCode: 200 });
+  });
+
+  it('超过 TTL 后同 clientRequestId 重试可成为新的 owner', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+
+    const first = reserveInFlightStreamRequest({ sessionId, clientRequestId, userId });
+    vi.setSystemTime(new Date(Date.now() + STREAM_REQUEST_LOCK_TTL_MS));
+
+    const retry = reserveInFlightStreamRequest({ sessionId, clientRequestId, userId });
+    expect(retry.owner).toBe(true);
+    expect(retry.execution).not.toBe(first.execution);
+
+    retry.resolve({ statusCode: 200 });
+    first.resolve({ statusCode: 200 });
   });
 });

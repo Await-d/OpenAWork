@@ -13,7 +13,10 @@ vi.mock('../../../routes/preloadable-route-modules.js', () => ({
 
 function resetUiState(): void {
   useUIStateStore.setState({
-    savedWorkspacePaths: ['/home/await/project/OpenAWork', '/home/await/project/MarketAgent'],
+    savedWorkspaces: [
+      { workspacePath: '/home/await/project/OpenAWork', sshConnectionId: null },
+      { workspacePath: '/home/await/project/MarketAgent', sshConnectionId: null },
+    ],
     selectedWorkspacePath: '/home/await/project/OpenAWork',
   });
 }

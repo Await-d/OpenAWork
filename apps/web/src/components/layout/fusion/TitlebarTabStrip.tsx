@@ -69,9 +69,13 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const closedSessionTabIds = useUIStateStore((s) => s.closedSessionTabIds);
   const clearClosedSessionTabIds = useUIStateStore((s) => s.clearClosedSessionTabIds);
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
+  const selectedSshConnectionId = useUIStateStore((s) => s.selectedSshConnectionId);
   // 当前项目名：与侧栏面板头部同源（别名优先），别名被重命名时通过订阅实时刷新。
+  // 必须带上 SSH 连接维度：两台服务器上的同名目录是两个工作区，别名不共享。
   const projectDisplayName = useSyncExternalStore(subscribeWorkspaceAlias, () =>
-    selectedWorkspacePath ? resolveWorkspaceDisplayName(selectedWorkspacePath) : '',
+    selectedWorkspacePath
+      ? resolveWorkspaceDisplayName(selectedWorkspacePath, selectedSshConnectionId)
+      : '',
   );
 
   const { sessions, newSession, quickDeleteSession, isDeletingSession } = useSessions();

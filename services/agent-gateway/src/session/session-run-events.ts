@@ -715,6 +715,57 @@ export function listSessionRunEventsByRequest(input: {
   });
 }
 
+/**
+ * 只回当前 scope 的**尾部** `limit` 条事件（按 seq 升序返回）。
+ *
+ * 存在的理由：`listSessionRunEventsByRequest` 对一个 scope 无上限，而 scope 内的行数
+ * 随这一轮 run 的时长只增不减（每个 delta chunk 一行）—— retention 只按 scope 保留
+ * 最近 50 个，在飞 scope 永不清理。于是 `GET /sessions/:id/recovery` 这类被 2.5s 轮询
+ * 的读接口，在会话活跃期的单次成本是 O(本轮已产生事件数)，且全部同步读+parse+回传。
+ *
+ * `ORDER BY seq DESC, id DESC` 直接逆序走 `idx_session_run_events_request_seq` 的第三
+ * 列，无需临时排序；取出后在内存里翻回升序，调用方拿到的仍是可顺序 reduce 的序列。
+ *
+ * 注意：**不要**用它替代需要完整序列的调用方 —— `recoverActiveAssistantStream` 与
+ * `buildChatRightPanelStateFromRunEvents` 都是累加 reduce（首个 `tool_call_delta` 的
+ * input、`text += delta` 的前缀、`compaction` started/completed 配对都依赖开头），
+ * 截断会让它们重建出残缺状态。仅供「只看最近若干条」的消费者使用。
+ */
+export function listSessionRunEventsByRequestTail(input: {
+  sessionId: string;
+  clientRequestId: string;
+  limit: number;
+}): RunEvent[] {
+  const limit = Math.floor(input.limit);
+  if (!(limit > 0)) {
+    return [];
+  }
+  // Read-your-writes: 与 listSessionRunEventsByRequest 同语义，尾部窗口也必须包含
+  // 仍坐在批量队列里的 deltas，否则「最新 N 条」会漏掉刚落地的内容。
+  flushSessionRunEventQueue(input.sessionId);
+  const rows = sqliteAll<SessionRunEventRow>(
+    `SELECT payload_json
+     FROM session_run_events
+     WHERE session_id = ? AND client_request_id = ?
+     ORDER BY seq DESC, id DESC
+     LIMIT ?`,
+    [input.sessionId, input.clientRequestId, limit],
+  );
+  const events: RunEvent[] = [];
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (!row) {
+      continue;
+    }
+    try {
+      events.push(JSON.parse(row.payload_json) as RunEvent);
+    } catch {
+      continue;
+    }
+  }
+  return events;
+}
+
 export interface PersistedSessionRunEvent {
   event: RunEvent;
   seq: number;

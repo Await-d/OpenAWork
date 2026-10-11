@@ -52,7 +52,11 @@ import { useGatewayClient } from '../../hooks/gateway/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useCurrentUserDisplayName } from '../../stores/user-profile/current-user-profile.js';
-import { resolveEffectiveTerminalPanelPosition, useUIStateStore } from '../../stores/ui/uiState.js';
+import {
+  resolveEffectiveTerminalPanelPosition,
+  useLocalSavedWorkspacePaths,
+  useUIStateStore,
+} from '../../stores/ui/uiState.js';
 import {
   type ChatSettingsProvider,
   loadSavedChatSessionDefaults,
@@ -327,13 +331,19 @@ export default function ChatPage() {
    * 头部插入旧消息（加载更多历史 / 跳转到更早消息）的滚动锚点快照：
    * 非 null 时「恢复视口」effect 会在下一帧把加载前的阅读位置恢复回去。
    */
-  const [pendingHistoryAnchor, setPendingHistoryAnchor] = useState<ScrollAnchorSnapshot | null>(null);
+  const [pendingHistoryAnchor, setPendingHistoryAnchor] = useState<ScrollAnchorSnapshot | null>(
+    null,
+  );
   const lastAnchorMessageIdRef = useRef<string | null>(null);
   // 可见窗口第一条消息 id 的 ref 镜像（在 `useChatRenderData` 返回后同步）：
   // 头部加载锚点捕获的回调定义在更早的位置，需要在任意时刻读到最新值。
   const firstVisibleMessageIdRef = useRef<string | null>(null);
   // armHistoryAnchor 的实际实现在下方 `useChatRenderData` 之后；此处用 ref
   // 转发，让 `ensureMessageVisible`（本文件更早位置）稳定调用同一实现。
+  // 更正:上面两行的描述已过时——`ensureMessageVisible` 不再武装滚动锚点。
+  // 该转发现在只服务「加载更早」(手动按钮 / 上滑 onNearTop);历史跳转与搜索
+  // 改走 `pendingMessageScroll` 的一次性粗滚动(见虚拟视口的同名 effect)。
+  // 两者不能同时生效:锚点恢复会把视口拉回加载前的阅读位置,从而覆盖跳转的目标位。
   const armHistoryAnchorImplRef = useRef<(() => void) | null>(null);
   const armHistoryAnchor = useCallback((): void => {
     armHistoryAnchorImplRef.current?.();
@@ -575,8 +585,8 @@ export default function ChatPage() {
   const workspaceTreeVersion = useUIStateStore((s) => s.workspaceTreeVersion);
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
   const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
-  const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
-  const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
+  const addSavedWorkspace = useUIStateStore((s) => s.addSavedWorkspace);
+  const savedWorkspacePaths = useLocalSavedWorkspacePaths();
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const selectedSshConnectionId = useUIStateStore((s) => s.selectedSshConnectionId);
   const setSelectedSshConnectionId = useUIStateStore((s) => s.setSelectedSshConnectionId);
@@ -2129,6 +2139,9 @@ export default function ChatPage() {
       contextSessionId: currentSessionId,
       activeSessionWorkspace: useUIStateStore.getState().activeSessionWorkspace,
       fallbackWorkspacePath: selectedWorkspacePath,
+      // 全局选中工作区的「路径 + 连接」是成对的，路径回落时连接必须一起回落：
+      // 在远端工作区里点 ⌘N 时漏掉这一步，新会话会以裸路径落库。
+      fallbackSshConnectionId: selectedSshConnectionId,
     });
     useUIStateStore
       .getState()
@@ -2136,7 +2149,13 @@ export default function ChatPage() {
     if (currentSessionId) {
       void navigate('/chat');
     }
-  }, [currentSessionId, focusComposerWithText, navigate, selectedWorkspacePath]);
+  }, [
+    currentSessionId,
+    focusComposerWithText,
+    navigate,
+    selectedSshConnectionId,
+    selectedWorkspacePath,
+  ]);
 
   const appendTextToComposer = useCallback((text: string) => {
     setInput((previous) => {
@@ -2778,6 +2797,10 @@ export default function ChatPage() {
   /**
    * 工作区绑定的统一落地点：草稿态只改本地选中值；已有会话（且绑定未锁定）时同步 PATCH 到网关。
    * 绑定锁兜底：即使入口在锁定后仍被触发，也不会修改已开始对话的会话。
+   *
+   * 这里只处理**本地**目录：入口是输入框工作区菜单与本地文件树，列表数据来自
+   * `useLocalSavedWorkspacePaths()`（已过滤掉远端目录），所以 `sshConnectionId` 恒为 null。
+   * 远端工作区必须走 `applySshWorkspaceSelection`，否则会被当成裸路径绑到本机。
    */
   const applyWorkspaceSelection = useCallback(
     async (path: string): Promise<void> => {
@@ -2790,7 +2813,7 @@ export default function ChatPage() {
         if (currentSessionId && canAdjustWorkspaceBinding) {
           await workspace.setWorkspace(normalizedPath);
         }
-        addSavedWorkspacePath(normalizedPath);
+        addSavedWorkspace({ workspacePath: normalizedPath, sshConnectionId: null });
         setSelectedWorkspacePath(normalizedPath);
         setFileTreeRootPath(normalizedPath);
         // 绑定本地目录即清理草稿态 SSH 连接：否则菜单会继续标注「远端」，
@@ -2801,7 +2824,7 @@ export default function ChatPage() {
       }
     },
     [
-      addSavedWorkspacePath,
+      addSavedWorkspace,
       canAdjustWorkspaceBinding,
       currentSessionId,
       setFileTreeRootPath,
@@ -3228,6 +3251,8 @@ export default function ChatPage() {
    * 也能通过 `armHistoryAnchor` 稳定引用（ref 转发，无 TDZ 问题）。
    */
   const armHistoryAnchorImpl = useCallback((): void => {
+    // 目前只有「加载更早」两条路径调用(按钮 / onNearTop)。历史跳转与搜索走
+    // `pendingMessageScroll` 粗滚动,不再武装锚点,否则会互相覆盖。
     lastAnchorMessageIdRef.current = firstVisibleMessageIdRef.current;
     setPendingHistoryAnchor(captureHistoryScrollAnchor());
   }, [captureHistoryScrollAnchor]);
@@ -3451,11 +3476,6 @@ export default function ChatPage() {
           return;
         }
         setRightOpen((v) => !v);
-      },
-      onToggleReviewPanel: () => {
-        // 审查面板状态固定在共享 store（reviewPanelOpened / sidePanelActiveTab），
-        // classic 布局与顶栏按钮走同一条路径（否则 Cmd/Ctrl+Shift+R 在 classic 是死键）。
-        fusionChatLayout.toggleReviewPanel();
       },
       onToggleTerminalPanel: () => {
         toggleTerminalPanelOpened();

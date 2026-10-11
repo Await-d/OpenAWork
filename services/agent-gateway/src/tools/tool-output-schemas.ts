@@ -1,5 +1,31 @@
 import { z } from 'zod';
 
+/**
+ * 选择类参数：文本看行、结构化看 jsonPath / 项、超长单行看字符偏移。
+ *
+ * 这些参数**不携带引用**，只描述「读哪一段」。模型在续读上一页时的自然心智
+ * 模型是「沿用刚才那页」，因此只传选择参数是合法且高频的调用形态。
+ */
+function hasSelectionOnlyInput(value: {
+  charCount?: number;
+  charStart?: number;
+  itemCount?: number;
+  itemStart?: number;
+  jsonPath?: string;
+  lineCount?: number;
+  lineStart?: number;
+}): boolean {
+  return (
+    value.jsonPath !== undefined ||
+    value.lineStart !== undefined ||
+    value.lineCount !== undefined ||
+    value.charStart !== undefined ||
+    value.charCount !== undefined ||
+    value.itemStart !== undefined ||
+    value.itemCount !== undefined
+  );
+}
+
 export const readToolOutputInputSchema = z
   .object({
     toolCallId: z.string().min(1).optional(),
@@ -25,9 +51,13 @@ export const readToolOutputInputSchema = z
   .strict()
   .superRefine((value, ctx) => {
     if (value.toolCallId || value.toolCallRef || value.useLatestReferenced === true) return;
+    // 只给了分页 / 选择参数：视为「续读最近一次被引用的大输出」，
+    // 由 handler 回退解析到最近引用，而不是把合法的续读意图判成参数缺失。
+    if (hasSelectionOnlyInput(value)) return;
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'toolCallId 和 useLatestReferenced 至少提供一个。',
+      message:
+        'toolCallId 和 useLatestReferenced 至少提供一个；若只想续读上一页，也可只传 lineStart / jsonPath / charStart 等选择参数。',
       path: ['toolCallId'],
     });
   });

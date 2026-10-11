@@ -66,8 +66,10 @@ export interface ComposerQueueReturn {
   /**
    * 入队一条待发消息。传入 overrideText 时以该文本为准，供输入框把折叠的
    * 粘贴内容直接并入本次入队，无需先写回受控 input 再等待其变化。
+   *
+   * 返回落地的队列条目（调用方需要它的 id 才能写网关），空文本且无附件时返回 null。
    */
-  enqueueComposerMessage: (overrideText?: string) => Promise<boolean>;
+  enqueueComposerMessage: (overrideText?: string) => Promise<QueuedComposerMessage | null>;
   removeQueuedComposerMessage: (messageId: string) => void;
   restoreQueuedComposerMessage: (messageId: string) => void;
 }
@@ -143,13 +145,17 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
   const enqueueComposerMessage = useCallback(
     async (overrideText?: string) => {
       const nextText = sanitizeComposerPlainText(overrideText ?? input).trim();
-      if (nextText.length === 0 && attachedFiles.length === 0) return false;
+      if (nextText.length === 0 && attachedFiles.length === 0) return null;
 
+      // 本地附件一旦存不进 IndexedDB，这条消息换端 / 清缓存后就绑不回原文件。
+      // 该结论由附件层给出，这里先落一个初值，稍后按写入结果修正——调用方拿到的
+      // 返回值必须是**最终**状态，否则同步到网关的标记会与实际能力不符。
+      let requiresAttachmentRebind = attachedFiles.length > 0 && !queuedComposerScope;
       const queueItem: QueuedComposerMessage = {
         attachmentItems: attachmentItems.map((item) => ({ ...item })),
         files: [...attachedFiles],
         id: crypto.randomUUID(),
-        requiresAttachmentRebind: attachedFiles.length > 0 && !queuedComposerScope,
+        requiresAttachmentRebind,
         text: nextText,
       };
       setQueuedComposerMessages((previous) => [...previous, queueItem]);
@@ -163,6 +169,7 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
           scope: queuedComposerScope,
         });
         if (!persisted) {
+          requiresAttachmentRebind = true;
           if (queuedComposerScope === queuedComposerScopeRef.current) {
             setQueuedComposerMessages((previous) =>
               previous.map((item) =>
@@ -172,7 +179,9 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
           }
         }
       }
-      return true;
+      return requiresAttachmentRebind
+        ? { ...queueItem, requiresAttachmentRebind: true }
+        : queueItem;
     },
     [
       attachedFiles,

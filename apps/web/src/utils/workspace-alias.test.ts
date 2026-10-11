@@ -43,6 +43,30 @@ describe('workspace-alias', () => {
     expect(readWorkspaceAlias(null)).toBe('');
   });
 
+  it('同名远端目录在不同主机上不共享别名槽位', () => {
+    const REMOTE_PATH = '/srv/app';
+
+    writeWorkspaceAlias(REMOTE_PATH, 'A 主机的应用', 'ssh-a');
+    writeWorkspaceAlias(REMOTE_PATH, 'B 主机的应用', 'ssh-b');
+
+    expect(readWorkspaceAlias(REMOTE_PATH, 'ssh-a')).toBe('A 主机的应用');
+    expect(readWorkspaceAlias(REMOTE_PATH, 'ssh-b')).toBe('B 主机的应用');
+    // 本地同名目录也是独立槽位。
+    expect(readWorkspaceAlias(REMOTE_PATH)).toBe('');
+    expect(resolveWorkspaceDisplayName(REMOTE_PATH)).toBe('app');
+  });
+
+  it('只清除指定主机的别名', () => {
+    const REMOTE_PATH = '/srv/app';
+    writeWorkspaceAlias(REMOTE_PATH, 'A 主机的应用', 'ssh-a');
+    writeWorkspaceAlias(REMOTE_PATH, 'B 主机的应用', 'ssh-b');
+
+    writeWorkspaceAlias(REMOTE_PATH, '', 'ssh-a');
+
+    expect(readWorkspaceAlias(REMOTE_PATH, 'ssh-a')).toBe('');
+    expect(readWorkspaceAlias(REMOTE_PATH, 'ssh-b')).toBe('B 主机的应用');
+  });
+
   it('写入时通知订阅者，取消订阅后不再通知', () => {
     const listener = vi.fn();
     const unsubscribe = subscribeWorkspaceAlias(listener);

@@ -85,8 +85,22 @@ const REHYPE_KATEX_OPTIONS = {
  * `pre` 组件先于 `code` 组件执行（React 自上而下渲染），所以它可以在
  * 返回的子树里 provide 这个标记；`code` 执行时就能读到。Context 不产生
  * DOM，因此流式 / 落定两条管线的 innerHTML 仍然一致。
+ *
+ * ⚠️ 这个标记会沿 React 树向下**穿透**所有嵌套 markdown 渲染器
+ * （`ThinkingCodeBlock`、`MarkdownPreviewCodeBlock` 的预览面板……）。它们
+ * 自带的 `<ReactMarkdown>` 若不显式复位成 `false`，段落里的行内 `` `code` ``
+ * 会被误判为围栏代码块，走块级分支渲染出 `CodeBlock` 的 `<div>`/`<pre>`，
+ * 直接落进 `<p>` 里 —— 这正是 `validateDOMNesting: <div> cannot be a
+ * descendant of <p>` 的来源。嵌套渲染器必须自己包一层
+ * `<PreBlockContext.Provider value={false}>`（内层真正的围栏块会由内层自己的
+ * `pre` 组件重新置 `true`，互不影响）。
  */
 const PreBlockContext = createContext(false);
+
+/** 嵌套 markdown 渲染器专用：把 `PreBlockContext` 复位到根值 `false`。 */
+function NestedMarkdownScope({ children }: { children: ReactNode }) {
+  return <PreBlockContext.Provider value={false}>{children}</PreBlockContext.Provider>;
+}
 
 type StaticPreviewKind = 'html' | 'css' | 'javascript' | 'svg';
 
@@ -114,15 +128,17 @@ export function MarkdownCore({ content }: { content: string }) {
     );
   }
   return (
-    <MarkdownImageProvider urls={extractMarkdownImageUrls(content)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, REHYPE_KATEX_OPTIONS], rehypeHighlight]}
-        components={markdownComponents}
-      >
-        {content}
-      </ReactMarkdown>
-    </MarkdownImageProvider>
+    <NestedMarkdownScope>
+      <MarkdownImageProvider urls={extractMarkdownImageUrls(content)}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[[rehypeKatex, REHYPE_KATEX_OPTIONS], rehypeHighlight]}
+          components={markdownComponents}
+        >
+          {content}
+        </ReactMarkdown>
+      </MarkdownImageProvider>
+    </NestedMarkdownScope>
   );
 }
 
@@ -1033,15 +1049,17 @@ function MarkdownPreviewCodeBlock({
             }
           >
             <div className="chat-markdown">
-              <MarkdownImageProvider urls={extractMarkdownImageUrls(copyableCode)}>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeHighlight]}
-                  components={noMarkdownPreviewComponents}
-                >
-                  {copyableCode}
-                </ReactMarkdown>
-              </MarkdownImageProvider>
+              <NestedMarkdownScope>
+                <MarkdownImageProvider urls={extractMarkdownImageUrls(copyableCode)}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeHighlight]}
+                    components={noMarkdownPreviewComponents}
+                  >
+                    {copyableCode}
+                  </ReactMarkdown>
+                </MarkdownImageProvider>
+              </NestedMarkdownScope>
             </div>
           </div>
           {shouldCollapse && (
@@ -1283,15 +1301,17 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
     <div className="assistant-reasoning-block" data-collapsed={shouldCollapse ? 'true' : undefined}>
       <div className="assistant-reasoning-body" style={bodyStyle}>
         <div className="assistant-rich-content-body">
-          <MarkdownImageProvider urls={extractMarkdownImageUrls(labeledSource)}>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight]}
-              components={markdownComponents}
-            >
-              {labeledSource}
-            </ReactMarkdown>
-          </MarkdownImageProvider>
+          <NestedMarkdownScope>
+            <MarkdownImageProvider urls={extractMarkdownImageUrls(labeledSource)}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight]}
+                components={markdownComponents}
+              >
+                {labeledSource}
+              </ReactMarkdown>
+            </MarkdownImageProvider>
+          </NestedMarkdownScope>
         </div>
       </div>
       {selfFoldAvailable && (

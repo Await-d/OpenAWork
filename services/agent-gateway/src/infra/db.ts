@@ -714,6 +714,38 @@ export async function migrate(): Promise<void> {
   );
   db.exec('CREATE INDEX IF NOT EXISTS idx_paste_session ON session_paste_contents(session_id)');
 
+  // ─── 会话待发队列：输入框在流式期间排队的消息 (2026-10-11) ───
+  // 语义与 `task/task-job-delivery.ts` 的「先落库、后消费」一致：入队即持久化，
+  // 消费与否只取决于会话是否空闲，因此刷新/换端/断连都不会丢条目。
+  // 附件二进制不入库（仍由客户端 IndexedDB 持有），这里只存附件元数据用于
+  // 重建队列预览；元数据与本地 Blob 对不上时前端会置 `requiresAttachmentRebind`。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_composer_queue (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      attachment_items_json TEXT NOT NULL DEFAULT '[]',
+      requires_attachment_rebind INTEGER NOT NULL DEFAULT 0,
+      enqueued_at INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_composer_queue_session ON session_composer_queue(session_id, enqueued_at)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_composer_queue_user ON session_composer_queue(user_id, session_id)',
+  );
+  // 消费租约：同一会话被多端 / 多标签页同时打开时，靠它保证一条待发消息只被一个
+  // 客户端真正发出。claim 是「原子上锁」，故用 ensureColumn 追加——表可能已在
+  // 早期版本建好，CREATE TABLE IF NOT EXISTS 不会再补列。
+  ensureColumn('session_composer_queue', 'claimed_by', 'TEXT');
+  ensureColumn('session_composer_queue', 'claimed_until', 'INTEGER');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_composer_queue_claim ON session_composer_queue(session_id, claimed_until)',
+  );
+
   // ─── Session Recovery Enhancement: 技能状态持久化 (2026-08-14) ───
   // 会话恢复时保留已加载的技能上下文
   db.exec(`
@@ -1358,6 +1390,21 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_message_v2_session_time ON message_v2(session_id, time_created, id)',
   );
+  // `role` 反规范化列：turnLimit 边界查询（`listMessagesByTurnLimit`）与回合总数统计
+  // （`countUserMessages`）此前都用 `data LIKE '%"role":"user"%'` 过滤 —— 前导通配符
+  // 无法走索引，每次都要把该会话**全部** message_v2 行的 `data` 大 blob 读进内存做模式
+  // 匹配。`GET /sessions/:id/recovery` 在会话 running 期间被前端以 2.5s 周期轮询，
+  // 会话越长历史越大，这笔固定开销就越高，且全程同步阻塞事件循环（流式 deltas 被饿死）。
+  // 落成独立列后两条查询都走 (session_id, user_id, role, …) 索引。
+  //
+  // 默认值给 ''（而非 NULL）而非 NULL 有两个原因：ALTER TABLE ADD COLUMN 只接受常量
+  // 默认值；且非空默认值让 `WHERE role = ''` 能被优化器用作索引等值前缀，使下面的
+  // backfill 在「无待回填行」时也只做一次索引探测而非全表扫描。
+  ensureColumn('message_v2', 'role', "TEXT NOT NULL DEFAULT ''");
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_message_v2_session_role_time ON message_v2(session_id, user_id, role, time_created, id)',
+  );
+  backfillMessageRole();
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS part_v2 (
@@ -2248,6 +2295,25 @@ function ensureColumn(table: string, column: string, definition: string): void {
   if (!exists) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+}
+
+/**
+ * 回填 `message_v2.role`（新增该列时的存量数据迁移）。
+ *
+ * 用 SQLite 的 `json_extract` 在 SQL 内取值，避免把每行 `data` 拉进 JS 再
+ * `JSON.parse`；`json_valid(data) = 1` 保证手改/损坏行只被跳过而不是让整条
+ * UPDATE 抛 "malformed JSON" —— 那会让每次启动都失败。`COALESCE(..., '')` 同样
+ * 必需：`json_extract` 在 JSON 里没有 `$.role` 键时返回 NULL，直接写进 NOT NULL 列
+ * 会让迁移失败；这类行保留 '' 并继续被读侧的 `tryMessageInfoFromRow` 跳过。
+ *
+ * `WHERE role = ''` 命中 `idx_message_v2_session_role_time` 的等值前缀，空库 /
+ * 已迁移完成的库上是一次索引探测。
+ */
+export function backfillMessageRole(): void {
+  sqliteRun(
+    `UPDATE message_v2 SET role = COALESCE(json_extract(data, '$.role'), '')
+      WHERE role = '' AND json_valid(data) = 1`,
+  );
 }
 
 export function backfillToolResultIndex(): void {

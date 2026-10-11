@@ -59,6 +59,21 @@ const SSH_SFTP_TIMEOUT_MS = 60_000;
 const DEFAULT_SSH_SFTP_READ_MAX_BYTES = 16 * 1024 * 1024;
 
 /**
+ * 通道自愈(SSH_CHANNEL_EXHAUSTION)连续阈值。ssh2 打开 exec/sftp 失败时，
+ * 只有连续的「通道打开失败」达到该阈值才判定为该连接的通道预算被耗尽
+ * (sshd 的 MaxSessions)，从而触发重建传输；单独的偶发失败（如并发突发）
+ * 直接透传给调用方，不触发重连，避免误伤临时资源短缺。
+ */
+const SSH_CHANNEL_EXHAUSTION_THRESHOLD = 3;
+
+/**
+ * 通道自愈冷却期。一次重建后，在冷却期内即使再遇到通道打开失败也不
+ * 重复重建，直接透传错误，防止「重建→立刻又失败」的热循环耗尽 CPU 并刷屏
+ * 日志。仅在冷却期外且连续失败达到阈值时才再次触发。
+ */
+const SSH_SELF_HEAL_COOLDOWN_MS = 60_000;
+
+/**
  * Resolve the SFTP read ceiling per-call (not at module load) so the env
  * override applies at runtime and stays test-injectable. `<=0` disables.
  */
@@ -70,6 +85,19 @@ function resolveSshReadMaxBytes(): number {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   return Math.floor(parsed);
+}
+
+/**
+ * 判断是否为「通道打开阶段」被服务端拒绝的错误。ssh2 对 CHANNEL_OPEN_FAILURE
+ * 统一包装成 `(SSH) Channel open failure: <description>`（description 来自
+ * 服务端回包），`open failed` 正是 sshd 在中央拒绝新 session（如 MaxSessions
+ * 耗尽）时的回包描述。只在「打开阶段」失败使用——已建立通道上的操作错误
+ * （如 ENOENT、命令非零退出）不在此列，不能误计为通道耗尽。
+ */
+function isChannelOpenFailure(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'message' in error
+    ? /\(SSH\) Channel open failure/i.test(String((error as { message: unknown }).message))
+    : false;
 }
 
 export interface SSHConnection {
@@ -159,6 +187,11 @@ interface SSHConnectionManagerOptions {
    * that provide their own transport.
    */
   clientFactory?: () => Promise<SSHClient>;
+  /**
+   * 通道自愈冷却期（ms），默认 {@link SSH_SELF_HEAL_COOLDOWN_MS}。测试
+   * 注入小值以覆盖「冷却期内不重复重建」分支，生产无需配置。
+   */
+  selfHealCooldownMs?: number;
 }
 
 type SSHClient = SSHTerminalClient & {
@@ -274,6 +307,16 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
   private readonly verifyHostKey: NonNullable<SSHConnectionManagerOptions['verifyHostKey']>;
   private readonly trustedKeys = new Map<string, string>();
   private readonly clientFactory: () => Promise<SSHClient>;
+  private readonly selfHealCooldownMs: number;
+  /**
+   * 通道耗尽自愈状态(按连接)。`channelFailures` 记录连续「通道打开失败」
+   * 次数,任何一次通道成功打开都会清零;达到 {@link SSH_CHANNEL_EXHAUSTION_THRESHOLD}
+   * 才重建传输。`lastSelfHealAt` 强制冷却期,避免「重建后立刻又失败」的热循环。
+   * `selfHeals` 让并发的多个失败共享同一次重建,而不是并发发起 N 次重连。
+   */
+  private readonly channelFailures = new Map<string, number>();
+  private readonly lastSelfHealAt = new Map<string, number>();
+  private readonly selfHeals = new Map<string, Promise<boolean>>();
 
   constructor(options: SSHConnectionManagerOptions = {}) {
     if (options.clients) {
@@ -289,6 +332,7 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
         return true;
       });
     this.clientFactory = options.clientFactory ?? loadSSHClient;
+    this.selfHealCooldownMs = options.selfHealCooldownMs ?? SSH_SELF_HEAL_COOLDOWN_MS;
   }
 
   addConnection(conn: SSHConnection): void {
@@ -300,6 +344,7 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
       this.releaseSftp(conn.id);
       client?.end();
     }
+    this.resetChannelHealState(conn.id);
     this.connections.set(conn.id, { ...conn });
   }
 
@@ -449,18 +494,51 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
     this.clients.delete(id);
     this.releaseSftp(id);
     client?.end();
+    this.resetChannelHealState(id);
     this.publishStatus({ connectionId: id, status: 'disconnected', intentional: true });
   }
 
-  openTerminal(id: string, options: SSHTerminalOptions): Promise<ClientChannel> {
-    return openSSHTerminal(this.requireClient(id), options);
+  async openTerminal(id: string, options: SSHTerminalOptions): Promise<ClientChannel> {
+    try {
+      return await openSSHTerminal(this.requireClient(id), options);
+    } catch (error) {
+      const recovered = await this.recoverFromChannelExhaustion(id, error);
+      if (!recovered) throw error;
+      return openSSHTerminal(this.requireClient(id), options);
+    }
   }
 
   async execCommand(id: string, command: string, options?: SSHExecOptions): Promise<ExecResult> {
-    const client = this.requireClient(id);
     const timeoutMs = options?.timeoutMs ?? SSH_EXEC_TIMEOUT_MS;
     const maxOutputBytes = options?.maxOutputBytes ?? SSH_EXEC_MAX_OUTPUT_BYTES;
+    try {
+      return await this.runExecOnClient(
+        id,
+        this.requireClient(id),
+        command,
+        timeoutMs,
+        maxOutputBytes,
+      );
+    } catch (error) {
+      if (!(await this.recoverFromChannelExhaustion(id, error))) throw error;
+      // 传输已重建：用新 client 原样重试一次（整体墙钟 deadline 重新起算）。
+      return this.runExecOnClient(
+        id,
+        this.requireClient(id),
+        command,
+        timeoutMs,
+        maxOutputBytes,
+      );
+    }
+  }
 
+  private runExecOnClient(
+    id: string,
+    client: SSHClient,
+    command: string,
+    timeoutMs: number,
+    maxOutputBytes: number,
+  ): Promise<ExecResult> {
     return new Promise((resolve, reject) => {
       let stdout = '';
       let stderr = '';
@@ -541,6 +619,8 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
           finish(() => reject(err));
           return;
         }
+        // 通道成功打开：清零该连接的通道耗尽计数（临时突发不累积）。
+        this.channelFailures.delete(id);
         if (settled) {
           // The deadline already fired before this channel opened; release the
           // late channel instead of attaching listeners to a finished promise.
@@ -733,25 +813,108 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
     return client;
   }
 
+  /**
+   * Clear the per-connection self-heal bookkeeping. Called on `addConnection` /
+   * `disconnect` so a freshly (re-)established transport never inherits a
+   * stale failure count or an in-flight heal promise from a dead one.
+   */
+  private resetChannelHealState(id: string): void {
+    this.channelFailures.delete(id);
+    this.lastSelfHealAt.delete(id);
+    this.selfHeals.delete(id);
+  }
+
+  /**
+   * Decide whether a channel-open failure on `id` should trigger a transport
+   * rebuild, and perform it (deduped across concurrent failures). Returns
+   * `true` when the caller must retry on a FRESH client, `false` when the
+   * original error should be surfaced unchanged:
+   *
+   * - Non channel-open failures (ENOENT, non-zero exit, SFTP op timeout) →
+   *   never self-heal; rebuilding the transport would be a no-op at best.
+   * - Within the cooldown window after a prior heal → passthrough, so a
+   *   rebuild that keeps failing cannot hot-loop.
+   * - Below {@link SSH_CHANNEL_EXHAUSTION_THRESHOLD} consecutive failures →
+   *   passthrough, so a one-off resource blip is not mistaken for exhaustion.
+   *
+   * On a genuine trigger we `disconnect` (tears down the dead transport, which
+   * also drops any orphaned exec/shell channels back to sshd) then
+   * `connect()` to a clean one, and the caller retries once on the new
+   * client.
+   */
+  private async recoverFromChannelExhaustion(id: string, error: unknown): Promise<boolean> {
+    if (!isChannelOpenFailure(error)) return false;
+
+    // A successful open elsewhere resets the consecutive counter; any other
+    // failure just bumps it. Only run this when not already healing.
+    const inflight = this.selfHeals.get(id);
+    if (inflight) {
+      // Ride the in-flight rebuild; it already accounts for this failure.
+      const healed = await inflight;
+      return healed;
+    }
+
+    const count = (this.channelFailures.get(id) ?? 0) + 1;
+    this.channelFailures.set(id, count);
+    const lastHeal = this.lastSelfHealAt.get(id) ?? 0;
+    if (Date.now() - lastHeal < this.selfHealCooldownMs) return false;
+    if (count < SSH_CHANNEL_EXHAUSTION_THRESHOLD) return false;
+
+    this.lastSelfHealAt.set(id, Date.now());
+    const heal = this.runSelfHeal(id);
+    this.selfHeals.set(id, heal);
+    void heal.finally(() => {
+      if (this.selfHeals.get(id) === heal) this.selfHeals.delete(id);
+    });
+    return heal;
+  }
+
+  /**
+   * Perform the actual transport rebuild for a healed connection: tear the
+   * dead transport down (which also drops any orphaned exec/shell channels
+   * back to sshd), then establish a clean one. Resolves `true` when the
+   * caller may retry on the fresh client.
+   */
+  private runSelfHeal(id: string): Promise<boolean> {
+    return (async (): Promise<boolean> => {
+      try {
+        // disconnect() 会清掉该连接的全部自愈状态（含冷却基线），所以这里
+        // 在拆掉旧传输之后立刻重新登记冷却基线：无论重建成功还是失败，
+        // 冷却期内的后续失败都直接透传，避免重建热循环。
+        await this.disconnect(id);
+        this.lastSelfHealAt.set(id, Date.now());
+        await this.connect(id);
+        this.channelFailures.delete(id);
+        return true;
+      } catch {
+        // Rebuild failed (auth / host key / network). Leave the counter intact
+        // so the next trigger inside the cooldown window just passes through;
+        // the caller surfaces the ORIGINAL channel-open error, not this one.
+        return false;
+      }
+    })();
+  }
+
   private getSftp(id: string): Promise<SFTPWrapper> {
     const cached = this.sftps.get(id);
     if (cached) return cached;
 
-    const client = this.requireClient(id);
-    const pending = withSftpTimeout<SFTPWrapper>('sftp', (resolve, reject) => {
-      client.sftp((err, sftp) => {
-        if (err) {
-          reject(err instanceof Error ? err : new Error(String(err)));
-          return;
+    const state: { pending?: Promise<SFTPWrapper>; wrapper?: SFTPWrapper } = {};
+    // Drop the cache when this channel self-closes / errors so the next file
+    // op opens a fresh one; only delete while the cached promise is still ours.
+    const track = (sftp: SFTPWrapper): void => {
+      state.wrapper = sftp;
+      const invalidate = (): void => {
+        if (this.sftps.get(id) === state.pending && state.wrapper === sftp) {
+          this.sftps.delete(id);
         }
-        const invalidate = () => {
-          if (this.sftps.get(id) === pending) this.sftps.delete(id);
-        };
-        sftp.on?.('close', invalidate);
-        sftp.on?.('error', invalidate);
-        resolve(sftp);
-      });
-    });
+      };
+      sftp.on?.('close', invalidate);
+      sftp.on?.('error', invalidate);
+    };
+
+    const pending = this.openSftpWithSelfHeal(id, track);
+    state.pending = pending;
     this.sftps.set(id, pending);
     // A rejected open must not stay cached, or every later file op inherits the
     // same failure instead of retrying a fresh channel.
@@ -759,6 +922,45 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
       if (this.sftps.get(id) === pending) this.sftps.delete(id);
     });
     return pending;
+  }
+
+  /**
+   * Open an SFTP channel; on a channel-open failure that reaches the self-heal
+   * threshold it rebuilds the transport and retries ONCE, else it propagates
+   * the original error. Each attempt is bounded by {@link SSH_SFTP_TIMEOUT_MS}.
+   */
+  private async openSftpWithSelfHeal(
+    id: string,
+    track: (sftp: SFTPWrapper) => void,
+  ): Promise<SFTPWrapper> {
+    try {
+      return await this.openSftpOnClient(this.requireClient(id), id, track);
+    } catch (error) {
+      const recovered = await this.recoverFromChannelExhaustion(id, error);
+      if (!recovered) throw error;
+      // Transport was rebuilt; reopen on the fresh client.
+      return this.openSftpOnClient(this.requireClient(id), id, track);
+    }
+  }
+
+  private openSftpOnClient(
+    client: SSHClient,
+    id: string,
+    track: (sftp: SFTPWrapper) => void,
+  ): Promise<SFTPWrapper> {
+    return withSftpTimeout<SFTPWrapper>('sftp', (resolve, reject) => {
+      client.sftp((err, sftp) => {
+        if (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+          return;
+        }
+        // Channel opened successfully; reset the consecutive counter so a
+        // transient blip does not accumulate toward a rebuild.
+        this.channelFailures.delete(id);
+        track(sftp);
+        resolve(sftp);
+      });
+    });
   }
 
   private releaseSftp(id: string): void {

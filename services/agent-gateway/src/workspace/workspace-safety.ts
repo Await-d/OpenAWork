@@ -363,7 +363,21 @@ export async function ensureIgnoreRulesLoadedForPath(path?: string | null): Prom
     await cached;
     return;
   }
-  const loadPromise = defaultIgnoreManager.loadRules(workspaceRoot).then(() => undefined);
+  const loadPromise = defaultIgnoreManager.loadRules(workspaceRoot).then(
+    () => undefined as void,
+    (error: unknown) => {
+      // 失败不得污染缓存:清除该根的缓存并重置全局标记,让下一次请求重新加载。
+      // 否则一旦 loadRules 拒绝,该根下所有后续 `/workspace/tree` 请求都会复现同一
+      // rejection 而持续 500,直到网关重启(毒化缓存)。
+      if (ignoreLoadCache.get(workspaceRoot) === loadPromise) {
+        ignoreLoadCache.delete(workspaceRoot);
+      }
+      if (globalIgnoreLoadedRoot === workspaceRoot) {
+        globalIgnoreLoadedRoot = null;
+      }
+      throw error;
+    },
+  );
   ignoreLoadCache.set(workspaceRoot, loadPromise);
   // `loadRules` 在首个 await 之前同步写入 `projectRoot`，因此调用返回即代表
   // 全局管理器已装载该根；这里同步标记，避免并发同根请求重复加载。

@@ -17,6 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
+import type { InputImageContent } from '@openAwork/shared';
 import { ToastContainer } from '../../../components/common/feedback/ToastNotification.js';
 import { useChatRetryAndEdit } from './use-chat-retry-and-edit.js';
 import type { RetryPrompt } from './use-chat-message-actions.js';
@@ -312,6 +313,36 @@ describe('useChatRetryAndEdit — handleEditResendInCurrentSession', () => {
     ]);
     expect(sendMessage).toHaveBeenCalledWith('edited text', {
       existingInputParts: editedParts,
+      forcedSessionId: SESSION_ID,
+    });
+  });
+
+  it('清空附件后不重发原始图片(回归:被删图片不得复活)', async () => {
+    const sendMessage = vi.fn(async () => undefined);
+    const originalImage: InputImageContent[] = [
+      { type: 'input_image', imageUrl: 'data:image/png;base64,AAA' },
+    ];
+
+    const { result } = renderHook(() =>
+      useChatRetryAndEdit(
+        makeOptions({
+          sendMessage: sendMessage as never,
+          historyEditPrompt: {
+            messageId: 'm3',
+            text: 'x',
+            hasCodeMarkers: false,
+            inputParts: originalImage,
+          },
+        }),
+      ),
+    );
+
+    // 编辑器清空附件后回传空数组,重发不得回退到原始附件。
+    await act(async () => {
+      await result.current.handleEditResendInCurrentSession('edited text', 'm3', []);
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith('edited text', {
       forcedSessionId: SESSION_ID,
     });
   });

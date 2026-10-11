@@ -245,6 +245,44 @@ describe('repairToolInput', () => {
     });
   });
 
+  describe('{ raw } 降级形态还原', () => {
+    it('唯一 raw 键承载 JSON 文本时展开为对象并继续修复字段', () => {
+      const schema = z.object({ limit: z.number() });
+      expect(repairToolInput(schema, { raw: '{"limit":"20"}' })).toEqual({ limit: 20 });
+    });
+
+    it('展开后的字符串化数字等字段同样被修复', () => {
+      const schema = z.object({ command: z.string().min(1), timeout: z.number() });
+      expect(repairToolInput(schema, { raw: '{"command":"docker ps","timeout":"60000"}' })).toEqual(
+        { command: 'docker ps', timeout: 60000 },
+      );
+    });
+
+    it('schema 声明了 raw 字段时不展开', () => {
+      const schema = z.object({ raw: z.string() });
+      const input = { raw: '{"limit":20}' };
+      expect(repairToolInput(schema, input)).toBe(input);
+    });
+
+    it('raw 值不是对象 JSON 文本时不展开', () => {
+      const schema = z.object({ limit: z.number() });
+      const input = { raw: 'docker ps -a' };
+      expect(repairToolInput(schema, input)).toBe(input);
+    });
+
+    it('半截 JSON(以 { 开头但无法解析)时保持原样', () => {
+      const schema = z.object({ limit: z.number() });
+      const input = { raw: '{"limit":' };
+      expect(repairToolInput(schema, input)).toBe(input);
+    });
+
+    it('除 raw 外还有其它键时不展开', () => {
+      const schema = z.object({ limit: z.number() });
+      const input = { raw: '{"limit":20}', extra: 1 };
+      expect(repairToolInput(schema, input)).toBe(input);
+    });
+  });
+
   describe('不确定就不改', () => {
     it('未知 schema 原样返回', () => {
       const input = { anything: 1 };

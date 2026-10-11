@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../hooks/workspace/useSessions.js';
 import {
+  UNBOUND_WORKSPACE_GROUP_KEY,
   UNBOUND_WORKSPACE_LABEL,
+  buildWorkspaceSessionCollections,
   filterSessionTreeGroupsByMatcher,
   filterSessionTreeGroupsByQuery,
+  getWorkspaceGroupKey,
   groupSessionsByWorkspace,
+  isWorkspaceGroupCollapsed,
+  listWorkspaceIdentitiesFromSessions,
   resolveSessionWorkspaceBindingById,
   resolveWorkspaceGroupDisplayName,
 } from './session-grouping.js';
-import type { WorkspaceSessionTreeGroup, WorkspaceSessionTreeNode } from './session-grouping.js';
+import type {
+  WorkspaceIdentity,
+  WorkspaceSessionTreeGroup,
+  WorkspaceSessionTreeNode,
+} from './session-grouping.js';
 
 function makeSession(id: string, title: string): Session {
   return { id, title, updated_at: '2026-07-07T08:00:00.000Z' };
@@ -33,6 +42,7 @@ function makeTreeGroup(
   roots.forEach(visit);
 
   return {
+    groupKey: getWorkspaceGroupKey(workspacePath),
     workspacePath,
     workspaceLabel: workspacePath,
     sessions,
@@ -76,7 +86,10 @@ describe('groupSessionsByWorkspace', () => {
       metadata_json: JSON.stringify({ workingDirectory: '/repo/zeta' }),
     };
 
-    const groups = groupSessionsByWorkspace([zeta, alpha], ['/repo/idle']);
+    const groups = groupSessionsByWorkspace(
+      [zeta, alpha],
+      [{ workspacePath: '/repo/idle', sshConnectionId: null }],
+    );
 
     expect(groups.map((group) => group.workspaceLabel)).toEqual(['alpha', 'zeta', 'idle']);
   });
@@ -121,6 +134,259 @@ describe('groupSessionsByWorkspace', () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0]?.sshConnectionId).toBe('ssh-1');
+  });
+
+  it('两台主机上的同名远端目录分成两个组，不再合并', () => {
+    const onHostA: Session = {
+      ...makeSession('host-a', 'A 机会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-a',
+        workingDirectory: '/srv/app',
+      }),
+    };
+    const onHostB: Session = {
+      ...makeSession('host-b', 'B 机会话'),
+      updated_at: '2026-07-08T08:00:00.000Z',
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-b',
+        workingDirectory: '/srv/app',
+      }),
+    };
+
+    const groups = groupSessionsByWorkspace([onHostA, onHostB]);
+
+    // 路径完全相同、只有主机不同——曾经在这里被合成一个工作区。
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.sshConnectionId).sort()).toEqual(['ssh-a', 'ssh-b']);
+    expect(groups.every((group) => group.workspacePath === '/srv/app')).toBe(true);
+    expect(groups.every((group) => group.sessions.length === 1)).toBe(true);
+  });
+
+  it('同名远端目录与同名本地目录也分成两个组', () => {
+    const remote: Session = {
+      ...makeSession('remote', '远端会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-a',
+        workingDirectory: '/srv/app',
+      }),
+    };
+    const local: Session = {
+      ...makeSession('local', '本地会话'),
+      updated_at: '2026-07-08T08:00:00.000Z',
+      metadata_json: JSON.stringify({ workingDirectory: '/srv/app' }),
+    };
+
+    const groups = groupSessionsByWorkspace([remote, local]);
+
+    expect(groups).toHaveLength(2);
+  });
+
+  it('闲置占位组按主机区分：远端空组不会被同名的本地空组吸附', () => {
+    const saved: WorkspaceIdentity[] = [
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+      { workspacePath: '/srv/app', sshConnectionId: null },
+    ];
+
+    const groups = groupSessionsByWorkspace([], saved);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.sshConnectionId).sort()).toEqual([null, 'ssh-a']);
+  });
+});
+
+describe('getWorkspaceGroupKey', () => {
+  it('本地工作区返回裸路径，与历史键保持一致', () => {
+    expect(getWorkspaceGroupKey('/srv/app')).toBe('/srv/app');
+    expect(getWorkspaceGroupKey('/srv/app', null)).toBe('/srv/app');
+  });
+
+  it('不同主机的同名目录得到不同的键', () => {
+    expect(getWorkspaceGroupKey('/srv/app', 'ssh-a')).not.toBe(
+      getWorkspaceGroupKey('/srv/app', 'ssh-b'),
+    );
+  });
+
+  it('远端键与本地键不相等', () => {
+    expect(getWorkspaceGroupKey('/srv/app', 'ssh-a')).not.toBe(getWorkspaceGroupKey('/srv/app'));
+  });
+
+  it('未绑定工作区忽略连接维度，返回统一占位键', () => {
+    expect(getWorkspaceGroupKey(null)).toBe(UNBOUND_WORKSPACE_GROUP_KEY);
+    expect(getWorkspaceGroupKey(null, 'ssh-a')).toBe(UNBOUND_WORKSPACE_GROUP_KEY);
+  });
+});
+
+describe('isWorkspaceGroupCollapsed', () => {
+  it('命中当前键时判定为折叠', () => {
+    const collapsed = new Set([getWorkspaceGroupKey('/srv/app', 'ssh-a')]);
+
+    expect(isWorkspaceGroupCollapsed(collapsed, '/srv/app', 'ssh-a')).toBe(true);
+    expect(isWorkspaceGroupCollapsed(collapsed, '/srv/app', 'ssh-b')).toBe(false);
+  });
+
+  it('回落到升级前的裸路径键（本地与远端都兼容旧偏好）', () => {
+    const collapsed = new Set(['/srv/app']);
+
+    expect(isWorkspaceGroupCollapsed(collapsed, '/srv/app', 'ssh-a')).toBe(true);
+    expect(isWorkspaceGroupCollapsed(collapsed, '/srv/app', null)).toBe(true);
+    expect(isWorkspaceGroupCollapsed(collapsed, '/srv/other', 'ssh-a')).toBe(false);
+  });
+});
+
+describe('buildWorkspaceSessionCollections', () => {
+  it('同名跨主机的会话在计数表与批量删除集合里也各自独立', () => {
+    const hostA: Session = {
+      ...makeSession('host-a', 'A 机会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-a',
+        workingDirectory: '/srv/app',
+      }),
+    };
+    const hostB: Session = {
+      ...makeSession('host-b', 'B 机会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-b',
+        workingDirectory: '/srv/app',
+      }),
+    };
+
+    const collections = buildWorkspaceSessionCollections([hostA, hostB]);
+    const keyA = getWorkspaceGroupKey('/srv/app', 'ssh-a');
+    const keyB = getWorkspaceGroupKey('/srv/app', 'ssh-b');
+
+    expect(collections.sessionCountByWorkspace.get(keyA)).toBe(1);
+    expect(collections.sessionCountByWorkspace.get(keyB)).toBe(1);
+    expect(collections.sessionIdsByGroupKey.get(keyA)).toEqual(['host-a']);
+    expect(collections.sessionIdsByGroupKey.get(keyB)).toEqual(['host-b']);
+  });
+
+  /**
+   * 回归锁定：分组自带 `groupKey`，渲染层一律用它查计数表与折叠态。
+   *
+   * 曾出现过 `/sessions` 页用裸路径重算 groupKey 的问题——远端分组的计数静默变成 0、
+   * 折叠失效，且不报任何错。这里断言 group 自带的键与计数表严格对齐，让「用错键」
+   * 在测试期就暴露。
+   */
+  it('group.groupKey 是计数表与批量删除集合的唯一可取键', () => {
+    const hostA: Session = {
+      ...makeSession('host-a', 'A 机会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-a',
+        workingDirectory: '/srv/app',
+      }),
+    };
+    const hostB: Session = {
+      ...makeSession('host-b', 'B 机会话'),
+      updated_at: '2026-07-08T08:00:00.000Z',
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-b',
+        workingDirectory: '/srv/app',
+      }),
+    };
+    const local: Session = {
+      ...makeSession('local', '本地会话'),
+      updated_at: '2026-07-09T08:00:00.000Z',
+      metadata_json: JSON.stringify({ workingDirectory: '/srv/app' }),
+    };
+
+    const collections = buildWorkspaceSessionCollections([hostA, hostB, local]);
+
+    for (const group of collections.groups) {
+      expect(group.groupKey).toBe(getWorkspaceGroupKey(group.workspacePath, group.sshConnectionId));
+      expect(collections.sessionCountByWorkspace.get(group.groupKey)).toBe(group.sessions.length);
+      expect(collections.sessionIdsByGroupKey.get(group.groupKey)).toEqual(
+        group.sessions.map((session) => session.id),
+      );
+    }
+
+    // 三个同名工作区、三个互不相同的键；裸路径查表必然拿不到远端分组。
+    expect(collections.groups.map((group) => group.groupKey)).toHaveLength(3);
+    expect(new Set(collections.groups.map((group) => group.groupKey)).size).toBe(3);
+    expect(
+      collections.groups
+        .filter((group) => group.sshConnectionId !== null)
+        .every((group) => collections.sessionCountByWorkspace.has(group.groupKey)),
+    ).toBe(true);
+  });
+
+  it('闲置占位组的 groupKey 同样带连接维度', () => {
+    const collections = buildWorkspaceSessionCollections(
+      [],
+      [
+        { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+        { workspacePath: '/srv/app', sshConnectionId: null },
+      ],
+    );
+
+    expect(collections.groups.map((group) => group.groupKey)).toEqual([
+      getWorkspaceGroupKey('/srv/app', 'ssh-a'),
+      '/srv/app',
+    ]);
+  });
+
+  it('未绑定工作区的 groupKey 恒为占位键，与连接维度无关', () => {
+    const unbound: Session = makeSession('unbound', '无工作区会话');
+
+    const groups = groupSessionsByWorkspace([unbound]);
+
+    expect(groups[0]?.groupKey).toBe(UNBOUND_WORKSPACE_GROUP_KEY);
+    expect(groups[0]?.sshConnectionId).toBeFalsy();
+  });
+});
+
+describe('listWorkspaceIdentitiesFromSessions', () => {
+  it('同名跨主机的目录分别返回各自的工作区身份', () => {
+    const hostA: Session = {
+      ...makeSession('host-a', 'A 机会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-a',
+        workingDirectory: '/srv/app',
+      }),
+    };
+    const hostB: Session = {
+      ...makeSession('host-b', 'B 机会话'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-b',
+        workingDirectory: '/srv/app',
+      }),
+    };
+    const local: Session = {
+      ...makeSession('local', '本地会话'),
+      metadata_json: JSON.stringify({ workingDirectory: '/srv/app' }),
+    };
+
+    const identities = listWorkspaceIdentitiesFromSessions([hostA, hostB, local]);
+
+    expect(identities).toHaveLength(3);
+    expect(identities).toContainEqual({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+    expect(identities).toContainEqual({ workspacePath: '/srv/app', sshConnectionId: 'ssh-b' });
+    expect(identities).toContainEqual({ workspacePath: '/srv/app', sshConnectionId: null });
+  });
+
+  it('同一工作区只保留一条身份', () => {
+    const first: Session = {
+      ...makeSession('first', '会话一'),
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-a',
+        workingDirectory: '/srv/app',
+      }),
+    };
+    const second: Session = {
+      ...makeSession('second', '会话二'),
+      updated_at: '2026-07-08T08:00:00.000Z',
+      metadata_json: JSON.stringify({
+        sshConnectionId: 'ssh-a',
+        workingDirectory: '/srv/app',
+      }),
+    };
+
+    expect(listWorkspaceIdentitiesFromSessions([first, second])).toEqual([
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+    ]);
+  });
+
+  it('跳过未绑定工作区的会话', () => {
+    expect(listWorkspaceIdentitiesFromSessions([makeSession('unbound', '无工作区')])).toEqual([]);
   });
 });
 

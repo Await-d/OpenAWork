@@ -19,7 +19,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { HttpError, type SessionsClient } from '@openAwork/web-client';
-import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { useLocalSavedWorkspacePaths } from '../../../stores/ui/uiState.js';
 
 interface WorkspaceWarpDialogProps {
   isOpen: boolean;
@@ -117,7 +117,8 @@ export function WorkspaceWarpDialog({
   token,
   onComplete,
 }: WorkspaceWarpDialogProps) {
-  const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
+  // warp 目标是本地目录（远端工作区走 SSH 选择器），故取本地投影即可。
+  const savedWorkspacePaths = useLocalSavedWorkspacePaths();
   const [draft, setDraft] = useState(currentWorkingDirectory ?? '');
   const [force, setForce] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -142,7 +143,9 @@ export function WorkspaceWarpDialog({
 
   const quickPicks = useMemo(
     () =>
-      savedWorkspacePaths.filter((p) => p && p !== currentWorkingDirectory && p !== trimmedDraft),
+      savedWorkspacePaths.filter(
+        (path) => path !== currentWorkingDirectory && path !== trimmedDraft,
+      ),
     [savedWorkspacePaths, currentWorkingDirectory, trimmedDraft],
   );
 

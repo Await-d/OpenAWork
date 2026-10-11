@@ -70,10 +70,17 @@ const messageUpsertProjector = (event: { data: unknown }) => {
   safeUpsert(
     () =>
       sqliteRun(
-        `INSERT INTO message_v2 (id, session_id, user_id, time_created, data)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET data = excluded.data, updated_at = datetime('now')`,
-        [info.id, data.sessionID, userId, info.time.created, dataJson],
+        // `role` 与 `time_created` 一起作为反规范化列落库：读侧的回合窗口查询与回合
+        // 计数靠 (session_id, user_id, role, time_created, id) 索引定位，不再对 `data`
+        // 做前导通配符 LIKE 全表扫。ON CONFLICT 分支必须一并刷新 —— role 可能随
+        // 消息状态流转而变化，只更新 `data` 会让索引列与 JSON 脱节。
+        `INSERT INTO message_v2 (id, session_id, user_id, time_created, role, data)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           role = excluded.role,
+           data = excluded.data,
+           updated_at = datetime('now')`,
+        [info.id, data.sessionID, userId, info.time.created, info.role, dataJson],
       ),
     'message update',
     { messageID: info.id, sessionID: data.sessionID },

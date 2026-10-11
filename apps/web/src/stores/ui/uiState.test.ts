@@ -56,6 +56,11 @@ function resetLayoutState(): void {
     terminalPanelPosition: 'bottom',
     readIdentity: EMPTY_READ_IDENTITY,
     workbenchLayoutMode: 'fusion',
+    // 工作区列表是跨用例共享的单例 store 状态，不重置会让身份相关用例互相污染。
+    savedWorkspaces: [],
+    selectedWorkspacePath: null,
+    selectedSshConnectionId: null,
+    fileTreeRootPath: null,
   });
 }
 
@@ -202,7 +207,10 @@ describe('useUIStateStore tabs', () => {
 
     const state = useUIStateStore.getState();
     expect(state.selectedWorkspacePath).toBe('/ws/new');
-    expect(state.savedWorkspacePaths).toContain('/ws/new');
+    expect(state.savedWorkspaces).toContainEqual({
+      workspacePath: '/ws/new',
+      sshConnectionId: null,
+    });
     expect(state.chatView).toBe('home');
     expect(state.activeTabId).toBe(tabId);
     expect(state.tabs[0]?.type).toBe('draft');
@@ -237,6 +245,102 @@ describe('useUIStateStore tabs', () => {
 
     useUIStateStore.getState().openDraftSession('/ws/local', null);
     expect(useUIStateStore.getState().selectedSshConnectionId).toBeNull();
+  });
+});
+
+/**
+ * 回归锁定：工作区列表的身份维度。
+ *
+ * 旧结构只有裸路径，`savedWorkspacePaths` → `savedWorkspaces` 迁移时无法还原
+ * 「这条路径属于哪台主机」，只能按本地归一；若不做事后校正，远端目录会留下一条
+ * 「本地 /srv/app」残条，混进本地投影后被工作区选择器当成本机目录绑定。
+ */
+describe('savedWorkspaces 工作区身份', () => {
+  it('addSavedWorkspace 同名跨主机各自保留，互不覆盖', () => {
+    const store = useUIStateStore.getState();
+    store.addSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+    store.addSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: 'ssh-b' });
+    store.addSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: null });
+
+    expect(useUIStateStore.getState().savedWorkspaces).toEqual([
+      { workspacePath: '/srv/app', sshConnectionId: null },
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-b' },
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+    ]);
+  });
+
+  it('重复登记同一身份只保留一条', () => {
+    const store = useUIStateStore.getState();
+    store.addSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+    store.addSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+
+    expect(useUIStateStore.getState().savedWorkspaces).toHaveLength(1);
+  });
+
+  it('merge 反推出的远端身份清掉迁移误标的本地残条', () => {
+    // 模拟 v27 → v28 迁移结果：旧裸路径数组里的远端目录被按本地归一。
+    useUIStateStore.setState({
+      savedWorkspaces: [
+        { workspacePath: '/srv/app', sshConnectionId: null },
+        { workspacePath: '/ws/local', sshConnectionId: null },
+      ],
+    });
+
+    // 会话列表反推：/srv/app 属于远端 ssh-a，本地会话只涉及 /ws/local。
+    useUIStateStore.getState().mergeSavedWorkspaces([
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+      { workspacePath: '/ws/local', sshConnectionId: null },
+    ]);
+
+    const identities = useUIStateStore.getState().savedWorkspaces;
+    expect(identities).toContainEqual({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+    expect(
+      identities.filter(
+        (entry) => entry.workspacePath === '/srv/app' && entry.sshConnectionId === null,
+      ),
+    ).toEqual([]);
+    // 真实的本地工作区不受影响。
+    expect(identities).toContainEqual({ workspacePath: '/ws/local', sshConnectionId: null });
+  });
+
+  it('同名本地与远端都真实存在时，本地条目必须保留', () => {
+    useUIStateStore.setState({
+      savedWorkspaces: [{ workspacePath: '/srv/app', sshConnectionId: null }],
+    });
+
+    useUIStateStore.getState().mergeSavedWorkspaces([
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+      { workspacePath: '/srv/app', sshConnectionId: null },
+    ]);
+
+    const identities = useUIStateStore.getState().savedWorkspaces;
+    expect(identities).toContainEqual({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+    expect(identities).toContainEqual({ workspacePath: '/srv/app', sshConnectionId: null });
+  });
+
+  it('removeSavedWorkspace 只移除指定主机的条目', () => {
+    const store = useUIStateStore.getState();
+    store.addSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+    store.addSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: 'ssh-b' });
+
+    store.removeSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+
+    expect(useUIStateStore.getState().savedWorkspaces).toEqual([
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-b' },
+    ]);
+  });
+
+  it('移除本地同名工作区不会清掉另一台主机的选中态', () => {
+    const store = useUIStateStore.getState();
+    store.addSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: 'ssh-a' });
+    store.setSelectedWorkspacePath('/srv/app');
+    store.setSelectedSshConnectionId('ssh-a');
+
+    store.removeSavedWorkspace({ workspacePath: '/srv/app', sshConnectionId: null });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/srv/app');
+    expect(state.selectedSshConnectionId).toBe('ssh-a');
   });
 
   it('closeDraftTabs 在草稿转正后移除草稿标签并落到幸存标签', () => {
@@ -856,8 +960,8 @@ function fullBinaryLayout(depth: number): unknown {
 }
 
 describe('terminalLayoutBySession v24 → v25 迁移', () => {
-  it('persist 版本已提升到 27', () => {
-    expect(useUIStateStore.persist.getOptions().version).toBe(27);
+  it('persist 版本已提升到 28（v28 起 savedWorkspaces 带 SSH 连接维度）', () => {
+    expect(useUIStateStore.persist.getOptions().version).toBe(28);
   });
 
   it('v24 快照迁移得到空桶（分屏能力本轮才引入，无历史值可迁移）', () => {
@@ -890,6 +994,64 @@ describe('terminalPanelHeightCustomized v25 → v26 迁移', () => {
 
     expect(migrated.terminalPanelHeight).toBe(TERMINAL_PANEL_STORAGE_HEIGHT_BOUNDS.max);
     expect(migrated.terminalPanelHeightCustomized).toBe(false);
+  });
+});
+
+describe('savedWorkspaces v27 → v28 迁移', () => {
+  it('旧裸路径数组按本地工作区归一并清掉旧键', () => {
+    const migrated = runPersistMigration({ savedWorkspacePaths: ['/ws/a', '/ws/b'] }, 27);
+
+    expect(migrated.savedWorkspacePaths).toBeUndefined();
+    expect(migrated.savedWorkspaces).toEqual([
+      { workspacePath: '/ws/a', sshConnectionId: null },
+      { workspacePath: '/ws/b', sshConnectionId: null },
+    ]);
+  });
+
+  it('旧数组里的脏项（空串 / 非字符串）被丢弃', () => {
+    const migrated = runPersistMigration(
+      { savedWorkspacePaths: ['/ws/a', '', 42, null, '   '] },
+      27,
+    );
+
+    expect(migrated.savedWorkspaces).toEqual([{ workspacePath: '/ws/a', sshConnectionId: null }]);
+  });
+
+  it('旧数组内的重复路径被去重', () => {
+    const migrated = runPersistMigration({ savedWorkspacePaths: ['/ws/a', '/ws/a'] }, 27);
+
+    expect(migrated.savedWorkspaces).toEqual([{ workspacePath: '/ws/a', sshConnectionId: null }]);
+  });
+
+  it('已是新格式时保留 SSH 连接维度，并按身份去重', () => {
+    const migrated = runPersistMigration(
+      {
+        savedWorkspaces: [
+          { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+          { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+          { workspacePath: '/srv/app', sshConnectionId: 'ssh-b' },
+          { workspacePath: '/srv/app', sshConnectionId: null },
+        ],
+      },
+      28,
+    );
+
+    // 同名路径分属三台「主机」，必须各自保留——这正是本次修复的核心诉求。
+    expect(migrated.savedWorkspaces).toEqual([
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-a' },
+      { workspacePath: '/srv/app', sshConnectionId: 'ssh-b' },
+      { workspacePath: '/srv/app', sshConnectionId: null },
+    ]);
+  });
+
+  it('同版本脏数据（非法结构）在载入期被归一为空数组', () => {
+    expect(runPersistMigration({ savedWorkspaces: 'oops' }, 28).savedWorkspaces).toEqual([]);
+    expect(
+      runPersistMigration(
+        { savedWorkspaces: [{ workspacePath: 1 }, null, { workspacePath: '/ws/a' }] },
+        28,
+      ).savedWorkspaces,
+    ).toEqual([]);
   });
 });
 

@@ -9,6 +9,13 @@ export interface WorkspaceRenameDialogProps {
   open: boolean;
   /** 工作区路径；为空表示未绑定工作区，此时不允许重命名。 */
   workspacePath: string | null;
+  /**
+   * 工作区所属 SSH 连接 id（本地工作区为 null）。
+   *
+   * 远端目录路径只在单台主机内唯一，别名槽位必须按连接隔离——否则在 A 主机
+   * 改名会连带改掉 B 主机同名目录的显示名。
+   */
+  sshConnectionId?: string | null;
   /** 路径末段：作为默认名提示与「恢复默认名」的目标。 */
   defaultName: string;
   onCancel: () => void;
@@ -155,6 +162,7 @@ const styles: Record<string, CSSProperties> = {
 export function WorkspaceRenameDialog({
   open,
   workspacePath,
+  sshConnectionId,
   defaultName,
   onCancel,
   onSubmit,
@@ -172,10 +180,10 @@ export function WorkspaceRenameDialog({
       return;
     }
 
-    setValue(readWorkspaceAlias(workspacePath) || defaultName);
+    setValue(readWorkspaceAlias(workspacePath, sshConnectionId) || defaultName);
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, [defaultName, open, workspacePath]);
+  }, [defaultName, open, sshConnectionId, workspacePath]);
 
   if (!open || !workspacePath) {
     return null;

@@ -264,7 +264,7 @@ export function FusionSidebar({
   const leftSidebarOpen = useUIStateStore((state) => state.leftSidebarOpen);
   const setLeftSidebarOpen = useUIStateStore((state) => state.setLeftSidebarOpen);
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
-  const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
+  const addSavedWorkspace = useUIStateStore((s) => s.addSavedWorkspace);
   const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const fileTreeRootPath = useUIStateStore((s) => s.fileTreeRootPath);
@@ -294,7 +294,8 @@ export function FusionSidebar({
 
   const handleSelectWorkspace = useCallback(
     async (path: string) => {
-      addSavedWorkspacePath(path);
+      // 本地目录：连接维度恒为 null。
+      addSavedWorkspace({ workspacePath: path, sshConnectionId: null });
       setSelectedWorkspacePath(path);
       setFileTreeRootPath(path);
       // 选中本地目录即清理 SSH 草稿连接，避免头部继续标注「远端」。
@@ -306,7 +307,7 @@ export function FusionSidebar({
       }
     },
     [
-      addSavedWorkspacePath,
+      addSavedWorkspace,
       compactViewport,
       setFileTreeRootPath,
       setLeftSidebarOpen,
@@ -346,7 +347,9 @@ export function FusionSidebar({
         setActiveSessionWorkspace(currentSessionId, path, selection.connectionId);
       }
 
-      addSavedWorkspacePath(path);
+      // 远端目录必须连同连接 id 登记：同名远端目录在其它主机上是另一个工作区，
+      // 只按路径登记会让两者的会话在侧栏合并成一组。
+      addSavedWorkspace({ workspacePath: path, sshConnectionId: selection.connectionId });
       setSelectedWorkspacePath(path);
       setSelectedSshConnectionId(selection.connectionId);
       setFileTreeRootPath(null);
@@ -356,7 +359,7 @@ export function FusionSidebar({
     },
     [
       accessToken,
-      addSavedWorkspacePath,
+      addSavedWorkspace,
       compactViewport,
       currentSessionId,
       gatewayUrl,
@@ -1086,7 +1089,9 @@ export function FusionSidebar({
                 collapsedGroups={collapsedGroups}
                 isSearching={isSearchingSessions}
                 toggleGroupCollapsed={toggleGroupCollapsed}
-                onCreateSession={(workspacePath) => void newSession(workspacePath)}
+                onCreateSession={(workspacePath, sshConnectionId) =>
+                  void newSession(workspacePath, sshConnectionId)
+                }
                 rowHandlers={chatRowHandlers}
               />
             </>

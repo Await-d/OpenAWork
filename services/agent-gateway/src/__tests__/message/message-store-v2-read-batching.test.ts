@@ -86,6 +86,7 @@ function makeMessageRow(index: number): MessageV2Row {
     session_id: SESSION_ID,
     user_id: USER_ID,
     time_created: index,
+    role: 'user',
     data: JSON.stringify({
       role: 'user',
       time: { created: index },

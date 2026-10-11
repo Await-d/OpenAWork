@@ -52,6 +52,119 @@ afterAll(async () => {
 });
 
 describe('session run events', () => {
+  describe('listSessionRunEventsByRequestTail', () => {
+    function seedDeltas(count: number, clientRequestId = CLIENT_REQUEST_ID): void {
+      for (let index = 0; index < count; index += 1) {
+        sessionRunEvents.publishSessionRunEvent(
+          SESSION_ID,
+          {
+            type: 'text_delta',
+            delta: `片段${index}`,
+            eventId: `evt-delta-${index}`,
+            occurredAt: 1_700_000_000_000 + index,
+          },
+          { clientRequestId },
+        );
+      }
+    }
+
+    it('只回尾部 limit 条，且按 seq 升序返回（可直接顺序 reduce）', () => {
+      seedDeltas(10);
+
+      const tail = sessionRunEvents.listSessionRunEventsByRequestTail({
+        sessionId: SESSION_ID,
+        clientRequestId: CLIENT_REQUEST_ID,
+        limit: 3,
+      });
+
+      expect(tail.map((event) => (event.type === 'text_delta' ? event.delta : null))).toEqual([
+        '片段7',
+        '片段8',
+        '片段9',
+      ]);
+    });
+
+    it('limit 大于实际行数时返回全部，不补齐也不截断', () => {
+      seedDeltas(4);
+
+      const tail = sessionRunEvents.listSessionRunEventsByRequestTail({
+        sessionId: SESSION_ID,
+        clientRequestId: CLIENT_REQUEST_ID,
+        limit: 100,
+      });
+
+      expect(tail).toHaveLength(4);
+    });
+
+    it('只覆盖目标 scope，不串到同会话的其它 clientRequestId', () => {
+      seedDeltas(3);
+      seedDeltas(2, 'req-other');
+
+      const tail = sessionRunEvents.listSessionRunEventsByRequestTail({
+        sessionId: SESSION_ID,
+        clientRequestId: CLIENT_REQUEST_ID,
+        limit: 10,
+      });
+
+      expect(tail).toHaveLength(3);
+      expect(
+        sessionRunEvents.listSessionRunEventsByRequest({
+          sessionId: SESSION_ID,
+          clientRequestId: 'req-other',
+        }),
+      ).toHaveLength(2);
+    });
+
+    it('limit 非正数时返回空数组（调用方无需自行判空）', () => {
+      seedDeltas(3);
+
+      expect(
+        sessionRunEvents.listSessionRunEventsByRequestTail({
+          sessionId: SESSION_ID,
+          clientRequestId: CLIENT_REQUEST_ID,
+          limit: 0,
+        }),
+      ).toEqual([]);
+      expect(
+        sessionRunEvents.listSessionRunEventsByRequestTail({
+          sessionId: SESSION_ID,
+          clientRequestId: CLIENT_REQUEST_ID,
+          limit: -1,
+        }),
+      ).toEqual([]);
+    });
+
+    it('尾部窗口包含仍坐在批量队列里的 delta（read-your-writes）', () => {
+      // text_delta 走 queueSessionRunEvent 时会被缓冲到下一个批量 flush，尚未落库。
+      // 尾部窗口必须先 flush，否则「最新 N 条」会漏掉刚落地的内容。
+      sessionRunEvents.queueSessionRunEvent(
+        SESSION_ID,
+        {
+          type: 'text_delta',
+          delta: '排队中的片段',
+          eventId: 'evt-queued',
+          occurredAt: 1_700_000_009_000,
+        },
+        { clientRequestId: CLIENT_REQUEST_ID },
+      );
+
+      expect(
+        dbModule.sqliteAll<{ cnt: number }>(
+          'SELECT COUNT(*) AS cnt FROM session_run_events WHERE session_id = ?',
+          [SESSION_ID],
+        )[0]?.cnt,
+      ).toBe(0);
+
+      const tail = sessionRunEvents.listSessionRunEventsByRequestTail({
+        sessionId: SESSION_ID,
+        clientRequestId: CLIENT_REQUEST_ID,
+        limit: 5,
+      });
+
+      expect(tail).toEqual([expect.objectContaining({ delta: '排队中的片段' })]);
+    });
+  });
+
   it('publishSessionRunEvent 隔离订阅者异常，仍持久化并通知其他订阅者', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const received: RunEvent[] = [];

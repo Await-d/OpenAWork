@@ -16,7 +16,7 @@ import { exportSession } from '../../utils/session/session-transfer.js';
 import {
   buildWorkspaceSessionCollections,
   filterSessionTreeGroupsByQuery,
-  listWorkspacePathsFromSessions,
+  listWorkspaceIdentitiesFromSessions,
 } from '../../utils/session/session-grouping.js';
 import { resolveNewSessionWorkspace } from '../../utils/session/new-session-workspace.js';
 import {
@@ -131,6 +131,9 @@ function resolveSessionListRequestKey(
     token,
     options.path ?? '',
     options.includeDescendants === false ? '0' : '1',
+    // 键必须覆盖 host 维度:两台 SSH 主机上的同名 `/srv/app` 请求参数完全一致,
+    // 漏掉连接 id 会让它们命中同一份在途 Promise,A 主机的列表被当成 B 主机的结果。
+    options.sshConnectionId ?? '',
   ].join('\u0000');
 }
 
@@ -175,13 +178,14 @@ export function useSessions() {
   const accessToken = useAuthStore((s) => s.accessToken);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
-  const savedWorkspacePaths = useUIStateStore((s) => s.savedWorkspacePaths);
-  const mergeSavedWorkspacePaths = useUIStateStore((s) => s.mergeSavedWorkspacePaths);
+  const savedWorkspaces = useUIStateStore((s) => s.savedWorkspaces);
+  const mergeSavedWorkspaces = useUIStateStore((s) => s.mergeSavedWorkspaces);
   const sessionListPathFilterEnabled = useUIStateStore((s) => s.sessionListPathFilterEnabled);
   const sessionListPathFilterFeatureEnabled = useUIStateStore(
     (s) => s.sessionListPathFilterFeatureEnabled,
   );
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
+  const selectedSshConnectionId = useUIStateStore((s) => s.selectedSshConnectionId);
   const collapsedSessionGroups = useUIStateStore((s) => s.collapsedSessionGroups);
   const toggleGroupCollapsed = useUIStateStore((s) => s.toggleSessionGroupCollapsed);
   const retainSubagentCollapsed = useUIStateStore((s) => s.retainSubagentCollapsed);
@@ -254,6 +258,9 @@ export function useSessions() {
               selectedWorkspacePath
             ) {
               listOptions.path = selectedWorkspacePath;
+              // 远端工作区必须带上连接 id：路径在跨主机时并不唯一，
+              // 只按路径过滤会把其它服务器同名目录的会话一起捞进来。
+              listOptions.sshConnectionId = selectedSshConnectionId;
             }
             // 多实例并发时合并为一次网络往返(见 loadSessionListSingleFlight)。
             const listedSessions = (await loadSessionListSingleFlight(
@@ -339,7 +346,7 @@ export function useSessions() {
           return;
         }
         const nextSessions = data;
-        mergeSavedWorkspacePaths(listWorkspacePathsFromSessions(nextSessions));
+        mergeSavedWorkspaces(listWorkspaceIdentitiesFromSessions(nextSessions));
         setSessions((previous) =>
           isSessionListSemanticallyEqual(previous, nextSessions) ? previous : nextSessions,
         );
@@ -368,11 +375,12 @@ export function useSessions() {
       gatewayUrl,
       tokenStore,
       clearAuth,
-      mergeSavedWorkspacePaths,
+      mergeSavedWorkspaces,
       retainSubagentCollapsed,
       sessionListPathFilterEnabled,
       sessionListPathFilterFeatureEnabled,
       selectedWorkspacePath,
+      selectedSshConnectionId,
       // 刻意不含 navigate —— 见 navigateRef 处的说明。移除后每次路由跳转
       // 不再重跑挂载 effect，常驻的多个实例也不会各发一次 /sessions。
     ],
@@ -391,7 +399,7 @@ export function useSessions() {
    * 还要手动调整工作区。
    */
   const newSession = useCallback(
-    async (workspacePath?: string | null, _parentSessionId?: string | null) => {
+    async (workspacePath?: string | null, sshConnectionId?: string | null) => {
       if (!accessToken) return;
 
       const uiState = useUIStateStore.getState();
@@ -402,11 +410,16 @@ export function useSessions() {
       const contextSessionId =
         routeSessionId ?? (activeTab?.type === 'session' ? activeTab.sessionId : null);
       const resolvedWorkspace = resolveNewSessionWorkspace({
-        ...(workspacePath !== undefined ? { explicitWorkspacePath: workspacePath } : {}),
+        ...(workspacePath !== undefined
+          ? { explicitWorkspacePath: workspacePath, explicitSshConnectionId: sshConnectionId }
+          : {}),
         contextSessionId,
         activeSessionWorkspace: uiState.activeSessionWorkspace,
         sessions,
         fallbackWorkspacePath: uiState.selectedWorkspacePath,
+        // 全局选中工作区是「路径 + 连接」成对的选中值，路径回落时连接一起回落；
+        // 缺失这一步会让远端工作区的新会话退化成裸路径，丢掉 SSH 标识。
+        fallbackSshConnectionId: uiState.selectedSshConnectionId,
       });
 
       uiState.openDraftSession(resolvedWorkspace.workspacePath, resolvedWorkspace.sshConnectionId);
@@ -629,8 +642,8 @@ export function useSessions() {
   const pinnedSessions = useUIStateStore((s) => s.pinnedSessions);
   const collapsedGroups = useMemo(() => new Set(collapsedSessionGroups), [collapsedSessionGroups]);
   const workspaceCollections = useMemo(
-    () => buildWorkspaceSessionCollections(sessions, savedWorkspacePaths, pinnedSessions),
-    [savedWorkspacePaths, sessions, pinnedSessions],
+    () => buildWorkspaceSessionCollections(sessions, savedWorkspaces, pinnedSessions),
+    [savedWorkspaces, sessions, pinnedSessions],
   );
 
   const groupedSessionTrees = useMemo(

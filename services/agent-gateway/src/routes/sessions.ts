@@ -51,6 +51,7 @@ import { buildFileDiff } from '../tools/file-diff-format.js';
 import { deleteSpilledToolOutputsForSession } from '../tools/tool-output-spill.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { registerSessionClientErrorRoutes } from './session-client-error-routes.js';
+import { registerSessionComposerQueueRoutes } from './session-composer-queue.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
 import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
 import {
@@ -97,6 +98,7 @@ import {
   getLatestSessionRunEventSeqByRequest,
   listSessionRunEvents,
   listSessionRunEventsByRequest,
+  listSessionRunEventsByRequestTail,
 } from '../session/session-run-events.js';
 import {
   getAnyInFlightStreamRequestForSession,
@@ -1511,16 +1513,20 @@ async function reconcileSessionRuntimeForResponse(
     return session;
   }
 
+  // 协调未写过 sessions 行时，重查必然拿回等价的一行 —— 直接复用调用方手里这行。
+  // 活跃会话走 `hasLiveSignal` 分支并**恒**返回非 null status，旧实现在这里对会话
+  // 及其每条祖先/子孙都多打一次 SELECT；`/recovery` 在 running 期间被 2.5s 轮询，
+  // 团队会话树上这条冗余查询会被放大几十倍，且全程同步阻塞事件循环。
+  if (!reconciliation.sessionRowChanged) {
+    return session;
+  }
+
   const refreshedSession = sqliteGet<SessionRow>(
     `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE id = ? AND user_id = ? LIMIT 1`,
     [session.id, userId],
   );
   if (refreshedSession) {
     return refreshedSession;
-  }
-
-  if (reconciliation.status === session.state_status) {
-    return session;
   }
 
   return {
@@ -1704,6 +1710,7 @@ async function buildSessionRecoveryReadModel(input: {
   session: SessionRow;
   userId: string;
   messageLimit?: number;
+  runEventLimit?: number;
   since?: number;
 }) {
   // `/recovery` 被团队会话快照（2.5s）与子会话详情（2.5s）轮询，且下面会对子树跑
@@ -1762,18 +1769,31 @@ async function buildSessionRecoveryReadModel(input: {
   const relevantSessionIds = [sessionId, ...children.map((child) => child.id)];
 
   const sessionsById = new Map(sessions.map((candidate) => [candidate.id, candidate] as const));
+  const descendantSessionIdSet = new Set(descendantSessionIds);
   const visibleSessionIds = new Set<string>([
     ...collectAncestorSessionIds(sessionsById, sessionId),
-    ...collectDescendantSessionIds(sessions, sessionId),
+    ...descendantSessionIds,
+    sessionId,
   ]);
-  const reconciledSessions = await reconcileSessionRuntimeRowsForResponse(
-    sessions.filter((candidate) => visibleSessionIds.has(candidate.id)),
+  // 子树已在上面为 `children` 协调过一遍，主会话也已在函数入口协调过；这里只补
+  // 祖先链。旧实现对「子孙 + 主会话」整体重跑第二轮，于是 `/recovery` 每次轮询
+  // 对会话树上每条会话都付了两次协调（含各自的 sessions 重查）。
+  const reconciledAncestorRows = await reconcileSessionRuntimeRowsForResponse(
+    sessions.filter(
+      (candidate) =>
+        visibleSessionIds.has(candidate.id) &&
+        candidate.id !== sessionId &&
+        !descendantSessionIdSet.has(candidate.id),
+    ),
     input.userId,
     { releaseStaleDeciding: false },
   );
-  const reconciledSessionsById = new Map(
-    reconciledSessions.map((candidate) => [candidate.id, candidate] as const),
-  );
+  const reconciledSessionsById = new Map<string, SessionRow>([
+    // 主会话的协调结果来自入口，显式占位，避免被 `sessions` 全量列表里的旧行覆盖。
+    [reconciledSession.id, reconciledSession],
+    ...childRows.map((candidate) => [candidate.id, candidate] as const),
+    ...reconciledAncestorRows.map((candidate) => [candidate.id, candidate] as const),
+  ]);
   const mergedSessions = sessions.map(
     (candidate) => reconciledSessionsById.get(candidate.id) ?? candidate,
   );
@@ -1812,14 +1832,26 @@ async function buildSessionRecoveryReadModel(input: {
   // active stream (if any) so the frontend can resume in-progress tool calls.
   // Historical runEvents are redundant — completed messages already contain the
   // full tool results.
+  //
+  // `runEventLimit` 让「只看最近若干条」的调用方（团队会话 2.5s 轮询的过程时间线预览）
+  // 把单次成本钉在常数级：活跃 scope 的行数随这一轮 run 的时长只增不减，无上限读 +
+  // 逐行 JSON.parse + 整包回传正是活跃期超时的主因。不传该参数时保持全量语义 ——
+  // chat 页的 `recoverActiveAssistantStream` / `buildChatRightPanelStateFromRunEvents`
+  // 是累加 reduce，依赖完整序列，截断会让它们重建出残缺状态。
   let filteredRunEvents: RunEvent[];
   if (hasTurnLimit) {
-    filteredRunEvents = activeThread
-      ? listSessionRunEventsByRequest({
-          sessionId,
-          clientRequestId: activeThread.clientRequestId,
-        })
-      : [];
+    filteredRunEvents = !activeThread
+      ? []
+      : typeof input.runEventLimit === 'number' && input.runEventLimit > 0
+        ? listSessionRunEventsByRequestTail({
+            sessionId,
+            clientRequestId: activeThread.clientRequestId,
+            limit: input.runEventLimit,
+          })
+        : listSessionRunEventsByRequest({
+            sessionId,
+            clientRequestId: activeThread.clientRequestId,
+          });
   } else {
     const allRunEvents = listSessionRunEvents(sessionId);
     filteredRunEvents =
@@ -1963,6 +1995,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           // equality by explicitly passing "0" / "false".
           path: z.string().min(1).optional(),
           includeDescendants: z.coerce.boolean().optional().default(true),
+          // 远端工作区的 host 维度。`path` 本身无法区分主机——两台服务器上
+          // 同名的 `/srv/app` 会互相命中。调用方已知选中的是哪个 SSH 工作区时
+          // 必须带上，否则列表会混入其它主机的同名目录会话。省略则保持
+          // 纯路径过滤（兼容本地会话与旧客户端）。
+          sshConnectionId: z.string().min(1).max(200).optional(),
           // 当 excludeTeam=true 时，排除所有 team 会话（通过 role_layer 列
           // 或 metadata_json 中的 teamWorkspaceId 标识）。chat 侧边栏使用此参数。
           excludeTeam: z.coerce.boolean().optional().default(false),
@@ -1970,7 +2007,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         (request as FastifyRequest & { query: unknown }).query,
       );
 
-      const { limit, offset, path, includeDescendants, excludeTeam } = query;
+      const { limit, offset, path, includeDescendants, excludeTeam, sshConnectionId } = query;
 
       // team 会话通过三种标识之一识别：
       //   1. role_layer 列有值（reception/pm1/pm2/executor/reviewer）
@@ -2006,7 +2043,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       }));
 
       const filtered = path
-        ? filterSessionsByPath(sanitized, { path, includeDescendants }).slice(
+        ? filterSessionsByPath(sanitized, { path, includeDescendants, sshConnectionId }).slice(
             offset,
             offset + limit,
           )
@@ -2061,6 +2098,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
   );
   await registerSessionSharedReadRoutes(app);
   await registerSessionClientErrorRoutes(app);
+  await registerSessionComposerQueueRoutes(app);
 
   app.get(
     '/sessions/:sessionId/message-ratings',
@@ -2240,6 +2278,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         typeof query.messageLimit === 'string' && /^\d+$/u.test(query.messageLimit)
           ? Number(query.messageLimit)
           : undefined;
+      // 只回活跃 scope 的尾部 N 条 run events（0 / 缺省 / 非法值 → 全量，保持旧语义）。
+      const runEventLimit =
+        typeof query.runEventLimit === 'string' && /^\d+$/u.test(query.runEventLimit)
+          ? Number(query.runEventLimit)
+          : undefined;
       const since =
         typeof query.since === 'string' && /^\d+$/u.test(query.since)
           ? Number(query.since)
@@ -2249,6 +2292,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         session,
         userId: user.sub,
         messageLimit,
+        runEventLimit,
         since,
       });
       step.succeed(undefined, {

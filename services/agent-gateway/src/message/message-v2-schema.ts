@@ -368,6 +368,8 @@ export interface MessageV2Row {
   session_id: string;
   user_id: string;
   time_created: number;
+  /** 反规范化自 `data.role`（回填列，见 infra/db.ts 的 `backfillMessageRole`）。 */
+  role: string;
   data: string; // JSON of Omit<MessageInfo, 'id' | 'sessionID'>
   created_at: string;
   updated_at: string;

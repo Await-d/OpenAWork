@@ -488,6 +488,15 @@ export interface SessionsListOptions {
    */
   includeDescendants?: boolean;
   /**
+   * Scope `path` to a single SSH connection.
+   *
+   * Only meaningful together with `path`: remote working directories are not
+   * unique across hosts, so a bare path filter would also return sessions from
+   * any other server carrying the same directory. Omit it to keep the legacy
+   * path-only (or local) behaviour.
+   */
+  sshConnectionId?: string | null;
+  /**
    * When `true`, excludes team sessions (identified by `role_layer` column
    * or `teamWorkspaceId` in `metadata_json`) from the result set.
    * Used by the chat sidebar to avoid showing team conversations.
@@ -587,12 +596,22 @@ export interface SessionsClient {
   getRecovery(
     token: string,
     sessionId: string,
-    options?: { messageLimit?: number; signal?: AbortSignal; since?: number },
+    options?: {
+      messageLimit?: number;
+      runEventLimit?: number;
+      signal?: AbortSignal;
+      since?: number;
+    },
   ): Promise<SessionRecoveryReadModel>;
   getRecoveryResult(
     token: string,
     sessionId: string,
-    options?: { messageLimit?: number; signal?: AbortSignal; since?: number },
+    options?: {
+      messageLimit?: number;
+      runEventLimit?: number;
+      signal?: AbortSignal;
+      since?: number;
+    },
   ): Promise<SessionRecoveryLoadResult>;
   getStatus(
     token: string,
@@ -1009,11 +1028,22 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
   const getRecoveryResult = async (
     token: string,
     sessionId: string,
-    options?: { messageLimit?: number; signal?: AbortSignal; since?: number },
+    options?: {
+      messageLimit?: number;
+      runEventLimit?: number;
+      signal?: AbortSignal;
+      since?: number;
+    },
   ): Promise<SessionRecoveryLoadResult> => {
     const params = new URLSearchParams();
     if (typeof options?.messageLimit === 'number') {
       params.set('messageLimit', String(options.messageLimit));
+    }
+    // 只回活跃 scope 的尾部 N 条 run events。**仅**供只看最近若干条的消费者使用
+    // （团队会话的过程时间线预览）；需要完整序列做累加重建的调用方（chat 页
+    // recoverActiveAssistantStream / buildChatRightPanelStateFromRunEvents）必须省略。
+    if (typeof options?.runEventLimit === 'number') {
+      params.set('runEventLimit', String(options.runEventLimit));
     }
     if (typeof options?.since === 'number') {
       params.set('since', String(options.since));
@@ -1061,6 +1091,10 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
         params.set('path', options.path.trim());
         if (options.includeDescendants === false) {
           params.set('includeDescendants', '0');
+        }
+        const sshConnectionId = options.sshConnectionId?.trim();
+        if (sshConnectionId) {
+          params.set('sshConnectionId', sshConnectionId);
         }
       }
       if (options?.excludeTeam) {

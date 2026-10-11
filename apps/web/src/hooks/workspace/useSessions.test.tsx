@@ -81,8 +81,10 @@ beforeEach(() => {
     activeTabId: null,
     chatView: 'session',
     collapsedSubagentParentIds: [],
-    savedWorkspacePaths: [],
+    savedWorkspaces: [],
     selectedWorkspacePath: null,
+    // 草稿的 SSH 连接是独立字段，跨用例不重置会残留上一轮的远端绑定。
+    selectedSshConnectionId: null,
     sessionListPathFilterEnabled: false,
     sessionListPathFilterFeatureEnabled: false,
     tabs: [],
@@ -133,7 +135,10 @@ describe('useSessions.newSession — 草稿会话', () => {
     const state = useUIStateStore.getState();
     expect(sessionsClientMocks.create).not.toHaveBeenCalled();
     expect(state.selectedWorkspacePath).toBe('/ws/a');
-    expect(state.savedWorkspacePaths).toContain('/ws/a');
+    expect(state.savedWorkspaces).toContainEqual({
+      workspacePath: '/ws/a',
+      sshConnectionId: null,
+    });
     expect(state.tabs[0]?.workspacePath).toBe('/ws/a');
   });
 
@@ -155,8 +160,90 @@ describe('useSessions.newSession — 草稿会话', () => {
 
     const state = useUIStateStore.getState();
     expect(state.selectedWorkspacePath).toBe('/ws/current');
-    expect(state.savedWorkspacePaths).toContain('/ws/current');
+    expect(state.savedWorkspaces).toContainEqual({
+      workspacePath: '/ws/current',
+      sshConnectionId: null,
+    });
     expect(state.tabs[0]?.workspacePath).toBe('/ws/current');
+  });
+
+  /**
+   * 回归锁定：草稿工作区的两个字段是分别落地的 —— `workingDirectory` 来自
+   * `selectedWorkspacePath`，`sshConnectionId` 来自 `selectedSshConnectionId`。
+   * 新建会话时漏掉连接，草稿就停在「远端路径 + 本地身份」，首条消息创建出来的
+   * 会话没有 SSH 绑定，UI 上表现为远端工作区退化成裸本地路径。
+   */
+  it('远端工作区分组「+」新建时把 SSH 连接与路径成对写入草稿', async () => {
+    const { result } = renderUseSessions();
+
+    await act(async () => {
+      await result.current.newSession('/remote/repo', 'ssh-a');
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/remote/repo');
+    expect(state.selectedSshConnectionId).toBe('ssh-a');
+    expect(state.savedWorkspaces).toContainEqual({
+      workspacePath: '/remote/repo',
+      sshConnectionId: 'ssh-a',
+    });
+  });
+
+  it('本地工作区显式传 null 时清掉上一轮残留的远端绑定', async () => {
+    useUIStateStore.setState({ selectedSshConnectionId: 'ssh-stale' });
+    const { result } = renderUseSessions();
+
+    await act(async () => {
+      await result.current.newSession('/local/repo', null);
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/local/repo');
+    expect(state.selectedSshConnectionId).toBeNull();
+    expect(state.savedWorkspaces).toContainEqual({
+      workspacePath: '/local/repo',
+      sshConnectionId: null,
+    });
+  });
+
+  it('无参新建时回落全局选中工作区，连同其 SSH 连接', async () => {
+    useUIStateStore.setState({
+      selectedWorkspacePath: '/remote/repo',
+      selectedSshConnectionId: 'ssh-a',
+    });
+    const { result } = renderUseSessions('/chat');
+
+    await act(async () => {
+      await result.current.newSession();
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/remote/repo');
+    expect(state.selectedSshConnectionId).toBe('ssh-a');
+  });
+
+  it('从远端会话继承时新草稿仍是远端', async () => {
+    sessionsClientMocks.list.mockResolvedValueOnce([
+      {
+        id: 'session-remote',
+        metadata_json: JSON.stringify({
+          workingDirectory: '/remote/repo',
+          sshConnectionId: 'ssh-a',
+        }),
+        title: '远端会话',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    const { result } = renderUseSessions('/chat/session-remote');
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.newSession();
+    });
+
+    const state = useUIStateStore.getState();
+    expect(state.selectedWorkspacePath).toBe('/remote/repo');
+    expect(state.selectedSshConnectionId).toBe('ssh-a');
   });
 
   it('实时解析缓存优先于会话列表 metadata', async () => {

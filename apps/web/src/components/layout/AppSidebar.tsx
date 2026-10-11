@@ -27,7 +27,7 @@ import SessionContextMenu from './sidebar/SessionContextMenu.js';
 import TeamSessionContextMenu from './sidebar/TeamSessionContextMenu.js';
 import TeamWorkspaceContextMenu from './sidebar/TeamWorkspaceContextMenu.js';
 import ChatWorkspaceContextMenu from './sidebar/ChatWorkspaceContextMenu.js';
-import { getWorkspaceGroupKey } from '../../utils/session/session-grouping.js';
+import { isWorkspaceGroupCollapsed } from '../../utils/session/session-grouping.js';
 import WorkspacePickerModal from '../common/modal/WorkspacePickerModal.js';
 import { buildWorkspacePickerDataSource } from '../common/modal/workspace-picker-data-source.js';
 import { buildTeamSessionRoute } from '../../utils/session/team-session-route.js';
@@ -77,9 +77,9 @@ export default function AppSidebar({
 
   // 对话工作区选择器
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
-  const addSavedWorkspacePath = useUIStateStore((s) => s.addSavedWorkspacePath);
+  const addSavedWorkspace = useUIStateStore((s) => s.addSavedWorkspace);
   const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
-  const removeSavedWorkspacePath = useUIStateStore((s) => s.removeSavedWorkspacePath);
+  const removeSavedWorkspace = useUIStateStore((s) => s.removeSavedWorkspace);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
   const fileTreeRootPath = useUIStateStore((s) => s.fileTreeRootPath);
@@ -93,12 +93,13 @@ export default function AppSidebar({
   );
   const handleSelectWorkspace = useCallback(
     async (path: string) => {
-      addSavedWorkspacePath(path);
+      // 经典侧栏的 picker 只列本地目录，故连接维度恒为 null。
+      addSavedWorkspace({ workspacePath: path, sshConnectionId: null });
       setSelectedWorkspacePath(path);
       setFileTreeRootPath(path);
       setShowWorkspacePicker(false);
     },
-    [addSavedWorkspacePath, setFileTreeRootPath, setSelectedWorkspacePath],
+    [addSavedWorkspace, setFileTreeRootPath, setSelectedWorkspacePath],
   );
 
   const handleToggleRail = () => {
@@ -667,15 +668,16 @@ export default function AppSidebar({
                 </p>
               )}
               {groupedSessions.map((group) => {
-                const groupKey = getWorkspaceGroupKey(group.workspacePath);
-                const isCollapsed = collapsedGroups.has(groupKey);
-                const groupBodyId = `app-session-group-${encodeURIComponent(groupKey)}`;
-                const actualSessionCount =
-                  sessionCountByWorkspace.get(getWorkspaceGroupKey(group.workspacePath)) ?? 0;
-                // 从 groupedSessionTrees 中查找对应的 roots（树形结构）
-                const treeGroup = groupedSessionTrees.find(
-                  (tg) => getWorkspaceGroupKey(tg.workspacePath) === groupKey,
+                const groupKey = group.groupKey;
+                const isCollapsed = isWorkspaceGroupCollapsed(
+                  collapsedGroups,
+                  group.workspacePath,
+                  group.sshConnectionId,
                 );
+                const groupBodyId = `app-session-group-${encodeURIComponent(groupKey)}`;
+                const actualSessionCount = sessionCountByWorkspace.get(groupKey) ?? 0;
+                // 从 groupedSessionTrees 中查找对应的 roots（树形结构）
+                const treeGroup = groupedSessionTrees.find((tg) => tg.groupKey === groupKey);
                 const roots = treeGroup?.roots ?? [];
                 return (
                   <div
@@ -781,7 +783,7 @@ export default function AppSidebar({
                       </button>
                       <button
                         type="button"
-                        onClick={() => void newSession(group.workspacePath)}
+                        onClick={() => void newSession(group.workspacePath, group.sshConnectionId)}
                         title={`在 ${group.workspaceLabel} 中新建会话`}
                         style={{
                           flexShrink: 0,

@@ -3,7 +3,7 @@ import { sqliteGet, sqliteRun } from '../infra/db.js';
 import type { SqliteBindableValue } from '../infra/sqlite-bind-params.js';
 import { getAnyInFlightStreamRequestForSession } from '../routes/stream-cancellation.js';
 import {
-  clearSessionRuntimeThread,
+  clearSessionRuntimeThreadIfPresent,
   hasFreshSessionRuntimeThread,
 } from './session-runtime-thread-store.js';
 
@@ -25,6 +25,14 @@ export interface SessionRuntimeReconciliationResult {
   sessionContext: SessionContextRecord | null;
   status: PersistedSessionStateStatus | null;
   wasReset: boolean;
+  /**
+   * 本次协调是否真的 UPDATE 过 `sessions` 行（`state_status` / `updated_at`）。
+   *
+   * 读侧据此跳过「协调后重查该行」：`false` 时 `sessions` 行未被本次协调触碰，
+   * 重新 SELECT 必然拿回与调用方手里那一行等价的结果。批量读路径（`/recovery`
+   * 会按会话 + 全部祖先/子孙各调一次协调）靠这个标记把纯冗余的 SELECT 消掉。
+   */
+  sessionRowChanged: boolean;
 }
 
 export type SessionInteractionRunEvent = Extract<
@@ -128,10 +136,27 @@ function releaseStaleDecidingRecords(
   where: string,
   params: SqliteBindableValue[],
 ): void {
+  const stalePredicate = `status = 'deciding' AND updated_at < ${DECIDING_INTERACTION_TIMEOUT_SQL}`;
+
+  // 前置存在性探测，与 `clearSessionRuntimeThreadIfPresent` 同构：
+  // 「没有僵尸 deciding」是压倒性的常态，而 UPDATE 即使影响 0 行也要开写事务抢 WAL
+  // 写锁。`/status` 有 1s 与 3s 两条轮询，节流窗口内每个客户端仍会各发一次这组写；
+  // 网关是 bun 单进程 + 同步 `bun:sqlite` + `busy_timeout=5000`（见 `infra/db.ts`），
+  // 撞锁期间整个事件循环连同所有在途请求一起冻结。先判存在，把常态降级为纯读；
+  // 确有僵尸时才执行原 UPDATE，对外语义完全不变（无行时 UPDATE 本就是 no-op）。
+  // `SELECT 1 AS id` 的列值恒为整数 1；这里只用作存在性标记，不参与任何比较。
+  const hasStale = sqliteGet<{ id: number }>(
+    `SELECT 1 AS id FROM ${table} WHERE ${stalePredicate} AND ${where} LIMIT 1`,
+    params,
+  );
+  if (hasStale === undefined) {
+    return;
+  }
+
   sqliteRun(
     `UPDATE ${table}
        SET status = 'pending', updated_at = datetime('now')
-     WHERE status = 'deciding' AND updated_at < ${DECIDING_INTERACTION_TIMEOUT_SQL} AND ${where}`,
+     WHERE ${stalePredicate} AND ${where}`,
     params,
   );
 }
@@ -279,6 +304,7 @@ export function reconcileSessionStateStatus(input: {
       sessionContext: null,
       status: null,
       wasReset: false,
+      sessionRowChanged: false,
     };
   }
 
@@ -300,7 +326,8 @@ export function reconcileSessionStateStatus(input: {
 
   if (hasLiveSignal) {
     const desiredStatus = resolveLiveSessionStateStatus(previousStatus, input.sessionId);
-    if (desiredStatus !== previousStatus) {
+    const changed = desiredStatus !== previousStatus;
+    if (changed) {
       sqliteRun(
         "UPDATE sessions SET state_status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
         [desiredStatus, input.sessionId, input.userId],
@@ -315,12 +342,17 @@ export function reconcileSessionStateStatus(input: {
       }),
       status: desiredStatus,
       wasReset: false,
+      sessionRowChanged: changed,
     };
   }
 
   if (hasPendingSessionInteraction(input.sessionId)) {
-    clearSessionRuntimeThread({ sessionId: input.sessionId, userId: input.userId });
-    if (previousStatus !== 'paused') {
+    // 守卫式清理：走到这里说明既无 in-flight 流也无新鲜心跳，正常情况下那行早已被
+    // stream 的 `finally` 删掉，DELETE 会命中 0 行却仍要抢一次 WAL 写锁。见
+    // `clearSessionRuntimeThreadIfPresent` 的说明。
+    clearSessionRuntimeThreadIfPresent({ sessionId: input.sessionId, userId: input.userId });
+    const pausedChanged = previousStatus !== 'paused';
+    if (pausedChanged) {
       sqliteRun(
         "UPDATE sessions SET state_status = 'paused', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
         [input.sessionId, input.userId],
@@ -332,11 +364,12 @@ export function reconcileSessionStateStatus(input: {
       sessionContext: buildSessionContextRecord({ sessionId: input.sessionId, status: 'paused' }),
       status: 'paused',
       wasReset: false,
+      sessionRowChanged: pausedChanged,
     };
   }
 
   if (previousStatus === 'idle') {
-    clearSessionRuntimeThread({ sessionId: input.sessionId, userId: input.userId });
+    clearSessionRuntimeThreadIfPresent({ sessionId: input.sessionId, userId: input.userId });
     return {
       previousStatus,
       sessionContext: buildSessionContextRecord({
@@ -345,10 +378,12 @@ export function reconcileSessionStateStatus(input: {
       }),
       status: previousStatus,
       wasReset: false,
+      // 只清 session_runtime_threads 行，sessions 行未被触碰。
+      sessionRowChanged: false,
     };
   }
 
-  clearSessionRuntimeThread({ sessionId: input.sessionId, userId: input.userId });
+  clearSessionRuntimeThreadIfPresent({ sessionId: input.sessionId, userId: input.userId });
   sqliteRun(
     "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
     [input.sessionId, input.userId],
@@ -358,5 +393,6 @@ export function reconcileSessionStateStatus(input: {
     sessionContext: buildSessionContextRecord({ sessionId: input.sessionId, status: 'idle' }),
     status: 'idle',
     wasReset: true,
+    sessionRowChanged: true,
   };
 }

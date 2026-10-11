@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  clearSessionRuntimeThread: vi.fn(),
+  clearSessionRuntimeThreadIfPresent: vi.fn(),
   getAnyInFlightStreamRequestForSession: vi.fn(),
   hasFreshSessionRuntimeThread: vi.fn(),
   sqliteGet: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('../../routes/stream-cancellation.js', () => ({
 }));
 
 vi.mock('../../session/session-runtime-thread-store.js', () => ({
-  clearSessionRuntimeThread: mocks.clearSessionRuntimeThread,
+  clearSessionRuntimeThreadIfPresent: mocks.clearSessionRuntimeThreadIfPresent,
   hasFreshSessionRuntimeThread: mocks.hasFreshSessionRuntimeThread,
 }));
 
@@ -37,6 +37,8 @@ interface FakeState {
   pendingPermissions: number;
   pendingQuestions: number;
   persistStatus: string | null;
+  /** 是否存在超时的僵尸 `deciding` 行（决定前置存在性探测的结果）。 */
+  staleDeciding: boolean;
 }
 
 const stateWrites: Array<{ sessionId: string; status: string; userId: string }> = [];
@@ -44,6 +46,12 @@ const stateWrites: Array<{ sessionId: string; status: string; userId: string }> 
 let state: FakeState;
 
 function sqliteGetImpl(sql: string): unknown {
+  // 守卫式存在性探测（`releaseStaleDecidingRecords` 的前置 SELECT）。必须先于下面
+  // 按表名匹配的分支判断 —— 探测语句同样带表名。
+  if (/^\s*SELECT\s+1\s+AS\s+id/i.test(sql)) {
+    return state.staleDeciding ? { id: 'stale-1' } : undefined;
+  }
+
   if (/FROM\s+sessions/i.test(sql)) {
     return state.persistStatus === null ? undefined : { state_status: state.persistStatus };
   }
@@ -57,6 +65,14 @@ function sqliteGetImpl(sql: string): unknown {
   }
 
   return undefined;
+}
+
+/** 回收僵尸 deciding 的 UPDATE —— 守卫生效时应为 0 条。 */
+function staleReleaseUpdates(): unknown[][] {
+  return mocks.sqliteRun.mock.calls.filter((call) => {
+    const sql = String(call[0]);
+    return /^UPDATE\s+(permission_requests|question_requests)/i.test(sql);
+  });
 }
 
 function sqliteRunImpl(sql: string, params: unknown[] = []): void {
@@ -87,6 +103,7 @@ function seed(input: {
   pendingPermissions?: number;
   pendingQuestions?: number;
   persistStatus: string | null;
+  staleDeciding?: boolean;
   streamInFlight: boolean;
   threadFresh: boolean;
 }): void {
@@ -94,6 +111,7 @@ function seed(input: {
     pendingPermissions: input.pendingPermissions ?? 0,
     pendingQuestions: input.pendingQuestions ?? 0,
     persistStatus: input.persistStatus,
+    staleDeciding: input.staleDeciding ?? false,
   };
   stateWrites.length = 0;
   mocks.getAnyInFlightStreamRequestForSession.mockReturnValue(
@@ -103,7 +121,7 @@ function seed(input: {
 }
 
 beforeEach(() => {
-  mocks.clearSessionRuntimeThread.mockReset();
+  mocks.clearSessionRuntimeThreadIfPresent.mockReset();
   mocks.getAnyInFlightStreamRequestForSession.mockReset();
   mocks.hasFreshSessionRuntimeThread.mockReset();
   mocks.sqliteGet.mockReset();
@@ -180,5 +198,64 @@ describe('reconcileSessionStateStatus 活跃信号不变量', () => {
     expect(result.wasReset).toBe(false);
     expect(state.persistStatus).toBe('paused');
     expect(stateWrites).toEqual([{ sessionId: SESSION_ID, status: 'paused', userId: USER_ID }]);
+  });
+});
+
+/**
+ * 写锁防护不变量：`/status`（3s）与 `/recovery`（1s）会以秒级频率走进本文件。
+ * 回收僵尸 `deciding` 的 UPDATE 在「无僵尸」时命中 0 行，而 SQLite 的 UPDATE 即使
+ * 影响 0 行也要开写事务抢 WAL 写锁——网关是 bun 单进程 + 同步 `bun:sqlite` +
+ * `busy_timeout=5000`，撞锁期间整个事件循环连同所有在途请求一起冻结，最长 5s。
+ *
+ * 这正是「工具权限申请期间 `/status` 偶发挂起」的成因，故必须有断言钉住。
+ */
+describe('reconcileSessionStateStatus 的写锁防护', () => {
+  it('无僵尸 deciding 时只读不写，不发出任何回收 UPDATE', () => {
+    seed({
+      pendingPermissions: 1,
+      persistStatus: 'paused',
+      staleDeciding: false,
+      streamInFlight: false,
+      threadFresh: false,
+    });
+
+    reconcileSessionStateStatus({ sessionId: SESSION_ID, userId: USER_ID });
+
+    expect(staleReleaseUpdates()).toEqual([]);
+  });
+
+  it('存在僵尸 deciding 时照常回收两张表', () => {
+    seed({
+      pendingPermissions: 1,
+      persistStatus: 'paused',
+      staleDeciding: true,
+      streamInFlight: false,
+      threadFresh: false,
+    });
+
+    reconcileSessionStateStatus({ sessionId: SESSION_ID, userId: USER_ID });
+
+    const updatedTables = staleReleaseUpdates().map((call) => String(call[0]));
+    expect(updatedTables).toHaveLength(2);
+    expect(updatedTables[0]).toMatch(/UPDATE\s+permission_requests/i);
+    expect(updatedTables[1]).toMatch(/UPDATE\s+question_requests/i);
+  });
+
+  it('回收 UPDATE 仍以 status=deciding 且超时的僵尸行为条件，不放宽口径', () => {
+    seed({
+      persistStatus: 'idle',
+      staleDeciding: true,
+      streamInFlight: false,
+      threadFresh: false,
+    });
+
+    reconcileSessionStateStatus({ sessionId: SESSION_ID, userId: USER_ID });
+
+    for (const call of staleReleaseUpdates()) {
+      const sql = String(call[0]);
+      expect(sql).toMatch(/status\s*=\s*'deciding'/i);
+      expect(sql).toMatch(/updated_at\s*<\s*datetime\('now',\s*'-10 minutes'\)/i);
+      expect(sql).toMatch(/SET\s+status\s*=\s*'pending'/i);
+    }
   });
 });

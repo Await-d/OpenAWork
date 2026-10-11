@@ -46,26 +46,27 @@ OpenAWork/
 
 ## 查找指引
 
-| 任务                | 位置                                                  |
-| ------------------- | ----------------------------------------------------- |
-| Agent 状态机        | `packages/agent-core/src/state-machine.ts`            |
-| LLM Provider 配置   | `packages/agent-core/src/provider/`                   |
-| 工具定义            | `packages/agent-core/src/tools/` + `tool-contract.ts` |
-| 会话持久化          | `packages/agent-core/src/sqlite-session-store.ts`     |
-| 多 Agent DAG        | `packages/multi-agent/src/dag.ts` + `orchestrator.ts` |
-| 网关 HTTP 路由      | `services/agent-gateway/src/routes/`                  |
-| 网关 WS 流式        | `services/agent-gateway/src/routes/stream.ts`         |
-| 消息渠道            | `services/agent-gateway/src/channels/`                |
-| 技能安装/安全       | `packages/skill-registry/src/`                        |
-| 共享类型（消息/流） | `packages/shared/src/index.ts`                        |
-| UI 组件             | `packages/shared-ui/src/`                             |
-| Web 应用路由        | `apps/web/src/App.tsx`                                |
-| 桌面 Tauri 命令     | `apps/desktop/src-tauri/src/`                         |
-| 认证状态（Zustand） | `apps/web/src/stores/auth.ts`                         |
-| 浏览器端网关客户端  | `packages/web-client/src/`                            |
-| Docker 基础设施     | `docker-compose.yml`                                  |
-| CI 流水线           | `.github/workflows/ci.yml`                            |
-| Agent 路由逻辑      | `packages/agent-core/src/routing.ts`                  |
+| 任务                | 位置                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| Agent 状态机        | `packages/agent-core/src/state-machine.ts`                                                        |
+| LLM Provider 配置   | `packages/agent-core/src/provider/`                                                               |
+| 工具定义            | `packages/agent-core/src/tools/` + `tool-contract.ts`                                             |
+| 会话持久化          | `packages/agent-core/src/sqlite-session-store.ts`                                                 |
+| 多 Agent DAG        | `packages/multi-agent/src/dag.ts` + `orchestrator.ts`                                             |
+| 网关 HTTP 路由      | `services/agent-gateway/src/routes/`                                                              |
+| 网关 WS 流式        | `services/agent-gateway/src/routes/stream.ts`                                                     |
+| 消息渠道            | `services/agent-gateway/src/channels/`                                                            |
+| 待发队列（服务端）  | `services/agent-gateway/src/session/composer-queue-store.ts` + `routes/session-composer-queue.ts` |
+| 技能安装/安全       | `packages/skill-registry/src/`                                                                    |
+| 共享类型（消息/流） | `packages/shared/src/index.ts`                                                                    |
+| UI 组件             | `packages/shared-ui/src/`                                                                         |
+| Web 应用路由        | `apps/web/src/App.tsx`                                                                            |
+| 桌面 Tauri 命令     | `apps/desktop/src-tauri/src/`                                                                     |
+| 认证状态（Zustand） | `apps/web/src/stores/auth.ts`                                                                     |
+| 浏览器端网关客户端  | `packages/web-client/src/`                                                                        |
+| Docker 基础设施     | `docker-compose.yml`                                                                              |
+| CI 流水线           | `.github/workflows/ci.yml`                                                                        |
+| Agent 路由逻辑      | `packages/agent-core/src/routing.ts`                                                              |
 
 ## 架构说明
 
@@ -76,7 +77,9 @@ OpenAWork/
 - **哈希锚定编辑**：自定义文件编辑工具（`packages/agent-core/src/tools/hash-edit.ts`）使用 SHA-256 行哈希替代行号，防止编辑漂移。
 - **路由分级**：`packages/agent-core/src/routing.ts` 定义 R0–R3 路由分级（复杂度层级），用于 Agent 任务调度。
 - **子代理结果交付（单通道）**：子代理结算后由 `services/agent-gateway/src/task/task-job-delivery.ts` 的 `deliverTaskCompletion` 投递——先幂等准入（`injectSyntheticSessionMessage`，`notificationId` 同时作消息 id 与唤醒请求键），再由纯函数 `resolveTaskJobWakeDecision` 决策，最后 `continueSessionFromHistory` 唤醒。通知以 **`synthetic` 角色**落库（对模型可见、客户端不得按用户输入渲染；`description` + `metadata = { source:'subagent', childID, agent, state }` 是 notice 契约）。**通知正文由 `formatSubagentNoticeText` 渲染为参考库的 `<subagent sessionID state description>` 标签形态**（标签内 `state` 用上游 wire 词表 `completed|error|cancelled`；客户端 `parseSubagentNotice` 解析时剥离标签），并带 4k 字符上限（超出截断 + 指引去子会话读全文）；**同步 task 结果只取子代理最后一条 assistant 文本**（`extractLatestChildSessionSummary`，不再全量拼接子会话文本/工具输出），并同样以 `<subagent sessionID state>` 包裹（保留 `task_id` resume 提示行），正文另有 20k 字符上限（`delegated-task-display.ts`）。**通知已落库 ⇒ 延后永不丢**，故禁止恢复「定时重试 / 伪造用户请求」类补偿路径；自动唤醒受 `task/task-wake-budget.ts` 上限约束（用户真实交互才重置计数）。
+- **待发队列（服务端落库）**：输入框在流式期间按 Enter 排队的消息，**以网关 SQLite `session_composer_queue` 表为唯一真相源**（`session/composer-queue-store.ts` + `routes/session-composer-queue.ts`，按 `user_id` + `session_id` 归属，未拥有会话一律 404）。客户端只在三处与后端交互——`use-composer-queue-backend.ts` 的 `hydrate`（进会话拉全量）/ `enqueue`（**入队即落库**，失败则回滚内存条目并把文本退回输入框）/ `remove`；**消费时机仍是「发送成功后」**才删服务端记录（`run-send-message.ts` 的 `cleanupConsumedQueuedMessage`），因为 flush 会先摘队首再发送、失败还要放回，出队即删会让重试凭空丢消息。localStorage 快照降级为**只读兜底**（仅网关没问成时顶上），不再写入。**附件二进制不入库**，仍由 IndexedDB 持有，网关只存附件元数据用于重建预览；取不到本地 Blob 时条目被标记 `requiresAttachmentRebind` 提示重新选文件，而非静默丢附件。幂等键复用客户端生成的 `itemId`，天然抵抗入队重试与双标签页。
 - **.evidence/**：fastify、ioredis、postgres 的只读参考源码，禁止编辑。
+- **待发队列的跨端互斥（消费租约）**：队列落在服务端，而「判断空闲 → 发送」发生在客户端，因此同一会话被多端（桌面端 ↔ Web）或同机多标签页打开时，各端会各自把同一条待发消息发一遍。互斥由**数据库层的原子 claim** 保证：`session_composer_queue` 的 `claimed_by` / `claimed_until` 两列 + `POST/DELETE .../:itemId/claim`，单条 UPDATE 的 WHERE 同时判定「未被他人持有」与「自己的持有可续期」，不依赖事务隔离级别。客户端身份是**每标签页一个**的 `clientId`（sessionStorage，`composer-queue-client-id.ts`）——共用 id 会让同机双标签页互认为「自己人」而双双放行。`claim` 是**三态**，调用方必须区分：`true` 拿到权可发；`false` 另一端正在处理，跳过并**丢弃本地副本**（切勿就此重新水合，那会拉回同一条仍在该会话队列里的条目 → 再次 claim 失败 → 再次水合，形成死循环）；抛错 = 没问成，必须**保留**本地条目并退避重试（`QUEUE_CLAIM_RETRY_MS`），移除会让消息静默消失、硬发则可能重复。flush 流程中**不得预先摘队首**，摘除必须在 claim 成功之后。发送失败要 `releaseClaim` 交还租约，否则该条目要等租约（默认 60s）过期才能被接手。**已知边界**：附件二进制仍不跨端（见上条）。
 
 ## 约定
 

@@ -15,7 +15,7 @@ export interface ChatWorkspaceMenuState {
 export function useChatWorkspaceActions() {
   const setSelectedWorkspacePath = useUIStateStore((s) => s.setSelectedWorkspacePath);
   const setFileTreeRootPath = useUIStateStore((s) => s.setFileTreeRootPath);
-  const removeSavedWorkspacePath = useUIStateStore((s) => s.removeSavedWorkspacePath);
+  const removeSavedWorkspace = useUIStateStore((s) => s.removeSavedWorkspace);
 
   const [chatWorkspaceContextMenu, setChatWorkspaceContextMenu] =
     useState<ChatWorkspaceMenuState | null>(null);
@@ -43,9 +43,10 @@ export function useChatWorkspaceActions() {
 
   const removeChatWorkspace = useCallback(
     (workspacePath: string) => {
-      removeSavedWorkspacePath(workspacePath);
+      // 经典侧栏的对话工作区只来自本地目录，连接维度恒为 null。
+      removeSavedWorkspace({ workspacePath, sshConnectionId: null });
     },
-    [removeSavedWorkspacePath],
+    [removeSavedWorkspace],
   );
 
   return {

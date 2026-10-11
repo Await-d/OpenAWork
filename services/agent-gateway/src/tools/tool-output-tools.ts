@@ -21,7 +21,7 @@ export const readToolOutputToolDefinition: ToolDefinition<
 > = {
   name: 'read_tool_output',
   description:
-    '从当前会话中读取此前产生的工具调用结果。优先使用历史中的 toolCallId；超长 ID 引用使用 toolCallRef。仅当两者都拿不到时，才使用 useLatestReferenced=true 兜底。支持 charStart/charCount 分页读取超长内容。',
+    '从当前会话中读取此前产生的工具调用结果。优先使用历史中的 toolCallId；超长 ID 引用使用 toolCallRef。仅当两者都拿不到时，才使用 useLatestReferenced=true 兜底。若只是在续读上一页（只传了 lineStart / lineCount、jsonPath、charStart / charCount 或 itemStart / itemCount），可省略引用参数，工具会自动沿用最近一次被引用的输出，并在 note 中告知实际解析到的 toolCallId。支持 charStart/charCount 分页读取超长内容。',
   inputSchema: readToolOutputInputSchema,
   outputSchema: readToolOutputOutputSchema,
   timeout: 30000,
@@ -31,7 +31,7 @@ export const readToolOutputToolDefinition: ToolDefinition<
 };
 
 export function buildReadToolOutputHint(toolCallId: string): string {
-  return `如需继续查看完整细节，请优先调用 read_tool_output 并传入 toolCallId="${toolCallId}"；只有在当前会话历史里出现了 [tool_output_reference] 且拿不到 toolCallId 时，才使用 useLatestReferenced=true。超长单行可配合 charStart/charCount 续读（偏移相对当前行/项选择，续读时保留选择参数）；文本结果建议配合 lineStart/lineCount，结构化结果建议配合 jsonPath 或 itemStart/itemCount。`;
+  return `如需继续查看完整细节，请优先调用 read_tool_output 并传入 toolCallId="${toolCallId}"；只有在当前会话历史里出现了 [tool_output_reference] 且拿不到 toolCallId 时，才使用 useLatestReferenced=true。续读同一份输出时可直接省略引用参数只传 lineStart / jsonPath / charStart / itemStart 等选择参数，工具会自动沿用最近一次被引用的输出。超长单行可配合 charStart/charCount 续读（偏移相对当前行/项选择，续读时保留选择参数）；文本结果建议配合 lineStart/lineCount，结构化结果建议配合 jsonPath 或 itemStart/itemCount。`;
 }
 
 export function buildReadToolOutputResponse(input: {
@@ -134,7 +134,7 @@ export function buildReadToolOutputResponse(input: {
     output: text.slice(charStart, charEnd),
     note:
       charEnd < text.length
-        ? `仅返回当前选择的字符片段；保留 jsonPath/行/项参数并使用 charStart=${charEnd} 续读。结构化片段为 JSON 文本。`
+        ? `仅返回当前选择的字符片段。续读时请再次调用 read_tool_output，带上 toolCallId="${input.toolCallId}"（或 toolCallRef）精确定位到这份输出，并保留原有的 jsonPath/行/项参数、同时把 charStart 改为 ${charEnd};若省略引用参数，系统会回退到最近一次被引用的输出，并自动解析为本 toolCallId。结构化片段为 JSON 文本。`
         : '当前选择的字符分页已结束；结构化片段为 JSON 文本。',
   };
 }
@@ -175,7 +175,7 @@ function buildSelectionResponse(input: {
       output: selection.output,
       note:
         selection.sliceEnd < selection.totalLines
-          ? `仅返回第 ${lineStart}-${selection.sliceEnd} 行；完整输出仍已保留，可继续增加 lineStart 查看后续内容。`
+          ? `仅返回第 ${lineStart}-${selection.sliceEnd} 行；完整输出仍已保留。续读时请再次调用 read_tool_output 并带上 toolCallId="${input.toolCallId}"（或 toolCallRef）精确定位，同时把 lineStart 改为 ${selection.sliceEnd + 1}；若省略引用参数，系统会回退到最近一次被引用的输出，并自动解析为本 toolCallId。`
           : undefined,
     };
   }
@@ -200,7 +200,7 @@ function buildSelectionResponse(input: {
       output: selectedItems,
       note:
         itemStart + selectedItems.length < input.output.length
-          ? `仅返回第 ${itemStart}-${itemStart + selectedItems.length - 1} 项；完整输出仍已保留，可继续增加 itemStart 查看后续内容。`
+          ? `仅返回第 ${itemStart}-${itemStart + selectedItems.length - 1} 项；完整输出仍已保留。续读时请再次调用 read_tool_output 并带上 toolCallId="${input.toolCallId}"（或 toolCallRef）精确定位，同时把 itemStart 改为 ${itemStart + selectedItems.length}；若省略引用参数，系统会回退到最近一次被引用的输出，并自动解析为本 toolCallId。`
           : undefined,
     };
   }

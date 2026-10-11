@@ -222,6 +222,14 @@ export type {
 } from './session/questions.js';
 export { createDialogueModeClient } from './session/dialogue-mode.js';
 export type { ConfirmClarifySwitchResult, DialogueModeClient } from './session/dialogue-mode.js';
+export { createComposerQueueClient } from './session/composer-queue.js';
+export type {
+  ComposerQueueAttachment,
+  ComposerQueueClient,
+  ComposerQueueItem,
+  EnqueueComposerQueueInput,
+  EnqueueComposerQueueResult,
+} from './session/composer-queue.js';
 export {
   createSessionsClient,
   createMultiAttachStream,

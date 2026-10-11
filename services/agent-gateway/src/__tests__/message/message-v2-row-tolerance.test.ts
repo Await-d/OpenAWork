@@ -23,6 +23,7 @@ function messageRow(id: string, data: string): MessageV2Row {
     session_id: 'ses_1',
     user_id: 'usr_1',
     time_created: 1,
+    role: '',
     data,
     created_at: '2026-05-30',
     updated_at: '2026-05-30',

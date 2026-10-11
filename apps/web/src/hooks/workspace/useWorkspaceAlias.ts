@@ -12,19 +12,27 @@ import {
  * 这里订阅并重建解析函数，保证所有消费方（侧栏 / 会话管理页 / 标题栏）
  * 在任意入口改名后立即同步，无需刷新页面。
  */
-export function useWorkspaceDisplayName(): (workspacePath: string | null) => string {
+export function useWorkspaceDisplayName(): (
+  workspacePath: string | null,
+  sshConnectionId?: string | null,
+) => string {
   const [aliasRevision, setAliasRevision] = useState(0);
 
   useEffect(() => subscribeWorkspaceAlias(() => setAliasRevision((revision) => revision + 1)), []);
 
   // aliasRevision 参与依赖：变更后重建函数引用，强制消费方读取最新别名。
   return useCallback(
-    (workspacePath: string | null) => resolveWorkspaceDisplayName(workspacePath),
+    (workspacePath: string | null, sshConnectionId?: string | null) =>
+      resolveWorkspaceDisplayName(workspacePath, sshConnectionId),
     [aliasRevision],
   );
 }
 
 /** 重命名工作区（写入别名）；传空串表示恢复默认名。 */
-export function renameWorkspaceDisplay(workspacePath: string | null, alias: string): void {
-  writeWorkspaceAlias(workspacePath, alias);
+export function renameWorkspaceDisplay(
+  workspacePath: string | null,
+  alias: string,
+  sshConnectionId?: string | null,
+): void {
+  writeWorkspaceAlias(workspacePath, alias, sshConnectionId);
 }

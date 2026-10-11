@@ -7,7 +7,10 @@ import type {
   WorkspaceSessionGroup,
   WorkspaceSessionTreeGroup,
 } from '../../../utils/session/session-grouping.js';
-import { UNBOUND_WORKSPACE_LABEL } from '../../../utils/session/session-grouping.js';
+import {
+  getWorkspaceGroupKey,
+  UNBOUND_WORKSPACE_LABEL,
+} from '../../../utils/session/session-grouping.js';
 import {
   getFusionSidebarMocks,
   MARKET_PATH,
@@ -170,6 +173,7 @@ describe('FusionSidebar 展开 Panel', () => {
     const sessionsResult = setFusionSidebarChatGroups(
       [
         {
+          groupKey: getWorkspaceGroupKey(null),
           sessions: [],
           workspaceLabel: UNBOUND_WORKSPACE_LABEL,
           workspacePath: null,
@@ -177,6 +181,7 @@ describe('FusionSidebar 展开 Panel', () => {
       ],
       [
         {
+          groupKey: getWorkspaceGroupKey(null),
           roots: [],
           sessions: [],
           workspaceLabel: UNBOUND_WORKSPACE_LABEL,
@@ -191,7 +196,39 @@ describe('FusionSidebar 展开 Panel', () => {
       screen.getByRole('button', { name: `在 ${UNBOUND_WORKSPACE_LABEL} 中新建会话` }),
     );
 
-    expect(sessionsResult.newSession).toHaveBeenCalledWith(null);
+    // 未绑定工作区没有 SSH 身份，第二个参数显式为 null（而不是留空让残留绑定存活）。
+    expect(sessionsResult.newSession).toHaveBeenCalledWith(null, null);
+  });
+
+  it('远端工作区分组「+」把 SSH 连接与路径成对传给新建入口', () => {
+    const sessionsResult = setFusionSidebarChatGroups(
+      [
+        {
+          groupKey: getWorkspaceGroupKey('/remote/app', 'ssh-a'),
+          sessions: [],
+          workspaceLabel: 'app',
+          workspacePath: '/remote/app',
+          sshConnectionId: 'ssh-a',
+        },
+      ],
+      [
+        {
+          groupKey: getWorkspaceGroupKey('/remote/app', 'ssh-a'),
+          roots: [],
+          sessions: [],
+          workspaceLabel: 'app',
+          workspacePath: '/remote/app',
+          sshConnectionId: 'ssh-a',
+        },
+      ],
+    );
+
+    renderFusionSidebar('/chat/open-session');
+
+    fireEvent.click(screen.getByRole('button', { name: '在 app 中新建会话' }));
+
+    // 漏掉连接会让新会话以裸路径落库，丢掉 SSH 绑定。
+    expect(sessionsResult.newSession).toHaveBeenCalledWith('/remote/app', 'ssh-a');
   });
 
   it('选择团队会话时保留 Team 工作台上下文', async () => {
@@ -272,11 +309,22 @@ describe('FusionSidebar 展开 Panel', () => {
     const hitSession = createSession('open-session', 'OpenAWork plan', OPENAWORK_PATH);
     const missedSession = createSession('market-session', 'Market roadmap', MARKET_PATH);
     const unfilteredGroups: WorkspaceSessionGroup<Session>[] = [
-      { sessions: [hitSession], workspaceLabel: 'OpenAWork', workspacePath: OPENAWORK_PATH },
-      { sessions: [missedSession], workspaceLabel: 'MarketAgent', workspacePath: MARKET_PATH },
+      {
+        groupKey: getWorkspaceGroupKey(OPENAWORK_PATH),
+        sessions: [hitSession],
+        workspaceLabel: 'OpenAWork',
+        workspacePath: OPENAWORK_PATH,
+      },
+      {
+        groupKey: getWorkspaceGroupKey(MARKET_PATH),
+        sessions: [missedSession],
+        workspaceLabel: 'MarketAgent',
+        workspacePath: MARKET_PATH,
+      },
     ];
     const filteredTrees: WorkspaceSessionTreeGroup<Session>[] = [
       {
+        groupKey: getWorkspaceGroupKey(OPENAWORK_PATH),
         roots: [{ children: [], session: hitSession }],
         sessions: [hitSession],
         workspaceLabel: 'OpenAWork',

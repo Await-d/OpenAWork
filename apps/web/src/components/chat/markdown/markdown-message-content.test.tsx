@@ -412,3 +412,42 @@ describe('MarkdownMessageContent 无语言围栏代码块', () => {
     expect(document.querySelector('.chat-markdown-code-block')).toBeNull();
   });
 });
+
+describe('MarkdownMessageContent 思考块内的行内代码', () => {
+  // 回归：`<analysis>` 会被改写成 ````thinking` 围栏，`ThinkingCodeBlock` 再用
+  // 自带的 `<ReactMarkdown>` 渲染思考正文。这个内层渲染器位于外层 `pre` 的
+  // `PreBlockContext` provider 子树内，若不复位上下文，段落里的行内代码会被
+  // 误判成围栏代码块，块级 `CodeBlock` 的 <div>/<pre> 直接落进 <p>，触发
+  // `validateDOMNesting: <div> cannot be a descendant of <p>`。
+  const content = [
+    '<analysis>',
+    'Now I see that `PluginStatus` needs a guard.',
+    '</analysis>',
+  ].join('\n');
+
+  it('行内代码保持行内渲染，不渲染块级代码容器', () => {
+    render(<MarkdownMessageContent content={content} />);
+
+    const inline = document.querySelector('.assistant-reasoning-body .chat-markdown-inline-code');
+    expect(inline?.textContent).toBe('PluginStatus');
+    expect(document.querySelector('p .chat-markdown-code-block')).toBeNull();
+    expect(document.querySelector('p .chat-markdown-pre')).toBeNull();
+  });
+
+  it('嵌套 markdown 内的围栏代码块仍按块级渲染', () => {
+    const nestedFence = [
+      '<analysis>',
+      '现在看 `PluginStatus`：',
+      '```ts',
+      'const status = 1;',
+      '```',
+      '</analysis>',
+    ].join('\n');
+
+    render(<MarkdownMessageContent content={nestedFence} />);
+
+    const body = document.querySelector('.assistant-reasoning-body');
+    expect(body?.querySelector('.chat-markdown-code-block')).toBeTruthy();
+    expect(body?.querySelector('p .chat-markdown-code-block')).toBeNull();
+  });
+});

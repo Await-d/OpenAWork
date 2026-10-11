@@ -33,6 +33,25 @@ function resolveWebfetchMaxResponseBytes(): number {
  */
 const WEBFETCH_CLOUDFLARE_RETRY_USER_AGENT = 'OpenAWork-webfetch';
 
+/**
+ * 非 2xx 时回灌给模型的响应头。
+ *
+ * 只取「能直接决定下一步动作」的头：GitHub 限流看 `x-ratelimit-*`，
+ * 429/503 看 `retry-after`，Cloudflare 挑战看 `cf-mitigated`。
+ * 丢弃这些信息等于让模型在「重试 / 换 UA / 等限流恢复」之间纯猜。
+ */
+const WEBFETCH_DIAGNOSTIC_HEADERS = [
+  'retry-after',
+  'x-ratelimit-limit',
+  'x-ratelimit-remaining',
+  'x-ratelimit-reset',
+  'x-ratelimit-used',
+  'cf-mitigated',
+] as const;
+
+/** 错误正文回灌上限：够看清 GitHub 的 `message` / Reddit 的拦截说明，又不至于撑爆上下文。 */
+const WEBFETCH_ERROR_BODY_MAX_CHARS = 512;
+
 function isAllowedWebfetchUrl(value: string): boolean {
   try {
     const protocol = new URL(value).protocol;
@@ -47,6 +66,15 @@ const webfetchUrlSchema = z
   .url()
   .refine(isAllowedWebfetchUrl, 'webfetch only supports http(s) URLs');
 
+/**
+ * 必须是 `ZodObject`，不能挂 `.superRefine()` / `.transform()`。
+ *
+ * zod v3 下这些方法会把 schema 变成 `ZodEffects`，而
+ * `v2-runtime/upstream/tool-adapter.ts::zodToJsonSchema` 只认 `ZodObject`
+ * 等具体 typeName，命中 `ZodEffects` 会落到 `default: { type: 'string' }`，
+ * 发给模型的工具 schema 直接退化成字符串 —— 模型将看不到任何参数名。
+ * 改本 schema 前先确认 `zodTypeName(inputSchema) === 'ZodObject'`。
+ */
 const webfetchInputSchema = z.object({
   url: webfetchUrlSchema,
   format: z.enum(['markdown', 'text', 'html', 'image-preview']).default('markdown'),
@@ -69,6 +97,76 @@ function normalizeWebfetchUrl(url: string): string {
   }
 
   return url;
+}
+
+/** 命中这些主机且配置了 token 时，自动注入 GitHub 认证头。 */
+const WEBFETCH_GITHUB_API_HOSTS = new Set(['api.github.com']);
+
+function resolveGitHubToken(): string | undefined {
+  const raw = globalThis.process?.env?.['GITHUB_TOKEN'] ?? globalThis.process?.env?.['GH_TOKEN'];
+  const trimmed = raw?.trim();
+  return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * 组装自动注入的请求头。
+ *
+ * 未认证的 `api.github.com` 只有 60 次/小时，批量查仓库必然撞 403 限流，
+ * 因此配置了 `GITHUB_TOKEN` 时自动补认证头——否则模型只能看到无信息量的 403。
+ * 空结果表示「不设置任何请求头」，调用方据此保持运行时默认 UA。
+ */
+function buildWebfetchRequestHeaders(url: string): Record<string, string> {
+  const host = new URL(url).host.toLowerCase();
+  const token = WEBFETCH_GITHUB_API_HOSTS.has(host) ? resolveGitHubToken() : undefined;
+  if (!token) {
+    return {};
+  }
+  return {
+    authorization: `Bearer ${token}`,
+    'x-github-api-version': '2022-11-28',
+  };
+}
+
+/**
+ * 非 2xx 的错误文案：状态码 + 可行动响应头 + 正文片段。
+ *
+ * 过去直接丢弃 body 只留状态码，模型因此无法区分「仓库不存在」、
+ * 「raw.githubusercontent 文件名大小写写错」和「触发 API 限流」，
+ * 只能对同一个错误 URL 反复重试。
+ */
+async function buildWebfetchFailureMessage(response: Response): Promise<string> {
+  const statusText = response.statusText ? ` ${response.statusText}` : '';
+  const lines = [`webfetch request failed with status ${response.status}${statusText}`];
+
+  const headerHints = WEBFETCH_DIAGNOSTIC_HEADERS.map(
+    (name) => [name, response.headers.get(name)] as [string, string | null],
+  ).filter((entry): entry is [string, string] => entry[1] !== null);
+  if (headerHints.length > 0) {
+    lines.push(`响应头：${headerHints.map(([name, value]) => `${name}=${value}`).join(' | ')}`);
+  }
+
+  let bodySnippet: string;
+  try {
+    const raw = await readResponseTextWithLimit(response, WEBFETCH_ERROR_BODY_MAX_CHARS);
+    const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+    const cleaned = contentType.includes('text/html') ? htmlToText(raw) : raw.trim();
+    bodySnippet = cleaned.length > 0 ? cleaned : '<空正文>';
+  } catch (error) {
+    // 诊断信息读失败不能盖掉原始 HTTP 错误，把读取失败原因并入文案即可。
+    bodySnippet = `<响应正文读取失败：${error instanceof Error ? error.message : String(error)}>`;
+  }
+  lines.push(`响应正文：${bodySnippet}`);
+
+  if (response.status === 403 || response.status === 429) {
+    lines.push(
+      '排查建议：403/429 通常是限流或 UA 拦截 —— GitHub API 可设置 GITHUB_TOKEN 环境变量，或在 headers 中传浏览器 user-agent 后重试；若响应头 x-ratelimit-remaining=0，请等待限流恢复再试。',
+    );
+  } else if (response.status === 404) {
+    lines.push(
+      '排查建议：404 通常是路径写错 —— raw.githubusercontent.com 的文件名大小写敏感（如 README.md 而非 readme.md），仓库也可能已改名或不存在。',
+    );
+  }
+  return lines.join('\n');
 }
 
 function createAbortSignal(
@@ -115,16 +213,21 @@ function isCloudflareChallenge(response: Response): boolean {
 /**
  * 发起 webfetch 请求并在命中 Cloudflare 挑战时换一个 User-Agent 重试一次。
  *
- * 首次请求**不显式设置 User-Agent**（保持运行时默认，与改动前行为一致）；
- * 仅重试时改用 `WEBFETCH_CLOUDFLARE_RETRY_USER_AGENT`。
+ * 首次请求**不主动设置 User-Agent**（保持运行时默认，与改动前行为一致）；
+ * 仅重试且调用方未显式指定 UA 时改用 `WEBFETCH_CLOUDFLARE_RETRY_USER_AGENT`。
  * 重试复用同一个 `AbortSignal`，因此仍受整体超时约束，最多只重试一次；
  * 重试仍失败时把末尾响应交回调用方，由既有 `!response.ok` 分支按原样抛错。
  */
 async function fetchWithCloudflareChallengeRetry(
   url: string,
   signal: AbortSignal,
+  requestHeaders: Record<string, string>,
 ): Promise<Response> {
-  const response = await fetch(url, { signal });
+  const hasCustomHeaders = Object.keys(requestHeaders).length > 0;
+  const response = await fetch(
+    url,
+    hasCustomHeaders ? { signal, headers: requestHeaders } : { signal },
+  );
 
   if (!isCloudflareChallenge(response)) {
     return response;
@@ -135,7 +238,10 @@ async function fetchWithCloudflareChallengeRetry(
 
   return fetch(url, {
     signal,
-    headers: { 'user-agent': WEBFETCH_CLOUDFLARE_RETRY_USER_AGENT },
+    headers: {
+      ...requestHeaders,
+      'user-agent': requestHeaders['user-agent'] ?? WEBFETCH_CLOUDFLARE_RETRY_USER_AGENT,
+    },
   });
 }
 
@@ -186,7 +292,7 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
   {
     name: 'webfetch',
     description:
-      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use open_websearch for discovery by default, fall back to websearch when open_websearch is unavailable, and use webfetch for a concrete URL. If the user asks to fetch, find, show, or display an existing web image, use open_websearch/websearch plus webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image.',
+      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use open_websearch for discovery by default, fall back to websearch when open_websearch is unavailable, and use webfetch for a concrete URL. If the user asks to fetch, find, show, or display an existing web image, use open_websearch/websearch plus webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image. On 403/429 do not retry the same URL blindly: the error message carries the rate-limit headers and the response body needed to tell限流、UA 拦截与路径写错 apart.',
     inputSchema: webfetchInputSchema,
     outputSchema: webfetchOutputSchema,
     timeout: MAX_WEBFETCH_TIMEOUT_SECONDS * 1000,
@@ -198,13 +304,18 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
       const { signal: requestSignal, cleanup } = createAbortSignal(input.timeout, signal);
 
       try {
-        const response = await fetchWithCloudflareChallengeRetry(normalizedUrl, requestSignal);
+        const requestHeaders = buildWebfetchRequestHeaders(normalizedUrl);
+        const response = await fetchWithCloudflareChallengeRetry(
+          normalizedUrl,
+          requestSignal,
+          requestHeaders,
+        );
         const contentType = response.headers.get('content-type') ?? 'text/plain';
 
         if (!response.ok) {
-          // Drop the (unused) error body so the socket is released promptly.
-          await response.body?.cancel().catch(() => undefined);
-          throw new Error(`webfetch request failed with status ${response.status}`);
+          // 不丢弃错误正文：状态码 + 诊断响应头 + 正文片段是模型判断
+          // 「限流 / UA 拦截 / 路径写错」的唯一依据。
+          throw new Error(await buildWebfetchFailureMessage(response));
         }
 
         if (isImageContentType(contentType)) {
