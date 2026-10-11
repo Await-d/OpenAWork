@@ -328,6 +328,33 @@ describe('createSettingsClient mutation error handling', () => {
   });
 });
 
+describe('createSettingsClient 开发日志清除', () => {
+  it('clearDevLogs 在网络异常时会转换成中文网络错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Failed to fetch');
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+
+    await expect(client.clearDevLogs('token-1')).rejects.toThrow('清空开发日志失败。');
+  });
+
+  it('clearDevLogs 成功时以 DELETE 方法请求 /settings/dev-logs', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
+      return { ok: true, json: async () => ({ ok: true }) } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+    await client.clearDevLogs('token-1');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe('http://localhost:3000/settings/dev-logs');
+    expect(call?.[1]?.method).toBe('DELETE');
+  });
+});
+
 describe('createSettingsClient telemetry methods', () => {
   it('getTelemetryConsent 成功时返回同意状态', async () => {
     globalThis.fetch = vi.fn(async () => {

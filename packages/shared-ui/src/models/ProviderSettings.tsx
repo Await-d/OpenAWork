@@ -21,7 +21,8 @@ import type { ProviderUpstreamVariantUi } from './provider-catalog-ui.js';
 import { ModelManager } from './ModelManager.js';
 import { canRemoveProvider } from './provider-removal.js';
 import { StatusPill } from '../primitives/index.js';
-import type { ProviderModelTestResult } from './ModelManager.js';
+import type { AIModelConfigItem, ProviderModelTestResult } from './ModelManager.js';
+import type { UpstreamModelItem, UpstreamModelsResult } from './UpstreamModelsPanel.js';
 import type { SupportedReasoningEffort } from './model-reasoning-support.js';
 import { buildFilteredModelGroups, compareModelsByName } from './model-picker-search.js';
 
@@ -174,6 +175,15 @@ export interface ProviderSettingsProps {
     modelCount?: number;
     message?: string;
   }>;
+  /** 拉取指定接口上游实际可用的模型列表(透传给每个 provider 的 ModelManager)。 */
+  onFetchUpstreamModels?: (providerId: string) => Promise<UpstreamModelsResult>;
+  /** 把选中的上游模型批量并入指定 provider 的模型列表(透传给 ModelManager)。 */
+  onImportUpstreamModels?: (providerId: string, models: UpstreamModelItem[]) => void;
+  /** 批量更新多个模型的字段(透传给 ModelManager 的「批量设置思考档位」,合并为一次保存)。 */
+  onBatchUpdateModels?: (
+    providerId: string,
+    updates: Array<{ modelId: string; updates: Partial<AIModelConfigItem> }>,
+  ) => void;
   /** 从 models.dev 发现尚未内置的平台。 */
   onDiscoverProviders?: () => Promise<{
     providers: Array<{
@@ -614,6 +624,9 @@ export function ProviderSettings({
   onUpdateModel,
   onTestModel,
   onSyncCatalog,
+  onFetchUpstreamModels,
+  onImportUpstreamModels,
+  onBatchUpdateModels,
   onDiscoverProviders,
   onImportDiscoveredProvider,
   style,
@@ -1947,6 +1960,9 @@ export function ProviderSettings({
                         onUpdateModel={onUpdateModel}
                         {...(onTestModel ? { onTestModel } : {})}
                         {...(onSyncCatalog ? { onSyncCatalog } : {})}
+                        {...(onFetchUpstreamModels ? { onFetchUpstreamModels } : {})}
+                        {...(onImportUpstreamModels ? { onImportUpstreamModels } : {})}
+                        {...(onBatchUpdateModels ? { onBatchUpdateModels } : {})}
                       />
                     </div>
                   </div>

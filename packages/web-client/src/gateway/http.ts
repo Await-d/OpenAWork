@@ -175,6 +175,56 @@ export async function expectOk(response: Response, label: string): Promise<void>
 export const DEFAULT_FETCH_TIMEOUT_MS = 20_000;
 
 /**
+ * 生成「响应不是 JSON」的可执行提示。
+ *
+ * 前端拿到 `<!doctype html>` 的原因基本只有一个:请求没有落到网关,而是落到了托管
+ * 前端的同源地址(dev server 的 SPA 兜底、反代 `try_files ... /index.html` 都会这么
+ * 干),最常见的诱因是网关地址为空 —— `${baseUrl}/xxx` 会退化成相对路径。此时
+ * `response.json()` 抛出的 `SyntaxError: Unexpected token '<'` 只说明「解析器看到了
+ * 尖括号」,会把排障方向误导到「后端接口坏了」。
+ */
+export function describeNonJsonResponse(response: Response): string {
+  const contentType = response.headers?.get?.('content-type') ?? '';
+  if (contentType.includes('text/html')) {
+    return '网关返回的是网页(HTML)而不是接口数据:请求可能没有打到 Gateway(常见原因是网关地址为空或指向了前端页面)。请在设置中确认 Gateway 地址。';
+  }
+  return `网关返回的内容不是可解析的 JSON(HTTP ${response.status})。`;
+}
+
+/**
+ * 给 `response.json()` 套一层诊断:解析失败时抛出可执行文案,并把原始
+ * `SyntaxError` 挂在 `cause` 上便于进一步定位。
+ *
+ * 之所以放在 `fetchWithTimeout` 这个唯一的传输汇聚点统一包装,而不是逐个调用点判断:
+ * web-client 有二十多个资源域客户端各自直接 `response.json()`,逐个改既会漏、也会
+ * 随着新增客户端持续腐化。这里只改写 response 实例自身的方法(不动其它属性与流),
+ * 解析成功时与原生行为完全一致。
+ */
+function withJsonDiagnostics(response: Response): Response {
+  if (typeof response?.json !== 'function') {
+    return response;
+  }
+  const boundJson = response.json.bind(response);
+  try {
+    Object.defineProperty(response, 'json', {
+      configurable: true,
+      writable: true,
+      value: async (): Promise<unknown> => {
+        try {
+          return await boundJson();
+        } catch (error) {
+          throw new Error(describeNonJsonResponse(response), { cause: error });
+        }
+      },
+    });
+  } catch {
+    // 不可扩展的 Response(只读替身、被冻结的测试桩)保持原样透传:诊断是增强项,
+    // 不应让请求本身失败。
+  }
+  return response;
+}
+
+/**
  * `fetch` with a wall-clock ceiling. The browser `fetch` has no built-in
  * timeout: a server that accepts the connection but never responds (half-open
  * socket, stalled proxy, overloaded gateway) leaves the promise pending
@@ -216,7 +266,7 @@ export async function fetchWithTimeout(
     controller.abort();
   }, timeoutMs);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return withJsonDiagnostics(await fetch(input, { ...init, signal: controller.signal }));
   } finally {
     clearTimeout(timer);
     if (callerSignal) {

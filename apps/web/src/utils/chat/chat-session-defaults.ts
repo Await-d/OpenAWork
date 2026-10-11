@@ -1,4 +1,5 @@
 import { createSettingsClient, type SettingsProvidersLoadResult } from '@openAwork/web-client';
+import type { ModelReasoningOption } from '@openAwork/shared-ui';
 import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
 import type { ReasoningEffort } from '../../components/conversation-runtime/messages/support.js';
 import type { ModelSelectionSource } from '../../pages/chat-page/conversation/settings/model-selection-source.js';
@@ -11,6 +12,8 @@ export interface ChatSettingsModel {
   contextWindow?: number;
   contextWindowOverride?: number;
   maxOutputTokens?: number;
+  /** 模型自声明的推理档位;聊天侧据此展示可选思考等级(优先于按 modelId 推断)。 */
+  reasoningOptions?: readonly ModelReasoningOption[];
   supportsImageGeneration?: boolean;
   supportsImageGeneration4K?: boolean;
   supportsTools?: boolean;

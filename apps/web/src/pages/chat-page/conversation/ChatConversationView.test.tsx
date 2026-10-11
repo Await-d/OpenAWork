@@ -202,21 +202,21 @@ describe('ChatConversationView — 基础骨架', () => {
     );
   });
 
-  it('内容列最大宽度随可用宽度自适应：窄屏按 80% 收窄，超宽屏放宽到 1638px', () => {
-    render(<ChatConversationView {...createViewProps({ contentMaxWidth: 1024 })} />);
+  it('内容列最大宽度随可用宽度自适应：窄屏按 72% 收窄，不设上限', () => {
+    render(<ChatConversationView {...createViewProps({ contentMaxWidth: 'centered' })} />);
 
     expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe(
-      'min(1638px, max(80%, 420px))',
+      'max(72%, 420px)',
     );
   });
 
-  it('split 布局先把基线抬高 1.5 倍，收敛到 1800px 硬顶并用 96% 占比', () => {
+  it('split 布局用 96% 占比，尽量吃满容器给左右分列留出行宽', () => {
     useDisplayPreferencesStore.setState({ messageLayout: 'split' });
 
-    render(<ChatConversationView {...createViewProps({ contentMaxWidth: 1024 })} />);
+    render(<ChatConversationView {...createViewProps({ contentMaxWidth: 'centered' })} />);
 
     expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe(
-      'min(1800px, max(96%, 420px))',
+      'max(96%, 420px)',
     );
   });
 

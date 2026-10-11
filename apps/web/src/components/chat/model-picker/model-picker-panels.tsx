@@ -1,12 +1,27 @@
-import React from 'react';
+import React, { type CSSProperties } from 'react';
 import {
+  REASONING_EFFORT_RANK,
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
   inferSupportsThinking,
   resolveProviderVisual,
+  sortSupportedReasoningEfforts,
 } from '@openAwork/shared-ui';
+import type { ModelReasoningOption } from '@openAwork/shared-ui';
 import type { ReasoningEffort } from '../../conversation-runtime/messages/support.js';
 import { buildFilteredModelGroups, type ModelPickerProvider } from './model-picker-search.js';
+import { formatReasoningEffortLabel } from '../composer/reasoning-effort-label.js';
+
+/** 思考强度权重:滑块填充、辉光与卡片流光都按它从「淡」到「浓」分级呈现。 */
+const THINKING_INTENSITY: Record<ReasoningEffort, number> = {
+  none: 0,
+  minimal: 0.25,
+  low: 0.45,
+  medium: 0.65,
+  high: 0.8,
+  xhigh: 0.92,
+  max: 1,
+};
 
 function formatContextWindow(value: number | undefined): string | null {
   if (!value || !Number.isFinite(value) || value <= 0) {
@@ -745,6 +760,7 @@ export function ModelSettingsPopover({
   modelId,
   supportsThinking,
   canConfigureThinking,
+  reasoningOptions,
   contextWindow,
   contextWindowOverride,
   onChangeContextWindowOverride,
@@ -765,6 +781,8 @@ export function ModelSettingsPopover({
   modelId?: string;
   supportsThinking: boolean;
   canConfigureThinking: boolean;
+  /** 模型自声明的推理档位(来自 provider 配置 / models.dev);优先于按 modelId 推断。 */
+  reasoningOptions?: readonly ModelReasoningOption[];
   contextWindow?: number;
   contextWindowOverride?: number;
   onChangeContextWindowOverride?: (value: number | undefined) => Promise<void> | void;
@@ -864,7 +882,11 @@ export function ModelSettingsPopover({
 
   if (!open) return null;
 
-  const supportedEfforts = getSupportedReasoningEffortsForModel(providerType, modelId);
+  const supportedEfforts = getSupportedReasoningEffortsForModel(
+    providerType,
+    modelId,
+    reasoningOptions,
+  );
   const showFastSettings = providerType === 'openai';
   const hasContextWindow = typeof contextWindow === 'number' && contextWindow > 0;
   const effectiveContextWindow =
@@ -910,6 +932,64 @@ export function ModelSettingsPopover({
       setFastError(error instanceof Error ? error.message : '保存 OpenAI Fast 模式失败。');
     } finally {
       setFastSaving(false);
+    }
+  };
+
+  // 思考滑块:「关闭」+ 从低到高的支持档位,统一用一个带刻度点的滑条表达,
+  // 比一堆按钮更好理解,也天然带排序。
+  const sortedSupportedEfforts = sortSupportedReasoningEfforts(supportedEfforts);
+  const thinkingStops: Array<{ key: string; effort: ReasoningEffort | null; label: string }> = [
+    { key: 'off', effort: null, label: '关闭' },
+    ...sortedSupportedEfforts.map((effort) => ({
+      key: effort,
+      effort,
+      label: formatReasoningEffortLabel(effort),
+    })),
+  ];
+  const activeThinkingStopIndex = !thinkingEnabled
+    ? 0
+    : (() => {
+        const exact = thinkingStops.findIndex((stop) => stop.effort === reasoningEffort);
+        if (exact >= 0) return exact;
+        // 当前档位不在这个模型的支持列表里（比如切换了模型）：就近钳制到
+        // 最接近的支持档位，避免滑块永远停在「关闭」上看起来像没生效。
+        let best = 1;
+        let bestDiff = Number.POSITIVE_INFINITY;
+        for (let i = 1; i < thinkingStops.length; i += 1) {
+          const stop = thinkingStops[i];
+          if (!stop || stop.effort === null) continue;
+          const diff = Math.abs(
+            REASONING_EFFORT_RANK[stop.effort] - REASONING_EFFORT_RANK[reasoningEffort],
+          );
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            best = i;
+          }
+        }
+        return best;
+      })();
+  const activeThinkingStop = thinkingStops[activeThinkingStopIndex] ?? thinkingStops[0];
+  // 强度可视化:填充渐变到拇指位置、拇指辉光半径、均衡条点亮数与脉冲速度,
+  // 全部由 THINKING_INTENSITY 驱动——档位越高,填充越「热」、辉光越大、条子闪得越快。
+  const thinkingIntensity = activeThinkingStop?.effort
+    ? (THINKING_INTENSITY[activeThinkingStop.effort] ?? 0)
+    : 0;
+  const sliderFillPercent =
+    thinkingStops.length > 1 ? (activeThinkingStopIndex / (thinkingStops.length - 1)) * 100 : 0;
+  const thinkingGlowPx = thinkingEnabled ? Math.round(thinkingIntensity * 8) : 0;
+  // 每个档位配不同的脉冲节奏:低档轻柔单次、中档双拍、高档三连急促;越高越快、幅度越大。
+  const thinkingPulseTier: 'soft' | 'mid' | 'hard' =
+    thinkingIntensity <= 0.34 ? 'soft' : thinkingIntensity <= 0.72 ? 'mid' : 'hard';
+  const thinkingPulseDuration = `${(2.8 - thinkingIntensity * 1.7).toFixed(2)}s`;
+  const thinkingBreathe = (0.05 + thinkingIntensity * 0.07).toFixed(3);
+  const handleThinkingStopSelect = (index: number) => {
+    const stop = thinkingStops[index];
+    if (!stop) return;
+    if (stop.effort === null) {
+      onChangeThinkingEnabled(false);
+    } else {
+      onChangeThinkingEnabled(true);
+      onChangeReasoningEffort(stop.effort);
     }
   };
 
@@ -982,6 +1062,173 @@ export function ModelSettingsPopover({
             outline: 2px solid var(--accent);
             outline-offset: 2px;
             box-shadow: 0 0 0 4px var(--accent-subtle);
+          }
+          /* 思考等级卡片:安静中性为底。底色几乎不染色,只有边框与一条很窄的流光
+             随强度轻微升温,避免整卡被蓝色「洗白」 */
+          .chat-model-settings-thinking-card {
+            position: relative;
+            overflow: hidden;
+            border-radius: 10px;
+            background: color-mix(
+              in oklch,
+              var(--accent) calc(var(--thinking-intensity, 0) * var(--thinking-intensity, 0) * 4%),
+              var(--bg-raised)
+            );
+            border: 1px solid
+              color-mix(
+                in oklch,
+                var(--accent) calc(var(--thinking-intensity, 0) * var(--thinking-intensity, 0) * 22%),
+                var(--border-default) 100%
+              );
+            transition: background 320ms ease, border-color 320ms ease;
+          }
+          .chat-model-settings-thinking-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            width: 38%;
+            pointer-events: none;
+            background: linear-gradient(
+              100deg,
+              transparent 0%,
+              color-mix(in oklch, var(--accent) 5%, transparent) 45%,
+              color-mix(in oklch, var(--accent) 9%, transparent) 55%,
+              transparent 100%
+            );
+            opacity: calc(var(--thinking-intensity, 0) * 0.9);
+            transform: translateX(-110%);
+          }
+          .chat-model-settings-thinking-card--shimmer::before {
+            animation: chat-thinking-card-shimmer calc(4s - var(--thinking-intensity, 0) * 2.2s) ease-in-out infinite;
+          }
+          @keyframes chat-thinking-card-shimmer {
+            0% { transform: translateX(-110%); }
+            45%, 100% { transform: translateX(calc(100% / 0.38)); }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .chat-model-settings-thinking-card--shimmer::before {
+              animation: none;
+            }
+          }
+          /* 思考等级滑条:12px 轨道 + 22px 圆拇指;呼吸与脉冲速度由 CSS 变量控制 */
+          .chat-model-settings-thinking-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 12px;
+            border-radius: 999px;
+            background: var(--border-default);
+          }
+          .chat-model-settings-thinking-slider:disabled {
+            cursor: not-allowed;
+          }
+          .chat-model-settings-thinking-slider::-webkit-slider-runnable-track {
+            height: 12px;
+            border-radius: 999px;
+            background: transparent;
+          }
+          .chat-model-settings-thinking-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 22px;
+            height: 22px;
+            margin-top: -5px;
+            border: 3px solid var(--bg-overlay);
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow:
+              0 2px 6px rgba(0, 0, 0, 0.5),
+              0 0 var(--thinking-glow, 0px) color-mix(in oklch, var(--accent) 50%, transparent);
+            cursor: pointer;
+          }
+          .chat-model-settings-thinking-slider:not(:disabled)::-webkit-slider-thumb {
+            animation: chat-thinking-thumb-breathe var(--thinking-pulse-duration, 2.4s) ease-in-out infinite;
+          }
+          .chat-model-settings-thinking-slider:not(:disabled)::-webkit-slider-thumb:hover {
+            box-shadow:
+              0 2px 6px rgba(0, 0, 0, 0.5),
+              0 0 calc(var(--thinking-glow, 0px) + 6px) color-mix(in oklch, var(--accent) 70%, transparent);
+          }
+          .chat-model-settings-thinking-slider::-moz-range-track {
+            height: 12px;
+            border-radius: 999px;
+            background: var(--border-default);
+          }
+          .chat-model-settings-thinking-slider::-moz-range-progress {
+            height: 12px;
+            border-radius: 999px;
+            background: var(--accent);
+          }
+          .chat-model-settings-thinking-slider::-moz-range-thumb {
+            width: 22px;
+            height: 22px;
+            border: 3px solid var(--bg-overlay);
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+            cursor: pointer;
+          }
+          /* 拇指呼吸幅度随档位加大 */
+          @keyframes chat-thinking-thumb-breathe {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(calc(1 + var(--thinking-breathe, 0.08))); }
+          }
+          /* 档位脉冲光环:soft 单次缓胀 / mid 双拍 / hard 三连急促 */
+          .chat-model-settings-thinking-halo {
+            position: absolute;
+            top: 6px;
+            left: 0;
+            width: 42px;
+            height: 42px;
+            margin: -21px 0 0 -21px;
+            border-radius: 50%;
+            pointer-events: none;
+            background: radial-gradient(
+              circle,
+              color-mix(in oklch, var(--accent) 42%, transparent) 0%,
+              color-mix(in oklch, var(--accent) 16%, transparent) 56%,
+              transparent 74%
+            );
+            animation-duration: var(--thinking-pulse-duration, 2.4s);
+            animation-iteration-count: infinite;
+            animation-timing-function: ease-out;
+            will-change: transform, opacity;
+          }
+          .chat-model-settings-thinking-halo--soft { animation-name: chat-thinking-halo-soft; }
+          .chat-model-settings-thinking-halo--mid { animation-name: chat-thinking-halo-mid; }
+          .chat-model-settings-thinking-halo--hard { animation-name: chat-thinking-halo-hard; }
+          @keyframes chat-thinking-halo-soft {
+            0% { transform: scale(0.6); opacity: 0; }
+            32% { opacity: 0.55; }
+            100% { transform: scale(1.24); opacity: 0; }
+          }
+          @keyframes chat-thinking-halo-mid {
+            0% { transform: scale(0.62); opacity: 0; }
+            22% { opacity: 0.6; }
+            42% { transform: scale(1.04); opacity: 0.08; }
+            58% { opacity: 0.5; }
+            100% { transform: scale(1.34); opacity: 0; }
+          }
+          @keyframes chat-thinking-halo-hard {
+            0% { transform: scale(0.6); opacity: 0; }
+            14% { opacity: 0.72; }
+            30% { transform: scale(0.98); opacity: 0.1; }
+            44% { opacity: 0.62; }
+            60% { transform: scale(1.22); opacity: 0.08; }
+            74% { opacity: 0.5; }
+            100% { transform: scale(1.48); opacity: 0; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .chat-model-settings-thinking-halo,
+            .chat-model-settings-thinking-slider:not(:disabled)::-webkit-slider-thumb,
+            .chat-model-settings-thinking-card--shimmer::before {
+              animation: none !important;
+            }
+          }
+          .chat-model-settings-thinking-slider:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
           }
           .chat-model-settings-scroll::-webkit-scrollbar { width: 5px; }
           .chat-model-settings-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -1333,182 +1580,192 @@ export function ModelSettingsPopover({
                   当前模型具备思考能力，但它的思考模式由模型本身决定，不能在这里单独开关。
                 </div>
               ) : null}
+              {/* 思考等级卡片:左侧大字档位 + 说明,右侧加粗滑条;卡片底色/流光随强度升温 */}
               <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 9,
-                  fontWeight: 700,
-                  color: 'var(--fg-muted)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  marginBottom: 6,
-                  padding: '0 2px',
-                }}
+                className={`chat-model-settings-thinking-card${
+                  thinkingEnabled ? ' chat-model-settings-thinking-card--shimmer' : ''
+                }`}
+                style={
+                  {
+                    margin: 0,
+                    padding: '12px 14px',
+                    opacity: canConfigureThinking ? 1 : 0.6,
+                    cursor: 'default',
+                    '--thinking-intensity': thinkingEnabled ? thinkingIntensity : 0,
+                    '--thinking-glow': `${thinkingGlowPx}px`,
+                    '--thinking-pulse-duration': thinkingPulseDuration,
+                    '--thinking-breathe': thinkingBreathe,
+                  } as CSSProperties
+                }
               >
-                思考等级
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
-                }}
-              >
-                {/* Off option */}
-                <button
-                  className={`chat-model-settings-option${!thinkingEnabled ? ' is-active' : ''}`}
-                  type="button"
-                  disabled={!canConfigureThinking}
-                  onClick={() => onChangeThinkingEnabled(false)}
+                <div
                   style={{
+                    position: 'relative',
+                    zIndex: 1,
                     display: 'flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    border: 'none',
-                    borderRadius: 7,
-                    background: !thinkingEnabled ? 'var(--accent-muted)' : 'transparent',
-                    color: !thinkingEnabled ? 'var(--accent)' : 'var(--fg-default)',
-                    padding: '7px 10px',
-                    cursor: canConfigureThinking ? 'pointer' : 'not-allowed',
-                    opacity: canConfigureThinking ? 1 : 0.45,
-                    fontSize: 11,
-                    textAlign: 'left',
+                    flexDirection: 'column',
+                    gap: 10,
                   }}
                 >
-                  <span
+                  {/* 顶部行:左侧标题,右侧当前档位 + 简短说明 */}
+                  <div
                     style={{
-                      width: 14,
                       display: 'flex',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      flexShrink: 0,
+                      alignItems: 'baseline',
+                      justifyContent: 'space-between',
+                      gap: 10,
                     }}
                   >
-                    {!thinkingEnabled ? (
-                      <svg
-                        width="9"
-                        height="9"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : (
-                      <svg
-                        width="9"
-                        height="9"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                        style={{ opacity: 0.3 }}
-                      >
-                        <circle cx="12" cy="12" r="8" />
-                      </svg>
-                    )}
-                  </span>
-                  <span style={{ fontWeight: 600 }}>关闭思考</span>
-                </button>
-                {/* Effort levels */}
-                {supportedEfforts.map((level) => {
-                  const active = thinkingEnabled && reasoningEffort === level;
-                  const desc = describeReasoningEffort(level);
-                  return (
-                    <button
-                      className={`chat-model-settings-option${active ? ' is-active' : ''}`}
-                      key={level}
-                      type="button"
-                      disabled={!canConfigureThinking}
-                      onClick={() => {
-                        onChangeThinkingEnabled(true);
-                        onChangeReasoningEffort(level);
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        color: 'var(--fg-muted)',
                       }}
-                      title={desc}
+                    >
+                      思考等级
+                    </span>
+                    <span
                       style={{
                         display: 'flex',
-                        alignItems: 'center',
-                        gap: 7,
-                        border: 'none',
-                        borderRadius: 7,
-                        background: active
-                          ? 'color-mix(in oklch, var(--accent) 14%, transparent)'
-                          : 'transparent',
-                        color: active
-                          ? 'color-mix(in oklch, var(--accent) 85%, var(--fg-on-accent) 15%)'
-                          : 'var(--fg-default)',
-                        padding: '7px 10px',
-                        cursor: canConfigureThinking ? 'pointer' : 'not-allowed',
-                        opacity: canConfigureThinking ? 1 : 0.45,
-                        textAlign: 'left',
-                        fontSize: 11,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
+                        alignItems: 'baseline',
+                        justifyContent: 'flex-end',
+                        flex: 1,
+                        minWidth: 0,
                       }}
                     >
                       <span
                         style={{
-                          width: 14,
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          flexShrink: 0,
+                          fontSize: 9.5,
+                          color: thinkingEnabled ? 'var(--fg-muted)' : 'var(--fg-subtle)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          transition: 'color 200ms ease',
                         }}
+                        title={
+                          activeThinkingStop && activeThinkingStop.effort !== null
+                            ? describeReasoningEffort(activeThinkingStop.effort)
+                            : '直接回答，不额外推理'
+                        }
                       >
-                        {active ? (
-                          <svg
-                            width="9"
-                            height="9"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <polyline points="20 6 9 17 4 12" />
-                          </svg>
-                        ) : (
-                          <svg
-                            width="9"
-                            height="9"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                            style={{ opacity: 0.3 }}
-                          >
-                            <circle cx="12" cy="12" r="8" />
-                          </svg>
-                        )}
+                        {activeThinkingStop && activeThinkingStop.effort !== null
+                          ? describeReasoningEffort(activeThinkingStop.effort)
+                          : '直接回答，不额外推理'}
                       </span>
+                    </span>
+                  </div>
+                  {/* 全宽滑条:轨道刻度点 + 档位标签 */}
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="range"
+                      className="chat-model-settings-thinking-slider"
+                      min={0}
+                      max={Math.max(0, thinkingStops.length - 1)}
+                      step={1}
+                      value={activeThinkingStopIndex}
+                      disabled={!canConfigureThinking}
+                      aria-label="思考等级"
+                      aria-valuetext={activeThinkingStop ? activeThinkingStop.label : '关闭'}
+                      onChange={(event) => handleThinkingStopSelect(Number(event.target.value))}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        accentColor: 'var(--accent)',
+                        cursor: canConfigureThinking ? 'pointer' : 'not-allowed',
+                        opacity: canConfigureThinking ? 1 : 0.5,
+                        margin: 0,
+                        background: thinkingEnabled
+                          ? `linear-gradient(90deg, color-mix(in oklch, var(--accent) 62%, transparent) 0%, var(--accent) ${sliderFillPercent}%, color-mix(in oklch, var(--fg-subtle) 30%, transparent) ${sliderFillPercent}%)`
+                          : 'color-mix(in oklch, var(--fg-subtle) 30%, transparent)',
+                      }}
+                    />
+                    {/* 档位脉冲光环:跟随拇指位置,节奏随档位变化(低=单次缓胀 / 中=双拍 / 高=三连急促) */}
+                    {thinkingEnabled ? (
                       <span
+                        aria-hidden="true"
+                        className={`chat-model-settings-thinking-halo chat-model-settings-thinking-halo--${thinkingPulseTier}`}
                         style={{
-                          fontSize: 10.5,
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.03em',
-                          flexShrink: 0,
+                          left: `calc(11px + (100% - 22px) * ${sliderFillPercent / 100})`,
                         }}
-                      >
-                        {level}
-                      </span>
-                    </button>
-                  );
-                })}
+                      />
+                    ) : null}
+                    {/* 轨道刻度:细竖线,与各档位对齐(当前档位由拇指本身表示,不重复画) */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: 11,
+                        right: 11,
+                        top: 0,
+                        height: 12,
+                        pointerEvents: 'none',
+                      }}
+                      aria-hidden="true"
+                    >
+                      {thinkingStops.map((stop, index) => {
+                        if (index === activeThinkingStopIndex) return null;
+                        const reached = thinkingEnabled && index <= activeThinkingStopIndex;
+                        return (
+                          <span
+                            key={stop.key}
+                            style={{
+                              position: 'absolute',
+                              top: '50%',
+                              left:
+                                thinkingStops.length === 1
+                                  ? '50%'
+                                  : `${(index / (thinkingStops.length - 1)) * 100}%`,
+                              transform: 'translate(-50%, -50%)',
+                              width: 2,
+                              height: 12,
+                              borderRadius: 1,
+                              background: reached
+                                ? 'color-mix(in oklch, var(--fg-on-accent) 45%, transparent)'
+                                : 'color-mix(in oklch, var(--fg-muted) 45%, transparent)',
+                              transition: 'background 160ms ease',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                    {/* 档位标签:与刻度对齐,从左到右「关闭 → 最强」 */}
+                    <div
+                      style={{
+                        position: 'relative',
+                        height: 14,
+                        marginTop: 10,
+                        marginLeft: 11,
+                        marginRight: 11,
+                      }}
+                    >
+                      {thinkingStops.map((stop, index) => (
+                        <span
+                          key={stop.key}
+                          style={{
+                            position: 'absolute',
+                            left:
+                              thinkingStops.length === 1
+                                ? '50%'
+                                : `${(index / (thinkingStops.length - 1)) * 100}%`,
+                            transform: 'translateX(-50%)',
+                            fontSize: 9.5,
+                            fontWeight: stop.key === activeThinkingStop?.key ? 700 : 500,
+                            color:
+                              stop.key === activeThinkingStop?.key
+                                ? 'var(--accent)'
+                                : 'var(--fg-subtle)',
+                            whiteSpace: 'nowrap',
+                            transition: 'color 200ms ease',
+                          }}
+                        >
+                          {stop.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           ) : (

@@ -72,6 +72,39 @@ describe('normalizeChatThinkingState', () => {
       reasoningEffort: 'medium',
     });
   });
+
+  it('honours model-declared reasoningOptions over vendor rules', () => {
+    expect(
+      normalizeChatThinkingState({
+        providerType: 'custom',
+        modelId: 'my-local-reasoner',
+        declaredSupportsThinking: true,
+        thinkingEnabled: true,
+        reasoningEffort: 'max',
+        reasoningOptions: [{ type: 'effort', values: ['low', 'medium', 'high'] }],
+      }),
+    ).toEqual({
+      supportsThinking: true,
+      canConfigureThinking: true,
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+    });
+  });
+
+  it('treats a declared supportsThinking model as configurable without a known provider', () => {
+    expect(
+      normalizeChatThinkingState({
+        declaredSupportsThinking: true,
+        thinkingEnabled: true,
+        reasoningEffort: 'medium',
+      }),
+    ).toEqual({
+      supportsThinking: true,
+      canConfigureThinking: true,
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+    });
+  });
 });
 
 describe('resolveChatThinkingRequest', () => {

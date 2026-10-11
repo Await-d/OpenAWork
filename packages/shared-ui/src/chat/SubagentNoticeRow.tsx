@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { SubagentNotice, SubagentNoticeState } from '@openAwork/shared';
+import { parseSubagentResultBlocks, summarizeSubagentResult } from '@openAwork/shared';
+import { SubagentResultCard } from './SubagentResultCard.js';
 import { color, font, motion, radius, spacing } from '../tokens.js';
 
 interface StatePresentation {
@@ -23,16 +25,20 @@ export interface SubagentNoticeRowProps {
   notice: SubagentNotice;
   /** 与相邻通知合组时收紧上间距。 */
   grouped?: boolean;
-  /** 传入且通知带子会话 id 时，整行可点击/可聚焦跳转。 */
+  /** 传入且通知带子会话 id 时，标题行可点击/可聚焦跳转。 */
   onOpenChild?: (childSessionId: string) => void;
 }
 
 /**
- * 子代理完成通知的单行呈现。
+ * 子代理完成通知的呈现：紧凑标题行 + 全展开的结构化结果卡片。
  *
- * 对齐上游 notice 契约：13px 紧凑单行、按状态着色、`description` 追加在 ` · ` 之后、
- * 有子会话 id 时可点击跳转。整行可交互时使用原生 `button`，因此 Enter / Space
- * 激活、`role`/`tabIndex` 与 focus 语义都由浏览器保证。
+ * 标题行对齐上游 notice 契约：13px 紧凑单行、按状态着色、`description` 追加在
+ * ` · ` 之后、有子会话 id 时可点击跳转（原生 `button`，Enter / Space 激活、
+ * `role`/`tabIndex` 与 focus 语义由浏览器保证）。
+ *
+ * 标题行下方通过 `SubagentResultCard` 全展开渲染 `notice.text` 中的
+ * `<results>` 结构化块（files / findings / answer / next_steps / uncertainties）；
+ * 无结构化块时退化为纯正文段。原始 XML 标签不再直接暴露给用户。
  */
 export function SubagentNoticeRow({
   notice,
@@ -49,15 +55,24 @@ export function SubagentNoticeRow({
   const headingColor = interactive && hovered ? color.fgDefault : presentation.accent;
   const labelColor = interactive && hovered ? color.fgMuted : presentation.accent;
 
-  const style: CSSProperties = {
+  const resultSections = useMemo(() => parseSubagentResultBlocks(notice.text), [notice.text]);
+  // 正文非空才渲染结果区（`SubagentResultCard` 对无结构化块的情况自动退化为纯正文）。
+  const hasResults = notice.text.trim().length > 0;
+  const hoverSummary = useMemo(
+    () => summarizeSubagentResult(resultSections) || notice.text,
+    [resultSections, notice.text],
+  );
+
+  const headingStyle: CSSProperties = {
     appearance: 'none',
     display: 'block',
     width: '100%',
     maxWidth: '100%',
     margin: 0,
     // 上下留白必须对称：通知行落在两条消息之间，`12px 0 4px` 会让文字偏向下一条
-    // 消息（实测上 28px / 下 21px）。两侧同取 `spacing[2]` 后视觉居中。
-    padding: grouped ? `${spacing[1]}px 0` : `${spacing[2]}px 0`,
+    // 消息（实测上 28px / 下 21px）。两侧同取 `spacing[2]` 后视觉居中；
+    // 结果卡片全展开时下方交给卡片自身留白，这里只保留上间距。
+    padding: grouped ? `${spacing[1]}px 0 0` : hasResults ? `${spacing[2]}px 0 0` : `${spacing[2]}px 0`,
     background: 'transparent',
     border: 'none',
     textAlign: 'left',
@@ -92,32 +107,37 @@ export function SubagentNoticeRow({
     </>
   );
 
+  const card = hasResults ? <SubagentResultCard sections={resultSections} /> : null;
+
   if (!interactive) {
     return (
-      <div data-component="subagent-notice" data-state={notice.state} style={style}>
-        {body}
+      <div data-component="subagent-notice" data-state={notice.state}>
+        <div style={headingStyle}>{body}</div>
+        {card}
       </div>
     );
   }
 
   return (
-    <button
-      type="button"
-      data-component="subagent-notice"
-      data-state={notice.state}
-      title={notice.description.length > 0 ? notice.description : notice.text}
-      onClick={() => {
-        if (childSessionId) {
-          onOpenChild?.(childSessionId);
-        }
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      style={style}
-    >
-      {body}
-    </button>
+    <div data-component="subagent-notice" data-state={notice.state}>
+      <button
+        type="button"
+        data-subagent-notice-heading="true"
+        title={hoverSummary}
+        onClick={() => {
+          if (childSessionId) {
+            onOpenChild?.(childSessionId);
+          }
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={headingStyle}
+      >
+        {body}
+      </button>
+      {card}
+    </div>
   );
 }

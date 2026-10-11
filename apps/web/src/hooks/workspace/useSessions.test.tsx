@@ -451,3 +451,66 @@ describe('useSessions — 路由切换不应重复拉取列表', () => {
     expect(sessionsClientMocks.list).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('useSessions — 并发同参请求合并(在途单飞)', () => {
+  function sessionRow(id: string) {
+    return { id, title: id, updated_at: '2026-01-02T00:00:00.000Z' };
+  }
+
+  it('多个实例同时挂载时只对 /sessions 发一次请求', async () => {
+    const resolvers: Array<(value: unknown[]) => void> = [];
+    sessionsClientMocks.list.mockImplementation(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+
+    // 融合布局:FusionSidebar + TitlebarTabStrip 在同一次提交里挂载
+    const first = renderUseSessions();
+    const second = renderUseSessions();
+
+    await waitFor(() => expect(resolvers).toHaveLength(1));
+    expect(sessionsClientMocks.list).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      for (const resolve of resolvers) {
+        resolve([sessionRow('session-1')]);
+      }
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(first.result.current.sessions).toHaveLength(1));
+    await waitFor(() => expect(second.result.current.sessions).toHaveLength(1));
+    expect(sessionsClientMocks.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('一次刷新广播通知多个实例时仍只发一次请求', async () => {
+    sessionsClientMocks.list.mockResolvedValue([sessionRow('session-1')]);
+
+    const first = renderUseSessions();
+    const second = renderUseSessions();
+    await waitFor(() => expect(first.result.current.sessions).toHaveLength(1));
+    await waitFor(() => expect(second.result.current.sessions).toHaveLength(1));
+
+    const resolvers: Array<(value: unknown[]) => void> = [];
+    sessionsClientMocks.list.mockClear();
+    sessionsClientMocks.list.mockImplementation(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+
+    await act(async () => {
+      const refreshPromise = refreshSessionListsNow();
+      for (const resolve of resolvers) {
+        resolve([sessionRow('session-1')]);
+      }
+      await refreshPromise;
+    });
+
+    expect(resolvers).toHaveLength(1);
+    expect(sessionsClientMocks.list).toHaveBeenCalledTimes(1);
+  });
+});

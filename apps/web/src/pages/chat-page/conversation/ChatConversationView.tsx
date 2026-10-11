@@ -31,6 +31,7 @@ import type {
   UpstreamStreamSummary,
 } from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
+import type { ModelReasoningOption } from '@openAwork/shared-ui';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import './ChatConversationView.css';
 import { ChatMessageGroupList } from '../../../components/chat/message/chat-message-group-list.js';
@@ -229,6 +230,12 @@ export interface ChatConversationViewProps {
 
   // ─── 滚动 ──────────────────────────────────────────────────────────
   scrollRegionRef: RefObject<HTMLDivElement | null>;
+  /**
+   * 一次性「滚动到指定历史消息」请求（nonce 变化即视为新请求）。历史跳转 /
+   * 搜索扩窗后目标可能仍在虚拟视口的挂载窗口之外，虚拟视口据此先按目标组偏移
+   * 粗滚动一次把目标挂载出来，调用方（jump list / search）再精确居中。
+   */
+  pendingMessageScroll?: { messageId: string; nonce: number } | null;
   contentColumnRef: RefObject<HTMLDivElement | null>;
   bottomRef: RefObject<HTMLDivElement | null>;
   onScroll: (event: React.UIEvent<HTMLDivElement>) => void;
@@ -239,7 +246,10 @@ export interface ChatConversationViewProps {
   editorMode: boolean;
   /** 紧凑模式（team 嵌入时用）：减少顶部/侧边 padding，充分利用空间。 */
   compact?: boolean;
-  contentMaxWidth?: number | 'fluid';
+  /**
+   * 内容列宽度语义:`'fluid'` 铺满容器;`'centered'`(或缺省)按容器占比居中。
+   */
+  contentMaxWidth?: 'fluid' | 'centered';
   centerContent?: boolean;
 
   // ─── todo bar ───────────────────────────────────────────────────────
@@ -288,6 +298,7 @@ export interface ChatConversationViewProps {
     supportsVision?: boolean;
     contextWindow?: number;
     contextWindowOverride?: number;
+    reasoningOptions?: readonly ModelReasoningOption[];
   } | null;
   activeModelCanConfigureThinking?: boolean;
   activeModelTooltip?: string;
@@ -389,12 +400,6 @@ const CONVERSATION_STREAM_STYLE: CSSProperties = {
   transition: 'none',
 };
 
-/**
- * split 布局下每条消息只占内容列的 65%，左右分列要各自达到 unified 下的可用行宽，
- * 内容列基线需抬到约 1/0.65 ≈ 1.5 倍。基线抬高后仍走同一套「随可用宽度自适应」规则。
- */
-const SPLIT_CONTENT_COLUMN_WIDTH_FACTOR = 1.5;
-
 const SKELETON_BOTTOM_SPACER_STYLE: CSSProperties = {
   height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
   flexShrink: 0,
@@ -494,6 +499,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onOpenRecovery,
 
     scrollRegionRef,
+    pendingMessageScroll,
     contentColumnRef,
     bottomRef,
     onScroll,
@@ -667,31 +673,12 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     minHeight: 0,
     scrollPaddingBottom: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT,
   };
-  // 内容列最大宽度 = 「随可用宽度自适应」（见 resolveResponsiveContentMaxWidth）：
-  // 窄/中屏按容器占比收窄居中（行长可控），超宽屏放宽到「基准 × 1.6 / 1800px硬顶」。
-  const baseContentMaxWidthPx: number | null =
-    contentMaxWidth === 'fluid'
-      ? null
-      : typeof contentMaxWidth === 'number'
-        ? contentMaxWidth
-        : compact
-          ? null
-          : editorMode
-            ? 820
-            : 1024;
-
-  const contentColumnBaselinePx =
-    baseContentMaxWidthPx === null
-      ? null
-      : messageLayout === 'split'
-        ? Math.round(baseContentMaxWidthPx * SPLIT_CONTENT_COLUMN_WIDTH_FACTOR)
-        : baseContentMaxWidthPx;
-
+  // 内容列宽度 = 容器占比 + 420px 下限(见 resolveResponsiveContentMaxWidth),不设上限。
+  // fluid(停靠分栏)与 compact(team 嵌入)铺满容器;其余按占比居中(行长可控)。
   const effectiveContentMaxWidth: CSSProperties['maxWidth'] =
-    contentColumnBaselinePx === null
+    contentMaxWidth === 'fluid' || (contentMaxWidth === undefined && compact === true)
       ? '100%'
       : resolveResponsiveContentMaxWidth(
-          contentColumnBaselinePx,
           messageLayout === 'split' ? SPLIT_CONTENT_MAX_WIDTH_RATIO_PERCENT : undefined,
         );
 
@@ -813,6 +800,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
                     providerCatalog={providerCatalog}
                     resolveInlinePermissionActions={resolveInlinePermissionActions}
                     scrollRegionRef={scrollRegionRef}
+                    pendingMessageScroll={pendingMessageScroll}
                     {...(onOpenSubagentChild ? { onOpenSubagentChild } : {})}
                   />
                 </>

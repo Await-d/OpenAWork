@@ -189,10 +189,31 @@ export function canConfigureThinkingForModel(
   return false;
 }
 
+function isSupportedReasoningEffort(value: string): value is SupportedReasoningEffort {
+  return (
+    value === 'none' ||
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+  );
+}
+
 export function getSupportedReasoningEffortsForModel(
   providerType: string | undefined,
   modelId: string | undefined,
+  reasoningOptions?: readonly { readonly type: string; readonly values?: readonly string[] }[],
 ): readonly SupportedReasoningEffort[] {
+  // 与真实实现对齐:模型自声明的 `effort` 档位优先于按 providerType/modelId 推断。
+  const declaredEfforts = reasoningOptions?.find((option) => option.type === 'effort')?.values;
+  if (declaredEfforts && declaredEfforts.length > 0) {
+    const supported = declaredEfforts.filter((value): value is SupportedReasoningEffort =>
+      isSupportedReasoningEffort(value),
+    );
+    if (supported.length > 0) return supported;
+  }
   if (!providerType || !modelId) return ['low', 'medium', 'high'];
   const id = leafModelId(modelId);
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);

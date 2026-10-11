@@ -603,6 +603,82 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
 
   // 继承守卫：父会话未表达档位时，task 子会话不得凭空写入 permissionMode:'ask'
   // （否则会污染「从未表达过档位」的会话，并违背 metadata 模块「不凭空写 ask」的约定）。
+  it('subagent(子代理规范名)通过白名单门禁,不再报 is not allowed', async () => {
+    // 历史回归:静态白名单只登记了别名 task,模型可见的规范名 subagent
+    // 被沙箱白名单门禁拒绝(`Tool "subagent" is not allowed`)。
+    // yolo 档位免审批,subagent 校验失败时输出参数错误而非放行标志。
+    mocks.metadataJson = JSON.stringify({
+      yoloMode: true,
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-subagent-canonical',
+        toolName: 'subagent',
+        rawInput: {
+          prompt: '任务描述',
+          // 缺 category/subagent_type → 参数校验失败;关键断言是错误不是
+          // 白名单拒绝。
+          load_skills: [],
+        },
+      },
+      new AbortController().signal,
+      'session-subagent-canonical',
+      executionContext('req-subagent-canonical'),
+    );
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('参数校验失败');
+    expect(String(result.output)).not.toContain('is not allowed');
+  });
+
+  it('Agent(call_omo_agent)填 subagent_type=general 时被拒且指路 hephaestus/category', async () => {
+    mocks.metadataJson = JSON.stringify({
+      yoloMode: true,
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-omo-general',
+        toolName: 'call_omo_agent',
+        rawInput: {
+          prompt: '通用多步执行任务',
+          subagent_type: 'general',
+        },
+      },
+      new AbortController().signal,
+      'session-omo-general',
+      executionContext('req-omo-general'),
+    );
+    expect(result.isError).toBe(true);
+    const output = String(result.output);
+    expect(output).toContain('Invalid agent type "general"');
+    expect(output).toContain('hephaestus');
+    expect(output).toContain('category');
+  });
+
+  it('write 缺 content(大参数截断)时参数校验失败附带分块写入指引', async () => {
+    mocks.metadataJson = JSON.stringify({
+      yoloMode: true,
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-write-trunc',
+        toolName: 'write',
+        // 模拟长文档超输出上限后参数被截断:只剩 path、content 整体缺失。
+        rawInput: { path: join(TEST_WORKSPACE, 'long-report.md') },
+      },
+      new AbortController().signal,
+      'session-write-trunc',
+      executionContext('req-write-trunc'),
+    );
+    expect(result.isError).toBe(true);
+    const output = String(result.output);
+    expect(output).toContain('参数校验失败');
+    expect(output).toContain('content');
+    expect(output).toContain('分块写入');
+  });
+
   it('task 子会话在父会话未表达档位时保持权限键缺席', async () => {
     // 父会话只表达工作区（不表达档位）；权限文件需要 workingDirectory 才能被加载。
     mocks.metadataJson = JSON.stringify({ workingDirectory: TEST_WORKSPACE });

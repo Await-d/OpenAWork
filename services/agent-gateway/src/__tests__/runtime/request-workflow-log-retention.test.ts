@@ -131,3 +131,36 @@ describe('request-workflow-log-store 保留裁剪', () => {
     );
   });
 });
+
+describe('request-workflow-log-store 按用户清除', () => {
+  function persistForUser(userId: string, index: number): void {
+    logStore.persistRequestWorkflowLog({
+      context: {
+        requestId: `req-${userId}-${index}`,
+        method: 'GET',
+        path: `/usage?i=${index}`,
+        startTime: Date.now(),
+      },
+      steps: [{ name: 'request.handle', status: 'success' }],
+      statusCode: 200,
+      userId,
+    });
+  }
+
+  it('clearRequestWorkflowLogs 只清除目标用户的日志', () => {
+    seedUser('user-2', 'wf-user-2@example.com');
+    for (let i = 0; i < 3; i += 1) {
+      persistForUser('user-1', i);
+    }
+    for (let i = 0; i < 2; i += 1) {
+      persistForUser('user-2', i);
+    }
+    expect(countWorkflowLogRows()).toBe(5);
+
+    logStore.clearRequestWorkflowLogs('user-1');
+
+    expect(countWorkflowLogRows()).toBe(2);
+    expect(logStore.listRequestWorkflowLogs('user-1', 10)).toHaveLength(0);
+    expect(logStore.listRequestWorkflowLogs('user-2', 10)).toHaveLength(2);
+  });
+});

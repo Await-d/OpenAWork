@@ -2,6 +2,8 @@ export { ChatMessage } from './chat/ChatMessage.js';
 export type { ChatMessageProps } from './chat/ChatMessage.js';
 export { SubagentNoticeRow } from './chat/SubagentNoticeRow.js';
 export type { SubagentNoticeRowProps } from './chat/SubagentNoticeRow.js';
+export { SubagentResultCard } from './chat/SubagentResultCard.js';
+export type { SubagentResultCardProps } from './chat/SubagentResultCard.js';
 export { StreamRenderer } from './chat/StreamRenderer.js';
 export type { StreamRendererProps } from './chat/StreamRenderer.js';
 export { ToolCallCard } from './tools/ToolCallCard.js';
@@ -75,8 +77,13 @@ export {
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
   inferSupportsThinking,
+  sortSupportedReasoningEfforts,
 } from './models/model-reasoning-support.js';
-export type { SupportedReasoningEffort } from './models/model-reasoning-support.js';
+export type {
+  SupportedReasoningEffort,
+  ModelReasoningOption,
+} from './models/model-reasoning-support.js';
+export { REASONING_EFFORT_RANK } from './models/model-reasoning-support.js';
 
 export {
   hydrateProviderCatalogUi,
@@ -115,6 +122,15 @@ export type {
   AIModelConfigItem,
   ProviderModelTestResult,
 } from './models/ModelManager.js';
+export { UpstreamModelsPanel } from './models/UpstreamModelsPanel.js';
+export type {
+  UpstreamModelsPanelProps,
+  UpstreamModelItem,
+  UpstreamModelMetadata,
+  UpstreamExistingModel,
+  UpstreamModelsResult,
+  UpstreamModelsStatus,
+} from './models/UpstreamModelsPanel.js';
 export { OAuthButton } from './misc/OAuthButton.js';
 export type { OAuthButtonProps } from './misc/OAuthButton.js';
 export { CostOverview } from './cost/CostOverview.js';

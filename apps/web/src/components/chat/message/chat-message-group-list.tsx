@@ -86,6 +86,12 @@ interface ChatMessageGroupListProps {
   currentUserDisplayName?: string;
   currentUserEmail: string;
   groups: ChatRenderGroup[];
+  /**
+   * 一次性「滚动到指定历史消息」请求（`nonce` 变化即视为新请求）。虚拟化下
+   * 目标组可能仍在挂载窗口之外——此时调用方的 `scrollIntoView` 会因查不到
+   * 节点而静默失效，本组件按目标组偏移先粗滚动一次，把目标带进 overscan 窗口。
+   */
+  pendingMessageScroll?: { messageId: string; nonce: number } | null;
   pendingPermissions?: InlinePermissionQuickBarPermission[];
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
   resolveInlinePermissionActions?: ResolveInlinePermissionActionsFn;
@@ -111,6 +117,7 @@ export function ChatMessageGroupList({
   currentUserDisplayName,
   currentUserEmail,
   groups,
+  pendingMessageScroll,
   pendingPermissions,
   providerCatalog,
   resolveInlinePermissionActions,
@@ -162,6 +169,7 @@ export function ChatMessageGroupList({
       currentUserEmail={currentUserEmail}
       dividerLabels={dividerLabels}
       groups={groups}
+      pendingMessageScroll={pendingMessageScroll}
       pendingPermissions={activePendingPermissions}
       providerCatalog={providerCatalog}
       resolveInlinePermissionActions={showQuickBar ? resolveInlinePermissionActions : undefined}
@@ -211,6 +219,7 @@ function VirtualizedChatGroupViewport({
   currentUserEmail,
   dividerLabels,
   groups,
+  pendingMessageScroll,
   pendingPermissions,
   providerCatalog,
   resolveInlinePermissionActions,
@@ -432,6 +441,36 @@ function VirtualizedChatGroupViewport({
   }, []);
 
   const visibleGroups = groups.slice(visibleRange.startIndex, visibleRange.endIndex);
+
+  // 一次性「滚动到目标消息」：历史跳转 / 搜索扩窗后，目标组可能仍在挂载窗口
+  // 之外（离屏组不渲染节点），调用方的 `scrollIntoView` 会因查不到节点而静默
+  // 失效，视口就会停在无关位置。这里按目标组的布局偏移粗滚动一次，把目标带进
+  // overscan 窗口；节点挂载后由调用方（jump list / search）精确居中并高亮。
+  const handledMessageScrollNonceRef = useRef(0);
+  useEffect(() => {
+    const request = pendingMessageScroll;
+    if (!request || request.nonce === handledMessageScrollNonceRef.current) return;
+
+    const scrollRegion = scrollRegionRef.current;
+    if (!scrollRegion || scrollRegion.clientHeight === 0) return;
+
+    const targetIndex = groups.findIndex(
+      (group) =>
+        group.kind === 'messages' &&
+        group.entries.some((entry) => entry.message.id === request.messageId),
+    );
+    // 目标还没进入当前渲染窗口（扩窗尚未落地）：保留请求，等下一次渲染再试。
+    if (targetIndex < 0) return;
+
+    handledMessageScrollNonceRef.current = request.nonce;
+
+    const targetTop = layout.offsets[targetIndex] ?? 0;
+    const targetBottom = layout.offsets[targetIndex + 1] ?? layout.totalHeight;
+    const desiredTop =
+      targetTop + (targetBottom - targetTop) / 2 - scrollRegion.clientHeight / 2;
+    const maxTop = Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight);
+    scrollRegion.scrollTop = Math.max(0, Math.min(desiredTop, maxTop));
+  }, [groups, layout, pendingMessageScroll, scrollRegionRef]);
 
   return (
     <>

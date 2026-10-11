@@ -126,10 +126,20 @@ export async function handleWriteTool(ctx: SandboxHandlerContext): Promise<ToolC
 
   const parsed = writeTool.inputSchema.safeParse(rawInput);
   if (!parsed.success) {
+    let validationOutput = formatToolInputValidationOutput(request.toolName, parsed.error.issues);
+    // 排障诊断(2026-10-10 #7/#8):模型把整份长文档塞进单次 write,超出输出
+    // token 上限后参数在 JSON 中间被截断,content 整体缺失。通用的「参数校验
+    // 失败」提示会让它原样重试再被截断;缺 content 时明确告知分块写法。
+    if (
+      parsed.error.issues.some((issue) => issue.path.includes('content') && issue.code === 'invalid_type')
+    ) {
+      validationOutput +=
+        '\n\n提示:本次写入的 content 过大或未完整传出(常见于长文档超过单次工具参数上限)。请改为分块写入:先 write 写入文件开头段落,再用 edit/multi_edit 逐段追加;单次 write 的 content 建议不超过 32KB。';
+    }
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
+      output: validationOutput,
       isError: true,
       durationMs: 0,
     };

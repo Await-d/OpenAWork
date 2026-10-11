@@ -52,6 +52,10 @@ const BASE_TOOL_TO_CATEGORY = {
   glob: 'glob',
   grep: 'grep',
   task: 'task_run',
+  // 子代理工具的规范名(模型可见名 `subagent`,与历史别名 `task` 同属一个工具)。
+  // 不登记会落到 `resolvePermissionCategory` 的 fail-closed 兜底 `custom`,
+  // 使每次委派都被迫走审批。
+  subagent: 'task_run',
   task_create: 'task',
   task_update: 'task',
   call_omo_agent: 'task_run',

@@ -178,6 +178,11 @@ import { resolveChatUiWorkspaceScope, useChatUiState } from './hooks/use-chat-ui
 import { useModelPrices } from './conversation/settings/use-model-prices.js';
 import { useProviderModelInfo } from './conversation/settings/use-provider-model-info.js';
 import { useScrollManager } from '../../components/conversation-runtime/scroll/use-scroll-manager.js';
+import {
+  captureScrollAnchor,
+  restoreScrollAnchor,
+  type ScrollAnchorSnapshot,
+} from '../../components/conversation-runtime/scroll/scroll-anchor.js';
 import { useSessionContentArtifacts } from './conversation/snapshot/use-session-content-artifacts.js';
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
 
@@ -318,6 +323,48 @@ export default function ChatPage() {
     () => useDisplayPreferencesStore.getState().defaultDialogueMode,
   );
   const [manualAgentId, setManualAgentId] = useState('');
+  /**
+   * 头部插入旧消息（加载更多历史 / 跳转到更早消息）的滚动锚点快照：
+   * 非 null 时「恢复视口」effect 会在下一帧把加载前的阅读位置恢复回去。
+   */
+  const [pendingHistoryAnchor, setPendingHistoryAnchor] = useState<ScrollAnchorSnapshot | null>(null);
+  const lastAnchorMessageIdRef = useRef<string | null>(null);
+  // 可见窗口第一条消息 id 的 ref 镜像（在 `useChatRenderData` 返回后同步）：
+  // 头部加载锚点捕获的回调定义在更早的位置，需要在任意时刻读到最新值。
+  const firstVisibleMessageIdRef = useRef<string | null>(null);
+  // armHistoryAnchor 的实际实现在下方 `useChatRenderData` 之后；此处用 ref
+  // 转发，让 `ensureMessageVisible`（本文件更早位置）稳定调用同一实现。
+  const armHistoryAnchorImplRef = useRef<(() => void) | null>(null);
+  const armHistoryAnchor = useCallback((): void => {
+    armHistoryAnchorImplRef.current?.();
+  }, []);
+  /**
+   * 悬挂的锚点恢复 rAF 取消句柄。**不能**由恢复 effect 的 cleanup 返回：
+   * 该 effect 内部会 `setPendingHistoryAnchor(null)`，重渲染时 cleanup 若取消
+   * rAF，恢复就永远不会落地。改为手动管理，只在重新武装 / 会话切换 / 卸载时取消。
+   */
+  const historyAnchorRestoreCancelRef = useRef<(() => void) | null>(null);
+  /**
+   * 一次性「滚动到指定历史消息」请求（虚拟化下用于先把目标组挂载出来）。
+   * 历史跳转 / 搜索走 `ensureMessageVisible` 扩窗后，若目标在虚拟视口挂载
+   * 窗口外，DOM 里查不到节点，调用方的 `scrollIntoView` 就会静默失效；
+   * 这条请求让虚拟视口按目标组偏移先粗滚动一次，目标挂载后调用方再精确居中。
+   */
+  const [pendingMessageScroll, setPendingMessageScroll] = useState<{
+    messageId: string;
+    nonce: number;
+  } | null>(null);
+  const pendingMessageScrollNonceRef = useRef(0);
+  const requestMessageScroll = useCallback((messageId: string): void => {
+    pendingMessageScrollNonceRef.current += 1;
+    setPendingMessageScroll({ messageId, nonce: pendingMessageScrollNonceRef.current });
+  }, []);
+  // 加载更多历史消息的实际实现在下方 `conversationViewProps` 附近定义；此处
+  // ref 转发，让更早位置的 `useScrollManager` 上滑触发（onNearTop）能调用它。
+  const loadEarlierMessagesRef = useRef<(() => void) | null>(null);
+  // 隐藏（未加载）历史消息数的 ref 镜像：`hiddenMessageCount` 在下方
+  // `useChatRenderData` 才派生，onNearTop 门控需任意时刻可读。
+  const hiddenMessageCountRef = useRef(0);
   const [permissionMode, setPermissionMode] = useState<ComposerPermissionMode>('ask');
   // 档位是唯一事实来源；布尔 yoloMode 是派生投影，供顶栏 / 命令面板 / 流式请求等旧读者消费。
   const yoloMode = permissionMode === 'yolo';
@@ -777,10 +824,7 @@ export default function ChatPage() {
     terminalPanelOpened,
     terminalRunningCount: sessionTerminals.runningCount,
   });
-  const classicConversationLayoutState = useMemo(
-    () => resolveClassicConversationLayoutState({ editorMode }),
-    [editorMode],
-  );
+  const classicConversationLayoutState = useMemo(() => resolveClassicConversationLayoutState(), []);
   const conversationLayoutState = isFusionLayout
     ? fusionChatLayout.conversationLayoutState
     : classicConversationLayoutState;
@@ -1394,6 +1438,10 @@ export default function ChatPage() {
           // 把窗口扩到能覆盖目标的位置。多加 5 条作为上下文 buffer。
           const requiredCount = messages.length - localIndex + 5;
           if (requiredCount > visibleMessageCount) {
+            // 扩窗会把旧消息插到渲染列表头部:目标节点此前没挂载,调用方的
+            // scrollIntoView 会静默失效。这里请求虚拟视口先按目标组偏移粗滚动
+            // 一次,把目标挂载出来,再由调用方精确居中。
+            requestMessageScroll(messageId);
             setVisibleMessageCount(requiredCount);
           }
         }
@@ -1402,6 +1450,7 @@ export default function ChatPage() {
       // 本地数组里也没有 → 服务端可能还没拉过来,触发一次 snapshot
       // 重载并把窗口扩到全部新消息可见。
       if (currentSessionId) {
+        requestMessageScroll(messageId);
         try {
           await loadCurrentSessionSnapshot(currentSessionId, { replaceMessages: true });
           setServerTotalTurnCount(null);
@@ -1421,6 +1470,7 @@ export default function ChatPage() {
       loadCurrentSessionSnapshot,
       setVisibleMessageCount,
       setServerTotalTurnCount,
+      requestMessageScroll,
     ],
   );
 
@@ -1950,6 +2000,17 @@ export default function ChatPage() {
       visibleStreaming,
       visibleStreamBufferLength: visibleStreamBuffer.length,
       editorMode,
+    },
+    {
+      // 上滑到顶部附近时动态加载更早的历史消息（本地窗口 / 服务端快照）。
+      // 门控走 ref：`hiddenMessageCount` 在下方 `useChatRenderData` 才派生。
+      onNearTop: () => {
+        if (hiddenMessageCountRef.current > 0) {
+          loadEarlierMessagesRef.current?.();
+        }
+      },
+      nearTopThreshold: 120,
+      nearTopDebounceMs: 800,
     },
   );
 
@@ -3018,6 +3079,7 @@ export default function ChatPage() {
       declaredSupportsThinking: activeModelOption?.supportsThinking === true,
       thinkingEnabled,
       reasoningEffort,
+      reasoningOptions: activeModelOption?.reasoningOptions,
     });
 
     if (thinkingEnabled !== normalizedThinkingState.thinkingEnabled) {
@@ -3030,6 +3092,7 @@ export default function ChatPage() {
     effectiveModelId,
     activeModelOption?.id,
     activeModelOption?.supportsThinking,
+    activeModelOption?.reasoningOptions,
     activeProvider?.type,
     reasoningEffort,
     thinkingEnabled,
@@ -3100,6 +3163,7 @@ export default function ChatPage() {
     effectiveContextMessageCount,
     sanitizedHistoricalMessages,
     hiddenMessageCount,
+    firstVisibleMessageId,
     historicalRenderedMessageEntries,
     streamingRenderedMessageEntry,
     historicalGroupedMessageEntries,
@@ -3137,6 +3201,117 @@ export default function ChatPage() {
     stoppingStream,
     onStopActiveMessage: stopActiveMessage,
   });
+
+  // ─── 头部插入历史消息的滚动锚点 ────────────────────────────────────
+  // `messages` 是完整（或快照窗口）列表，加载旧消息 = 扩大 `slice(-visibleMessageCount)`
+  // 窗口 / 替换 messages，旧消息插入渲染列表**头部**。视口若不加锚定，会被内容
+  // 增长推离阅读位置。这里在插入前捕获「视口内最靠上的可见消息」，插入后恢复。
+
+  firstVisibleMessageIdRef.current = firstVisibleMessageId;
+  hiddenMessageCountRef.current = hiddenMessageCount;
+
+  /** 捕获当前滚动锚点：视口内最靠上的一条可见消息 + 滚动区几何。 */
+  const captureHistoryScrollAnchor = useCallback((): ScrollAnchorSnapshot => {
+    const region = scrollRegionRef.current;
+    const messageId = firstVisibleMessageIdRef.current;
+    const anchorElement =
+      messageId !== null && region !== null
+        ? region.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`)
+        : null;
+    return captureScrollAnchor(region, anchorElement);
+  }, [scrollRegionRef]);
+
+  /**
+   * 武装头部插入锚点：记录加载前的阅读位置快照。旧消息插入渲染列表头部后，
+   * 「恢复视口」 effect 会把视口恢复到该位置。实现同时挂到
+   * `armHistoryAnchorImplRef`，让文件更早位置定义的 `ensureMessageVisible`
+   * 也能通过 `armHistoryAnchor` 稳定引用（ref 转发，无 TDZ 问题）。
+   */
+  const armHistoryAnchorImpl = useCallback((): void => {
+    lastAnchorMessageIdRef.current = firstVisibleMessageIdRef.current;
+    setPendingHistoryAnchor(captureHistoryScrollAnchor());
+  }, [captureHistoryScrollAnchor]);
+  useEffect(() => {
+    armHistoryAnchorImplRef.current = armHistoryAnchorImpl;
+  }, [armHistoryAnchorImpl]);
+
+  /**
+   * 加载更多历史消息（手动「加载更早」按钮 与 上滑 onNearTop 共用）：
+   * 本地窗口还有隐藏消息时直接扩窗口，否则拉一次服务端快照。
+   * 两条路径都会往渲染列表**头部**插入旧消息，因此先武装滚动锚点。
+   */
+  const handleLoadEarlierMessages = useCallback((): void => {
+    const localHidden =
+      sanitizedHistoricalMessages.length -
+      (visibleMessageCount ?? sanitizedHistoricalMessages.length);
+    if (localHidden > 0) {
+      armHistoryAnchor();
+      setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+      return;
+    }
+    if (!currentSessionId) return;
+    armHistoryAnchor();
+    void loadCurrentSessionSnapshot(currentSessionId, {
+      replaceMessages: true,
+    })
+      .then(() => {
+        setServerTotalTurnCount(null);
+        setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
+      })
+      .catch(() => undefined);
+  }, [
+    armHistoryAnchor,
+    currentSessionId,
+    loadCurrentSessionSnapshot,
+    sanitizedHistoricalMessages.length,
+    setServerTotalTurnCount,
+    setVisibleMessageCount,
+    visibleMessageCount,
+  ]);
+  useEffect(() => {
+    loadEarlierMessagesRef.current = handleLoadEarlierMessages;
+  }, [handleLoadEarlierMessages]);
+
+  // 会话切换：旧会话的待恢复锚点必须丢弃，不能落到新会话的滚动区上。
+  useEffect(() => {
+    historyAnchorRestoreCancelRef.current?.();
+    historyAnchorRestoreCancelRef.current = null;
+    setPendingHistoryAnchor(null);
+    setPendingMessageScroll(null);
+    lastAnchorMessageIdRef.current = null;
+  }, [currentSessionId]);
+
+  // 卸载时清理悬挂的恢复 rAF。
+  useEffect(() => {
+    return () => {
+      historyAnchorRestoreCancelRef.current?.();
+      historyAnchorRestoreCancelRef.current = null;
+    };
+  }, []);
+
+  // 「恢复视口」：旧消息落入窗口后（`firstVisibleMessageId` 相对锚点时刻变化），
+  // 在下一帧把视口恢复到加载前的阅读位置。layout effect 保证恢复先于绘制落地。
+  useLayoutEffect(() => {
+    if (pendingHistoryAnchor === null) return;
+    if (firstVisibleMessageId === lastAnchorMessageIdRef.current) return;
+
+    const anchorSnapshot = pendingHistoryAnchor;
+    // 先取消上一次仍未落地的恢复，再排新的；**不能**把 cancel 作为 effect 的
+    // 返回值——下方 setState 会触发重渲染，cleanup 会在 rAF 落地前把它取消掉。
+    historyAnchorRestoreCancelRef.current?.();
+    historyAnchorRestoreCancelRef.current = restoreScrollAnchor(
+      scrollRegionRef.current,
+      anchorSnapshot,
+      (): Element | null => {
+        const messageRegion = scrollRegionRef.current;
+        if (messageRegion === null || lastAnchorMessageIdRef.current === null) return null;
+        return messageRegion.querySelector<HTMLElement>(
+          `[data-message-id="${lastAnchorMessageIdRef.current}"]`,
+        );
+      },
+    );
+    setPendingHistoryAnchor(null);
+  }, [firstVisibleMessageId, pendingHistoryAnchor, scrollRegionRef]);
 
   const chatSearch = useChatSearch({ messages, scrollRegionRef, ensureMessageVisible });
 
@@ -3428,23 +3603,7 @@ export default function ChatPage() {
     activeProviderId: effectiveProviderId,
     activeModelId: effectiveModelId,
     activeModelLabel: activeModelOption?.label,
-    onLoadEarlier: () => {
-      const localHidden =
-        sanitizedHistoricalMessages.length -
-        (visibleMessageCount ?? sanitizedHistoricalMessages.length);
-      if (localHidden > 0) {
-        setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
-      } else if (currentSessionId) {
-        void loadCurrentSessionSnapshot(currentSessionId, {
-          replaceMessages: true,
-        })
-          .then(() => {
-            setServerTotalTurnCount(null);
-            setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
-          })
-          .catch(() => undefined);
-      }
-    },
+    onLoadEarlier: () => handleLoadEarlierMessages(),
     welcomeScreen: {
       hasWorkspace: !!effectiveWorkingDirectory,
       dialogueMode,
@@ -3468,6 +3627,8 @@ export default function ChatPage() {
       setRightTab('overview');
     },
     scrollRegionRef,
+    // 一次性「滚动到目标历史消息」请求（虚拟视口据此先把目标组挂载出来）。
+    pendingMessageScroll,
     contentColumnRef,
     bottomRef,
     onScroll: handleScroll,
@@ -3570,6 +3731,7 @@ export default function ChatPage() {
         declaredSupportsThinking: nextModel?.supportsThinking === true,
         thinkingEnabled,
         reasoningEffort,
+        reasoningOptions: nextModel?.reasoningOptions,
       });
       setActiveProviderId(pid);
       setActiveModelId(mid);

@@ -35,6 +35,20 @@ export interface PromptSnippet {
   updatedAt: string;
 }
 
+/** 提示词内容版本（资产化沉淀：内容变更自动留痕，可回滚）。 */
+export interface PromptSnippetVersion {
+  id: string;
+  snippetId: string;
+  userId: string;
+  /** 版本号（同一 snippet 内单调递增，从 1 开始）。 */
+  version: number;
+  title: string;
+  content: string;
+  /** 创建来源：'created' = 首次创建；'updated' = 内容更新；'restored' = 回滚到历史版本。 */
+  source: 'created' | 'updated' | 'restored';
+  createdAt: string;
+}
+
 export interface CreateGroupInput {
   name: string;
   order?: number;
@@ -57,6 +71,8 @@ export interface UpdateSnippetInput {
   content?: string;
   groupId?: string;
   order?: number;
+  /** 版本来源标记：'restored' 表示该更新来自回滚，用于版本历史留痕。 */
+  source?: 'updated' | 'restored';
 }
 
 // ─── Client Interface ───────────────────────────────────────────────────────
@@ -78,6 +94,17 @@ export interface PromptSnippetsClient {
     input: UpdateSnippetInput,
   ): Promise<PromptSnippet>;
   deleteSnippet(token: string, snippetId: string): Promise<void>;
+
+  listSnippetVersions(
+    token: string,
+    snippetId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<PromptSnippetVersion[]>;
+  restoreSnippetVersion(
+    token: string,
+    snippetId: string,
+    version: number,
+  ): Promise<PromptSnippet>;
 }
 
 function buildPromptSnippetsActionErrorMessage(
@@ -255,6 +282,36 @@ export function createPromptSnippetsClient(baseUrl: string): PromptSnippetsClien
             headers: authHeader(token),
           }),
       });
+    },
+
+    async listSnippetVersions(token, snippetId, options) {
+      const data = await performPromptSnippetsRequest<{ versions: PromptSnippetVersion[] }>({
+        actionLabel: '读取提示词版本历史',
+        request: () =>
+          fetchWithTimeout(
+            `${baseUrl}/prompt-snippets/${encodeURIComponent(snippetId)}/versions`,
+            {
+              headers: authHeader(token),
+              signal: options?.signal,
+            },
+          ),
+      });
+      return data.versions;
+    },
+
+    async restoreSnippetVersion(token, snippetId, version) {
+      const data = await performPromptSnippetsRequest<{ snippet: PromptSnippet }>({
+        actionLabel: '回滚提示词版本',
+        request: () =>
+          fetchWithTimeout(
+            `${baseUrl}/prompt-snippets/${encodeURIComponent(snippetId)}/versions/${version}/restore`,
+            {
+              method: 'PUT',
+              headers: jsonAuthHeaders(token),
+            },
+          ),
+      });
+      return data.snippet;
     },
   };
 }

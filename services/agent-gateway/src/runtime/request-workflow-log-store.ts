@@ -197,6 +197,29 @@ export function listRequestWorkflowLogs(userId: string, limit = 100): RequestWor
   }
 }
 
+/**
+ * 清除某个用户的全部请求工作流日志(「开发者模式与日志」分区的「清除全部」)。
+ *
+ * 与读取侧保持一致:遇到库损坏则禁用整个 store 并静默返回,不把错误抛给清除接口,
+ * 避免一次失败让调用方误以为请求整体不可用。
+ */
+export function clearRequestWorkflowLogs(userId: string): void {
+  if (requestWorkflowLogStoreDisabled) {
+    return;
+  }
+
+  try {
+    sqliteRun(`DELETE FROM request_workflow_logs WHERE user_id = ?`, [userId]);
+  } catch (error) {
+    if (isSqliteMalformedError(error)) {
+      requestWorkflowLogStoreDisabled = true;
+      return;
+    }
+
+    throw error;
+  }
+}
+
 export function resetRequestWorkflowLogStoreStateForTests(): void {
   requestWorkflowLogStoreDisabled = false;
   insertsSincePrune = 0;

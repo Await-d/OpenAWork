@@ -25,6 +25,7 @@ import {
 } from '../../session/session-manager-tools.js';
 import { skillManageToolDefinition } from '../../skill/skill-admin-tools.js';
 import { skillMcpToolDefinition } from '../../skill/skill-mcp-tools.js';
+import { TASK_TOOL_LEGACY_NAME, TASK_TOOL_NAME } from '../../task/task-tools.js';
 import { teamWorkspaceManageToolDefinition } from '../../team/team-workspace-admin-tools.js';
 import {
   assertSessionWorkingDirectory,
@@ -292,7 +293,12 @@ export const TOOL_WHITELIST = new Set<string>([
   'multi_edit',
   'batch',
   'skill',
-  'task',
+  // 子代理工具的**规范名**(`TASK_TOOL_NAME`)。模型可见名就是 `subagent`
+  // (见 `tool-definitions.ts` 的 `getVisibleToolName`),而静态白名单此前只
+  // 登记了历史别名 `task`,导致 `subagent` 卡在本门禁:`Tool "subagent" is
+  // not allowed`。规范名与别名同属一个工具,必须同时登记。
+  TASK_TOOL_NAME,
+  TASK_TOOL_LEGACY_NAME,
   'lsp_diagnostics',
   'lsp_touch',
   'lsp_goto_definition',

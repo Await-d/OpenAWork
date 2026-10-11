@@ -417,24 +417,26 @@ NODE_PATH=packages/browser-automation/node_modules \
   「旧 → 新」后才交给 tab 条 —— 这条语义由 `QuickTerminalPanel.test.tsx` 的面板级用例
   守卫；本 harness 只验证 tab 条按传入顺序从左到右渲染。
 
-## 对话内容列宽度自适应验收（`chat-content-width`）
+## 对话内容列宽度自适应验收(`chat-content-width`)
 
 对应 `pages/chat-page/layout/conversation-layout-state.ts` 的
-`resolveResponsiveContentMaxWidth`（策略本体）与 `conversation/ChatConversationView.tsx`
-的内容列 `maxWidth` 接线（接线由 `ChatConversationView.test.tsx` 守卫）。
-渲染的是与组件一致的内联样式链：滚动区（padding + flex column）→ 内容列
-（`width:100%` + `maxWidth: clamp(基准, 88%, 1.5×基准)` + `margin:0 auto`）。
+`resolveResponsiveContentMaxWidth`(策略本体)与 `conversation/ChatConversationView.tsx`
+的内容列 `maxWidth` 接线(接线由 `ChatConversationView.test.tsx` 守卫)。
+渲染的是与组件一致的内联样式链:滚动区(padding + flex column)→ 内容列
+(`width:100%` + `maxWidth: max(72%, 420px)` + `margin:0 auto`)。
 
-覆盖项（5 个**固定宽度容器**，页面视口 1900；期望值由夹具按规则独立重算）：
+策略为「容器占比 + 固定下限」,**不设上限**——内容列在超宽屏随容器一路放宽
+(旧的「基准 × 放大倍数 / 1800px 硬顶」模型已移除)。
 
-| 项               | 说明                                                                                                        |
-| ---------------- | ----------------------------------------------------------------------------------------------------------- |
-| clamp 声明       | 真实引擎保留 `clamp(基准px, 88%, 1.5×基准px)`，三个组件逐项对齐（含窄容器下「渲染宽恒等于容器」的盲区用例） |
-| 渲染宽度（下限） | 容器 900 / 基准 1024：窄于下限 → 铺满容器且不横向溢出                                                       |
-| 渲染宽度（比例） | 容器 1200 / 基准 1024：按 88% 加宽（1024 → 1134 容器下取 1024，1800 容器下取 1525.9）                       |
-| 渲染宽度（封顶） | 容器 1800 / 基准 1024 → 1536 封顶；容器 1600 / 基准 820 → 1230 封顶；基准 1536（split 抬高）仍按 88% 自适应 |
-| 居中             | 未占满容器时左右边距差 ≤ 1.5px（`margin: 0 auto` 真实生效）                                                 |
-| 页面不溢出       | 文档 `scrollWidth ≤ 1900`                                                                                   |
+覆盖项(4 个**固定宽度容器**,页面视口 1900;期望值由夹具按规则独立重算):
+
+| 项               | 说明                                                                                          |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| max-width 声明   | 真实引擎保留 `max(72%, 420px)`,两个组件逐项对齐(含窄容器下「渲染宽恒等于容器」的盲区用例) |
+| 渲染宽度(比例) | 容器 1200 / 1800:按容器 72% 加宽,不封顶                                                      |
+| 渲染宽度(下限) | 容器 600:72% 低于 420 → 取 420px 下限;容器 400:窄于下限 → 铺满容器且不横向溢出              |
+| 居中             | 未占满容器时左右边距差 ≤ 1.5px(`margin: 0 auto` 真实生效)                                    |
+| 页面不溢出       | 文档 `scrollWidth ≤ 1900`                                                                     |
 
 ### 运行
 
@@ -444,19 +446,17 @@ NODE_PATH=packages/browser-automation/node_modules \
   bun apps/web/harness/verify-chat-content-width.ts
 ```
 
-21 断言全绿；截图写到 `/tmp/opencode/chat-content-width-<pane-id>.png`。
+截图写到 `/tmp/opencode/chat-content-width-<pane-id>.png`。
 
 ### 为什么需要它
 
-- **jsdom 没有布局引擎**：`max-width: clamp(px, %, px)` 的解析值与真实渲染宽度
-  （`min(容器, clamp)`）、`margin: 0 auto` 的居中，只有真实引擎能判定；jsdom 只保留声明字符串。
-- **Chromium 的计算值不解析 clamp**：`getComputedStyle().maxWidth` 会**原样返回**
-  `clamp(...)` 数学函数（规范允许）——所以断言拆成两条：解析声明组件证明「声明被接受」，
-  比较渲染宽度证明「解析结果正确」。只做前者会漏掉解析错误，只做后者会在窄容器用例上失明。
-- **容器 ≠ 视口**：策略刻意用容器百分比而不是 `vw` / `vh`（分栏面板里视口单位会失真），
+- **jsdom 没有布局引擎**:`max-width: max(%, px)` 的解析值与真实渲染宽度
+  (`min(容器, max-width)`)、`margin: 0 auto` 的居中,只有真实引擎能判定;jsdom 只保留声明字符串。
+- **Chromium 的计算值不解析数学函数**:`getComputedStyle().maxWidth` 会**原样返回**
+  `max(...)`(规范允许)——所以断言拆成两条:解析声明组件证明「声明被接受」,
+  比较渲染宽度证明「解析结果正确」。只做前者会漏掉解析错误,只做后者会在窄容器用例上失明。
+- **容器 ≠ 视口**:策略刻意用容器百分比而不是 `vw` / `vh`(分栏面板里视口单位会失真),
   因此用例必须用**固定宽度容器**而不是三视口档位。
-- **红→绿证据（实测）**：把策略比例从 88 改成 60 → 5 条 clamp 声明断言 + 2 条渲染宽度断言
-  失败（`b1024-wide` 实际 1040.4px、`b820-wide` 实际 920.4px）；恢复 88 后 21/21 全绿。
 
 ## 工具卡展开可视化验收（`tool-expansion`）
 

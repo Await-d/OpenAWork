@@ -100,10 +100,16 @@ export async function handleCallOmoAgentTool(
   if (
     !CALL_OMO_ALLOWED_AGENTS.includes(normalizedAgent as (typeof CALL_OMO_ALLOWED_AGENTS)[number])
   ) {
+    // `general` 是历史文案里宣传过但**从未**存在于白名单的"通用执行" agent,
+    // 模型高频臆造(排障诊断 2026-10-10 #4 同款)。单独给一行指路,避免再次猜测。
+    const generalHint =
+      normalizedAgent === 'general'
+        ? ' `general` 不存在:通用研究与多步执行请改用 hephaestus(深度实施)或省略 subagent_type 走 category。'
+        : '';
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: `Error: Invalid agent type "${parsed.data.subagent_type}". Only ${CALL_OMO_ALLOWED_AGENTS.join(', ')} are allowed.`,
+      output: `Error: Invalid agent type "${parsed.data.subagent_type}". Only ${CALL_OMO_ALLOWED_AGENTS.join(', ')} are allowed.${generalHint}`,
       isError: true,
       durationMs: 0,
     };

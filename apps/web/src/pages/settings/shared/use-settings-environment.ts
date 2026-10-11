@@ -167,9 +167,17 @@ export function useSettingsEnvironment(
   );
 
   const saveGatewayUrl = React.useCallback(async () => {
-    const gatewayUrl = normalizeGatewayUrl(urlInput);
+    const nextUrl = normalizeGatewayUrl(urlInput);
+    // 空输入视为「不修改」:空 baseUrl 会让所有 `${baseUrl}/xxx` 退化成相对路径,
+    // 请求打到前端自身并被 SPA 兜底成 index.html(用量 / 开发日志 / Worker 等面板
+    // 统一报 `Unexpected token '<'`)。这里把输入框回填成当前生效地址并直接返回,
+    // 既不落库空值,也不误触发桌面端的网关切换流程。
+    if (!nextUrl) {
+      setUrlInput(input.gatewayUrl);
+      return;
+    }
     if (!isTauriRuntime()) {
-      input.setGatewayUrl(gatewayUrl);
+      input.setGatewayUrl(nextUrl);
       setUrlSaved(true);
       setTimeout(() => setUrlSaved(false), 2000);
       return;
@@ -178,10 +186,10 @@ export function useSettingsEnvironment(
     setDesktopGatewayBusy(true);
     setDesktopGatewayError(null);
     try {
-      const nextMode = desktopGatewayModeForUrl(gatewayUrl);
+      const nextMode = desktopGatewayModeForUrl(nextUrl);
       if (nextMode === 'local') {
         const fallbackPort = parseGatewayPort(portInput, input.webPort);
-        const port = readGatewayPortFromUrl(gatewayUrl, fallbackPort);
+        const port = readGatewayPortFromUrl(nextUrl, fallbackPort);
         const nextGatewayUrl = localGatewayUrl(port);
         await tauriInvoke('start_gateway', {
           port,
@@ -200,8 +208,8 @@ export function useSettingsEnvironment(
         }
         writeDesktopGatewayMode('remote');
         input.setWebAccess(false, parseGatewayPort(portInput, input.webPort));
-        await refreshRemoteDesktopAuth(gatewayUrl);
-        input.setGatewayUrl(gatewayUrl);
+        await refreshRemoteDesktopAuth(nextUrl);
+        input.setGatewayUrl(nextUrl);
       }
       setUrlSaved(true);
       setTimeout(() => setUrlSaved(false), 2000);

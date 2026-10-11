@@ -9,6 +9,20 @@ afterEach(() => {
   cleanup();
 });
 
+const EXPLORE_RESULTS = `<results>
+<files>
+- /abs/path/to/file1.ts — 状态机核心实现
+</files>
+
+<answer>
+状态机在 file1.ts 中定义。
+</answer>
+
+<next_steps>
+- 先读 transition 函数
+</next_steps>
+</results>`;
+
 function buildNotice(overrides: Partial<SubagentNotice> = {}): SubagentNotice {
   return {
     id: 'notice-1',
@@ -23,7 +37,7 @@ function buildNotice(overrides: Partial<SubagentNotice> = {}): SubagentNotice {
 }
 
 describe('SubagentNoticeRow', () => {
-  it('渲染一行通知：代理名 + 状态标签 + 描述', () => {
+  it('渲染标题行：代理名 + 状态标签 + 描述', () => {
     const { container } = render(<SubagentNoticeRow notice={buildNotice()} />);
     const row = container.querySelector('[data-component="subagent-notice"]');
 
@@ -53,7 +67,7 @@ describe('SubagentNoticeRow', () => {
     }
   });
 
-  it('有 childID 且传入 onOpenChild 时是原生 button，点击回传子会话 id', () => {
+  it('有 childID 且传入 onOpenChild 时标题行是原生 button，点击回传子会话 id', () => {
     const onOpenChild = vi.fn();
     render(<SubagentNoticeRow notice={buildNotice()} onOpenChild={onOpenChild} />);
 
@@ -63,10 +77,9 @@ describe('SubagentNoticeRow', () => {
     expect(onOpenChild).toHaveBeenCalledWith('child-1');
   });
 
-  it('未传 onOpenChild 时不可交互（div 而非 button）', () => {
-    const { container } = render(<SubagentNoticeRow notice={buildNotice()} />);
+  it('未传 onOpenChild 时不可交互（无 button）', () => {
+    render(<SubagentNoticeRow notice={buildNotice()} />);
 
-    expect(container.querySelector('button')).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();
   });
 
@@ -92,14 +105,18 @@ describe('SubagentNoticeRow', () => {
 
     fireEvent.focus(button);
 
-    const focused = container.querySelector('[data-component="subagent-notice"]') as HTMLElement;
-    expect(focused.style.outline).toContain('var(--accent');
-    expect(focused.style.outlineOffset).toBe('2px');
-    expect(focused.style.boxShadow).toContain('var(--accent-subtle');
+    const heading = container.querySelector(
+      '[data-subagent-notice-heading="true"]',
+    ) as HTMLElement;
+    expect(heading.style.outline).toContain('var(--accent');
+    expect(heading.style.outlineOffset).toBe('2px');
+    expect(heading.style.boxShadow).toContain('var(--accent-subtle');
 
-    fireEvent.blur(focused);
+    fireEvent.blur(heading);
     expect(
-      (container.querySelector('[data-component="subagent-notice"]') as HTMLElement).style.outline,
+      (container.querySelector(
+        '[data-subagent-notice-heading="true"]',
+      ) as HTMLElement).style.outline,
     ).toBe('');
   });
 
@@ -111,24 +128,39 @@ describe('SubagentNoticeRow', () => {
 
     expect(row).not.toBeNull();
     expect(row?.textContent).toContain('已失败');
-    expect(row?.textContent).not.toContain('·');
   });
 
-  it('grouped 收紧上下间距，未分组时上下留白对称', () => {
-    const { container: groupedContainer, unmount: unmountGrouped } = render(
-      <SubagentNoticeRow notice={buildNotice()} grouped />,
+  it('无 <results> 块时正文直接展示（无结构化卡片）', () => {
+    const { container } = render(
+      <SubagentNoticeRow notice={buildNotice({ text: '纯文本总结，无结构化块' })} />,
     );
-    const groupedRow = groupedContainer.querySelector(
-      '[data-component="subagent-notice"]',
-    ) as HTMLElement;
-    expect(groupedRow.style.padding).toBe('4px 0px');
-    unmountGrouped();
+    const card = container.querySelector('[data-component="subagent-result-card"]');
+    // 卡片组件存在但退化为非结构化视图（data-structured 为 "false"）。
+    expect(card?.getAttribute('data-structured')).toBe('false');
+    expect(container.textContent).toContain('纯文本总结，无结构化块');
+    expect(container.textContent).not.toContain('<results>');
+  });
 
-    const { container: looseContainer } = render(<SubagentNoticeRow notice={buildNotice()} />);
-    const looseRow = looseContainer.querySelector(
-      '[data-component="subagent-notice"]',
-    ) as HTMLElement;
-    // 对称 padding：通知行夹在两条消息之间时必须上下居中，不得偏向任一侧。
-    expect(looseRow.style.padding).toBe('8px 0px');
+  it('结构化结果全展开：渲染 answer / files / next_steps 分节且不泄露原始标签', () => {
+    const { container } = render(
+      <SubagentNoticeRow notice={buildNotice({ text: EXPLORE_RESULTS })} />,
+    );
+    const card = container.querySelector('[data-component="subagent-result-card"]');
+    expect(card).not.toBeNull();
+    expect(card?.getAttribute('data-structured')).toBe('true');
+    expect(card?.textContent).toContain('相关文件');
+    expect(card?.textContent).toContain('状态机在 file1.ts 中定义。');
+    expect(card?.textContent).toContain('后续步骤');
+    // 原始 XML 标签被解析后不应再作为可见文本出现。
+    expect(card?.textContent).not.toContain('<results>');
+    expect(card?.textContent).not.toContain('<files>');
+  });
+
+  it('卡片内不嵌套可交互按钮（a11y：button 内不允许 button）', () => {
+    const { container } = render(
+      <SubagentNoticeRow notice={buildNotice({ text: EXPLORE_RESULTS })} onOpenChild={() => undefined} />,
+    );
+    const heading = container.querySelector('button[data-subagent-notice-heading="true"]');
+    expect(heading?.querySelector('button')).toBeNull();
   });
 });

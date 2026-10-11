@@ -128,6 +128,107 @@ export interface OptimizePromptInput {
   candidateCount?: number;
 }
 
+// ==================== 提示词评估（对应 agent-core 的 prompt-evaluation 模块） ====================
+
+export type PromptEvaluationType =
+  | 'result'
+  | 'compare'
+  | 'prompt-only'
+  | 'prompt-iterate';
+
+export type PromptPatchOperationType = 'insert' | 'replace' | 'delete';
+
+export interface PromptPatchOperation {
+  op: PromptPatchOperationType;
+  oldText: string;
+  newText: string;
+  instruction: string;
+  occurrence?: number;
+}
+
+export interface PromptEvaluationTestCase {
+  id: string;
+  label?: string;
+  input: {
+    kind: 'text' | 'variables' | 'conversation' | 'json';
+    label: string;
+    content: string;
+    summary?: string;
+  };
+}
+
+export interface PromptEvaluationSnapshot {
+  id: string;
+  label: string;
+  testCaseId: string;
+  promptRef: {
+    kind: 'workspace' | 'original' | 'version' | 'custom';
+    version?: number;
+    label?: string;
+  };
+  promptText: string;
+  output: string;
+  modelKey?: string;
+  versionLabel?: string;
+}
+
+export interface EvaluatePromptInputBase {
+  workspacePrompt: string;
+  referencePrompt?: string;
+}
+
+export interface PromptResultEvaluationInput extends EvaluatePromptInputBase {
+  type: 'result';
+  testCase: PromptEvaluationTestCase;
+  snapshot: PromptEvaluationSnapshot;
+}
+
+export interface PromptCompareEvaluationInput extends EvaluatePromptInputBase {
+  type: 'compare';
+  testCases: PromptEvaluationTestCase[];
+  snapshots: PromptEvaluationSnapshot[];
+}
+
+export interface PromptOnlyEvaluationInput extends EvaluatePromptInputBase {
+  type: 'prompt-only';
+}
+
+export interface PromptIterateEvaluationInput extends EvaluatePromptInputBase {
+  type: 'prompt-iterate';
+  iterateRequirement: string;
+}
+
+export type EvaluatePromptInput =
+  | PromptResultEvaluationInput
+  | PromptCompareEvaluationInput
+  | PromptOnlyEvaluationInput
+  | PromptIterateEvaluationInput;
+
+export interface PromptEvaluationStopSignals {
+  targetVsBaseline?: 'improved' | 'flat' | 'regressed';
+  improvementHeadroom?: 'none' | 'low' | 'medium' | 'high';
+  overfitRisk?: 'low' | 'medium' | 'high';
+  stopRecommendation?: 'continue' | 'stop' | 'review';
+  stopReasons?: string[];
+}
+
+export interface PromptEvaluationResponse {
+  type: PromptEvaluationType;
+  score: {
+    overall: number;
+    dimensions: Array<{ key: string; label: string; score: number }>;
+  };
+  improvements: string[];
+  summary: string;
+  patchPlan: PromptPatchOperation[];
+  stopSignals?: PromptEvaluationStopSignals;
+  metadata?: {
+    model?: string;
+    timestamp?: number;
+    duration?: number;
+  };
+}
+
 export interface TranslationTaskInput {
   id: string;
   content: string;
@@ -196,6 +297,10 @@ export interface WorkflowsClient {
   ): Promise<WorkflowTemplateRecord>;
   removeTemplate(token: string, templateId: string): Promise<void>;
   optimizePrompt(token: string, input: OptimizePromptInput): Promise<PromptOptimizerResult>;
+  evaluatePrompt(
+    token: string,
+    input: EvaluatePromptInput,
+  ): Promise<PromptEvaluationResponse>;
   translate(token: string, tasks: TranslationTaskInput[]): Promise<TranslationResult[]>;
   assignTeamModels(token: string, input: AssignTeamModelsInput): Promise<AssignTeamModelsResult>;
 }
@@ -402,6 +507,24 @@ export function createWorkflowsClient(baseUrl: string): WorkflowsClient {
         actionLabel: '优化提示词',
         request: () =>
           fetchWithTimeout(`${baseUrl}/workflows/optimize-prompt`, {
+            method: 'POST',
+            headers: {
+              ...buildAuthHeaders(token),
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(input),
+          }),
+      });
+    },
+
+    async evaluatePrompt(
+      token: string,
+      input: EvaluatePromptInput,
+    ): Promise<PromptEvaluationResponse> {
+      return performWorkflowTemplateRequest<PromptEvaluationResponse>({
+        actionLabel: '评估提示词',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/workflows/evaluate-prompt`, {
             method: 'POST',
             headers: {
               ...buildAuthHeaders(token),

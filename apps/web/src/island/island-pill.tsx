@@ -80,7 +80,7 @@ export function IslandPill({
           onClick={hasSession ? onOpenSession : undefined}
           onKeyDown={hasSession ? handleHeaderKeyDown : undefined}
         >
-          <BrandLogo className="island-brand" size={16} />
+          <BrandLogo className="island-brand" size={12} variant="plain" />
           <span className="island-label">{label}</span>
           <span className="island-spacer" />
           <span className="island-wave" aria-hidden="true">

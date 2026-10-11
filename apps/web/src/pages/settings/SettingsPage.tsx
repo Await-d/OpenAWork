@@ -119,6 +119,7 @@ export default function SettingsPage() {
     saveDefaultModelSettings,
     handleTestModel,
     handleSyncCatalog,
+    handleFetchUpstreamModels,
     handleDiscoverProviders,
     handleImportDiscoveredProvider,
     handleAddProvider,
@@ -129,6 +130,8 @@ export default function SettingsPage() {
     handleAddModel,
     handleUpdateModel,
     handleRemoveModel,
+    handleImportUpstreamModels,
+    handleBatchUpdateModels,
   } = useSettingsProviders({ gatewayUrl, token });
 
   const isCompactSettingsLayout = useCompactSettingsLayout();
@@ -150,6 +153,7 @@ export default function SettingsPage() {
     sshDialogs,
     sshDialogsReady,
     loadDevLogs,
+    clearDevLogs,
     loadWorkers,
     loadDiagnostics,
     loadDesktopAutomationStatus,
@@ -386,6 +390,9 @@ export default function SettingsPage() {
                     handleRemoveProvider={handleRemoveProvider}
                     onTestModel={handleTestModel}
                     onSyncCatalog={handleSyncCatalog}
+                    onFetchUpstreamModels={handleFetchUpstreamModels}
+                    onImportUpstreamModels={handleImportUpstreamModels}
+                    onBatchUpdateModels={handleBatchUpdateModels}
                     onDiscoverProviders={handleDiscoverProviders}
                     onImportDiscoveredProvider={handleImportDiscoveredProvider}
                     urlInput={urlInput}
@@ -523,6 +530,7 @@ export default function SettingsPage() {
                     diagnosticsDateFilter={diagnosticsDateFilter}
                     onSetDiagnosticsDateFilter={setDiagnosticsDateFilter}
                     onClearDiagnostics={handleClearDiagnostics}
+                    onClearLogs={clearDevLogs}
                     sourceStates={devtoolsSourceStates}
                     workers={workers}
                     onExportLogs={exportDevLogs}

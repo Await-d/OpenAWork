@@ -3,26 +3,76 @@ import { persist } from 'zustand/middleware';
 import { acquireRefresh } from '@openAwork/web-client';
 
 /**
- * 根据当前浏览器地址动态计算默认 Gateway 地址。
- * - 浏览器端口为 5173（Vite 默认开发端口）时，Gateway 默认端口 3000；
- * - 浏览器端口非 5173 时（如生产部署或自定义端口），Gateway 与浏览器同源，
- *   由接入层（nginx / Caddy 反代）将 /api、/auth、/sessions 转发至网关。
- * - 非 browser 环境（SSR / Tauri）回退到 http://localhost:3000。
+ * 根据当前运行形态动态计算默认 Gateway 地址。
+ * - 开发态(Vite dev server)一律回落到 http://localhost:3000,与 vite.config.ts 中
+ *   dev proxy 的 target 保持一致(端口漂移或端口转发域名下,同源推断会把默认地址
+ *   解析成前端页面自身,详见 isAppSelfOriginUrl);
+ * - 生产构建下 Gateway 与浏览器同源(网关自己托管前端);
+ * - 非 browser 环境(SSR)回退到 http://localhost:3000。
  *
- * 使用 `window.location.host`（端口为默认值时自动省略端口）而非
- * `${hostname}:${port}` 拼接：HTTPS 默认端口（443）下 `port` 为空字符串，
+ * 使用 `window.location.host`(端口为默认值时自动省略端口)而非
+ * `${hostname}:${port}` 拼接:HTTPS 默认端口(443)下 `port` 为空字符串,
  * 旧写法会产出 `https://example.com:` 这类尾随冒号的脆弱地址。
  */
 function getDefaultGatewayUrl(): string {
+  // 开发态(Vite dev server)一律用本机 3000,与 vite.config.ts 的 proxy target 对齐:
+  // 页面由 dev server 托管时,任何同源推断都指向前端自身,请求会被 SPA 兜底成 index.html。
+  if (import.meta.env.DEV) {
+    return 'http://localhost:3000';
+  }
   if (typeof window === 'undefined' || !window.location) {
     return 'http://localhost:3000';
   }
-  const { port, protocol, host } = window.location;
-  const isViteDevPort = port === '5173';
-  if (isViteDevPort) {
-    return 'http://localhost:3000';
-  }
+  const { protocol, host } = window.location;
   return `${protocol}//${host}`;
+}
+
+/** 去掉首尾空白与尾部斜杠。 */
+function normalizeGatewayUrlInput(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
+}
+
+/**
+ * 判断一个已持久化的网关地址是否就是「页面自身来源」——旧版 `getDefaultGatewayUrl`
+ * 在端口非 5173 时的同源推断产物(端口漂移到 5180 之类),会被原样写进 localStorage。
+ *
+ * 开发态页面由 dev server 托管、网关固定在本机 3000,而 dev proxy 只转发
+ * `/api`、`/auth`、`/sessions`,因此「网关地址 == 页面来源」必然让 `/usage`、
+ * `/dev-logs`、`/settings` 这类请求落到 SPA 兜底上并拿回 `index.html`。仅在开发态
+ * 做这个判定:生产构建下网关自己托管前端,同源本来就是合法的网关地址。
+ */
+function isAppSelfOriginUrl(value: string): boolean {
+  if (!import.meta.env.DEV || typeof window === 'undefined' || !window.location) {
+    return false;
+  }
+  return value === window.location.origin;
+}
+
+/**
+ * 写入入口的归一化:空白值一律回落到默认地址。
+ *
+ * 空字符串会把所有 `${baseUrl}/xxx` 退化成相对路径,请求打到前端自身并被 SPA 兜底成
+ * `index.html`(用量 / 开发日志 / Worker 等面板全部报 `Unexpected token '<'`),而
+ * `/auth`、`/sessions` 因命中 dev proxy 仍能正常工作,极容易被误判成「后端接口坏了」。
+ * 因此空地址绝不允许进入 store。
+ */
+function resolveGatewayUrl(value: string | null | undefined): string {
+  const normalized = normalizeGatewayUrlInput(value);
+  return normalized.length > 0 ? normalized : getDefaultGatewayUrl();
+}
+
+/**
+ * rehydrate 入口的归一化:在写入归一化的基础上,额外修复旧版同源推断留下的脏值。
+ *
+ * 只在 rehydrate 阶段做这层修复,而不放进 `setGatewayUrl`:用户在设置面板里显式填写的
+ * 地址应当被尊重(即便填得不对,也应看到可执行的错误提示,而不是被静默改写)。
+ */
+function healPersistedGatewayUrl(value: string | null | undefined): string {
+  const normalized = normalizeGatewayUrlInput(value);
+  if (normalized.length === 0 || isAppSelfOriginUrl(normalized)) {
+    return getDefaultGatewayUrl();
+  }
+  return normalized;
 }
 
 interface AuthState {
@@ -86,7 +136,7 @@ export const useAuthStore = create<AuthState>()(
       },
       clearAuth: () =>
         set({ accessToken: null, email: null, refreshToken: null, tokenExpiresAt: null }),
-      setGatewayUrl: (url) => set({ gatewayUrl: url }),
+      setGatewayUrl: (url) => set({ gatewayUrl: resolveGatewayUrl(url) }),
       setWebAccess: (enabled, port, exposeLan) =>
         set((state) => ({
           webAccessEnabled: enabled,
@@ -119,6 +169,18 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-store',
+      // 历史版本会往 localStorage 里写两类脏网关地址:空值(用户在登录页 / 连接面板
+      // 清空输入框后未填回即离开),以及旧版同源推断把 dev server 端口(如 5180)当成
+      // 网关地址。两者都会让 http 客户端把请求打到前端自身并被 SPA 兜底成 index.html,
+      // 因此在 rehydrate 阶段就地修复(见 healPersistedGatewayUrl)。
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<AuthState>;
+        return {
+          ...currentState,
+          ...persisted,
+          gatewayUrl: healPersistedGatewayUrl(persisted.gatewayUrl ?? currentState.gatewayUrl),
+        };
+      },
       partialize: (s) => ({
         accessToken: s.accessToken,
         refreshToken: s.refreshToken,

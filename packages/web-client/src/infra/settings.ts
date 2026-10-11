@@ -64,6 +64,15 @@ export interface SettingsClient {
     token: string,
     options?: { signal?: AbortSignal },
   ): Promise<{ ok: boolean; providerCount?: number; modelCount?: number; message?: string }>;
+  /**
+   * 拉取指定 provider 上游 `GET {baseUrl}/models` 实际暴露的模型列表(只读,不落库)。
+   * 业务层失败也以 200 + 结构化结果返回(`ok` / `status` / `message` / `models`)。
+   */
+  fetchUpstreamModels(
+    token: string,
+    payload: { providerId?: string; provider?: unknown },
+    options?: { signal?: AbortSignal },
+  ): Promise<unknown>;
   /** 从 models.dev 发现尚未内置的平台列表。 */
   discoverProviders(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   /** 从 models.dev 导入指定平台为 custom provider。 */
@@ -101,6 +110,7 @@ export interface SettingsClient {
   getFilePatterns(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   putFilePatterns(token: string, patterns: string[]): Promise<void>;
   getDevLogs(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
+  clearDevLogs(token: string): Promise<void>;
   getWorkers(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   getDiagnostics(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   clearDiagnostics(token: string): Promise<void>;
@@ -355,6 +365,23 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
       throw new HttpError(`连通性自检失败（HTTP ${response.status}）`, response.status);
     },
 
+    async fetchUpstreamModels(token, payload, options) {
+      // 与自检一致:业务层失败也以 200 + 结构化结果返回,这里直接透传 JSON,
+      // 让调用方按返回体里的 `ok` / `status` / `models` 渲染面板状态。
+      const response = await fetchWithTimeout(`${baseUrl}/settings/providers/upstream-models`, {
+        timeoutMs: 120_000,
+        method: 'POST',
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      });
+      const data = (await response.json().catch(() => null)) as unknown;
+      if (data && typeof data === 'object') {
+        return data;
+      }
+      throw new HttpError(`拉取上游模型列表失败(HTTP ${response.status})`, response.status);
+    },
+
     async putProviders(token, payload) {
       return performSettingsRequest<unknown>({
         actionLabel: '保存 Provider 配置',
@@ -540,6 +567,18 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
           fetchWithTimeout(`${baseUrl}/settings/dev-logs`, {
             headers: authHeader(token),
             signal: options?.signal,
+          }),
+      });
+    },
+
+    async clearDevLogs(token) {
+      await performSettingsRequest({
+        actionLabel: '清空开发日志',
+        parseJson: false,
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/dev-logs`, {
+            method: 'DELETE',
+            headers: authHeader(token),
           }),
       });
     },

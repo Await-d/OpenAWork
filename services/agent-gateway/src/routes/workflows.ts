@@ -36,6 +36,10 @@ const {
   PromptOptimizerImpl,
   PromptOptimizerResultParseError,
   PromptOptimizerUpstreamError,
+  PromptEvaluationError,
+  PromptEvaluationParseError,
+  PromptEvaluationServiceImpl,
+  PromptEvaluationUpstreamError,
   TranslationWorkflowImpl,
 } = {
   PromptOptimizerError: agentCoreRecord['PromptOptimizerError'] as
@@ -45,6 +49,14 @@ const {
   PromptOptimizerResultParseError: agentCoreRecord['PromptOptimizerResultParseError'] as
     ErrorConstructor<PromptOptimizerErrorLike> | undefined,
   PromptOptimizerUpstreamError: agentCoreRecord['PromptOptimizerUpstreamError'] as
+    ErrorConstructor<Error> | undefined,
+  PromptEvaluationError: agentCoreRecord['PromptEvaluationError'] as
+    ErrorConstructor<PromptOptimizerErrorLike> | undefined,
+  PromptEvaluationParseError: agentCoreRecord['PromptEvaluationParseError'] as
+    ErrorConstructor<PromptOptimizerErrorLike> | undefined,
+  PromptEvaluationServiceImpl: agentCoreRecord['PromptEvaluationServiceImpl'] as
+    typeof agentCore.PromptEvaluationServiceImpl | undefined,
+  PromptEvaluationUpstreamError: agentCoreRecord['PromptEvaluationUpstreamError'] as
     ErrorConstructor<Error> | undefined,
   TranslationWorkflowImpl: agentCoreRecord['TranslationWorkflowImpl'] as
     typeof agentCore.TranslationWorkflowImpl | undefined,
@@ -109,6 +121,62 @@ const optimizePromptSchema = z.object({
   targetAudience: z.string().optional(),
   candidateCount: z.number().int().min(1).max(5).optional(),
 });
+
+const evaluationContentBlockSchema = z.object({
+  kind: z.enum(['text', 'variables', 'conversation', 'json']),
+  label: z.string().min(1).max(200),
+  content: z.string().max(20000),
+  summary: z.string().max(500).optional(),
+});
+
+const evaluationTestCaseSchema = z.object({
+  id: z.string().min(1).max(120),
+  label: z.string().max(200).optional(),
+  input: evaluationContentBlockSchema,
+});
+
+const evaluationSnapshotSchema = z.object({
+  id: z.string().min(1).max(120),
+  label: z.string().min(1).max(40),
+  testCaseId: z.string().min(1).max(120),
+  promptRef: z.object({
+    kind: z.enum(['workspace', 'original', 'version', 'custom']),
+    version: z.number().int().positive().optional(),
+    label: z.string().max(200).optional(),
+  }),
+  promptText: z.string().min(1).max(60000),
+  output: z.string().min(1).max(100000),
+  modelKey: z.string().max(200).optional(),
+  versionLabel: z.string().max(100).optional(),
+});
+
+const evaluatePromptSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('result'),
+    workspacePrompt: z.string().min(1).max(60000),
+    referencePrompt: z.string().max(60000).optional(),
+    testCase: evaluationTestCaseSchema,
+    snapshot: evaluationSnapshotSchema,
+  }),
+  z.object({
+    type: z.literal('compare'),
+    workspacePrompt: z.string().min(1).max(60000),
+    referencePrompt: z.string().max(60000).optional(),
+    testCases: z.array(evaluationTestCaseSchema).min(1).max(20),
+    snapshots: z.array(evaluationSnapshotSchema).min(2).max(10),
+  }),
+  z.object({
+    type: z.literal('prompt-only'),
+    workspacePrompt: z.string().min(1).max(60000),
+    referencePrompt: z.string().max(60000).optional(),
+  }),
+  z.object({
+    type: z.literal('prompt-iterate'),
+    workspacePrompt: z.string().min(1).max(60000),
+    referencePrompt: z.string().max(60000).optional(),
+    iterateRequirement: z.string().min(1).max(4000),
+  }),
+]);
 
 /** 「一键智能分配模型」请求体：候选池 + 各层画像 + 策略。 */
 const assignTeamModelsSchema = z.object({
@@ -410,6 +478,90 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(500).send({
           code: 'unexpected_error',
           error: '优化提示词失败，请稍后重试。',
+          retryable: true,
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/workflows/evaluate-prompt',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'workflow.prompt.evaluate');
+      const body = parseBody(evaluatePromptSchema, request.body);
+
+      // 与 optimize-prompt 一致：复用 设置 → 提供商 中「快速 / 内联」模型凭证，
+      // 让评估器与优化器解耦但共用同一套已配置的模型。
+      const user = request.user as JwtPayload;
+      const llmConfig = await resolveAuxiliaryLlmConfig(user.sub);
+      if (!llmConfig) {
+        step.fail('no llm config');
+        return reply.status(503).send({
+          code: 'evaluator_unavailable',
+          error:
+            '提示词评估器未找到可用模型：请在 设置 → 提供商 中启用一个「快速 / 内联」或「会话」模型并填写 API Key，或在网关环境变量中设置 AI_API_BASE_URL 与 AI_API_KEY 后重启网关。',
+          retryable: true,
+        });
+      }
+      if (!PromptEvaluationServiceImpl) {
+        step.fail('prompt evaluation implementation unavailable');
+        return reply.status(503).send({
+          code: 'evaluator_unavailable',
+          error: '评估提示词失败，请稍后重试。',
+          retryable: true,
+        });
+      }
+      const PromptEvaluationServiceImplCtor = PromptEvaluationServiceImpl;
+
+      const evaluator = new PromptEvaluationServiceImplCtor(async (prompt: string) => {
+        return requestWorkflowLlmCompletion({
+          apiBaseUrl: llmConfig.apiBaseUrl,
+          apiKey: llmConfig.apiKey,
+          model: llmConfig.model,
+          ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+          ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+          ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
+          prompt,
+          // 低温度让评估打分稳定、可复现。
+          temperature: 0.2,
+        });
+      });
+
+      try {
+        const result = await evaluator.evaluate(body);
+        step.succeed(undefined, {
+          type: result.type,
+          overall: result.score.overall,
+          patchPlan: result.patchPlan.length,
+        });
+        return reply.send(result);
+      } catch (err) {
+        if (isErrorInstance(err, PromptEvaluationUpstreamError)) {
+          step.fail('prompt evaluation upstream unavailable');
+          return reply.status(502).send({
+            code: 'upstream_unavailable',
+            error: `评估提示词失败：${err.message}`,
+            retryable: true,
+          });
+        }
+
+        if (
+          isErrorInstance(err, PromptEvaluationParseError) ||
+          (isErrorInstance(err, PromptEvaluationError) && err.kind === 'invalid_response')
+        ) {
+          step.fail('prompt evaluation invalid response');
+          return reply.status(502).send({
+            code: 'invalid_response',
+            error: '评估提示词失败：模型返回结果格式无效，请重试。',
+            retryable: false,
+          });
+        }
+
+        step.fail(err instanceof Error ? err.name : 'prompt evaluation unexpected error');
+        return reply.status(500).send({
+          code: 'unexpected_error',
+          error: '评估提示词失败，请稍后重试。',
           retryable: true,
         });
       }

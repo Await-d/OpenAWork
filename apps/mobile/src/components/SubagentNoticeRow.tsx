@@ -1,9 +1,15 @@
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  parseSubagentResultBlocks,
+  summarizeSubagentResult,
+} from '@openAwork/shared';
 import type { MobileSubagentNotice, MobileSubagentNoticeState } from '../chat/chat-message-content';
 import { colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { spacing } from '../theme/spacing';
 import { textPresets } from '../theme/typography';
+import { MobileSubagentResultCard } from './SubagentResultCard';
 
 interface NoticeStatePresentation {
   glyph: string;
@@ -25,26 +31,29 @@ export interface SubagentNoticeRowProps {
   notice: MobileSubagentNotice;
   /** 与相邻通知合组时收紧上间距。 */
   grouped?: boolean;
-  /** 传入且通知带子会话 id 时，整行可点击跳转。 */
+  /** 传入且通知带子会话 id 时，标题行可点击跳转。 */
   onOpenChild?: (childSessionId: string) => void;
 }
 
 function buildNoticeAccessibilityLabel(notice: MobileSubagentNotice): string {
   const presentation = STATE_PRESENTATION[notice.state];
   const heading = `${notice.agent} ${presentation.label}`;
+  const summary = summarizeSubagentResult(parseSubagentResultBlocks(notice.text));
   if (notice.description.length > 0) {
-    return `${heading} · ${notice.description}`;
+    return `${heading} · ${notice.description}${summary ? ` · ${summary}` : ''}`;
   }
-  return notice.text.length > 0 ? `${heading} · ${notice.text}` : heading;
+  return summary ? `${heading} · ${summary}` : heading;
 }
 
 /**
- * 子代理完成通知的单行呈现。
+ * 子代理完成通知的呈现：紧凑标题行 + 全展开的结构化结果卡片。
  *
- * 对齐上游 notice 契约：紧凑单行、按状态着色、` · ` 追加 `description`、
- * 有子会话 id 且提供 `onOpenChild` 时整行可点击（`Pressable` + 按压反馈）。
- * `failed` 即使没有描述也强制可见——可见性由 `parseMobileSubagentNotice` 裁决，
- * 本组件不再二次过滤。
+ * 标题行对齐上游 notice 契约：紧凑单行、按状态着色、` · ` 追加 `description`、
+ * 有子会话 id 且提供 `onOpenChild` 时标题行可点击（`Pressable` + 按压反馈）。
+ * 标题行下方通过 `MobileSubagentResultCard` 全展开渲染 `notice.text` 中的
+ * `<results>` 结构化块（files / findings / answer / next_steps / uncertainties）；
+ * 无结构化块时退化为纯正文段。原始 XML 标签不再直接暴露给用户。
+ * `failed` 即使没有描述也强制可见——可见性由 `parseMobileSubagentNotice` 裁决。
  */
 export function SubagentNoticeRow({
   notice,
@@ -54,9 +63,11 @@ export function SubagentNoticeRow({
   const presentation = STATE_PRESENTATION[notice.state];
   const childSessionId = notice.childSessionId;
   const interactive = Boolean(childSessionId && onOpenChild);
-  const accessibilityLabel = buildNoticeAccessibilityLabel(notice);
+  const accessibilityLabel = useMemo(() => buildNoticeAccessibilityLabel(notice), [notice]);
 
-  const body = (
+  const resultSections = useMemo(() => parseSubagentResultBlocks(notice.text), [notice.text]);
+
+  const heading = (
     <Text
       accessibilityLabel={accessibilityLabel}
       ellipsizeMode="tail"
@@ -72,28 +83,39 @@ export function SubagentNoticeRow({
     </Text>
   );
 
+  const card = (
+    <MobileSubagentResultCard sections={resultSections} />
+  );
+
   if (!interactive) {
-    return <View style={[styles.base, grouped ? styles.grouped : styles.spaced]}>{body}</View>;
+    return (
+      <View style={[styles.base, grouped ? styles.grouped : styles.spaced]}>
+        {heading}
+        {card}
+      </View>
+    );
   }
 
   return (
-    <Pressable
-      accessibilityHint="打开子会话"
-      accessibilityRole="button"
-      hitSlop={spacing[2]}
-      style={({ pressed }) => [
-        styles.base,
-        grouped ? styles.grouped : styles.spaced,
-        pressed && styles.pressed,
-      ]}
-      onPress={() => {
-        if (childSessionId && onOpenChild) {
-          onOpenChild(childSessionId);
-        }
-      }}
-    >
-      {body}
-    </Pressable>
+    <View style={[styles.base, grouped ? styles.grouped : styles.spaced]}>
+      <Pressable
+        accessibilityHint="打开子会话"
+        accessibilityRole="button"
+        hitSlop={spacing[2]}
+        style={({ pressed }) => [
+          styles.headingPressable,
+          pressed && styles.pressed,
+        ]}
+        onPress={() => {
+          if (childSessionId && onOpenChild) {
+            onOpenChild(childSessionId);
+          }
+        }}
+      >
+        {heading}
+      </Pressable>
+      {card}
+    </View>
   );
 }
 
@@ -130,6 +152,11 @@ const styles = StyleSheet.create({
   },
   spaced: { marginTop: spacing[2] },
   grouped: { marginTop: spacing[0.5] },
+  headingPressable: {
+    borderRadius: radii.xs,
+    paddingHorizontal: spacing[0.5],
+    paddingVertical: spacing[0.5],
+  },
   pressed: { backgroundColor: colors.surface2 },
   rowText: {
     ...textPresets.bodySmall,

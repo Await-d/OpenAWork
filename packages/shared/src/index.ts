@@ -50,6 +50,21 @@ export {
 } from './assistant-trace.js';
 export { parseSubagentNotice, SUBAGENT_NOTICE_DEFAULT_AGENT } from './subagent-notice.js';
 export type { SubagentNotice } from './subagent-notice.js';
+export {
+  hasSubagentResultBlocks,
+  isStructuredSubagentResult,
+  isSubagentResultSectionVisible,
+  parseSubagentResultBlocks,
+  pickSubagentResultAnswer,
+  summarizeSubagentResult,
+  transformSubagentResultBlocks,
+} from './subagent-results.js';
+export type {
+  SubagentResultItem,
+  SubagentResultSection,
+  SubagentResultSectionKind,
+  SubagentResultTransformMode,
+} from './subagent-results.js';
 export type {
   ImageGenerationBackground,
   ImageGenerationOutputFormat,

@@ -7,12 +7,17 @@ import type {
   ReasoningEffort,
   SlashCommandItem,
 } from '../../conversation-runtime/messages/support.js';
-import type { PromptOptimizerResult } from '@openAwork/web-client';
+import type {
+  PromptCandidate,
+  PromptEvaluationResponse,
+  PromptOptimizerResult,
+} from '@openAwork/web-client';
 import { detectThinkKeyword } from '../../conversation-runtime/reveal/think-keyword-detector.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
 import { ChatComposerMenu } from './ChatComposerMenu.js';
 import { ChatComposerOptimize } from './ChatComposerOptimize.js';
+import { ChatComposerEvaluate } from './ChatComposerEvaluate.js';
 import { PasteSnippetCard } from './PasteSnippetCard.js';
 import { ComposerDragOverlay } from './ComposerDragOverlay.js';
 import { ComposerImagePreviews } from './ComposerImagePreviews.js';
@@ -146,6 +151,8 @@ interface ChatComposerProps {
   onRestoreInputFromHistory?: () => boolean;
   onDropFiles?: (files: File[]) => void;
   onOptimizePrompt?: (text: string) => Promise<PromptOptimizerResult>;
+  /** 评估提示词（prompt-evaluation 闭环）。返回评估结果，供 UI 展示补丁计划。 */
+  onEvaluatePrompt?: (text: string) => Promise<PromptEvaluationResponse>;
   onReplaceInput?: (nextValue: string) => void;
   /**
    * 自定义 textarea placeholder。team 接待会话用此覆盖默认的 chat 占位文案，
@@ -260,6 +267,7 @@ export function ChatComposer({
   onRestoreInputFromHistory,
   onDropFiles,
   onOptimizePrompt,
+  onEvaluatePrompt,
   onReplaceInput,
   placeholder,
   composerRightSlot,
@@ -532,6 +540,77 @@ export function ChatComposer({
       });
   }, [input, onOptimizePrompt, optimizeLoading, streaming]);
 
+  // 评估提示词：复用配置的 fast 模型做单结果评估（prompt-only），
+  // 产出评分、改进建议与补丁计划。评估目标是弹窗里被选中的候选文本，
+  // evaluateTarget 记录该文本供补丁应用与面板展示。
+  const [evaluateResult, setEvaluateResult] = useState<PromptEvaluationResponse | null>(null);
+  const [evaluateLoading, setEvaluateLoading] = useState(false);
+  const [evaluateError, setEvaluateError] = useState<string | null>(null);
+  const [evaluateTarget, setEvaluateTarget] = useState<string>('');
+
+  const runEvaluatePrompt = useCallback(
+    (text: string) => {
+      if (!onEvaluatePrompt || evaluateLoading || streaming) {
+        return;
+      }
+      const target = text.trim();
+      if (target.length === 0) {
+        return;
+      }
+      setEvaluateTarget(target);
+      setEvaluateLoading(true);
+      setEvaluateError(null);
+      setEvaluateResult(null);
+      void onEvaluatePrompt(target)
+        .then((result) => {
+          setEvaluateResult(result);
+        })
+        .catch((error: unknown) => {
+          setEvaluateError(getUserVisibleErrorDescriptor(error, '提示词评估失败，请稍后重试。').message);
+        })
+        .finally(() => {
+          setEvaluateLoading(false);
+        });
+    },
+    [evaluateLoading, onEvaluatePrompt, streaming],
+  );
+
+  const handleEvaluateCandidate = useCallback(
+    (candidate: PromptCandidate) => {
+      setEvaluateTarget(candidate.text);
+      runEvaluatePrompt(candidate.text);
+    },
+    [runEvaluatePrompt],
+  );
+
+  const retryEvaluate = useCallback(() => {
+    if (evaluateTarget.length > 0) {
+      runEvaluatePrompt(evaluateTarget);
+    }
+  }, [evaluateTarget, runEvaluatePrompt]);
+
+  const closeEvaluate = useCallback(() => {
+    setEvaluateResult(null);
+    setEvaluateLoading(false);
+    setEvaluateError(null);
+    setEvaluateTarget('');
+  }, []);
+
+  const applyEvaluatedPatch = useCallback(
+    (appliedText: string) => {
+      onReplaceInput?.(appliedText);
+      closeEvaluate();
+      setOptimizeResult(null);
+      setOptimizeError(null);
+      requestAnimationFrame(() => {
+        if (!textareaRef.current) return;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(appliedText.length, appliedText.length);
+      });
+    },
+    [closeEvaluate, onReplaceInput],
+  );
+
   useEffect(() => {
     composerItemRefs.current.length = currentItems.length;
   }, [currentItems.length]);
@@ -716,14 +795,28 @@ export function ChatComposer({
                 optimizePopoverRef={optimizePopoverRef}
                 onClearError={() => setOptimizeError(null)}
                 onRetryOptimize={optimizeError?.retryable ? runOptimizePrompt : undefined}
+                onEvaluateCandidate={onEvaluatePrompt ? handleEvaluateCandidate : undefined}
+                evaluatingCandidateId={evaluateLoading ? evaluateTarget || null : null}
+                evaluatePanel={
+                  <ChatComposerEvaluate
+                    sourceText={evaluateTarget}
+                    evaluateResult={evaluateResult}
+                    evaluateLoading={evaluateLoading}
+                    evaluateError={evaluateError}
+                    onRetry={retryEvaluate}
+                    onApplyPatch={applyEvaluatedPatch}
+                  />
+                }
                 onClose={() => {
                   setOptimizeResult(null);
                   setOptimizeError(null);
+                  closeEvaluate();
                 }}
                 onSelectCandidate={(candidate) => {
                   onReplaceInput?.(candidate.text);
                   setOptimizeResult(null);
                   setOptimizeError(null);
+                  closeEvaluate();
                   requestAnimationFrame(() => {
                     if (!textareaRef.current) return;
                     textareaRef.current.focus();

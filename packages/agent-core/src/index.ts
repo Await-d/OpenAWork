@@ -470,6 +470,33 @@ export {
   type PromptCandidate,
 } from './workflow/prompt-optimizer.js';
 export {
+  applyPatch,
+  applyPatchPlan,
+  findPatchAnchor,
+  PromptEvaluationError,
+  PromptEvaluationParseError,
+  PromptEvaluationUpstreamError,
+  type PatchApplyFailure,
+  type PatchApplyResult,
+  type PatchOperation,
+  type PatchOperationType,
+  type PromptEvaluationRequest,
+  type PromptEvaluationResponse,
+  type PromptEvaluationType,
+  type ResultEvaluationRequest,
+  type CompareEvaluationRequest,
+  type PromptOnlyEvaluationRequest,
+  type PromptIterateEvaluationRequest,
+  type EvaluationTestCase,
+  type EvaluationSnapshot,
+  type EvaluationContentBlock,
+  type EvaluationDimension,
+  type EvaluationScore,
+  type EvaluationStopSignals,
+} from './workflow/prompt-evaluation.js';
+export { PromptEvaluationServiceImpl } from './workflow/prompt-evaluation-service.js';
+export type { PromptEvaluationService } from './workflow/prompt-evaluation-service.js';
+export {
   TranslationWorkflowImpl,
   type TranslationWorkflow,
   type TranslationTask,

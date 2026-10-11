@@ -38,10 +38,14 @@ import {
   providerConnectivityTestBodySchema,
   providerSettingsBodySchema,
   providerSettingsQuerySchema,
+  providerUpstreamModelsBodySchema,
 } from '../provider/provider-config.js';
 import { resolveSubagentLimitsForUser } from '../task/subagent-limits.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
-import { listRequestWorkflowLogs } from '../runtime/request-workflow-log-store.js';
+import {
+  clearRequestWorkflowLogs,
+  listRequestWorkflowLogs,
+} from '../runtime/request-workflow-log-store.js';
 import {
   getMcpPoolKey,
   invalidateMcpServerConnectionForUser,
@@ -1359,6 +1363,86 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // 拉取上游模型列表:对一个已配置(或内联)的 provider 发起 `GET {baseUrl}/models`,
+  // 把上游真实暴露的模型 id 返回给设置页,供用户一键同步进当前接口的模型列表。
+  // 只读——真正的「同步进 provider」由前端把选中的模型合并后走 PUT /settings/providers。
+  app.post(
+    '/settings/providers/upstream-models',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.providers.upstream-models');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const parsed = parseBody(providerUpstreamModelsBodySchema, request.body);
+      parseStep.succeed();
+
+      // 解析目标 provider:优先用请求体里内联的 provider(拉「尚未保存」的表单值对应上游),
+      // 否则按 providerId 从已保存配置里取。同时拿到当前用户的存量 provider 清单,
+      // 后面用于把上游裸 id 补全为上下文 / 能力齐全的模型配置。
+      const resolveStep = child('resolve-provider');
+      const providerRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+        [user.sub],
+      );
+      const selectionRow = sqliteGet<UserSettingRow>(
+        `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
+        [user.sub],
+      );
+      const { providers: userProviders } = await materializeProviderConfig(
+        parseStoredJson(providerRow?.value),
+        parseStoredJson(selectionRow?.value),
+      );
+      let provider: AIProvider | undefined;
+      if (parsed.provider) {
+        provider = normalizeSingleProviderForTest(parsed.provider);
+      } else if (parsed.providerId) {
+        provider = userProviders.find((item) => item.id === parsed.providerId);
+      }
+
+      if (!provider) {
+        resolveStep.fail('provider not found');
+        step.fail('provider not found');
+        return reply.status(404).send({
+          ok: false,
+          status: 'error',
+          message: '未找到目标 provider,请先保存配置或提供完整的 provider 信息。',
+          models: [],
+        });
+      }
+      resolveStep.succeed(undefined, { providerId: provider.id });
+
+      const fetchStep = child('fetch-upstream-models');
+      const { fetchUpstreamModels, buildLocalModelMetadataIndex, enrichUpstreamModels } =
+        await import('../provider/upstream-models.js');
+      const result = await fetchUpstreamModels({ provider });
+      if (result.ok) {
+        fetchStep.succeed(undefined, { models: result.models.length });
+        step.succeed(undefined, { status: result.status });
+      } else {
+        fetchStep.fail(result.status);
+        step.fail(result.status);
+      }
+
+      // 上游 `/models` 通常只回 id,不含上下文与能力。用本地「用户已配置 > 内置目录」
+      // 的同名模型元数据补齐,避免同步进来的模型没有上下文大小 / 能力标记。
+      const enrichStep = child('enrich-local-metadata');
+      if (result.ok && result.models.length > 0) {
+        const catalog = (await materializeProviderConfig(undefined, undefined)).providers;
+        const index = buildLocalModelMetadataIndex([userProviders, catalog]);
+        result.models = enrichUpstreamModels(result.models, index);
+        enrichStep.succeed(undefined, {
+          matched: result.models.filter((item) => item.meta).length,
+        });
+      } else {
+        enrichStep.succeed();
+      }
+
+      // 与自检一致:业务层失败仍以 200 返回结构化结果,由前端面板按 `status` 渲染。
+      return reply.send({ ...result, providerId: provider.id });
+    },
+  );
+
   app.get(
     '/settings/providers/discover',
     { onRequest: [requireAuth] },
@@ -2008,6 +2092,27 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { logs: logs.length });
 
       return reply.send({ logs });
+    },
+  );
+
+  app.delete(
+    '/settings/dev-logs',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.dev-logs.clear');
+      const user = request.user as JwtPayload;
+      // 列表把「工具执行日志」(audit_logs)与「请求工作流日志」(request_workflow_logs)
+      // 合并展示,清除必须同时覆盖两张表,否则清完仍会残留工作流日志。
+      sqliteRun(
+        `DELETE FROM audit_logs
+         WHERE session_id IN (
+           SELECT id FROM sessions WHERE user_id = ?
+         )`,
+        [user.sub],
+      );
+      clearRequestWorkflowLogs(user.sub);
+      step.succeed(undefined, { cleared: true });
+      return reply.send({ ok: true });
     },
   );
 

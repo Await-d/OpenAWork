@@ -39,6 +39,7 @@ internal static class CapabilityCatalogStaticData
         ("exit_plan_mode", "ExitPlanMode", "Exit plan mode"),
         ("read_tool_output", "read_tool_output", "Read stored tool output"),
         ("task", "task", "Launch sub-task execution"),
+        ("subagent", "subagent", "Launch sub-agent (canonical name; task is the legacy alias)"),
         ("background_output", "background_output", "Read background task output"),
         ("background_cancel", "background_cancel", "Cancel background task"),
         ("session_list", "session_list", "List sessions"),

@@ -10,7 +10,7 @@ import {
   HttpError,
   SESSIONS_LIST_PAGE_LIMIT,
 } from '@openAwork/web-client';
-import type { TokenStore, SessionsListOptions } from '@openAwork/web-client';
+import type { TokenStore, SessionsClient, SessionsListOptions } from '@openAwork/web-client';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import { exportSession } from '../../utils/session/session-transfer.js';
 import {
@@ -98,6 +98,59 @@ const SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS = [400, 1200, 2600];
  * 而不是默默重试。
  */
 const SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS = 5_000;
+
+/**
+ * 会话列表请求的**并发同参合并**(在途单飞)。
+ *
+ * 为什么需要:本 hook 在工作台里是**多实例常驻**的 —— 融合布局下
+ * `FusionSidebar` + `TitlebarTabStrip` 各一个,外加被无上限
+ * `CachedRouteOutlet` 永久缓存的 `HomePage`,最多 3 个;经典布局则是
+ * `AppSidebar` + `SessionSidebar`。而刷新总线
+ * (`requestSessionListRefresh` / `refreshSessionListsNow`)会在**同一个
+ * 微任务里同步通知所有实例**,挂载 effect 也会在同一提交内跑完 —— 于是这些
+ * 实例对完全相同的 `GET /sessions?limit=100&excludeTeam=true` 天然并发,
+ * 一次刷新广播就是 N 次一模一样的网络往返。
+ *
+ * 这里让同参请求共享同一个在途 Promise,把 N 次压成 1 次。只合并「并发在途」,
+ * 落定即摘除键,**不缓存已完成结果**,因此不引入任何陈旧窗口;各实例的 state、
+ * 请求 ID 与错误处理仍完全独立(共享的只是 Promise)。
+ */
+type SessionListSnapshot = Awaited<ReturnType<SessionsClient['list']>>;
+
+const inFlightSessionLists = new Map<string, Promise<SessionListSnapshot>>();
+
+function resolveSessionListRequestKey(
+  gatewayUrl: string,
+  token: string,
+  options: SessionsListOptions,
+): string {
+  // 键必须覆盖所有影响请求结果的输入:网关地址、令牌、路径过滤开关。
+  // (`excludeTeam` 恒为 true,无需参与。)
+  return [
+    gatewayUrl,
+    token,
+    options.path ?? '',
+    options.includeDescendants === false ? '0' : '1',
+  ].join('\u0000');
+}
+
+function loadSessionListSingleFlight(
+  key: string,
+  load: () => Promise<SessionListSnapshot>,
+): Promise<SessionListSnapshot> {
+  const existing = inFlightSessionLists.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = load().finally(() => {
+    if (inFlightSessionLists.get(key) === pending) {
+      inFlightSessionLists.delete(key);
+    }
+  });
+  inFlightSessionLists.set(key, pending);
+  return pending;
+}
 
 export function useSessions() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -202,9 +255,10 @@ export function useSessions() {
             ) {
               listOptions.path = selectedWorkspacePath;
             }
-            const listedSessions = (await createSessionsClient(gatewayUrl).list(
-              token,
-              listOptions,
+            // 多实例并发时合并为一次网络往返(见 loadSessionListSingleFlight)。
+            const listedSessions = (await loadSessionListSingleFlight(
+              resolveSessionListRequestKey(gatewayUrl, token, listOptions),
+              () => createSessionsClient(gatewayUrl).list(token, listOptions),
             )) as unknown as Session[];
             const hydratedSessions = await hydrateMissingParentSessions(
               listedSessions,

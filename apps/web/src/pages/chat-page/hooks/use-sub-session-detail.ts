@@ -12,6 +12,7 @@ import {
   type ChatMessage,
 } from '../../../components/conversation-runtime/messages/support.js';
 import { filterTranscriptMessages } from '../../../components/conversation-runtime/messages/transcript-visibility.js';
+import { startSequentialPolling } from '../../../components/conversation-runtime/session/sequential-polling.js';
 
 export interface SubSessionDetailState {
   error: string | null;
@@ -96,10 +97,12 @@ export function useSubSessionDetail(
   /**
    * 单飞标记。
    *
-   * 这个 hook 每 2.5s 轮询一次，一次要并发 3 个请求，其中 `GET /sessions/:id`
-   * 拉的是**无分页上限的全量消息历史**——单次往返很容易超过 2.5s。定时器不会
-   * 等上一轮结束，于是请求会持续叠加；而本 hook 是「每个打开的子会话面板一条」，
-   * N 个面板就是 N 倍。`refresh()`（手动/外部触发）仍可强制发起，`force` 区分二者。
+   * 全量刷新一次要并发 3 个请求，其中 `GET /sessions/:id` 拉的是**无分页上限的
+   * 全量消息历史**——单次往返可能远超 2.5s。串行轮询虽保证「上一拍结束才发下一
+   * 拍」，但探针成功触发的 `runRefresh`（非 force）在探针返回后才真正跑完，期间
+   * 下一拍探针仍需跳过，避免双全量抢同一份 state；本 hook 又是「每个打开的子会话
+   * 面板一条」，N 个面板就是 N 倍。`refresh()`（手动/外部触发）仍可强制发起，
+   * `force` 区分二者。
    */
   const inFlightRef = useRef(false);
   /** 上一拍的消息指纹与归一化结果，供等价时复用。 */
@@ -208,26 +211,33 @@ export function useSubSessionDetail(
    * 完全一致,此前每 2.5s 无条件拉一次纯属浪费。这里改判:存在活跃流、上一拍状态为
    * running/paused、或有待处理审批 / 提问时才拉全量,静止期只花一次轻量状态查询。
    */
-  const pollStatus = useCallback(async () => {
-    if (!childSessionId || !token) return;
-    // 全量刷新在途时跳过这一拍,避免与 runRefresh 抢同一份 state。
-    if (inFlightRef.current) return;
-    let status: SessionStatusReadModel;
-    try {
-      status = await createSessionsClient(gatewayUrl).getStatus(token, childSessionId);
-    } catch {
-      // 轻量探针失败不改变 UI:下一拍重试,避免轮询失败刷屏错误态。
-      return;
-    }
-    const isActive =
-      status.activeStream !== null ||
-      lastKnownRunningRef.current ||
-      status.pendingPermissions.length > 0 ||
-      status.pendingQuestions.length > 0;
-    if (isActive) {
-      void runRefresh({ force: false });
-    }
-  }, [childSessionId, gatewayUrl, runRefresh, token]);
+  const pollStatus = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!childSessionId || !token) return;
+      // 全量刷新在途时跳过这一拍,避免与 runRefresh 抢同一份 state。
+      if (inFlightRef.current) return;
+      let status: SessionStatusReadModel;
+      try {
+        status = await createSessionsClient(gatewayUrl).getStatus(token, childSessionId, {
+          signal,
+        });
+      } catch {
+        // 轻量探针失败不改变 UI:下一拍重试,避免轮询失败刷屏错误态。
+        // 取消/中止导致的失败由 startSequentialPolling 统一吞掉,这里无需区分。
+        return;
+      }
+      if (signal?.aborted) return;
+      const isActive =
+        status.activeStream !== null ||
+        lastKnownRunningRef.current ||
+        status.pendingPermissions.length > 0 ||
+        status.pendingQuestions.length > 0;
+      if (isActive) {
+        void runRefresh({ force: false });
+      }
+    },
+    [childSessionId, gatewayUrl, runRefresh, token],
+  );
 
   useEffect(() => {
     if (!childSessionId || !token) {
@@ -239,15 +249,19 @@ export function useSubSessionDetail(
     }
 
     void runRefresh({ force: true });
-    const intervalId = window.setInterval(() => {
-      // 页面不可见时跳过：每个打开的子会话面板各有一条 2.5s 轮询，
-      // 后台叠加会成为多会话场景下的请求风暴。
-      if (typeof document !== 'undefined' && document.hidden) return;
-      void pollStatus();
-    }, 2500);
+    // 串行链式轮询：上一拍（/status 探针，必要时含全量刷新）结束后才等待 2.5s
+    // 再发下一拍，慢响应不会造成请求堆叠；页面不可见时跳过。
+    // 每个打开的子会话面板各有一条，后台叠加仍要避免成为多会话场景下的请求风暴。
+    const polling = startSequentialPolling({
+      intervalMs: 2500,
+      run: async (signal) => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        await pollStatus(signal);
+      },
+    });
 
     return () => {
-      window.clearInterval(intervalId);
+      polling.cancel();
     };
   }, [childSessionId, pollStatus, runRefresh, token]);
 

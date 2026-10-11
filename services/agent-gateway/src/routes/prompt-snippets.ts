@@ -21,10 +21,13 @@ import {
   createSnippet,
   deleteGroup,
   deleteSnippet,
+  hasPromptSnippet,
   hasPromptSnippetGroup,
   listGroups,
   listSnippets,
+  listSnippetVersions,
   migratePromptSnippetsTables,
+  restoreSnippetVersion,
   updateGroup,
   updateSnippet,
 } from '../prompt-snippets/prompt-snippets-store.js';
@@ -38,7 +41,8 @@ type PromptSnippetsRouteErrorCode =
   | 'prompt_snippet_group_id_required'
   | 'prompt_snippet_title_required'
   | 'prompt_snippet_content_required'
-  | 'prompt_snippet_not_found';
+  | 'prompt_snippet_not_found'
+  | 'prompt_snippet_version_not_found';
 
 const PROMPT_SNIPPETS_ROUTE_ERROR_MESSAGES: Record<PromptSnippetsRouteErrorCode, string> = {
   prompt_snippet_group_name_required: '分组名称不能为空。',
@@ -47,6 +51,7 @@ const PROMPT_SNIPPETS_ROUTE_ERROR_MESSAGES: Record<PromptSnippetsRouteErrorCode,
   prompt_snippet_title_required: '标题不能为空。',
   prompt_snippet_content_required: '提示词内容不能为空。',
   prompt_snippet_not_found: '目标提示词不存在。',
+  prompt_snippet_version_not_found: '目标提示词或版本不存在。',
 };
 
 function promptSnippetsRouteErrorPayload(code: PromptSnippetsRouteErrorCode): {
@@ -230,6 +235,7 @@ export async function promptSnippetsRoutes(app: FastifyInstance): Promise<void> 
         content?: string;
         groupId?: string;
         order?: number;
+        source?: 'updated' | 'restored';
       } | null;
 
       if (typeof body?.groupId === 'string' && body.groupId.trim().length === 0) {
@@ -264,6 +270,7 @@ export async function promptSnippetsRoutes(app: FastifyInstance): Promise<void> 
         content: typeof body?.content === 'string' ? body.content : undefined,
         groupId: nextGroupId,
         order: typeof body?.order === 'number' ? body.order : undefined,
+        source: body?.source === 'restored' ? 'restored' : 'updated',
       });
 
       if (!snippet) {
@@ -292,6 +299,55 @@ export async function promptSnippetsRoutes(app: FastifyInstance): Promise<void> 
 
       step.succeed(undefined, { snippetId });
       return reply.send({ ok: true });
+    },
+  );
+
+  // ─── 版本历史 ───────────────────────────────────────────────────────────
+
+  app.get(
+    '/prompt-snippets/:snippetId/versions',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'prompt-snippets.versions.list');
+      const user = request.user as JwtPayload;
+      const { snippetId } = request.params as { snippetId: string };
+
+      if (!hasPromptSnippet(user.sub, snippetId)) {
+        step.fail('prompt_snippet_not_found');
+        return reply.status(404).send(promptSnippetsRouteErrorPayload('prompt_snippet_not_found'));
+      }
+
+      const versions = listSnippetVersions(user.sub, snippetId);
+      step.succeed(undefined, { snippetId, count: versions.length });
+      return reply.send({ versions });
+    },
+  );
+
+  app.put(
+    '/prompt-snippets/:snippetId/versions/:version/restore',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'prompt-snippets.version.restore');
+      const user = request.user as JwtPayload;
+      const { snippetId, version } = request.params as { snippetId: string; version: string };
+      const targetVersion = Number(version);
+      if (!Number.isInteger(targetVersion) || targetVersion < 1) {
+        step.fail('prompt_snippet_version_not_found');
+        return reply
+          .status(400)
+          .send(promptSnippetsRouteErrorPayload('prompt_snippet_version_not_found'));
+      }
+
+      const snippet = restoreSnippetVersion(user.sub, snippetId, targetVersion);
+      if (!snippet) {
+        step.fail('prompt_snippet_version_not_found');
+        return reply
+          .status(404)
+          .send(promptSnippetsRouteErrorPayload('prompt_snippet_version_not_found'));
+      }
+
+      step.succeed(undefined, { snippetId, version: targetVersion });
+      return reply.send({ snippet, restoredVersion: targetVersion });
     },
   );
 }

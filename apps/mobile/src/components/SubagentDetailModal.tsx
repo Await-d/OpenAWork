@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { transformSubagentResultBlocks } from '@openAwork/shared';
 import {
   Modal,
   View,
@@ -82,7 +83,7 @@ function SubagentMsgRow({ msg }: { msg: SubagentMessage }) {
         ]}
         selectable
       >
-        {msg.content}
+        {msg.role === 'assistant' ? transformSubagentResultBlocks(msg.content, 'plain') : msg.content}
       </Text>
     </View>
   );

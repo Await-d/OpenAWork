@@ -17,6 +17,7 @@ import {
   getReasoningLabel,
   REASONING_COLOR_TOKENS,
   REASONING_UI_TOKENS,
+  transformSubagentResultBlocks,
 } from '@openAwork/shared';
 import type { MobileChatMessage, MobileInputImage } from '../chat/chat-message-content';
 import {
@@ -70,7 +71,7 @@ export function ChatMessageBubble({
           <CodeBlock key={`code-${index}`} code={segment.code} language={segment.language} />
         ) : segment.text.length > 0 ? (
           <Text key={`text-${index}`} style={[styles.bubbleText, isUser && styles.userBubbleText]}>
-            {segment.text}
+            {isUser ? segment.text : transformSubagentResultBlocks(segment.text, 'plain')}
             {isStreaming && index === segments.length - 1 ? (
               <Text style={styles.cursor}>▋</Text>
             ) : null}

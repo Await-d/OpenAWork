@@ -1,3 +1,4 @@
+import React from 'react';
 import type { CSSProperties } from 'react';
 import type { DevtoolsSourceState, SettingsDevLogRecord } from '../state/settings-types.js';
 import {
@@ -38,6 +39,8 @@ export interface DevtoolsLogsSectionProps {
   copyErrorLogs: () => void;
   copyLogField: (label: string, value: unknown) => void;
   onExportLogs: () => void;
+  /** 清除全部开发日志(工具执行日志 + 请求工作流日志);resolve 后由父级刷新列表。 */
+  onClearLogs: () => Promise<void>;
 }
 
 const GHOST_INTERACTION = subtleButtonInteractionProps();
@@ -99,7 +102,9 @@ export function DevtoolsLogsSection({
   copyErrorLogs,
   copyLogField,
   onExportLogs,
+  onClearLogs,
 }: DevtoolsLogsSectionProps) {
+  const [isClearing, setIsClearing] = React.useState(false);
   const visibleErrorCount = filteredLogs.filter((log) => log.level === 'error').length;
   const totalErrorCount = devLogs.filter((log) => log.level === 'error').length;
 
@@ -218,6 +223,25 @@ export function DevtoolsLogsSection({
           >
             复制可见
           </button>
+          {devLogs.length > 0 && (
+            <button
+              type="button"
+              disabled={isClearing}
+              onClick={() => {
+                setIsClearing(true);
+                void onClearLogs().finally(() => setIsClearing(false));
+              }}
+              {...GHOST_INTERACTION}
+              style={{
+                ...BS,
+                fontSize: 12,
+                color: isClearing ? 'var(--fg-muted)' : 'var(--danger)',
+                cursor: isClearing ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {isClearing ? '清除中...' : '清除全部'}
+            </button>
+          )}
         </div>
       </div>
 

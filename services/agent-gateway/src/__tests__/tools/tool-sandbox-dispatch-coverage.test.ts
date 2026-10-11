@@ -15,7 +15,8 @@
  * 说明:渠道 / codegraph 等工具在普通 chat 会话会命中「会话未启用」门
  * (`is not enabled for this session`)——那是**门控**而非**派发缺口**,不计入失败。
  */
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as MessageStoreV2 from '../../message/message-store-v2.js';
 
@@ -58,6 +59,10 @@ const CRITICAL_WHITELIST_NAMES = [
   'batch',
   'skill',
   'question',
+  // 子代理工具:规范名 `subagent` 与历史别名 `task` 都必须在册。
+  // 模型可见名是 `subagent`(见 tool-definitions 的 getVisibleToolName),
+  // 历史回归:白名单只登记 `task` 时,`subagent` 会被沙箱白名单门禁拒绝。
+  'subagent',
   'task',
   'task_create',
   'task_get',
@@ -153,5 +158,68 @@ describe('tool-sandbox 派发覆盖率 tripwire', () => {
 
     // 空数组 = 每个白名单名都有真实承接(if 链分支或注册表工具)。
     expect(unhandled).toEqual([]);
+  });
+
+  it('派发链不得出现未 await 的 handler 调用', () => {
+    const source = readFileSync(new URL('../../tools/tool-sandbox.ts', import.meta.url), 'utf8');
+    // `return await handleXxx(...)` 合法;写成 `return handleXxx(...)` 时,handler 的
+    // 异步 reject 不经过 `executeGatewayManagedToolImpl` 的 try/catch(async 函数的
+    // `return promise` 语义),会绕过兜底 catch 直接中断整轮流。
+    // 只匹配「调用形态」:`return handleFoo;`(把 handler 当值返回)不算违规。
+    expect(source).not.toMatch(
+      /\breturn\s+(?!await\s)(?:handle[A-Z]\w*\s*\(|executePluginTool\s*\()/,
+    );
+  });
+
+  /** 把会话工作区绑定到子目录,便于构造「越界 workdir」的入参错误。 */
+  function bindNestedSessionWorkspace(): string {
+    const nestedWorkspace = join(TEST_WORKSPACE, 'nested-session');
+    mkdirSync(nestedWorkspace, { recursive: true });
+    mocks.metadataJson = JSON.stringify({
+      workingDirectory: nestedWorkspace,
+      permissionMode: 'yolo',
+    });
+    return nestedWorkspace;
+  }
+
+  function runBashProbe(workdir: string, tag: string) {
+    return createDefaultSandbox().execute(
+      {
+        toolCallId: `probe-bash-outside-${tag}`,
+        toolName: 'bash',
+        rawInput: { command: 'echo hi', description: 'probe outside workspace', workdir },
+      },
+      new AbortController().signal,
+      'coverage-session',
+      {
+        clientRequestId: `probe-req-bash-outside-${tag}`,
+        nextRound: 1,
+        requestData: { clientRequestId: `probe-req-bash-outside-${tag}` },
+      },
+    );
+  }
+
+  it('handler 抛出的绝对路径越界错误降级为可恢复工具错误,并给出可操作的会话工作区', async () => {
+    const nestedWorkspace = bindNestedSessionWorkspace();
+
+    // 会话工作区绑定在子目录,workdir 却指向父目录:resolveBashWorkdir 会抛错,
+    // 必须被收敛成 isError 工具结果(线上表现曾是可恢复错误被放大为
+    // STREAM_ERROR + WS 流中断)。
+    const result = await runBashProbe(TEST_WORKSPACE, 'absolute-parent');
+
+    expect(result.isError).toBe(true);
+    const output = String(result.output);
+    expect(output).toContain('outside current session workspace');
+    // 文案契约:必须带上正确的会话工作区,模型才能据此自我纠正重试。
+    expect(output).toContain(`(session workspace: ${nestedWorkspace})`);
+  });
+
+  it('handler 抛出的相对路径越界错误同样降级为工具错误', async () => {
+    bindNestedSessionWorkspace();
+
+    const result = await runBashProbe('../..', 'relative-escape');
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('outside current session workspace');
   });
 });

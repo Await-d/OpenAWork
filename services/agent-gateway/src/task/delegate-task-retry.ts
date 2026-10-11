@@ -31,12 +31,12 @@ export const DELEGATE_TASK_ERROR_PATTERNS: DelegateTaskErrorPattern[] = [
     pattern: 'category OR subagent_type',
     errorType: 'mutual_exclusion',
     fixHint:
-      '仅提供以下之一：category（如 "general", "quick"）或 subagent_type（如 "oracle", "explore"）',
+      '仅提供以下之一：category（如 "quick", "deep"）或 subagent_type（如 "oracle", "explore"）',
   },
   {
     pattern: 'Must provide either category or subagent_type',
     errorType: 'missing_category_or_agent',
-    fixHint: '添加 category="general" 或 subagent_type="explore"',
+    fixHint: '添加 category="quick" 或 subagent_type="explore"',
   },
   {
     pattern: 'Unknown category',
@@ -119,7 +119,7 @@ export function buildRetryGuidance(errorInfo: DetectedError): string {
 delegate_task(
   description="任务描述",
   prompt="详细提示...",
-  category="general",  // 或 subagent_type="explore"
+  category="quick",  // 或 subagent_type="explore"
   run_in_background=false,
   load_skills=[]
 )

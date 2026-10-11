@@ -255,7 +255,7 @@ internal static class PermissionsRouteWorkspacePermissionConfigWriter
             "bash" or "interactive_bash" => "bash",
             "glob" => "glob",
             "grep" => "grep",
-            "task" => "task",
+            "task" or "subagent" => "task",
             "skill" or "skill_mcp" => "skill",
             "mcp_call" => "mcp_call",
             "lsp_rename" => "lsp",

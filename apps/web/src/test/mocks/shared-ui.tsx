@@ -37,3 +37,10 @@ export {
   highlightCodeLines,
 } from '../../../../../packages/shared-ui/src/tools/UnifiedCodeDiff.js';
 export type { DiffToken } from '../../../../../packages/shared-ui/src/tools/UnifiedCodeDiff.js';
+
+// 思考档位权重与排序是纯常量 / 纯函数(无副作用):转发真实实现,
+// 避免模型设置弹层的档位顺序在测试里与真实实现漂移。
+export {
+  REASONING_EFFORT_RANK,
+  sortSupportedReasoningEfforts,
+} from '../../../../../packages/shared-ui/src/models/model-reasoning-support.js';

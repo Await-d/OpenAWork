@@ -6,7 +6,7 @@ export interface ModelReasoningOption {
   readonly values?: readonly string[];
 }
 
-function isSupportedReasoningEffort(value: string): value is SupportedReasoningEffort {
+export function isSupportedReasoningEffort(value: string): value is SupportedReasoningEffort {
   switch (value) {
     case 'none':
     case 'minimal':
@@ -344,6 +344,11 @@ export function canConfigureThinkingForModel(
   modelId: string | undefined,
   declaredSupportsThinking = false,
 ): boolean {
+  // 用户在 provider 配置里显式声明 supportsThinking 时，哪怕缺 provider/model 信息
+  // 也允许配置——否则下拉里的「思考」永远显示禁用，与模型信息标签自相矛盾。
+  if (declaredSupportsThinking && (!providerType || !modelId)) {
+    return !isOpenAIProModel(modelId ?? '');
+  }
   if (!providerType || !modelId) {
     return false;
   }
@@ -352,17 +357,10 @@ export function canConfigureThinkingForModel(
   const effectiveType = resolveEffectiveProviderType(providerType, modelId);
   const actualModelId = leafModelId(modelId);
 
-  // 自定义渠道 / Azure 部署名 / OpenAI 兼容代理：用户显式勾选 supportsThinking 后
-  // 必须可配置。否则「思考」勾选只是假控件——聊天侧会因 canConfigure=false 强制关闭。
-  // gpt-5-pro 仍保持不可配置（上游拒绝 effort 旋钮）。
-  if (
-    declaredSupportsThinking &&
-    (providerType === 'custom' ||
-      providerType === 'azure' ||
-      providerType === 'openai' ||
-      providerType === 'siliconflow' ||
-      providerType === 'opencode-go')
-  ) {
+  // 用户显式勾选了 supportsThinking（例如从上游模型目录迁移过来的能力标记）后,
+  // 一律视为可配置——否则任何未命中厂商规则的 provider 类型都会让控件永久禁用。
+  // 唯一的例外仍是 gpt-5-pro:上游本身拒绝 effort 旋钮,勾选了也下发不了。
+  if (declaredSupportsThinking) {
     return !isOpenAIProModel(actualModelId);
   }
 
@@ -477,6 +475,24 @@ const XAI_REASONING_EFFORTS = [
 ] as const satisfies readonly SupportedReasoningEffort[];
 
 const BINARY_TOGGLE_EFFORTS = ['medium'] as const satisfies readonly SupportedReasoningEffort[];
+
+/** 思考强度从低到高的全局排序权重（none/minimal 表示「不开启 / 极少」）。 */
+export const REASONING_EFFORT_RANK: Record<SupportedReasoningEffort, number> = {
+  none: 0,
+  minimal: 1,
+  low: 2,
+  medium: 3,
+  high: 4,
+  xhigh: 5,
+  max: 6,
+};
+
+/** 把任意顺序的档位列表排成「从低到高」,用于滑块 / 分级控件。 */
+export function sortSupportedReasoningEfforts(
+  efforts: readonly SupportedReasoningEffort[],
+): SupportedReasoningEffort[] {
+  return [...efforts].sort((a, b) => REASONING_EFFORT_RANK[a] - REASONING_EFFORT_RANK[b]);
+}
 
 export function getSupportedReasoningEffortsForModel(
   providerType: string | undefined,

@@ -273,6 +273,12 @@ export function SessionRunStateBar({
   if (pendingQuestionsCount > 0) counterParts.push(`问题 ${pendingQuestionsCount}`);
   const upstreamSummaryLabel = formatChatUpstreamSummaryLabel(latestUpstreamSummary);
 
+  // running 相位且无检查点 / 压缩 / 上游流摘要等附加信息时,状态条只剩「会话持续运行中」
+  // 这类与 composer 内联提示完全重复的内容,直接不渲染以免重复提示。
+  if (phase === 'running' && counterParts.length === 0 && !upstreamSummaryLabel) {
+    return null;
+  }
+
   return (
     <div
       data-testid="chat-session-runtime-status"

@@ -401,21 +401,28 @@ async function executeGatewayManagedToolImpl(
   };
 
   try {
+    // 派发链上的 `return await handleXxx(...)` 中的 `await` 不可省略。
+    // async 函数里 `return promise` 不经过本函数的 try/catch —— 丢掉 await,
+    // handler 的异步 reject(如 bash workdir 越界、会话未绑定工作区)就会绕过
+    // 下面的兜底 catch,一路冒泡成模型回合的 STREAM_ERROR,把「工具入参非法」
+    // 放大整轮流中断(客户端只看到 WS_STREAM_ERROR),模型也失去自我纠正机会。
     // v2 plugin platform: dispatch plugin-contributed tools. Permission
     // gating already ran upstream — plugin tools are not mapped to a
     // built-in category, so the ladder resolves them to `custom` (ask).
     const pluginTool = getPluginToolRegistry().get(request.toolName);
     if (pluginTool) {
-      return executePluginTool({ tool: pluginTool, request, sessionId, signal });
+      return await executePluginTool({ tool: pluginTool, request, sessionId, signal });
     }
 
-    if (request.toolName === todoWriteTool.name) return handleTodoWriteTool(handlerContext);
+    if (request.toolName === todoWriteTool.name) return await handleTodoWriteTool(handlerContext);
 
-    if (request.toolName === todoReadTool.name) return handleTodoReadTool(handlerContext);
+    if (request.toolName === todoReadTool.name) return await handleTodoReadTool(handlerContext);
 
-    if (request.toolName === subTodoWriteTool.name) return handleSubTodoWriteTool(handlerContext);
+    if (request.toolName === subTodoWriteTool.name)
+      return await handleSubTodoWriteTool(handlerContext);
 
-    if (request.toolName === subTodoReadTool.name) return handleSubTodoReadTool(handlerContext);
+    if (request.toolName === subTodoReadTool.name)
+      return await handleSubTodoReadTool(handlerContext);
 
     if (CHANNEL_TOOL_NAME_SET.has(request.toolName)) {
       try {
@@ -442,112 +449,117 @@ async function executeGatewayManagedToolImpl(
       }
     }
 
-    if (request.toolName === 'mcp_list_tools') return handleMcpListToolsTool(handlerContext);
+    if (request.toolName === 'mcp_list_tools') return await handleMcpListToolsTool(handlerContext);
 
     if (request.toolName === desktopAutomationToolDefinition.name)
-      return handleDesktopAutomationTool(handlerContext);
+      return await handleDesktopAutomationTool(handlerContext);
 
     if (request.toolName === desktopControlToolDefinition.name)
-      return handleDesktopControlTool(handlerContext);
+      return await handleDesktopControlTool(handlerContext);
 
     if (request.toolName === computerUseToolDefinition.name)
-      return handleComputerUseTool(handlerContext);
+      return await handleComputerUseTool(handlerContext);
 
     if (request.toolName === sessionListToolDefinition.name)
-      return handleSessionListTool(handlerContext);
+      return await handleSessionListTool(handlerContext);
 
     if (request.toolName === sessionReadToolDefinition.name)
-      return handleSessionReadTool(handlerContext);
+      return await handleSessionReadTool(handlerContext);
 
     if (request.toolName === sessionSearchToolDefinition.name)
-      return handleSessionSearchTool(handlerContext);
+      return await handleSessionSearchTool(handlerContext);
 
     if (request.toolName === sessionInfoToolDefinition.name)
-      return handleSessionInfoTool(handlerContext);
+      return await handleSessionInfoTool(handlerContext);
 
     if (request.toolName === sessionRenameToolDefinition.name)
-      return handleSessionRenameTool(handlerContext);
+      return await handleSessionRenameTool(handlerContext);
 
     if (request.toolName === sessionMoveToolDefinition.name)
-      return handleSessionMoveTool(handlerContext);
+      return await handleSessionMoveTool(handlerContext);
 
     if (request.toolName === modelSearchToolDefinition.name)
-      return handleModelSearchTool(handlerContext);
+      return await handleModelSearchTool(handlerContext);
 
     if (request.toolName === taskCreateToolDefinition.name)
-      return handleTaskCreateTool(handlerContext);
+      return await handleTaskCreateTool(handlerContext);
 
-    if (request.toolName === taskGetToolDefinition.name) return handleTaskGetTool(handlerContext);
+    if (request.toolName === taskGetToolDefinition.name)
+      return await handleTaskGetTool(handlerContext);
 
-    if (request.toolName === taskListToolDefinition.name) return handleTaskListTool(handlerContext);
+    if (request.toolName === taskListToolDefinition.name)
+      return await handleTaskListTool(handlerContext);
 
     if (request.toolName === taskUpdateToolDefinition.name)
-      return handleTaskUpdateTool(handlerContext);
+      return await handleTaskUpdateTool(handlerContext);
 
-    if (request.toolName === skillMcpToolDefinition.name) return handleSkillMcpTool(handlerContext);
+    if (request.toolName === skillMcpToolDefinition.name)
+      return await handleSkillMcpTool(handlerContext);
 
-    if (request.toolName === lookAtToolDefinition.name) return handleLookAtTool(handlerContext);
+    if (request.toolName === lookAtToolDefinition.name)
+      return await handleLookAtTool(handlerContext);
 
     if (request.toolName === generateImageToolDefinition.name)
-      return handleGenerateImageTool(handlerContext);
+      return await handleGenerateImageTool(handlerContext);
 
     if (request.toolName === convertMediaToolDefinition.name)
-      return handleConvertMediaTool(handlerContext);
+      return await handleConvertMediaTool(handlerContext);
 
     if (request.toolName === extractMediaInfoToolDefinition.name)
-      return handleExtractMediaInfoTool(handlerContext);
+      return await handleExtractMediaInfoTool(handlerContext);
 
     if (request.toolName === extractVideoFrameToolDefinition.name)
-      return handleExtractVideoFrameTool(handlerContext);
+      return await handleExtractVideoFrameTool(handlerContext);
 
     if (request.toolName === generateAudioToolDefinition.name)
-      return handleGenerateAudioTool(handlerContext);
+      return await handleGenerateAudioTool(handlerContext);
 
     if (request.toolName === callOmoAgentToolDefinition.name)
-      return handleCallOmoAgentTool(handlerContext);
+      return await handleCallOmoAgentTool(handlerContext);
 
-    if (request.toolName === TOOL_SEARCH_TOOL_NAME) return handleToolSearchTool(handlerContext);
+    if (request.toolName === TOOL_SEARCH_TOOL_NAME)
+      return await handleToolSearchTool(handlerContext);
 
     if (request.toolName === readToolOutputToolDefinition.name)
-      return handleReadToolOutputTool(handlerContext);
+      return await handleReadToolOutputTool(handlerContext);
 
     // Flat MCP 别名(mcp__<server>__<tool>):判定条件原位保留,分支体在 handler 内。
-    if (parseFlatMcpToolName(request.toolName)) return handleFlatMcpTool(handlerContext);
+    if (parseFlatMcpToolName(request.toolName)) return await handleFlatMcpTool(handlerContext);
 
-    if (request.toolName === 'mcp_call') return handleMcpCallTool(handlerContext);
+    if (request.toolName === 'mcp_call') return await handleMcpCallTool(handlerContext);
 
     if (request.toolName === mcpManageServersToolDefinition.name)
-      return handleMcpManageServersTool(handlerContext);
+      return await handleMcpManageServersTool(handlerContext);
 
     if (request.toolName === memoryManageToolDefinition.name)
-      return handleMemoryManageTool(handlerContext);
+      return await handleMemoryManageTool(handlerContext);
 
     if (request.toolName === skillManageToolDefinition.name)
-      return handleSkillManageTool(handlerContext);
+      return await handleSkillManageTool(handlerContext);
 
     if (request.toolName === pluginManageToolDefinition.name)
-      return handlePluginManageTool(handlerContext);
+      return await handlePluginManageTool(handlerContext);
 
     if (request.toolName === scheduleManageToolDefinition.name)
-      return handleScheduleManageTool(handlerContext);
+      return await handleScheduleManageTool(handlerContext);
 
     if (request.toolName === agentManageToolDefinition.name)
-      return handleAgentManageTool(handlerContext);
+      return await handleAgentManageTool(handlerContext);
 
     if (request.toolName === teamWorkspaceManageToolDefinition.name)
-      return handleTeamWorkspaceManageTool(handlerContext);
+      return await handleTeamWorkspaceManageTool(handlerContext);
 
     if (request.toolName === workspaceReviewStatusTool.name)
-      return handleWorkspaceReviewStatusTool(handlerContext);
+      return await handleWorkspaceReviewStatusTool(handlerContext);
 
     if (request.toolName === workspaceReviewDiffTool.name)
-      return handleWorkspaceReviewDiffTool(handlerContext);
+      return await handleWorkspaceReviewDiffTool(handlerContext);
 
     if (request.toolName === workspaceCreateDirectoryTool.name)
-      return handleWorkspaceCreateDirectoryTool(handlerContext);
+      return await handleWorkspaceCreateDirectoryTool(handlerContext);
 
     if (request.toolName === workspaceReviewRevertTool.name)
-      return handleWorkspaceReviewRevertTool(handlerContext);
+      return await handleWorkspaceReviewRevertTool(handlerContext);
 
     if (CODEGRAPH_TOOL_NAME_SET.has(request.toolName)) {
       const output = await executeCodegraphTool({
@@ -564,49 +576,52 @@ async function executeGatewayManagedToolImpl(
       };
     }
 
-    if (request.toolName === 'edit') return handleEditTool(handlerContext);
+    if (request.toolName === 'edit') return await handleEditTool(handlerContext);
 
-    if (request.toolName === 'multi_edit') return handleMultiEditTool(handlerContext);
+    if (request.toolName === 'multi_edit') return await handleMultiEditTool(handlerContext);
 
-    if (request.toolName === writeTool.name) return handleWriteTool(handlerContext);
+    if (request.toolName === writeTool.name) return await handleWriteTool(handlerContext);
 
     if (request.toolName === applyPatchToolDefinition.name)
-      return handleApplyPatchTool(handlerContext);
+      return await handleApplyPatchTool(handlerContext);
 
     if (request.toolName === astGrepReplaceToolDefinition.name)
-      return handleAstGrepReplaceTool(handlerContext);
+      return await handleAstGrepReplaceTool(handlerContext);
 
     if (request.toolName === lspRenameToolDefinition.name)
-      return handleLspRenameTool(handlerContext);
+      return await handleLspRenameTool(handlerContext);
 
-    if (request.toolName === 'batch') return handleBatchTool(handlerContext);
+    if (request.toolName === 'batch') return await handleBatchTool(handlerContext);
 
-    if (request.toolName === 'skill') return handleSkillTool(handlerContext);
+    if (request.toolName === 'skill') return await handleSkillTool(handlerContext);
 
-    if (request.toolName === 'question') return handleQuestionTool(handlerContext);
+    if (request.toolName === 'question') return await handleQuestionTool(handlerContext);
 
     if (request.toolName === enterPlanModeToolDefinition.name)
-      return handleEnterPlanModeTool(handlerContext);
+      return await handleEnterPlanModeTool(handlerContext);
 
     if (request.toolName === exitPlanModeToolDefinition.name)
-      return handleExitPlanModeTool(handlerContext);
+      return await handleExitPlanModeTool(handlerContext);
 
-    if (isTaskToolName(request.toolName)) return handleTaskTool(handlerContext);
+    if (isTaskToolName(request.toolName)) return await handleTaskTool(handlerContext);
 
-    if (request.toolName === 'background_output') return handleBackgroundOutputTool(handlerContext);
+    if (request.toolName === 'background_output')
+      return await handleBackgroundOutputTool(handlerContext);
 
-    if (request.toolName === 'background_cancel') return handleBackgroundCancelTool(handlerContext);
+    if (request.toolName === 'background_cancel')
+      return await handleBackgroundCancelTool(handlerContext);
 
-    if (request.toolName === 'bash') return handleBashTool(handlerContext);
+    if (request.toolName === 'bash') return await handleBashTool(handlerContext);
 
-    if (request.toolName === 'interactive_bash') return handleInteractiveBashTool(handlerContext);
+    if (request.toolName === 'interactive_bash')
+      return await handleInteractiveBashTool(handlerContext);
 
     if (request.toolName === 'run_bash_in_background')
-      return handleRunBashInBackgroundTool(handlerContext);
+      return await handleRunBashInBackgroundTool(handlerContext);
 
-    if (request.toolName === 'bash_output') return handleBashOutputTool(handlerContext);
+    if (request.toolName === 'bash_output') return await handleBashOutputTool(handlerContext);
 
-    if (request.toolName === 'bash_kill') return handleBashKillTool(handlerContext);
+    if (request.toolName === 'bash_kill') return await handleBashKillTool(handlerContext);
 
     // ─── L1.2.3 Builtin Instructions Dispatch ─────────────────────────────
     // 如果 toolName 匹配某个已注册的内置指令，走 invokeInstruction 路径。

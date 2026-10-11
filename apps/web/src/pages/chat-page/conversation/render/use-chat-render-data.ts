@@ -157,6 +157,12 @@ export interface ChatRenderDataReturn {
   effectiveContextMessageCount: number;
   sanitizedHistoricalMessages: ChatMessage[];
   hiddenMessageCount: number;
+  /**
+   * 当前可见窗口（`slice(-visibleMessageCount)`）渲染后的**第一条**历史消息 id。
+   * 头部插入旧消息（prepend load）的滚动锚点用它定位：加载前捕获该消息节点的
+   * 位置，加载后恢复，避免视口跳到新加载旧消息的顶部。
+   */
+  firstVisibleMessageId: string | null;
   historicalRenderedMessageEntries: ChatRenderEntry[];
   streamingRenderedMessageEntry: ChatRenderEntry | null;
   historicalGroupedMessageEntries: ChatRenderGroup[];
@@ -839,6 +845,10 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     subagentNotices,
   ]);
 
+  const firstVisibleMessageId = useMemo(() => {
+    return visibleMessages.length > 0 ? (visibleMessages[0]?.id ?? null) : null;
+  }, [visibleMessages]);
+
   return {
     assistantUsageDetails,
     messageInputTokens,
@@ -849,6 +859,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     effectiveContextMessageCount: effectiveContextMessages.length,
     sanitizedHistoricalMessages,
     hiddenMessageCount,
+    firstVisibleMessageId,
     historicalRenderedMessageEntries,
     streamingRenderedMessageEntry,
     historicalGroupedMessageEntries,

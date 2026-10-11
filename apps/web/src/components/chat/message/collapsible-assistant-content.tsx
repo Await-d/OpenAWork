@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useState } from 'react';
+import { isSubagentResultSectionVisible } from '@openAwork/shared';
 import { FoldDisabledContext, MessageFoldContext } from '../markdown/fold-policy.js';
 
 /**
@@ -52,6 +53,7 @@ export function CollapsibleAssistantContent({
   const latestAssistantId = useContext(LatestAssistantMessageContext);
   const isLatest = messageId !== undefined && messageId === latestAssistantId;
   const isLong = content.length > FOLD_CHAR_THRESHOLD;
+  const hasVisibleResults = isSubagentResultSectionVisible(content);
   const [expanded, setExpanded] = useState(false);
 
   // 最新一条已完成回复整体不折叠时，块级折叠（代码块 / Markdown 预览块）也必须跟着
@@ -59,6 +61,10 @@ export function CollapsibleAssistantContent({
   // 会突然塌缩，且该块高度突变会把视口向上顶（视口上跳）。这里透传 context，让围栏块
   // 跳过自身折叠；历史回复仍走下面的整条折叠逻辑。
   if (isLatest) return <FoldDisabledContext value={true}>{children}</FoldDisabledContext>;
+
+  // 子代理结构化结果（<results> 的 files / findings / answer / … 分节）是结论本身，
+  // 折叠掉等于把答案藏起来：跳过整条折叠，让其完整展示。
+  if (hasVisibleResults) return <>{children}</>;
 
   if (!isLong) return <>{children}</>;
 

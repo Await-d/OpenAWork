@@ -52,6 +52,7 @@ interface DevtoolsTabContentProps {
   diagnosticsDateFilter: string | null;
   onSetDiagnosticsDateFilter: (date: string | null) => void;
   onClearDiagnostics: () => Promise<void>;
+  onClearLogs: () => Promise<void>;
   sourceStates: Record<DevtoolsSourceKey, DevtoolsSourceState>;
   workers: WorkerEntry[];
   onExportLogs: () => void;
@@ -117,6 +118,7 @@ export function DevtoolsTabContent({
   diagnosticsDateFilter,
   onSetDiagnosticsDateFilter,
   onClearDiagnostics,
+  onClearLogs,
   sourceStates,
   workers,
   onExportLogs,
@@ -894,6 +896,7 @@ export function DevtoolsTabContent({
             void copyLogField(label, value);
           }}
           onExportLogs={onExportLogs}
+          onClearLogs={onClearLogs}
         />
       )}
 

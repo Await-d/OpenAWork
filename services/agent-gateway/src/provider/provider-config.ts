@@ -296,6 +296,26 @@ export const providerConnectivityTestBodySchema = z
   });
 
 /**
+ * 拉取上游模型列表请求体:支持两种来源——
+ *   - `provider`(内联完整 provider 配置):拉「尚未保存」的设置页表单值对应上游;
+ *   - `providerId`(已保存 provider 的 id):拉库里已有配置对应上游。
+ * 二者必须提供其一。
+ */
+export const providerUpstreamModelsBodySchema = z
+  .object({
+    provider: aiProviderSchema.optional(),
+    providerId: z.string().min(1).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.provider && !value.providerId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Either `provider` or `providerId` is required.',
+      });
+    }
+  });
+
+/**
  * 把单个内联 provider 规整为运行时 `AIProvider`(补 createdAt/updatedAt、
  * 清洗 apiKeyEnv)，供连通性自检直接使用。
  */

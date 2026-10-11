@@ -2,7 +2,7 @@
  * ChatComposerOptimize — 提示词优化错误提示 + 结果弹窗
  */
 
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { PromptCandidate, PromptOptimizerResult } from '@openAwork/web-client';
 import type { ComposerOptimizeError } from './composer-optimize-error.js';
 
@@ -14,6 +14,12 @@ export interface ChatComposerOptimizeProps {
   onClose: () => void;
   onSelectCandidate: (candidate: PromptCandidate) => void;
   onRetryOptimize?: () => void;
+  /** 对单个候选发起评估（prompt-only），渲染评估面板。 */
+  onEvaluateCandidate?: (candidate: PromptCandidate) => void;
+  /** 正在评估的候选 id。 */
+  evaluatingCandidateId?: string | null;
+  /** 评估结果面板（评分/维度/补丁计划），由 ChatComposer 构造。 */
+  evaluatePanel?: ReactNode;
 }
 
 export function ChatComposerOptimize({
@@ -24,6 +30,9 @@ export function ChatComposerOptimize({
   onClose,
   onSelectCandidate,
   onRetryOptimize,
+  onEvaluateCandidate,
+  evaluatingCandidateId,
+  evaluatePanel,
 }: ChatComposerOptimizeProps) {
   return (
     <>
@@ -175,10 +184,17 @@ export function ChatComposerOptimize({
             {optimizeResult.candidates.map((candidate: PromptCandidate) => {
               const isRecommended = candidate.id === optimizeResult.recommended;
               return (
-                <button
+                <div
                   key={candidate.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onSelectCandidate(candidate)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelectCandidate(candidate);
+                    }
+                  }}
                   style={{
                     width: '100%',
                     textAlign: 'left',
@@ -222,6 +238,36 @@ export function ChatComposerOptimize({
                   >
                     {candidate.text}
                   </span>
+                  {onEvaluateCandidate && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onEvaluateCandidate(candidate);
+                      }}
+                      disabled={evaluatingCandidateId === candidate.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        alignSelf: 'flex-start',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 6,
+                        background:
+                          evaluatingCandidateId === candidate.id
+                            ? 'color-mix(in oklch, var(--accent) 8%, transparent)'
+                            : 'transparent',
+                        color: 'var(--accent)',
+                        padding: '2px 6px',
+                        cursor: evaluatingCandidateId === candidate.id ? 'wait' : 'pointer',
+                        fontSize: 9,
+                        fontWeight: 600,
+                        transition: 'background 150ms ease',
+                      }}
+                    >
+                      {evaluatingCandidateId === candidate.id ? '评估中…' : '评估此候选'}
+                    </button>
+                  )}
                   {candidate.improvements.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 2 }}>
                       {candidate.improvements.map((imp: string, idx: number) => (
@@ -242,10 +288,11 @@ export function ChatComposerOptimize({
                       ))}
                     </div>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
+          {evaluatePanel}
         </div>
       )}
     </>

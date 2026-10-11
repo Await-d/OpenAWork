@@ -7,6 +7,8 @@ import {
   type AIModelConfigItem,
   type AIProviderRef,
   type ImageGenerationDefaultsRef,
+  type UpstreamModelItem,
+  type UpstreamModelsResult,
 } from '@openAwork/shared-ui';
 import type {
   ProviderEditData,
@@ -112,6 +114,12 @@ interface ConnectionTabContentProps {
     modelCount?: number;
     message?: string;
   }>;
+  onFetchUpstreamModels?: (providerId: string) => Promise<UpstreamModelsResult>;
+  onImportUpstreamModels?: (providerId: string, models: UpstreamModelItem[]) => void;
+  onBatchUpdateModels?: (
+    providerId: string,
+    updates: Array<{ modelId: string; updates: Partial<AIModelConfigItem> }>,
+  ) => void;
   onDiscoverProviders?: () => Promise<{
     providers: Array<{
       id: string;
@@ -171,6 +179,9 @@ export function ConnectionTabContent({
   handleRemoveProvider,
   onTestModel,
   onSyncCatalog,
+  onFetchUpstreamModels,
+  onImportUpstreamModels,
+  onBatchUpdateModels,
   onDiscoverProviders,
   onImportDiscoveredProvider,
   urlInput,
@@ -466,6 +477,9 @@ export function ConnectionTabContent({
             onUpdateModel={handleUpdateModel}
             {...(onTestModel ? { onTestModel } : {})}
             {...(onSyncCatalog ? { onSyncCatalog } : {})}
+            {...(onFetchUpstreamModels ? { onFetchUpstreamModels } : {})}
+            {...(onImportUpstreamModels ? { onImportUpstreamModels } : {})}
+            {...(onBatchUpdateModels ? { onBatchUpdateModels } : {})}
             {...(onDiscoverProviders ? { onDiscoverProviders } : {})}
             {...(onImportDiscoveredProvider ? { onImportDiscoveredProvider } : {})}
           />

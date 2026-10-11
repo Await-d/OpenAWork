@@ -24,11 +24,13 @@ import {
   createPromptSnippetsClient,
   type PromptSnippet,
   type PromptSnippetGroup,
+  type PromptSnippetVersion,
 } from '@openAwork/web-client';
 import {
   getUserVisibleErrorMessage,
   isAbortLikeError,
 } from '../../../utils/errors/user-visible-error.js';
+import { PromptSnippetsVersionHistory } from './PromptSnippetsVersionHistory.js';
 
 function iconStroke(color = 'currentColor') {
   return {
@@ -118,6 +120,19 @@ function TrashIcon() {
   );
 }
 
+function HistoryIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        {...iconStroke()}
+        strokeWidth="1.9"
+        d="M3 3v5h5M3.05 13a9 9 0 1 0 2.13-8.36L3 8"
+      />
+      <path {...iconStroke()} strokeWidth="1.9" d="M12 7v5l4 2" />
+    </svg>
+  );
+}
+
 function SpinnerIcon() {
   return (
     <span
@@ -148,7 +163,13 @@ export interface PromptSnippetsPanelProps {
 
 // ─── Sub-views ──────────────────────────────────────────────────────────────
 
-type PanelView = 'list' | 'add-group' | 'edit-group' | 'add-snippet' | 'edit-snippet';
+type PanelView =
+  | 'list'
+  | 'add-group'
+  | 'edit-group'
+  | 'add-snippet'
+  | 'edit-snippet'
+  | 'versions';
 type PanelActionKind =
   | 'create-group'
   | 'update-group'
@@ -156,7 +177,8 @@ type PanelActionKind =
   | 'create-snippet'
   | 'update-snippet'
   | 'delete-snippet'
-  | 'copy-snippet';
+  | 'copy-snippet'
+  | 'restore-version';
 
 interface PanelActionState {
   readonly kind: PanelActionKind;
@@ -185,6 +207,9 @@ export function PromptSnippetsPanel({
   const [formTitle, setFormTitle] = useState('');
   const [formContent, setFormContent] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [versionsSnippetId, setVersionsSnippetId] = useState<string | null>(null);
+  const [versions, setVersions] = useState<PromptSnippetVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const [popoverPosition, setPopoverPosition] = useState<{ bottom: number; left: number } | null>(
     null,
   );
@@ -458,6 +483,44 @@ export function PromptSnippetsPanel({
         setPendingAction(null);
       }
     })();
+  };
+
+  const openVersions = async (snippetId: string) => {
+    if (!hasAuth || !token) return;
+    setVersionsSnippetId(snippetId);
+    setVersions([]);
+    setView('versions');
+    setVersionsLoading(true);
+    setActionError(null);
+    try {
+      const nextVersions = await client.listSnippetVersions(token, snippetId);
+      setVersions(nextVersions);
+    } catch (error) {
+      if (!isAbortLikeError(error)) {
+        setActionError(getUserVisibleErrorMessage(error, '读取版本历史失败，请稍后重试。'));
+      }
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const handleRestoreVersion = async (snippetId: string, version: number) => {
+    if (!hasAuth || !token) return;
+    setActionError(null);
+    setPendingAction({ kind: 'restore-version', targetId: snippetId });
+    try {
+      await client.restoreSnippetVersion(token, snippetId, version);
+      setVersionsSnippetId(null);
+      setVersions([]);
+      setView('list');
+      await fetchData();
+    } catch (error) {
+      if (!isAbortLikeError(error)) {
+        setActionError(getUserVisibleErrorMessage(error, '回滚版本失败，请稍后重试。'));
+      }
+    } finally {
+      setPendingAction(null);
+    }
   };
 
   const handleInject = (text: string) => {
@@ -785,6 +848,15 @@ export function PromptSnippetsPanel({
                               </button>
                               <button
                                 type="button"
+                                onClick={() => void openVersions(s.id)}
+                                title="版本历史"
+                                disabled={hasPendingAction}
+                                style={smallBtnStyle}
+                              >
+                                <HistoryIcon />
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => void handleDeleteSnippet(s.id)}
                                 title="删除"
                                 disabled={hasPendingAction}
@@ -961,6 +1033,23 @@ export function PromptSnippetsPanel({
                     style={{ ...inputStyle, resize: 'vertical', minHeight: 80 }}
                   />
                 </FormSection>
+              )}
+
+              {/* 版本历史 */}
+              {view === 'versions' && versionsSnippetId && (
+                <PromptSnippetsVersionHistory
+                  versions={versions}
+                  loading={versionsLoading}
+                  restoring={isPendingTarget('restore-version', versionsSnippetId)}
+                  onRestore={(version) => void handleRestoreVersion(versionsSnippetId, version)}
+                  onBack={() => {
+                    setView('list');
+                    setVersionsSnippetId(null);
+                    setVersions([]);
+                  }}
+                  smallBtnStyle={smallBtnStyle}
+                  actionBtnStyle={actionBtnStyle}
+                />
               )}
             </>
           )}

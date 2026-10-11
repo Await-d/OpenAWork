@@ -550,10 +550,16 @@ export function useChatConversationState(
     if (sessionStateStatus !== 'running') return undefined;
     // 使用 visibility check：只在 tab 可见时 poll
     let active = true;
+    // 单飞守卫：`reload()` 发的是无分页全量 getRecovery，单次往返可能超过 2.5s；
+    // 裸 setInterval 不等上一拍结束，上一拍未回则跳过本拍，避免请求堆叠。
+    let pending: Promise<void> | null = null;
     const interval = setInterval(() => {
       if (!active) return;
       if (typeof document !== 'undefined' && document.hidden) return;
-      void reload();
+      if (pending) return;
+      pending = reload().finally(() => {
+        pending = null;
+      });
     }, 2500);
     return () => {
       active = false;

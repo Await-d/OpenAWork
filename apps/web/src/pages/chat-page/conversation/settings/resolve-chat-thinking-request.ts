@@ -3,6 +3,7 @@ import {
   getSupportedReasoningEffortsForModel,
   inferSupportsThinking,
 } from '@openAwork/shared-ui';
+import type { ModelReasoningOption } from '@openAwork/shared-ui';
 import type { ReasoningEffort } from '../../../../components/conversation-runtime/messages/support.js';
 
 const EFFORT_RANK: Record<ReasoningEffort, number> = {
@@ -21,6 +22,8 @@ export interface NormalizeChatThinkingStateInput {
   declaredSupportsThinking: boolean;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
+  /** 模型自声明的推理档位;提供时优先于按 modelId 推断,否则回退到内置规则。 */
+  reasoningOptions?: readonly ModelReasoningOption[];
 }
 
 export interface NormalizedChatThinkingState {
@@ -109,6 +112,7 @@ export function normalizeChatThinkingState(
   const supportedEfforts = getSupportedReasoningEffortsForModel(
     input.providerType,
     input.modelId,
+    input.reasoningOptions,
   ) as readonly ReasoningEffort[];
 
   return {

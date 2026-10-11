@@ -84,7 +84,9 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
   }
 
   function handleGatewayBlur() {
-    const resolvedUrl = normalizeGatewayUrl(gatewayInput);
+    // 空输入不落库:store 会把空值回落成默认地址,这里同步回填,避免输入框显示为空
+    // 而请求实际发往默认地址,造成「设置与行为不一致」的困惑。
+    const resolvedUrl = normalizeGatewayUrl(gatewayInput) || gatewayUrl;
     setGatewayInput(resolvedUrl);
     setGatewayUrl(resolvedUrl);
     if (desktopRuntime) {

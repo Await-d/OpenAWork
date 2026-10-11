@@ -93,12 +93,12 @@ const promptOptimizerPayloadSchema = z.object({
   rationale: z.string().trim().optional().default(''),
 });
 
-function extractJsonCodeBlocks(raw: string): string[] {
+export function extractJsonCodeBlocks(raw: string): string[] {
   const matches = raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/giu);
   return Array.from(matches, (match) => match[1]?.trim() ?? '').filter((value) => value.length > 0);
 }
 
-function extractBalancedJsonObjects(raw: string): string[] {
+export function extractBalancedJsonObjects(raw: string): string[] {
   const payloads: string[] = [];
   let start = -1;
   let depth = 0;

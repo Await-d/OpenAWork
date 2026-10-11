@@ -29,6 +29,8 @@ const mockClient = vi.hoisted(() => ({
   createSnippet: vi.fn(),
   updateSnippet: vi.fn(),
   deleteSnippet: vi.fn(),
+  listSnippetVersions: vi.fn(),
+  restoreSnippetVersion: vi.fn(),
 }));
 
 vi.mock('@openAwork/web-client', async (importOriginal) => {
@@ -60,6 +62,8 @@ beforeEach(() => {
   mockClient.createSnippet.mockReset();
   mockClient.updateSnippet.mockReset();
   mockClient.deleteSnippet.mockReset();
+  mockClient.listSnippetVersions.mockReset();
+  mockClient.restoreSnippetVersion.mockReset();
 
   mockClient.listGroups.mockResolvedValue([]);
   mockClient.listSnippets.mockResolvedValue([]);
@@ -319,5 +323,103 @@ describe('PromptSnippetsPanel', () => {
 
     expect(await screen.findByText('复制提示词失败，请检查剪贴板权限后重试。')).toBeTruthy();
     expect(screen.queryByText('✓')).toBeNull();
+  });
+
+  it('点击版本历史后加载版本列表并支持回滚', async () => {
+    mockClient.listGroups.mockResolvedValueOnce([
+      {
+        id: 'group-1',
+        userId: 'u-1',
+        name: '默认分组',
+        order: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockClient.listSnippets.mockResolvedValueOnce([
+      {
+        id: 'snippet-1',
+        userId: 'u-1',
+        groupId: 'group-1',
+        title: '提示词一',
+        content: '内容一',
+        order: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockClient.listSnippetVersions.mockResolvedValueOnce([
+      {
+        id: 'version-2',
+        snippetId: 'snippet-1',
+        userId: 'u-1',
+        version: 2,
+        title: '提示词一',
+        content: '内容二',
+        source: 'updated',
+        createdAt: '2026-01-02T00:00:00.000Z',
+      },
+      {
+        id: 'version-1',
+        snippetId: 'snippet-1',
+        userId: 'u-1',
+        version: 1,
+        title: '提示词一',
+        content: '初始内容',
+        source: 'created',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    renderPanel('token-1');
+
+    expect(await screen.findByText('提示词一')).toBeTruthy();
+    fireEvent.click(screen.getByTitle('版本历史'));
+
+    expect(await screen.findByText('v2')).toBeTruthy();
+    expect(screen.getByText('v1')).toBeTruthy();
+    expect(screen.getByText('创建')).toBeTruthy();
+    expect(screen.getByText('更新')).toBeTruthy();
+
+    fireEvent.click(screen.getAllByText('回滚')[0] as HTMLElement);
+    await waitFor(() => {
+      expect(mockClient.restoreSnippetVersion).toHaveBeenCalledWith('token-1', 'snippet-1', 2);
+    });
+  });
+
+  it('版本历史读取失败时展示错误而不是空白', async () => {
+    mockClient.listGroups.mockResolvedValueOnce([
+      {
+        id: 'group-1',
+        userId: 'u-1',
+        name: '默认分组',
+        order: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockClient.listSnippets.mockResolvedValueOnce([
+      {
+        id: 'snippet-1',
+        userId: 'u-1',
+        groupId: 'group-1',
+        title: '提示词一',
+        content: '内容一',
+        order: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockClient.listSnippetVersions.mockRejectedValueOnce(new Error('boom'));
+
+    renderPanel('token-1');
+
+    expect(await screen.findByText('提示词一')).toBeTruthy();
+    fireEvent.click(screen.getByTitle('版本历史'));
+
+    // 短的普通错误按项目脱敏策略直接透传（面板既有行为），但仍可从错误态恢复。
+    expect(await screen.findByText('boom')).toBeTruthy();
+    expect(screen.getByText('版本历史')).toBeTruthy();
+    expect(screen.getByText('返回')).toBeTruthy();
   });
 });

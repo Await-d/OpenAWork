@@ -190,6 +190,7 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
     handleTestModel,
     handleSyncCatalog,
     handleDiscoverProviders,
+    handleFetchUpstreamModels,
     handleImportDiscoveredProvider,
   } = useProviderCatalogActions({
     gatewayUrl,
@@ -211,6 +212,8 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
     handleAddModel,
     handleUpdateModel,
     handleRemoveModel,
+    handleImportUpstreamModels,
+    handleBatchUpdateModels,
   } = useProviderMutations({
     providersRef,
     setProviders,
@@ -240,6 +243,7 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
     saveDefaultModelSettings,
     handleTestModel,
     handleSyncCatalog,
+    handleFetchUpstreamModels,
     handleDiscoverProviders,
     handleImportDiscoveredProvider,
     handleAddProvider,
@@ -250,5 +254,7 @@ export function useSettingsProviders({ gatewayUrl, token }: UseSettingsProviders
     handleAddModel,
     handleUpdateModel,
     handleRemoveModel,
+    handleImportUpstreamModels,
+    handleBatchUpdateModels,
   };
 }

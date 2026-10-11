@@ -162,6 +162,32 @@ export function useDevtoolsSources({ gatewayUrl, token }: UseDevtoolsSourcesOpti
     }
   }, [gatewayUrl, token, updateDevtoolsSourceState]);
 
+  const clearDevLogs = React.useCallback(async () => {
+    if (!token) return;
+
+    try {
+      await createSettingsClient(gatewayUrl).clearDevLogs(token);
+      setDevLogs([]);
+      updateDevtoolsSourceState('devLogs', {
+        status: 'empty',
+        detail: '开发日志已清空',
+        error: null,
+        count: 0,
+        updatedAt: Date.now(),
+      });
+    } catch (error: unknown) {
+      // 清除失败不抛出:调用方(按钮)只关心终态,失败以源状态错误提示呈现。
+      updateDevtoolsSourceState('devLogs', {
+        status: 'error',
+        detail: '清空开发日志失败',
+        error: error instanceof Error ? error.message : '清空开发日志失败',
+        count: devLogsRef.current.length,
+        updatedAt: Date.now(),
+      });
+      logger.error('failed to clear dev logs', error);
+    }
+  }, [gatewayUrl, token, updateDevtoolsSourceState]);
+
   const loadWorkers = React.useCallback(async () => {
     if (!token) return;
 
@@ -374,6 +400,7 @@ export function useDevtoolsSources({ gatewayUrl, token }: UseDevtoolsSourcesOpti
     sshDialogs,
     sshDialogsReady,
     loadDevLogs,
+    clearDevLogs,
     loadWorkers,
     loadDiagnostics,
     loadDesktopAutomationStatus,

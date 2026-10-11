@@ -29,6 +29,13 @@ describe('SessionRunStateBar', () => {
     expect(screen.getByText(/流摘要 文本 6 \/ 思考 2 \/ 工具 1 \/ done/)).toBeTruthy();
   });
 
+  it('纯 running 且无附加信息时不渲染状态条(避免与 composer 提示重复)', () => {
+    const { container } = render(<SessionRunStateBar status="running" />);
+
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId('chat-session-runtime-status')).toBeNull();
+  });
+
   it('在有待审批权限时展示「等待审批」而非「持续运行中」', () => {
     render(<SessionRunStateBar status="running" pendingPermissionsCount={1} />);
 

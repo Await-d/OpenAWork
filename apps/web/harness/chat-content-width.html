@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>对话内容列宽度自适应验收（clamp 真实解析 / 居中）</title>
+    <title>对话内容列宽度自适应验收（max 真实解析 / 居中）</title>
     <style>
       /*
        * 颜色不是本 harness 的断言对象；这里只提供暗色近似值让截图可读。
-       * 断言对象是几何：内容列宽 = min(容器, clamp(基准, 88%, 1.5×基准)) 与居中边距。
+       * 断言对象是几何：内容列宽 = min(容器, max(72%, 420px)) 与居中边距。
        */
       :root {
         --bg-base: #0b0f16;

@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AttachmentItem } from '@openAwork/shared-ui';
+import type { AttachmentItem, ModelReasoningOption } from '@openAwork/shared-ui';
 import { inferSupportsThinking } from '@openAwork/shared-ui';
 import type { CommandDescriptor } from '@openAwork/shared';
-import type { PromptOptimizerResult } from '@openAwork/web-client';
+import type { PromptEvaluationResponse, PromptOptimizerResult } from '@openAwork/web-client';
 import { createWorkflowsClient } from '@openAwork/web-client';
 import { ChatComposer } from './ChatComposer.js';
 import { ComposerPermissionModeSelect } from './ComposerPermissionModeSelect.js';
@@ -92,6 +92,7 @@ export interface UnifiedComposerProps {
     supportsVision?: boolean;
     contextWindow?: number;
     contextWindowOverride?: number;
+    reasoningOptions?: readonly ModelReasoningOption[];
   } | null;
   activeModelCanConfigureThinking?: boolean;
   activeModelTooltip?: string;
@@ -496,6 +497,18 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     ],
   );
 
+  const handleEvaluatePrompt = useCallback(
+    async (text: string): Promise<PromptEvaluationResponse> => {
+      if (!token) throw new Error('未登录，无法评估提示词。');
+      const client = createWorkflowsClient(gatewayUrl);
+      return client.evaluatePrompt(token, {
+        type: 'prompt-only',
+        workspacePrompt: text,
+      });
+    },
+    [gatewayUrl, token],
+  );
+
   const composerVariant = props.variant;
 
   // 图片预览按 id 取文件，避免把「两个数组同序同长」的隐式契约复制到 ChatComposer。
@@ -622,6 +635,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         onEditPreviousUserMessage={onEditPreviousUserMessage}
         onRestoreInputFromHistory={restoreInputFromHistory}
         onOptimizePrompt={features.promptOptimize && token ? handleOptimizePrompt : undefined}
+        onEvaluatePrompt={features.promptOptimize && token ? handleEvaluatePrompt : undefined}
         onDropFiles={appendFiles}
         onReplaceInput={(nextValue: string) => setInput(nextValue)}
         statsData={resolvedStatsData}
@@ -695,6 +709,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
             activeModelOption?.supportsThinking === true,
           )}
           canConfigureThinking={activeModelCanConfigureThinking ?? false}
+          reasoningOptions={activeModelOption?.reasoningOptions}
           contextWindow={activeModelOption?.contextWindow}
           contextWindowOverride={activeModelOption?.contextWindowOverride}
           onChangeContextWindowOverride={onContextWindowOverrideChange}

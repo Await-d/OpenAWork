@@ -5,18 +5,22 @@ import type {
   AIProviderRef,
   ActiveSelectionRef,
   ImageGenerationDefaultsRef,
+  UpstreamModelItem,
 } from '@openAwork/shared-ui';
 import { canRemoveProvider } from '@openAwork/shared-ui';
 import { logger } from '../../../utils/log/logger.js';
 import type { ProviderEditData, ThinkingDefaultsRef } from '../state/settings-types.js';
 import {
   addProviderModel,
+  addProviderModels,
+  batchUpdateProviderModels,
   removeProvider,
   removeProviderModel,
   toggleProviderModel,
   updateProviderModel,
 } from '../connection/provider-model-mutations.js';
 import { BUILTIN_PROVIDER_TYPE_SET } from './settings-page-helpers.js';
+import { toUpstreamModelConfigs } from './upstream-model-mapping.js';
 
 interface UseProviderMutationsOptions {
   providersRef: React.RefObject<AIProviderRef[]>;
@@ -249,6 +253,29 @@ export function useProviderMutations({
       'failed to save removed model',
     );
   }
+  /**
+   * 把上游拉取到的模型批量并入指定 provider:上下文 / 能力 / 价格由本地同名模型迁移
+   * (上游 `/models` 不返回这些字段),已存在的模型仅补齐缺失字段,最后一次性保存。
+   */
+  function handleImportUpstreamModels(providerId: string, models: UpstreamModelItem[]) {
+    const items = toUpstreamModelConfigs(models);
+    if (items.length === 0) return;
+    persistModelMutation(
+      (prev) => addProviderModels(prev, providerId, items),
+      'failed to save upstream models',
+    );
+  }
+  /** 批量更新多个模型的字段(合并为一次保存),用于「批量设置思考档位」。 */
+  function handleBatchUpdateModels(
+    providerId: string,
+    updates: Array<{ modelId: string; updates: Partial<AIModelConfigItem> }>,
+  ) {
+    if (updates.length === 0) return;
+    persistModelMutation(
+      (prev) => batchUpdateProviderModels(prev, providerId, updates),
+      'failed to save batch model updates',
+    );
+  }
 
   return {
     handleAddProvider,
@@ -259,5 +286,7 @@ export function useProviderMutations({
     handleAddModel,
     handleUpdateModel,
     handleRemoveModel,
+    handleImportUpstreamModels,
+    handleBatchUpdateModels,
   };
 }

@@ -2,6 +2,15 @@ import type { CSSProperties, ChangeEvent, KeyboardEvent, ReactNode } from 'react
 import { useEffect, useState } from 'react';
 import { tokens, color } from '../tokens.js';
 import { compareModelsByName } from './model-picker-search.js';
+import { UpstreamModelsPanel } from './UpstreamModelsPanel.js';
+import type { UpstreamModelItem, UpstreamModelsResult } from './UpstreamModelsPanel.js';
+import {
+  BatchReasoningLevelPanel,
+  ModelReasoningLevelCell,
+  buildReasoningOptions,
+  readDeclaredReasoningLevels,
+} from './reasoning-level-picker.js';
+import type { BatchReasoningTarget } from './reasoning-level-picker.js';
 
 export interface AIModelConfigItem {
   id: string;
@@ -19,6 +28,7 @@ export interface AIModelConfigItem {
   supportsThinking?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
+  reasoningOptions?: { type: string; values?: string[] }[];
 }
 
 export interface AIProviderItem {
@@ -60,6 +70,22 @@ export interface ModelManagerProps {
     modelCount?: number;
     message?: string;
   }>;
+  /**
+   * 拉取「当前接口上游」实际暴露的模型列表(走 web-client 的 `settings.fetchUpstreamModels`)。
+   * 返回结构化结果,由 ModelManager 渲染上游模型面板供勾选导入。
+   */
+  onFetchUpstreamModels?: (providerId: string) => Promise<UpstreamModelsResult>;
+  /**
+   * 把选中的上游模型批量加入当前 provider 的模型列表(走 provider 变更 + 保存链路)。
+   */
+  onImportUpstreamModels?: (providerId: string, models: UpstreamModelItem[]) => void;
+  /**
+   * 批量更新多个模型的字段(如「批量设置思考档位」),合并为**一次**保存。
+   */
+  onBatchUpdateModels?: (
+    providerId: string,
+    updates: Array<{ modelId: string; updates: Partial<AIModelConfigItem> }>,
+  ) => void;
   style?: CSSProperties;
 }
 
@@ -465,6 +491,9 @@ export function ModelManager({
   onUpdateModel,
   onTestModel,
   onSyncCatalog,
+  onFetchUpstreamModels,
+  onImportUpstreamModels,
+  onBatchUpdateModels,
   style,
 }: ModelManagerProps) {
   const [newLabel, setNewLabel] = useState('');
@@ -479,10 +508,15 @@ export function ModelManager({
   // 模型目录同步状态：进行中 / 结果提示（成功统计或失败原因）。
   const [syncing, setSyncing] = useState(false);
   const [syncNotice, setSyncNotice] = useState<{ ok: boolean; message: string } | null>(null);
+  // 上游模型列表拉取状态:进行中 + 结果(失败也以结构化结果交给面板渲染)。
+  const [fetchingUpstream, setFetchingUpstream] = useState(false);
+  const [upstreamResult, setUpstreamResult] = useState<UpstreamModelsResult | null>(null);
   // 模型搜索 + 折叠——模型数量多时仅渲染匹配项且默认折叠到前 N 个
   const [modelSearch, setModelSearch] = useState('');
   const [showAllModels, setShowAllModels] = useState(false);
   const COLLAPSE_THRESHOLD = 15;
+  // 批量思考档位面板的展开状态。
+  const [batchReasoningOpen, setBatchReasoningOpen] = useState(false);
 
   async function handleSyncCatalog() {
     if (!onSyncCatalog || syncing) return;
@@ -508,6 +542,48 @@ export function ModelManager({
     } finally {
       setSyncing(false);
     }
+  }
+
+  // 拉取当前接口的上游模型清单,结果交给面板渲染(失败也以结构化结果呈现)。
+  async function handleFetchUpstreamModels() {
+    if (!onFetchUpstreamModels || fetchingUpstream) return;
+    setFetchingUpstream(true);
+    setUpstreamResult(null);
+    try {
+      const result = await onFetchUpstreamModels(provider.id);
+      setUpstreamResult(result);
+    } catch (error) {
+      setUpstreamResult({
+        ok: false,
+        status: 'error',
+        message: error instanceof Error ? error.message : '拉取上游模型列表失败',
+        models: [],
+      });
+    } finally {
+      setFetchingUpstream(false);
+    }
+  }
+
+  // 把面板里勾选的上游模型批量并入当前 provider,成功后收起面板。
+  function handleImportUpstreamModels(models: UpstreamModelItem[]) {
+    if (!onImportUpstreamModels || models.length === 0) return;
+    onImportUpstreamModels(provider.id, models);
+    setUpstreamResult(null);
+  }
+
+  // 批量应用思考档位:把目标模型列表合并为一次保存(复用 onBatchUpdateModels)。
+  function handleBatchApplyReasoning(targets: BatchReasoningTarget[]) {
+    if (!onBatchUpdateModels || targets.length === 0) return;
+    onBatchUpdateModels(
+      provider.id,
+      targets.map((target) => ({
+        modelId: target.modelId,
+        updates: target.reasoningOptions
+          ? { reasoningOptions: target.reasoningOptions }
+          : { reasoningOptions: undefined },
+      })),
+    );
+    setBatchReasoningOpen(false);
   }
 
   async function handleTestModel(modelId: string) {
@@ -593,9 +669,55 @@ export function ModelManager({
           <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--fg-default)' }}>
             {provider.name} — 模型
           </h2>
-          {onSyncCatalog ? (
+          {onSyncCatalog ||
+          onFetchUpstreamModels ||
+          (onUpdateModel && provider.defaultModels.length > 0) ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              {syncNotice ? (
+              {onUpdateModel && provider.defaultModels.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setBatchReasoningOpen((value) => !value)}
+                  title="批量为多个模型声明思考档位(一次保存生效)"
+                  style={{
+                    background: 'transparent',
+                    border: batchReasoningOpen
+                      ? '1px solid var(--accent)'
+                      : '1px solid var(--border-default, hsla(215, 18%, 50%, 0.12))',
+                    borderRadius: 6,
+                    color: batchReasoningOpen ? 'var(--accent)' : 'var(--fg-default)',
+                    padding: '0.25rem 0.75rem',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {batchReasoningOpen ? '收起批量档位' : '批量设置思考档位'}
+                </button>
+              ) : null}
+              {onFetchUpstreamModels ? (
+                <button
+                  type="button"
+                  onClick={() => void handleFetchUpstreamModels()}
+                  disabled={fetchingUpstream}
+                  title="拉取当前接口上游实际可用的模型列表,勾选后同步到当前提供商的模型配置"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--accent)',
+                    borderRadius: 6,
+                    color: 'var(--accent)',
+                    padding: '0.25rem 0.75rem',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: fetchingUpstream ? 'not-allowed' : 'pointer',
+                    opacity: fetchingUpstream ? 0.6 : 1,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {fetchingUpstream ? '拉取中...' : '拉取上游模型'}
+                </button>
+              ) : null}
+              {onSyncCatalog && syncNotice ? (
                 <span
                   style={{
                     fontSize: 10,
@@ -657,6 +779,35 @@ export function ModelManager({
           </div>
         </div>
       </div>
+
+      {upstreamResult ? (
+        <div style={{ padding: `0 ${tokens.spacing.xl}px ${tokens.spacing.lg}px` }}>
+          <UpstreamModelsPanel
+            result={upstreamResult}
+            existingModels={provider.defaultModels}
+            importing={false}
+            onImport={handleImportUpstreamModels}
+            onClose={() => setUpstreamResult(null)}
+          />
+        </div>
+      ) : null}
+
+      {onBatchUpdateModels && batchReasoningOpen && provider.defaultModels.length > 0 ? (
+        <div style={{ padding: `0 ${tokens.spacing.xl}px` }}>
+          <BatchReasoningLevelPanel
+            models={provider.defaultModels.map((model) => ({
+              id: model.id,
+              label: model.label,
+              supportsThinking: model.supportsThinking === true,
+              levels: readDeclaredReasoningLevels(model.reasoningOptions),
+            }))}
+            onApply={(targets) => {
+              handleBatchApplyReasoning(targets);
+            }}
+            onClose={() => setBatchReasoningOpen(false)}
+          />
+        </div>
+      ) : null}
 
       {provider.defaultModels.length === 0 ? (
         <div
@@ -758,7 +909,7 @@ export function ModelManager({
                 </div>
               ) : null}
               <div style={{ overflowX: 'auto', marginTop: 10 }}>
-                <table style={{ width: '100%', minWidth: 940, borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', minWidth: 1020, borderCollapse: 'collapse' }}>
                   <thead>
                     <tr
                       style={{
@@ -772,6 +923,7 @@ export function ModelManager({
                         '输入 $/M',
                         '输出 $/M',
                         '自动压缩',
+                        '思考档位',
                         '4K',
                         '已启用',
                         '检测',
@@ -988,6 +1140,29 @@ export function ModelManager({
                               </>
                             );
                           })()}
+                        </td>
+                        <td style={cellStyle}>
+                          {onUpdateModel ? (
+                            <ModelReasoningLevelCell
+                              levels={readDeclaredReasoningLevels(model.reasoningOptions)}
+                              supportsThinking={model.supportsThinking}
+                              disabled={!onUpdateModel}
+                              onChange={(nextLevels) =>
+                                onUpdateModel(provider.id, model.id, {
+                                  reasoningOptions: buildReasoningOptions(nextLevels),
+                                })
+                              }
+                            />
+                          ) : (
+                            <span style={{ ...mutedStyle, fontSize: 11 }}>
+                              {(() => {
+                                const levels = readDeclaredReasoningLevels(model.reasoningOptions);
+                                return model.supportsThinking
+                                  ? `思考 · ${levels.length === 0 ? '自动' : levels.join('/')}`
+                                  : '—';
+                              })()}
+                            </span>
+                          )}
                         </td>
                         <td style={cellStyle}>
                           {model.supportsImageGeneration ? (

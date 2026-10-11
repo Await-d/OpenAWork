@@ -1,5 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithTimeout, DEFAULT_FETCH_TIMEOUT_MS, isGenericFetchErrorMessage } from './http.js';
+import {
+  fetchWithTimeout,
+  DEFAULT_FETCH_TIMEOUT_MS,
+  describeNonJsonResponse,
+  isGenericFetchErrorMessage,
+} from './http.js';
+
+/** 构造一个只实现测试所需字段的 Response 替身。 */
+function jsonResponseStub(input: {
+  status?: number;
+  contentType?: string;
+  json: () => Promise<unknown>;
+}): Response {
+  return {
+    ok: (input.status ?? 200) < 400,
+    status: input.status ?? 200,
+    headers: {
+      get: (name: string) => (name === 'content-type' ? (input.contentType ?? null) : null),
+    },
+    json: input.json,
+  } as unknown as Response;
+}
 
 const originalFetch = globalThis.fetch;
 
@@ -124,5 +145,68 @@ describe('isGenericFetchErrorMessage', () => {
     expect(isGenericFetchErrorMessage('inbound window expired')).toBe(false);
     expect(isGenericFetchErrorMessage('请求体参数无效。')).toBe(false);
     expect(isGenericFetchErrorMessage('')).toBe(false);
+  });
+});
+
+describe('fetchWithTimeout 的非 JSON 响应诊断', () => {
+  it('响应是 SPA 兜底的 index.html 时,response.json() 抛出可执行的地址排查提示', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponseStub({
+        contentType: 'text/html; charset=utf-8',
+        json: async () => {
+          throw new SyntaxError(`Unexpected token '<', "<!doctype "... is not valid JSON`);
+        },
+      }),
+    ) as unknown as typeof fetch;
+
+    const response = await fetchWithTimeout('http://localhost:3000/usage/records', {
+      timeoutMs: 1000,
+    });
+
+    await expect(response.json()).rejects.toThrow(/不是接口数据/);
+  });
+
+  it('JSON 正常时解析行为与原生一致', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponseStub({
+        contentType: 'application/json',
+        json: async () => ({ records: [] as unknown[] }),
+      }),
+    ) as unknown as typeof fetch;
+
+    const response = await fetchWithTimeout('http://localhost:3000/usage/records', {
+      timeoutMs: 1000,
+    });
+
+    await expect(response.json()).resolves.toEqual({ records: [] });
+  });
+
+  it('Response 不可扩展(只读替身)时保持原样透传,不让诊断本身破坏请求', async () => {
+    const frozen = Object.freeze(
+      jsonResponseStub({ contentType: 'text/html', json: async () => ({ ok: true }) }),
+    );
+    globalThis.fetch = vi.fn(async () => frozen) as unknown as typeof fetch;
+
+    const response = await fetchWithTimeout('http://localhost:3000/x', { timeoutMs: 1000 });
+
+    expect(response).toBe(frozen);
+  });
+});
+
+describe('describeNonJsonResponse', () => {
+  it('HTML 响应给出网关地址排查指引', () => {
+    expect(
+      describeNonJsonResponse(
+        jsonResponseStub({ contentType: 'text/html', json: async () => null }),
+      ),
+    ).toContain('Gateway');
+  });
+
+  it('非 HTML 的非 JSON 响应给出通用文案并带上状态码', () => {
+    expect(
+      describeNonJsonResponse(
+        jsonResponseStub({ status: 502, contentType: 'text/plain', json: async () => null }),
+      ),
+    ).toBe('网关返回的内容不是可解析的 JSON(HTTP 502)。');
   });
 });

@@ -17,6 +17,15 @@
  * `data-theme`,恒定命中 `:root:not([data-theme])` 那一块,因此无论主窗口用哪套
  * 主题,浮窗都稳定拿到同一组暗色 token。注意:web 包里**没有** `--primary`,
  * 不要再写回 `hsl(var(--primary))`(计算值阶段失效会让背景变透明)。
+ *
+ * 两条硬约束(踩过坑,勿改回):
+ * 1. **不要用 `color-mix()`**。它需要较新的引擎(WebKitGTK ≥ 2.40 / WebView2 ≥ 111),
+ *    不支持时 `--island-edge` 里的渐变会整条失效。这里改用已算好的
+ *    `--accent-border` / `--aux-border` / `--contrast-border`(本身就是 rgba),
+ *    并全部带字面量兜底。
+ * 2. **表面不要挂在 `background` 简写上**。简写里任何一层失效,整条 `background`
+ *    都会在计算值阶段作废 —— 浮窗会直接变成「一个透明的块」。所以底色走独立的
+ *    `background-color`,渐变描边才走 `background-image`,两者互不牵连。
  */
 
 html.island-html,
@@ -42,12 +51,12 @@ body.island-body #root {
   --island-fill: rgba(255, 255, 255, 0.06);
   --island-fill-hover: rgba(255, 255, 255, 0.13);
   --island-hairline: rgba(255, 255, 255, 0.09);
-  /* 顶边无描边(贴顶),描边色只出现在左 / 右 / 下 */
+  /* 描边渐变:只用 rgba token + 字面量兜底,不依赖 color-mix() */
   --island-edge: linear-gradient(
     120deg,
-    color-mix(in srgb, var(--accent) 60%, transparent),
-    color-mix(in srgb, var(--aux, var(--accent)) 45%, transparent) 55%,
-    color-mix(in srgb, var(--contrast, var(--accent)) 45%, transparent)
+    var(--accent-border, rgba(92, 212, 192, 0.4)),
+    var(--aux-border, rgba(58, 160, 255, 0.3)) 55%,
+    var(--contrast-border, rgba(160, 107, 255, 0.3))
   );
   --island-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --island-ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
@@ -73,9 +82,13 @@ body.island-body #root {
   border-radius: 0 0 14px 14px;
   border: 1px solid transparent;
   border-top: 0;
-  background:
-    linear-gradient(var(--island-glass), var(--island-glass)) padding-box,
-    var(--island-edge) border-box;
+  /* 底色独立一格:background-image 全线失效时浮窗仍然可见 */
+  background-color: var(--island-glass);
+  /* 第 1 层盖住内部,第 2 层只从 border-box 露出来 → 左 / 右 / 下的渐变描边 */
+  background-image: linear-gradient(var(--island-glass), var(--island-glass)), var(--island-edge);
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  background-repeat: no-repeat;
   color: var(--island-fg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   -webkit-backdrop-filter: blur(28px) saturate(1.8);
@@ -93,7 +106,7 @@ body.island-body #root {
 .island.is-expanded {
   border-radius: 0 0 20px 20px;
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    inset 0 0 0 1px var(--accent-muted, rgba(92, 212, 192, 0.14)),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
   /* 展开:等纵向落下(约 0.16s)后再放大圆角 */
   transition:
@@ -112,12 +125,12 @@ body.island-body #root {
   }
   45% {
     box-shadow:
-      inset 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent),
+      inset 0 0 0 2px var(--accent-border, rgba(92, 212, 192, 0.4)),
       inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
   100% {
     box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+      inset 0 0 0 1px var(--accent-muted, rgba(92, 212, 192, 0.14)),
       inset 0 1px 0 rgba(255, 255, 255, 0.07);
   }
 }
@@ -144,15 +157,30 @@ body.island-body #root {
 }
 
 .island-head[role='button']:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent, #5cd4c0);
   outline-offset: -2px;
   border-radius: 0 0 14px 14px;
 }
 
-/* 品牌图标替代原来的状态圆点:占据头部首位,靠左对齐 */
+/* 品牌图标替代原来的状态圆点:占据头部首位,靠左对齐。
+   底片用 CSS 画(accent 纯色 + 字面量兜底),图案用 BrandLogo 的 `plain` 变体
+   (`currentColor`)—— 既保持「品牌方块」观感,又完全避开 `filled` 变体里那个
+   `color-mix(in oklch, ...)` 渐变停靠点:引擎不支持 color-mix 时该停靠点会退回
+   黑色,而花瓣色 `--fg-on-accent` 是 #052e22,深色压近黑就等于看不见。 */
 .island-brand {
   flex: 0 0 auto;
-  display: block;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4.5px;
+  background: var(--accent, #5cd4c0);
+  color: var(--fg-on-accent, #052e22);
+}
+
+.island-brand svg {
+  width: 12px;
+  height: 12px;
 }
 
 .island-label {
@@ -185,7 +213,7 @@ body.island-body #root {
   width: 2.5px;
   height: 4px;
   border-radius: 2px;
-  background: linear-gradient(180deg, var(--accent), var(--aux, var(--accent)));
+  background: linear-gradient(180deg, var(--accent, #5cd4c0), var(--aux, #3aa0ff));
   animation: island-wave-bounce 1.05s ease-in-out infinite;
 }
 
@@ -354,7 +382,7 @@ body.island-body #root {
 }
 
 .island-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent, #5cd4c0);
   outline-offset: 2px;
 }
 
@@ -364,13 +392,9 @@ body.island-body #root {
 }
 
 .island-btn-accent {
-  background: linear-gradient(
-    135deg,
-    var(--accent),
-    color-mix(in srgb, var(--accent) 72%, transparent)
-  );
+  background: linear-gradient(135deg, var(--accent, #5cd4c0), var(--accent-hover, #72e0ce));
   border-color: transparent;
-  color: var(--fg-on-accent, #ffffff);
+  color: var(--fg-on-accent, #052e22);
 }
 
 .island-btn-accent:hover:not(:disabled) {
@@ -401,7 +425,7 @@ body.island-body #root {
   bottom: 0;
   width: 42%;
   border-radius: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent), var(--aux, var(--accent)));
+  background: linear-gradient(90deg, transparent, var(--accent, #5cd4c0), var(--aux, #3aa0ff));
   animation: island-progress-slide 1.6s ease-in-out infinite;
 }
 

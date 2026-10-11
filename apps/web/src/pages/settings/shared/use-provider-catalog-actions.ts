@@ -1,7 +1,12 @@
 import React from 'react';
 import { createSettingsClient } from '@openAwork/web-client';
-import type { AIProviderRef, ActiveSelectionRef } from '@openAwork/shared-ui';
+import type { AIProviderRef, ActiveSelectionRef, UpstreamModelsResult } from '@openAwork/shared-ui';
 import { logger } from '../../../utils/log/logger.js';
+import {
+  applyLocalMetadataFallback,
+  buildLocalMetadataIndex,
+  toUpstreamItems,
+} from './upstream-model-mapping.js';
 
 interface UseProviderCatalogActionsOptions {
   gatewayUrl: string;
@@ -127,6 +132,68 @@ export function useProviderCatalogActions({
     }
   }, [token, gatewayUrl]);
 
+  // 拉取「当前接口上游」实际暴露的模型列表:用「当前内存里的 provider 配置」
+  // (含尚未保存的编辑)发起一次 `GET {baseUrl}/models`;结果结构化返回,由
+  // ModelManager 的面板展示并勾选导入。合并/保存由 handleImportUpstreamModels 负责。
+  const handleFetchUpstreamModels = React.useCallback(
+    async (providerId: string): Promise<UpstreamModelsResult> => {
+      if (!token) {
+        return { ok: false, status: 'error', message: '未登录,无法拉取上游模型列表。', models: [] };
+      }
+      const provider = providersRef.current.find((item) => item.id === providerId);
+      if (!provider) {
+        return {
+          ok: false,
+          status: 'error',
+          message: '未找到该 provider,请先保存配置。',
+          models: [],
+        };
+      }
+      try {
+        const data = (await createSettingsClient(gatewayUrl).fetchUpstreamModels(token, {
+          // 传内联 provider,拉「尚未保存」的表单值对应上游;带 createdAt/updatedAt
+          // 占位以满足网关 schema(后端会重新规整)。
+          provider: {
+            ...provider,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        })) as {
+          ok?: boolean;
+          status?: UpstreamModelsResult['status'];
+          message?: string;
+          models?: unknown;
+          baseUrl?: string;
+          protocol?: string;
+          latencyMs?: number;
+        };
+        const items = toUpstreamItems(data.models);
+        // 兜底:客户端自身的 provider 状态就是用户看到的「本地配置」(含内置平台由
+        // models.dev 派生的上下文 / 能力)。网关若未能给出 meta(例如目录未命中的
+        // 同名模型),这里按 id 再补一次,确保「本地相同模型」的上下文 / 能力迁移到位。
+        const localIndex = buildLocalMetadataIndex(providersRef.current, providerId);
+        const models = applyLocalMetadataFallback(items, localIndex);
+        return {
+          ok: data.ok === true,
+          status: data.status ?? (data.ok ? 'ok' : 'error'),
+          message: data.message ?? (data.ok ? '已拉取上游模型。' : '拉取上游模型列表失败'),
+          models,
+          ...(typeof data.baseUrl === 'string' ? { baseUrl: data.baseUrl } : {}),
+          ...(typeof data.protocol === 'string' ? { protocol: data.protocol } : {}),
+          ...(typeof data.latencyMs === 'number' ? { latencyMs: data.latencyMs } : {}),
+        };
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          status: 'error',
+          message: error instanceof Error ? error.message : '拉取上游模型列表失败',
+          models: [],
+        };
+      }
+    },
+    [token, gatewayUrl],
+  );
+
   const handleDiscoverProviders = React.useCallback(async (): Promise<{
     providers: Array<{
       id: string;
@@ -183,6 +250,7 @@ export function useProviderCatalogActions({
   return {
     handleTestModel,
     handleSyncCatalog,
+    handleFetchUpstreamModels,
     handleDiscoverProviders,
     handleImportDiscoveredProvider,
   };
