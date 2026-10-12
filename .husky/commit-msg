@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# 提交信息门禁：本地就按 commitlint.config.js 校验 type(scope): 中文描述
+# 以及 body 行宽等规则，不让不合规的提交信息流到 CI 的 Commit Message 步骤。
+#
+# 校验范围 = 本次提交的完整信息（等价于 `commitlint --edit`）。
+# 需要临时跳过时用：`git commit --no-verify`（不推荐，CI 仍会拦）。
+bunx --bun commitlint --edit "$1"
