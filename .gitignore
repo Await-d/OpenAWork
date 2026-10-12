@@ -29,8 +29,10 @@ apps/desktop/src-tauri/target/
 .evidence/
 **/.agentdocs/tasks/
 
-# Husky hooks (auto-generated, not for version control)
-.husky/
+# Husky 运行时自动生成的 shim 目录（`_/` 内是 husky 的 wrapper 与依赖软链），不入库。
+# 但 hook 脚本本身（pre-commit / pre-push）必须入库——否则新克隆、CI、其他开发者
+# 机器上没有任何本地门禁，未格式化 / 未过 lint 的代码会直接流进 main。
+.husky/_/
 
 # OS
 .DS_Store

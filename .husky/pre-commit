@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# 提交前门禁：只检查「已暂存」的文件，规则来自 package.json 的 lint-staged。
+# 覆盖 eslint + prettier --check + Fastify / Docker 版本对齐，
+# 目的是让未格式化、未过 lint 的代码在 commit 这一步就被拦下，
+# 而不是等到 push 后的 CI 才失败。
+#
+# 需要临时跳过（例如仅想提交 WIP）时用：`git commit --no-verify`。
+# 但注意：跳过后 CI 仍会拒绝，pre-push 的 preflight 也会拦。
+bunx lint-staged

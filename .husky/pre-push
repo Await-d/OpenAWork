@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# 推送前门禁：跑与 CI `quality` job 等价的全量校验，
+# 保证「本地绿 → 推送后 CI 也绿」，把红灯留在本地而不是留在 Actions 上。
+#
+# 覆盖：Prettier 格式 / ESLint / 全量类型检查 / Fastify 与 Docker 版本对齐。
+# 需要临时跳过时用：`git push --no-verify`（不推荐，CI 仍会拦）。
+bun run preflight

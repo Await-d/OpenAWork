@@ -98,11 +98,15 @@ jobs:
       - name: Build OpenCode LLM dependency
         run: bun run --filter "@openAwork/opencode-llm" build
 
-      - name: Lint
-        run: bun run --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" lint
-
+      # 顺序有意为之：Format check 放在 Lint 之前。prettier 全仓检查远快于
+      # ESLint，把最廉价的门禁排前面，格式回归能在十几秒内暴露，而不是排在
+      # ESLint 后面被遮蔽（串行步骤下 Lint 一挂，后续步骤全部 skip，
+      # 一次推送只能暴露一个问题，需要反复推送才能收敛）。
       - name: Format check
         run: bun run format:check
+
+      - name: Lint
+        run: bun run --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" lint
 
       - name: Typecheck
         run: bun run --filter "@openAwork/shared" --filter "@openAwork/artifacts" --filter "@openAwork/logger" --filter "@openAwork/browser-automation" --filter "@openAwork/skill-registry" --filter "@openAwork/skills" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" typecheck

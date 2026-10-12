@@ -172,6 +172,9 @@ bun run lint:fix
 bun run format
 bun run format:check
 
+# 提交 / 推送前门禁（本地已在 husky 里自动接好，等价于 CI quality job）
+bun run preflight
+
 # 全量类型检查
 bun run typecheck
 
@@ -304,7 +307,11 @@ Docker：`docker-compose up` 启动网关 + Web，并把 Gateway durable 数据�
 - 移动端使用手动屏幕状态机（非 React Navigation 栈）——`apps/mobile/src/navigation/AppNavigator.tsx`
 - 若 `agent-gateway` 或 Fastify 插件类型突然出现 `app.jwt`、`request.user`、`request.jwtVerify`、`injectWS`、`websocket`、`hide` 等属性缺失，优先排查 **Fastify 依赖是否分叉**，先运行 `bun run check:fastify-alignment`；这类问题常由 `bun.lock` 中同时解析出多份 `fastify` / `fastify-plugin` 版本引起，表现会像“类型增强失效”而非业务代码直接报错。
 - `bun run check:fastify-alignment` 已接入根 `package.json` 的 `lint-staged`，凡是改动 `package.json` / `bun.lock` / workspace 子包清单后，提交前都应以它为首要排查入口；如果它失败，先修依赖对齐，再看后续 lint / typecheck。
-- `.husky/` 当前被 `.gitignore` 忽略，仓库里的 Husky hook 属于**本地机器状态**，不会随 Git 提交共享；因此排查“本地能拦、远端没拦”或“我改了 pre-push 但别人没生效”时，应先确认规则是否真正落在受版本控制的 `package.json`、`scripts/` 或 `.github/workflows/` 中。
+- **`.husky/` 已纳入版本控制**（只入库 `pre-commit` / `pre-push` 两个脚本，`.husky/_/` 仍被忽略）。新克隆后 `bun install` 会通过 `prepare` 脚本自动装好钩子，无需手工 `husky`。
+  - `pre-commit` → `bunx lint-staged`，只校验**已暂存**文件，覆盖 ESLint + `prettier --check` + Fastify/Docker 版本对齐。
+  - `pre-push` → `bun run preflight`，等价于 CI `quality` job 的全量门禁：`format:check` → `lint` → `typecheck` → `check:fastify-alignment` → `check:docker-versions`。
+  - **踩坑记录**：`.husky/` 早期被 `.gitignore` 忽略，导致 `lint-staged` 形同虚设，未格式化代码一路流进 main，直到 CI 红灯才暴露（2026-10-11，commit `1e28048c` 一次性带进 29 个未格式化文件）。同时 CI 的 `Lint` 与 `Format check` 是**串行**步骤，Lint 一挂后续全部 skip，一次推送只能暴露一个问题，得反复推送才能收敛——因此 `Format check` 已调到 `Lint` 之前（prettier 比 ESLint 快得多，格式问题十几秒就能暴露）。**提交前跑 `bun run preflight` 是硬要求**，不要用 `--no-verify` 绕过（CI 仍会拦）。
+- **已知竞态（非阻断，但排查 typecheck 诡异报错时要看）**：各包 `typecheck` 脚本是 `tsc -b tsconfig.typecheck.json --emitDeclarationOnly --force`，而 `bun run --workspaces` / `bun run --filter A --filter B` 都是**并行**执行。下游包（如 `shared-ui`）经 project reference 构建 `shared` 时读 `packages/shared/dist/index.d.ts`，而 `shared` 自己的 typecheck 同时在覆写同一文件，偶发读到半截产物报 `TS1005: '}' expected`。CI 用同样的并行 filter 写法，理论上同样会偶发。**碰到这类 `dist/*.d.ts` 语法错误，先 `bun run --filter @openAwork/shared build` 重建产物再重跑**，不要去改源码。
 - 手机端云端自动构建依赖 GitHub Secret `EXPO_TOKEN`（EAS 云构建凭证）。未配置时 `auto-release.yml` 会**自动跳过**手机端 dispatch，并在 workflow summary 中说明原因，自动发布流程仍会成功结束；需要启用手机端自动构建时，先在仓库 Secrets 中配置 `EXPO_TOKEN` 即可，无需改动任何 workflow。
 - `packages/agent-core/src/catwalk/` — 模型评测/对比模块
 - `packages/agent-core/src/crush-ignore/` — 文件排除规则（Agent 上下文的 .gitignore）

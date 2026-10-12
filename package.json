@@ -21,6 +21,7 @@
     "test:scripts": "node --test scripts/build/vite-plugin-file-icons.test.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "preflight": "bun run format:check && bun run lint && bun run typecheck && bun run check:fastify-alignment && bun run check:docker-versions",
     "check:fastify-alignment": "node scripts/check-fastify-dependency-alignment.mjs",
     "check:docker-versions": "node scripts/check-docker-version-alignment.mjs",
     "check:desktop-native": "node scripts/check-desktop-native.mjs",
