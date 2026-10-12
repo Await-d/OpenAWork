@@ -95,9 +95,8 @@ function resolveSshReadMaxBytes(): number {
  * （如 ENOENT、命令非零退出）不在此列，不能误计为通道耗尽。
  */
 function isChannelOpenFailure(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'message' in error
-    ? /\(SSH\) Channel open failure/i.test(String((error as { message: unknown }).message))
-    : false;
+  if (typeof error !== 'object' || error === null || !('message' in error)) return false;
+  return /\(SSH\) Channel open failure/i.test(String(error.message));
 }
 
 export interface SSHConnection {
@@ -522,13 +521,7 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
     } catch (error) {
       if (!(await this.recoverFromChannelExhaustion(id, error))) throw error;
       // 传输已重建：用新 client 原样重试一次（整体墙钟 deadline 重新起算）。
-      return this.runExecOnClient(
-        id,
-        this.requireClient(id),
-        command,
-        timeoutMs,
-        maxOutputBytes,
-      );
+      return this.runExecOnClient(id, this.requireClient(id), command, timeoutMs, maxOutputBytes);
     }
   }
 
@@ -860,7 +853,6 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
     if (Date.now() - lastHeal < this.selfHealCooldownMs) return false;
     if (count < SSH_CHANNEL_EXHAUSTION_THRESHOLD) return false;
 
-    this.lastSelfHealAt.set(id, Date.now());
     const heal = this.runSelfHeal(id);
     this.selfHeals.set(id, heal);
     void heal.finally(() => {
@@ -887,9 +879,9 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
         this.channelFailures.delete(id);
         return true;
       } catch {
-        // Rebuild failed (auth / host key / network). Leave the counter intact
-        // so the next trigger inside the cooldown window just passes through;
-        // the caller surfaces the ORIGINAL channel-open error, not this one.
+        // 重建失败（认证 / 主机密钥 / 网络）：把原错误抛给调用方，而不是这次的
+        // 连接错误。此时 disconnect 已清空失败计数、冷却基线已在上方登记，
+        // 因此需再累积到阈值且冷却期满才会再次尝试重建，不会形成热循环。
         return false;
       }
     })();
