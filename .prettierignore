@@ -19,3 +19,9 @@ services/agent-gateway-dotnet/
 
 # 本地部署目录（不在版本控制中，见 .gitignore 的 deploy/）
 deploy/
+
+# 发布说明生成物：由 scripts/release/release-notes.mjs 写入仓库根目录，
+# 内容来自提交历史与版本号，格式不受仓库 Prettier 规则约束
+# （它只是 GitHub Release 的 body 与 tag 注解来源）。若纳入检查，
+# auto-release 在推送版本提升提交时会因格式不符被 pre-push 门禁拦下。
+release-notes.md

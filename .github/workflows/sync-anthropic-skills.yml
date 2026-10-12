@@ -1,5 +1,9 @@
 name: Sync Anthropic Skills
 
+# CI 内禁用 husky：避免 bun install 装上的本地门禁拦截机器人同步提交的 git push。
+env:
+  HUSKY: '0'
+
 on:
   schedule:
     # Every Monday at 03:00 UTC

@@ -3,6 +3,8 @@ name: Release Mobile
 env:
   EXPO_TOKEN_PRESENT: ${{ secrets.EXPO_TOKEN != '' }}
   IOS_SUBMIT_READY: ${{ secrets.EXPO_TOKEN != '' && secrets.APPLE_ID != '' && secrets.ASC_APP_ID != '' && secrets.APPLE_TEAM_ID != '' }}
+  # CI 内禁用 husky：避免 bun install 装上的本地门禁拦截机器人的 git commit / git push。
+  HUSKY: '0'
 
 on:
   push:

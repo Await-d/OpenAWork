@@ -12,6 +12,12 @@ concurrency:
 
 env:
   EXPO_TOKEN_PRESENT: ${{ secrets.EXPO_TOKEN != '' }}
+  # CI 内禁用 husky：bun install 的 prepare 脚本会安装仓库里的 hooks，
+  # 而本流程需要机器人自己执行 git commit / git push（版本提升、tag）。
+  # 本地门禁（pre-commit / commit-msg / pre-push）在 CI 中既无意义，
+  # 又会直接拦下机器人提交——2026-10-12 v1.2.9 推送失败即此原因
+  # （pre-push 的 format:check 检到了生成的 release-notes.md）。
+  HUSKY: '0'
 
 jobs:
   auto-release-preview:
