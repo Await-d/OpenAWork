@@ -4,10 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildChannelToolParameters } from '../../tools/channel-tool-parameters.js';
 import { buildGatewayToolDefinitions } from '../../tools/tool-definitions.js';
-import {
-  TOOL_PARAMETER_BUILDERS,
-  buildToolParameters,
-} from '../../tools/tool-parameters/index.js';
+import { TOOL_PARAMETER_BUILDERS, buildToolParameters } from '../../tools/tool-parameters/index.js';
 
 const TOOL_PARAMETERS_DIR = join(
   dirname(fileURLToPath(import.meta.url)),

@@ -205,9 +205,7 @@ describe('ChatConversationView — 基础骨架', () => {
   it('内容列最大宽度随可用宽度自适应：窄屏按 72% 收窄，不设上限', () => {
     render(<ChatConversationView {...createViewProps({ contentMaxWidth: 'centered' })} />);
 
-    expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe(
-      'max(72%, 420px)',
-    );
+    expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe('max(72%, 420px)');
   });
 
   it('split 布局用 96% 占比，尽量吃满容器给左右分列留出行宽', () => {
@@ -215,9 +213,7 @@ describe('ChatConversationView — 基础骨架', () => {
 
     render(<ChatConversationView {...createViewProps({ contentMaxWidth: 'centered' })} />);
 
-    expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe(
-      'max(96%, 420px)',
-    );
+    expect(screen.getByTestId('chat-content-column').style.maxWidth).toBe('max(96%, 420px)');
   });
 
   it('contentMaxWidth 为 fluid 时内容列保持铺满容器', () => {

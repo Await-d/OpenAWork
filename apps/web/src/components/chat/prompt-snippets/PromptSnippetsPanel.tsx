@@ -123,11 +123,7 @@ function TrashIcon() {
 function HistoryIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        {...iconStroke()}
-        strokeWidth="1.9"
-        d="M3 3v5h5M3.05 13a9 9 0 1 0 2.13-8.36L3 8"
-      />
+      <path {...iconStroke()} strokeWidth="1.9" d="M3 3v5h5M3.05 13a9 9 0 1 0 2.13-8.36L3 8" />
       <path {...iconStroke()} strokeWidth="1.9" d="M12 7v5l4 2" />
     </svg>
   );
@@ -163,13 +159,7 @@ export interface PromptSnippetsPanelProps {
 
 // ─── Sub-views ──────────────────────────────────────────────────────────────
 
-type PanelView =
-  | 'list'
-  | 'add-group'
-  | 'edit-group'
-  | 'add-snippet'
-  | 'edit-snippet'
-  | 'versions';
+type PanelView = 'list' | 'add-group' | 'edit-group' | 'add-snippet' | 'edit-snippet' | 'versions';
 type PanelActionKind =
   | 'create-group'
   | 'update-group'

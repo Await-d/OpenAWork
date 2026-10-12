@@ -123,7 +123,11 @@ function buildEvaluationPrompt(request: PromptEvaluationRequest): string {
 
   sections.push(``, `## Workspace Prompt (evaluation target)`, request.workspacePrompt);
   if (request.referencePrompt) {
-    sections.push(``, `## Reference Prompt (baseline, e.g. original version)`, request.referencePrompt);
+    sections.push(
+      ``,
+      `## Reference Prompt (baseline, e.g. original version)`,
+      request.referencePrompt,
+    );
   }
 
   if (request.type === 'result') {

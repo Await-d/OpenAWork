@@ -226,7 +226,12 @@ export function ChatComposerEvaluate({
               fontSize: 22,
               fontWeight: 800,
               letterSpacing: '-0.02em',
-              color: score.overall >= 70 ? 'var(--success)' : score.overall >= 50 ? 'var(--accent)' : 'var(--danger)',
+              color:
+                score.overall >= 70
+                  ? 'var(--success)'
+                  : score.overall >= 50
+                    ? 'var(--accent)'
+                    : 'var(--danger)',
             }}
           >
             {Math.round(score.overall)}
@@ -236,9 +241,7 @@ export function ChatComposerEvaluate({
         <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>提示词评估</span>
       </div>
 
-      {summary && (
-        <div style={{ color: 'var(--fg-default)', lineHeight: 1.6 }}>{summary}</div>
-      )}
+      {summary && <div style={{ color: 'var(--fg-default)', lineHeight: 1.6 }}>{summary}</div>}
 
       <StopSignalBadges result={evaluateResult} />
 
@@ -288,9 +291,7 @@ export function ChatComposerEvaluate({
       {/* 改进建议 */}
       {improvements.length > 0 && (
         <div style={{ display: 'grid', gap: 3 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-strong)' }}>
-            改进建议
-          </span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-strong)' }}>改进建议</span>
           <ul style={{ margin: 0, paddingLeft: 16, display: 'grid', gap: 2 }}>
             {improvements.map((imp, idx) => (
               <li key={idx} style={{ color: 'var(--fg-default)', lineHeight: 1.5 }}>
@@ -340,7 +341,9 @@ export function ChatComposerEvaluate({
                   >
                     {OP_LABELS[op.op] ?? op.op}
                   </span>
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <span
+                    style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  >
                     {op.instruction}
                   </span>
                 </div>
@@ -407,10 +410,12 @@ export function ChatComposerEvaluate({
             transition: 'background 150ms ease',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 18%, transparent)';
+            e.currentTarget.style.background =
+              'color-mix(in oklch, var(--accent) 18%, transparent)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 12%, transparent)';
+            e.currentTarget.style.background =
+              'color-mix(in oklch, var(--accent) 12%, transparent)';
           }}
         >
           应用修复到输入框

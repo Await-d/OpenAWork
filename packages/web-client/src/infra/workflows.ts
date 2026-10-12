@@ -130,11 +130,7 @@ export interface OptimizePromptInput {
 
 // ==================== 提示词评估（对应 agent-core 的 prompt-evaluation 模块） ====================
 
-export type PromptEvaluationType =
-  | 'result'
-  | 'compare'
-  | 'prompt-only'
-  | 'prompt-iterate';
+export type PromptEvaluationType = 'result' | 'compare' | 'prompt-only' | 'prompt-iterate';
 
 export type PromptPatchOperationType = 'insert' | 'replace' | 'delete';
 
@@ -297,10 +293,7 @@ export interface WorkflowsClient {
   ): Promise<WorkflowTemplateRecord>;
   removeTemplate(token: string, templateId: string): Promise<void>;
   optimizePrompt(token: string, input: OptimizePromptInput): Promise<PromptOptimizerResult>;
-  evaluatePrompt(
-    token: string,
-    input: EvaluatePromptInput,
-  ): Promise<PromptEvaluationResponse>;
+  evaluatePrompt(token: string, input: EvaluatePromptInput): Promise<PromptEvaluationResponse>;
   translate(token: string, tasks: TranslationTaskInput[]): Promise<TranslationResult[]>;
   assignTeamModels(token: string, input: AssignTeamModelsInput): Promise<AssignTeamModelsResult>;
 }

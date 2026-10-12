@@ -1,9 +1,6 @@
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import {
-  parseSubagentResultBlocks,
-  summarizeSubagentResult,
-} from '@openAwork/shared';
+import { parseSubagentResultBlocks, summarizeSubagentResult } from '@openAwork/shared';
 import type { MobileSubagentNotice, MobileSubagentNoticeState } from '../chat/chat-message-content';
 import { colors } from '../theme/colors';
 import { radii } from '../theme/radii';
@@ -83,9 +80,7 @@ export function SubagentNoticeRow({
     </Text>
   );
 
-  const card = (
-    <MobileSubagentResultCard sections={resultSections} />
-  );
+  const card = <MobileSubagentResultCard sections={resultSections} />;
 
   if (!interactive) {
     return (
@@ -102,10 +97,7 @@ export function SubagentNoticeRow({
         accessibilityHint="打开子会话"
         accessibilityRole="button"
         hitSlop={spacing[2]}
-        style={({ pressed }) => [
-          styles.headingPressable,
-          pressed && styles.pressed,
-        ]}
+        style={({ pressed }) => [styles.headingPressable, pressed && styles.pressed]}
         onPress={() => {
           if (childSessionId && onOpenChild) {
             onOpenChild(childSessionId);

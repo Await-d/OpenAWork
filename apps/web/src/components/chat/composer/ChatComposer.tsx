@@ -566,7 +566,9 @@ export function ChatComposer({
           setEvaluateResult(result);
         })
         .catch((error: unknown) => {
-          setEvaluateError(getUserVisibleErrorDescriptor(error, '提示词评估失败，请稍后重试。').message);
+          setEvaluateError(
+            getUserVisibleErrorDescriptor(error, '提示词评估失败，请稍后重试。').message,
+          );
         })
         .finally(() => {
           setEvaluateLoading(false);

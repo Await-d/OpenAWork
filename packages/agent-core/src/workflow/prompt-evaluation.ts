@@ -10,11 +10,7 @@
 
 // ==================== 评估类型 ====================
 
-export type PromptEvaluationType =
-  | 'result'
-  | 'compare'
-  | 'prompt-only'
-  | 'prompt-iterate';
+export type PromptEvaluationType = 'result' | 'compare' | 'prompt-only' | 'prompt-iterate';
 
 // ==================== 补丁操作（借鉴 PatchOperation 设计） ====================
 
@@ -253,8 +249,7 @@ export function applyPatch(
   const occurrence = operation.occurrence ?? 1;
   const anchor = findPatchAnchor(text, operation.oldText, occurrence);
   if (anchor === null) {
-    const total =
-      operation.oldText.length === 0 ? 0 : countOccurrences(text, operation.oldText);
+    const total = operation.oldText.length === 0 ? 0 : countOccurrences(text, operation.oldText);
     const reason: PatchApplyFailure['reason'] =
       total === 0 ? 'anchor_not_found' : 'anchor_ambiguous';
     return { result: null, failure: { operation, reason } };

@@ -1,5 +1,9 @@
 import { StyleSheet, Text, View } from 'react-native';
-import type { SubagentResultItem, SubagentResultSection, SubagentResultSectionKind } from '@openAwork/shared';
+import type {
+  SubagentResultItem,
+  SubagentResultSection,
+  SubagentResultSectionKind,
+} from '@openAwork/shared';
 import { colors } from '../theme/colors';
 import { radii } from '../theme/radii';
 import { spacing } from '../theme/spacing';
@@ -35,17 +39,10 @@ function isFileLike(text: string): boolean {
 function ListItem({ item }: { item: SubagentResultItem }) {
   return (
     <View style={listStyles.itemRow}>
-      <Text
-        style={[
-          listStyles.itemText,
-          isFileLike(item.text) && listStyles.itemTextMono,
-        ]}
-      >
+      <Text style={[listStyles.itemText, isFileLike(item.text) && listStyles.itemTextMono]}>
         {item.text}
       </Text>
-      {item.detail ? (
-        <Text style={listStyles.itemDetail}>{`— ${item.detail}`}</Text>
-      ) : null}
+      {item.detail ? <Text style={listStyles.itemDetail}>{`— ${item.detail}`}</Text> : null}
     </View>
   );
 }

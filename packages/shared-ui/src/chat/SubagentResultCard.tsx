@@ -177,10 +177,7 @@ export interface SubagentResultCardProps {
  * 普通通知正文展示不受影响。
  */
 export function SubagentResultCard({ sections }: SubagentResultCardProps) {
-  const structured = useMemo(
-    () => sections.some((section) => section.kind !== 'raw'),
-    [sections],
-  );
+  const structured = useMemo(() => sections.some((section) => section.kind !== 'raw'), [sections]);
   const rawSections = useMemo(
     () => sections.filter((section) => section.kind === 'raw'),
     [sections],
@@ -223,7 +220,9 @@ export function SubagentResultCard({ sections }: SubagentResultCardProps) {
   const orderedSections = [
     ...sections.filter((section) => section.kind === 'answer'),
     ...sections.filter((section) => section.kind === 'files' || section.kind === 'findings'),
-    ...sections.filter((section) => section.kind === 'next_steps' || section.kind === 'uncertainties'),
+    ...sections.filter(
+      (section) => section.kind === 'next_steps' || section.kind === 'uncertainties',
+    ),
     ...sections.filter((section) => section.kind === 'other'),
     ...rawSections,
   ];

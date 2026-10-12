@@ -339,7 +339,13 @@ export function createSnippet(
 export function updateSnippet(
   userId: string,
   snippetId: string,
-  input: { title?: string; content?: string; groupId?: string; order?: number; source?: 'updated' | 'restored' },
+  input: {
+    title?: string;
+    content?: string;
+    groupId?: string;
+    order?: number;
+    source?: 'updated' | 'restored';
+  },
 ): PromptSnippet | null {
   const existing = db
     .prepare('SELECT id FROM prompt_snippets WHERE id = ? AND user_id = ?')
@@ -405,9 +411,7 @@ export function updateSnippet(
   const hadContentChange = input.title !== undefined || input.content !== undefined;
   if (hadContentChange) {
     const after = db
-      .prepare(
-        'SELECT title, content FROM prompt_snippets WHERE id = ? AND user_id = ?',
-      )
+      .prepare('SELECT title, content FROM prompt_snippets WHERE id = ? AND user_id = ?')
       .get(snippetId, userId) as { title: string; content: string };
     const before = db
       .prepare(
@@ -417,7 +421,13 @@ export function updateSnippet(
       .get(snippetId) as { title: string; content: string } | undefined;
     const changed = !before || before.title !== after.title || before.content !== after.content;
     if (changed) {
-      recordSnippetVersion(userId, snippetId, after.title, after.content, input.source ?? 'updated');
+      recordSnippetVersion(
+        userId,
+        snippetId,
+        after.title,
+        after.content,
+        input.source ?? 'updated',
+      );
     }
   }
 
@@ -486,10 +496,7 @@ function recordSnippetVersion(
 }
 
 /** 列出某条目的全部版本（新→旧）。条目不存在或跨用户访问返回空数组。 */
-export function listSnippetVersions(
-  userId: string,
-  snippetId: string,
-): PromptSnippetVersion[] {
+export function listSnippetVersions(userId: string, snippetId: string): PromptSnippetVersion[] {
   const owned = db
     .prepare('SELECT id FROM prompt_snippets WHERE id = ? AND user_id = ?')
     .get(snippetId, userId) as { id: string } | undefined;

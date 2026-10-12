@@ -72,7 +72,11 @@ export function SubagentNoticeRow({
     // 上下留白必须对称：通知行落在两条消息之间，`12px 0 4px` 会让文字偏向下一条
     // 消息（实测上 28px / 下 21px）。两侧同取 `spacing[2]` 后视觉居中；
     // 结果卡片全展开时下方交给卡片自身留白，这里只保留上间距。
-    padding: grouped ? `${spacing[1]}px 0 0` : hasResults ? `${spacing[2]}px 0 0` : `${spacing[2]}px 0`,
+    padding: grouped
+      ? `${spacing[1]}px 0 0`
+      : hasResults
+        ? `${spacing[2]}px 0 0`
+        : `${spacing[2]}px 0`,
     background: 'transparent',
     border: 'none',
     textAlign: 'left',

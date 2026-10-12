@@ -26,5 +26,7 @@ function stripStandaloneBreakLines(markdown: string): string {
  */
 export function normalizeAssistantMarkdown(content: string): string {
   const transformed = transformSubagentResultBlocks(content, 'markdown');
-  return stripStandaloneBreakLines(normalizeMathMarkdown(transformInlineReasoningTags(transformed)));
+  return stripStandaloneBreakLines(
+    normalizeMathMarkdown(transformInlineReasoningTags(transformed)),
+  );
 }

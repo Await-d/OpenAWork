@@ -105,18 +105,15 @@ describe('SubagentNoticeRow', () => {
 
     fireEvent.focus(button);
 
-    const heading = container.querySelector(
-      '[data-subagent-notice-heading="true"]',
-    ) as HTMLElement;
+    const heading = container.querySelector('[data-subagent-notice-heading="true"]') as HTMLElement;
     expect(heading.style.outline).toContain('var(--accent');
     expect(heading.style.outlineOffset).toBe('2px');
     expect(heading.style.boxShadow).toContain('var(--accent-subtle');
 
     fireEvent.blur(heading);
     expect(
-      (container.querySelector(
-        '[data-subagent-notice-heading="true"]',
-      ) as HTMLElement).style.outline,
+      (container.querySelector('[data-subagent-notice-heading="true"]') as HTMLElement).style
+        .outline,
     ).toBe('');
   });
 
@@ -158,7 +155,10 @@ describe('SubagentNoticeRow', () => {
 
   it('卡片内不嵌套可交互按钮（a11y：button 内不允许 button）', () => {
     const { container } = render(
-      <SubagentNoticeRow notice={buildNotice({ text: EXPLORE_RESULTS })} onOpenChild={() => undefined} />,
+      <SubagentNoticeRow
+        notice={buildNotice({ text: EXPLORE_RESULTS })}
+        onOpenChild={() => undefined}
+      />,
     );
     const heading = container.querySelector('button[data-subagent-notice-heading="true"]');
     expect(heading?.querySelector('button')).toBeNull();

@@ -16,13 +16,7 @@
 
 /** 结构化结果块的分节类型。 */
 export type SubagentResultSectionKind =
-  | 'files'
-  | 'findings'
-  | 'answer'
-  | 'next_steps'
-  | 'uncertainties'
-  | 'other'
-  | 'raw';
+  'files' | 'findings' | 'answer' | 'next_steps' | 'uncertainties' | 'other' | 'raw';
 
 export interface SubagentResultItem {
   /** 条目正文（如文件路径、发现结论）。 */
@@ -64,9 +58,9 @@ const RESULT_TAG_NAMES = ['results', 'files', 'findings', 'answer', 'next_steps'
 /** 探针：只有正文真带 `<results>` 块时才启动改写，普通消息零成本跳过。 */
 const RESULT_PROBE_RE = /<\s*\/?\s*results\b/iu;
 // `_` 与 `-` 互换匹配，使 `<next-steps>` 与 `<next_steps>` 都命中。
-const RESULT_TAG_GROUP = `(?:${RESULT_TAG_NAMES.map((name) =>
-  name.replace(/_/g, '[_-]'),
-).join('|')})`;
+const RESULT_TAG_GROUP = `(?:${RESULT_TAG_NAMES.map((name) => name.replace(/_/g, '[_-]')).join(
+  '|',
+)})`;
 const RESULT_SECTION_RE = new RegExp(`<\\s*(\\/?)\\s*(${RESULT_TAG_GROUP})\\s*>`, 'giu');
 
 export type SubagentResultTransformMode = 'markdown' | 'plain';
@@ -150,13 +144,21 @@ function parseItemLine(line: string): SubagentResultItem {
   return { text: raw };
 }
 
-function sectionFromContent(kind: SubagentResultSectionKind, content: string): SubagentResultSection {
+function sectionFromContent(
+  kind: SubagentResultSectionKind,
+  content: string,
+): SubagentResultSection {
   const lines = content
     .split('\n')
     .map((line) => line.trimEnd())
     .filter((line) => line.trim().length > 0);
 
-  if (kind === 'files' || kind === 'findings' || kind === 'next_steps' || kind === 'uncertainties') {
+  if (
+    kind === 'files' ||
+    kind === 'findings' ||
+    kind === 'next_steps' ||
+    kind === 'uncertainties'
+  ) {
     // 列表节：识别 `- ` / `1. ` 前缀的条目；无前缀的行并入上一条 detail，
     // 没有上一条时降级为独立条目。
     const items: SubagentResultItem[] = [];
@@ -191,7 +193,8 @@ function sectionFromContent(kind: SubagentResultSectionKind, content: string): S
 function parseResultsBlock(blockContent: string): SubagentResultSection[] {
   const sections: SubagentResultSection[] = [];
 
-  const sectionPattern = /<\s*(\/?)\s*([A-Za-z][A-Za-z0-9_-]*)\s*>([\s\S]*?)(?=<\s*\/?\s*[A-Za-z][A-Za-z0-9_-]*\s*>|$)/gu;
+  const sectionPattern =
+    /<\s*(\/?)\s*([A-Za-z][A-Za-z0-9_-]*)\s*>([\s\S]*?)(?=<\s*\/?\s*[A-Za-z][A-Za-z0-9_-]*\s*>|$)/gu;
   let match: RegExpExecArray | null;
   while ((match = sectionPattern.exec(blockContent)) !== null) {
     const isClosing = match[1] === '/';
@@ -294,10 +297,7 @@ export function isSubagentResultSectionVisible(content: string): boolean {
   // 纯文本结果块：`<results>` 内没有已知子标签但仍有正文（如只有 answer 文本），
   // 总结内容同样不应被折叠裁掉。
   const innerText = content
-    .slice(
-      content.indexOf('<results>') + '<results>'.length,
-      lastIndexOfResultsClose(content),
-    )
+    .slice(content.indexOf('<results>') + '<results>'.length, lastIndexOfResultsClose(content))
     .replace(/<\s*\/?\s*(files|findings|answer|next[_-]steps|uncertainties)\s*>/gi, '')
     .trim();
   return innerText.length > 0;
@@ -332,7 +332,10 @@ export function summarizeSubagentResult(
   sections: readonly SubagentResultSection[],
   maxLength = 120,
 ): string {
-  const answer = pickSubagentResultAnswer(sections).replace(/^[#*\s]+/u, '').split('\n')[0]?.trim();
+  const answer = pickSubagentResultAnswer(sections)
+    .replace(/^[#*\s]+/u, '')
+    .split('\n')[0]
+    ?.trim();
   if (!answer || answer.length === 0) {
     return '';
   }

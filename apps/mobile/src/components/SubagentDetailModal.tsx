@@ -83,7 +83,9 @@ function SubagentMsgRow({ msg }: { msg: SubagentMessage }) {
         ]}
         selectable
       >
-        {msg.role === 'assistant' ? transformSubagentResultBlocks(msg.content, 'plain') : msg.content}
+        {msg.role === 'assistant'
+          ? transformSubagentResultBlocks(msg.content, 'plain')
+          : msg.content}
       </Text>
     </View>
   );

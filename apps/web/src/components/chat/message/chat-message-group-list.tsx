@@ -466,8 +466,7 @@ function VirtualizedChatGroupViewport({
 
     const targetTop = layout.offsets[targetIndex] ?? 0;
     const targetBottom = layout.offsets[targetIndex + 1] ?? layout.totalHeight;
-    const desiredTop =
-      targetTop + (targetBottom - targetTop) / 2 - scrollRegion.clientHeight / 2;
+    const desiredTop = targetTop + (targetBottom - targetTop) / 2 - scrollRegion.clientHeight / 2;
     const maxTop = Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight);
     scrollRegion.scrollTop = Math.max(0, Math.min(desiredTop, maxTop));
   }, [groups, layout, pendingMessageScroll, scrollRegionRef]);

@@ -121,7 +121,9 @@ ${EXPLORE_RESULTS}
     expect(summarizeSubagentResult(sections)).toBe('状态机在 file1.ts 的 transition 函数中定义。');
 
     const longText = `长总结：${'x'.repeat(200)}`;
-    expect(summarizeSubagentResult(parseSubagentResultBlocks(longText), 50).length).toBeLessThan(60);
+    expect(summarizeSubagentResult(parseSubagentResultBlocks(longText), 50).length).toBeLessThan(
+      60,
+    );
   });
 });
 

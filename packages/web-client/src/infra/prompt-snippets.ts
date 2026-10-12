@@ -100,11 +100,7 @@ export interface PromptSnippetsClient {
     snippetId: string,
     options?: { signal?: AbortSignal },
   ): Promise<PromptSnippetVersion[]>;
-  restoreSnippetVersion(
-    token: string,
-    snippetId: string,
-    version: number,
-  ): Promise<PromptSnippet>;
+  restoreSnippetVersion(token: string, snippetId: string, version: number): Promise<PromptSnippet>;
 }
 
 function buildPromptSnippetsActionErrorMessage(
@@ -288,13 +284,10 @@ export function createPromptSnippetsClient(baseUrl: string): PromptSnippetsClien
       const data = await performPromptSnippetsRequest<{ versions: PromptSnippetVersion[] }>({
         actionLabel: '读取提示词版本历史',
         request: () =>
-          fetchWithTimeout(
-            `${baseUrl}/prompt-snippets/${encodeURIComponent(snippetId)}/versions`,
-            {
-              headers: authHeader(token),
-              signal: options?.signal,
-            },
-          ),
+          fetchWithTimeout(`${baseUrl}/prompt-snippets/${encodeURIComponent(snippetId)}/versions`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
       });
       return data.versions;
     },
