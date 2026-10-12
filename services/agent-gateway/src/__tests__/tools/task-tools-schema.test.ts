@@ -268,6 +268,11 @@ describe('task tool — 子代理选型指引', () => {
     expect(description).toContain('子代理选型');
     expect(description).toMatch(/web-researcher=联网新闻/);
     expect(description).toMatch(/scout=外部依赖源码/);
-    expect(description).toContain('general=通用研究');
+    expect(description).toMatch(/hephaestus=自主深度实施/);
+    // general 从未进入可委派白名单（见 CALL_OMO_ALLOWED_AGENTS），且是模型高频臆造的
+    // agent——handlers/delegation.ts 与 tool-sandbox-permission-ladder.test.ts 都会
+    // 显式拒绝它。选型指引若宣传 general=通用研究，等于引导模型去调一个必然被拒的
+    // agent；通用执行的真实指路是 hephaestus，或省略 subagent_type 走 category。
+    expect(description).not.toMatch(/general=/);
   });
 });
