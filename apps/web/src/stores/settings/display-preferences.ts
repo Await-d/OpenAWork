@@ -257,6 +257,12 @@ type DisplayPreferenceValues = Omit<
 const DISPLAY_PREFERENCES_STORAGE_KEY = 'openAwork-display-preferences';
 
 /**
+ * 持久化结构版本号（persist 声明与手工备份写入必须共用同一常量，
+ * 两处漂移会让 migrate 在每次刷新时误判旧数据）。
+ */
+const DISPLAY_PREFERENCES_STORAGE_VERSION = 8;
+
+/**
  * 工具类别折叠默认值。
  *
  * - `fileEdit` 默认 **展开**：对齐参考实现（opencode）的文件卡——编辑 / 写入的
@@ -301,6 +307,70 @@ const DEFAULTS: DisplayPreferenceValues = {
   themeStyle: typeof window !== 'undefined' ? storageReadThemeStyle() : 'carbon',
   fileIconTheme: 'material',
 };
+
+/**
+ * 提取显示偏好的纯值字段——persist `partialize`、手工 localStorage 写入、
+ * 远端同步序列化共用这一份口径，避免多处手抄字段清单漂移。
+ */
+export function pickDisplayPreferenceValues(
+  state: DisplayPreferenceValues,
+): DisplayPreferenceValues {
+  return {
+    showMessageTimestamps: state.showMessageTimestamps,
+    showProviderLabel: state.showProviderLabel,
+    showModelName: state.showModelName,
+    showDuration: state.showDuration,
+    showStopReason: state.showStopReason,
+    showTokenBreakdown: state.showTokenBreakdown,
+    showEstimatedTokens: state.showEstimatedTokens,
+    showRequestIndex: state.showRequestIndex,
+    showToolCount: state.showToolCount,
+    showMetaLine: state.showMetaLine,
+    messageLayout: state.messageLayout,
+    showReasoningBlock: state.showReasoningBlock,
+    reasoningExpandedByDefault: state.reasoningExpandedByDefault,
+    toolCallsExpandedByDefault: state.toolCallsExpandedByDefault,
+    toolExpandedOverrides: state.toolExpandedOverrides,
+    defaultDialogueMode: state.defaultDialogueMode,
+    showComposerStatsBar: state.showComposerStatsBar,
+    showVoiceInputButton: state.showVoiceInputButton,
+    showCommandPaletteButton: state.showCommandPaletteButton,
+    showGatewayStatusIndicator: state.showGatewayStatusIndicator,
+    showTerminalButton: state.showTerminalButton,
+    themeMode: state.themeMode,
+    themeStyle: state.themeStyle,
+    fileIconTheme: state.fileIconTheme,
+  };
+}
+
+type BooleanPreferenceKey = {
+  [K in keyof DisplayPreferenceValues]: DisplayPreferenceValues[K] extends boolean ? K : never;
+}[keyof DisplayPreferenceValues];
+
+/**
+ * 布尔型偏好字段清单（供远端取值校验迭代使用）。
+ * `satisfies` 保证列出的键确实是布尔字段；新增布尔字段时记得同步补充。
+ */
+export const BOOLEAN_DISPLAY_PREFERENCE_KEYS = [
+  'showMessageTimestamps',
+  'showProviderLabel',
+  'showModelName',
+  'showDuration',
+  'showStopReason',
+  'showTokenBreakdown',
+  'showEstimatedTokens',
+  'showRequestIndex',
+  'showToolCount',
+  'showMetaLine',
+  'showReasoningBlock',
+  'reasoningExpandedByDefault',
+  'toolCallsExpandedByDefault',
+  'showComposerStatsBar',
+  'showVoiceInputButton',
+  'showCommandPaletteButton',
+  'showGatewayStatusIndicator',
+  'showTerminalButton',
+] as const satisfies readonly BooleanPreferenceKey[];
 
 export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
   persist(
@@ -415,11 +485,11 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
     }),
     {
       name: DISPLAY_PREFERENCES_STORAGE_KEY,
-      version: 8,
+      version: DISPLAY_PREFERENCES_STORAGE_VERSION,
       migrate: (persistedState, version) => {
         const state = persistedState as Partial<DisplayPreferenceValues> | undefined;
         if (!state) return state;
-        if (version < 8) {
+        if (version < DISPLAY_PREFERENCES_STORAGE_VERSION) {
           // v8：文件编辑 / 写入默认直接展示内容变更（对齐参考实现 opencode 的文件卡）。
           // 旧版本默认值是 false，这里一次性升级为 true；用户仍可在设置中单独关闭。
           return {
@@ -430,32 +500,7 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         return state;
       },
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({
-        showMessageTimestamps: s.showMessageTimestamps,
-        showProviderLabel: s.showProviderLabel,
-        showModelName: s.showModelName,
-        showDuration: s.showDuration,
-        showStopReason: s.showStopReason,
-        showTokenBreakdown: s.showTokenBreakdown,
-        showEstimatedTokens: s.showEstimatedTokens,
-        showRequestIndex: s.showRequestIndex,
-        showToolCount: s.showToolCount,
-        showMetaLine: s.showMetaLine,
-        messageLayout: s.messageLayout,
-        showReasoningBlock: s.showReasoningBlock,
-        reasoningExpandedByDefault: s.reasoningExpandedByDefault,
-        toolCallsExpandedByDefault: s.toolCallsExpandedByDefault,
-        toolExpandedOverrides: s.toolExpandedOverrides,
-        defaultDialogueMode: s.defaultDialogueMode,
-        showComposerStatsBar: s.showComposerStatsBar,
-        showVoiceInputButton: s.showVoiceInputButton,
-        showCommandPaletteButton: s.showCommandPaletteButton,
-        showGatewayStatusIndicator: s.showGatewayStatusIndicator,
-        showTerminalButton: s.showTerminalButton,
-        themeMode: s.themeMode,
-        themeStyle: s.themeStyle,
-        fileIconTheme: s.fileIconTheme,
-      }),
+      partialize: (s) => pickDisplayPreferenceValues(s),
       onRehydrateStorage: () => (state) => {
         if (state) {
           try {
@@ -478,33 +523,13 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
 function persistToLocalStorage() {
   try {
     const state = useDisplayPreferencesStore.getState();
-    const data = {
-      showMessageTimestamps: state.showMessageTimestamps,
-      showProviderLabel: state.showProviderLabel,
-      showModelName: state.showModelName,
-      showDuration: state.showDuration,
-      showStopReason: state.showStopReason,
-      showTokenBreakdown: state.showTokenBreakdown,
-      showEstimatedTokens: state.showEstimatedTokens,
-      showRequestIndex: state.showRequestIndex,
-      showToolCount: state.showToolCount,
-      showMetaLine: state.showMetaLine,
-      messageLayout: state.messageLayout,
-      showReasoningBlock: state.showReasoningBlock,
-      reasoningExpandedByDefault: state.reasoningExpandedByDefault,
-      toolCallsExpandedByDefault: state.toolCallsExpandedByDefault,
-      toolExpandedOverrides: state.toolExpandedOverrides,
-      defaultDialogueMode: state.defaultDialogueMode,
-      showComposerStatsBar: state.showComposerStatsBar,
-      showVoiceInputButton: state.showVoiceInputButton,
-      showCommandPaletteButton: state.showCommandPaletteButton,
-      showGatewayStatusIndicator: state.showGatewayStatusIndicator,
-      showTerminalButton: state.showTerminalButton,
-      themeMode: state.themeMode,
-      themeStyle: state.themeStyle,
-      fileIconTheme: state.fileIconTheme,
-    };
-    const serialized = JSON.stringify({ state: data, version: 7 });
+    const data = pickDisplayPreferenceValues(state);
+    // version 必须与 persist 声明的版本一致：写低版本会让下次加载
+    // 触发 migrate（v8 会把 fileEdit 强制改回展开），覆盖用户的显式关闭。
+    const serialized = JSON.stringify({
+      state: data,
+      version: DISPLAY_PREFERENCES_STORAGE_VERSION,
+    });
     localStorage.setItem(DISPLAY_PREFERENCES_STORAGE_KEY, serialized);
     console.log('[theme-store] manual persist done:', data.themeStyle, data.themeMode);
   } catch (e) {

@@ -10,6 +10,7 @@ import {
   type ResolveInlinePermissionActionsFn,
   sharedUiThemeVars,
 } from '../session/ChatPageSections.js';
+import MarkdownMessageContent from '../markdown/markdown-message-content.js';
 import { decideTimeDivider } from './time-divider.js';
 
 export interface ChatRenderAction {
@@ -97,6 +98,14 @@ interface ChatMessageGroupListProps {
   resolveInlinePermissionActions?: ResolveInlinePermissionActionsFn;
   scrollRegionRef: React.RefObject<HTMLDivElement | null>;
   trailingContent?: React.ReactNode;
+  /**
+   * 点击子代理通知行时打开对应子会话。
+   *
+   * **必须由本组件显式透传给 `ChatGroupBlock`**：调用方（`ChatConversationView`）
+   * 是用 JSX 展开传进来的，而 JSX 展开不做多余属性检查——props 未声明/未透传时
+   * 不会报类型错误，只会让通知行的 `onOpenChild` 恒为 undefined（整行点不动）。
+   */
+  onOpenSubagentChild?: (childSessionId: string) => void;
 }
 
 const DEFAULT_GROUP_HEIGHT = 148;
@@ -120,6 +129,7 @@ export function ChatMessageGroupList({
   pendingMessageScroll,
   pendingPermissions,
   providerCatalog,
+  onOpenSubagentChild,
   resolveInlinePermissionActions,
   scrollRegionRef,
   trailingContent,
@@ -145,6 +155,7 @@ export function ChatMessageGroupList({
             group={group}
             providerCatalog={providerCatalog}
             timeDividerLabel={dividerLabels[groupIndex] ?? null}
+            {...(onOpenSubagentChild ? { onOpenSubagentChild } : {})}
           />
         ))}
         {showQuickBar && (
@@ -175,6 +186,7 @@ export function ChatMessageGroupList({
       resolveInlinePermissionActions={showQuickBar ? resolveInlinePermissionActions : undefined}
       scrollRegionRef={scrollRegionRef}
       trailingContent={trailingContent}
+      {...(onOpenSubagentChild ? { onOpenSubagentChild } : {})}
     />
   );
 }
@@ -225,6 +237,7 @@ function VirtualizedChatGroupViewport({
   resolveInlinePermissionActions,
   scrollRegionRef,
   trailingContent,
+  onOpenSubagentChild,
 }: ChatMessageGroupListProps & { dividerLabels: Array<string | null> }) {
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_VIEWPORT_HEIGHT);
   const [scrollTop, setScrollTop] = useState(0);
@@ -508,6 +521,7 @@ function VirtualizedChatGroupViewport({
                 group={group}
                 providerCatalog={providerCatalog}
                 timeDividerLabel={dividerLabels[actualIndex] ?? null}
+                {...(onOpenSubagentChild ? { onOpenSubagentChild } : {})}
               />
             </div>
           );
@@ -523,6 +537,15 @@ function VirtualizedChatGroupViewport({
       <div ref={bottomRef} style={{ height: CHAT_SCROLL_BOTTOM_SPACER_HEIGHT, flexShrink: 0 }} />
     </>
   );
+}
+
+/**
+ * 子代理结果卡片正文的渲染器：注入给 shared-ui 的 `SubagentNoticeRow`，
+ * 让 `answer` / `raw` 正文按 Markdown 渲染（`<results>` 分节已在通知侧解析，
+ * 这里渲染的是纯正文）。模块级函数引用天然稳定，不破坏结果卡片的 memo。
+ */
+function renderSubagentResultBody(markdown: string): React.ReactNode {
+  return <MarkdownMessageContent content={markdown} />;
 }
 
 const ChatGroupBlock = React.memo(function ChatGroupBlock({
@@ -566,6 +589,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
           <div className="chat-message-main">
             <SubagentNoticeRow
               notice={group.notice}
+              renderBody={renderSubagentResultBody}
               {...(onOpenSubagentChild ? { onOpenChild: onOpenSubagentChild } : {})}
             />
           </div>

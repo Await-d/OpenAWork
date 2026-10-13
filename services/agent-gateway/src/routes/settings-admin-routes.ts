@@ -9,6 +9,11 @@ import {
 } from '../permission/permission-grants-store.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
+  clearChannelErrorRecords,
+  listChannelErrorAuditLogs,
+  listChannelHealthRecords,
+} from '../channels/channel-error-store.js';
+import {
   clearRequestWorkflowLogs,
   listRequestWorkflowLogs,
 } from '../runtime/request-workflow-log-store.js';
@@ -426,6 +431,35 @@ export async function registerSettingsAdminRoutes(app: FastifyInstance): Promise
       clearRequestWorkflowLogs(user.sub);
       step.succeed(undefined, { cleared: true });
       return reply.send({ ok: true });
+    },
+  );
+
+  app.get(
+    '/settings/channel-troubleshooting',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.channel-troubleshooting.get');
+      const user = request.user as JwtPayload;
+      const querySchema = z.object({
+        limit: z.coerce.number().int().min(1).max(500).default(100),
+      });
+      const { limit } = parseQuery(querySchema, request.query);
+      const channels = listChannelHealthRecords({ ownerUserId: user.sub });
+      const auditLogs = listChannelErrorAuditLogs(user.sub, limit);
+      step.succeed(undefined, { channels: channels.length, auditLogs: auditLogs.length });
+      return reply.send({ channels, auditLogs });
+    },
+  );
+
+  app.delete(
+    '/settings/channel-troubleshooting',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.channel-troubleshooting.clear');
+      const user = request.user as JwtPayload;
+      const cleared = clearChannelErrorRecords(user.sub);
+      step.succeed(undefined, cleared);
+      return reply.send({ ok: true, ...cleared });
     },
   );
 

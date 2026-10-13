@@ -19,6 +19,8 @@ import { SSHConnectionManagerImpl, type SSHConnection } from './ssh-connection-m
 
 interface FakeBehavior {
   statSize: number;
+  isDirectory?: boolean;
+  readFileError?: Error;
 }
 
 function makeSftpClient(behavior: FakeBehavior) {
@@ -29,11 +31,24 @@ function makeSftpClient(behavior: FakeBehavior) {
     },
     readFile(_path: string, _opts: unknown, cb: (err: Error | undefined, data: string) => void) {
       readFileCalled = true;
+      if (behavior.readFileError) {
+        queueMicrotask(() => cb(behavior.readFileError, ''));
+        return;
+      }
       queueMicrotask(() => cb(undefined, 'file-contents'));
     },
     writeFile() {},
     readdir() {},
   };
+  if (behavior.isDirectory) {
+    // 覆盖 stat 的实现：带 isDirectory 标记（对齐 ssh2 的 SFTP.Stats 形状）。
+    sftp.stat = (
+      _path: string,
+      cb: (err: Error | undefined, stats: { size?: number; isDirectory?: () => boolean }) => void,
+    ) => {
+      queueMicrotask(() => cb(undefined, { size: 4096, isDirectory: () => true }));
+    };
+  }
   const client = {
     on() {
       return client;
@@ -99,5 +114,52 @@ describe('SSHConnectionManagerImpl readFile size guard', () => {
     expect(result.content).toBe('file-contents');
     expect(result.truncated).toBe(false);
     expect(fake.wasReadFileCalled()).toBe(true);
+  });
+});
+
+// 回归（2026-10-12 线上排障）：目录与权限类读取失败曾被透传成裸
+// "Failure"（SFTP 通用失败码），`GET /ssh/file` 侧只能回 500。
+describe('SSHConnectionManagerImpl readFile 错误归一', () => {
+  it('远端路径是目录时在读取前 reject，且不调用 sftp.readFile', async () => {
+    const fake = makeSftpClient({ statSize: 4096, isDirectory: true });
+    const mgr = new SSHConnectionManagerImpl({
+      clients: new Map([['c3', fake.client as never]]),
+    });
+    mgr.addConnection(conn('c3'));
+
+    await expect(mgr.readFile('c3', '/var/log')).rejects.toThrow(/is a directory/);
+    expect(fake.wasReadFileCalled()).toBe(false);
+  });
+
+  it('SFTP FAILURE(code 4) 归一为 not-readable 并保留原始信息', async () => {
+    const fake = makeSftpClient({
+      statSize: 10,
+      readFileError: Object.assign(new Error('Failure'), { code: 4 }),
+    });
+    const mgr = new SSHConnectionManagerImpl({
+      clients: new Map([['c4', fake.client as never]]),
+    });
+    mgr.addConnection(conn('c4'));
+
+    const error = await mgr.readFile('c4', '/root/secret').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('not readable');
+    expect((error as Error).message).toContain('/root/secret');
+    expect((error as Error).message).toContain('SFTP status 4');
+  });
+
+  it('SFTP NO_SUCH_FILE(code 2) 归一为 not-found 并携带 ENOENT', async () => {
+    const fake = makeSftpClient({
+      statSize: 10,
+      readFileError: Object.assign(new Error('No such file'), { code: 2 }),
+    });
+    const mgr = new SSHConnectionManagerImpl({
+      clients: new Map([['c5', fake.client as never]]),
+    });
+    mgr.addConnection(conn('c5'));
+
+    const error = await mgr.readFile('c5', '/tmp/missing').catch((e: unknown) => e);
+    expect((error as Error).message).toContain('not found');
+    expect((error as { code?: string }).code).toBe('ENOENT');
   });
 });

@@ -113,18 +113,46 @@ function getCacheKey(userId: string, mcpPoolKey: string): string {
  * Used both by the explicit "warm cache after first listTools" path
  * and by the post-push refresh inside {@link installPoolListenerOnce}.
  */
+/**
+ * Optional per-server tool filter applied to **every** snapshot write.
+ *
+ * The catalog layer deliberately knows nothing about per-server config (see
+ * the module header) — but its documented contract ("tools as last fetched
+ * post `disabledTools` filter") only holds if no write path can bypass the
+ * filter. The runtime installs this hook at module load; every write site,
+ * including the pool's `tools/list_changed` push path below, then funnels
+ * through it. Unset ⇒ snapshots are stored verbatim (unit-test default).
+ */
+export interface CatalogSnapshotToolFilterInput {
+  userId: string;
+  mcpPoolKey: string;
+  serverId: string;
+  tools: MCPToolDef[];
+}
+
+type CatalogSnapshotToolFilter = (input: CatalogSnapshotToolFilterInput) => MCPToolDef[];
+
+let snapshotToolFilter: CatalogSnapshotToolFilter | undefined;
+
+export function setCatalogSnapshotToolFilter(filter: CatalogSnapshotToolFilter | undefined): void {
+  snapshotToolFilter = filter;
+}
+
 export function setCatalogSnapshot(
   userId: string,
   mcpPoolKey: string,
   serverId: string,
   tools: MCPToolDef[],
 ): void {
+  const filteredTools = snapshotToolFilter
+    ? snapshotToolFilter({ userId, mcpPoolKey, serverId, tools })
+    : tools;
   cache.set(getCacheKey(userId, mcpPoolKey), {
-    tools,
+    tools: filteredTools,
     capturedAt: Date.now(),
   });
   pruneCatalogSnapshots();
-  publishChange({ userId, mcpPoolKey, serverId, tools });
+  publishChange({ userId, mcpPoolKey, serverId, tools: filteredTools });
 }
 
 export function getCatalogSnapshot(userId: string, mcpPoolKey: string): MCPToolDef[] | null {

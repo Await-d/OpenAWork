@@ -6,6 +6,10 @@ describe('resolveEffectiveContextWindow', () => {
     expect(resolveEffectiveContextWindow(1_000_000, 400_000)).toBe(400_000);
   });
 
+  it('挡位高于模型上限时同样使用挡位值（挡位为权威值）', () => {
+    expect(resolveEffectiveContextWindow(128_000, 400_000)).toBe(400_000);
+  });
+
   it('仅配置挡位时仍能提供有效窗口', () => {
     expect(resolveEffectiveContextWindow(undefined, 272_000)).toBe(272_000);
   });

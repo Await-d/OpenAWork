@@ -59,6 +59,119 @@ const SSH_SFTP_TIMEOUT_MS = 60_000;
 const DEFAULT_SSH_SFTP_READ_MAX_BYTES = 16 * 1024 * 1024;
 
 /**
+ * 远端路径读取失败的语义化错误（`readFile` 预览等场景）。
+ *
+ * ssh2 的 SFTP 错误 `code` 是数字状态码（2=NO_SUCH_FILE、3=PERMISSION_DENIED、
+ * 4=FAILURE），message 往往只有一个词（如 "Failure"）——直接透传到
+ * `GET /ssh/file` 就成了 `500 + "Failure"`，排障包里既没有路径也没有原因
+ * （2026-10-12 线上排障命中）。`kind` 让网关路由把它映射成客户端可纠正的
+ * 4xx（目录 / 不存在 / 不可读），`remotePath` / `detail` 进入日志与排障包。
+ */
+export class SshRemotePathError extends Error {
+  constructor(
+    readonly kind: 'directory' | 'not-found' | 'not-readable',
+    readonly remotePath: string,
+    readonly detail?: string,
+  ) {
+    super(
+      kind === 'directory'
+        ? `SSH remote path is a directory: ${remotePath}`
+        : kind === 'not-found'
+          ? `SSH remote path not found: ${remotePath}`
+          : `SSH remote path not readable: ${remotePath}${detail ? ` (${detail})` : ''}`,
+    );
+    this.name = 'SshRemotePathError';
+  }
+}
+
+/**
+ * 远端 sshd 未能启动 SFTP 子系统时的语义化错误。
+ *
+ * ssh2 的 `client.sftp()` 在服务端拒绝 `subsystem` 请求时只回一句裸文案
+ * `Unable to start subsystem: sftp`（没有 `code`、没有路径）——直接透传到
+ * `GET /ssh/files` 就成了 `500 + 原生英文`，排障包里看不出这是远端环境
+ * 问题还是网关故障（2026-10-12 线上排障命中）。这不是网关缺陷、也无法通过
+ * 重试恢复，故单独归一成一个类型，让路由层映射成非 500 的可操作文案。
+ */
+export class SshSftpUnavailableError extends Error {
+  constructor(readonly subsystem = 'sftp') {
+    super(`SSH remote server did not start the ${subsystem} subsystem`);
+    this.name = 'SshSftpUnavailableError';
+  }
+}
+
+/**
+ * 识别 ssh2 的「Unable to start subsystem」错误。ssh2 在这条路径上只给
+ * 裸 message（无 `code`），因此只能按文案匹配；大小写与后方子系统名在不同
+ * ssh2 版本间略有差异，故只匹配前缀片段。
+ */
+function isSftpSubsystemUnavailable(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('message' in error)) return false;
+  return /unable to start subsystem/i.test(String((error as { message?: unknown }).message));
+}
+
+/**
+ * 归一「打开 SFTP 通道」阶段的错误：仅把可识别的子系统缺失换成
+ * {@link SshSftpUnavailableError}，其余原样返回（不掩盖真实故障，
+ * 也保持注入实现 / 旧链路的行为不变）。
+ */
+function normalizeSftpChannelError(error: unknown): Error {
+  if (isSftpSubsystemUnavailable(error)) return new SshSftpUnavailableError();
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * 把 ssh2 SFTP 的原始读取错误归一成 {@link SshRemotePathError}。
+ *
+ * 归一规则与 `ssh-remote-execution.ts::isRemoteNotFoundError` 的既有判定口径
+ * 一致（code 2 / 'ENOENT' / 'SSH_FX_NO_SUCH_FILE' / message 含 no such file）；
+ * 无法识别的错误原样返回，不掩盖真实故障。
+ */
+function normalizeSftpReadError(remotePath: string, error: unknown): Error {
+  const raw = error instanceof Error ? error : new Error(String(error));
+  const code = (raw as { code?: unknown }).code;
+  const message = raw.message;
+
+  if (
+    code === 2 ||
+    code === 'ENOENT' ||
+    code === 'SSH_FX_NO_SUCH_FILE' ||
+    /no such file/i.test(message)
+  ) {
+    const notFound = new SshRemotePathError('not-found', remotePath);
+    (notFound as { code?: string }).code = 'ENOENT';
+    return notFound;
+  }
+  if (code === 3 || code === 'SSH_FX_PERMISSION_DENIED' || /permission denied/i.test(message)) {
+    const statusLabel = sftpStatusLabel(code);
+    return new SshRemotePathError(
+      'not-readable',
+      remotePath,
+      statusLabel === undefined
+        ? 'permission denied'
+        : `permission denied (SFTP status ${statusLabel})`,
+    );
+  }
+  if (code === 4 || code === 'SSH_FX_FAILURE' || /^failure$/i.test(message.trim())) {
+    const statusLabel = sftpStatusLabel(code);
+    return new SshRemotePathError(
+      'not-readable',
+      remotePath,
+      statusLabel === undefined ? message.trim() : `SFTP status ${statusLabel}: ${message.trim()}`,
+    );
+  }
+  return raw;
+}
+
+/**
+ * SFTP 状态码的可读形式（数字状态码 / 文本别名）；无法识别时返回 undefined，
+ * 调用方的 detail 文案据此省略状态码，避免输出 "SFTP status undefined"。
+ */
+function sftpStatusLabel(code: unknown): string | number | undefined {
+  return typeof code === 'number' || typeof code === 'string' ? code : undefined;
+}
+
+/**
  * 通道自愈(SSH_CHANNEL_EXHAUSTION)连续阈值。ssh2 打开 exec/sftp 失败时，
  * 只有连续的「通道打开失败」达到该阈值才判定为该连接的通道预算被耗尽
  * (sshd 的 MaxSessions)，从而触发重建传输；单独的偶发失败（如并发突发）
@@ -653,15 +766,30 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
     const maxReadBytes = resolveSshReadMaxBytes();
     if (maxReadBytes > 0 && typeof sftp.stat === 'function') {
       const statFn = sftp.stat.bind(sftp);
-      const size = await withSftpTimeout<number | null>('stat', (resolve) => {
-        statFn(remotePath, (err, stats) => {
-          if (err || typeof stats?.size !== 'number') {
-            resolve(null);
-            return;
-          }
-          resolve(stats.size);
-        });
-      });
+      const stat = await withSftpTimeout<{ size: number; isDirectory: boolean } | null>(
+        'stat',
+        (resolve) => {
+          statFn(remotePath, (err, stats) => {
+            if (err || typeof stats?.size !== 'number') {
+              // stat 失败保持既有降级语义（交由 readFile 给出真实错误），
+              // 不在这里猜原因。
+              resolve(null);
+              return;
+            }
+            resolve({
+              size: stats.size,
+              isDirectory:
+                typeof stats.isDirectory === 'function' ? stats.isDirectory() === true : false,
+            });
+          });
+        },
+      );
+      // 目录无法作为文件预览：显式给出可映射为 4xx 的错误，而不是让
+      // sftp.readFile 在远端报一个无信息量的 "Failure"。
+      if (stat?.isDirectory === true) {
+        throw new SshRemotePathError('directory', remotePath);
+      }
+      const size = stat?.size ?? null;
       if (size !== null && size > maxReadBytes) {
         throw new Error(
           `SSH file too large to preview: ${size} bytes exceeds limit ${maxReadBytes} bytes`,
@@ -672,7 +800,7 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
     return withSftpTimeout<SSHFilePreview>('readFile', (resolve, reject) => {
       sftp.readFile(remotePath, { encoding: 'utf8' }, (err, data) => {
         if (err) {
-          reject(err instanceof Error ? err : new Error(String(err)));
+          reject(normalizeSftpReadError(remotePath, err));
           return;
         }
         const content = typeof data === 'string' ? data : data.toString('utf8');
@@ -943,7 +1071,10 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
     return withSftpTimeout<SFTPWrapper>('sftp', (resolve, reject) => {
       client.sftp((err, sftp) => {
         if (err) {
-          reject(err instanceof Error ? err : new Error(String(err)));
+          // 远端未启用 sftp 子系统时 ssh2 只给裸英文文案；归一后路由才能
+          // 映射成「非 500 的可操作提示」。注意这条错误不匹配
+          // isChannelOpenFailure，因此不会触发无意义的传输重建自愈。
+          reject(normalizeSftpChannelError(err));
           return;
         }
         // Channel opened successfully; reset the consecutive counter so a

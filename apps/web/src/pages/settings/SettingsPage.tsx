@@ -156,6 +156,10 @@ export default function SettingsPage() {
     clearDevLogs,
     loadWorkers,
     loadDiagnostics,
+    loadChannelTroubleshooting,
+    clearChannelTroubleshooting,
+    channelHealthRecords,
+    channelAuditLogs,
     loadDesktopAutomationStatus,
     loadDesktopControlStatus,
     loadSshConnections,
@@ -235,6 +239,9 @@ export default function SettingsPage() {
         case 'diagnostics':
           void loadDiagnostics();
           break;
+        case 'channelTroubleshooting':
+          void loadChannelTroubleshooting();
+          break;
         case 'desktopAutomation':
           void loadDesktopAutomationStatus();
           break;
@@ -256,6 +263,7 @@ export default function SettingsPage() {
       loadDesktopControlStatus,
       loadDevLogs,
       loadDiagnostics,
+      loadChannelTroubleshooting,
       loadSshConnections,
       loadWorkers,
     ],
@@ -265,6 +273,7 @@ export default function SettingsPage() {
     void Promise.allSettled([
       loadDevLogs(),
       loadDiagnostics(),
+      loadChannelTroubleshooting(),
       loadDesktopAutomationStatus(),
       loadDesktopControlStatus(),
       loadSshConnections(),
@@ -275,6 +284,7 @@ export default function SettingsPage() {
     loadDesktopControlStatus,
     loadDevLogs,
     loadDiagnostics,
+    loadChannelTroubleshooting,
     loadSshConnections,
     loadWorkers,
   ]);
@@ -526,10 +536,13 @@ export default function SettingsPage() {
                     gatewayUrl={gatewayUrl}
                     devLogs={devLogs}
                     diagnostics={diagnostics}
+                    channelHealthRecords={channelHealthRecords}
+                    channelAuditLogs={channelAuditLogs}
                     diagnosticsAvailableDates={diagnosticsAvailableDates}
                     diagnosticsDateFilter={diagnosticsDateFilter}
                     onSetDiagnosticsDateFilter={setDiagnosticsDateFilter}
                     onClearDiagnostics={handleClearDiagnostics}
+                    onClearChannelTroubleshooting={clearChannelTroubleshooting}
                     onClearLogs={clearDevLogs}
                     sourceStates={devtoolsSourceStates}
                     workers={workers}

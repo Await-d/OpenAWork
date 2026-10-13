@@ -264,8 +264,7 @@ describe('Post-Write Lint 工具提示词', () => {
       // TypeScript 类型检查会确保这一点
       // 这里只是运行时验证不能被修改
       expect(() => {
-        // @ts-expect-error - 测试只读属性
-        POST_WRITE_LINT_TOOLS_LIST[0] = 'test';
+        Object.assign(POST_WRITE_LINT_TOOLS_LIST, { 0: 'test' });
       }).toThrow();
     });
   });

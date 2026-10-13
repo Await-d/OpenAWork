@@ -317,6 +317,338 @@ describe('workspace routes', () => {
     }
   });
 
+  /** 未绑定工作区的普通 chat 会话：文件读取应回退到「未绑定会话默认工作区」。 */
+  function seedUnboundSession(sessionId: string): void {
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+       VALUES (?, ?, 'chat', '{}', 'idle')`,
+      [sessionId, USER_ID],
+    );
+  }
+
+  it('GET /workspace/file 未绑定工作区会话按默认工作区解析相对路径', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    const fileName = 'news-2026-10-06_10-12-detail.md';
+    const filePath = join(defaultRoot, fileName);
+    writeFileSync(filePath, '# 默认工作区里的笔记\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent(fileName)}` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        path: filePath,
+        content: '# 默认工作区里的笔记\n',
+        truncated: false,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/file/binary 未绑定工作区会话按默认工作区解析相对路径', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound-binary';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    const payload = Buffer.from('%PDF-1.4 unbound', 'utf8');
+    writeFileSync(join(defaultRoot, 'unbound-report.pdf'), payload);
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file/binary?path=${encodeURIComponent('unbound-report.pdf')}` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain('application/pdf');
+      expect(response.rawPayload.equals(payload)).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('未绑定会话只在绝对路径位于默认工作区内时放行', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound-absolute';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    const insidePath = join(defaultRoot, 'unbound-absolute.md');
+    writeFileSync(insidePath, '# 默认工作区内的绝对路径\n', 'utf8');
+    const outsidePath = join(outsideRoot, 'not-in-default-workspace.md');
+    writeFileSync(outsidePath, '# 越界\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const insideResponse = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent(insidePath)}` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+      const outsideResponse = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent(outsidePath)}` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(insideResponse.statusCode).toBe(200);
+      expect(insideResponse.json()).toMatchObject({
+        path: insidePath,
+        content: '# 默认工作区内的绝对路径\n',
+      });
+      expect(outsideResponse.statusCode).toBe(403);
+      expect(outsideResponse.json()).toMatchObject({ error: '工作区路径不在允许范围内。' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('未绑定会话的相对路径越出默认工作区时返回中文 403', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound-escape';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    writeFileSync(join(defaultRoot, '..', 'outside-of-default.txt'), 'leak', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent('../outside-of-default.txt')}` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({ error: '工作区路径不在允许范围内。' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('team 会话未绑定工作区时不回退到默认工作区', async () => {
+    const teamSessionId = 's-workspace-routes-team-unbound';
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, state_status, role_layer)
+       VALUES (?, ?, 'team', '{}', 'idle', 'executor')`,
+      [teamSessionId, USER_ID],
+    );
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    writeFileSync(join(defaultRoot, 'team-note.md'), 'team', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent('team-note.md')}` +
+          `&sessionId=${encodeURIComponent(teamSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({ error: '工作区路径不在允许范围内。' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('已绑定工作目录的会话不会被改写到默认工作区', async () => {
+    // SESSION_ID 在 beforeEach 中绑定到 projectRoot。
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    writeFileSync(join(defaultRoot, 'bound-note.md'), '# 默认工作区', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/file?path=${encodeURIComponent('bound-note.md')}` +
+          `&sessionId=${encodeURIComponent(SESSION_ID)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({ error: '工作区路径不在允许范围内。' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/tree 未绑定工作区会话按默认工作区解析相对路径', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound-tree';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(join(defaultRoot, 'unbound-tree'), { recursive: true });
+    writeFileSync(join(defaultRoot, 'unbound-tree', 'digest.md'), '# 摘要\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      // 真实前端（fetchTreeWithIdentity）会把当前浏览根作为 workspaceRoot
+      // 下发：未绑定会话下就是默认工作区根，必须通过收窄校验。
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/tree?path=${encodeURIComponent('unbound-tree')}&depth=1` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}` +
+          `&workspaceRoot=${encodeURIComponent(defaultRoot)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { nodes: Array<{ name: string; path: string }> };
+      const digest = body.nodes.find((node) => node.name === 'digest.md');
+      expect(digest?.path).toBe(join(defaultRoot, 'unbound-tree', 'digest.md'));
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /workspace/files/search 未绑定工作区会话按默认工作区解析相对路径', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound-search';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(join(defaultRoot, 'unbound-search'), { recursive: true });
+    writeFileSync(
+      join(defaultRoot, 'unbound-search', 'target.ts'),
+      'export const target = 1;\n',
+      'utf8',
+    );
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url:
+          `/workspace/files/search?path=${encodeURIComponent('unbound-search')}` +
+          `&q=${encodeURIComponent('target')}` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { files: string[]; root: string };
+      expect(body.root).toBe(join(defaultRoot, 'unbound-search'));
+      expect(body.files).toContain('target.ts');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PUT /workspace/file 未绑定工作区会话按默认工作区回退保存', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound-put';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    const filePath = join(defaultRoot, 'unbound-put.md');
+    writeFileSync(filePath, '# 旧内容\n', 'utf8');
+
+    const app = await buildApp();
+    try {
+      // 真实前端（文件编辑器写操作）会带上当前浏览根 workspaceRoot：
+      // 未绑定会话下即默认工作区根，必须通过收窄校验。
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/workspace/file',
+        payload: {
+          path: filePath,
+          content: '# 新内容\n',
+          sessionId: unboundSessionId,
+          workspaceRoot: defaultRoot,
+        },
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ success: true, path: filePath });
+      expect(readFileSync(filePath, 'utf8')).toBe('# 新内容\n');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('DELETE /workspace/entry 未绑定工作区会话可删除默认工作区内条目，但禁止删除根自身', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound-delete';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    const filePath = join(defaultRoot, 'unbound-delete.md');
+    writeFileSync(filePath, 'delete-me', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const deleteFile = await app.inject({
+        method: 'DELETE',
+        url:
+          `/workspace/entry?path=${encodeURIComponent(filePath)}` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(deleteFile.statusCode).toBe(200);
+      expect(deleteFile.json()).toMatchObject({ ok: true, path: filePath });
+      expect(() => readFileSync(filePath, 'utf8')).toThrow();
+
+      const deleteRoot = await app.inject({
+        method: 'DELETE',
+        url:
+          `/workspace/entry?path=${encodeURIComponent(defaultRoot)}` +
+          `&sessionId=${encodeURIComponent(unboundSessionId)}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(deleteRoot.statusCode).toBe(400);
+      expect(deleteRoot.json()).toMatchObject({ error: '不能直接操作工作区根目录。' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /workspace/rename 未绑定工作区会话按默认工作区回退重命名', async () => {
+    const unboundSessionId = 's-workspace-routes-unbound-rename';
+    seedUnboundSession(unboundSessionId);
+    const defaultRoot = resolveUnboundSessionWorkspaceFallback();
+    mkdirSync(defaultRoot, { recursive: true });
+    const oldPath = join(defaultRoot, 'unbound-rename-old.md');
+    const newPath = join(defaultRoot, 'unbound-rename-new.md');
+    writeFileSync(oldPath, 'rename-me', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/workspace/rename',
+        payload: { oldPath, newPath, sessionId: unboundSessionId },
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ ok: true, oldPath, newPath });
+      expect(readFileSync(newPath, 'utf8')).toBe('rename-me');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('大文件预览并发饱和时返回中文 429 与 Retry-After', async () => {
     const filePath = join(projectRoot, 'big-2mb.txt');
     writeFileSync(filePath, Buffer.alloc(2 * 1024 * 1024, 97));

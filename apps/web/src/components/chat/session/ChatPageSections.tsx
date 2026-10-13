@@ -336,6 +336,7 @@ function renderToolCallContent(input: {
           input.toolInput,
           input.output,
           input.taskRuntimeLookup,
+          input.toolCallId,
         )}
         selectedChildSessionId={input.selectedChildSessionId}
       />

@@ -201,3 +201,62 @@ describe('captureWorkspaceReconcileSnapshot / collectWorkspaceReconcileDiffs 事
     expect(readGitCalls().some((call) => call.startsWith('show '))).toBe(false);
   });
 });
+
+/**
+ * 行级统计口径回归（2026-10-12 线上排障）。
+ *
+ * 排障包里一条「文件顶部多一行 using + 整文件 CRLF 化」的改动被报成
+ * `additions: 116, deletions: 116`：旧计数是「首个分歧点之后双指针错位即双计」，
+ * 插入点之后的每一行都会被同时计为新增与删除。新口径按行内容计数，换行符差异
+ * 不算内容改动。
+ */
+describe('collectWorkspaceReconcileDiffs 行级统计口径', () => {
+  function seedLines(count: number): string[] {
+    return Array.from({ length: count }, (_, index) => `line-${index + 1}`);
+  }
+
+  it('单行插入 + 整文件 CRLF 化不再放大为整文件增删', async () => {
+    const file = 'crlf-insert.cs';
+    const lines = seedLines(120);
+    writeFileSync(join(workDir, file), `${lines.join('\n')}\n`);
+    runGit(['add', '-A']);
+    runGit(['commit', '-qm', 'seed crlf insert case']);
+
+    const before = await captureWorkspaceReconcileSnapshot(workDir);
+
+    const rewrittenLines = [
+      ...lines.slice(0, 10),
+      'using Utility.Helper.Cron;',
+      ...lines.slice(10),
+    ];
+    writeFileSync(join(workDir, file), `${rewrittenLines.join('\r\n')}\r\n`);
+
+    const after = await captureWorkspaceReconcileSnapshot(workDir);
+    const diffs = await collectWorkspaceReconcileDiffs({ after, before, workspaceRoot: workDir });
+    const diff = diffs.find((entry) => entry.file === file);
+
+    expect(diff?.status).toBe('modified');
+    expect(diff?.additions).toBe(1);
+    expect(diff?.deletions).toBe(0);
+  });
+
+  it('纯 CRLF 改写不虚增增删行数', async () => {
+    const file = 'eol-only.txt';
+    const lines = seedLines(80);
+    writeFileSync(join(workDir, file), `${lines.join('\n')}\n`);
+    runGit(['add', '-A']);
+    runGit(['commit', '-qm', 'seed eol-only case']);
+
+    const before = await captureWorkspaceReconcileSnapshot(workDir);
+    writeFileSync(join(workDir, file), `${lines.join('\r\n')}\r\n`);
+    const after = await captureWorkspaceReconcileSnapshot(workDir);
+
+    const diffs = await collectWorkspaceReconcileDiffs({ after, before, workspaceRoot: workDir });
+    const diff = diffs.find((entry) => entry.file === file);
+
+    // 内容口径下该文件没有变化：要么不产出条目（git 也认为是 clean），要么以
+    // 0/0 出现（git 侧仍报 modified）。绝不能像旧实现那样报出接近行数的增删。
+    expect(diff?.additions ?? 0).toBe(0);
+    expect(diff?.deletions ?? 0).toBe(0);
+  });
+});

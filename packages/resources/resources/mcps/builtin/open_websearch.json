@@ -1,7 +1,7 @@
 {
   "id": "open_websearch",
   "title": "Open WebSearch",
-  "description": "内置免 API Key 网络搜索与网页正文提取 MCP 适配器",
+  "description": "内置免 API Key 的网页正文提取与 GitHub README 读取适配器（联网搜索由原生 websearch 工具承担）",
   "transport": "stdio",
   "builtinKind": "adapter",
   "enabledByDefault": true

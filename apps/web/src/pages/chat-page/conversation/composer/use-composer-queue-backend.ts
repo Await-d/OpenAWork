@@ -6,7 +6,7 @@
  *
  * - `hydrate`：进入会话时从网关拉全量（替代原先读 localStorage 快照）
  * - `enqueue`：入队即落库，保证刷新不丢
- * - `remove`：移出队列 / 恢复到输入框时删记录
+ * - `remove`：移出队列 / 恢复到输入框时删记录（「会话空闲」校验由 claim 路由一并向网关收敛）
  *
  * 「消费成功后的清理」不在此列，原因见 `ComposerQueueBackend` 里的说明。
  *
@@ -18,6 +18,8 @@
 import { useCallback, useMemo, useRef } from 'react';
 import {
   createComposerQueueClient,
+  type ComposerQueueBatchClaim,
+  type ComposerQueueClaimResult,
   type ComposerQueueClient,
   type ComposerQueueItem,
 } from '@openAwork/web-client';
@@ -55,18 +57,24 @@ export interface ComposerQueueBackend {
   enqueue: (item: PersistedQueuedComposerMessage) => Promise<boolean>;
   remove: (itemId: string) => Promise<boolean>;
   /**
-   * 认领一条待发消息的发送权（多端互斥）。
+   * 认领一条待发消息的发送权（多端互斥 + 会话空闲校验，两者同源于网关）。
    *
    * 三态语义，调用方必须区分：
-   * - `true`：拿到发送权，可以发；
-   * - `false`：**另一端正在处理**，跳过该条目并以服务端为准重新收敛——这不是错误，
-   *   重试只会加剧竞争；
-   * - 抛错：没问成（网关不可达）。此时所有权未知，调用方同样应跳过而非硬发，否则
+   * - `claimed: true`：拿到发送权，可以发；
+   * - `claimed: false` + `reason: 'held_by_other'`：**另一端正在处理该条目**，跳过并
+   *   以服务端为准重新收敛——这不是错误，重试只会加剧竞争；
+   * - `claimed: false` + `reason: 'session_running'`：**会话仍被单飞锁占用**（另一端
+   *   的请求 / 网关自己唤醒的 run / 上一回合收尾），此时发出去必被拒成
+   *   SESSION_ALREADY_RUNNING——条目应保留并退避重试；
+   * - 抛错：没问成（网关不可达）。此时状态未知，调用方同样应跳过而非硬发，否则
    *   会出现「claim 失败但发送成功」的重复发送窗口。
    */
-  claim: (itemId: string) => Promise<boolean>;
+  claim: (itemId: string) => Promise<ComposerQueueClaimResult>;
+  claimMany: (itemIds: readonly string[]) => Promise<ComposerQueueBatchClaim[]>;
   /** 发送失败时交还发送权，让别的端（或自己下一轮）能接手，不必等租约过期。 */
   releaseClaim: (itemId: string) => Promise<void>;
+  // 刻意**不**提供 `probeSessionIdle`：「会话空闲」的校验已并入网关 claim 路由
+  // （与 409 单飞锁判定同源，见 `session-composer-queue.ts`），客户端无需二次探测。
   // 刻意**不**提供 `consume`：消费清理发生在 `run-send-message.ts` 的各条
   // return true 分支上，那里的 sessionId 是分支局部变量（`sid` /
   // `requestOriginSessionId`），拿不到 hook 上下文。故该职责由那里的模块级
@@ -176,16 +184,33 @@ export function useComposerQueueBackend(
   if (clientIdRef.current === null) {
     clientIdRef.current = resolveComposerQueueClientId();
   }
-
   const claim = useCallback(
-    async (itemId: string): Promise<boolean> => {
+    async (itemId: string): Promise<ComposerQueueClaimResult> => {
       const target = resolveTarget();
       if (!target) {
         // 网关未就绪：所有权无从确认，交给调用方按「没问成」处理。
         throw new Error('待发队列发送权认领失败：网关尚未就绪。');
       }
-      // 失败不在此吞掉：三态语义（拿到 / 他人持有 / 没问成）必须让调用方看见。
+      // 每次都问网关，不做本地「已持有」缓存：服务端对同一 clientId 的重复 claim 是
+      // 幂等续期，而本地缓存会让「会话仍被单飞锁占用（session_running）」与「租约已
+      // 过期」的真实状态被旧结论遮蔽——被拒回流后同 id 重发会绕过网关判定，形成无
+      // 退避的重发循环，甚至在租约过期后与他端重复发送。三态语义（拿到 / 他人持有 /
+      // 没问成）必须让调用方基于服务端的实时结论行动。
       return target.client.claim(target.activeToken, target.activeSessionId, itemId, {
+        clientId: clientIdRef.current as string,
+      });
+    },
+    [resolveTarget],
+  );
+
+  const claimMany = useCallback(
+    async (itemIds: readonly string[]): Promise<ComposerQueueBatchClaim[]> => {
+      const target = resolveTarget();
+      if (!target) {
+        throw new Error('待发队列发送权批量认领失败：网关尚未就绪。');
+      }
+      // 与 claim 同理：全量交由服务端裁决，拒绝理由（reason）实时可见。
+      return target.client.claimMany(target.activeToken, target.activeSessionId, itemIds, {
         clientId: clientIdRef.current as string,
       });
     },
@@ -213,5 +238,5 @@ export function useComposerQueueBackend(
     [resolveTarget],
   );
 
-  return { claim, enqueue, hydrate, releaseClaim, remove };
+  return { claim, claimMany, enqueue, hydrate, releaseClaim, remove };
 }

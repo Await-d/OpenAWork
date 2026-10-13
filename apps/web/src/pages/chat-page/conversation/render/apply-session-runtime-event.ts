@@ -10,6 +10,8 @@ export interface TaskUpdateRuntimeEventLike {
   assignedAgent?: string;
   errorMessage?: string;
   label: string;
+  /** 任务记录 metadata（含 `parentToolCallId`），缺失时保留既有值。 */
+  metadata?: Record<string, unknown>;
   occurredAt?: number;
   parentTaskId?: string;
   reason?: string;
@@ -65,6 +67,8 @@ export function applyTaskUpdateRuntimeEvent(
     depth: event.parentTaskId ? 1 : (existingTask?.depth ?? 0),
     errorMessage: event.errorMessage ?? existingTask?.errorMessage,
     id: event.taskId,
+    // 事件缺 metadata 时保留既有值：老事件不得抹掉轮询快照里带来的关联键。
+    metadata: event.metadata ?? existingTask?.metadata,
     parentTaskId: event.parentTaskId,
     priority: existingTask?.priority ?? 'medium',
     readySubtaskCount: existingTask?.readySubtaskCount ?? 0,

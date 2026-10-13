@@ -42,6 +42,10 @@ const PROVIDER_OPTIONS: ReadonlyArray<{ id: WebsearchProvider; label: string; ne
     { id: 'zhipu', label: '智谱', needsKey: true },
     { id: 'google', label: 'Google CSE', needsKey: true },
     { id: 'bing', label: 'Bing', needsKey: true },
+    // 免密钥引擎（网关侧内置实现，无需 Key）。
+    { id: 'baidu', label: '百度', needsKey: false },
+    { id: 'sogou', label: '搜狗', needsKey: false },
+    { id: 'startpage', label: 'Startpage', needsKey: false },
   ];
 
 const ROLLOUT_MODES: ReadonlyArray<{ id: WebsearchRolloutMode; label: string; hint: string }> = [

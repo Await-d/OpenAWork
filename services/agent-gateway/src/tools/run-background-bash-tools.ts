@@ -29,12 +29,19 @@
 import { randomBytes } from 'node:crypto';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
-import { deriveBashDescription, runBashCommand } from './bash-tools.js';
+import {
+  deriveBashDescription,
+  resolveBashPreflight,
+  runBashCommand,
+  type BashPreflight,
+} from './bash-tools.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
+  appendTerminalOutput,
   getTerminal,
   killTerminal,
   listSessionTerminals,
+  markTerminalExited,
 } from '../session/session-terminal-registry.js';
 
 const DEFAULT_BACKGROUND_TIMEOUT_MS = (() => {
@@ -247,12 +254,28 @@ export async function dispatchRunBashInBackground(input: {
     timeout: parsed.data.timeout ?? DEFAULT_BACKGROUND_TIMEOUT_MS,
   };
 
-  // Fire-and-forget. Errors are swallowed here because the registry has
-  // already recorded the failure (spawn_error → markTerminalExited) and
-  // the model will see it through bash_output(terminalId).
+  // 准入校验（shell 守卫 + workdir 越界 / 不存在）必须在**返回 terminalId 之前**
+  // 完成：终端登记发生在 `runBashCommand` 内部且排在这两步之后，被拒绝时 registry
+  // 里根本不会出现该 terminalId 的行，而模型已经拿到「启动成功 + id」，随后
+  // `bash_output(id)` 只能读到「terminal_id 不存在或不属于当前用户」——既误导又
+  // 无法自纠（2026-10-12 线上排障命中的正是这条路径）。这里把真实原因作为工具
+  // 错误同步交回模型。
+  let preflight: BashPreflight;
+  try {
+    preflight = await resolveBashPreflight(bashInput, input.context.sessionId);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logGatewayWarn(`[background-bash] preflight rejected: ${reason}`);
+    return { ok: false, error: `后台命令未启动：${reason}` };
+  }
+
+  // Fire-and-forget. 登记之后才可能失败（spawn / 输出处理），此时 registry 里
+  // 已有该行，兜底把它收敛成 spawn_error 并把原因写进输出尾巴，模型通过
+  // bash_output(terminalId) 能读到可操作的原因，而不是停在 running。
   void runBashCommand(bashInput, {
     signal: abortController.signal,
     sessionId: input.context.sessionId,
+    preflight,
     tracking: {
       sessionId: input.context.sessionId,
       userId: input.context.userId,
@@ -268,10 +291,13 @@ export async function dispatchRunBashInBackground(input: {
       },
     },
   }).catch((err: unknown) => {
+    const reason = err instanceof Error ? err.message : String(err);
     logGatewayWarn(
       `[background-bash] runBashCommand rejected unexpectedly for ${terminalId}:`,
-      err instanceof Error ? err.message : String(err),
+      reason,
     );
+    appendTerminalOutput(terminalId, `[background-bash] 启动失败：${reason}\n`);
+    markTerminalExited({ terminalId, status: 'spawn_error' });
   });
 
   // Look the registry row up so we return the canonical cwd (after

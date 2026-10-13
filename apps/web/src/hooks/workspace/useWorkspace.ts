@@ -8,6 +8,7 @@ import {
 } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { hasTeamWorkspace } from '../../utils/session/session-metadata.js';
 
 export interface FileTreeNode {
   path: string;
@@ -111,11 +112,29 @@ type SessionWorkspaceLookupResult =
       kind: 'resolved';
       path: string | null;
       sshConnectionId: string | null;
+      /**
+       * 会话是否必须绑定工作区（team 语义）。与网关 `requiresBoundSessionWorkspace`
+       * 同判定口径：`role_layer` / `team_parent_session_id` / metadata.teamWorkspaceId
+       * 任一存在即为 true。未绑定的这类会话不回退默认工作区。
+       */
+      requiresBoundWorkspace: boolean;
     }
   | {
       errorMessage: string;
       kind: 'unavailable';
     };
+
+/**
+ * 会话是否必须绑定工作区（只看会话自身字段，不沿父链继承——与网关
+ * `requiresBoundSessionWorkspace(sessionId)` 的查询口径一致）。
+ */
+function parseSessionRequiresBoundWorkspace(session: Session): boolean {
+  return (
+    hasTeamWorkspace(session.metadata_json) ||
+    session.team_parent_session_id != null ||
+    session.role_layer != null
+  );
+}
 
 async function resolveSessionWorkspaceWithParentFallback(input: {
   sessionId: string;
@@ -128,6 +147,7 @@ async function resolveSessionWorkspaceWithParentFallback(input: {
   let isRootSession = true;
   let resolvedPath: string | null = null;
   let resolvedSshConnectionId: string | null = null;
+  let requiresBoundWorkspace = false;
 
   while (currentSessionId && !seenSessionIds.has(currentSessionId)) {
     seenSessionIds.add(currentSessionId);
@@ -145,7 +165,17 @@ async function resolveSessionWorkspaceWithParentFallback(input: {
           errorMessage: result.errorMessage ?? '加载会话失败',
         };
       }
-      return { kind: 'resolved', path: resolvedPath, sshConnectionId: resolvedSshConnectionId };
+      return {
+        kind: 'resolved',
+        path: resolvedPath,
+        sshConnectionId: resolvedSshConnectionId,
+        requiresBoundWorkspace,
+      };
+    }
+
+    if (isRootSession) {
+      // 绑定策略只看顶层会话自身（与网关同口径，不沿父链继承）。
+      requiresBoundWorkspace = parseSessionRequiresBoundWorkspace(result.session);
     }
 
     // 两个字段各自沿父链继承：workingDirectory 与 sshConnectionId 可能落在
@@ -161,7 +191,12 @@ async function resolveSessionWorkspaceWithParentFallback(input: {
     isRootSession = false;
   }
 
-  return { kind: 'resolved', path: resolvedPath, sshConnectionId: resolvedSshConnectionId };
+  return {
+    kind: 'resolved',
+    path: resolvedPath,
+    sshConnectionId: resolvedSshConnectionId,
+    requiresBoundWorkspace,
+  };
 }
 
 export function useWorkspace(sessionId: string | null) {
@@ -170,6 +205,20 @@ export function useWorkspace(sessionId: string | null) {
     sessionId: null,
     sshConnectionId: null,
   });
+  /**
+   * 未绑定工作区的**普通**会话（非 team）解析出的「默认工作区」根
+   * （`~/Documents/OpenAWork`，由网关 `/workspace/files/index-version`
+   * 省略 path 时回退给出）。
+   *
+   * 只服务于「文件浏览 / 读取」：文件树与 @ 引用用它让无工作区会话也能浏览
+   * Agent 创建的文件；`workingDirectory` 保持 null，绑定语义不变。
+   * 带 `sessionId` 是为了切会话时旧值立刻失效，绝不把上一个会话的目录
+   * 泄漏给新会话。
+   */
+  const [fallbackWorkspaceState, setFallbackWorkspaceState] = useState<{
+    sessionId: string;
+    path: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -200,6 +249,31 @@ export function useWorkspace(sessionId: string | null) {
     ? (activeSessionWorkspace.sshConnectionId ?? null)
     : retainedSshConnectionId;
 
+  // 严格匹配当前会话：切会话瞬间旧会话的默认工作区立即失效（不闪旧目录）。
+  const fallbackWorkspacePath =
+    sessionId !== null && fallbackWorkspaceState?.sessionId === sessionId
+      ? fallbackWorkspaceState.path
+      : null;
+
+  /**
+   * 读取未绑定会话的默认工作区根；失败静默降级为 null（文件树退回
+   * 「未绑定」空态即可，不影响绑定工作区的主流程）。
+   */
+  const loadFallbackWorkspacePath = useCallback(
+    async (targetSessionId: string, signal?: AbortSignal): Promise<string | null> => {
+      try {
+        const fallback = await workspaceClient.getFileIndexVersion(accessToken ?? '', undefined, {
+          sessionId: targetSessionId,
+          ...(signal ? { signal } : {}),
+        });
+        return fallback.root || null;
+      } catch {
+        return null;
+      }
+    },
+    [accessToken, workspaceClient],
+  );
+
   useEffect(() => {
     if (!sessionId) {
       requestIdRef.current += 1;
@@ -208,6 +282,7 @@ export function useWorkspace(sessionId: string | null) {
         sessionId: null,
         sshConnectionId: null,
       });
+      setFallbackWorkspaceState(null);
       setLoading(false);
       setError(null);
       return;
@@ -253,6 +328,19 @@ export function useWorkspace(sessionId: string | null) {
         });
         setActiveSessionWorkspace(sessionId, result.path, result.sshConnectionId);
         setError(null);
+
+        // 未绑定的本地普通会话：解析「默认工作区」根（仅用于文件浏览）。
+        // 独立于 loading 的附加解析（不拖长会话切换的 loading）；失败静默，
+        // 由 sessionId 匹配保证不把旧会话的目录外露。
+        if (!result.path && !result.sshConnectionId && !result.requiresBoundWorkspace) {
+          void loadFallbackWorkspacePath(sessionId, controller.signal).then((fallbackPath) => {
+            if (requestIdRef.current === requestId && fallbackPath) {
+              setFallbackWorkspaceState({ sessionId, path: fallbackPath });
+            }
+          });
+        } else {
+          setFallbackWorkspaceState(null);
+        }
       })
       .catch((error: unknown) => {
         if (requestIdRef.current !== requestId) {
@@ -272,7 +360,13 @@ export function useWorkspace(sessionId: string | null) {
     return () => {
       controller.abort();
     };
-  }, [sessionId, accessToken, sessionsClient, setActiveSessionWorkspace]);
+  }, [
+    sessionId,
+    accessToken,
+    sessionsClient,
+    setActiveSessionWorkspace,
+    loadFallbackWorkspacePath,
+  ]);
 
   const setWorkspace = useCallback(
     async (path: string): Promise<void> => {
@@ -288,6 +382,8 @@ export function useWorkspace(sessionId: string | null) {
           sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
         }));
         setActiveSessionWorkspace(sessionId, normalizedPath || null, null);
+        // 绑定生效后默认工作区不再参与文件浏览。
+        setFallbackWorkspaceState(null);
         setError(null);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -312,6 +408,12 @@ export function useWorkspace(sessionId: string | null) {
       }));
       setActiveSessionWorkspace(sessionId, null, null);
       setError(null);
+      // 解除绑定后回到未绑定默认工作区（仅文件浏览用途），失败静默为 null。
+      void loadFallbackWorkspacePath(sessionId).then((fallbackPath) => {
+        if (fallbackPath) {
+          setFallbackWorkspaceState({ sessionId, path: fallbackPath });
+        }
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -319,7 +421,13 @@ export function useWorkspace(sessionId: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, accessToken, workspaceClient, setActiveSessionWorkspace]);
+  }, [
+    sessionId,
+    accessToken,
+    workspaceClient,
+    setActiveSessionWorkspace,
+    loadFallbackWorkspacePath,
+  ]);
 
   const validatePath = useCallback(
     async (path: string): Promise<{ valid: boolean; error?: string; path?: string }> =>
@@ -473,6 +581,13 @@ export function useWorkspace(sessionId: string | null) {
 
   return {
     workingDirectory: resolvedWorkingDirectory,
+    /**
+     * 未绑定工作区的普通会话的默认工作区根（仅文件浏览/读取用途）。
+     *
+     * 消费方（文件树 / @ 引用）用 `workingDirectory ?? fallbackWorkspacePath`
+     * 作为浏览根；`workingDirectory` 仍是 null（未绑定语义），不要替换使用。
+     */
+    fallbackWorkspacePath,
     /**
      * 当前会话的 SSH 连接 id（本地会话为 null）。读取身份消费方据此判断
      * 会话是否绑定远端工作区；无活动的会话工作区时为 null。

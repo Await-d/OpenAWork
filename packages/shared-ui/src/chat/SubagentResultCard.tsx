@@ -1,11 +1,29 @@
 import { useMemo } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type {
   SubagentResultItem,
   SubagentResultSection,
   SubagentResultSectionKind,
 } from '@openAwork/shared';
 import { color, font, radius, shadow, spacing } from '../tokens.js';
+
+/**
+ * 正文渲染注入点：消费端（如 web）可注入 Markdown 渲染器（`renderBody`），
+ * 让 `answer` / `raw` 正文按自身格式渲染。不注入时退化为纯文本
+ * （保留换行）——shared-ui 不内置 Markdown 渲染器，避免把 web 应用侧
+ * 的重资产（react-markdown / katex / 代码高亮）拉进跨端共享包。
+ */
+export type SubagentResultBodyRenderer = (markdown: string) => ReactNode;
+
+/**
+ * 纯文本正文的排版：保留换行 + 长词折行。
+ * 注入 `renderBody` 时**不**套用——外层 `pre-wrap` 会让 Markdown 渲染器
+ * 输出的段落软换行再渲染一遍（行距翻倍），此时排版由渲染器自管。
+ */
+const PLAIN_BODY_TEXT_STYLE: CSSProperties = {
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+};
 
 interface SectionTitle {
   label: string;
@@ -109,7 +127,13 @@ function ItemSection({ section }: { section: SubagentResultSection }) {
 }
 
 /** 正文分节（answer / raw / other-正文）。 */
-function BodySection({ section }: { section: SubagentResultSection }) {
+function BodySection({
+  section,
+  renderBody,
+}: {
+  section: SubagentResultSection;
+  renderBody?: SubagentResultBodyRenderer;
+}) {
   const body = section.body?.trim() ?? '';
   if (body.length === 0) {
     return null;
@@ -154,11 +178,10 @@ function BodySection({ section }: { section: SubagentResultSection }) {
           fontSize: 13,
           lineHeight: 1.6,
           color: color.fgDefault,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
+          ...(renderBody ? {} : PLAIN_BODY_TEXT_STYLE),
         }}
       >
-        {body}
+        {renderBody ? renderBody(body) : body}
       </div>
     </div>
   );
@@ -167,6 +190,8 @@ function BodySection({ section }: { section: SubagentResultSection }) {
 export interface SubagentResultCardProps {
   /** 由 `parseSubagentResultBlocks` 解析出的分节（三端共用 SSOT）。 */
   sections: readonly SubagentResultSection[];
+  /** 正文渲染器注入点（如 Markdown）；未注入时正文按纯文本渲染。 */
+  renderBody?: SubagentResultBodyRenderer;
 }
 
 /**
@@ -174,9 +199,10 @@ export interface SubagentResultCardProps {
  * next_steps / uncertainties）渲染为带语义色标栏的分节视图。
  *
  * 无结构化块时（全部为 raw 节）退化为纯正文视图，不做额外装饰——保证
- * 普通通知正文展示不受影响。
+ * 普通通知正文展示不受影响。`renderBody` 注入时（如 web 端注入 Markdown
+ * 渲染器）正文交由注入渲染器输出，纯文本兜底排版不再套用。
  */
-export function SubagentResultCard({ sections }: SubagentResultCardProps) {
+export function SubagentResultCard({ sections, renderBody }: SubagentResultCardProps) {
   const structured = useMemo(() => sections.some((section) => section.kind !== 'raw'), [sections]);
   const rawSections = useMemo(
     () => sections.filter((section) => section.kind === 'raw'),
@@ -205,12 +231,11 @@ export function SubagentResultCard({ sections }: SubagentResultCardProps) {
           lineHeight: 1.6,
           color: color.fgMuted,
           fontFamily: font.sans,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
+          ...(renderBody ? {} : PLAIN_BODY_TEXT_STYLE),
         }}
       >
         {rawSections.map((section, index) => (
-          <BodySection key={index} section={section} />
+          <BodySection key={index} section={section} renderBody={renderBody} />
         ))}
       </div>
     );
@@ -234,7 +259,7 @@ export function SubagentResultCard({ sections }: SubagentResultCardProps) {
           return <ItemSection key={index} section={section} />;
         }
         if (section.body?.trim()) {
-          return <BodySection key={index} section={section} />;
+          return <BodySection key={index} section={section} renderBody={renderBody} />;
         }
         return null;
       })}

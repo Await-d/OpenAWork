@@ -179,3 +179,35 @@ island 点击「打开会话」
 - **状态圆点 → 品牌图标**:头部首位改用 `@openAwork/shared-ui` 的 `BrandLogo`(16px),删除 `.island-dot` 系列样式与脉冲关键帧;强调色统一取 `--accent`(与 `BrandLogo` 同源),不再使用 web 包中**未定义**的 `--primary`(它会让 `background` 在计算值阶段失效变透明)。
 - **行号引用**:本文档此前的 `Lxxxx-yyyy` 引用已随改动失效,已整体移除;定位请以函数 / 常量名(如 `island_position_for`、`ISLAND_*`)为准。
 
+
+## 2026-10-12 修复:桌面端浮窗「完全透明」
+
+> 症状:Linux 桌面端(Tauri + WebKitGTK)灵动岛窗口存在、DOM 正常、可交互,但视觉上完全透明。本节以 WebKitGTK 2.50.4 + 透明窗口的最小复现程序(自编译 GTK MiniBrowser,逐帧抓取 X 像素统计)实测定位,证据链完整。
+
+### 根因(两层,均已复现)
+
+1. **`filter: blur()` 触发整帧丢弃**:`.island-body` 折叠态的 `filter: blur(6px)` 让 WebView 进入 effects 离屏渲染路径,透明窗口下整帧合成输出为空。`backdrop-filter` 同族(GPU 路径下结果不稳定),一并移除。
+2. **大面积 `opacity: 0` 让整帧 alpha 归零**(主因,最隐蔽):透明窗口上,折叠态 `.island-body`(占窗口约 70% 高)常态处于 `opacity: 0`,整帧合成 alpha 被算成 0;首帧丢失后若无样式失效便不再重画,表现为「永远全透明」。小面积 `opacity: 0`(文字行)不受影响。
+
+### 修复
+
+| 文件 | 变更 |
+|---|---|
+| `apps/web/src/island/island.css` | 移除 `filter` / `backdrop-filter`;所有 `opacity: 0` 改为 `opacity: 0.01`(视觉无差);文件头新增硬约束 3、4 |
+| `apps/web/island.html` | 新增 island 专属入口:不加载主窗口全局样式与 Monaco 等重资源;固定深色、不设 `data-theme`(恒定命中 `:root:not([data-theme])` Nebula 暗 token) |
+| `apps/web/src/island-main.ts` | 新增 island 入口脚本,直接调 `mountIslandApp()` |
+| `apps/web/vite.config.ts` | `rollupOptions.input` 增加 `island.html` 多页入口 |
+| `apps/desktop/src-tauri/src/lib.rs` | `create_island_window` 改指 `island.html` |
+| `apps/web/src/island/mount-island.tsx` | 新增 `kickRepaint()`:首帧提交后强制一次无害重绘,填掉「首帧丢失后不再重画」的窗口期 |
+| `apps/web/src/main.tsx` | island 分流降级为兜底路径(正常走 island.html) |
+
+### 验证
+
+- 最小复现程序(WebKitGTK 2.50.4,与桌面端同引擎)原生加载 island.html 连续 8 次像素统计 64.3% 稳定(修复前 0.0% 稳定),截图确认玻璃底/品牌图标/状态文字正常。
+- `island-types.test.ts` + `island-store.test.ts` 31 测试通过;`tsc --noEmit` 通过。
+- 待真机:展开/折叠过渡、拖动、隐藏/唤回(原 T-14 清单)。
+
+### 遗留注意
+
+- 环境的批量删除防护(阈值 500)会拦截 vite 清空 dist(file-icons 1254 文件);本机验证用 dev server 完成,正式构建在用户/CI 环境执行 `bun run --filter @openAwork/web build` 即可(先手动清理旧 dist)。
+- 诊断期间发现 vite HMR 会污染浏览器内诊断(变量随 reload 丢失),后续排查以独立进程 + 生产构建为准。

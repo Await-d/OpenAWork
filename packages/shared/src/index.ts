@@ -1423,6 +1423,8 @@ export interface StreamTaskUpdateChunk {
   sessionId?: string;
   parentTaskId?: string;
   parentSessionId?: string;
+  /** 任务记录的 metadata（如 `parentToolCallId`），供客户端把流内任务与消息里的 tool call 关联。 */
+  metadata?: Record<string, unknown>;
   eventId?: string;
   runId?: string;
   occurredAt?: number;

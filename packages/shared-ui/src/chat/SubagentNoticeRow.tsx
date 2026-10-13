@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import type { SubagentNotice, SubagentNoticeState } from '@openAwork/shared';
 import { parseSubagentResultBlocks, summarizeSubagentResult } from '@openAwork/shared';
 import { SubagentResultCard } from './SubagentResultCard.js';
+import type { SubagentResultBodyRenderer } from './SubagentResultCard.js';
 import { color, font, motion, radius, spacing } from '../tokens.js';
 
 interface StatePresentation {
@@ -27,6 +28,8 @@ export interface SubagentNoticeRowProps {
   grouped?: boolean;
   /** 传入且通知带子会话 id 时，标题行可点击/可聚焦跳转。 */
   onOpenChild?: (childSessionId: string) => void;
+  /** 结果卡片正文渲染器注入点（如 Markdown）；未注入时正文按纯文本渲染。 */
+  renderBody?: SubagentResultBodyRenderer;
 }
 
 /**
@@ -39,11 +42,13 @@ export interface SubagentNoticeRowProps {
  * 标题行下方通过 `SubagentResultCard` 全展开渲染 `notice.text` 中的
  * `<results>` 结构化块（files / findings / answer / next_steps / uncertainties）；
  * 无结构化块时退化为纯正文段。原始 XML 标签不再直接暴露给用户。
+ * 传入 `renderBody` 时正文交由注入渲染器（如 web 端的 Markdown）输出。
  */
 export function SubagentNoticeRow({
   notice,
   grouped = false,
   onOpenChild,
+  renderBody,
 }: SubagentNoticeRowProps) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -111,7 +116,9 @@ export function SubagentNoticeRow({
     </>
   );
 
-  const card = hasResults ? <SubagentResultCard sections={resultSections} /> : null;
+  const card = hasResults ? (
+    <SubagentResultCard sections={resultSections} {...(renderBody ? { renderBody } : {})} />
+  ) : null;
 
   if (!interactive) {
     return (

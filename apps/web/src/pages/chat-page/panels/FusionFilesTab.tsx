@@ -27,6 +27,12 @@ export interface FusionFilesTabProps {
   readonly editorFileState: FusionFilesEditorState;
   readonly editorOpenFilePaths: readonly string[];
   readonly effectiveWorkingDirectory: string | null;
+  /**
+   * 文件浏览根：已绑定时与 `effectiveWorkingDirectory` 相同；未绑定的普通
+   * 会话为默认工作区。工作区浏览树用它与 `effectiveWorkingDirectory` 一起
+   * 判断可用性，其余展示用途仍用 `effectiveWorkingDirectory`。
+   */
+  readonly fileBrowseRoot: string | null;
   readonly fetchTree: WorkspaceFileTreePanelProps['fetchTree'];
   readonly handleSaveFile: (path: string) => Promise<void>;
   readonly onOpenFileInEditor: (path: string) => void;
@@ -55,6 +61,7 @@ export function FusionFilesTab({
   editorFileState,
   editorOpenFilePaths,
   effectiveWorkingDirectory,
+  fileBrowseRoot,
   fetchTree,
   handleSaveFile,
   onOpenFileInEditor,
@@ -130,7 +137,7 @@ export function FusionFilesTab({
       </div>
 
       <section className="fusion-side-panel__section" aria-labelledby="fusion-files-editor-heading">
-        {effectiveWorkingDirectory ? (
+        {fileBrowseRoot ? (
           <>
             <div className="fusion-side-panel__subsection-head">
               <div className="fusion-side-panel__eyebrow">工作区浏览</div>
@@ -140,7 +147,7 @@ export function FusionFilesTab({
             </div>
             <div className="fusion-side-panel__workspace-tree-shell">
               <WorkspaceFileTreePanel
-                workspacePath={effectiveWorkingDirectory}
+                workspacePath={fileBrowseRoot}
                 sessionId={currentSessionId}
                 onOpenFile={onOpenFileInEditor}
                 fetchTree={fetchTree}

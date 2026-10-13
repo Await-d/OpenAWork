@@ -160,7 +160,9 @@ function mountApp(): void {
   );
 }
 
-// 灵动岛窗口：复用同一份 bundle，只挂载浮窗 UI（动态导入，主窗口不为此付加载成本）。
+// 灵动岛窗口兜底分流：正常情况下 Rust 侧把 island 窗口指向 island.html（专属
+// 入口，不背主窗口的全局样式与重资源，原因见 island.css 头注释）。这里只处理
+// 「island WebView 仍落在 index.html」的异常路径，挂载浮窗 UI 而非完整应用。
 if (readDesktopWindowMode() === 'island') {
   void import('./island/mount-island.js')
     .then((module) => {

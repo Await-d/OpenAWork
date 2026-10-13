@@ -71,6 +71,88 @@ describe('createSettingsClient profile methods', () => {
   });
 });
 
+describe('createSettingsClient display preferences methods', () => {
+  it('getDisplayPreferences 成功时返回偏好与 updatedAt', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          preferences: { themeMode: 'dark', workbenchLayoutMode: 'classic' },
+          updatedAt: '2026-10-12T00:00:00.000Z',
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.getDisplayPreferences('token-1');
+
+    expect(result).toMatchObject({
+      preferences: { themeMode: 'dark', workbenchLayoutMode: 'classic' },
+      updatedAt: '2026-10-12T00:00:00.000Z',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/display-preferences',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-1' }),
+      }),
+    );
+  });
+
+  it('getDisplayPreferences 服务端无记录时 preferences 为 null', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ preferences: null, updatedAt: null }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.getDisplayPreferences('token-1');
+
+    expect(result).toEqual({ preferences: null, updatedAt: null });
+  });
+
+  it('putDisplayPreferences 通过 display-preferences endpoint 保存全量偏好', async () => {
+    const payload = { themeMode: 'dark', showMetaLine: false, workbenchLayoutMode: 'classic' };
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({ preferences: payload, updatedAt: '2026-10-12T00:00:00.000Z' }),
+      } as unknown as Response;
+    }) as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = createSettingsClient('http://localhost:3000');
+    const result = await client.putDisplayPreferences('token-1', payload);
+
+    expect(result).toMatchObject({ preferences: payload });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/settings/display-preferences',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    );
+  });
+
+  it('putDisplayPreferences 认证失效时抛中文错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSettingsClient('http://localhost:3000');
+
+    await expect(client.putDisplayPreferences('token-1', { themeMode: 'dark' })).rejects.toThrow(
+      '认证失效或当前账号无权保存显示偏好。',
+    );
+  });
+});
+
 describe('createSettingsClient.getProvidersResult', () => {
   it('成功时返回 providers 载荷', async () => {
     globalThis.fetch = vi.fn(async () => {

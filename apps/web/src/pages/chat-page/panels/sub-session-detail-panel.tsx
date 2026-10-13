@@ -6,6 +6,7 @@ import {
   type ChatRenderEntry,
   type ChatRenderGroup,
 } from '../../../components/chat/message/chat-message-group-list.js';
+import { formatReasoningEffortLabel } from '../../../components/chat/composer/reasoning-effort-label.js';
 import { useScrollManager } from '../../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import {
   formatGatewayStreamErrorMessage,
@@ -21,13 +22,17 @@ import {
   hasActivePendingPermissionRequest,
   type AssistantTraceToolCall,
   type ChatMessage,
+  type ReasoningEffort,
 } from '../../../components/conversation-runtime/messages/support.js';
 import { useSubSessionDetail } from '../hooks/use-sub-session-detail.js';
 import { mergeOptimisticUserMessage } from './sub-session-message-state.js';
 import { SubSessionFailureBanner } from './SubSessionFailureBanner.js';
 import { aggregateSubAgentTask, resolveSubAgentRunStatus } from './sub-agent-status.js';
 import type { TaskToolRuntimeLookup } from '../conversation/render/task-tool-runtime.js';
-import { requestCurrentSessionRefresh } from '../../../utils/session/session-list-events.js';
+import {
+  requestCurrentSessionRefresh,
+  requestSessionListRefresh,
+} from '../../../utils/session/session-list-events.js';
 
 type CancelableSessionsClient = ReturnType<typeof createSessionsClient> & {
   cancelTask: (
@@ -90,26 +95,76 @@ function compactSessionId(sessionId: string): string {
   return `${sessionId.slice(0, 8)}…${sessionId.slice(-4)}`;
 }
 
+const REASONING_EFFORT_SET: ReadonlySet<string> = new Set<ReasoningEffort>([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === 'string' && REASONING_EFFORT_SET.has(value);
+}
+
 function parseModelSelectionFromMetadataJson(metadataJson: string | undefined): {
   modelId: string;
   providerId: string;
+  modelLabel: string;
+  thinkingEnabled?: boolean;
+  reasoningEffort?: ReasoningEffort;
   parentSessionId: string | null;
 } {
   if (!metadataJson) {
-    return { modelId: '', providerId: '', parentSessionId: null };
+    return {
+      modelId: '',
+      providerId: '',
+      modelLabel: '',
+      thinkingEnabled: undefined,
+      reasoningEffort: undefined,
+      parentSessionId: null,
+    };
   }
 
   try {
     const metadata = JSON.parse(metadataJson) as Record<string, unknown>;
+    const reasoningEffort = metadata['reasoningEffort'];
     return {
       modelId: typeof metadata['modelId'] === 'string' ? metadata['modelId'] : '',
       providerId: typeof metadata['providerId'] === 'string' ? metadata['providerId'] : '',
+      modelLabel: typeof metadata['modelLabel'] === 'string' ? metadata['modelLabel'] : '',
+      thinkingEnabled:
+        typeof metadata['thinkingEnabled'] === 'boolean' ? metadata['thinkingEnabled'] : undefined,
+      reasoningEffort: isReasoningEffort(reasoningEffort) ? reasoningEffort : undefined,
       parentSessionId:
         typeof metadata['parentSessionId'] === 'string' ? metadata['parentSessionId'] : null,
     };
   } catch {
-    return { modelId: '', providerId: '', parentSessionId: null };
+    return {
+      modelId: '',
+      providerId: '',
+      modelLabel: '',
+      thinkingEnabled: undefined,
+      reasoningEffort: undefined,
+      parentSessionId: null,
+    };
   }
+}
+
+/**
+ * 思考等级的紧凑展示文案（与输入框工具条 `describeSettingsLabel` 同一套约定）：
+ * 元数据缺失时返回空串——头部不渲染，避免对旧数据虚构档位。
+ */
+function formatThinkingLevelLabel(input: {
+  thinkingEnabled?: boolean;
+  reasoningEffort?: ReasoningEffort;
+}): string {
+  if (input.thinkingEnabled === false) return '思考关闭';
+  if (input.thinkingEnabled !== true) return '';
+  if (!input.reasoningEffort || input.reasoningEffort === 'none') return '思考已开启';
+  return `思考 · ${formatReasoningEffortLabel(input.reasoningEffort)}`;
 }
 
 const VISIBLE_TASK_COUNT = 5;
@@ -174,6 +229,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   onOpenFullSession,
   parentTaskRuntimeLookup,
   providerCatalog,
+  sequence,
   token,
 }: {
   childSessionId: string | null;
@@ -183,6 +239,8 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   onOpenFullSession: (sessionId: string) => void;
   parentTaskRuntimeLookup?: TaskToolRuntimeLookup;
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
+  /** 子代理系统序号（由调用方从运行列表中查得）；用于无标题时的默认命名。 */
+  sequence?: number;
   token: string | null;
 }) {
   const { error, loading, messages, pendingPermissions, refresh, session, tasks } =
@@ -201,6 +259,9 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   const [sendError, setSendError] = useState<string | null>(null);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const [hasPendingFollowContent, setHasPendingFollowContent] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameBusy, setRenameBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRegionRef = useRef<HTMLDivElement>(null);
   const contentColumnRef = useRef<HTMLDivElement>(null);
@@ -221,7 +282,38 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     setSendError(null);
     setShowScrollToLatest(false);
     setHasPendingFollowContent(false);
+    setRenaming(false);
+    setRenameValue('');
   }, [childSessionId]);
+
+  async function commitRename() {
+    if (!token || !childSessionId || renameBusy) {
+      return;
+    }
+    const trimmed = renameValue.trim();
+    const currentTitle = session?.title?.trim() ?? '';
+    setRenaming(false);
+    if (!trimmed || trimmed === currentTitle) {
+      return;
+    }
+
+    setRenameBusy(true);
+    setSendError(null);
+    try {
+      await sessionsClient.rename(token, childSessionId, trimmed);
+      await refresh();
+      // 子代理标题出现在父会话的运行列表 / 切换器里：同源刷新两处缓存。
+      requestCurrentSessionRefresh(childSessionId);
+      if (childSessionSelection.parentSessionId) {
+        requestCurrentSessionRefresh(childSessionSelection.parentSessionId);
+      }
+      requestSessionListRefresh();
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : '重命名子代理失败');
+    } finally {
+      setRenameBusy(false);
+    }
+  }
 
   const renderedMessages = useMemo(() => {
     const baseMessages = mergeOptimisticUserMessage(messages, optimisticUserMessage);
@@ -277,6 +369,16 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
     () => parseModelSelectionFromMetadataJson(session?.metadata_json),
     [session?.metadata_json],
   );
+  // 子代理实际使用的模型与思考等级：优先落库的显示名，回退原始 modelId。
+  const childModelName =
+    childSessionSelection.modelLabel.trim() || childSessionSelection.modelId.trim();
+  const childThinkingLabel = formatThinkingLevelLabel(childSessionSelection);
+  const childModelTitle = childSessionSelection.providerId
+    ? providerCatalog?.get(childSessionSelection.providerId)?.name
+    : undefined;
+  const childModelTooltip = childModelTitle
+    ? `${childModelTitle} · ${childSessionSelection.modelId}`
+    : childSessionSelection.modelId;
   const isChildSessionPaused = resolvedChildStatus === 'paused';
   const isChildSessionBusy = streaming || isChildSessionPaused || resolvedChildStatus === 'running';
   const runningTaskCount = useMemo(
@@ -537,22 +639,100 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
         <div
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}
         >
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 800,
-              color: 'var(--fg-strong)',
-              lineHeight: 1.2,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              minWidth: 0,
-              flex: 1,
-            }}
-            title={session?.title?.trim() || childSessionId}
-          >
-            {session?.title?.trim() || `子代理 ${childSessionId.slice(0, 8)}`}
-          </div>
+          {renaming ? (
+            <input
+              autoFocus
+              aria-label="重命名子代理"
+              value={renameValue}
+              disabled={renameBusy}
+              onChange={(event) => setRenameValue(event.target.value)}
+              onBlur={() => void commitRename()}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void commitRename();
+                } else if (event.key === 'Escape') {
+                  // 取消时把值复位为当前标题：卸载引发的 blur 提交会因「值相同」而 no-op，
+                  // 避免用户改了字再按 Esc 仍被意外保存。
+                  setRenameValue(session?.title?.trim() ?? '');
+                  setRenaming(false);
+                }
+              }}
+              placeholder={
+                session?.title?.trim() || (sequence !== undefined ? `子代理 #${sequence}` : '')
+              }
+              style={{
+                flex: 1,
+                minWidth: 0,
+                height: 24,
+                border: '1px solid var(--accent-border)',
+                borderRadius: 6,
+                background: 'var(--bg-overlay)',
+                color: 'var(--fg-strong)',
+                fontSize: 11,
+                fontWeight: 700,
+                padding: '0 6px',
+                outline: 'none',
+              }}
+            />
+          ) : (
+            <>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: 'var(--fg-strong)',
+                  lineHeight: 1.2,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                  flex: 1,
+                }}
+                title={session?.title?.trim() || childSessionId}
+              >
+                {session?.title?.trim() ||
+                  (sequence !== undefined
+                    ? `子代理 #${sequence}`
+                    : `子代理 ${childSessionId.slice(0, 8)}`)}
+              </div>
+              <button
+                type="button"
+                aria-label="重命名子代理"
+                title="重命名"
+                onClick={() => {
+                  setRenameValue(session?.title?.trim() ?? '');
+                  setRenaming(true);
+                }}
+                style={{
+                  border: 'none',
+                  borderRadius: 5,
+                  background: 'transparent',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 2,
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  aria-hidden="true"
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                </svg>
+              </button>
+            </>
+          )}
           <span
             style={{
               display: 'inline-flex',
@@ -578,6 +758,23 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             flexWrap: 'wrap',
           }}
         >
+          {childModelName && (
+            <span
+              style={{
+                color: 'var(--fg-default)',
+                fontWeight: 600,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: 180,
+                minWidth: 0,
+              }}
+              title={childModelTooltip}
+            >
+              {childModelName}
+            </span>
+          )}
+          {childThinkingLabel && <span title="思考等级">{childThinkingLabel}</span>}
           <span title={childSessionId}>{compactSessionId(childSessionId)}</span>
           <span>消息 {messages.length}</span>
           <span>任务 {tasks.length}</span>

@@ -33,6 +33,8 @@ export interface FusionMobileBottomPanelProps {
   readonly editorFileState: FusionFilesEditorState;
   readonly editorOpenFilePaths: readonly string[];
   readonly effectiveWorkingDirectory: string | null;
+  /** 文件浏览根：已绑定时同 effectiveWorkingDirectory，未绑定时为默认工作区。 */
+  readonly fileBrowseRoot: string | null;
   readonly fetchTree: WorkspaceFileTreePanelProps['fetchTree'];
   readonly gatewayUrl: string;
   readonly handleSaveFile: (path: string) => Promise<void>;
@@ -175,6 +177,7 @@ export function FusionMobileBottomPanel({
   editorFileState,
   editorOpenFilePaths,
   effectiveWorkingDirectory,
+  fileBrowseRoot,
   fetchTree,
   gatewayUrl,
   handleSaveFile,
@@ -264,6 +267,7 @@ export function FusionMobileBottomPanel({
                   editorFileState={editorFileState}
                   editorOpenFilePaths={editorOpenFilePaths}
                   effectiveWorkingDirectory={effectiveWorkingDirectory}
+                  fileBrowseRoot={fileBrowseRoot}
                   fetchTree={fetchTree}
                   handleSaveFile={handleSaveFile}
                   onOpenFileInEditor={onOpenFileInEditor}

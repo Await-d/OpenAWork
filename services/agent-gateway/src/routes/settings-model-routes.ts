@@ -148,12 +148,13 @@ export async function registerSettingsModelRoutes(app: FastifyInstance): Promise
   );
 
   // P2-WEBSEARCH (workflow 260509): persisted multi-provider rollout
-  // policy. The gateway tool path currently still uses the legacy
-  // single-provider call; this endpoint stores the user's intended
-  // configuration so a future switch to `searchMultiProvider` can
-  // pick it up without a UI re-roll. Default state keeps the legacy
-  // behaviour (`sequential`, no providers) so saving an empty
-  // configuration is a no-op.
+  // policy. The gateway tool path reads this row **per tool call** via
+  // `createWebsearchTool({ resolveMultiConfig })` and routes to
+  // `searchMultiProvider` when the policy adds something over the legacy
+  // single-call (multi-mode OR 2+ providers), so saving here takes effect
+  // on the very next `websearch` invocation without rebuilding sandboxes.
+  // Default state (`sequential`, no providers) keeps the legacy
+  // single-provider behaviour — saving an empty configuration is a no-op.
   app.get(
     '/settings/websearch',
     { onRequest: [requireAuth] },

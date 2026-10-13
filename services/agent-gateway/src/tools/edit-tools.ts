@@ -16,6 +16,7 @@ import {
 } from './edit-replacers.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
 import {
+  assertRegularFileIfExists,
   assertSessionWorkspacePath,
   getSessionWorkspaceRoot,
 } from '../workspace/workspace-safety.js';
@@ -69,7 +70,7 @@ function assertEditableWorkspaceFilePath(sessionId: string, filePath: string): s
   return safePath;
 }
 
-function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
+export function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
   // 只认规范名 `read`。改名前的审计行一律不算证据：方向是 fail-safe ——
   // 模型重新读一次即可，不会因此跳过读取。
   const rows = sqliteAll<AuditLogRow>(
@@ -128,6 +129,8 @@ export function createEditTool(
           'newString must be different from oldString. ' + EDIT_ERROR_RECOVERY_SUFFIX,
         );
       }
+
+      await assertRegularFileIfExists(safePath);
 
       let exists = true;
       let currentContent = '';

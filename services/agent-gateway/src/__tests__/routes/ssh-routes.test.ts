@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { SshRemotePathError, SshSftpUnavailableError } from '@openAwork/agent-core';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type * as SshRoutesModule from '../../routes/ssh.ts';
@@ -239,6 +240,114 @@ describe('ssh routes error mapping', () => {
     expect(res.statusCode).toBe(504);
     expect(res.json()).toMatchObject({ error: 'SSH 操作超时,请稍后重试。' });
     await app.close();
+  });
+
+  // 回归（2026-10-12 线上排障）：远端读取失败曾被一律映射成 500 + 裸
+  // "Failure"（SFTP 通用失败码），排障包里既没有路径也没有原因。
+  describe('GET /ssh/file 远端读取失败的可读映射', () => {
+    async function injectReadError(failReadFile: (id: string, path: string) => Error) {
+      sshServiceModule.__resetSshServiceForTests(
+        buildFakeService({ connections: [], failReadFile }),
+      );
+      const app = await buildApp();
+      try {
+        return await app.inject({
+          method: 'GET',
+          url: '/ssh/file?connectionId=ssh-1&path=/tmp/target',
+          headers: { authorization: bearer(app) },
+        });
+      } finally {
+        await app.close();
+      }
+    }
+
+    it('目录 → 400', async () => {
+      const res = await injectReadError(() => new SshRemotePathError('directory', '/tmp/target'));
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: '远端路径是目录，无法作为文件预览。' });
+    });
+
+    it('不可读（权限 / SFTP FAILURE）→ 403', async () => {
+      const res = await injectReadError(
+        () => new SshRemotePathError('not-readable', '/tmp/target', 'SFTP status 4: Failure'),
+      );
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toMatchObject({ error: '远端拒绝读取该路径（权限不足或目标不可读）。' });
+    });
+
+    it('语义化 not-found → 404', async () => {
+      const res = await injectReadError(() => new SshRemotePathError('not-found', '/tmp/target'));
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({ error: '远端文件不存在。' });
+    });
+
+    it('未经归一的裸 SFTP "Failure" 也给出可操作文案而非 500', async () => {
+      const res = await injectReadError(() => new Error('Failure'));
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error as string).toContain('SFTP 返回通用失败');
+    });
+
+    it('未经归一的裸 "No such file" / "Permission denied" 按既有约定映射', async () => {
+      const notFound = await injectReadError(() => new Error('No such file'));
+      expect(notFound.statusCode).toBe(404);
+      expect(notFound.json()).toMatchObject({ error: '远端文件不存在。' });
+
+      const denied = await injectReadError(() => new Error('Permission denied'));
+      expect(denied.statusCode).toBe(403);
+      expect(denied.json()).toMatchObject({
+        error: '远端拒绝读取该路径（权限不足或目标不可读）。',
+      });
+    });
+  });
+
+  // 回归（2026-10-12 线上排障）：远端 sshd 未启用 sftp 子系统时，ssh2 只给
+  // 一句裸英文 `Unable to start subsystem: sftp`，路由曾把它映射成 500，看起来
+  // 像网关故障。远端能力缺失既不可重试也不是网关缺陷，应回 501 + 可操作指引。
+  describe('SFTP 子系统缺失的可读映射', () => {
+    it('GET /ssh/files → 501 + 可操作指引', async () => {
+      sshServiceModule.__resetSshServiceForTests(
+        buildFakeService({
+          connections: [],
+          failListFiles: () => new SshSftpUnavailableError(),
+        }),
+      );
+      const app = await buildApp();
+      try {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/ssh/files?connectionId=ssh-1&path=/tmp',
+          headers: { authorization: bearer(app) },
+        });
+        expect(res.statusCode).toBe(501);
+        const message = res.json().error as string;
+        expect(message).toContain('未启用 SFTP 子系统');
+        // 文案必须给出远端侧的修复动作，否则用户无从下手。
+        expect(message).toContain('Subsystem sftp');
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('GET /ssh/file 上的未归一裸英文同样不会落进 500', async () => {
+      sshServiceModule.__resetSshServiceForTests(
+        buildFakeService({
+          connections: [],
+          failReadFile: () => new Error('Unable to start subsystem: sftp'),
+        }),
+      );
+      const app = await buildApp();
+      try {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/ssh/file?connectionId=ssh-1&path=/tmp/target',
+          headers: { authorization: bearer(app) },
+        });
+        expect(res.statusCode).toBe(501);
+        expect(res.json().error as string).toContain('未启用 SFTP 子系统');
+      } finally {
+        await app.close();
+      }
+    });
   });
 
   it('POST /ssh/upload 在未知异常时返回 500 + 原始消息', async () => {

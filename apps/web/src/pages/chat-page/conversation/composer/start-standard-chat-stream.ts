@@ -40,6 +40,11 @@ export interface StartedStandardChatStream {
   displayMessageForStream: string;
   requestStartedAt: number;
   requestText: string;
+  /**
+   * 乐观追加的用户消息 id。发送被网关拒收（如 SESSION_ALREADY_RUNNING）时，调用方
+   * 需要按 id 撤掉这条气泡——消息未送达，不留痕，由待发队列重试。
+   */
+  userMessageId: string;
 }
 
 export function startStandardChatStream(
@@ -130,5 +135,6 @@ export function startStandardChatStream(
     displayMessageForStream,
     requestStartedAt,
     requestText: text,
+    userMessageId,
   };
 }

@@ -209,3 +209,70 @@ describe('子代理工具（subagent / call_omo_agent / delegate_task）', () =>
     expect(data.taskMeta?.hasAdditionalInputFields).toBe(false);
   });
 });
+
+/**
+ * 截断的 JSON 输出（大文件写入 / 传输中断 / 上游转发上限）：严格解析失败后旧实现
+ * 让卡片退化成「一整段转义 JSON 文本 + 参数抽屉」，用户看不到任何文件变更。
+ * 修复只补闭合，并把 `truncated` 如实带到 diffView 与摘要上。
+ */
+describe('resolveToolCallCardDisplayData diffView（截断输出的补闭合修复）', () => {
+  it('截断在值字符串里：保留已收到的正文并补上闭合', () => {
+    const output = '{"before":"","after":"# 科技新闻\\n\\n> 来源：cnBeta\\n\\n正文被截断';
+
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'write',
+      input: { content: '# 科技新闻', path: '/repo/docs/tech-news.md' },
+      output,
+    });
+
+    expect(data.diffView).toBeDefined();
+    expect(data.diffView?.truncated).toBe(true);
+    expect(data.diffView?.summary).toContain('输出可能不完整');
+    expect(data.diffView?.beforeText).toBe('');
+    expect(data.diffView?.afterText).toContain('来源：cnBeta');
+    // 截断点落在 `path` 之前：文件名只能由入参兜底，不能留空。
+    expect(data.diffView?.filePath).toBe('/repo/docs/tech-news.md');
+  });
+
+  it('截断在嵌套信封里：内层 filediff 字段保留', () => {
+    const output = '{"success":true,"filediff":{"file":"/repo/a.md","before":"x","after":"y';
+
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'edit',
+      input: { filePath: '/repo/a.md', newString: 'y', oldString: 'x' },
+      output,
+    });
+
+    expect(data.diffView?.filePath).toBe('/repo/a.md');
+    expect(data.diffView?.beforeText).toBe('x');
+    expect(data.diffView?.afterText).toBe('y');
+    expect(data.diffView?.truncated).toBe(true);
+  });
+
+  it('截断但信封里没有变更字段：仍不产生 diff', () => {
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'patch',
+      input: { patchText: '...' },
+      output: '{"success":true,"files":',
+    });
+
+    expect(data.diffView).toBeUndefined();
+  });
+
+  it('完整输出不受修复路径影响（不标注截断）', () => {
+    const output = JSON.stringify({
+      filediff: { additions: 1, after: 'b', before: 'a', deletions: 1, file: '/repo/a.md' },
+      success: true,
+    });
+
+    const data = resolveToolCallCardDisplayData({
+      toolName: 'edit',
+      input: { filePath: '/repo/a.md' },
+      output,
+    });
+
+    expect(data.diffView?.truncated).toBeUndefined();
+    expect(data.diffView?.summary).not.toContain('输出可能不完整');
+    expect(data.diffView?.filePath).toBe('/repo/a.md');
+  });
+});

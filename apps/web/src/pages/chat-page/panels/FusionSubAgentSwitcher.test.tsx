@@ -15,6 +15,7 @@ function makeItem(sessionId: string, overrides: Partial<SubAgentRunItem> = {}): 
     status: 'running',
     taskLabel: `任务 ${sessionId}`,
     title: `子代理 ${sessionId}`,
+    sequence: 1,
     messageCount: 0,
     ...overrides,
   };
@@ -57,9 +58,9 @@ describe('FusionSubAgentSwitcher', () => {
     expect(tablist).not.toBeNull();
     expect(chips).toHaveLength(3);
     expect(chips.map((chip) => chip.textContent)).toEqual([
-      '子代理 child-1运行中',
-      '子代理 child-2运行中',
-      '子代理 child-3运行中',
+      '#1子代理 child-1运行中',
+      '#1子代理 child-2运行中',
+      '#1子代理 child-3运行中',
     ]);
     expect(chips[0]?.getAttribute('title')).toBe('子代理 child-1');
   });
@@ -184,5 +185,48 @@ describe('FusionSubAgentSwitcher', () => {
 
     expect(chips[0]?.textContent).toContain('任务标签');
     expect(chips[1]?.textContent).toContain('explore');
+  });
+
+  it('序号徽章跟随 item.sequence 渲染，sequence 缺失时不渲染', () => {
+    renderSwitcher([
+      makeItem('child-1', { sequence: 2 }),
+      makeItem('child-2', { sequence: undefined }),
+    ]);
+
+    const chips = screen.getAllByRole('tab');
+
+    expect(chips[0]?.querySelector('.fusion-sub-agent-switcher__index')?.textContent).toBe('#2');
+    expect(chips[1]?.querySelector('.fusion-sub-agent-switcher__index')).toBeNull();
+  });
+
+  it('开启「仅活跃」后只保留 running / paused 的 chip', () => {
+    renderSwitcher([
+      makeItem('child-running', { status: 'running', sequence: 1 }),
+      makeItem('child-paused', { status: 'paused', sequence: 2 }),
+      makeItem('child-completed', { status: 'completed', sequence: 3 }),
+      makeItem('child-failed', { status: 'failed', sequence: 4 }),
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: /仅显示活跃子代理/ }));
+
+    const chips = screen.getAllByRole('tab');
+    expect(chips).toHaveLength(2);
+    expect(chips.map((chip) => chip.getAttribute('data-status'))).toEqual(['running', 'paused']);
+
+    // 再点一次恢复全部
+    fireEvent.click(screen.getByRole('button', { name: /仅显示活跃子代理/ }));
+    expect(screen.getAllByRole('tab')).toHaveLength(4);
+  });
+
+  it('仅活跃且无活跃项时展示空态提示', () => {
+    renderSwitcher([
+      makeItem('child-1', { status: 'completed', sequence: 1 }),
+      makeItem('child-2', { status: 'failed', sequence: 2 }),
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: /仅显示活跃子代理/ }));
+
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.getByText('暂无活跃子代理')).not.toBeNull();
   });
 });

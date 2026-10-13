@@ -2,14 +2,17 @@ import { createHash } from 'node:crypto';
 import type { MCPToolDef, MCPToolResult } from '@openAwork/mcp-client';
 import type { MCPServerRef } from '@openAwork/skill-types';
 import { sqliteGet } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import { mergeBuiltinAndConfiguredMcps } from './builtin-mcps.js';
 import { sanitizePersistedMcpServers } from './mcp-settings-schemas.js';
 import { mcpConnectionPool } from '../skill/skill-mcp-connection-pool.js';
 import {
   clearCatalogSnapshot,
   ensureToolCatalogPoolListener,
+  getCatalogSnapshot,
   publishOAuthRedirect,
   setCatalogSnapshot,
+  setCatalogSnapshotToolFilter,
 } from './mcp-tool-catalog.js';
 import { McpOAuthProvider } from './mcp-oauth-provider.js';
 import {
@@ -31,6 +34,16 @@ import {
 // `setCatalogSnapshot` (below) is then automatically refreshed when
 // the underlying server pushes an update.
 ensureToolCatalogPoolListener();
+
+// Enforce the catalog's "post `disabledTools` filter" contract at the single
+// write choke point. Without this, a server-config change would be enforced at
+// call time (`callMcpToolForSession`) while the push-driven refresh could still
+// hand the model a tool it can never call. Both helper functions are hoisted
+// declarations in this module, so referencing them at load time is safe.
+setCatalogSnapshotToolFilter(({ userId, serverId, tools }) => {
+  const server = loadConfiguredMcpServersForUser(userId).find((entry) => entry.id === serverId);
+  return filterEnabledMcpTools(tools, server?.disabledTools);
+});
 
 interface UserSettingRow {
   value: string;
@@ -155,10 +168,47 @@ export function getConfiguredServerByIdForUser(
   return getConfiguredServerById(userId, serverId);
 }
 
+/**
+ * 归一化用于「id / 展示名」比对键：忽略大小写与空格、下划线、短横线差异，
+ * 这样 `Open WebSearch`、`open-websearch`、`open_websearch` 都能命中同一项。
+ */
+function normalizeMcpLookupKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
+/**
+ * 把「serverId 不存在」渲染成**可自我纠正**的错误信息。
+ *
+ * `serverId` 是模型的入参，而模型经常把**展示名**当 id 传（2026-10-12 线上排障：
+ * 传入 `Open WebSearch`，真实 id 是 `open_websearch`）。旧文案
+ * `Configured MCP server not found: Open WebSearch` 既不给可用 id、也不指出
+ * 「你传的是名称」，调用方只能原样重试。这里额外做两件事：
+ *   1. 用归一化键按展示名反查真实 id 并直接告诉调用方；
+ *   2. 无论是否命中，都附上可用 id 列表，让下一次调用能自纠正。
+ */
+function describeUnknownMcpServer(
+  servers: readonly ConfiguredMCPServer[],
+  serverId: string,
+): string {
+  const normalized = normalizeMcpLookupKey(serverId);
+  const byName = servers.find((entry) => normalizeMcpLookupKey(entry.name) === normalized);
+  const availableIds = servers.map((entry) => entry.id).sort((a, b) => a.localeCompare(b));
+  const available =
+    availableIds.length > 0 ? availableIds.join(', ') : '（当前用户没有可用的 MCP server）';
+  const hint = byName
+    ? `传入的是展示名 "${serverId}"，该 server 的正确 id 是 "${byName.id}"，请改用 id 调用。`
+    : `未找到 id 为 "${serverId}" 的 MCP server。`;
+  return `Configured MCP server not found: ${serverId}. ${hint}可用 id：${available}。`;
+}
+
 function getConfiguredServerById(userId: string, serverId: string): ConfiguredMCPServer {
-  const server = loadConfiguredMcpServersForUser(userId).find((entry) => entry.id === serverId);
+  const servers = loadConfiguredMcpServersForUser(userId);
+  const server = servers.find((entry) => entry.id === serverId);
   if (!server) {
-    throw new Error(`Configured MCP server not found: ${serverId}`);
+    throw new Error(describeUnknownMcpServer(servers, serverId));
   }
   if (!server.enabled) {
     throw new Error(`Configured MCP server is disabled: ${serverId}`);
@@ -328,6 +378,57 @@ function isRuntimeVirtualBuiltinMcpServer(server: ConfiguredMCPServer): boolean 
   );
 }
 
+/**
+ * 后台刷新去重：同一 `(userId, poolKey)` 只允许一个在途刷新，避免并发
+ * 请求各自拉起一次「重连 + listTools」。
+ */
+const backgroundCatalogRefreshInFlight = new Set<string>();
+
+/**
+ * Serve-stale + background-refresh 的重连路径。
+ *
+ * 连接池空闲 5 分钟即清理连接（`IDLE_TIMEOUT_MS`），但工具目录快照仍在
+ * catalog 缓存里。此前空闲后的第一次目录读取要在请求路径上真实重连
+ * （stdio spawn / SSE 握手，单 server 握手超时 30s，连接类错误还会重试
+ * 3 次），`/capabilities/session/:id` 等读取端点因此动辄数秒到数十秒。
+ *
+ * 这里改为：立即向调用方返回快照，把重连挪到后台——成功则刷新快照
+ * （订阅方按既有 push 语义收到更新），失败则丢弃快照，让下一次读取走
+ * 真实连接路径并如实暴露连接错误。手动「重试连接」
+ * （`retryMcpConnectionForUser`）仍强制真连，是显式的修复入口。
+ */
+function scheduleBackgroundCatalogRefresh(
+  userId: string,
+  server: ConfiguredMCPServer,
+  poolKey: string,
+): void {
+  const inflightKey = `${userId}:${poolKey}`;
+  if (backgroundCatalogRefreshInFlight.has(inflightKey)) {
+    return;
+  }
+  backgroundCatalogRefreshInFlight.add(inflightKey);
+  void mcpConnectionPool
+    .withOperationRetry(userId, poolKey, toMcpServerRef(server, userId), (adapter, serverId) =>
+      adapter.listTools(serverId),
+    )
+    .then((tools) => {
+      setCatalogSnapshot(userId, poolKey, server.id, tools);
+    })
+    .catch((error: unknown) => {
+      logGatewayWarn(
+        `[mcp-runtime] 后台刷新 MCP 工具目录失败（${server.id}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      // 快照对应的连接已丢失且重连失败——继续保留会把「已下线」的
+      // server 永远呈现为 connected；丢弃后下次读取走真实连接路径。
+      clearCatalogSnapshot(userId, poolKey);
+    })
+    .finally(() => {
+      backgroundCatalogRefreshInFlight.delete(inflightKey);
+    });
+}
+
 export async function listMcpToolsForUser(
   userId: string,
   filter?: { serverId?: string; allowedServerIds?: readonly string[] },
@@ -377,19 +478,41 @@ export async function listMcpToolsForUser(
           };
         }
 
+        const poolKey = getMcpPoolKey(server);
+        // Snapshot-first 快路径：连接已被空闲清理（或尚在建立）但快照仍在时，
+        // 立即返回缓存目录，把「重连 + listTools」挪到后台（见
+        // scheduleBackgroundCatalogRefresh）。空闲后的第一次目录读取因此不再
+        // 在请求路径上支付完整重连成本。
+        if (!mcpConnectionPool.isConnected(userId, poolKey)) {
+          const cachedTools = getCatalogSnapshot(userId, poolKey);
+          if (cachedTools) {
+            scheduleBackgroundCatalogRefresh(userId, server, poolKey);
+            return {
+              serverId: server.id,
+              serverName: server.name,
+              transport: server.transport,
+              enabled: true,
+              status: 'connected',
+              tools: cachedTools,
+            };
+          }
+        }
+
         // Persistent-pool path (PR-B): reuse the same connection across
         // turns instead of building/tearing-down a fresh
         // `MCPClientAdapterImpl` for every request. Mirrors opencode's
         // `MCP.Service` lifecycle (`@/temp/opencode/packages/opencode/src/mcp/index.ts:472-549`).
         // `withOperationRetry` will auto-reconnect transient
         // disconnects up to 3 times.
-        const poolKey = getMcpPoolKey(server);
-        const tools = await mcpConnectionPool.withOperationRetry(
+        const fetchedTools = await mcpConnectionPool.withOperationRetry(
           userId,
           poolKey,
           toMcpServerRef(server, userId),
           (adapter, serverId) => adapter.listTools(serverId),
         );
+        // 目录返回值与快照都必须过滤：模型不应看到永远调不通的工具
+        // （`callMcpToolForSession` 会在执行侧拒绝 `disabledTools`）。
+        const tools = filterEnabledMcpTools(fetchedTools, server.disabledTools);
         // Warm the per-user catalog cache so PR-C's flattened LLM
         // tool dictionary can read a stable snapshot, and so the
         // pool's `tools/list_changed` listener has somewhere to
@@ -513,12 +636,14 @@ export async function retryMcpConnectionForUser(
 
   const startedAt = Date.now();
   try {
-    const tools = await mcpConnectionPool.withOperationRetry(
+    const fetchedTools = await mcpConnectionPool.withOperationRetry(
       userId,
       poolKey,
       toMcpServerRef(server, userId),
       (adapter, sid) => adapter.listTools(sid),
     );
+    // 「重试连接」按钮的 toolCount 与目录快照一致，同样排除被禁用的工具。
+    const tools = filterEnabledMcpTools(fetchedTools, server.disabledTools);
     setCatalogSnapshot(userId, poolKey, server.id, tools);
     return {
       serverId: server.id,

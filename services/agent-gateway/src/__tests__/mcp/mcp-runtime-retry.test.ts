@@ -439,7 +439,10 @@ describe('retryMcpConnectionForUser', () => {
     const result = await retryMcpConnectionForUser(USER_ID, 'open_websearch');
 
     expect(result.status).toBe('connected');
-    expect(result.toolCount).toBe(3);
+    // builtin-mcps.ts 已把 open_websearch 的 `search` 默认收口
+    // （联网搜索由网关原生 websearch 工具承担），只剩取正文 / README。
+    expect(result.toolCount).toBe(2);
+    expect(result.error).toBeUndefined();
     expect(poolMock.withOperationRetryMock).not.toHaveBeenCalled();
   });
 });
@@ -524,5 +527,245 @@ describe('getMcpPoolKey config fingerprint', () => {
     const second = getMcpPoolKey({ ...STDIO_BASE, headers: { a: 'b' } });
 
     expect(second).toBe(first);
+  });
+});
+
+/**
+ * 回归：`disabledTools` 必须在**目录**与**执行**两侧语义一致。
+ *
+ * 修复前 pool 路径（含 `tools/list_changed` 推送刷新）写入快照时不过滤，
+ * 而 `callMcpToolForSession` 在调用时拒绝 —— 模型因此会看到一个永远调不通的
+ * 工具，白白消耗一次调用（与排障包里 `tool_invoke` 反复失败同一类问题）。
+ * 现在过滤统一收敛在 `setCatalogSnapshot` 的写入入口。
+ */
+describe('catalog snapshot —— disabledTools 写入即过滤', () => {
+  /** MCPToolDef 的最小合法形状（与同文件其它用例保持一致）。 */
+  const toolDef = (name: string) => ({ name, description: '', inputSchema: {} as never });
+
+  beforeEach(() => {
+    dbMock.rows.clear();
+    poolMock.resetSpies();
+    clearAllCatalogSnapshots();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('推送刷新写入的快照排除被禁用的工具', () => {
+    const configured: ConfiguredMCPServer = { ...STDIO_BASE, disabledTools: ['write_file'] };
+    setUserMcpServers([configured]);
+    const poolKey = getMcpPoolKey(configured);
+
+    // 模拟 pool 的 `tools/list_changed` 推送路径：拿到的是服务端全量工具。
+    setCatalogSnapshot(USER_ID, poolKey, 'fs', [toolDef('read_file'), toolDef('write_file')]);
+
+    expect(getCatalogSnapshot(USER_ID, poolKey)).toEqual([toolDef('read_file')]);
+  });
+
+  it('没有 disabledTools 配置时快照原样保留', () => {
+    const configured: ConfiguredMCPServer = { ...STDIO_BASE };
+    setUserMcpServers([configured]);
+    const poolKey = getMcpPoolKey(configured);
+
+    setCatalogSnapshot(USER_ID, poolKey, 'fs', [toolDef('read_file'), toolDef('write_file')]);
+
+    expect(getCatalogSnapshot(USER_ID, poolKey)).toEqual([
+      toolDef('read_file'),
+      toolDef('write_file'),
+    ]);
+  });
+
+  it('禁用的工具不在目录返回值里（不是只在调用时拒绝）', async () => {
+    const configured: ConfiguredMCPServer = { ...STDIO_BASE, disabledTools: ['write_file'] };
+    setUserMcpServers([configured]);
+    poolMock.withOperationRetryMock.mockImplementation(async (_userId, _poolKey, _ref, op) => {
+      const fakeAdapter = {
+        listTools: vi.fn(async () => [toolDef('read_file'), toolDef('write_file')]),
+      };
+      return op(fakeAdapter as unknown as never, 'fs');
+    });
+
+    const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'fs' });
+    const tools = catalogs[0]?.tools ?? [];
+    expect(tools.map((entry) => entry.name)).toEqual(['read_file']);
+  });
+});
+
+/**
+ * 回归（2026-10-12 线上排障）：`tool_invoke` 的 `serverId` 是模型的入参，模型
+ * 把**展示名**当 id 传了（`Open WebSearch`，真实 id 是 `open_websearch`），
+ * 旧文案只有 `Configured MCP server not found: Open WebSearch` —— 既不给可用
+ * id，也不指出「你传的是名称」，调用方只能原样重试。现在必须能自纠正。
+ */
+describe('callMcpToolForSession — 未知 serverId 的可自我纠正提示', () => {
+  beforeEach(() => {
+    dbMock.rows.clear();
+    poolMock.resetSpies();
+    clearAllCatalogSnapshots();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('传入内置 server 的展示名时，直接给出正确 id', async () => {
+    await expect(
+      callMcpToolForSession('session-1', { serverId: 'Open WebSearch', toolName: 'search' }),
+    ).rejects.toThrow(/正确 id 是 "open_websearch"/);
+  });
+
+  it('无论是否命中展示名，都附上可用 id 列表', async () => {
+    const error = await callMcpToolForSession('session-1', {
+      serverId: 'does-not-exist',
+      toolName: 'search',
+    }).then(
+      () => null,
+      (err: unknown) => err as Error,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toContain('Configured MCP server not found: does-not-exist');
+    expect(error?.message).toContain('可用 id：');
+    // 内置 MCP 始终在可用集合里，模型据此即可改对。
+    expect(error?.message).toContain('open_websearch');
+  });
+
+  it('用户自定义 server 也参与展示名反查', async () => {
+    setUserMcpServers([{ ...STDIO_BASE, id: 'my-fs', name: 'My Filesystem' }]);
+
+    await expect(
+      callMcpToolForSession('session-1', { serverId: 'My Filesystem', toolName: 'read_file' }),
+    ).rejects.toThrow(/正确 id 是 "my-fs"/);
+  });
+});
+
+/**
+ * 快照优先读路径（2026-10-12 性能排障）：连接池空闲 5 分钟即清理连接，
+ * 此前空闲后的第一次 `listMcpToolsForUser` 要在请求路径上真实重连每个
+ * server（stdio spawn / SSE 握手，单 server 握手超时 30s）。现在命中
+ * 快照时必须立即返回缓存目录，把重连挪到后台刷新。
+ */
+describe('listMcpToolsForUser — 快照优先读路径', () => {
+  beforeEach(() => {
+    dbMock.rows.clear();
+    poolMock.resetSpies();
+    clearAllCatalogSnapshots();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('空闲清理后命中快照时立即返回缓存目录，并在后台重连刷新', async () => {
+    setUserMcpServers([STDIO_BASE]);
+    const poolKey = getMcpPoolKey({ ...STDIO_BASE });
+    const CACHED_TOOLS = [{ name: 'cached_tool', description: '', inputSchema: {} as never }];
+    setCatalogSnapshot(USER_ID, poolKey, 'fs', CACHED_TOOLS);
+
+    poolMock.isConnectedMock.mockReturnValue(false);
+    // 后台刷新挂起不返回——若实现错误地 await 了它，本测试会超时。
+    let resolveRefresh!: (tools: Array<{ name: string }>) => void;
+    poolMock.withOperationRetryMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+
+    const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'fs' });
+
+    expect(catalogs).toHaveLength(1);
+    expect(catalogs[0]?.status).toBe('connected');
+    expect(catalogs[0]?.tools).toEqual(CACHED_TOOLS);
+    // 后台刷新已排队（去重键只放行一个在途刷新）。
+    expect(poolMock.withOperationRetryMock).toHaveBeenCalledTimes(1);
+
+    resolveRefresh([{ name: 'fresh_tool' }]);
+    await vi.waitFor(() => {
+      expect(getCatalogSnapshot(USER_ID, poolKey)).toEqual([{ name: 'fresh_tool' }]);
+    });
+  });
+
+  it('同一 server 的并发读取只触发一次后台刷新', async () => {
+    setUserMcpServers([STDIO_BASE]);
+    setCatalogSnapshot(USER_ID, getMcpPoolKey({ ...STDIO_BASE }), 'fs', []);
+
+    poolMock.isConnectedMock.mockReturnValue(false);
+    poolMock.withOperationRetryMock.mockResolvedValue([]);
+
+    const [first, second] = await Promise.all([
+      listMcpToolsForUser(USER_ID, { serverId: 'fs' }),
+      listMcpToolsForUser(USER_ID, { serverId: 'fs' }),
+    ]);
+
+    expect(first[0]?.status).toBe('connected');
+    expect(second[0]?.status).toBe('connected');
+    expect(poolMock.withOperationRetryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('后台刷新失败时丢弃快照，下次读取回到真实连接路径', async () => {
+    setUserMcpServers([STDIO_BASE]);
+    const poolKey = getMcpPoolKey({ ...STDIO_BASE });
+    setCatalogSnapshot(USER_ID, poolKey, 'fs', [
+      { name: 'cached_tool', description: '', inputSchema: {} as never },
+    ]);
+
+    poolMock.isConnectedMock.mockReturnValue(false);
+    poolMock.withOperationRetryMock.mockRejectedValueOnce(new Error('connection lost'));
+
+    // 请求本身立即拿到缓存目录；后台刷新失败在稍后清理快照。
+    const staleCatalogs = await listMcpToolsForUser(USER_ID, { serverId: 'fs' });
+    expect(staleCatalogs[0]?.tools).toEqual([
+      { name: 'cached_tool', description: '', inputSchema: {} },
+    ]);
+
+    await vi.waitFor(() => {
+      expect(getCatalogSnapshot(USER_ID, poolKey)).toBeNull();
+    });
+
+    // 快照已被丢弃 → 下一次读取必须走 withOperationRetry 真实连接。
+    poolMock.withOperationRetryMock.mockImplementation(async (_u, _k, _r, op) => {
+      const fakeAdapter = { listTools: vi.fn(async () => [{ name: 'read_file' }]) };
+      return op(fakeAdapter as unknown as never, 'fs');
+    });
+    const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'fs' });
+
+    expect(catalogs[0]?.status).toBe('connected');
+    expect(catalogs[0]?.tools).toEqual([{ name: 'read_file' }]);
+    expect(poolMock.withOperationRetryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('无快照（冷启动）时仍在请求路径上真实连接', async () => {
+    setUserMcpServers([STDIO_BASE]);
+    poolMock.isConnectedMock.mockReturnValue(false);
+    poolMock.withOperationRetryMock.mockImplementation(async (_u, _k, _r, op) => {
+      const fakeAdapter = { listTools: vi.fn(async () => [{ name: 'read_file' }]) };
+      return op(fakeAdapter as unknown as never, 'fs');
+    });
+
+    const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'fs' });
+
+    expect(catalogs[0]?.status).toBe('connected');
+    expect(catalogs[0]?.tools).toEqual([{ name: 'read_file' }]);
+    expect(poolMock.withOperationRetryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('池内连接仍存活时不读快照，照常走 listTools 并回写快照', async () => {
+    setUserMcpServers([STDIO_BASE]);
+    const poolKey = getMcpPoolKey({ ...STDIO_BASE });
+    setCatalogSnapshot(USER_ID, poolKey, 'fs', [
+      { name: 'cached_tool', description: '', inputSchema: {} as never },
+    ]);
+
+    poolMock.isConnectedMock.mockReturnValue(true);
+    poolMock.withOperationRetryMock.mockImplementation(async (_u, _k, _r, op) => {
+      const fakeAdapter = { listTools: vi.fn(async () => [{ name: 'fresh_tool' }]) };
+      return op(fakeAdapter as unknown as never, 'fs');
+    });
+
+    const catalogs = await listMcpToolsForUser(USER_ID, { serverId: 'fs' });
+
+    expect(catalogs[0]?.tools).toEqual([{ name: 'fresh_tool' }]);
+    expect(getCatalogSnapshot(USER_ID, poolKey)).toEqual([{ name: 'fresh_tool' }]);
   });
 });

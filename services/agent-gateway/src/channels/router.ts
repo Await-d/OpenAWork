@@ -15,6 +15,12 @@ import { buildNoTextReplyMessage } from './channel-localization.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 import { buildChannelSessionKey, upsertChannelSession } from './channel-session-store.js';
 import {
+  deleteChannelHealthRecord,
+  markChannelSessionHealthy,
+  recordChannelHealthIssue,
+  recordChannelRunFailure,
+} from './channel-error-store.js';
+import {
   compactChannelConversation,
   getChannelUsageStats,
   resetChannelConversation,
@@ -117,6 +123,14 @@ const autoReply = new AutoReplyPipeline({
   }) => {
     const channel = channels.get(pluginId);
     if (!channel?.ownerUserId) {
+      // 连会话归属都拿不到时无处落 message_v2（没有 sessionId/userId），
+      // 但仍要留下频道级痕迹 —— 否则这条消息彻底消失且无任何线索。
+      recordChannelHealthIssue({
+        channelId: pluginId,
+        message: 'Channel owner is missing for auto reply session',
+        ...(channel ? { channelType: channel.type } : {}),
+        source: 'channel_run',
+      });
       throw new Error('Channel owner is missing for auto reply session');
     }
     const memberAcl = resolveChannelMemberAcl(channel, {
@@ -124,14 +138,27 @@ const autoReply = new AutoReplyPipeline({
       senderName,
     });
 
-    const sessionId = upsertChannelSession({
-      chatId,
-      actor: memberAcl.actor,
-      channel: memberAcl.effectiveChannel,
-      currentMessageId: messageId,
-      sessionKey: buildChannelSessionKey(pluginId, chatId),
-      userId: channel.ownerUserId,
-    });
+    let sessionId: string;
+    try {
+      sessionId = upsertChannelSession({
+        chatId,
+        actor: memberAcl.actor,
+        channel: memberAcl.effectiveChannel,
+        currentMessageId: messageId,
+        sessionKey: buildChannelSessionKey(pluginId, chatId),
+        userId: channel.ownerUserId,
+      });
+    } catch (error) {
+      recordChannelHealthIssue({
+        channelId: pluginId,
+        channelType: channel.type,
+        message: `创建/复用渠道会话失败：${error instanceof Error ? error.message : String(error)}`,
+        ownerUserId: channel.ownerUserId,
+        source: 'channel_run',
+        ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+      });
+      throw error;
+    }
     const clientRequestId = randomUUID();
     let partialText = '';
     // 部分更新是装饰性的流式中间态，失败绝不能回退一次已成功完成的运行。
@@ -168,11 +195,31 @@ const autoReply = new AutoReplyPipeline({
     await partialUpdates.flush();
 
     if (result.statusCode >= 400 || result.stopReason === 'error') {
-      throw new Error(
-        result.errorSummary ??
-          `Channel session ${sessionId} failed with status ${result.statusCode}`,
-      );
+      const errorSummary = result.errorSummary?.trim() || '';
+      // 错误码对齐内核 `STREAM_ERROR_MESSAGES` / `createStreamErrorChunk` 的词表，
+      // 让落库后的 `[错误: CODE]` 前缀能被同一个解析器还原成错误卡片。
+      const code = result.statusCode === 409 ? 'SESSION_ALREADY_RUNNING' : 'CHANNEL_RUN_FAILED';
+      const errorMessage =
+        errorSummary || `Channel session ${sessionId} failed (${result.statusCode})`;
+      // 先落库再抛：抛错只是把失败转成 IM 回复，落库才是给排查留的证据。
+      // 内核已在用户消息落库之后失败的，消息由内核写；在此之前 early-return 的
+      // （会话占用 409、模型绑定不可用），user + error 消息由这里补齐。
+      recordChannelRunFailure({
+        channelId: pluginId,
+        clientRequestId,
+        code,
+        message: errorMessage,
+        sessionId,
+        userId: channel.ownerUserId,
+        ...(errorSummary ? { detail: errorSummary } : {}),
+        userMessageText: message,
+      });
+      throw new Error(errorMessage);
     }
+
+    // 一轮跑通即视为恢复：否则 `sessions.last_error` 会永久钉住，让
+    // `findReusableChannelSession` 把刚成功的会话误判为不可复用。
+    markChannelSessionHealthy({ sessionId, userId: channel.ownerUserId });
 
     const latestAssistantMessage = listSessionMessagesV2({
       sessionId,
@@ -633,6 +680,10 @@ export async function channelRoutes(app: FastifyInstance): Promise<void> {
       const nextChannels = stored.filter((channel) => channel.id !== id);
       writeStoredChannels(user.sub, nextChannels);
       syncChannelCache(user.sub, nextChannels);
+      // 频道没了，它的健康留痕也失去归属。`owner_user_id` 的外键只在频道归属
+      // 恰好是该用户时才级联清理，这里显式删除，避免按 id 重建的同名频道继承
+      // 上一世的历史错误。
+      deleteChannelHealthRecord(id);
       step.succeed(undefined, { channelId: id });
       return reply.status(204).send();
     },

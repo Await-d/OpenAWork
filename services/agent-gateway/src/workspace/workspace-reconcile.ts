@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FileDiffContent } from '@openAwork/shared';
+import { countLineChanges, normalizeLineEndings } from './line-change-stats.js';
 import type { WorkspaceReviewChange } from './workspace-review.js';
 import { listWorkspaceReviewChanges } from './workspace-review.js';
 
@@ -88,8 +89,12 @@ export async function collectWorkspaceReconcileDiffs(input: {
       ? afterEntry.currentContent
       : readBatchedHeadContent(headContents, headPathFor(beforeEntry));
 
+    // 内容判等按换行符归一化后的文本比较：纯 CRLF / LF 改写不是内容改动，
+    // 不该产出一条「modified」条目（展示用的 before/after 仍保留原始文本）。
+    const contentsEquivalent =
+      normalizeLineEndings(beforeContent) === normalizeLineEndings(afterContent);
     if (
-      beforeContent === afterContent &&
+      contentsEquivalent &&
       buildChangeSignature(beforeEntry?.change) === buildChangeSignature(afterEntry?.change)
     ) {
       continue;
@@ -100,13 +105,14 @@ export async function collectWorkspaceReconcileDiffs(input: {
     }
 
     const effectiveStatus = afterEntry?.change.status ?? 'modified';
+    const { additions, deletions } = countLineChanges(beforeContent, afterContent);
 
     diffs.push({
       file: afterEntry?.change.path ?? beforeEntry?.change.path ?? path,
       before: beforeContent,
       after: afterContent,
-      additions: countAddedLines(beforeContent, afterContent),
-      deletions: countRemovedLines(beforeContent, afterContent),
+      additions,
+      deletions,
       status:
         effectiveStatus === 'added'
           ? 'added'
@@ -201,64 +207,5 @@ function readBatchedHeadContent(
   return contents.get(headPath) ?? '';
 }
 
-function countAddedLines(before: string, after: string): number {
-  const beforeLines = toComparableLines(before);
-  const afterLines = toComparableLines(after);
-  let additions = 0;
-  let beforeIndex = 0;
-  let afterIndex = 0;
-
-  while (beforeIndex < beforeLines.length || afterIndex < afterLines.length) {
-    const beforeLine = beforeLines[beforeIndex];
-    const afterLine = afterLines[afterIndex];
-    if (beforeLine === afterLine && beforeLine !== undefined) {
-      beforeIndex += 1;
-      afterIndex += 1;
-      continue;
-    }
-    if (afterLine !== undefined) {
-      additions += 1;
-      afterIndex += 1;
-    }
-    if (beforeLine !== undefined) {
-      beforeIndex += 1;
-    }
-  }
-
-  return additions;
-}
-
-function countRemovedLines(before: string, after: string): number {
-  const beforeLines = toComparableLines(before);
-  const afterLines = toComparableLines(after);
-  let deletions = 0;
-  let beforeIndex = 0;
-  let afterIndex = 0;
-
-  while (beforeIndex < beforeLines.length || afterIndex < afterLines.length) {
-    const beforeLine = beforeLines[beforeIndex];
-    const afterLine = afterLines[afterIndex];
-    if (beforeLine === afterLine && beforeLine !== undefined) {
-      beforeIndex += 1;
-      afterIndex += 1;
-      continue;
-    }
-    if (beforeLine !== undefined) {
-      deletions += 1;
-      beforeIndex += 1;
-    }
-    if (afterLine !== undefined) {
-      afterIndex += 1;
-    }
-  }
-
-  return deletions;
-}
-
-function toComparableLines(value: string): string[] {
-  const lines = value.split(/\r?\n/);
-  if (lines.at(-1) === '') {
-    lines.pop();
-  }
-  return lines;
-}
+// 行级计数与 EOL 归一化统一由 `./line-change-stats.js` 提供：这两份重复的
+// 「错位即双计」实现都已删除，避免再次漂移出 116/116 这类失真数字。

@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
 import {
+  claimComposerQueueItems,
   claimComposerQueueItem,
   clearComposerQueue,
   COMPOSER_QUEUE_CLAIM_LEASE_MS,
@@ -297,6 +298,27 @@ describe('claimComposerQueueItem（多端互斥）', () => {
 
     expect(claim('client-a', 'first')).toBe(true);
     expect(claim('client-b', 'second')).toBe(true);
+  });
+
+  it('批量 claim 在一次调用中返回逐条结果并保持条目级互斥', () => {
+    enqueue({ enqueuedAt: 1, itemId: 'batch-first', text: '第一条' });
+    enqueue({ enqueuedAt: 2, itemId: 'batch-held', text: '已占用' });
+    expect(claim('client-b', 'batch-held')).toBe(true);
+
+    const result = claimComposerQueueItems({
+      clientId: 'client-a',
+      itemIds: ['batch-first', 'batch-held', 'batch-missing', 'batch-first'],
+      leaseMs: COMPOSER_QUEUE_CLAIM_LEASE_MS,
+      now: NOW,
+      sessionId: SESSION_ID,
+      userId: OWNER_ID,
+    });
+
+    expect(result).toEqual([
+      { claimed: true, itemId: 'batch-first' },
+      { claimed: false, itemId: 'batch-held' },
+      { claimed: false, itemId: 'batch-missing' },
+    ]);
   });
 });
 

@@ -42,7 +42,15 @@ interface LegacyMessage {
   role?: string;
 }
 
+const SEARCH_HYDRATION_TTL_MS = 30_000;
+const lastSearchHydrationAtByUser = new Map<string, number>();
+
 export function hydrateLegacySessionMessagesForSearch(userId: string): void {
+  const now = Date.now();
+  const lastHydratedAt = lastSearchHydrationAtByUser.get(userId);
+  if (lastHydratedAt !== undefined && now - lastHydratedAt < SEARCH_HYDRATION_TTL_MS) {
+    return;
+  }
   const sessions = sqliteAll<LegacySessionRow>(
     `SELECT id, user_id, messages_json
      FROM sessions
@@ -108,6 +116,7 @@ export function hydrateLegacySessionMessagesForSearch(userId: string): void {
       });
     });
   });
+  lastSearchHydrationAtByUser.set(userId, now);
 }
 
 export function upsertSessionMessageSearchDocument(input: {

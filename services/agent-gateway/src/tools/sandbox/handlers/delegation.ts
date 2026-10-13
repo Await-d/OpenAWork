@@ -711,6 +711,12 @@ export async function handleTaskTool(ctx: SandboxHandlerContext): Promise<ToolCa
       tags: taskTags,
       clientRequestId:
         resolveTaskGraphTurnClientRequestId(sessionId, executionContext) ?? undefined,
+      // 工具结算前（pending / running 阶段）前端消息里没有 output，无法从输出
+      // 解析子会话 id；parentToolCallId 是 tool call ↔ task 记录的唯一关联键，
+      // 内联子代理卡片靠它在工具执行期间就能点击打开子会话预览。
+      ...(parentToolReference
+        ? { metadata: { parentToolCallId: parentToolReference.toolCallId } }
+        : {}),
     });
     dispatchedChildTaskId = childTask.id;
     if (canExecuteImmediately) {
@@ -748,6 +754,7 @@ export async function handleTaskTool(ctx: SandboxHandlerContext): Promise<ToolCa
       ...(requestedSkills.length > 0 ? { requestedSkills } : {}),
       sessionId: childSessionId,
       parentSessionId: sessionId,
+      ...(childTask.metadata ? { metadata: childTask.metadata } : {}),
     });
 
     if (shouldRunInBackground && childRequestData) {

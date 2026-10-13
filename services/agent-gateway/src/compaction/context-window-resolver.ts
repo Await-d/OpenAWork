@@ -13,7 +13,8 @@ import { parsePositiveOverride, resolveCompactionThreshold } from './compaction-
  * This module:
  * 1. Parses provider error responses to extract actual token limits
  * 2. Maintains a per-session "effective context window" that adjusts downward
- *    when the provider reports a lower limit than the preset
+ *    when the provider reports a lower limit than the effective window
+ *    (user挡位 or preset)
  * 3. Provides the resolved context window to the compaction trigger logic
  */
 
@@ -200,8 +201,10 @@ export function parseContextLimitError(error: unknown): ParsedContextLimitError 
  * have hardcoded context limits (e.g. GPT-5.5 via Codex = 400K), and
  * oh-my-opencode's ANTHROPIC_1M_CONTEXT env var pattern.
  *
- * These overrides take priority over the model preset's contextWindow when
- * the provider/relay is known to have a lower limit than the model itself.
+ * These overrides are authoritative: once configured they replace the model
+ * preset's contextWindow (the catalog estimate may not match the relay's real
+ * limit in either direction). Only a runtime-discovered provider limit can
+ * tighten them downward.
  *
  * Sources (checked in order):
  * 1. User settings in database (per-provider model contextWindow config)
@@ -324,12 +327,14 @@ export function recordDiscoveredContextWindow(
 /**
  * Resolve the effective context window for a given user+model combination.
  *
- * Priority (highest to lowest):
- * 1. Discovered limit from provider error (runtime, cached)
- * 2. Environment variable override (CONTEXT_WINDOW_OVERRIDE_*)
- * 3. User-configured model contextWindow (from AIModelConfig in provider settings DB)
- *    — This is the primary mechanism for users to set per-provider limits.
- *    — e.g. User configures GPT-5.5 via relay X with contextWindow=400000
+ * Effective window (highest priority first):
+ * 1. Discovered limit from a provider error (runtime, cached) — the only value
+ *    that can tighten the window below the user-configured挡位.
+ * 2. User挡位 contextWindowOverride (from AIModelConfig in provider settings DB)
+ *    and env override (CONTEXT_WINDOW_OVERRIDE_* / CLAUDE_CODE_AUTO_COMPACT_WINDOW);
+ *    when both are set the tighter one wins. The挡位 is authoritative: it replaces
+ *    the model preset's contextWindow instead of being min'd against it.
+ * 3. Model preset contextWindow (catalog estimate).
  * 4. Fallback default (128K)
  *
  * This mirrors the combined approach of:
@@ -338,7 +343,7 @@ export function recordDiscoveredContextWindow(
  * - oh-my-opencode's parser.ts: runtime error-based discovery (→ cache)
  *
  * Example: GPT-5.5 has contextWindow=1M from models.dev sync, but:
- * - User sets contextWindow=400000 in provider settings → uses 400K (priority 3)
+ * - User sets contextWindow=400000 in provider settings → uses 400K (priority 2)
  * - Or CONTEXT_WINDOW_OVERRIDE_GPT_5_5=400000 is set → uses 400K (priority 2)
  * - Or relay returns "exceeds 400000 maximum" → caches 400K (priority 1)
  */

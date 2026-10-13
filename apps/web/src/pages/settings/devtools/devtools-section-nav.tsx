@@ -6,7 +6,7 @@ import {
   subtleButtonInteractionProps,
 } from './devtools-workbench-primitives.js';
 
-export type DevtoolsSectionId = 'overview' | 'diagnostics' | 'logs' | 'workers';
+export type DevtoolsSectionId = 'overview' | 'diagnostics' | 'logs' | 'channel' | 'workers';
 
 export interface DevtoolsSectionNavItem {
   id: DevtoolsSectionId;

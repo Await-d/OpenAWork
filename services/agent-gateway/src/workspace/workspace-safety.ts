@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, promises as fsp } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { defaultIgnoreManager } from '@openAwork/agent-core';
 import {
@@ -121,6 +121,30 @@ export function resolveSnapshotWorkspaceRoot(input: {
   return resolveUnboundSessionWorkspaceFallback();
 }
 
+/**
+ * 「必须绑定工作区」的会话判定，作用于已取出的会话行（role_layer /
+ * team_parent_session_id / metadata.teamWorkspaceId 任一存在即必须绑定）。
+ */
+function requiresBoundWorkspaceFromSessionRow(
+  row: SessionWorkspacePolicyRow,
+  metadata: Record<string, unknown>,
+): boolean {
+  if (typeof row.role_layer === 'string' && row.role_layer.trim().length > 0) {
+    return true;
+  }
+
+  if (
+    typeof row.team_parent_session_id === 'string' &&
+    row.team_parent_session_id.trim().length > 0
+  ) {
+    return true;
+  }
+
+  return (
+    typeof metadata['teamWorkspaceId'] === 'string' && metadata['teamWorkspaceId'].trim().length > 0
+  );
+}
+
 export function requiresBoundSessionWorkspace(sessionId: string): boolean {
   const row = sqliteGet<SessionWorkspacePolicyRow>(
     `SELECT metadata_json, user_id, role_layer, team_parent_session_id
@@ -133,21 +157,58 @@ export function requiresBoundSessionWorkspace(sessionId: string): boolean {
     return false;
   }
 
-  if (typeof row.role_layer === 'string' && row.role_layer.trim().length > 0) {
-    return true;
+  return requiresBoundWorkspaceFromSessionRow(row, parseSessionMetadataJson(row.metadata_json));
+}
+
+/**
+ * 文件读取端点的「未绑定会话默认工作区」回退根。
+ *
+ * 与工具执行根 / 快照根（`assertSessionWorkingDirectory`、
+ * `resolveSnapshotWorkspaceRoot`）保持同一口径：
+ *   1. 会话不存在或不属于该用户 → null（借用他人 sessionId 不获得回退）；
+ *   2. 会话已绑定工作目录（含 team / task 子会话的父链继承）→ null，
+ *      已绑定的路径绝不被静默改写到默认工作区；
+ *   3. team / task 子会话（`requiresBoundSessionWorkspace`）→ null，
+ *      它们必须绑定工作区，未绑定时按「不可用」处理；
+ *   4. 其余未绑定的普通 chat 会话 → 回退默认工作区
+ *      （`resolveUnboundSessionWorkspaceFallback()`）。
+ *
+ * 返回值可能不在 `WORKSPACE_ROOT(S)` 白名单内，调用方需用
+ * `resolveWorkspaceEntryPathWithinRoot` 这类不做白名单校验的解析器并使用它。
+ */
+export function resolveUnboundSessionFallbackRoot(input: {
+  sessionId?: string | undefined;
+  userId: string;
+}): string | null {
+  if (!input.sessionId) {
+    return null;
   }
 
-  if (
-    typeof row.team_parent_session_id === 'string' &&
-    row.team_parent_session_id.trim().length > 0
-  ) {
-    return true;
-  }
-
-  const metadata = parseSessionMetadataJson(row.metadata_json);
-  return (
-    typeof metadata['teamWorkspaceId'] === 'string' && metadata['teamWorkspaceId'].trim().length > 0
+  const row = sqliteGet<SessionWorkspacePolicyRow>(
+    `SELECT metadata_json, user_id, role_layer, team_parent_session_id
+       FROM sessions
+      WHERE id = ? AND user_id = ?
+      LIMIT 1`,
+    [input.sessionId, input.userId],
   );
+  if (!row) {
+    return null;
+  }
+
+  const bound = resolveSessionWorkspacePath({
+    metadataJson: row.metadata_json,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+  if (bound) {
+    return null;
+  }
+
+  if (requiresBoundWorkspaceFromSessionRow(row, parseSessionMetadataJson(row.metadata_json))) {
+    return null;
+  }
+
+  return resolveUnboundSessionWorkspaceFallback();
 }
 
 const UNBOUND_WORKSPACE_DIR_NAME = 'OpenAWork';
@@ -335,6 +396,21 @@ export function assertSessionWorkspacePath(input: {
     throw new Error(`Target path is outside current session workspace: ${result.safePath}`);
   }
   return result.safePath;
+}
+
+/**
+ * 编辑类工具只能作用于普通文件。字符设备(如 `/dev/null`)读出来是空内容,
+ * FIFO 读取会阻塞,目录要到写入时才报晦涩错误,这些目标都必须在读写前拒绝。
+ * 路径不存在时放行,由调用方按「新建文件」或「文件不存在」分支处理。
+ */
+export async function assertRegularFileIfExists(filePath: string): Promise<void> {
+  const stats = await fsp.stat(filePath).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  });
+  if (stats && !stats.isFile()) {
+    throw new Error(`Not a regular file, refusing to modify: ${filePath}`);
+  }
 }
 
 export function resolveWorkspaceEntryPathForRequest(input: {

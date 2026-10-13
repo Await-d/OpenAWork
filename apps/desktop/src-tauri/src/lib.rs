@@ -2279,7 +2279,11 @@ fn create_island_window(app: &tauri::AppHandle) -> tauri::Result<tauri::WebviewW
     tauri::WebviewWindowBuilder::new(
         app,
         ISLAND_WINDOW_LABEL,
-        tauri::WebviewUrl::App("index.html".into()),
+        // island 专属入口(island.html):只加载 island 组件 + island.css。
+        // 不能复用主窗口 index.html —— 全局 CSS(Monaco / loaders 等)里的
+        // filter / backdrop 声明在 WebKitGTK 透明窗口上会让浮窗合成输出
+        // 整帧丢失,表现为浮窗「完全透明」(详见 island.css 头注释)。
+        tauri::WebviewUrl::App("island.html".into()),
     )
     .title("OpenAWork")
     .inner_size(width, height)

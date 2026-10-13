@@ -237,3 +237,75 @@ describe('GET /sessions/:sessionId', () => {
     }
   });
 });
+
+describe('GET /sessions/:sessionId/messages', () => {
+  it('uses a stable cursor to page older messages without changing chronological order', async () => {
+    seedMessage('user', '第一页前', 100);
+    seedMessage('assistant', '第二页前', 200);
+    seedMessage('user', '最新消息', 300);
+
+    const app = await buildApp();
+    try {
+      const firstPage = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/messages?limit=2`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(firstPage.statusCode).toBe(200);
+      const first = firstPage.json() as {
+        messages: Array<{ content: Array<{ text?: string }>; role: string }>;
+        more: boolean;
+        nextCursor?: string;
+      };
+      expect(first.more).toBe(true);
+      expect(first.nextCursor).toBeTruthy();
+      expect(first.messages.map((message) => message.content[0]?.text)).toEqual([
+        '第二页前',
+        '最新消息',
+      ]);
+
+      const secondPage = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/messages?limit=2&before=${encodeURIComponent(first.nextCursor ?? '')}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(secondPage.statusCode).toBe(200);
+      const second = secondPage.json() as {
+        messages: Array<{ content: Array<{ text?: string }>; role: string }>;
+        more: boolean;
+      };
+      expect(second.more).toBe(false);
+      expect(second.messages.map((message) => message.content[0]?.text)).toEqual(['第一页前']);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a malformed `before` cursor with 400 instead of 500', async () => {
+    seedMessage('user', '任意消息', 100);
+
+    const app = await buildApp();
+    try {
+      // 无法解码为合法 JSON 的 base64url 串：校验失败必须在边界层返回 400,
+      // 而不是穿透到 decodeCursor 的 JSON.parse 变成 500。
+      const undecodable = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/messages?before=${encodeURIComponent('!!!not-a-cursor!!!')}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(undecodable.statusCode).toBe(400);
+
+      // 可解码但形状不对（缺少 time / id 字段）。
+      const wrongShape = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/messages?before=${encodeURIComponent(
+          Buffer.from(JSON.stringify({ foo: 1 })).toString('base64url'),
+        )}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(wrongShape.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+});

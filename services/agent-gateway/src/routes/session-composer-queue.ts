@@ -23,8 +23,10 @@ import { sqliteGet } from '../infra/db.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseParams } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import { getAnyInFlightStreamRequestForSession } from './stream-cancellation.js';
 import {
   claimComposerQueueItem,
+  claimComposerQueueItems,
   clearComposerQueue,
   COMPOSER_QUEUE_ATTACHMENT_MAX_COUNT,
   COMPOSER_QUEUE_CLAIM_LEASE_MS,
@@ -71,6 +73,17 @@ const queueItemParamsSchema = z.object({
  */
 const claimBodySchema = z.object({
   clientId: z.string().min(1).max(200),
+  leaseMs: z
+    .number()
+    .int()
+    .positive()
+    .max(5 * 60_000)
+    .optional(),
+});
+
+const claimManyBodySchema = z.object({
+  clientId: z.string().min(1).max(200),
+  itemIds: z.array(z.string().min(1).max(200)).min(1).max(32),
   leaseMs: z
     .number()
     .int()
@@ -204,7 +217,54 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
     },
   );
 
-  // 发送权独占。`claimed: false` 是正常结果（另一端正在发），不是错误——HTTP 仍回 200，
+  app.post(
+    '/sessions/:sessionId/composer-queue/claim',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = parseParams(sessionParamsSchema, request.params);
+      const { step } = startRequestWorkflow(
+        request,
+        'session.composer_queue.claim_many',
+        undefined,
+        {
+          sessionId,
+        },
+      );
+      const body = parseBody(claimManyBodySchema, request.body);
+      const itemIds = [...new Set(body.itemIds)];
+
+      assertSessionOwnership(sessionId, user.sub);
+      if (getAnyInFlightStreamRequestForSession({ sessionId, userId: user.sub })) {
+        const claims = itemIds.map((itemId) => ({
+          claimed: false,
+          itemId,
+          reason: 'session_running' as const,
+        }));
+        step.succeed(undefined, { count: claims.length, claimedCount: 0 });
+        return reply.send({ ok: true, claims });
+      }
+
+      const results = claimComposerQueueItems({
+        clientId: body.clientId,
+        itemIds,
+        leaseMs: body.leaseMs ?? COMPOSER_QUEUE_CLAIM_LEASE_MS,
+        now: Date.now(),
+        sessionId,
+        userId: user.sub,
+      });
+      const claims = results.map((result) =>
+        result.claimed ? result : { ...result, reason: 'held_by_other' as const },
+      );
+      step.succeed(undefined, {
+        count: claims.length,
+        claimedCount: claims.filter((claim) => claim.claimed).length,
+      });
+      return reply.send({ ok: true, claims });
+    },
+  );
+
+  // 发送权独占。`claimed: false` 是正常结果（另一端正在发，或会话仍在跑），不是错误——HTTP 仍回 200，
   // 由调用方决定跳过，不要让客户端把它当失败去重试，那会加剧竞争。
   app.post(
     '/sessions/:sessionId/composer-queue/:itemId/claim',
@@ -219,6 +279,14 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
       const body = parseBody(claimBodySchema, request.body);
 
       assertSessionOwnership(sessionId, user.sub);
+      // 会话仍在跑(单飞锁被占)时不发放租约,并用 reason 与「另一端正在发这条消息」区分:
+      // 后者是条目级的互斥,调用方应跳过;前者是会话级的占用,调用方应保留条目退避重试。
+      // 判据与 stream.ts 的 409 SESSION_ALREADY_RUNNING 完全同源(同一张 in-flight 注册表),
+      // 让「能不能发」在网关处一次问清,客户端无需再单独探测 /stream/active。
+      if (getAnyInFlightStreamRequestForSession({ sessionId, userId: user.sub })) {
+        step.succeed(undefined, { claimed: false, reason: 'session_running' });
+        return reply.send({ ok: true, claimed: false, reason: 'session_running' });
+      }
       const claimed = claimComposerQueueItem({
         clientId: body.clientId,
         itemId,

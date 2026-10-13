@@ -331,7 +331,9 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
         input.userId,
         input.route.model,
         parsed.maxTokens,
-        input.route.contextWindow,
+        // 以有效窗口（含挡位）为参照：挡位抬高后，高于模型预设但低于挡位的
+        // 真实上游限制同样需要缓存，否则每轮都会重复撞同一个错误。
+        effectiveContextWindow,
       );
     }
   }

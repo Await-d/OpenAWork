@@ -3,7 +3,10 @@ export type { ChatMessageProps } from './chat/ChatMessage.js';
 export { SubagentNoticeRow } from './chat/SubagentNoticeRow.js';
 export type { SubagentNoticeRowProps } from './chat/SubagentNoticeRow.js';
 export { SubagentResultCard } from './chat/SubagentResultCard.js';
-export type { SubagentResultCardProps } from './chat/SubagentResultCard.js';
+export type {
+  SubagentResultBodyRenderer,
+  SubagentResultCardProps,
+} from './chat/SubagentResultCard.js';
 export { StreamRenderer } from './chat/StreamRenderer.js';
 export type { StreamRendererProps } from './chat/StreamRenderer.js';
 export { ToolCallCard } from './tools/ToolCallCard.js';

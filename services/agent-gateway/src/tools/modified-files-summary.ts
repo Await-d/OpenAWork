@@ -6,6 +6,7 @@ import type {
   ModifiedFilesSummaryContent,
   ToolCallObservabilityAnnotation,
 } from '@openAwork/shared';
+import { countLineChanges } from '../workspace/line-change-stats.js';
 
 export function traceFileDiffs(input: {
   clientRequestId: string;
@@ -91,12 +92,19 @@ function toFileDiff(value: unknown): FileDiffContent[] {
     return [];
   }
 
+  // 缺任一数字时才算一次（多重集口径，见 `workspace/line-change-stats`）。
+  const countedChanges =
+    typeof record['additions'] === 'number' && typeof record['deletions'] === 'number'
+      ? null
+      : countLineChanges(before, after);
   const additions =
-    typeof record['additions'] === 'number' ? record['additions'] : countAddedLines(before, after);
+    typeof record['additions'] === 'number'
+      ? record['additions']
+      : (countedChanges?.additions ?? 0);
   const deletions =
     typeof record['deletions'] === 'number'
       ? record['deletions']
-      : countRemovedLines(before, after);
+      : (countedChanges?.deletions ?? 0);
   const action = readString(record['action']);
   const status =
     record['status'] === 'added' ||
@@ -201,54 +209,4 @@ function readString(value: unknown): string | undefined {
 function trimFilePath(value: string): string {
   const parts = value.split('/').filter(Boolean);
   return parts.slice(-2).join('/') || value;
-}
-
-function countAddedLines(before: string, after: string): number {
-  const beforeLines = before.split(/\r?\n/);
-  const afterLines = after.split(/\r?\n/);
-  let additions = 0;
-  let beforeIndex = 0;
-  let afterIndex = 0;
-  while (beforeIndex < beforeLines.length || afterIndex < afterLines.length) {
-    const beforeLine = beforeLines[beforeIndex];
-    const afterLine = afterLines[afterIndex];
-    if (beforeLine === afterLine && beforeLine !== undefined) {
-      beforeIndex += 1;
-      afterIndex += 1;
-      continue;
-    }
-    if (afterLine !== undefined) {
-      additions += 1;
-      afterIndex += 1;
-    }
-    if (beforeLine !== undefined) {
-      beforeIndex += 1;
-    }
-  }
-  return additions;
-}
-
-function countRemovedLines(before: string, after: string): number {
-  const beforeLines = before.split(/\r?\n/);
-  const afterLines = after.split(/\r?\n/);
-  let deletions = 0;
-  let beforeIndex = 0;
-  let afterIndex = 0;
-  while (beforeIndex < beforeLines.length || afterIndex < afterLines.length) {
-    const beforeLine = beforeLines[beforeIndex];
-    const afterLine = afterLines[afterIndex];
-    if (beforeLine === afterLine && beforeLine !== undefined) {
-      beforeIndex += 1;
-      afterIndex += 1;
-      continue;
-    }
-    if (beforeLine !== undefined) {
-      deletions += 1;
-      beforeIndex += 1;
-    }
-    if (afterLine !== undefined) {
-      afterIndex += 1;
-    }
-  }
-  return deletions;
 }

@@ -1,6 +1,8 @@
 import React from 'react';
 import type { WorkerEntry } from '@openAwork/shared-ui';
 import type {
+  DevtoolsChannelAuditRecord,
+  DevtoolsChannelRecord,
   DevtoolsSourceKey,
   DevtoolsSourceState,
   SettingsDiagnosticRecord,
@@ -29,6 +31,7 @@ import {
 import { DevtoolsOverviewSection } from './devtools-overview-section.js';
 import { DevtoolsDiagnosticsSection } from './devtools-diagnostics-section.js';
 import { DevtoolsLogsSection } from './devtools-logs-section.js';
+import { DevtoolsChannelSection } from './devtools-channel-section.js';
 import { DevtoolsWorkerSection } from './devtools-worker-section.js';
 import {
   buildErrorExportPayload,
@@ -48,10 +51,13 @@ interface DevtoolsTabContentProps {
   gatewayUrl: string;
   devLogs: SettingsDevLogRecord[];
   diagnostics: SettingsDiagnosticRecord[];
+  channelHealthRecords: DevtoolsChannelRecord[];
+  channelAuditLogs: DevtoolsChannelAuditRecord[];
   diagnosticsAvailableDates: string[];
   diagnosticsDateFilter: string | null;
   onSetDiagnosticsDateFilter: (date: string | null) => void;
   onClearDiagnostics: () => Promise<void>;
+  onClearChannelTroubleshooting: () => Promise<void>;
   onClearLogs: () => Promise<void>;
   sourceStates: Record<DevtoolsSourceKey, DevtoolsSourceState>;
   workers: WorkerEntry[];
@@ -114,10 +120,13 @@ export function DevtoolsTabContent({
   gatewayUrl,
   devLogs,
   diagnostics,
+  channelHealthRecords,
+  channelAuditLogs,
   diagnosticsAvailableDates,
   diagnosticsDateFilter,
   onSetDiagnosticsDateFilter,
   onClearDiagnostics,
+  onClearChannelTroubleshooting,
   onClearLogs,
   sourceStates,
   workers,
@@ -136,6 +145,8 @@ export function DevtoolsTabContent({
   const [copiedLogAction, setCopiedLogAction] = React.useState<string | null>(null);
   const copiedLogTimeoutRef = React.useRef<number | null>(null);
   const [workerQuery, setWorkerQuery] = React.useState('');
+  const [selectedChannelId, setSelectedChannelId] = React.useState<string | null>(null);
+  const [channelQuery, setChannelQuery] = React.useState('');
   const [selectedWorkerKey, setSelectedWorkerKey] = React.useState<string | null>(null);
   const [copiedWorkerAction, setCopiedWorkerAction] = React.useState<string | null>(null);
   const copiedWorkerTimeoutRef = React.useRef<number | null>(null);
@@ -145,6 +156,7 @@ export function DevtoolsTabContent({
   const anyRefreshableSourceLoading = [
     sourceStates.devLogs.status,
     sourceStates.diagnostics.status,
+    sourceStates.channelTroubleshooting.status,
     sourceStates.desktopAutomation.status,
     sourceStates.sshConnections.status,
     sourceStates.workers.status,
@@ -741,6 +753,11 @@ export function DevtoolsTabContent({
     workers,
   ]);
 
+  const faultyChannelCount = channelHealthRecords.filter(
+    (channel) => channel.lastError !== null,
+  ).length;
+  const channelIssueCount = faultyChannelCount + channelAuditLogs.length;
+
   const navItems: DevtoolsSectionNavItem[] = [
     {
       id: 'overview',
@@ -753,6 +770,12 @@ export function DevtoolsTabContent({
       label: '诊断',
       count: diagnostics.length,
       hasError: diagnostics.length > 0,
+    },
+    {
+      id: 'channel',
+      label: '频道路障',
+      count: channelIssueCount,
+      hasError: channelIssueCount > 0,
     },
     {
       id: 'logs',
@@ -867,6 +890,19 @@ export function DevtoolsTabContent({
           dateFilter={diagnosticsDateFilter}
           onSetDateFilter={onSetDiagnosticsDateFilter}
           onClearDiagnostics={onClearDiagnostics}
+        />
+      )}
+
+      {activeSection === 'channel' && (
+        <DevtoolsChannelSection
+          sourceState={sourceStates.channelTroubleshooting}
+          channels={channelHealthRecords}
+          auditLogs={channelAuditLogs}
+          selectedChannelId={selectedChannelId}
+          query={channelQuery}
+          onSetQuery={setChannelQuery}
+          onSelectChannel={setSelectedChannelId}
+          onClear={onClearChannelTroubleshooting}
         />
       )}
 

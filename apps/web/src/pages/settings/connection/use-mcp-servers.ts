@@ -103,10 +103,27 @@ export function useMcpServers({
   const [builtinMcpServers, setBuiltinMcpServers] = useState<MCPServerEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  /**
+   * 重拉运行状态（含工具明细）。`retryFeedback` 是纯前端字段，重拉后需要由
+   * 调用方按需补回。
+   */
+  const fetchStatuses = useCallback(async (): Promise<MCPServerStatus[] | null> => {
+    if (!token) return null;
+    try {
+      const data = (await createSettingsClient(gatewayUrl).getMcpStatus(token, {
+        includeTools: true,
+      })) as McpStatusPayload;
+      return (data.servers ?? []).map(toMcpServerStatus);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : '加载 MCP 服务失败');
+      logger.error('failed to load mcp statuses', error);
+      return null;
+    }
+  }, [gatewayUrl, token]);
+
   useEffect(() => {
     if (!token || !active) return;
-    const client = createSettingsClient(gatewayUrl);
-    void client
+    void createSettingsClient(gatewayUrl)
       .listMcpServers(token)
       .then((data) => {
         const payload = data as McpServersPayload;
@@ -118,17 +135,10 @@ export function useMcpServers({
         setLoadError(error instanceof Error ? error.message : '加载 MCP 服务失败');
         logger.error('failed to load mcp servers', error);
       });
-    void client
-      .getMcpStatus(token, { includeTools: true })
-      .then((data) => {
-        setMcpStatuses(((data as McpStatusPayload).servers ?? []).map(toMcpServerStatus));
-        setLoadError(null);
-      })
-      .catch((error: unknown) => {
-        setLoadError(error instanceof Error ? error.message : '加载 MCP 服务失败');
-        logger.error('failed to load mcp servers', error);
-      });
-  }, [gatewayUrl, token, active]);
+    void fetchStatuses().then((statuses) => {
+      if (statuses) setMcpStatuses(statuses);
+    });
+  }, [gatewayUrl, token, active, fetchStatuses]);
 
   const setMcpServers = useCallback(
     (updater: SetStateAction<MCPServerEntry[]>) => {
@@ -140,14 +150,23 @@ export function useMcpServers({
           builtinServers: builtinMcpServers,
         });
         if (token) {
-          void createSettingsClient(gatewayUrl).putMcpServers(token, {
-            servers: persistedServers,
-          });
+          // 保存会改动 enabled / disabledTools，网关侧保存成功后即断掉旧连接。
+          // PUT 完成后再拉一次目录，避免卡片计数与「管理工具」明细停留在
+          // 保存前的快照，用户必须手动刷新页面才能对齐。
+          void createSettingsClient(gatewayUrl)
+            .putMcpServers(token, { servers: persistedServers })
+            .then(() => fetchStatuses())
+            .then((statuses) => {
+              if (statuses) setMcpStatuses(statuses);
+            })
+            .catch((error: unknown) => {
+              logger.error('failed to persist mcp servers', error);
+            });
         }
         return next;
       });
     },
-    [token, gatewayUrl, builtinMcpServers],
+    [token, gatewayUrl, builtinMcpServers, fetchStatuses],
   );
 
   const onRetryMcp = useCallback(
@@ -169,21 +188,39 @@ export function useMcpServers({
             durationMs: number;
             error?: string;
           };
+          if (data.status === 'connected') {
+            // 重试成功只回填 toolCount 会让工具明细停留在旧快照——卡片显示
+            // 「3 tools」而「管理工具」仍只有 2 行。重拉完整目录，让计数与
+            // 明细来自同一次后端快照。
+            const refreshed = await fetchStatuses();
+            const retryFeedback = {
+              kind: 'ok' as const,
+              toolCount: data.toolCount,
+              durationMs: data.durationMs,
+            };
+            setMcpStatuses((prev) => {
+              if (refreshed) {
+                return refreshed.map((server) =>
+                  server.id === serverId ? { ...server, retryFeedback } : server,
+                );
+              }
+              // 刷新没成功：退回本地回填，至少保住本次重试的结果。
+              return prev.map((server) =>
+                server.id === serverId
+                  ? {
+                      ...server,
+                      status: 'connected' as const,
+                      toolCount: data.toolCount,
+                      retryFeedback,
+                    }
+                  : server,
+              );
+            });
+            return;
+          }
           setMcpStatuses((prev) =>
             prev.map((server) => {
               if (server.id !== serverId) return server;
-              if (data.status === 'connected') {
-                return {
-                  ...server,
-                  status: 'connected' as const,
-                  toolCount: data.toolCount,
-                  retryFeedback: {
-                    kind: 'ok' as const,
-                    toolCount: data.toolCount,
-                    durationMs: data.durationMs,
-                  },
-                };
-              }
               if (data.status === 'error') {
                 return {
                   ...server,
@@ -217,7 +254,7 @@ export function useMcpServers({
         }
       })();
     },
-    [token, gatewayUrl],
+    [token, gatewayUrl, fetchStatuses],
   );
 
   return { mcpServers, setMcpServers, mcpStatuses, onRetryMcp, loadError };

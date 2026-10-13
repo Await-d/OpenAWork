@@ -65,6 +65,7 @@ import {
   requestCurrentSessionRefresh,
   requestSessionListRefresh,
 } from '../../../utils/session/session-list-events.js';
+import { notifyQueuedMessageSendRejected } from '../../../utils/chat/composer-queue-events.js';
 import { prepareImageGenerationInput } from '.././conversation/composer/prepare-image-generation-input.js';
 import { prepareStandardChatSendInput } from '.././conversation/composer/prepare-standard-chat-send-input.js';
 import { deleteQueuedComposerFiles } from '.././conversation/composer/queued-composer-file-store.js';
@@ -161,6 +162,38 @@ function cleanupConsumedQueuedMessage(input: {
     .remove(token, sessionId, queuedMessageId)
     .catch((error: unknown) => {
       logger.warn('待发队列消费后清理失败', error);
+    });
+}
+
+/**
+ * 队列来源的发送被网关单飞锁拒成 `SESSION_ALREADY_RUNNING` 时的服务端兜底回流。
+ *
+ * 消费时刻（`cleanupConsumedQueuedMessage`）已经删掉了服务端记录；若只在编辑器侧
+ * 回填本地而网关记录缺失，下一轮 flush 会 claim 落空、把条目当作「他端持有」丢弃。
+ * 这里用原 itemId 幂等重写服务端记录（重复入队不产生第二条），保证哪怕编辑器已
+ * 卸载、回流事件无人接收，条目也只会晚发不会丢。
+ */
+function reEnqueueRejectedQueuedMessage(input: {
+  attachmentItems: AttachmentItem[];
+  gatewayUrl: string;
+  itemId: string;
+  sessionId: string;
+  text: string;
+  token: string | null;
+}): void {
+  const { attachmentItems, gatewayUrl, itemId, sessionId, text, token } = input;
+  if (!sessionId || !token || gatewayUrl.length === 0) {
+    return;
+  }
+  void createComposerQueueClient(gatewayUrl)
+    .enqueue(token, sessionId, {
+      attachmentItems: attachmentItems.map((attachment) => ({ ...attachment })),
+      itemId,
+      requiresAttachmentRebind: false,
+      text,
+    })
+    .catch((error: unknown) => {
+      logger.warn('被拒队列消息回流重排失败', error);
     });
 }
 
@@ -391,7 +424,11 @@ export async function runSendMessage(
       : null;
   if (
     (!trimmedSourceInput && (imageGenerationMode || effectiveFiles.length === 0)) ||
-    ((streaming || remoteSessionBusyState) && !matchedServerCommand && !matchedClientCommand) ||
+    // streamingRef 兜住「流已开、streaming 状态尚未提交」的窗口:只看 state 会漏判,
+    // 第二次发送会再起一个流,被网关单飞锁拒成 SESSION_ALREADY_RUNNING。
+    ((streaming || streamingRef.current || remoteSessionBusyState) &&
+      !matchedServerCommand &&
+      !matchedClientCommand) ||
     imageGenerationBusy
   ) {
     return false;
@@ -601,41 +638,46 @@ export async function runSendMessage(
   text = preparedStandardInput.text;
   const { requestInputParts, localRequestInputParts } = preparedStandardInput;
 
-  const { displayMessageForStream, requestStartedAt, requestText } = startStandardChatStream({
-    currentAssistantStreamMessageIdRef,
-    // 发送消息 = 用户明确回到最新：清除中断并把视口落到底部（与回底按钮同一原语）。
-    requestReturnToLatest: () => scrollToBottom('auto', 'latest-edge'),
-    ...(localRequestInputParts ? { localRequestInputParts } : {}),
-    onQueuedMessageConsumed: () => {
-      if (options?.queuedMessageId && queuedComposerScope) {
-        void deleteQueuedComposerFiles({
-          queueId: options.queuedMessageId,
-          scope: queuedComposerScope,
-        });
-      }
-    },
-    ...(requestInputParts ? { requestInputParts } : {}),
-    setActiveStreamFirstTokenLatencyMs,
-    setActiveStreamStartedAt,
-    setHasPendingFollowContent,
-    setMessages,
-    setReportedStreamUsage,
-    setSessionStateStatus,
-    setShowScrollToBottom,
-    setStoppingStream,
-    setStreamBuffer,
-    setStreamThinkingBlocks,
-    setStreamThinkingBuffer,
-    setStreaming,
-    stoppingStreamRef,
-    streamRevealNextAllowedAtRef,
-    streamRevealTargetCodePointsRef,
-    streamRevealTargetRef,
-    streamRevealVisibleCodePointCountRef,
-    streamRevealVisibleRef,
-    streamingRef,
-    text,
-  });
+  const { displayMessageForStream, requestStartedAt, requestText, userMessageId } =
+    startStandardChatStream({
+      currentAssistantStreamMessageIdRef,
+      // 发送消息 = 用户明确回到最新：清除中断并把视口落到底部（与回底按钮同一原语）。
+      requestReturnToLatest: () => scrollToBottom('auto', 'latest-edge'),
+      ...(localRequestInputParts ? { localRequestInputParts } : {}),
+      // 标准发送同样是「消费成功」出口:必须把服务端队列记录一起删掉。
+      // 只清本地附件而留下网关记录时,条目会在下一次水合时复活并被再发一遍;那条重发
+      // 往往撞在会话仍在运行的窗口上,被单飞锁拒成 SESSION_ALREADY_RUNNING——用户看到
+      // 的就是「当前会话已有请求正在运行。」
+      onQueuedMessageConsumed: () =>
+        cleanupConsumedQueuedMessage({
+          gatewayUrl,
+          queuedComposerScope,
+          queuedMessageId: options?.queuedMessageId,
+          sessionId: sid,
+          token,
+        }),
+      ...(requestInputParts ? { requestInputParts } : {}),
+      setActiveStreamFirstTokenLatencyMs,
+      setActiveStreamStartedAt,
+      setHasPendingFollowContent,
+      setMessages,
+      setReportedStreamUsage,
+      setSessionStateStatus,
+      setShowScrollToBottom,
+      setStoppingStream,
+      setStreamBuffer,
+      setStreamThinkingBlocks,
+      setStreamThinkingBuffer,
+      setStreaming,
+      stoppingStreamRef,
+      streamRevealNextAllowedAtRef,
+      streamRevealTargetCodePointsRef,
+      streamRevealTargetRef,
+      streamRevealVisibleCodePointCountRef,
+      streamRevealVisibleRef,
+      streamingRef,
+      text,
+    });
   // 第 1 轮的起点 = 请求起点；后续轮次由 `closeRoundIfGatewayAdvanced` 推进。
   setActiveStreamRoundStartedAt(requestStartedAt);
   const toolCallIds = new Set<string>();
@@ -1366,6 +1408,39 @@ export async function runSendMessage(
       requestSessionListRefresh();
     },
     onError: (code: string, message?: string, technicalDetail?: string) => {
+      // 队列来源的发送撞上单飞锁：回流重排，不按错误终态处理。
+      // 网关在落库用户消息**之前**就拒绝了这次请求，会话历史里不会有这条消息；弹
+      // 「当前会话已有请求正在运行。」只会让用户以为消息丢了。
+      // 回流必须排在 activeSessionRef 判定之前——用户可能已切走会话，但条目照样要回
+      // 服务端队列；本地回填由编辑器按 payload.sessionId 自行判定归属。
+      if (options?.queuedMessageId && code === 'SESSION_ALREADY_RUNNING') {
+        reEnqueueRejectedQueuedMessage({
+          attachmentItems: options.queuedAttachmentItems ?? [],
+          gatewayUrl,
+          itemId: options.queuedMessageId,
+          sessionId: sid,
+          text,
+          token,
+        });
+        notifyQueuedMessageSendRejected({
+          attachmentItems: options.queuedAttachmentItems ?? [],
+          files: options.queuedFiles ?? [],
+          itemId: options.queuedMessageId,
+          sessionId: sid,
+          text,
+        });
+        // 流状态复位只在仍停留在该会话时做：切走后这些 setter 属于新会话的视图，
+        // 旧流的清理已被切换路径处理过，这里再动会清掉新会话的实时状态。
+        if (activeSessionRef.current === sid) {
+          // 乐观用户气泡一并撤掉：消息未送达，不应留痕。
+          if (userMessageId) {
+            setMessages((previous) => previous.filter((item) => item.id !== userMessageId));
+          }
+          setSessionStateStatus('idle');
+          resetStreamState();
+        }
+        return;
+      }
       if (activeSessionRef.current !== sid) {
         requestSessionListRefresh();
         return;

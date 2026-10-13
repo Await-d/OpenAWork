@@ -63,13 +63,16 @@ export function parsePercentageOverride(value: string | undefined): number | und
 export function resolveCompactionThreshold(
   input: CompactionThresholdInput,
 ): CompactionThresholdContract {
+  const presetContextWindow = positiveInteger(input.modelContextWindow);
+  const overrideContextWindow = positiveInteger(input.contextWindowOverride);
+  const discoveredContextWindow = positiveInteger(input.discoveredContextWindow);
+  // 用户挡位是权威值：配置后直接作为有效窗口（可高于或低于模型预设——预设来自
+  // models.dev / 内置目录的估计，未必等于 relay 的实际上限），运行时从上游报错
+  // 发现的真实限制仍可向下收紧。未配置挡位时保持 min(模型预设, 发现值) 的既有
+  // 语义；全部缺失时回落 128K 兜底值。
   const modelContextWindow =
-    positiveInteger(input.modelContextWindow) ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const contextWindow = Math.min(
-    modelContextWindow,
-    positiveInteger(input.discoveredContextWindow) ?? modelContextWindow,
-    positiveInteger(input.contextWindowOverride) ?? modelContextWindow,
-  );
+    overrideContextWindow ?? presetContextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+  const contextWindow = Math.min(modelContextWindow, discoveredContextWindow ?? modelContextWindow);
   const summaryOutputTokens = Math.min(
     positiveInteger(input.modelMaxOutputTokens) ?? MAX_SUMMARY_OUTPUT_TOKENS,
     MAX_SUMMARY_OUTPUT_TOKENS,

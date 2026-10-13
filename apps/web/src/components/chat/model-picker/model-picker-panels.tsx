@@ -33,7 +33,7 @@ function formatContextWindow(value: number | undefined): string | null {
 }
 
 const CONTEXT_WINDOW_PRESETS = [
-  { value: undefined, label: '自动', detail: '使用模型上限' },
+  { value: undefined, label: '自动', detail: '使用模型预设' },
   { value: 272_000, label: '272K', detail: '适合常规长上下文' },
   { value: 400_000, label: '400K', detail: '适合中大型上下文' },
   { value: 1_000_000, label: '1M', detail: '适合超长上下文' },
@@ -917,11 +917,13 @@ export function ModelSettingsPopover({
     reasoningOptions,
   );
   const showFastSettings = providerType === 'openai';
-  const hasContextWindow = typeof contextWindow === 'number' && contextWindow > 0;
-  const effectiveContextWindow =
-    contextWindowOverride !== undefined && contextWindow !== undefined
-      ? Math.min(contextWindow, contextWindowOverride)
-      : (contextWindowOverride ?? contextWindow);
+  // 挡位是权威值：配置后直接生效（可高于模型预设），与网关解析口径一致；
+  // 未配置挡位时回落模型预设。预设缺失的拉取模型同样可以调挡位。
+  const effectiveContextWindow = contextWindowOverride ?? contextWindow;
+  const hasContextWindow =
+    effectiveContextWindow !== undefined &&
+    Number.isFinite(effectiveContextWindow) &&
+    effectiveContextWindow > 0;
   const selectedContextPreset = CONTEXT_WINDOW_PRESETS.find((preset) =>
     sameContextWindow(preset.value, contextWindowOverride),
   );
@@ -1458,9 +1460,11 @@ export function ModelSettingsPopover({
                 >
                   自动压缩上下文
                 </span>
-                <span style={{ color: 'var(--fg-subtle)', fontSize: 9 }}>
-                  模型上限 {modelContextWindowLabel}
-                </span>
+                {contextWindow !== undefined && contextWindow > 0 ? (
+                  <span style={{ color: 'var(--fg-subtle)', fontSize: 9 }}>
+                    模型预设 {modelContextWindowLabel}
+                  </span>
+                ) : null}
               </div>
               <div
                 style={{
@@ -1561,8 +1565,8 @@ export function ModelSettingsPopover({
                   (selectedContextPreset
                     ? `当前：${selectedContextPreset.label}，统计与自动压缩会立即使用有效窗口。`
                     : contextWindowOverride
-                      ? `当前：${formatContextWindow(contextWindowOverride)}`
-                      : '挡位只会降低模型上限，不会超过模型能力。')}
+                      ? `当前：${formatContextWindow(contextWindowOverride)}，统计与自动压缩会立即使用有效窗口。`
+                      : '未配置挡位时按模型预设统计；配置后挡位为权威值，自动压缩按其触发。')}
               </div>
             </div>
           )}

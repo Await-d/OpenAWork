@@ -28,6 +28,9 @@ export const WEB_SEARCH_PROVIDERS = [
   'zhipu',
   'google',
   'bing',
+  'baidu',
+  'sogou',
+  'startpage',
 ] as const;
 
 export const webSearchProviderSchema = z.enum(WEB_SEARCH_PROVIDERS);

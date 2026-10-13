@@ -141,7 +141,7 @@ jobs:
         run: bun run --filter "@openAwork/opencode-llm" build
 
       - name: Test
-        run: bun run --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" test
+        run: bun run --filter "@openAwork/shared" --filter "@openAwork/agent-core" --filter "@openAwork/agent-gateway" --filter "@openAwork/shared-ui" --filter "@openAwork/web-client" --filter "@openAwork/web" --filter "@openAwork/skill-types" --filter "@openAwork/mcp-client" --filter "@openAwork/lsp-client" --filter "@openAwork/multi-agent" --filter "@openAwork/mobile" --filter "@openAwork/desktop" test
 
   chat-recovery-fast:
     name: Chat Recovery Fast Gates

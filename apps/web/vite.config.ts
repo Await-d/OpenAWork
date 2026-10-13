@@ -152,6 +152,13 @@ export default defineConfig({
     sourcemap: true,
     chunkSizeWarningLimit: 800,
     rollupOptions: {
+      // 多页入口:index.html 为主窗口(完整工作台),island.html 为灵动岛浮窗
+      // (仅 island 组件 + island.css,隔离主窗口全局样式——WebKitGTK 透明窗口上
+      // 全局 CSS 的 filter/backdrop 声明会让浮窗合成输出整帧丢失,见 island.css 头注释)。
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        island: fileURLToPath(new URL('./island.html', import.meta.url)),
+      },
       // @antv/g6 依赖 @antv/util，后者在模块顶层使用 `"use client"` 指令，
       // 在 ESM 构建下会刷 MODULE_LEVEL_DIRECTIVE 警告（不影响运行）。
       // 官方 FAQ 给出的处理方式即在此处静默该警告。

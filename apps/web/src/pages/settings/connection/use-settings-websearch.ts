@@ -15,7 +15,19 @@ import { createSettingsClient } from '@openAwork/web-client';
 import { logger } from '../../../utils/log/logger.js';
 
 export type WebsearchProvider =
-  'duckduckgo' | 'tavily' | 'exa' | 'serper' | 'searxng' | 'bocha' | 'zhipu' | 'google' | 'bing';
+  | 'duckduckgo'
+  | 'tavily'
+  | 'exa'
+  | 'serper'
+  | 'searxng'
+  | 'bocha'
+  | 'zhipu'
+  | 'google'
+  | 'bing'
+  // 免密钥引擎：由网关侧注册进原生 `websearch` 的 provider 插槽。
+  | 'baidu'
+  | 'sogou'
+  | 'startpage';
 
 export type WebsearchRolloutMode = 'sequential' | 'first-success' | 'merge';
 

@@ -287,7 +287,18 @@ export function useLayoutShared(
     return () => media.removeEventListener('change', updateViewportMode);
   }, []);
 
+  // 窄屏 overlay 收起只在「路由 / 视口状态实际变化」时触发：
+  // 挂载首帧必须让位于持久化偏好——否则刷新后用户上次的展开状态会被
+  // 这里无条件按掉（leftSidebarOpen 本身是持久化的，被忘掉的全是这类
+  // 挂载期强制重置）。StrictMode 双跑 effect 也会被 prevKey 相同挡住。
+  const narrowSidebarPrevKeyRef = useRef<string | null>(null);
   useEffect(() => {
+    const nextKey = `${isChatRoute}:${isNarrowViewport}`;
+    const prevKey = narrowSidebarPrevKeyRef.current;
+    narrowSidebarPrevKeyRef.current = nextKey;
+    if (prevKey === null || prevKey === nextKey) {
+      return;
+    }
     if (isChatRoute && isNarrowViewport) {
       setLeftSidebarOpen(false);
     }

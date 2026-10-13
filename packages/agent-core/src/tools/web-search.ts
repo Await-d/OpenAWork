@@ -1,8 +1,19 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './tool-contract.js';
 
-type WebSearchProvider =
-  'duckduckgo' | 'tavily' | 'exa' | 'serper' | 'searxng' | 'bocha' | 'zhipu' | 'google' | 'bing';
+export type WebSearchProvider =
+  | 'duckduckgo'
+  | 'tavily'
+  | 'exa'
+  | 'serper'
+  | 'searxng'
+  | 'bocha'
+  | 'zhipu'
+  | 'google'
+  | 'bing'
+  | 'baidu'
+  | 'sogou'
+  | 'startpage';
 
 export interface WebSearchConfig {
   provider: WebSearchProvider;
@@ -10,6 +21,119 @@ export interface WebSearchConfig {
   baseUrl?: string;
   maxResults?: number;
   timeout?: number;
+}
+
+/**
+ * 各提供商「宿主环境变量 → API Key」的单一事实源（按优先级排列）。
+ *
+ * 密钥从设计上就不该由模型提供：`apiKey` 虽然形状上在 `web_search` 的入参里，
+ * 但模型既读不到宿主的 `process.env`，也不应被要求携带密钥。旧提示词让模型写
+ * `apiKey: process.env.BING_API_KEY`，模型只能省略该字段，于是每次调用都以
+ * `Bing API key is required` 结束（2026-10-12 线上排障命中）。网关据此表在
+ * 模型未提供密钥时补齐，报错文案也据此给出可操作指引。
+ */
+export const WEB_SEARCH_PROVIDER_API_KEY_ENV: Record<WebSearchProvider, readonly string[]> = {
+  duckduckgo: [],
+  tavily: ['TAVILY_API_KEY'],
+  exa: ['EXA_API_KEY'],
+  serper: ['SERPER_API_KEY'],
+  searxng: [],
+  bocha: ['BOCHA_API_KEY', 'BOCHA_API_TOKEN'],
+  zhipu: ['ZHIPU_API_KEY', 'GLM_API_KEY'],
+  google: ['GOOGLE_API_KEY', 'GOOGLE_CSE_API_KEY'],
+  bing: ['BING_API_KEY', 'BING_SEARCH_API_KEY'],
+  baidu: [],
+  sogou: [],
+  startpage: [],
+};
+
+/**
+ * 非密钥类必填配置对应的环境变量（SearXNG 实例地址、Google 可编程搜索的
+ * 引擎 ID / cx）。与 {@link WEB_SEARCH_PROVIDER_API_KEY_ENV} 同理，属宿主配置。
+ */
+export const WEB_SEARCH_PROVIDER_BASE_URL_ENV: Record<WebSearchProvider, readonly string[]> = {
+  duckduckgo: [],
+  tavily: [],
+  exa: [],
+  serper: [],
+  searxng: ['SEARXNG_BASE_URL'],
+  bocha: [],
+  zhipu: [],
+  google: ['GOOGLE_CSE_ID', 'GOOGLE_CSE_CX'],
+  bing: [],
+  baidu: [],
+  sogou: [],
+  startpage: [],
+};
+
+/**
+ * 取某个提供商的 API Key；缺失时抛出**可操作**的错误。
+ *
+ * 文案刻意区别于旧的裸英文 `X API key is required`：这条消息会直接进入模型的
+ * tool_result，必须交代「密钥属于宿主配置、不在模型入参里」，否则模型会反复
+ * 重试同一个必然失败的调用。
+ */
+function requireApiKey(provider: WebSearchProvider, config: WebSearchConfig): string {
+  const key = config.apiKey?.trim();
+  if (key) return key;
+  const envNames = WEB_SEARCH_PROVIDER_API_KEY_ENV[provider];
+  const envHint = envNames.length > 0 ? `（如 ${envNames.join(' / ')}）` : '';
+  throw new Error(
+    `${provider} 搜索需要 API Key，该密钥属于宿主 / 用户配置，无法由模型的入参提供。` +
+      `请通过环境变量${envHint}或用户设置 websearch_policy 为该提供商配置密钥，` +
+      `或改用无需密钥的 duckduckgo。`,
+  );
+}
+
+/** 取某个提供商必填的非密钥配置；缺失时抛出可操作的错误。 */
+function requireBaseUrl(
+  provider: WebSearchProvider,
+  config: WebSearchConfig,
+  what: string,
+): string {
+  const baseUrl = config.baseUrl?.trim();
+  if (baseUrl) return baseUrl;
+  const envNames = WEB_SEARCH_PROVIDER_BASE_URL_ENV[provider];
+  const envHint = envNames.length > 0 ? `（如 ${envNames.join(' / ')}）` : '';
+  throw new Error(
+    `${provider} 搜索需要${what}，该配置属于宿主 / 用户配置。` +
+      `请通过环境变量${envHint}或用户设置 websearch_policy 补齐。`,
+  );
+}
+
+/**
+ * 由宿主（网关）注册的「免密钥引擎」执行器。
+ *
+ * `baidu` / `sogou` / `startpage` 没有公开搜索 API，只能走 HTML 抓取，实现依赖
+ * `open-websearch` 包 —— 该依赖在网关侧而非 agent-core，因此这里只定义插槽，
+ * 由宿主在模块加载时调用 {@link registerWebSearchProvider} 注入。
+ *
+ * `bing` 是特例：官方 API 需要 Key，但同一引擎另有免密钥抓取实现，故
+ * `bingSearch` 在未配置 Key 时会回退到这里注册的 `bing` 执行器；有 Key 时
+ * 行为不变，仍走官方 API。
+ */
+export type WebSearchProviderExecutor = (
+  query: string,
+  config: WebSearchConfig,
+  signal: AbortSignal,
+) => Promise<string>;
+
+const externalProviderExecutors = new Map<WebSearchProvider, WebSearchProviderExecutor>();
+
+export function registerWebSearchProvider(
+  provider: WebSearchProvider,
+  executor: WebSearchProviderExecutor,
+): void {
+  externalProviderExecutors.set(provider, executor);
+}
+
+function requireExternalExecutor(provider: WebSearchProvider): WebSearchProviderExecutor {
+  const executor = externalProviderExecutors.get(provider);
+  if (executor) return executor;
+  throw new Error(
+    `${provider} 搜索需要免密钥引擎实现，但当前宿主尚未注册。` +
+      `请改用 duckduckgo，或在网关侧调用 registerWebSearchProvider('${provider}', ...) 注册引擎。`,
+  );
 }
 
 interface SearchResultItem {
@@ -109,15 +233,13 @@ async function tavilySearch(
   config: WebSearchConfig,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!config.apiKey) {
-    throw new Error('Tavily API key is required');
-  }
+  const apiKey = requireApiKey('tavily', config);
   const maxResults = config.maxResults ?? 5;
   const res = await fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      api_key: config.apiKey,
+      api_key: apiKey,
       query,
       max_results: maxResults,
     }),
@@ -142,15 +264,13 @@ async function exaSearch(
   config: WebSearchConfig,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!config.apiKey) {
-    throw new Error('Exa API key is required');
-  }
+  const apiKey = requireApiKey('exa', config);
   const maxResults = config.maxResults ?? 5;
   const res = await fetch('https://api.exa.ai/search', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': config.apiKey,
+      'x-api-key': apiKey,
     },
     body: JSON.stringify({
       query,
@@ -177,15 +297,13 @@ async function serperSearch(
   config: WebSearchConfig,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!config.apiKey) {
-    throw new Error('Serper API key is required');
-  }
+  const apiKey = requireApiKey('serper', config);
   const maxResults = config.maxResults ?? 5;
   const res = await fetch('https://google.serper.dev/search', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'X-API-KEY': config.apiKey,
+      'X-API-KEY': apiKey,
     },
     body: JSON.stringify({
       q: query,
@@ -215,10 +333,7 @@ async function searxngSearch(
   signal: AbortSignal,
 ): Promise<string> {
   const maxResults = config.maxResults ?? 5;
-  const baseUrl = config.baseUrl?.trim();
-  if (!baseUrl) {
-    throw new Error('SearXNG baseUrl is required');
-  }
+  const baseUrl = requireBaseUrl('searxng', config, '实例地址（baseUrl）');
   const url = new URL('/search', baseUrl);
   url.searchParams.set('q', query);
   url.searchParams.set('format', 'json');
@@ -245,15 +360,13 @@ async function bochaSearch(
   config: WebSearchConfig,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!config.apiKey) {
-    throw new Error('Bocha API key is required');
-  }
+  const apiKey = requireApiKey('bocha', config);
   const maxResults = config.maxResults ?? 5;
   const res = await fetch('https://api.bochaai.com/v1/web-search', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       query,
@@ -289,15 +402,13 @@ async function zhipuSearch(
   config: WebSearchConfig,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!config.apiKey) {
-    throw new Error('Zhipu API key is required');
-  }
+  const apiKey = requireApiKey('zhipu', config);
   const maxResults = config.maxResults ?? 5;
   const res = await fetch('https://open.bigmodel.cn/api/paas/v4/tools/web-search', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({ query }),
     signal,
@@ -326,13 +437,14 @@ async function googleSearch(
   config: WebSearchConfig,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!config.apiKey) {
-    throw new Error('Google API key is required');
-  }
+  const apiKey = requireApiKey('google', config);
+  // `cx`（可编程搜索引擎 ID）缺失时旧实现会静默发一个空 cx，换回 Google 的
+  // 400 —— 对模型完全不可解释。这里提前给出宿主配置指引。
+  const cx = requireBaseUrl('google', config, '可编程搜索引擎 ID（cx）');
   const maxResults = config.maxResults ?? 5;
   const url = new URL('https://www.googleapis.com/customsearch/v1');
-  url.searchParams.set('key', config.apiKey);
-  url.searchParams.set('cx', config.baseUrl ?? '');
+  url.searchParams.set('key', apiKey);
+  url.searchParams.set('cx', cx);
   url.searchParams.set('q', query);
   url.searchParams.set('num', String(maxResults));
 
@@ -356,9 +468,14 @@ async function bingSearch(
   config: WebSearchConfig,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!config.apiKey) {
-    throw new Error('Bing API key is required');
+  // 未配置 Azure Key 时先回退到宿主注册的免密钥抓取引擎（open-websearch 的
+  // bing 实现），而不是直接抛「需要 API Key」把这条免密钥检索路径整条掐掉。
+  // 有 Key 时行为不变，仍走官方 API。
+  if (!config.apiKey?.trim()) {
+    const keyless = externalProviderExecutors.get('bing');
+    if (keyless) return keyless(query, config, signal);
   }
+  const apiKey = requireApiKey('bing', config);
   const maxResults = config.maxResults ?? 5;
   const url = new URL('https://api.bing.microsoft.com/v7.0/search');
   url.searchParams.set('q', query);
@@ -366,7 +483,7 @@ async function bingSearch(
 
   const res = await fetch(url.toString(), {
     headers: {
-      'Ocp-Apim-Subscription-Key': config.apiKey,
+      'Ocp-Apim-Subscription-Key': apiKey,
     },
     signal,
   });
@@ -410,6 +527,10 @@ async function searchWithConfig(
       return googleSearch(query, config, signal);
     case 'bing':
       return bingSearch(query, config, signal);
+    case 'baidu':
+    case 'sogou':
+    case 'startpage':
+      return requireExternalExecutor(config.provider)(query, config, signal);
     default:
       throw new Error(`Unsupported web search provider: ${String(config.provider)}`);
   }
@@ -746,9 +867,14 @@ export const webSearchTool: ToolDefinition = {
         'zhipu',
         'google',
         'bing',
+        'baidu',
+        'sogou',
+        'startpage',
       ])
       .optional()
-      .describe('网页搜索提供商（默认 duckduckgo）'),
+      .describe(
+        '网页搜索提供商（默认 duckduckgo；baidu / sogou / startpage 由网关注册的免密钥引擎提供，bing 无 Key 时自动回退到免密钥抓取）',
+      ),
     apiKey: z.string().optional().describe('提供商 API Key（如需）'),
     baseUrl: z.string().optional().describe('提供商 base URL 或 engine id（各提供商不同）'),
   }),

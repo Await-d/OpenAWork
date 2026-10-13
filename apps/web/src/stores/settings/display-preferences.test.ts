@@ -61,4 +61,26 @@ describe('useDisplayPreferencesStore', () => {
     // v8：文件编辑 / 写入默认直接展示内容变更（对齐参考实现）。
     expect(useDisplayPreferencesStore.getState().toolExpandedOverrides.fileEdit).toBe(true);
   });
+
+  it('setter 写回的持久化版本号与 persist 声明一致，重载不会强制开启 fileEdit', async () => {
+    const { useDisplayPreferencesStore } = await import('./display-preferences.js');
+
+    // 用户显式关闭 fileEdit 默认展开，再触发一次普通 setter（会走手工持久化写入）。
+    useDisplayPreferencesStore.getState().setToolExpandedOverride('fileEdit', false);
+    useDisplayPreferencesStore.getState().setShowMetaLine(false);
+
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw ?? '{}') as { version?: number };
+    // 手工写入的 version 若低于 persist 声明的 8，下次加载会跑 migrate 覆盖用户选择。
+    expect(parsed.version).toBe(8);
+
+    // 模拟刷新：重新加载模块后，用户的显式关闭必须保留。
+    vi.resetModules();
+    const reloaded = await import('./display-preferences.js');
+    expect(reloaded.useDisplayPreferencesStore.getState().toolExpandedOverrides.fileEdit).toBe(
+      false,
+    );
+    expect(reloaded.useDisplayPreferencesStore.getState().showMetaLine).toBe(false);
+  });
 });

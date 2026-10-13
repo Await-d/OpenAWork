@@ -20,6 +20,8 @@ export interface TaskToolRuntimeSnapshot {
 export interface TaskToolRuntimeLookup {
   bySessionId: Map<string, TaskToolRuntimeSnapshot>;
   byTaskId: Map<string, TaskToolRuntimeSnapshot>;
+  /** `task.metadata.parentToolCallId` → 快照：工具结算前唯一可用的关联通道。 */
+  byToolCallId: Map<string, TaskToolRuntimeSnapshot>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -93,6 +95,8 @@ function buildLookupSignature(
         task.terminalReason ?? '',
         task.title,
         task.updatedAt,
+        // parentToolCallId 参与 snapshot 构造（byToolCallId 索引），必须进签名。
+        readString(task.metadata?.['parentToolCallId']) ?? '',
       ].join(''),
     )
     .sort((left, right) => left.localeCompare(right, 'en-US'))
@@ -124,6 +128,7 @@ export function buildTaskToolRuntimeLookup(
   const childSessionsById = new Map(childSessions.map((session) => [session.id, session]));
   const byTaskId = new Map<string, TaskToolRuntimeSnapshot>();
   const bySessionId = new Map<string, TaskToolRuntimeSnapshot>();
+  const byToolCallId = new Map<string, TaskToolRuntimeSnapshot>();
 
   for (const task of sessionTasks) {
     const childSession = task.sessionId ? childSessionsById.get(task.sessionId) : undefined;
@@ -144,9 +149,13 @@ export function buildTaskToolRuntimeLookup(
     if (task.sessionId) {
       bySessionId.set(task.sessionId, snapshot);
     }
+    const parentToolCallId = readString(task.metadata?.['parentToolCallId']);
+    if (parentToolCallId) {
+      byToolCallId.set(parentToolCallId, snapshot);
+    }
   }
 
-  lastLookup = { bySessionId, byTaskId };
+  lastLookup = { bySessionId, byTaskId, byToolCallId };
   lastLookupSignature = signature;
   return lastLookup;
 }
@@ -155,6 +164,7 @@ export function resolveTaskToolRuntimeSnapshot(
   input: Record<string, unknown>,
   output: unknown,
   lookup: TaskToolRuntimeLookup | undefined,
+  toolCallId?: string,
 ): TaskToolRuntimeSnapshot | undefined {
   if (!lookup) {
     return undefined;
@@ -168,6 +178,16 @@ export function resolveTaskToolRuntimeSnapshot(
 
   for (const candidateTaskId of candidateTaskIds) {
     const snapshot = lookup.byTaskId.get(candidateTaskId);
+    if (snapshot) {
+      return snapshot;
+    }
+  }
+
+  // 工具结算前（pending / running）消息里没有 output，input 也不含 task_id /
+  // session_id；网关在任务创建时把父 tool call id 记进了 task.metadata
+  // （parentToolCallId），这是 pending 阶段唯一可靠的关联通道。
+  if (toolCallId) {
+    const snapshot = lookup.byToolCallId.get(toolCallId);
     if (snapshot) {
       return snapshot;
     }

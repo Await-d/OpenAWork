@@ -115,14 +115,18 @@ function createUserMessage(id: string, content: string): ChatMessage {
   return { id, role: 'user', content, createdAt: 1_700_000_000_000, status: 'completed' };
 }
 
-function createDetailState(messages: ChatMessage[], sessionId: string | null) {
+function createDetailState(
+  messages: ChatMessage[],
+  sessionId: string | null,
+  metadataJson?: string,
+) {
   return {
     error: null,
     loading: false,
     messages,
     pendingPermissions: [],
     refresh: async (): Promise<void> => undefined,
-    session: sessionId === null ? null : { id: sessionId },
+    session: sessionId === null ? null : { id: sessionId, metadata_json: metadataJson },
     tasks: [],
   };
 }
@@ -387,5 +391,62 @@ describe('SubSessionDetailPanel 失败横幅', () => {
     render(createPanelElement());
 
     expect(screen.queryByRole('alert', { name: '子代理执行失败' })).toBeNull();
+  });
+});
+
+describe('SubSessionDetailPanel 模型与思考等级展示', () => {
+  it('展示落库的模型显示名与思考等级', () => {
+    useSubSessionDetailMock.mockReturnValue(
+      createDetailState(
+        [createUserMessage('message-1', '第一条')],
+        SESSION_ID,
+        JSON.stringify({
+          modelId: 'gpt-5.6-sol',
+          modelLabel: 'GPT-5.6 Sol',
+          providerId: 'openai',
+          thinkingEnabled: true,
+          reasoningEffort: 'high',
+        }),
+      ),
+    );
+
+    render(createPanelElement());
+
+    // 测试未传 providerCatalog：tooltip 回退为原始 modelId
+    const modelChip = screen.getByTitle('gpt-5.6-sol');
+    expect(modelChip.textContent).toBe('GPT-5.6 Sol');
+    expect(screen.getByText('思考 · 高')).not.toBeNull();
+  });
+
+  it('modelLabel 缺失时回退到原始 modelId，思考关闭时展示关闭态', () => {
+    useSubSessionDetailMock.mockReturnValue(
+      createDetailState(
+        [createUserMessage('message-1', '第一条')],
+        SESSION_ID,
+        JSON.stringify({
+          modelId: 'claude-fable-5',
+          providerId: 'anthropic',
+          thinkingEnabled: false,
+          reasoningEffort: 'high',
+        }),
+      ),
+    );
+
+    render(createPanelElement());
+
+    expect(screen.getByText('claude-fable-5')).not.toBeNull();
+    expect(screen.getByText('思考关闭')).not.toBeNull();
+  });
+
+  it('元数据缺失时不虚构模型与思考等级', () => {
+    useSubSessionDetailMock.mockReturnValue(
+      createDetailState([createUserMessage('message-1', '第一条')], SESSION_ID),
+    );
+
+    render(createPanelElement());
+
+    expect(screen.queryByText(/思考/)).toBeNull();
+    // 会话 id 与计数仍正常渲染
+    expect(screen.getByText('child-se…on-1')).not.toBeNull();
   });
 });

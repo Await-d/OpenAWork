@@ -1,3 +1,4 @@
+import { SshRemotePathError, SshSftpUnavailableError } from '@openAwork/agent-core';
 import { replaceSshHostKey, SshHostKeyError } from '../ssh/ssh-host-trust.js';
 import { SshCredentialPolicyError } from '../ssh/ssh-credential-policy.js';
 /**
@@ -85,6 +86,43 @@ function classifySshRouteError(error: unknown, actionLabel: string): ClassifiedS
   const message = error instanceof Error ? error.message : String(error);
   const errno = (error as NodeJS.ErrnoException | undefined)?.code;
 
+  // agent-core 归一出的远端路径语义错误：按 kind 映射成客户端可纠正的 4xx，
+  // 而不是 500（旧链路表现为 `500 + "Failure"`，排障包里无从定位）。
+  if (error instanceof SshRemotePathError) {
+    if (error.kind === 'directory') {
+      return { statusCode: 400, error: '远端路径是目录，无法作为文件预览。' };
+    }
+    if (error.kind === 'not-found') {
+      return { statusCode: 404, error: '远端文件不存在。' };
+    }
+    return { statusCode: 403, error: '远端拒绝读取该路径（权限不足或目标不可读）。' };
+  }
+  // 远端 sshd 未启用 sftp 子系统（`Subsystem sftp ...` 缺失 / 被禁用）：
+  // 属远端环境能力缺失，重试无法恢复，也不是网关故障，故回 501 而非 500，
+  // 并给出可操作建议（2026-10-12 线上排障命中：/ssh/files 曾被映射成 500）。
+  if (error instanceof SshSftpUnavailableError || /unable to start subsystem/i.test(message)) {
+    return {
+      statusCode: 501,
+      error:
+        '远端服务器未启用 SFTP 子系统，无法进行文件操作。请在远端 sshd 配置中启用 sftp（Subsystem sftp ...），或改用「远端命令」完成该操作。',
+    };
+  }
+  // 未经归一的原始 SFTP 错误（注入实现 / 旧链路）：按 isRemoteNotFoundError
+  // 的既有约定补齐裸 message 的归宿，避免「No such file / Permission denied /
+  // Failure」这类单词文案落进 500。
+  if (/no such file/i.test(message)) {
+    return { statusCode: 404, error: '远端文件不存在。' };
+  }
+  if (/permission denied/i.test(message)) {
+    return { statusCode: 403, error: '远端拒绝读取该路径（权限不足或目标不可读）。' };
+  }
+  if (/^failure$/i.test(message.trim())) {
+    return {
+      statusCode: 400,
+      error:
+        '远端拒绝读取该路径（SFTP 返回通用失败）：通常是目标是目录、缺少读权限或符号链接失效，请确认路径指向可读文件。',
+    };
+  }
   if (message.startsWith('SSH connection not found:')) {
     return { statusCode: 404, error: 'SSH 连接不存在。' };
   }
@@ -122,12 +160,15 @@ function failSshRoute(
   step: ReturnType<typeof startRequestWorkflow>['step'],
   actionLabel: string,
   error: unknown,
+  fields?: Record<string, string | number | boolean>,
 ): FastifyReply {
   const classified = classifySshRouteError(error, actionLabel);
   if (classified.statusCode >= 500) {
     request.log.error({ err: error }, `ssh route failed: ${actionLabel}`);
   }
-  step.fail(classified.error);
+  // 失败路径也要把定位参数带进 workflow 日志：排障包只有 message 时
+  // （如 SFTP 的裸 "Failure"）完全无法定位是哪条连接的哪个路径。
+  step.fail(classified.error, fields);
   return reply.status(classified.statusCode).send({ error: classified.error });
 }
 
@@ -302,7 +343,10 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { count: entries.length });
       return reply.send({ entries });
     } catch (error) {
-      return failSshRoute(request, reply, step, '读取 SSH 文件列表', error);
+      return failSshRoute(request, reply, step, '读取 SSH 文件列表', error, {
+        connectionId: parsed.connectionId,
+        path: parsed.path,
+      });
     }
   });
 
@@ -314,7 +358,10 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { path: parsed.path });
       return reply.send({ preview });
     } catch (error) {
-      return failSshRoute(request, reply, step, '读取 SSH 文件预览', error);
+      return failSshRoute(request, reply, step, '读取 SSH 文件预览', error, {
+        connectionId: parsed.connectionId,
+        path: parsed.path,
+      });
     }
   });
 
@@ -327,7 +374,10 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { bytes: bytes.length });
       return reply.send({ ok: true });
     } catch (error) {
-      return failSshRoute(request, reply, step, '上传 SSH 文件', error);
+      return failSshRoute(request, reply, step, '上传 SSH 文件', error, {
+        connectionId: parsed.connectionId,
+        path: parsed.path,
+      });
     }
   });
 
@@ -339,7 +389,10 @@ export async function sshRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { path: parsed.path });
       return reply.send({ ok: true });
     } catch (error) {
-      return failSshRoute(request, reply, step, '创建远端目录', error);
+      return failSshRoute(request, reply, step, '创建远端目录', error, {
+        connectionId: parsed.connectionId,
+        path: parsed.path,
+      });
     }
   });
 

@@ -1,8 +1,9 @@
 import { sqliteRun } from './db.js';
 import { isSqliteMalformedError } from './sqlite-error-utils.js';
 import { deleteRowsBeyondMostRecent } from './sqlite-retention.js';
+import { redactAuditValue } from './audit-redaction.js';
 
-export type AuditErrorCategory = 'tool' | 'llm' | 'stream' | 'route';
+export type AuditErrorCategory = 'tool' | 'llm' | 'stream' | 'route' | 'channel';
 
 export interface WriteAuditLogOptions {
   sessionId: string | null;
@@ -12,6 +13,8 @@ export interface WriteAuditLogOptions {
    * llm  → `QUOTA_EXCEEDED` / `RATE_LIMIT` / `MODEL_ERROR`
    * stream → `PARSE_ERROR` / `STREAM_ERROR`
    * route → `MODEL_RESOLVE` / `SESSION_CONFLICT` / `REPLAY_FAILED`
+   * channel → `CHANNEL_RUN_FAILED` / `CHANNEL_START_FAILED` /
+   *           `CHANNEL_QUEUE_REJECTED` / `CHANNEL_DELIVERY_FAILED`
    */
   sourceName: string;
   requestId: string;
@@ -176,8 +179,8 @@ export function writeAuditLog(options: WriteAuditLogOptions): void {
         options.sessionId,
         resolveToolNameColumn(options.category, options.sourceName),
         options.requestId,
-        safeStringify(options.input),
-        safeStringify(options.output),
+        safeStringify(redactAuditValue(options.input)),
+        safeStringify(redactAuditValue(options.output)),
         (options.isError ?? true) ? 1 : 0,
         options.pendingInteraction ? 1 : 0,
         options.durationMs ?? null,

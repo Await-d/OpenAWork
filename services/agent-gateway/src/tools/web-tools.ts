@@ -169,6 +169,79 @@ async function buildWebfetchFailureMessage(response: Response): Promise<string> 
   return lines.join('\n');
 }
 
+/**
+ * 超时中断的标记文本。fetch 会把 `abort(reason)` 的 reason 原样作为 rejection
+ * 抛出，靠它区分「本工具超时」与「用户取消」（父级 signal 的取消必须原样
+ * 透传，不能被翻译成超时，否则会破坏沙箱的取消语义）。
+ */
+const WEBFETCH_TIMEOUT_MARKER = 'webfetch timeout exceeded';
+
+/**
+ * 把 fetch 抛出的底层网络错误翻译成可操作的中文文案。
+ *
+ * 排障包里裸奔的 `getaddrinfo ENOTFOUND raw.githubusercontent.com` 与
+ * `webfetch timeout exceeded` 对模型和用户都没有信息量：前者分不清是本地
+ * DNS 还是目标站点问题，后者不知道阈值与应对方式。
+ */
+function describeWebfetchNetworkError(input: {
+  error: unknown;
+  url: string;
+  timeoutSeconds: number;
+  parentSignal?: AbortSignal;
+}): Error {
+  const { error, url, timeoutSeconds, parentSignal } = input;
+  const raw = error instanceof Error ? error : new Error(String(error));
+  // 用户取消：原样透传，绝不改写成超时。
+  if (parentSignal?.aborted) {
+    return raw;
+  }
+  const rawMessage = raw.message;
+  const errno = (raw as { code?: unknown }).code;
+  const host = (() => {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  })();
+
+  const isTimeout =
+    rawMessage.includes(WEBFETCH_TIMEOUT_MARKER) ||
+    (parentSignal?.aborted !== true &&
+      (errno === 'ABORT_ERR' || raw.name === 'AbortError' || errno === 'UND_ERR_ABORTED'));
+  if (isTimeout) {
+    return new Error(
+      `webfetch 超时（${timeoutSeconds}s）：${host} 在时限内未完成响应。` +
+        '境外站点在部分网络下不可直连，可改用可达的镜像源后重试。',
+    );
+  }
+
+  switch (errno) {
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return new Error(
+        `webfetch 失败：无法解析域名 ${host}（DNS 解析失败）。` +
+          '通常是本机 DNS 解析不了该域名（境外站点被污染或网络不可用），可改用可达的镜像域名后重试。',
+      );
+    case 'ECONNREFUSED':
+      return new Error(`webfetch 失败：${host} 拒绝连接，目标服务可能未启动或端口不正确。`);
+    case 'ECONNRESET':
+    case 'EPIPE':
+      return new Error(
+        `webfetch 失败：与 ${host} 的连接被重置，常见于网络不稳定或被中间设备拦截，可稍后重试。`,
+      );
+    case 'ETIMEDOUT':
+    case 'UND_ERR_CONNECT_TIMEOUT':
+      return new Error(`webfetch 失败：连接 ${host} 超时，可改用镜像源或稍后重试。`);
+    default:
+      break;
+  }
+  if (/CERT|SSL|TLS/i.test(String(errno)) || /certificate|self-signed/i.test(rawMessage)) {
+    return new Error(`webfetch 失败：${host} 的 TLS 证书校验未通过（${rawMessage}）。`);
+  }
+  return new Error(`webfetch 失败：${rawMessage}（${host}）`);
+}
+
 function createAbortSignal(
   timeoutSeconds: number,
   signal?: AbortSignal,
@@ -178,7 +251,7 @@ function createAbortSignal(
 } {
   const controller = new AbortController();
   const timer = setTimeout(
-    () => controller.abort(new Error('webfetch timeout exceeded')),
+    () => controller.abort(new Error(WEBFETCH_TIMEOUT_MARKER)),
     timeoutSeconds * 1000,
   );
   const abortFromParent = () => controller.abort(signal?.reason);
@@ -292,7 +365,7 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
   {
     name: 'webfetch',
     description:
-      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use open_websearch for discovery by default, fall back to websearch when open_websearch is unavailable, and use webfetch for a concrete URL. If the user asks to fetch, find, show, or display an existing web image, use open_websearch/websearch plus webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image. On 403/429 do not retry the same URL blindly: the error message carries the rate-limit headers and the response body needed to tell限流、UA 拦截与路径写错 apart.',
+      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use websearch for discovery — it is the only web-search entry — and use webfetch (or open_websearch/fetch_web) for a concrete URL; open_websearch/fetch_github_readme reads a GitHub repository README. If the user asks to fetch, find, show, or display an existing web image, use websearch plus webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image. On 403/429 do not retry the same URL blindly: the error message carries the rate-limit headers and the response body needed to tell限流、UA 拦截与路径写错 apart.',
     inputSchema: webfetchInputSchema,
     outputSchema: webfetchOutputSchema,
     timeout: MAX_WEBFETCH_TIMEOUT_SECONDS * 1000,
@@ -305,11 +378,23 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
 
       try {
         const requestHeaders = buildWebfetchRequestHeaders(normalizedUrl);
-        const response = await fetchWithCloudflareChallengeRetry(
-          normalizedUrl,
-          requestSignal,
-          requestHeaders,
-        );
+        let response: Response;
+        try {
+          response = await fetchWithCloudflareChallengeRetry(
+            normalizedUrl,
+            requestSignal,
+            requestHeaders,
+          );
+        } catch (error) {
+          // DNS / 超时 / 连接失败等底层错误在这里归因；HTTP 非 2xx 走下方
+          // 专属文案，不被本包装覆盖。
+          throw describeWebfetchNetworkError({
+            error,
+            url: normalizedUrl,
+            timeoutSeconds: input.timeout,
+            parentSignal: signal,
+          });
+        }
         const contentType = response.headers.get('content-type') ?? 'text/plain';
 
         if (!response.ok) {

@@ -80,6 +80,13 @@ async function waitForStatus(
   throw new Error(`Timed out waiting for status=${expected}; actual=${actual}`);
 }
 
+/** 当前会话已登记的后台终端（含已结束行）。 */
+function backgroundTerminals(): RegistryModule.SessionTerminalRecord[] {
+  return registry
+    .listSessionTerminals({ sessionId: SESSION_ID, userId: USER_ID, includeClosed: true })
+    .filter((terminal) => terminal.kind === 'background');
+}
+
 describe('dispatchRunBashInBackground', () => {
   it('returns a terminalId immediately and the command exits on its own', async () => {
     const result = await bg.dispatchRunBashInBackground({
@@ -126,6 +133,45 @@ describe('dispatchRunBashInBackground', () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected rejection');
     expect(result.error).toContain('上限');
+  });
+
+  // 回归（2026-10-12 线上排障）：准入校验发生在 registerTerminal 之前，若此时
+  // 被拒绝却仍返回 ok + terminalId，registry 里永远不会有这一行，模型随后
+  // bash_output 只能读到「terminal_id 不存在或不属于当前用户」——既误导又无法
+  // 自纠。准入失败必须在返回前同步暴露原因，且不得产出悬空 id。
+  it('workdir 越界时立即失败，不返回悬空的 terminalId', async () => {
+    const outsideWorkspace = path.dirname(workdir);
+    const result = await bg.dispatchRunBashInBackground({
+      context: { sessionId: SESSION_ID, userId: USER_ID },
+      rawInput: {
+        command: 'echo should-not-spawn',
+        description: 'outside workdir probe',
+        workdir: outsideWorkspace,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected rejection');
+    // 文案契约：必须带上会话工作区，模型才能据此自我纠正。
+    expect(result.error).toContain('outside current session workspace');
+    expect(result.error).toContain(`(session workspace: ${workdir})`);
+    expect(backgroundTerminals()).toEqual([]);
+  });
+
+  it('命令被守卫拒绝时立即失败，不返回悬空的 terminalId', async () => {
+    const result = await bg.dispatchRunBashInBackground({
+      context: { sessionId: SESSION_ID, userId: USER_ID },
+      rawInput: {
+        command: 'sudo echo should-not-spawn',
+        description: 'guarded command probe',
+        workdir,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected rejection');
+    expect(result.error).toContain('sudo is not allowed');
+    expect(backgroundTerminals()).toEqual([]);
   });
 });
 

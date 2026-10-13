@@ -95,7 +95,7 @@ const DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS = 13_000;
 const MIN_AUTOMATIC_PRESERVE_RECENT_TOKENS = 10_000;
 const MAX_AUTOMATIC_PRESERVE_RECENT_TOKENS = 40_000;
 const CONTEXT_WINDOW_PRESETS = [
-  { value: '', label: '自动（模型上限）' },
+  { value: '', label: '自动（模型预设）' },
   { value: '272000', label: '272K' },
   { value: '400000', label: '400K' },
   { value: '1000000', label: '1M' },
@@ -121,10 +121,12 @@ function formatContext(count: number | undefined): string {
 }
 
 function resolveEffectiveContextWindow(model: AIModelConfigItem): number | undefined {
-  if (model.contextWindow === undefined || model.contextWindowOverride === undefined) {
-    return model.contextWindowOverride ?? model.contextWindow;
+  // 挡位是权威值：配置后直接生效（可高于模型预设），与网关解析口径一致。
+  const override = model.contextWindowOverride;
+  if (override !== undefined && Number.isFinite(override) && override > 0) {
+    return override;
   }
-  return Math.min(model.contextWindow, model.contextWindowOverride);
+  return model.contextWindow;
 }
 
 function formatPrice(price: number | undefined): string {
@@ -1071,9 +1073,10 @@ export function ModelManager({
                           <div style={mutedStyle}>
                             {formatContext(resolveEffectiveContextWindow(model))}
                           </div>
-                          {model.contextWindowOverride !== undefined ? (
+                          {model.contextWindowOverride !== undefined &&
+                          model.contextWindow !== undefined ? (
                             <div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>
-                              模型上限 {formatContext(model.contextWindow)}
+                              模型预设 {formatContext(model.contextWindow)}
                             </div>
                           ) : null}
                           <ContextWindowOverrideControl

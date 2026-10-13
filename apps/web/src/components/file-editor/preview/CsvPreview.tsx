@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   parseDelimitedPreview,
   DEFAULT_DELIMITED_PREVIEW_ROWS,
@@ -12,7 +12,13 @@ import './preview-surface.css';
  *
  * 与产物侧的 CSV 预览（`artifact-preview-surface.tsx`）共用
  * `parseDelimitedPreview`，区别只在这里有工具栏、行数统计与更大的行上限。
+ *
+ * 超过首屏行数时提供「显示更多」渐进加载，不必离开预览面板去看编辑器。
  */
+
+/** 「显示更多」单次追加的数据行数。 */
+export const CSV_PREVIEW_ROW_STEP = 500;
+
 export function CsvPreview({
   content,
   delimiter,
@@ -22,9 +28,16 @@ export function CsvPreview({
   delimiter: string;
   path: string;
 }) {
+  const [rowLimit, setRowLimit] = useState(DEFAULT_DELIMITED_PREVIEW_ROWS);
+
+  // 切换文件时复位渐进上限（与 TextPreview 同一口径）。
+  useEffect(() => {
+    setRowLimit(DEFAULT_DELIMITED_PREVIEW_ROWS);
+  }, [path]);
+
   const preview = useMemo(
-    () => parseDelimitedPreview(content, delimiter, DEFAULT_DELIMITED_PREVIEW_ROWS),
-    [content, delimiter],
+    () => parseDelimitedPreview(content, delimiter, rowLimit),
+    [content, delimiter, rowLimit],
   );
   const summary =
     preview.headers.length === 0
@@ -76,8 +89,27 @@ export function CsvPreview({
         </table>
       </div>
       {preview.truncatedRows > 0 && (
-        <div className="oaw-preview-status" data-testid="file-editor-csv-truncated">
-          {`已展示前 ${preview.parsedLines} 行，另有 ${preview.truncatedRows} 行未渲染。可在左侧编辑器中查看完整内容。`}
+        <div
+          className="oaw-preview-status"
+          data-testid="file-editor-csv-truncated"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <span>{`已展示前 ${preview.parsedLines} 行，另有 ${preview.truncatedRows} 行未渲染。`}</span>
+          <button
+            type="button"
+            className="oaw-preview-btn"
+            data-testid="file-editor-csv-show-more"
+            onClick={() => setRowLimit((limit) => limit + CSV_PREVIEW_ROW_STEP)}
+          >
+            {preview.truncatedRows <= CSV_PREVIEW_ROW_STEP
+              ? `显示余下 ${preview.truncatedRows} 行`
+              : `显示更多（+${CSV_PREVIEW_ROW_STEP} 行）`}
+          </button>
         </div>
       )}
     </div>

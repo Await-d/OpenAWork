@@ -588,7 +588,14 @@ export async function capabilitiesRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: '会话不存在。' });
       }
 
-      const capabilities = buildCapabilitiesForUser({ userId: user.sub, sessionId });
+      // 顶部归属校验已取到 metadata_json——直接解析透传，避免
+      // buildCapabilitiesForUser 内部再查一次 sessions（与
+      // buildCapabilityContext 的既有 override 模式一致）。
+      const capabilities = buildCapabilitiesForUser({
+        userId: user.sub,
+        sessionId,
+        sessionMetadataOverride: parseSessionMetadataJson(row.metadata_json ?? '{}'),
+      });
       const skills = capabilities.filter((cap) => cap.kind === 'skill');
       const tools = capabilities.filter((cap) => cap.kind === 'tool');
 

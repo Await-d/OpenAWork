@@ -18,7 +18,13 @@
  * 本模块不注册任何定时重试。
  */
 
-import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
+import {
+  sqliteAll,
+  sqliteGet,
+  sqliteRun,
+  sqliteRunWithChanges,
+  sqliteTransaction,
+} from '../infra/db.js';
 
 /** 附件元数据（与前端 `AttachmentItem` 对齐，仅保留重建预览所需字段）。 */
 export interface ComposerQueueAttachment {
@@ -232,6 +238,11 @@ export function countComposerQueueItems(input: { sessionId: string; userId: stri
  */
 export const COMPOSER_QUEUE_CLAIM_LEASE_MS = 60_000;
 
+export interface ComposerQueueClaimResult {
+  claimed: boolean;
+  itemId: string;
+}
+
 /** 租约时长上下限——客户端传 0 或超大值都会让互斥语义失效，故在此夹紧。 */
 const CLAIM_LEASE_MIN_MS = 5_000;
 const CLAIM_LEASE_MAX_MS = 5 * 60_000;
@@ -265,26 +276,51 @@ export function claimComposerQueueItem(input: {
   sessionId: string;
   userId: string;
 }): boolean {
-  const leaseMs = clampLeaseMs(input.leaseMs);
   return (
-    sqliteRunWithChanges(
-      `UPDATE session_composer_queue
-          SET claimed_by = ?, claimed_until = ?
-        WHERE id = ? AND session_id = ? AND user_id = ?
-          AND (claimed_by IS NULL
-               OR claimed_until IS NULL
-               OR claimed_until <= ?
-               OR claimed_by = ?)`,
-      [
-        input.clientId,
-        input.now + leaseMs,
-        input.itemId,
-        input.sessionId,
-        input.userId,
-        input.now,
-        input.clientId,
-      ],
-    ) > 0
+    claimComposerQueueItems({
+      ...input,
+      itemIds: [input.itemId],
+    })[0]?.claimed === true
+  );
+}
+
+export function claimComposerQueueItems(input: {
+  clientId: string;
+  itemIds: readonly string[];
+  leaseMs: number;
+  now: number;
+  sessionId: string;
+  userId: string;
+}): ComposerQueueClaimResult[] {
+  const itemIds = [...new Set(input.itemIds)];
+  if (itemIds.length === 0) {
+    return [];
+  }
+
+  const leaseMs = clampLeaseMs(input.leaseMs);
+  return sqliteTransaction(() =>
+    itemIds.map((itemId) => ({
+      claimed:
+        sqliteRunWithChanges(
+          `UPDATE session_composer_queue
+              SET claimed_by = ?, claimed_until = ?
+            WHERE id = ? AND session_id = ? AND user_id = ?
+              AND (claimed_by IS NULL
+                   OR claimed_until IS NULL
+                   OR claimed_until <= ?
+                   OR claimed_by = ?)`,
+          [
+            input.clientId,
+            input.now + leaseMs,
+            itemId,
+            input.sessionId,
+            input.userId,
+            input.now,
+            input.clientId,
+          ],
+        ) > 0,
+      itemId,
+    })),
   );
 }
 

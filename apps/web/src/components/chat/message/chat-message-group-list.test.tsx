@@ -1,6 +1,6 @@
 import { createRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ChatMessageGroupList,
@@ -180,6 +180,100 @@ describe('ChatMessageGroupList', () => {
     // 否则文本会落在头像槽位下方、与消息正文差 40px（真实几何由浏览器验证）。
     expect(markup).toContain('chat-message-row--notice');
     expect(markup).toContain('chat-message-avatar-spacer');
+  });
+
+  it('子代理通知正文按 Markdown 渲染（加粗标记不再裸露）', () => {
+    const groups = buildSubagentNoticeGroups([
+      {
+        id: 'n-md',
+        agent: 'explore',
+        state: 'done',
+        description: '结构梳理',
+        text: [
+          '<results>',
+          '<answer>',
+          '**结论**：状态机核心实现已确认。',
+          '</answer>',
+          '</results>',
+        ].join('\n'),
+        createdAt: 1_000,
+      },
+    ]);
+
+    const markup = renderToStaticMarkup(
+      <ChatMessageGroupList
+        activeModelId="gpt-5.4"
+        activeProviderId="openai"
+        bottomRef={createRef<HTMLDivElement>()}
+        currentUserEmail="user@example.com"
+        groups={groups}
+        scrollRegionRef={createRef<HTMLDivElement>()}
+      />,
+    );
+
+    expect(markup).toContain('<strong>结论</strong>');
+    expect(markup).not.toContain('**结论**');
+  });
+
+  it('传入 onOpenSubagentChild 时通知行可点击并回传子会话 id', () => {
+    const onOpenSubagentChild = vi.fn();
+    const groups = buildSubagentNoticeGroups([
+      {
+        id: 'n-click',
+        agent: 'web-researcher',
+        state: 'done',
+        description: '请联网检索科技行业新动态',
+        text: '<subagent sessionID="child-1" state="completed">子代理已完成</subagent>',
+        childSessionId: 'child-1',
+        createdAt: 1_000,
+      },
+    ]);
+
+    const { container } = render(
+      <ChatMessageGroupList
+        activeModelId="gpt-5.4"
+        activeProviderId="openai"
+        bottomRef={createRef<HTMLDivElement>()}
+        currentUserEmail="user@example.com"
+        groups={groups}
+        onOpenSubagentChild={onOpenSubagentChild}
+        scrollRegionRef={createRef<HTMLDivElement>()}
+      />,
+    );
+
+    const heading = container.querySelector('[data-subagent-notice-heading="true"]');
+    expect(heading).not.toBeNull();
+    fireEvent.click(heading as HTMLElement);
+
+    expect(onOpenSubagentChild).toHaveBeenCalledWith('child-1');
+  });
+
+  it('未传 onOpenSubagentChild 时通知行不可点击（不渲染按钮）', () => {
+    const groups = buildSubagentNoticeGroups([
+      {
+        id: 'n-no-click',
+        agent: 'web-researcher',
+        state: 'done',
+        description: '请联网检索科技行业新动态',
+        text: '<subagent sessionID="child-1" state="completed">子代理已完成</subagent>',
+        childSessionId: 'child-1',
+        createdAt: 1_000,
+      },
+    ]);
+
+    const { container } = render(
+      <ChatMessageGroupList
+        activeModelId="gpt-5.4"
+        activeProviderId="openai"
+        bottomRef={createRef<HTMLDivElement>()}
+        currentUserEmail="user@example.com"
+        groups={groups}
+        scrollRegionRef={createRef<HTMLDivElement>()}
+      />,
+    );
+
+    expect(container.querySelector('[data-subagent-notice-heading="true"]')).toBeNull();
+    expect(container.querySelector('button')).toBeNull();
   });
 });
 

@@ -227,6 +227,50 @@ describe('settings profile routes', () => {
     }
   });
 
+  it('PUT /settings/providers/model-context 失效该用户的 catalog 缓存', async () => {
+    const catalogModule = await import('../../provider/provider-catalog.js');
+    const app = await buildApp();
+    try {
+      const authorization = await bearer(app);
+      dbModule.sqliteRun(
+        `INSERT INTO user_settings (user_id, key, value) VALUES (?, 'providers', ?)`,
+        [
+          USER_ID,
+          JSON.stringify([
+            {
+              id: 'provider-one',
+              type: 'custom',
+              name: 'Provider One',
+              enabled: true,
+              defaultModels: [{ id: 'model-one', label: 'Model One', enabled: true }],
+            },
+          ]),
+        ],
+      );
+      catalogModule.invalidateAllCatalogs();
+      catalogModule.__seedCatalogCacheForTest(USER_ID, Date.now());
+      expect(catalogModule.__getCatalogCacheSizeForTest()).toBe(1);
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/settings/providers/model-context',
+        headers: { authorization },
+        payload: {
+          providerId: 'provider-one',
+          modelId: 'model-one',
+          contextWindowOverride: 400_000,
+        },
+      });
+
+      // 挡位写入后必须立刻可被运行时读到：缓存未失效会让本次调整在 TTL 内不生效。
+      expect(response.statusCode).toBe(200);
+      expect(catalogModule.__getCatalogCacheSizeForTest()).toBe(0);
+    } finally {
+      await app.close();
+      catalogModule.invalidateAllCatalogs();
+    }
+  });
+
   it('PUT /settings/providers/model-context 未认证或模型不存在时拒绝请求', async () => {
     const app = await buildApp();
     try {
@@ -467,6 +511,78 @@ describe('settings profile routes', () => {
 
       const afterToggle = readStoredProviders().find((provider) => provider.id === 'deepseek');
       expect(afterToggle?.defaultModels).toEqual([{ ...target?.defaultModels[0], enabled: false }]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PUT /settings/providers 保存的上下文挡位经落库裁剪与 catalog 合并后不丢失', async () => {
+    const app = await buildApp();
+    try {
+      const authorization = await bearer(app);
+
+      const getResponse = await app.inject({
+        method: 'GET',
+        url: '/settings/providers',
+        headers: { authorization },
+      });
+      expect(getResponse.statusCode).toBe(200);
+      const initial = getResponse.json() as {
+        providers: Array<{ id: string; defaultModels: Array<Record<string, unknown>> }>;
+        activeSelection: unknown;
+      };
+      const target = initial.providers.find((provider) => provider.defaultModels.length > 0);
+      expect(target).toBeDefined();
+      const targetModelId = target?.defaultModels[0]?.['id'];
+      expect(typeof targetModelId).toBe('string');
+
+      const withOverride = initial.providers.map((provider) =>
+        provider.id === target?.id
+          ? {
+              ...provider,
+              defaultModels: provider.defaultModels.map((model) =>
+                model['id'] === targetModelId
+                  ? { ...model, contextWindowOverride: 400_000 }
+                  : model,
+              ),
+            }
+          : provider,
+      );
+
+      const putResponse = await app.inject({
+        method: 'PUT',
+        url: '/settings/providers',
+        headers: { authorization },
+        payload: { providers: withOverride, activeSelection: initial.activeSelection },
+      });
+      expect(putResponse.statusCode).toBe(200);
+
+      // 落库只存覆盖项:挡位是用户可编辑字段,必须留在 providers 行里。
+      const stored = JSON.parse(
+        dbModule.sqliteGet<{ value: string }>(
+          `SELECT value FROM user_settings WHERE user_id = ? AND key = 'providers'`,
+          [USER_ID],
+        )?.value ?? '[]',
+      ) as Array<{ id: string; defaultModels: Array<Record<string, unknown>> }>;
+      const storedModel = stored
+        .find((provider) => provider.id === target?.id)
+        ?.defaultModels.find((model) => model['id'] === targetModelId);
+      expect(storedModel?.['contextWindowOverride']).toBe(400_000);
+
+      // 读回会以 catalog 为底重新派生模型清单,挡位不能被合并过程抹掉。
+      const readResponse = await app.inject({
+        method: 'GET',
+        url: '/settings/providers',
+        headers: { authorization },
+      });
+      expect(readResponse.statusCode).toBe(200);
+      const readBack = readResponse.json() as {
+        providers: Array<{ id: string; defaultModels: Array<Record<string, unknown>> }>;
+      };
+      const readModel = readBack.providers
+        .find((provider) => provider.id === target?.id)
+        ?.defaultModels.find((model) => model['id'] === targetModelId);
+      expect(readModel?.['contextWindowOverride']).toBe(400_000);
     } finally {
       await app.close();
     }

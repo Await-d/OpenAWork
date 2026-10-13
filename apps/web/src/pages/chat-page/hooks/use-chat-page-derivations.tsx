@@ -73,6 +73,12 @@ export interface ChatPageDerivationsDeps {
   readonly effectiveContextMessageCount: number;
   readonly effectiveReportedStreamUsage: ChatBackendUsageSnapshot | undefined;
   readonly effectiveWorkingDirectory: string | null;
+  /**
+   * 文件浏览根：已绑定时与 `effectiveWorkingDirectory` 相同；未绑定的普通
+   * 会话为默认工作区（`~/Documents/OpenAWork`）。文件树用它，绑定 chip /
+   * 编辑器作用域等仍用 `effectiveWorkingDirectory`。
+   */
+  readonly fileBrowseRoot: string | null;
   readonly fileEditor: {
     openFiles: OpenFile[];
     activeFile: OpenFile | null;
@@ -185,6 +191,7 @@ export function useChatPageDerivations(deps: ChatPageDerivationsDeps) {
     effectiveContextMessageCount,
     effectiveReportedStreamUsage,
     effectiveWorkingDirectory,
+    fileBrowseRoot,
     fileEditor,
     fusionChatLayout,
     handleCompactCurrentSession,
@@ -373,9 +380,11 @@ export function useChatPageDerivations(deps: ChatPageDerivationsDeps) {
 
   // 主编辑器面板与停靠面板「代码」tab 共用同一份文件树配置，避免两处漂移；
   // 只有当前可见的那份 active=true，避免两份树同时拉取数据。
+  // 根路径用 `fileBrowseRoot`：未绑定工作区的普通会话回退到默认工作区，
+  // 让树在无工作区会话里也能浏览 Agent 创建的文件。
   const renderWorkspaceFileTree = (active: boolean) => (
     <WorkspaceFileTreePanel
-      workspacePath={effectiveWorkingDirectory}
+      workspacePath={fileBrowseRoot}
       sessionId={currentSessionId}
       onOpenFile={(path) => void fileEditor.openFile(path)}
       fetchTree={workspace.fetchTree}

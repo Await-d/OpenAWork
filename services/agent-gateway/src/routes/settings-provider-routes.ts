@@ -364,6 +364,9 @@ export async function registerSettingsProviderRoutes(app: FastifyInstance): Prom
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
         [user.sub, JSON.stringify(providers)],
       );
+      // 挡位变更必须立刻反映到运行时：catalog 缓存（30s TTL）里仍是旧模型配置，
+      // 不失效的话本次调整在缓存过期前不参与路由/压缩决策。
+      invalidateCatalog(user.sub);
       step.succeed(undefined, { providerId: body.providerId, modelId: body.modelId });
       return reply.send({
         ok: true,
@@ -766,20 +769,25 @@ export async function registerSettingsProviderRoutes(app: FastifyInstance): Prom
       );
       const modelPrices = materialized.providers.flatMap((provider) =>
         provider.defaultModels
+          .map((model) => ({
+            model,
+            // 用量页展示有效窗口：挡位是权威值，配置后覆盖模型预设。
+            contextWindow: model.contextWindowOverride ?? model.contextWindow,
+          }))
           .filter(
-            (model) =>
+            ({ model, contextWindow }) =>
               model.inputPricePerMillion !== undefined ||
               model.outputPricePerMillion !== undefined ||
               model.cacheReadPricePerMillion !== undefined ||
               model.cacheWritePricePerMillion !== undefined ||
-              model.contextWindow !== undefined,
+              contextWindow !== undefined,
           )
-          .map((model) => ({
+          .map(({ model, contextWindow }) => ({
             providerId: provider.id,
             modelName: model.id,
             inputPer1m: model.inputPricePerMillion ?? 0,
             outputPer1m: model.outputPricePerMillion ?? 0,
-            ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+            ...(contextWindow !== undefined ? { contextWindow } : {}),
             ...(model.cacheReadPricePerMillion !== undefined
               ? { cacheReadPer1m: model.cacheReadPricePerMillion }
               : {}),

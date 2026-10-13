@@ -37,7 +37,7 @@ export function extractTaskListFromOutput(output: unknown): TaskLike[] | null {
   }
   if (Array.isArray(output)) {
     // 检查第一个元素是否像任务
-    const first = (output as any[])[0];
+    const first: unknown = output[0];
     if (first && typeof first === 'object' && ('subject' in first || 'status' in first)) {
       return output as TaskLike[];
     }
@@ -56,7 +56,7 @@ export function extractSessionListFromOutput(output: unknown): SessionLike[] | n
     return r.sessions as SessionLike[];
   }
   if (Array.isArray(output)) {
-    const first = (output as any[])[0];
+    const first: unknown = output[0];
     if (
       first &&
       typeof first === 'object' &&

@@ -46,12 +46,37 @@ export interface EnqueueComposerQueueResult {
   item: ComposerQueueItem;
 }
 
+/** `claimed: false` 时的拒绝原因。 */
+export type ComposerQueueClaimRejectionReason = 'held_by_other' | 'session_running';
+
+export interface ComposerQueueClaimResult {
+  claimed: boolean;
+  /**
+   * 拒绝原因,仅 `claimed: false` 时存在:
+   * - `held_by_other`:另一端已持有**这条条目**的发送权,跳过即可;
+   * - `session_running`:**会话**仍被单飞锁占用(另一端的请求 / 网关自己唤醒的 run /
+   *   上一回合收尾),条目应保留并退避重试。
+   * 旧网关不返回该字段,此时视作 `held_by_other`。
+   */
+  reason?: ComposerQueueClaimRejectionReason;
+}
+
+export interface ComposerQueueBatchClaim {
+  claimed: boolean;
+  itemId: string;
+  reason?: ComposerQueueClaimRejectionReason;
+}
+
 export interface ComposerQueueClient {
   /**
    * 独占一条待发消息的发送权。
    *
-   * 返回 false = 另一端正在处理（正常结果，不是失败）。此时**不要**重试或报错，
-   * 应当跳过该条目并以服务端队列为准重新收敛。
+   * `claimed: false` 是正常结果（不是失败），按 `reason` 分流：
+   * - `held_by_other`：另一端正在处理**这条条目**，跳过并以服务端队列为准收敛，
+   *   不要重试或报错；
+   * - `session_running`：**会话**仍被网关单飞锁占用（另一端的请求 / 网关自己唤醒的
+   *   run / 上一回合正在收尾），此时发出去必被拒成 SESSION_ALREADY_RUNNING——条目
+   *   应保留并退避重试。
    */
   claim(
     token: string,
@@ -59,7 +84,14 @@ export interface ComposerQueueClient {
     itemId: string,
     input: { clientId: string; leaseMs?: number },
     options?: { signal?: AbortSignal },
-  ): Promise<boolean>;
+  ): Promise<ComposerQueueClaimResult>;
+  claimMany(
+    token: string,
+    sessionId: string,
+    itemIds: readonly string[],
+    input: { clientId: string; leaseMs?: number },
+    options?: { signal?: AbortSignal },
+  ): Promise<ComposerQueueBatchClaim[]>;
   clear(token: string, sessionId: string, options?: { signal?: AbortSignal }): Promise<number>;
   enqueue(
     token: string,
@@ -93,6 +125,7 @@ const ACTION_ENQUEUE = '加入待发队列';
 const ACTION_REMOVE = '移出待发队列';
 const ACTION_CLEAR = '清空待发队列';
 const ACTION_CLAIM = '获取待发消息发送权';
+const ACTION_CLAIM_MANY = '批量获取待发消息发送权';
 const ACTION_RELEASE = '交还待发消息发送权';
 
 function authHeader(token: string): { Authorization: string } {
@@ -201,6 +234,7 @@ export function createComposerQueueClient(gatewayUrl: string): ComposerQueueClie
     `${gatewayUrl}/sessions/${encodeURIComponent(sessionId)}/composer-queue`;
   const claimUrl = (sessionId: string, itemId: string): string =>
     `${base(sessionId)}/${encodeURIComponent(itemId)}/claim`;
+  const claimManyUrl = (sessionId: string): string => `${base(sessionId)}/claim`;
 
   return {
     async claim(token, sessionId, itemId, input, options) {
@@ -216,10 +250,56 @@ export function createComposerQueueClient(gatewayUrl: string): ComposerQueueClie
         });
         const payload = (await readJsonOrThrow(response, ACTION_CLAIM)) as {
           claimed?: unknown;
+          reason?: unknown;
         } | null;
-        return payload?.claimed === true;
+        const claimed = payload?.claimed === true;
+        if (claimed) {
+          return { claimed };
+        }
+        // reason 收敛为封闭枚举：旧网关不返回该字段，按「他端持有」处理，调用方无需判空。
+        const reason = payload?.reason === 'session_running' ? 'session_running' : 'held_by_other';
+        return { claimed, reason };
       } catch (error) {
         throw normalizeError(ACTION_CLAIM, error);
+      }
+    },
+
+    async claimMany(token, sessionId, itemIds, input, options) {
+      try {
+        const response = await fetchWithTimeout(claimManyUrl(sessionId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+          body: JSON.stringify({
+            clientId: input.clientId,
+            itemIds,
+            ...(input.leaseMs === undefined ? {} : { leaseMs: input.leaseMs }),
+          }),
+          signal: options?.signal,
+        });
+        const payload = (await readJsonOrThrow(response, ACTION_CLAIM_MANY)) as {
+          claims?: unknown;
+        } | null;
+        if (!Array.isArray(payload?.claims)) {
+          throw new Error(`${ACTION_CLAIM_MANY}失败：网关未返回可识别的结果。`);
+        }
+        return payload.claims.flatMap((value): ComposerQueueBatchClaim[] => {
+          if (typeof value !== 'object' || value === null) {
+            return [];
+          }
+          const candidate = value as Record<string, unknown>;
+          if (typeof candidate.itemId !== 'string' || candidate.itemId.length === 0) {
+            return [];
+          }
+          const claimed = candidate.claimed === true;
+          if (claimed) {
+            return [{ claimed, itemId: candidate.itemId }];
+          }
+          const reason =
+            candidate.reason === 'session_running' ? 'session_running' : 'held_by_other';
+          return [{ claimed, itemId: candidate.itemId, reason }];
+        });
+      } catch (error) {
+        throw normalizeError(ACTION_CLAIM_MANY, error);
       }
     },
 

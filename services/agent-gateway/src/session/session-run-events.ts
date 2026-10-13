@@ -730,6 +730,11 @@ export function listSessionRunEventsByRequest(input: {
  * `buildChatRightPanelStateFromRunEvents` 都是累加 reduce（首个 `tool_call_delta` 的
  * input、`text += delta` 的前缀、`compaction` started/completed 配对都依赖开头），
  * 截断会让它们重建出残缺状态。仅供「只看最近若干条」的消费者使用。
+ *
+ * 第三条通道是 `listSessionRunEventsByRequestAfterSeq` + `/recovery?runEventAfterSeq=`：
+ * 调用方（chat 页远端运行中的 1s 快照轮询）自己持有前缀，每拍只取 `seq > cursor` 的增量
+ * 并由客户端拼回完整序列，单拍成本与 scope 已积累的规模无关。能维护前缀的完整序列消费者
+ * 走这条；维护不了前缀的仍走全量（`listSessionRunEventsByRequest`）。
  */
 export function listSessionRunEventsByRequestTail(input: {
   sessionId: string;

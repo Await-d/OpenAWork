@@ -3,6 +3,7 @@ import { tokens } from '../tokens.js';
 import type { AlwaysScopeLevel } from '../permissions/PermissionPrompt.js';
 import type { ToolDiffFileView } from './ToolDiffCollection.js';
 import { ToolDiffCollection } from './ToolDiffCollection.js';
+import { parseJsonObjectTolerant } from './truncated-json.js';
 import { UnifiedCodeDiff, summarizeSnapshotDiff, summarizeUnifiedDiff } from './UnifiedCodeDiff.js';
 import {
   Chevron,
@@ -78,6 +79,11 @@ export interface ToolCallCardDisplayData {
     filePath?: string;
     files?: ToolDiffFileView[];
     summary: string;
+    /**
+     * diff 由「严格解析失败后补闭合修复」的 JSON 输出还原（见 `truncated-json.ts`）：
+     * 尾部可能不完整，UI 必须如实标注，不能当成与原件逐字一致的文件变更。
+     */
+    truncated?: boolean;
   };
   hasDetails: boolean;
   outputPreview?: string;
@@ -835,8 +841,8 @@ function summarizeInput(toolName: string, input: Record<string, unknown>): strin
   return `${firstKey}：${stringifyValue(firstValue).slice(0, 120)}`;
 }
 
-function summarizeOutputPreview(output: unknown): string | undefined {
-  const diffView = resolveDiffView(output);
+function summarizeOutputPreview(output: unknown, pathHint?: string): string | undefined {
+  const diffView = resolveDiffView(output, pathHint);
   if (diffView) {
     return diffView.summary;
   }
@@ -886,7 +892,10 @@ function summarizeOutputPreview(output: unknown): string | undefined {
   return undefined;
 }
 
-function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] | undefined {
+function resolveDiffView(
+  output: unknown,
+  pathHint?: string,
+): ToolCallCardDisplayData['diffView'] | undefined {
   if (typeof output === 'string') {
     const trimmed = output.trim();
     // Fast path: the output is already a unified diff blob.
@@ -901,15 +910,22 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
     // serialised to JSON during storage (see stringifyToolResultOutput in
     // agent-gateway), so the UI receives a JSON-encoded string rather than
     // a parsed envelope. Without this, multi-file patches render as a 4KB
-    // raw JSON dump in the generic ExpandableOutput fallback. Cheaply
-    // gate on the leading/trailing brace shape so bash/grep string output
-    // never enters JSON.parse.
-    if (
-      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-      (trimmed.startsWith('[') && trimmed.endsWith(']'))
-    ) {
+    // raw JSON dump in the generic ExpandableOutput fallback.
+    //
+    // 文本被截断时（大文件写入 / 传输中断 / 上游转发上限）严格解析必然失败，
+    // 只补闭合就能救回截断点之前的字段；否则卡片会退化成一整段转义 JSON
+    // 文本 + 参数抽屉，用户看不到任何文件变更。`truncated` 随 diffView 回传，
+    // 摘要里如实标注，避免把截断结果当成完整 diff。
+    const tolerant = parseJsonObjectTolerant(trimmed);
+    if (tolerant) {
+      const view = resolveDiffView(tolerant.value, pathHint);
+      return view && tolerant.truncated ? markTruncatedDiffView(view) : view;
+    }
+    // 数组形态保持严格解析：截断修复只覆盖对象信封，bash/grep 的裸文本
+    // 依旧不会进入 JSON.parse（`{` 前缀是唯一入口）。
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
       try {
-        return resolveDiffView(JSON.parse(trimmed));
+        return resolveDiffView(JSON.parse(trimmed) as unknown, pathHint);
       } catch {
         // Malformed JSON — fall through to undefined so the caller can pick
         // a different output renderer.
@@ -928,7 +944,8 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
   const filePath =
     readNonEmptyString(record['filePath']) ??
     readNonEmptyString(record['path']) ??
-    readNonEmptyString(record['filename']);
+    readNonEmptyString(record['filename']) ??
+    readNonEmptyString(pathHint);
 
   const multiFileSource = Array.isArray(record['files'])
     ? record['files']
@@ -1025,6 +1042,33 @@ function resolveDiffView(output: unknown): ToolCallCardDisplayData['diffView'] |
   };
 }
 
+/**
+ * 标记「这份 diff 来自修复过的输出」：摘要追加后缀并把 `truncated` 透传给消费者。
+ *
+ * 文案用「可能不完整」而不是「已截断」——修复只能判定「严格解析失败」，无法区分
+ * 真截断与源文本本身格式异常（如尾逗号），过强的断言会变成另一种误导。
+ *
+ * 只标注最外层返回值——多文件分支内部用子项 `summary` 里的 `+N / -M` 聚合统计，
+ * 提前污染子项会把总数算错。
+ */
+function markTruncatedDiffView(
+  view: NonNullable<ToolCallCardDisplayData['diffView']>,
+): NonNullable<ToolCallCardDisplayData['diffView']> {
+  return { ...view, summary: `${view.summary} · 输出可能不完整`, truncated: true };
+}
+
+/**
+ * 入参里的目标路径：输出被截断时 `path` / `file` 往往落在截断点之后，
+ * diff 头没有文件名就只剩 `+N / -M`。用入参兜底比留空更可读。
+ */
+function readInputPathHint(input: Record<string, unknown>): string | undefined {
+  for (const key of ['filePath', 'path', 'file_path'] as const) {
+    const value = readNonEmptyString(input[key]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
 export function resolveToolCallCardDisplayData(input: {
   includeOutputDetails?: boolean;
   input: Record<string, unknown>;
@@ -1036,7 +1080,8 @@ export function resolveToolCallCardDisplayData(input: {
   const taskMeta = isSubagentToolName(input.toolName)
     ? resolveTaskToolMeta(input.input, input.output)
     : undefined;
-  const diffView = taskMeta ? undefined : resolveDiffView(input.output);
+  const pathHint = readInputPathHint(input.input);
+  const diffView = taskMeta ? undefined : resolveDiffView(input.output, pathHint);
   const bashView = taskMeta
     ? undefined
     : resolveBashTerminalView(input.toolName, input.input, input.output);
@@ -1046,7 +1091,7 @@ export function resolveToolCallCardDisplayData(input: {
     : (diffView?.summary ?? summarizeInput(input.toolName, input.input));
   const includeOutputDetails = input.includeOutputDetails !== false;
   const outputPreview =
-    taskMeta || !includeOutputDetails ? undefined : summarizeOutputPreview(input.output);
+    taskMeta || !includeOutputDetails ? undefined : summarizeOutputPreview(input.output, pathHint);
   const outputReadHints = taskMeta
     ? undefined
     : includeOutputDetails

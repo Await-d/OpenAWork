@@ -18,6 +18,11 @@ export interface SubAgentRunItem {
   status: SubAgentRunStatus;
   taskLabel: string;
   title: string;
+  /**
+   * 系统序号（按子会话创建顺序从 1 起编，见 `buildSubAgentRunItems`）。
+   * 用于切换器徽章与「子代理 N」默认命名；直构 fixture 可省略。
+   */
+  sequence?: number;
   assignedAgent?: string;
   result?: string;
   errorMessage?: string;
@@ -175,12 +180,47 @@ export function buildSubAgentRunItems(
   // 同一次构建共用一个时钟：宽限期判断不应随每个 item 的遍历时刻漂移。
   const nowMs = Date.now();
 
+  // 系统序号：按子会话创建顺序（createdAt 升序，缺时间的排最后、按 id 稳定排序）
+  // 从 1 起编。序号在「有任务的子会话」与「只有会话记录的子会话」的并集上统一分配，
+  // 保证同一子代理在切换器 / 运行列表 / 详情面板里始终是同一个号。
+  const involvedSessionIds = new Set<string>(tasksBySessionId.keys());
+  for (const session of childSessions) {
+    if (currentSessionId && session.id === currentSessionId) {
+      continue;
+    }
+    involvedSessionIds.add(session.id);
+  }
+  const createdAtBySessionId = new Map(
+    childSessions.map((session) => [session.id, session.createdAt] as const),
+  );
+  const sequenceBySessionId = new Map<string, number>();
+  Array.from(involvedSessionIds)
+    .sort((left, right) => {
+      const leftCreatedAt = createdAtBySessionId.get(left);
+      const rightCreatedAt = createdAtBySessionId.get(right);
+      if (
+        leftCreatedAt !== undefined &&
+        rightCreatedAt !== undefined &&
+        leftCreatedAt !== rightCreatedAt
+      ) {
+        return leftCreatedAt - rightCreatedAt;
+      }
+      if (leftCreatedAt !== undefined) return -1;
+      if (rightCreatedAt !== undefined) return 1;
+      return left.localeCompare(right);
+    })
+    .forEach((sessionId, index) => {
+      sequenceBySessionId.set(sessionId, index + 1);
+    });
+
   for (const [sessionId, groupedTasks] of tasksBySessionId) {
     // 同一子代理可能有多条任务（重启 / 重派），必须以最新一条为准，不能依赖遍历顺序。
     const aggregatedTask = aggregateSubAgentTask(groupedTasks);
     const childSession = childSessionsById.get(sessionId);
     const shortSessionId = sessionId.slice(0, 8);
-    const fallbackLabel = `子代理 ${shortSessionId}`;
+    const sequence = sequenceBySessionId.get(sessionId);
+    const fallbackLabel =
+      sequence === undefined ? `子代理 ${shortSessionId}` : `子代理 ${sequence}`;
 
     if (aggregatedTask === null) {
       continue;
@@ -199,6 +239,7 @@ export function buildSubAgentRunItems(
         childSession?.title,
         normalizeTitle(aggregatedTask.title, fallbackLabel),
       ),
+      ...(sequence !== undefined ? { sequence } : {}),
       assignedAgent: aggregatedTask.assignedAgent,
       result: aggregatedTask.result,
       errorMessage: aggregatedTask.errorMessage,
@@ -218,7 +259,8 @@ export function buildSubAgentRunItems(
     }
 
     const shortSessionId = session.id.slice(0, 8);
-    const fallbackLabel = normalizeTitle(session.title, `子代理 ${shortSessionId}`);
+    const sequence = sequenceBySessionId.get(session.id);
+    const fallbackLabel = normalizeTitle(session.title, `子代理 ${sequence ?? shortSessionId}`);
     itemsBySessionId.set(session.id, {
       sessionId: session.id,
       shortSessionId,
@@ -229,6 +271,7 @@ export function buildSubAgentRunItems(
       }),
       taskLabel: fallbackLabel,
       title: fallbackLabel,
+      ...(sequence !== undefined ? { sequence } : {}),
       messageCount: session.messages?.length ?? 0,
     });
   }

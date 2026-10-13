@@ -148,4 +148,86 @@ describe('McpServerManager', () => {
     renderManager({ servers: [], statuses: [] });
     expect(screen.getByText(/暂无服务器配置/)).toBeTruthy();
   });
+
+  // 回归：`disabledTools` 会被目录侧隐藏（模型不应看到永远调不通的工具），
+  // 所以 UI 必须把「运行状态里的已启用工具」与「配置里的已禁用工具名」合起来
+  // 渲染，否则用户没有入口把工具改回来 —— 内置默认收口就成了单向操作。
+  it('工具开关：已启用项可勾除，全部启用时显式写出空数组', () => {
+    const onUpdate = vi.fn<(id: string, entry: MCPServerEntry) => void>();
+    renderManager({
+      servers: [server({ disabledTools: ['fs_delete'] })],
+      statuses: [
+        status({
+          tools: [{ name: 'fs_read', description: '读取文件' }, { name: 'fs_write' }],
+        }),
+      ],
+      onUpdate,
+    });
+
+    fireEvent.click(screen.getByText(/管理工具/));
+
+    // 被禁用的工具只剩名字，且默认未勾选 → 勾选即从禁用列表移除（空数组 = 全部启用）。
+    const remove = screen.getByRole('checkbox', { name: /fs_delete/ }) as HTMLInputElement;
+    expect(remove.checked).toBe(false);
+    fireEvent.click(remove);
+    expect(onUpdate.mock.calls.at(-1)?.[1].disabledTools).toEqual([]);
+
+    // 已启用工具默认勾选 → 取消勾选即写入禁用列表。
+    const read = screen.getByRole('checkbox', { name: /fs_read/ }) as HTMLInputElement;
+    expect(read.checked).toBe(true);
+    fireEvent.click(read);
+    expect(onUpdate.mock.calls.at(-1)?.[1].disabledTools).toEqual(['fs_delete', 'fs_read']);
+  });
+
+  it('同名同时出现在启用与禁用两处（矛盾数据）以禁用为准', () => {
+    renderManager({
+      servers: [server({ disabledTools: ['fs_write'] })],
+      statuses: [status({ tools: [{ name: 'fs_write' }] })],
+      onUpdate: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByText(/管理工具/));
+
+    // 执行侧会拒绝该工具，UI 不能显示成「已启用」。
+    const write = screen.getByRole('checkbox', { name: /fs_write/ }) as HTMLInputElement;
+    expect(write.checked).toBe(false);
+  });
+
+  it('工具开关保持内置桥接脱敏，并在无工具信息时隐藏', () => {
+    const onUpdate = vi.fn();
+    renderManager({
+      servers: [
+        server({
+          id: 'open_websearch',
+          name: 'Open WebSearch',
+          builtin: true,
+          builtinKind: 'adapter',
+          source: 'builtin',
+          command: 'openawork-virtual-open-websearch',
+          url: 'https://fake.invalid/open-websearch',
+          disabledTools: ['search'],
+        }),
+      ],
+      statuses: [status({ id: 'open_websearch', tools: [{ name: 'fetch_web' }] })],
+      onUpdate,
+    });
+
+    fireEvent.click(screen.getByText(/管理工具/));
+    fireEvent.click(screen.getByRole('checkbox', { name: /search/ }));
+
+    const patch = onUpdate.mock.calls.at(-1)?.[1] as MCPServerEntry;
+    expect(patch.disabledTools).toEqual([]);
+    expect(patch).not.toHaveProperty('command');
+    expect(patch).not.toHaveProperty('url');
+  });
+
+  it('无 onUpdate 时不渲染工具开关（只读场景）', () => {
+    renderManager({
+      servers: [server({ disabledTools: ['fs_write'] })],
+      statuses: [status({ tools: [{ name: 'fs_read' }] })],
+      onUpdate: undefined,
+    });
+
+    expect(screen.queryByText(/管理工具/)).toBeNull();
+  });
 });

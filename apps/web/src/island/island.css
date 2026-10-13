@@ -26,6 +26,20 @@
  * 2. **表面不要挂在 `background` 简写上**。简写里任何一层失效,整条 `background`
  *    都会在计算值阶段作废 —— 浮窗会直接变成「一个透明的块」。所以底色走独立的
  *    `background-color`,渐变描边才走 `background-image`,两者互不牵连。
+ * 3. **不要用 `filter` / `backdrop-filter`**。WebKitGTK(桌面端 WebView,实测 2.50.4)
+ *    在透明窗口上,任何元素一旦进入 filter / backdrop 采样这类 effects 离屏渲染
+ *    路径,整个 WebView 的合成输出会被整帧丢弃 —— 浮窗窗口还在、DOM 还在、点击
+ *    还在,但视觉上「完全透明」。已通过逐条规则注入二分定位:`.island-body` 带
+ *    `filter: blur(6px)` 即稳定致死;`backdrop-filter` 同族(离屏 + backdrop
+ *    采样,受 GPU 路径影响结果不稳定),一并移除。浮现柔化由 opacity + transform
+ *    承担,玻璃质感由 0.72 底色 + 渐变描边表达。
+ * 4. **不要用 `opacity: 0`(用 0.01 替代)**。这是「完全透明」的第二根因,也是
+ *    最隐蔽的一根:透明窗口上,大面积元素处于 `opacity: 0` 时,整帧合成 alpha
+ *    被算成 0 —— 与第 3 条同症状。折叠态的 `.island-body`(占窗口约 70% 高)
+ *    正是常态下唯一的大面积透明元素,因此浮窗「永远全透明」;小面积
+ *    (`opacity: 0` 的文字行)不受影响,但为防布局变化改变面积,本文件内
+ *    一律用 `opacity: 0.01`(视觉无差)替代。展开/折叠的 opacity 过渡
+ *    (0.01 ↔ 1)中间态不经过 0,过渡期间同样安全。
  */
 
 html.island-html,
@@ -91,8 +105,6 @@ body.island-body #root {
   background-repeat: no-repeat;
   color: var(--island-fg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  -webkit-backdrop-filter: blur(28px) saturate(1.8);
-  backdrop-filter: blur(28px) saturate(1.8);
   overflow: hidden;
   cursor: grab;
   touch-action: none;
@@ -271,27 +283,25 @@ body.island-body #root {
   align-items: center;
   gap: 10px;
   padding: 0 12px 13px;
-  opacity: 0;
+  /* 硬约束:透明窗口上禁用 opacity:0(见文件头第 4 条),0.01 视觉等同 */
+  opacity: 0.01;
   transform: translateY(10px);
-  filter: blur(6px);
   pointer-events: none;
   /* 折叠时内容先撤,不拖泥带水 */
+  /* 不得加 filter(第 3 条),浮现柔化由 opacity + transform 承担 */
   transition:
     opacity 0.12s ease,
-    transform 0.16s ease,
-    filter 0.12s ease;
+    transform 0.16s ease;
 }
 
 .island.is-expanded .island-body {
   opacity: 1;
   transform: none;
-  filter: blur(0);
   pointer-events: auto;
   /* 原生补间纵向落下接近完成(约 0.3s)后才浮现 */
   transition:
     opacity 0.28s ease 0.3s,
-    transform 0.4s var(--island-ease-out) 0.3s,
-    filter 0.28s ease 0.3s;
+    transform 0.4s var(--island-ease-out) 0.3s;
 }
 
 .island-body-main {
@@ -302,7 +312,8 @@ body.island-body #root {
 .island-title,
 .island-preview,
 .island-actions {
-  opacity: 0;
+  /* 硬约束:透明窗口上禁用 opacity:0(第 4 条) */
+  opacity: 0.01;
   transform: translateY(6px);
   transition:
     opacity 0.12s ease,
@@ -410,7 +421,8 @@ body.island-body #root {
   height: 2px;
   background: rgba(255, 255, 255, 0.06);
   overflow: hidden;
-  opacity: 0;
+  /* 硬约束:透明窗口上禁用 opacity:0(第 4 条) */
+  opacity: 0.01;
   transition: opacity 0.3s ease 0.4s;
   pointer-events: none;
 }
@@ -469,7 +481,6 @@ body.island-body #root {
 
   .island-body {
     opacity: 1;
-    filter: none;
     transform: none;
   }
 }

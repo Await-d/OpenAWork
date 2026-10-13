@@ -1,9 +1,18 @@
-/* 子代理失败原因横幅：任务级错误、超时原因与会话级错误的统一落点。 */
+/* 子代理失败原因横幅：任务级错误、超时原因与会话级错误的统一落点。
+ *
+ * 层次策略：容器只铺 7% 的 danger 底（--complement-subtle，语义上 danger =
+ * complement），靠左侧 3px 强调条与边框表达失败语义；内部 chip / 按钮用更高
+ * 浓度的混合色浮出，避免「色块套色块」糊成一片。
+ */
 
 .sub-session-failure-banner {
-  background: var(--danger-muted);
-  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border-default));
-  border-radius: var(--radius-lg);
+  animation: sub-session-failure-banner-enter var(--dur-normal) var(--ease-normal);
+  background: var(--complement-subtle);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  box-shadow:
+    inset 3px 0 0 var(--danger),
+    var(--shadow-sm);
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
@@ -13,6 +22,18 @@
   min-width: 0;
   overflow: hidden;
   padding: var(--spacing-2) var(--spacing-3);
+}
+
+@keyframes sub-session-failure-banner-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .sub-session-failure-banner__header {
@@ -30,20 +51,21 @@
 
 .sub-session-failure-banner__title {
   color: var(--danger);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   min-width: 0;
+  letter-spacing: 0.01em;
 }
 
 .sub-session-failure-banner__count {
-  background: color-mix(in srgb, var(--danger) 14%, var(--bg-overlay));
-  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border-default));
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-overlay));
+  border: 1px solid var(--danger-border);
   border-radius: var(--radius-pill);
   color: var(--danger);
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
-  line-height: 16px;
+  line-height: 18px;
   padding: 0 var(--spacing-2);
 }
 
@@ -67,7 +89,7 @@
 }
 
 .sub-session-failure-banner__item + .sub-session-failure-banner__item {
-  border-top: 1px solid color-mix(in srgb, var(--danger) 18%, var(--border-subtle));
+  border-top: 1px solid color-mix(in srgb, var(--danger) 14%, var(--border-subtle));
   padding-top: var(--spacing-2);
 }
 
@@ -81,7 +103,7 @@
 .sub-session-failure-banner__name {
   color: var(--fg-strong);
   flex: 1;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   min-width: 0;
   overflow: hidden;
@@ -90,23 +112,25 @@
 }
 
 .sub-session-failure-banner__status {
-  background: var(--danger-muted);
-  border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border-default));
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-overlay));
+  border: 1px solid var(--danger-border);
   border-radius: var(--radius-pill);
   color: var(--danger);
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
-  line-height: 16px;
+  line-height: 18px;
   padding: 0 var(--spacing-2);
 }
 
+/* 错误正文用实底 + subtle 边界：横幅底色已降到 7%，实底块的可读性优先。 */
 .sub-session-failure-banner__error {
-  background: color-mix(in srgb, var(--bg-base) 72%, transparent);
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   color: var(--fg-default);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1.55;
   margin: 0;
   max-height: 96px;
@@ -128,14 +152,14 @@
 
 .sub-session-failure-banner__timeout {
   color: var(--warning);
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 600;
   line-height: 1.4;
 }
 
 .sub-session-failure-banner__session-fallback {
   color: var(--fg-default);
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1.6;
   margin: 0;
 }
@@ -150,10 +174,10 @@
 
 .sub-session-failure-banner__action {
   align-items: center;
-  background: var(--bg-overlay);
-  border: 1px solid var(--border-emphasis);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  color: var(--fg-default);
+  color: var(--fg-muted);
   cursor: pointer;
   display: inline-flex;
   font-size: 10px;
@@ -172,8 +196,8 @@
 
 .sub-session-failure-banner__action:hover {
   background: var(--bg-hover);
-  border-color: var(--border-strong);
-  color: var(--fg-strong);
+  border-color: var(--border-emphasis);
+  color: var(--fg-default);
 }
 
 .sub-session-failure-banner__action:active {
@@ -191,14 +215,15 @@
   opacity: 0.55;
 }
 
+/* 复制是横幅内的主操作：danger 语义 + 实底浮出。 */
 .sub-session-failure-banner__action--copy {
-  background: var(--danger-muted);
-  border-color: color-mix(in srgb, var(--danger) 34%, var(--border-default));
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-overlay));
+  border-color: var(--danger-border);
   color: var(--danger);
 }
 
 .sub-session-failure-banner__action--copy:hover {
-  background: color-mix(in srgb, var(--danger) 20%, var(--bg-overlay));
+  background: color-mix(in srgb, var(--danger) 26%, var(--bg-overlay));
   border-color: color-mix(in srgb, var(--danger) 46%, var(--border-default));
   color: var(--danger);
 }
@@ -215,7 +240,16 @@
   color: var(--warning);
 }
 
+/* 「打开完整会话」保持 ghost 次操作：面板头部已有同款入口，这里不抢层级。 */
+.sub-session-failure-banner__action--open {
+  margin-left: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .sub-session-failure-banner {
+    animation: none;
+  }
+
   .sub-session-failure-banner__action {
     transition: none;
   }

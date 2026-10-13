@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenAWork Island</title>
+    <script>
+      // 灵动岛窗口专属入口。与 index.html(主窗口)的区别:
+      // 1. 不加载主窗口的全局样式与 Monaco 等重资源 —— WebKitGTK 透明窗口上,
+      //    全局样式表中的 filter / backdrop 类声明会让整个 WebView 的合成输出
+      //    被整帧丢弃(浮窗「完全透明」),主窗口的全量 CSS 对浮窗是纯风险;
+      // 2. 固定深色 + 不设 data-theme —— 恒定命中 index.css 的
+      //    `:root:not([data-theme])`(E · Nebula 暗色)默认 token 块,与
+      //    island.css 头注释「浮窗稳定拿到同一组暗色 token」的设计一致。
+      document.documentElement.setAttribute('data-mode', 'dark');
+      document.documentElement.style.colorScheme = 'dark';
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/island-main.ts"></script>
+  </body>
+</html>

@@ -236,6 +236,16 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
     const targetPath = join(TEST_WORKSPACE, 'auto-edit-multi.txt');
     writeFileSync(targetPath, 'alpha beta\n', 'utf8');
 
+    // multi_edit 现在要求先 read（与 edit / 远程 multi_edit 对齐）。沙箱审计
+    // 写入在测试里是 no-op（sqliteRunMock），所以直接给证据查询喂一条匹配的
+    // read 审计行，保持本用例聚焦在权限档位语义上。
+    mocks.sqliteAllMock.mockReturnValueOnce([
+      {
+        input_json: JSON.stringify({ path: targetPath }),
+        output_json: null,
+      },
+    ]);
+
     const result = await createDefaultSandbox().execute(
       {
         toolCallId: 'call-auto-edit-multi',
@@ -254,6 +264,33 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
     expect(result.pendingPermissionRequestId).toBeUndefined();
     expect(readFileSync(targetPath, 'utf8')).toBe('gamma beta\n');
     expect(permissionInsertParams()).toBeUndefined();
+  });
+
+  it('multi_edit 未读先改时拒绝并提示先读文件', async () => {
+    mocks.metadataJson = JSON.stringify({
+      permissionMode: 'auto-edit',
+      workingDirectory: TEST_WORKSPACE,
+    });
+    const targetPath = join(TEST_WORKSPACE, 'unread-multi.txt');
+    writeFileSync(targetPath, 'alpha beta\n', 'utf8');
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-unread-multi',
+        toolName: 'multi_edit',
+        rawInput: {
+          filePath: targetPath,
+          edits: [{ oldString: 'alpha', newString: 'gamma' }],
+        },
+      },
+      new AbortController().signal,
+      'session-unread-multi',
+      executionContext('req-unread-multi'),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.output ?? '')).toContain('You must read file');
+    expect(readFileSync(targetPath, 'utf8')).toBe('alpha beta\n');
   });
 
   it('auto-edit 档位下 patch 自动执行且不创建 pending 权限请求', async () => {

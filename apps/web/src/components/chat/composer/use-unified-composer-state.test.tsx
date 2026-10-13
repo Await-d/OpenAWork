@@ -11,6 +11,7 @@ import type { UnifiedComposerFeatures } from './UnifiedComposer.js';
 import { useComposerInputHistoryStore } from '../../../stores/chat/composer-input-history.js';
 import { useChatQueueStore } from '../../../stores/chat/chat-queue.js';
 import { useUnifiedComposerState } from './use-unified-composer-state.js';
+import { notifyQueuedMessageSendRejected } from '../../../utils/chat/composer-queue-events.js';
 
 let hydrationGate: { promise: Promise<void>; resolve: () => void } | null = null;
 
@@ -53,6 +54,8 @@ const { fakeQueue } = vi.hoisted(() => ({
     claimShouldThrow: false,
     releaseCalls: [] as Array<{ clientId: string; itemId: string; sessionId: string }>,
     removeCalls: [] as Array<{ itemId: string; sessionId: string }>,
+    /** 置 true 后 claim 返回 session_running:模拟「会话仍被单飞锁占用」。 */
+    claimSessionRunning: false,
   },
 }));
 
@@ -74,7 +77,44 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
           throw new Error('网关不可达');
         }
         fakeQueue.claimCalls.push({ clientId: input.clientId, itemId, sessionId });
-        return !fakeQueue.claimHeldByOther;
+        if (fakeQueue.claimSessionRunning) {
+          return { claimed: false, reason: 'session_running' as const };
+        }
+        if (fakeQueue.claimHeldByOther) {
+          return { claimed: false, reason: 'held_by_other' as const };
+        }
+        return { claimed: true };
+      },
+      claimMany: async (
+        _token: string,
+        _sessionId: string,
+        itemIds: readonly string[],
+        input: { clientId: string },
+      ) => {
+        const results = [];
+        for (const itemId of itemIds) {
+          results.push(
+            await (async () => {
+              fakeQueue.claimAttempts += 1;
+              if (fakeQueue.claimShouldThrow) {
+                throw new Error('网关不可达');
+              }
+              fakeQueue.claimCalls.push({
+                clientId: input.clientId,
+                itemId,
+                sessionId: _sessionId,
+              });
+              if (fakeQueue.claimSessionRunning) {
+                return { claimed: false, itemId, reason: 'session_running' as const };
+              }
+              if (fakeQueue.claimHeldByOther) {
+                return { claimed: false, itemId, reason: 'held_by_other' as const };
+              }
+              return { claimed: true, itemId };
+            })(),
+          );
+        }
+        return results;
       },
       clear: async () => 0,
       enqueue: async (
@@ -284,6 +324,7 @@ afterEach(() => {
   fakeQueue.claimShouldThrow = false;
   fakeQueue.listCalls = 0;
   fakeQueue.releaseCalls.length = 0;
+  fakeQueue.claimSessionRunning = false;
   vi.restoreAllMocks();
 });
 
@@ -782,14 +823,18 @@ describe('useUnifiedComposerState', () => {
       />,
     );
 
-    // 第一次失败后立即回填并自动重试，第二次成功——两跳之间没有可稳定观察的中间态，
-    // 因此只断言最终结果：交还过发送权、共发送两次、队列清空。
+    // 第一次失败后回填，并等 flush 退避定时器（首个失败 2s）兑现后自动重试，第二次成功——
+    // 两跳之间没有可稳定观察的中间态，因此只断言最终结果：交还过发送权、共发送两次、队列清空。
     await waitFor(() => {
       expect(fakeQueue.releaseCalls).toHaveLength(1);
     });
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledTimes(2);
-    });
+    // 重试发生在退避之后，waitFor 默认 1s 超时不够，必须显式放宽。
+    await waitFor(
+      () => {
+        expect(onSubmit).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 5_000 },
+    );
     expect(view.getByTestId('queue-count').textContent).toBe('0');
   });
 
@@ -899,5 +944,107 @@ describe('useUnifiedComposerState', () => {
     // B 的每条消息只发送一次，未因 A 结算而被重复启动
     expect(onSubmit).toHaveBeenCalledTimes(2);
     expect(onSubmit.mock.calls.filter((call) => call[0]?.text === 'B 在途消息')).toHaveLength(1);
+  });
+
+  it('会话仍在运行时,待发消息不发送——等网关宣告空闲再发', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="等会话空闲再发"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(backendQueue('session-1')).toHaveLength(1);
+    });
+
+    // 本端以为空闲(streaming=false),但网关侧会话仍被单飞锁占用。这正是队列消息
+    // 撞上「当前会话已有请求正在运行。」的现场:挂载快照未回、网关自己唤醒的 run、
+    // 另一端的运行,本端统统看不见。
+    fakeQueue.claimSessionRunning = true;
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-1"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    // 网关在 claim 里直接拒绝(不发放租约):不发送,条目原样留着。
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(fakeQueue.claimCalls).toHaveLength(1);
+    expect(backendQueue('session-1')).toHaveLength(1);
+    expect(view.getByTestId('queue-count').textContent).toBe('1');
+
+    // 网关释放单飞锁后,退避定时器到点自动补发,不需要用户再操作。
+    fakeQueue.claimSessionRunning = false;
+    await waitFor(
+      () => {
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 5_000 },
+    );
+  });
+
+  it('队列消息发送被单飞锁拒绝时,回流到队列并自动重试', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="被拒的消息"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => {
+      expect(backendQueue('session-1')).toHaveLength(1);
+    });
+    const itemId = backendQueue('session-1')[0]?.id ?? '';
+
+    view.rerender(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-1"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    expect(view.getByTestId('queue-count').textContent).toBe('0');
+
+    // 模拟网关把这次发送拒成 SESSION_ALREADY_RUNNING(run-send-message 会通知回流)。
+    notifyQueuedMessageSendRejected({
+      attachmentItems: [],
+      files: [],
+      itemId,
+      sessionId: 'session-1',
+      text: '被拒的消息',
+    });
+
+    // 回流:服务端记录用原 itemId 幂等重写,本地队列回填,条目不丢。
+    await waitFor(() => {
+      expect(view.getByTestId('queue-count').textContent).toBe('1');
+    });
+    await waitFor(() => {
+      expect(backendQueue('session-1')).toHaveLength(1);
+    });
+
+    // 下一轮 flush 自动重试,不需要用户重新输入。
+    await waitFor(
+      () => {
+        expect(onSubmit).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 5_000 },
+    );
+    expect(view.getByTestId('queue-count').textContent).toBe('0');
   });
 });

@@ -19,6 +19,7 @@ import {
   buildNoChannelConfigurationMessage,
 } from './channel-localization.js';
 import { channelLogInfo, channelLogWarn, summarizeChannelMessage } from './channel-log.js';
+import { recordChannelHealthIssue, type ChannelErrorSource } from './channel-error-store.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 import type { ChannelReplyLanguage } from './types.js';
 import { logGatewayError } from '../infra/gateway-logger.js';
@@ -72,10 +73,22 @@ export class AutoReplyPipeline {
     try {
       await this.handleInternal(event);
     } catch (err) {
+      // `handleInternal` 首行即 `if (event.type !== 'message') return`，所以能到
+      // 这里的事件必然是 message，`pluginId` 不会是占位值。
       const pluginId = event.type === 'message' ? event.pluginId : 'unknown';
       logGatewayError('[auto-reply] unhandled channel event failure', {
         pluginId,
         error: err instanceof Error ? err.message : String(err),
+      });
+      // 兜底分支吞掉的是「所有内层处理都没接住」的故障，原本只留一行日志。
+      // 这里补一次落库。注意归属：内层若已创建会话则 sessionId 为 null
+      // （渠道层拿不到 userId 就无法关联），此时该行仅供数据库层排查，
+      // 用户排障页看不到 —— 这是刻意的，见 `listChannelErrorAuditLogs` 的说明。
+      recordChannelHealthIssue({
+        channelId: pluginId,
+        message: `渠道事件处理兜底失败：${err instanceof Error ? err.message : String(err)}`,
+        source: 'channel_dispatch',
+        ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
       });
     }
   }
@@ -90,7 +103,14 @@ export class AutoReplyPipeline {
     });
     const service = channelManager.getService(pluginId);
     if (!service) {
+      // 消息已经进来了却没有服务接管（启动中 / 重启窗口 / 服务已崩溃）。
+      // 原实现只 warn 后 return，用户看到的是「发了没回」，且重启后无从查证。
       channelLogWarn('auto-reply skipped: service not found', { pluginId });
+      this.recordIssue({
+        channelId: pluginId,
+        message: '收到入站消息但频道服务未在运行，消息未被处理（service not found）',
+        source: 'channel_dispatch',
+      });
       return;
     }
 
@@ -105,12 +125,25 @@ export class AutoReplyPipeline {
       return;
     }
 
-    const commandResult = await tryHandleChannelCommand({
-      actions: this.options.commandActions,
-      channel,
-      message,
-      pluginId,
-    });
+    let commandResult: Awaited<ReturnType<typeof tryHandleChannelCommand>>;
+    try {
+      commandResult = await tryHandleChannelCommand({
+        actions: this.options.commandActions,
+        channel,
+        message,
+        pluginId,
+      });
+    } catch (err) {
+      // 指令解析（重写、命令匹配）抛错时原实现直接冒泡到 `handle()`，错误信息与
+      // 触发它的原始消息都不留痕。这里补落库并原样抛出，保持控制流不变。
+      this.recordIssue({
+        channelId: pluginId,
+        message: `频道指令处理失败：${err instanceof Error ? err.message : String(err)}`,
+        source: 'channel_inbound',
+        ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+      });
+      throw err;
+    }
 
     if (commandResult.kind === 'skip') {
       channelLogInfo('auto-reply command skipped normal handling', { pluginId });
@@ -265,10 +298,18 @@ export class AutoReplyPipeline {
       }
     });
     if (!enqueued) {
+      // 队列满意味着这条入站消息**不会被处理**，是「消息彻底消失」的一类。
+      // 原实现只有一行 console.warn：没有会话、没有消息、没有任何持久化痕迹。
+      // 落 channel_health 让「为什么这条没回」在重启后仍可回答。
       console.warn('[auto-reply] session queue is full; rejecting channel message', {
         pluginId,
         sessionKey,
         maxDepth: MAX_SESSION_TASK_QUEUE_DEPTH,
+      });
+      this.recordIssue({
+        channelId: pluginId,
+        message: `会话串行队列已满（深度 ${MAX_SESSION_TASK_QUEUE_DEPTH}），入站消息被拒绝（chatId=${message.chatId}）`,
+        source: 'channel_queue',
       });
       await this.safeSend(pluginId, () =>
         this.sendChannelReply({
@@ -345,11 +386,44 @@ export class AutoReplyPipeline {
     try {
       await send();
     } catch (err) {
+      // 错误通知自己发不出去是最难排查的一类故障：用户侧完全没有反馈，
+      // 而这里原实现只有一行日志。落 `channel_health` 让它跨重启可查。
       logGatewayError('[auto-reply] failed to deliver error notice to channel', {
         pluginId,
         error: err instanceof Error ? err.message : String(err),
       });
+      this.recordIssue({
+        channelId: pluginId,
+        message: `错误通知投递失败：${err instanceof Error ? err.message : String(err)}`,
+        source: 'channel_delivery',
+        ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+      });
     }
+  }
+
+  /**
+   * 频道级故障的统一上报入口。
+   *
+   * 取 `ownerUserId` / `type` 是为了让 `channel_health.owner_user_id` 落到正确
+   * 归属下 —— 否则排障列表按用户过滤时，这些行永远查不出来。
+   */
+  private recordIssue(input: {
+    readonly channelId: string;
+    readonly message: string;
+    readonly source: ChannelErrorSource;
+    readonly sessionId?: string | null | undefined;
+    readonly stack?: string | undefined;
+  }): void {
+    const channel = this.options.resolveChannel?.(input.channelId);
+    recordChannelHealthIssue({
+      channelId: input.channelId,
+      message: input.message,
+      source: input.source,
+      ...(channel ? { channelType: channel.type } : {}),
+      ...(channel?.ownerUserId ? { ownerUserId: channel.ownerUserId } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.stack ? { stack: input.stack } : {}),
+    });
   }
 
   private async sendChannelReply(context: AutoReplySendContext): Promise<{ messageId: string }> {
@@ -362,24 +436,36 @@ export class AutoReplyPipeline {
       contentLength: context.content.length,
       replyMode: shouldReplyToQQReferencedMessage(context.channel, message.id) ? 'reply' : 'send',
     });
-    if (shouldReplyToQQReferencedMessage(context.channel, message.id)) {
-      const result = await context.service.replyMessage(message.id, context.content);
-      channelLogInfo('channel reply sent', {
+    try {
+      if (shouldReplyToQQReferencedMessage(context.channel, message.id)) {
+        const result = await context.service.replyMessage(message.id, context.content);
+        channelLogInfo('channel reply sent', {
+          pluginId: context.message.pluginId,
+          pluginType: context.channel?.type,
+          chatId: message.chatId,
+          messageId: result.messageId,
+        });
+        return result;
+      }
+      const result = await context.service.sendMessage(message.chatId, context.content);
+      channelLogInfo('channel message sent', {
         pluginId: context.message.pluginId,
         pluginType: context.channel?.type,
         chatId: message.chatId,
         messageId: result.messageId,
       });
       return result;
+    } catch (err) {
+      // agent 已经跑完、结果也已落库，但回复发不出去 —— 消息在会话里可见、在 IM 里
+      // 不可见。不记这一笔的话排查会得出「什么都没发生」的错误结论。
+      this.recordIssue({
+        channelId: context.message.pluginId,
+        message: `回复投递失败：${err instanceof Error ? err.message : String(err)}`,
+        source: 'channel_delivery',
+        ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+      });
+      throw err;
     }
-    const result = await context.service.sendMessage(message.chatId, context.content);
-    channelLogInfo('channel message sent', {
-      pluginId: context.message.pluginId,
-      pluginType: context.channel?.type,
-      chatId: message.chatId,
-      messageId: result.messageId,
-    });
-    return result;
   }
 }
 

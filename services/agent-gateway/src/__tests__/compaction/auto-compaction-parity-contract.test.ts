@@ -30,6 +30,35 @@ describe('auto compaction parity contract baseline', () => {
     expect(contextWindow).toBe(100_000);
   });
 
+  it('resolves the user override as the effective window when the preset is missing', () => {
+    // Given / When
+    const contextWindow = resolveEffectiveContextWindow(
+      'user-relay',
+      'relay-model',
+      undefined,
+      272_000,
+    );
+
+    // Then
+    expect(contextWindow).toBe(272_000);
+  });
+
+  it('lets the runtime-discovered limit tighten the override when the preset is missing', () => {
+    // Given
+    recordDiscoveredContextWindow('user-relay-2', 'relay-model', 100_000, undefined);
+
+    // When
+    const contextWindow = resolveEffectiveContextWindow(
+      'user-relay-2',
+      'relay-model',
+      undefined,
+      400_000,
+    );
+
+    // Then
+    expect(contextWindow).toBe(100_000);
+  });
+
   it('counts the normalized cache breakdown once when checking the threshold', () => {
     // Given
     const usage = {
@@ -116,6 +145,35 @@ describe('auto compaction reference threshold', () => {
     expect(threshold.autoCompactThreshold).toBe(304_000);
   });
 
+  it('uses the user override as the base window when the model preset is unknown', () => {
+    // Given：从上游 /models 拉取、本地无同名元数据的模型没有 contextWindow 预设，
+    // 此时用户挡位（如 272K/400K/1M）必须直接生效，而不是被 128K 兜底值压回。
+    // When
+    const threshold = resolveCompactionThreshold({
+      contextWindowOverride: 272_000,
+      modelMaxOutputTokens: 32_000,
+    });
+
+    // Then
+    expect(threshold).toEqual({
+      contextWindow: 272_000,
+      effectiveContextWindow: 252_000,
+      autoCompactThreshold: 252_000,
+    });
+  });
+
+  it('still lets a runtime-discovered limit tighten the override when the preset is unknown', () => {
+    // Given / When
+    const threshold = resolveCompactionThreshold({
+      contextWindowOverride: 400_000,
+      discoveredContextWindow: 150_000,
+      modelMaxOutputTokens: 32_000,
+    });
+
+    // Then
+    expect(threshold.contextWindow).toBe(150_000);
+  });
+
   it('does not let the legacy reserved setting rewrite the automatic threshold', () => {
     // Given
     const input = {
@@ -131,16 +189,18 @@ describe('auto compaction reference threshold', () => {
     expect(threshold.autoCompactThreshold).toBe(108_000);
   });
 
-  it('only lets window and percentage overrides lower the reference values', () => {
-    // Given
-    const higherOverrides = {
+  it('user contextWindowOverride replaces the model preset; runtime discovery can still tighten it', () => {
+    // Given：挡位是权威值——配置后直接作为有效窗口（可高于模型预设，
+    // 预设只是 models.dev / 内置目录的估计）；运行时发现的真实上游
+    // 限制仍然只能向下收紧。
+    const raiseOverride = {
       modelContextWindow: 128_000,
       discoveredContextWindow: 256_000,
       contextWindowOverride: 200_000,
       modelMaxOutputTokens: 32_000,
       autoCompactPercentOverride: 99,
     };
-    const lowerOverrides = {
+    const lowerOverride = {
       modelContextWindow: 200_000,
       discoveredContextWindow: 150_000,
       contextWindowOverride: 160_000,
@@ -149,16 +209,16 @@ describe('auto compaction reference threshold', () => {
     };
 
     // When
-    const higher = resolveCompactionThreshold(higherOverrides);
-    const lower = resolveCompactionThreshold(lowerOverrides);
+    const raised = resolveCompactionThreshold(raiseOverride);
+    const lowered = resolveCompactionThreshold(lowerOverride);
 
     // Then
-    expect(higher).toEqual({
-      contextWindow: 128_000,
-      effectiveContextWindow: 108_000,
-      autoCompactThreshold: 106_920,
+    expect(raised).toEqual({
+      contextWindow: 200_000,
+      effectiveContextWindow: 180_000,
+      autoCompactThreshold: 178_200,
     });
-    expect(lower).toEqual({
+    expect(lowered).toEqual({
       contextWindow: 150_000,
       effectiveContextWindow: 130_000,
       autoCompactThreshold: 104_000,

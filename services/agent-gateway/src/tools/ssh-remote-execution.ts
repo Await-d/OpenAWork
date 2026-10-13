@@ -911,6 +911,8 @@ async function executeRemoteWrite(
 ): Promise<RemoteToolOutcome> {
   const remotePath = resolveRemotePath(context, pickToolPathInput(input));
 
+  await assertRemoteRegularFileIfExists(context, remotePath);
+
   let before = '';
   let created = true;
   try {
@@ -958,6 +960,25 @@ async function loadRemoteFileForEdit(
   }
 }
 
+/**
+ * 远端编辑目标必须是普通文件。字符设备(如 `/dev/null`)读出来是空内容,会制造
+ * 「永远找不到 oldString」的重试循环;FIFO 读取会阻塞,目录/套接字同样拒绝。
+ * SSHToolProxy 没有 SFTP stat,用一次 `[ -e ] && [ ! -f ]` 探测代替:退出码 0
+ * 表示「存在且不是普通文件」;1 表示不存在或普通文件,交给后续读取分支处理。
+ */
+async function assertRemoteRegularFileIfExists(
+  context: SshRemoteExecutionContext,
+  remotePath: string,
+): Promise<void> {
+  const quotedPath = shellQuote(remotePath);
+  const result = await context.proxy.execCommand(`[ -e ${quotedPath} ] && [ ! -f ${quotedPath} ]`, {
+    timeoutMs: 10_000,
+  });
+  if (result.exitCode === 0) {
+    throw new Error(`Not a regular file, refusing to modify: ${remotePath}`);
+  }
+}
+
 async function executeRemoteEdit(
   context: SshRemoteExecutionContext,
   sessionId: string,
@@ -968,6 +989,8 @@ async function executeRemoteEdit(
   if (input.oldString === input.newString) {
     throw new Error('newString must be different from oldString. ' + REMOTE_EDIT_ERROR_SUFFIX);
   }
+
+  await assertRemoteRegularFileIfExists(context, remotePath);
 
   const loaded = await loadRemoteFileForEdit(context, remotePath);
 
@@ -1041,6 +1064,8 @@ async function executeRemoteMultiEdit(
   if (input.edits.length === 0) {
     throw new Error('At least one edit is required.');
   }
+
+  await assertRemoteRegularFileIfExists(context, remotePath);
 
   const loaded = await loadRemoteFileForEdit(context, remotePath);
   if (!loaded.exists) {

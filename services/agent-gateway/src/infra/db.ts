@@ -495,6 +495,9 @@ export async function migrate(): Promise<void> {
   // the relative `file_path` against the NEW root. Nullable: legacy rows stay
   // NULL and fall back to the content-based conflict check.
   ensureColumn('session_file_diffs', 'workspace_root', 'TEXT');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_file_diffs_session_user_created ON session_file_diffs(session_id, user_id, created_at DESC)',
+  );
 
   // ─── Per-file review decisions (accept / reject) ───
   // The append-only `session_file_diffs` stays the source of truth for the
@@ -662,6 +665,9 @@ export async function migrate(): Promise<void> {
       PRIMARY KEY (session_id, client_request_id)
     )
   `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_snapshots_session_user_created ON session_snapshots(session_id, user_id, created_at DESC)',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_file_backups (
@@ -744,6 +750,32 @@ export async function migrate(): Promise<void> {
   ensureColumn('session_composer_queue', 'claimed_until', 'INTEGER');
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_composer_queue_claim ON session_composer_queue(session_id, claimed_until)',
+  );
+
+  // ─── 消息频道健康与错误留痕 ───
+  // 频道侧的错误此前只存在于 `ChannelManager` 的内存 Map，进程重启即全部丢失，
+  // 留下「Web 上不显示任何异常、IM 里也没回消息」的盲区。这里给每个频道一份
+  // 可跨重启读取的当前错误快照；`owner_user_id` 随频道配置一并删除而级联清理。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS channel_health (
+      channel_id TEXT PRIMARY KEY,
+      owner_user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT,
+      last_error TEXT,
+      last_error_at INTEGER,
+      last_error_source TEXT,
+      last_error_channel_type TEXT,
+      last_inbound_at INTEGER,
+      last_inbound_accepted INTEGER,
+      last_inbound_type TEXT,
+      last_inbound_error TEXT,
+      last_message_at INTEGER,
+      last_message_chat_id TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_channel_health_owner ON channel_health(owner_user_id, last_error_at DESC)',
   );
 
   // ─── Session Recovery Enhancement: 技能状态持久化 (2026-08-14) ───
@@ -866,6 +898,9 @@ export async function migrate(): Promise<void> {
   ensureColumn('permission_requests', 'request_payload_json', 'TEXT');
   ensureColumn('permission_requests', 'expires_at', 'INTEGER');
   ensureColumn('permission_requests', 'always_json', 'TEXT');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_permission_requests_session_status_created ON permission_requests(session_id, status, created_at)',
+  );
 
   // User-scoped durable store for `permanent` permission grants. Unlike
   // `permission_requests` (session-owned, `ON DELETE CASCADE`) this survives
@@ -907,6 +942,9 @@ export async function migrate(): Promise<void> {
   `);
   ensureColumn('question_requests', 'expires_at', 'INTEGER');
   ensureColumn('question_requests', 'round_number', 'INTEGER');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_question_requests_session_status_created ON question_requests(session_id, status, created_at)',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS task_parent_auto_resume_contexts (
@@ -1390,6 +1428,9 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_message_v2_session_time ON message_v2(session_id, time_created, id)',
   );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_message_v2_session_user_time ON message_v2(session_id, user_id, time_created, id)',
+  );
   // `role` 反规范化列：turnLimit 边界查询（`listMessagesByTurnLimit`）与回合总数统计
   // （`countUserMessages`）此前都用 `data LIKE '%"role":"user"%'` 过滤 —— 前导通配符
   // 无法走索引，每次都要把该会话**全部** message_v2 行的 `data` 大 blob 读进内存做模式
@@ -1420,6 +1461,9 @@ export async function migrate(): Promise<void> {
   `);
   db.exec('CREATE INDEX IF NOT EXISTS idx_part_v2_message ON part_v2(message_id, id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_part_v2_session ON part_v2(session_id)');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_part_v2_session_message ON part_v2(session_id, message_id, id)',
+  );
   ensureColumn('part_v2', 'tool_call_id', 'TEXT');
   ensureColumn('part_v2', 'tool_call_ref', 'TEXT');
   db.exec(
@@ -1646,6 +1690,12 @@ export async function migrate(): Promise<void> {
   ensureColumn('sessions', 'pause_reason', 'TEXT DEFAULT NULL');
   // last_heartbeat：T-04/T-06 崩溃恢复用；ISO 'YYYY-MM-DD HH:MM:SS' UTC
   ensureColumn('sessions', 'last_heartbeat', 'TEXT DEFAULT NULL');
+  // 最近一次失败的摘要与时间。刻意与 `state_status` 分离：`state_status` 会被
+  // 失败路径写回 'idle'（排队语义），无法表达「这一轮炸过」；`last_error` 让
+  // 排查时能直接区分空闲会话与「上一轮失败」的会话，且让
+  // `findReusableChannelSession` 有依据把失败会话排除出复用候选。
+  ensureColumn('sessions', 'last_error', 'TEXT DEFAULT NULL');
+  ensureColumn('sessions', 'last_error_at', 'TEXT DEFAULT NULL');
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_sessions_team_parent ON sessions(team_parent_session_id) WHERE team_parent_session_id IS NOT NULL',
   );

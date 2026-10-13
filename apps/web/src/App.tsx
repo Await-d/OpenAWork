@@ -30,6 +30,7 @@ import {
   type ThemeStyle,
 } from './stores/settings/display-preferences.js';
 import { useCurrentUserProfileBootstrap } from './stores/user-profile/current-user-profile.js';
+import { useDisplayPreferencesSyncBootstrap } from './stores/settings/display-preferences-sync.js';
 import {
   readThemeStyle as storageReadThemeStyle,
   readThemeMode as storageReadThemeMode,
@@ -388,6 +389,7 @@ export default function App() {
   }, [desktopRuntime]);
 
   useCurrentUserProfileBootstrap(authHydrated && desktopGatewayReady);
+  useDisplayPreferencesSyncBootstrap(authHydrated && desktopGatewayReady);
 
   useEffect(() => {
     if (effectiveFileIconTheme !== 'material') return;

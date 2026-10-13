@@ -22,11 +22,13 @@ import {
   validateWorkspaceRelativePath,
   isPathWithinRoot,
   isSamePath,
+  resolveWorkspaceEntryPathWithinRoot,
 } from '../workspace/workspace-paths.js';
 import {
   resolveWorkspaceEntryPathForRequest,
   ensureIgnoreRulesLoadedForPath,
   getSessionWorkingDirectoryForUser,
+  resolveUnboundSessionFallbackRoot,
   resolveUnboundSessionWorkspaceFallback,
   resolveWorkspaceRootForPath,
 } from '../workspace/workspace-safety.js';
@@ -266,6 +268,82 @@ function validateWorkspacePathForRequest(path: string): string | null {
   return validateWorkspacePath(path);
 }
 
+type LocalFilePathResolution =
+  | { kind: 'ok'; safePath: string; usesDefaultWorkspace: boolean }
+  | { kind: 'forbidden'; message: string };
+
+/**
+ * 解析本地文件端点（读：`GET /workspace/file`、`GET /workspace/file/binary`、
+ * `GET /workspace/tree`、`GET /workspace/files/search`；写：`PUT /workspace/file`、
+ * `POST /workspace/file`、`POST /workspace/directory`）的目标路径。
+ *
+ *   1. 显式绝对路径照旧走全局 `WORKSPACE_ROOT(S)` 白名单，并可被调用方给出的
+ *      `workspaceRoot` 进一步收窄；
+ *   2. 解析失败且请求带的是**未绑定工作区的普通 chat 会话**时，回退到「未绑定
+ *      会话默认工作区」解析：前端在无工作区时不会做根拼接，会把相对路径（裸
+ *      文件名 / 模型输出的根相对路径）原样透传，若不回退，默认工作区里的文件
+ *      既读不到也改不了；位于该目录内的绝对路径同样放行；
+ *   3. 其余情况维持 403。team / task 子会话与已绑定工作目录的会话都不参与回退
+ *      （见 `resolveUnboundSessionFallbackRoot`）。
+ *
+ * 删除 / 重命名这类需要「作用域根」保护的端点走 `resolveScopedWorkspacePath`，
+ * 其未绑定分支以默认工作区为作用域根（同样禁止操作根自身）。
+ *
+ * 回退根**惰性求值**：只有白名单口径解析失败时才查会话（含父链），已绑定会话
+ * 的常规绝对路径请求不为此多付任何 SQL 开销。
+ */
+function resolveLocalFilePath(input: {
+  path: string;
+  workspaceRoot?: string | undefined;
+  sessionId?: string | undefined;
+  userId: string;
+}): LocalFilePathResolution {
+  let safePath = validateWorkspacePathForRequest(input.path);
+  let usesDefaultWorkspace = false;
+  let defaultWorkspaceRoot: string | null = null;
+  if (safePath === null) {
+    const unboundFallbackRoot = resolveUnboundSessionFallbackRoot({
+      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+      userId: input.userId,
+    });
+    if (unboundFallbackRoot !== null) {
+      const resolved = resolveWorkspaceEntryPathWithinRoot(input.path, unboundFallbackRoot);
+      if (resolved !== null) {
+        safePath = resolved;
+        usesDefaultWorkspace = true;
+        defaultWorkspaceRoot = unboundFallbackRoot;
+      }
+    }
+  }
+  if (safePath === null) {
+    return { kind: 'forbidden', message: WORKSPACE_ERROR_MESSAGES.forbiddenPath };
+  }
+
+  // Caller-supplied root narrows the safe set to that one root. We
+  // resolve + validate the root the same way so a malformed /
+  // non-workspace root is rejected before being used for the prefix
+  // check.
+  //
+  // 回退场景例外：前端（文件树 / 编辑器读写）会把当前浏览根作为
+  // `workspaceRoot` 下发，未绑定会话下它就是默认工作区根——该根本身不在
+  // 全局白名单里。此时直接用它做收窄（等价于要求路径在默认工作区内，
+  // 口径比白名单更严格），否则前端所有携带根的请求都会 403。
+  if (input.workspaceRoot !== undefined) {
+    const safeRoot =
+      defaultWorkspaceRoot !== null && isSamePath(input.workspaceRoot, defaultWorkspaceRoot)
+        ? defaultWorkspaceRoot
+        : validateWorkspacePathForRequest(input.workspaceRoot);
+    if (!safeRoot) {
+      return { kind: 'forbidden', message: WORKSPACE_ERROR_MESSAGES.forbiddenWorkspaceRoot };
+    }
+    if (!isPathWithinRoot(safePath, safeRoot)) {
+      return { kind: 'forbidden', message: WORKSPACE_ERROR_MESSAGES.pathOutsideWorkspace };
+    }
+  }
+
+  return { kind: 'ok', safePath, usesDefaultWorkspace };
+}
+
 async function readTree(
   dirPath: string,
   depth: number,
@@ -310,27 +388,63 @@ async function readTree(
   });
 }
 
+interface ScopedWorkspacePathResolution {
+  safePath: string | null;
+  scopeRoot: string | null;
+  missingSessionWorkspace: boolean;
+  /**
+   * 是否回退到「未绑定会话默认工作区」（普通 chat 会话，见
+   * `resolveUnboundSessionFallbackRoot`）。为 true 时调用方跳过 per-user
+   * allowlist 检查，与 `/workspace/file` 等读取端点同一口径。
+   */
+  usesDefaultWorkspace: boolean;
+}
+
 function resolveScopedWorkspacePath(input: {
   path: string;
   sessionId?: string;
   userId: string;
   workspaceRoot?: string;
-}): { safePath: string | null; scopeRoot: string | null; missingSessionWorkspace: boolean } {
+}): ScopedWorkspacePathResolution {
   if (input.sessionId) {
-    const scopeRoot = getSessionWorkingDirectoryForUser(input.sessionId, input.userId);
-    if (!scopeRoot) {
-      return { safePath: null, scopeRoot: null, missingSessionWorkspace: true };
+    const boundScopeRoot = getSessionWorkingDirectoryForUser(input.sessionId, input.userId);
+    if (boundScopeRoot) {
+      assertWorkspacePathSupportedByRequestHost(boundScopeRoot);
+      assertWorkspacePathSupportedByRequestHost(input.path);
+      return {
+        safePath: resolveWorkspaceEntryPathForRequest({
+          path: input.path,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        }),
+        scopeRoot: boundScopeRoot,
+        missingSessionWorkspace: false,
+        usesDefaultWorkspace: false,
+      };
     }
-    assertWorkspacePathSupportedByRequestHost(scopeRoot);
-    assertWorkspacePathSupportedByRequestHost(input.path);
+
+    // 未绑定工作区的普通 chat 会话：作用域根回退到默认工作区，删除 /
+    // 重命名因此同样被限制在默认工作区内，且不能操作该根自身（调用方的
+    // scopeRoot 保护照常生效）。team / 非归属会话不参与回退，维持
+    // missingSessionWorkspace，交由调用方按「不可用」处理。
+    const fallbackRoot = resolveUnboundSessionFallbackRoot({
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+    if (fallbackRoot) {
+      return {
+        safePath: resolveWorkspaceEntryPathWithinRoot(input.path, fallbackRoot),
+        scopeRoot: fallbackRoot,
+        missingSessionWorkspace: false,
+        usesDefaultWorkspace: true,
+      };
+    }
+
     return {
-      safePath: resolveWorkspaceEntryPathForRequest({
-        path: input.path,
-        sessionId: input.sessionId,
-        userId: input.userId,
-      }),
-      scopeRoot,
-      missingSessionWorkspace: false,
+      safePath: null,
+      scopeRoot: null,
+      missingSessionWorkspace: true,
+      usesDefaultWorkspace: false,
     };
   }
 
@@ -346,6 +460,7 @@ function resolveScopedWorkspacePath(input: {
     }),
     scopeRoot,
     missingSessionWorkspace: false,
+    usesDefaultWorkspace: false,
   };
 }
 
@@ -493,17 +608,26 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        pathStep.fail('forbidden path');
-        step.fail('forbidden path');
+      // 未绑定工作区会话回退默认工作区（与 `/workspace/file` 同口径，见
+      // resolveLocalFilePath）：文件树据此浏览未绑定会话创建的文件。
+      const resolution = resolveLocalFilePath({
+        path: parsed.path,
+        ...(parsed.workspaceRoot !== undefined ? { workspaceRoot: parsed.workspaceRoot } : {}),
+        ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+      });
+      if (resolution.kind === 'forbidden') {
+        pathStep.fail(resolution.message);
+        step.fail(resolution.message);
         return reply.status(403).send({
           nodes: [],
-          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+          error: resolution.message,
         });
       }
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      const { safePath, usesDefaultWorkspace } = resolution;
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      // 回退默认工作区时不做 per-user allowlist 检查（与 file 端点同口径）。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
@@ -733,19 +857,27 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        pathStep.fail('forbidden path');
-        step.fail('forbidden path');
+      // 未绑定工作区会话回退默认工作区（与 `/workspace/file` 同口径，见
+      // resolveLocalFilePath）：@ 文件引用在无工作区会话里也能检索。
+      const localResolution = resolveLocalFilePath({
+        path: parsed.path,
+        ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+      });
+      if (localResolution.kind === 'forbidden') {
+        pathStep.fail(localResolution.message);
+        step.fail(localResolution.message);
         return reply.status(403).send({
           files: [],
           directories: [],
           truncated: false,
-          error: WORKSPACE_ERROR_MESSAGES.forbiddenPath,
+          error: localResolution.message,
         });
       }
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      const { safePath, usesDefaultWorkspace } = localResolution;
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      // 回退默认工作区时不做 per-user allowlist 检查（与 file 端点同口径）。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
       const ignoreRoot = resolveWorkspaceRootForPath(safePath);
       const ignoreRules = await getWorkspaceIgnoreManager(ignoreRoot);
       if (ignoreRules.shouldIgnore(safePath)) {
@@ -970,31 +1102,23 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        pathStep.fail('forbidden path');
-        step.fail('forbidden path');
-        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
+      const resolution = resolveLocalFilePath({
+        path: parsed.path,
+        ...(parsed.workspaceRoot !== undefined ? { workspaceRoot: parsed.workspaceRoot } : {}),
+        ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+      });
+      if (resolution.kind === 'forbidden') {
+        pathStep.fail(resolution.message);
+        step.fail(resolution.message);
+        return reply.status(403).send({ error: resolution.message });
       }
-      // Caller-supplied root narrows the safe set to that one root.
-      // We resolve + validate the root the same way so a malformed /
-      // non-workspace root is rejected before being used for the
-      // prefix check.
-      if (parsed.workspaceRoot !== undefined) {
-        const safeRoot = validateWorkspacePathForRequest(parsed.workspaceRoot);
-        if (!safeRoot) {
-          pathStep.fail('forbidden workspace root');
-          step.fail('forbidden workspace root');
-          return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenWorkspaceRoot });
-        }
-        if (!isPathWithinRoot(safePath, safeRoot)) {
-          pathStep.fail('path outside workspace root');
-          step.fail('path outside workspace root');
-          return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.pathOutsideWorkspace });
-        }
-      }
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      const { safePath, usesDefaultWorkspace } = resolution;
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      // 回退到未绑定会话默认工作区时不做 per-user allowlist 检查：该目录不属于
+      // 任何用户工作区（allowlist 由用户自己的会话 workingDirectory 导出），与
+      // `/workspace/files/index-version` 的回退口径一致。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
@@ -1150,19 +1274,19 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         // `local`：会话未绑定 SSH，继续走本地逻辑。
       }
 
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        step.fail('forbidden path');
-        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
+      const resolution = resolveLocalFilePath({
+        path: parsed.path,
+        ...(parsed.workspaceRoot !== undefined ? { workspaceRoot: parsed.workspaceRoot } : {}),
+        ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+      });
+      if (resolution.kind === 'forbidden') {
+        step.fail(resolution.message);
+        return reply.status(403).send({ error: resolution.message });
       }
-      if (parsed.workspaceRoot !== undefined) {
-        const safeRoot = validateWorkspacePathForRequest(parsed.workspaceRoot);
-        if (!safeRoot || !isPathWithinRoot(safePath, safeRoot)) {
-          step.fail('path outside workspace root');
-          return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.pathOutsideWorkspace });
-        }
-      }
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      const { safePath, usesDefaultWorkspace } = resolution;
+      // 回退默认工作区时不做 per-user allowlist 检查（与文本端点同口径）。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
@@ -1255,15 +1379,23 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        pathStep.fail('forbidden path');
-        step.fail('forbidden path');
-        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
+      // 未绑定工作区会话回退默认工作区（与读端点同口径，见 resolveLocalFilePath）。
+      const resolution = resolveLocalFilePath({
+        path: parsed.path,
+        ...(parsed.workspaceRoot !== undefined ? { workspaceRoot: parsed.workspaceRoot } : {}),
+        ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+      });
+      if (resolution.kind === 'forbidden') {
+        pathStep.fail(resolution.message);
+        step.fail(resolution.message);
+        return reply.status(403).send({ error: resolution.message });
       }
+      const { safePath, usesDefaultWorkspace } = resolution;
       await ensureIgnoreRulesLoadedForPath(safePath);
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      // 回退默认工作区时不做 per-user allowlist 检查（与 file 读端点同口径）。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const writeStep = child('write');
       try {
@@ -1315,14 +1447,22 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        pathStep.fail('forbidden path');
-        step.fail('forbidden path');
-        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
+      // 未绑定工作区会话回退默认工作区（与读端点同口径，见 resolveLocalFilePath）。
+      const resolution = resolveLocalFilePath({
+        path: parsed.path,
+        ...(parsed.workspaceRoot !== undefined ? { workspaceRoot: parsed.workspaceRoot } : {}),
+        ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+      });
+      if (resolution.kind === 'forbidden') {
+        pathStep.fail(resolution.message);
+        step.fail(resolution.message);
+        return reply.status(403).send({ error: resolution.message });
       }
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      const { safePath, usesDefaultWorkspace } = resolution;
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      // 回退默认工作区时不做 per-user allowlist 检查（与 file 读端点同口径）。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const parentPath = resolve(join(safePath, '..'));
       const parentStep = child('parent-directory');
@@ -1409,14 +1549,22 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const pathStep = child('path-safety');
-      const safePath = validateWorkspacePathForRequest(parsed.path);
-      if (!safePath) {
-        pathStep.fail('forbidden path');
-        step.fail('forbidden path');
-        return reply.status(403).send({ error: WORKSPACE_ERROR_MESSAGES.forbiddenPath });
+      // 未绑定工作区会话回退默认工作区（与读端点同口径，见 resolveLocalFilePath）。
+      const resolution = resolveLocalFilePath({
+        path: parsed.path,
+        ...(parsed.workspaceRoot !== undefined ? { workspaceRoot: parsed.workspaceRoot } : {}),
+        ...(parsed.sessionId !== undefined ? { sessionId: parsed.sessionId } : {}),
+        userId: user.sub,
+      });
+      if (resolution.kind === 'forbidden') {
+        pathStep.fail(resolution.message);
+        step.fail(resolution.message);
+        return reply.status(403).send({ error: resolution.message });
       }
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      const { safePath, usesDefaultWorkspace } = resolution;
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      // 回退默认工作区时不做 per-user allowlist 检查（与 file 读端点同口径）。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
 
       const mkdirStep = child('mkdir');
       try {
@@ -1481,12 +1629,14 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const pathStep = child('path-safety');
-      const { safePath, scopeRoot, missingSessionWorkspace } = resolveScopedWorkspacePath({
+      const deleteResolution = resolveScopedWorkspacePath({
         path: parsed.path,
         ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
         userId: user.sub,
         ...(parsed.workspaceRoot ? { workspaceRoot: parsed.workspaceRoot } : {}),
       });
+      const { safePath, scopeRoot, missingSessionWorkspace, usesDefaultWorkspace } =
+        deleteResolution;
       if (missingSessionWorkspace) {
         pathStep.fail('session workspace unavailable');
         step.fail('session workspace unavailable');
@@ -1508,8 +1658,9 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safePath)) return;
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      // 回退默认工作区时不做 per-user allowlist 检查（与读端点同口径）。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safePath)) return;
       await ensureIgnoreRulesLoadedForPath(safePath);
       if (defaultIgnoreManager.shouldIgnore(safePath)) {
         step.fail('ignored path');
@@ -1584,7 +1735,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         userId: user.sub,
         ...(parsed.workspaceRoot ? { workspaceRoot: parsed.workspaceRoot } : {}),
       });
-      const { safePath: safeOldPath, scopeRoot, missingSessionWorkspace } = oldPathResolution;
+      const {
+        safePath: safeOldPath,
+        scopeRoot,
+        missingSessionWorkspace,
+        usesDefaultWorkspace,
+      } = oldPathResolution;
       const { safePath: safeNewPath } = newPathResolution;
       if (missingSessionWorkspace || newPathResolution.missingSessionWorkspace) {
         pathStep.fail('session workspace unavailable');
@@ -1614,9 +1770,10 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      pathStep.succeed();
-      if (!checkUserWorkspaceAccess(request, reply, safeOldPath)) return;
-      if (!checkUserWorkspaceAccess(request, reply, safeNewPath)) return;
+      pathStep.succeed(undefined, { usesDefaultWorkspace });
+      // 回退默认工作区时不做 per-user allowlist 检查（与读端点同口径）。
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safeOldPath)) return;
+      if (!usesDefaultWorkspace && !checkUserWorkspaceAccess(request, reply, safeNewPath)) return;
       await ensureIgnoreRulesLoadedForPath(safeOldPath);
       await ensureIgnoreRulesLoadedForPath(safeNewPath);
       if (

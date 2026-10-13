@@ -7,6 +7,7 @@ import {
   useDisplayPreferencesStore,
   type ThemeStyle,
 } from '../../web/src/stores/settings/display-preferences.js';
+import { useDisplayPreferencesSyncBootstrap } from '../../web/src/stores/settings/display-preferences-sync.js';
 import {
   readThemeStyle as storageReadThemeStyle,
   readThemeMode as storageReadThemeMode,
@@ -234,7 +235,9 @@ function useDesktopGatewayBootstrap(
   accessToken: string | null,
   retryKey: number,
   setBootstrapError: (message: string | null) => void,
-) {
+): boolean {
+  const [ready, setReady] = useState(false);
+
   useEffect(() => {
     if (!enabled) {
       return;
@@ -302,6 +305,12 @@ function useDesktopGatewayBootstrap(
             );
           }
         }
+
+        // 网关已可用（本地 sidecar 健康检查通过 / 远程网关直连）：依赖网关的
+        // 启动期任务（显示偏好同步等）可以在此时机安全发起。
+        if (!cancelled) {
+          setReady(true);
+        }
       } catch (error: unknown) {
         console.error('[bootstrap] 启动失败:', error);
         setBootstrapError(error instanceof Error ? error.message : '桌面默认身份建立失败');
@@ -315,6 +324,8 @@ function useDesktopGatewayBootstrap(
       cancelled = true;
     };
   }, [accessToken, enabled, retryKey, setBootstrapError]);
+
+  return ready;
 }
 
 export default function App() {
@@ -334,6 +345,17 @@ export default function App() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapRetry, setBootstrapRetry] = useState(0);
 
+  // 冷启动可能带着持久化的 accessToken 直接进主界面，此时本地 sidecar 还在启动：
+  // 显示偏好同步必须等网关就绪后再发起，否则 GET 必然失败并卡在错误态。
+  const desktopGatewayReady = useDesktopGatewayBootstrap(
+    onboarded,
+    accessToken,
+    bootstrapRetry,
+    setBootstrapError,
+  );
+
+  useDisplayPreferencesSyncBootstrap(Boolean(accessToken) && desktopGatewayReady);
+
   useEffect(() => {
     console.log('[App] 已挂载, BUILD_V2');
   }, []);
@@ -343,8 +365,6 @@ export default function App() {
       console.warn('文件图标清单预热失败，图标将降级为通用轮廓', error);
     });
   }, []);
-
-  useDesktopGatewayBootstrap(onboarded, accessToken, bootstrapRetry, setBootstrapError);
 
   // 登录成功后（accessToken 从 null 变为有值），强制从 localStorage 重新读取主题。
   useEffect(() => {

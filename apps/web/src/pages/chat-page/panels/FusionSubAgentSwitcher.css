@@ -1,4 +1,4 @@
-/* 子代理 tab 顶部的紧凑切换器：横向滚动的 chip 行，选中态用 accent。 */
+/* 子代理 tab 顶部的紧凑切换器：左侧「仅活跃」筛选开关 + 右侧横向滚动的 chip 行。 */
 
 .fusion-sub-agent-switcher {
   align-items: center;
@@ -6,11 +6,75 @@
   flex: 0 0 auto;
   gap: var(--spacing-1);
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
   padding-top: var(--spacing-1);
   padding-bottom: var(--spacing-2);
+}
+
+/* 横向滚动只发生在 chip 行上：筛选开关固定在行首不随滚动移出视野。 */
+.fusion-sub-agent-switcher__rail {
+  align-items: center;
+  display: flex;
+  gap: var(--spacing-1);
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: thin;
+}
+
+.fusion-sub-agent-switcher__filter {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro),
+    box-shadow var(--dur-micro) var(--ease-micro),
+    color var(--dur-micro) var(--ease-micro),
+    transform var(--dur-micro) var(--ease-micro);
+}
+
+.fusion-sub-agent-switcher__filter:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-default);
+}
+
+.fusion-sub-agent-switcher__filter:active {
+  transform: translateY(1px);
+}
+
+.fusion-sub-agent-switcher__filter:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+}
+
+.fusion-sub-agent-switcher__filter[aria-pressed='true'] {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.fusion-sub-agent-switcher__filter-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  opacity: 0.9;
+}
+
+.fusion-sub-agent-switcher__empty {
+  color: var(--fg-muted);
+  flex: 0 0 auto;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .fusion-sub-agent-switcher__chip {
@@ -59,6 +123,19 @@
   background: var(--accent-subtle);
   border-color: var(--accent-border);
   color: var(--fg-strong);
+}
+
+/* 系统序号徽章：弱化色 + 等宽数字，随 chip 选中态一起强调。 */
+.fusion-sub-agent-switcher__index {
+  color: var(--fg-muted);
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.fusion-sub-agent-switcher__chip[data-active='true'] .fusion-sub-agent-switcher__index {
+  color: var(--accent);
 }
 
 .fusion-sub-agent-switcher__dot {
@@ -128,6 +205,10 @@
   }
 
   .fusion-sub-agent-switcher__chip:active {
+    transform: none;
+  }
+
+  .fusion-sub-agent-switcher__filter:active {
     transform: none;
   }
 }

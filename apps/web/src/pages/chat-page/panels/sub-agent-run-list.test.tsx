@@ -2,13 +2,83 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
+import type { Session, SessionTask } from '@openAwork/web-client';
 import type { BackgroundTaskRow } from './background-task-model.js';
-import { SubAgentRunList, type SubAgentRunItem } from './sub-agent-run-list.js';
+import {
+  buildSubAgentRunItems,
+  SubAgentRunList,
+  type SubAgentRunItem,
+} from './sub-agent-run-list.js';
 
 afterEach(() => {
   cleanup();
   // 折叠状态会写入 localStorage；测试之间必须清理，避免污染后续渲染的初始态。
   window.localStorage.clear();
+});
+
+describe('buildSubAgentRunItems 系统序号与默认命名', () => {
+  function makeChildSession(sessionId: string, overrides: Partial<Session> = {}): Session {
+    return {
+      id: sessionId,
+      createdAt: 1_700_000_000_000,
+      state_status: 'idle',
+      messages: [],
+      ...overrides,
+    };
+  }
+
+  function makeTask(sessionId: string, taskId: string): SessionTask {
+    return {
+      id: taskId,
+      title: '',
+      status: 'completed',
+      blockedBy: [],
+      completedSubtaskCount: 0,
+      readySubtaskCount: 0,
+      unmetDependencyCount: 0,
+      subtaskCount: 0,
+      depth: 0,
+      priority: 'medium',
+      tags: [],
+      sessionId,
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_000_000,
+    };
+  }
+
+  it('序号按 createdAt 升序派生，无标题子代理默认命名为「子代理 N」', () => {
+    const items = buildSubAgentRunItems(
+      [
+        makeChildSession('child-b', { createdAt: 1_700_000_010_000 }),
+        makeChildSession('child-a', { createdAt: 1_700_000_000_000 }),
+        makeChildSession('child-c', { createdAt: undefined }), // 无 createdAt：排在最后
+      ],
+      [makeTask('child-a', 'task-a'), makeTask('child-b', 'task-b')],
+      null,
+    );
+
+    const byId = new Map(items.map((item) => [item.sessionId, item]));
+    expect(byId.get('child-a')?.sequence).toBe(1);
+    expect(byId.get('child-b')?.sequence).toBe(2);
+    expect(byId.get('child-c')?.sequence).toBe(3);
+    // 无标题 → 默认名带序号
+    expect(byId.get('child-c')?.title).toBe('子代理 3');
+  });
+
+  it('当前会话不参与序号分配，其余子代理序号连续', () => {
+    const items = buildSubAgentRunItems(
+      [
+        makeChildSession('parent', { createdAt: 1_700_000_000_000 }),
+        makeChildSession('child-2', { createdAt: 1_700_000_010_000 }),
+      ],
+      [],
+      'parent',
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.sessionId).toBe('child-2');
+    expect(items[0]?.sequence).toBe(1);
+  });
 });
 
 function makeItem(input: {

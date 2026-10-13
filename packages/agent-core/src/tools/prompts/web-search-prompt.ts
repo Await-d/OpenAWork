@@ -2,7 +2,7 @@
  * Web 搜索工具使用提示词
  *
  * 为 Agent 提供详细的 Web 搜索工具使用指南，包括：
- * - 9 个提供商的详细对比
+ * - 12 个提供商的详细对比
  * - 搜索技巧和优化建议
  * - 多提供商策略说明
  * - 错误处理和安全指导
@@ -27,8 +27,15 @@ export const WEB_SEARCH_TOOL_USAGE_GUIDE = `
 - \`query\`: 搜索关键词（必需）
 - \`maxResults\`: 返回结果数量（默认 5，最大 20）
 - \`provider\`: 搜索提供商（默认 duckduckgo）
-- \`apiKey\`: 提供商 API 密钥（部分提供商需要）
-- \`baseUrl\`: 提供商配置 URL（部分提供商需要）
+- \`apiKey\`: 提供商 API 密钥（**宿主侧配置，通常不要传**）
+- \`baseUrl\`: 提供商配置 URL（**宿主侧配置，通常不要传**）
+
+**关于 apiKey / baseUrl（重要）**:
+- 它们是宿主 / 用户预先配置好的凭据，网关会在你未提供时自动补齐；你**不需要也无法**提供。
+- **禁止**在工具入参里写 \`process.env.XXX\` 这类表达式——入参是 JSON，不会被求值，
+  这样只会让调用以一个必然失败的密钥错误结束。
+- 因此指定 \`provider\` 时应只传 \`query\` / \`maxResults\` / \`provider\`；若该提供商尚未
+  配置密钥，工具会返回明确的配置指引，此时请改用 duckduckgo，而不要反复重试同一次调用。
 
 **基础示例**:
 \`\`\`typescript
@@ -38,11 +45,10 @@ web_search({
   maxResults: 5
 })
 
-// 指定提供商
+// 指定提供商（凭据由宿主配置，无需在入参里携带）
 web_search({
   query: "React 最佳实践",
   provider: "tavily",
-  apiKey: "your-api-key",
   maxResults: 10
 })
 \`\`\`
@@ -88,7 +94,6 @@ web_search({
 web_search({
   query: "distributed systems consensus algorithms comparison",
   provider: "tavily",
-  apiKey: process.env.TAVILY_API_KEY,
   maxResults: 10
 })
 \`\`\`
@@ -110,8 +115,7 @@ web_search({
 \`\`\`typescript
 web_search({
   query: "how does transformer attention mechanism work",
-  provider: "exa",
-  apiKey: process.env.EXA_API_KEY
+  provider: "exa"
 })
 \`\`\`
 
@@ -133,7 +137,6 @@ web_search({
 web_search({
   query: "latest machine learning frameworks 2026",
   provider: "serper",
-  apiKey: process.env.SERPER_API_KEY,
   maxResults: 8
 })
 \`\`\`
@@ -156,7 +159,6 @@ web_search({
 web_search({
   query: "kubernetes best practices",
   provider: "searxng",
-  baseUrl: "https://your-searxng.example.com",
   maxResults: 10
 })
 \`\`\`
@@ -179,7 +181,6 @@ web_search({
 web_search({
   query: "competitor analysis software trends",
   provider: "bocha",
-  apiKey: process.env.BOCHA_API_KEY,
   maxResults: 15
 })
 \`\`\`
@@ -202,7 +203,6 @@ web_search({
 web_search({
   query: "Vue3 组合式 API 最佳实践",
   provider: "zhipu",
-  apiKey: process.env.ZHIPU_API_KEY,
   maxResults: 8
 })
 \`\`\`
@@ -225,8 +225,6 @@ web_search({
 web_search({
   query: "site:stackoverflow.com python async await",
   provider: "google",
-  apiKey: process.env.GOOGLE_API_KEY,
-  baseUrl: process.env.GOOGLE_CSE_ID,
   maxResults: 10
 })
 \`\`\`
@@ -236,7 +234,8 @@ web_search({
 - ✅ 覆盖面广
 - ✅ 与 Microsoft 生态集成
 - ✅ 新闻时效性好
-- ⚠️ 需要 API Key
+- ✅ **未配置 API Key 时自动回退到免密钥抓取实现**（无需 Key 也能用）
+- ⚠️ 抓取回退的稳定性弱于官方 API
 - ⚠️ 某些地区结果偏向性强
 
 **适用场景**:
@@ -249,10 +248,79 @@ web_search({
 web_search({
   query: "breaking news AI regulation 2026",
   provider: "bing",
-  apiKey: process.env.BING_API_KEY,
   maxResults: 10
 })
 \`\`\`
+
+#### 10. Baidu（百度）
+**特点**:
+- ✅ **无需 API Key**
+- ✅ 中文结果覆盖最好
+- ✅ 国内站点收录全面
+- ⚠️ 依赖 HTML 抓取，稳定性弱于官方 API
+
+**适用场景**:
+- 中文资讯与国内站点检索
+- 与英文提供商组合（Merge / First-Success）做中英文混合检索
+
+**使用示例**:
+\`\`\`typescript
+web_search({
+  query: "国产大模型 最新进展",
+  provider: "baidu",
+  maxResults: 10
+})
+\`\`\`
+
+#### 11. Sogou（搜狗）
+**特点**:
+- ✅ **无需 API Key**
+- ✅ 对微信公众号等内容源覆盖较好
+- ⚠️ 依赖 HTML 抓取，稳定性弱于官方 API
+
+**适用场景**:
+- 中文自媒体 / 公众号内容检索
+- 作为 Baidu 的补充来源
+
+**使用示例**:
+\`\`\`typescript
+web_search({
+  query: "开源模型 部署实践",
+  provider: "sogou",
+  maxResults: 10
+})
+\`\`\`
+
+#### 12. Startpage
+**特点**:
+- ✅ **无需 API Key**
+- ✅ 聚合 Google 结果且强调隐私
+- ⚠️ 依赖 HTML 抓取，稳定性弱于官方 API
+
+**适用场景**:
+- 需要 Google 覆盖面但不想配置 Key
+- 隐私敏感的检索
+
+**使用示例**:
+\`\`\`typescript
+web_search({
+  query: "privacy preserving analytics",
+  provider: "startpage",
+  maxResults: 10
+})
+\`\`\`
+
+### 搜索 vs 取正文（重要）
+
+本工具是**联网搜索的唯一入口**，只负责「找到页面」。拿到页面之后：
+
+| 需求 | 用什么 |
+| --- | --- |
+| 找资料、找链接、找新闻 | \`web_search\`（本工具） |
+| 读取某个具体网页的正文 | \`open_websearch/fetch_web\` |
+| 读取 GitHub 仓库 README | \`open_websearch/fetch_github_readme\` |
+
+**不要**为了「多找几个来源」而重复调用同一个搜索入口，也不要指望搜索结果里直接带全文。
 
 ### 搜索技巧
 
@@ -449,13 +517,17 @@ searchMultiProvider(
 
 ### 错误处理
 
-#### 错误 1: API Key 无效
-**错误信息**: "API key is required" 或 "Invalid API key"
+#### 错误 1: API Key 无效或缺失
+**错误信息**: 该提供商需要 API Key，且密钥属于宿主 / 用户配置。
+
+**先理解一件事**: 密钥不在你的入参里——网关会在你未提供时自动从用户设置 /
+环境变量补齐。因此**不要**在入参里写 \`apiKey\`（更不要写 \`process.env.XXX\`，
+它不会被求值），也不要对同一个提供商反复重试：重试不会凭空造出密钥。
 
 **解决方案**:
-1. 检查环境变量是否正确设置
-2. 验证 API Key 是否过期
-3. 回退到 duckduckgo（无需 Key）
+1. 改用 duckduckgo（无需密钥），先拿到结果继续推进任务；
+2. 在回复里说明「该提供商未配置密钥，已改用 duckduckgo」，让用户知道如何补齐配置；
+3. 只有用户明确告知已配置好后，才再次尝试原提供商。
 
 **代码示例**:
 \`\`\`typescript
@@ -463,10 +535,9 @@ try {
   return await web_search({
     query: "...",
     provider: "tavily",
-    apiKey: process.env.TAVILY_API_KEY,
   });
 } catch (error) {
-  // 回退到免费提供商
+  // 密钥缺失 / 失效时回退到免费提供商，不要重复调用同一个提供商。
   return await web_search({
     query: "...",
     provider: "duckduckgo",
@@ -666,4 +737,7 @@ export const WEB_SEARCH_PROVIDERS = [
   'zhipu',
   'google',
   'bing',
+  'baidu',
+  'sogou',
+  'startpage',
 ] as const;

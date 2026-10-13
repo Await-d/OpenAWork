@@ -98,4 +98,22 @@ describe('applyTaskUpdateRuntimeEvent', () => {
 
     expect(next[0]?.status).toBe('running');
   });
+
+  it('事件携带 metadata 时写入任务，缺失时保留既有值', () => {
+    const withEvent = applyTaskUpdateRuntimeEvent([], {
+      label: 'task',
+      status: 'in_progress',
+      taskId: 't1',
+      metadata: { parentToolCallId: 'call_abc' },
+    });
+    expect(withEvent[0]?.metadata).toEqual({ parentToolCallId: 'call_abc' });
+
+    const previous = [createTask({ id: 't1', metadata: { parentToolCallId: 'call_abc' } })];
+    const withoutEventMetadata = applyTaskUpdateRuntimeEvent(previous, {
+      label: 'task',
+      status: 'in_progress',
+      taskId: 't1',
+    });
+    expect(withoutEventMetadata[0]?.metadata).toEqual({ parentToolCallId: 'call_abc' });
+  });
 });

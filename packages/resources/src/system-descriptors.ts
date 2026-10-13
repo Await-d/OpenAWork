@@ -237,8 +237,19 @@ export function createSystemBuiltinMcpDescriptor(
   };
 }
 
+/**
+ * 内置 MCP 描述符是包内静态资源（`resources/mcps/builtin/*.json`），进程生命周期内
+ * 不会变化。但每次调用都会同步读 7 个 JSON 文件，而
+ * `loadConfiguredMcpServersForUser` 是每轮会话、每次 MCP 目录快照写入都会经过的
+ * 路径 —— 重复的同源文件 I/O 没有意义，故按进程缓存。
+ */
+let builtinMcpDescriptors: readonly SystemBuiltinMcpDescriptor[] | undefined;
+
 export function listSystemBuiltinMcpDescriptors(): readonly SystemBuiltinMcpDescriptor[] {
-  return SYSTEM_BUILTIN_MCP_IDS.map(createSystemBuiltinMcpDescriptor);
+  if (!builtinMcpDescriptors) {
+    builtinMcpDescriptors = SYSTEM_BUILTIN_MCP_IDS.map(createSystemBuiltinMcpDescriptor);
+  }
+  return builtinMcpDescriptors;
 }
 
 export function getSystemBuiltinMcpDescriptor(

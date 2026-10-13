@@ -300,6 +300,12 @@ export interface Session {
   fileChangesSummary?: SessionFileChangesSummary;
 }
 
+export interface SessionMessagesPage {
+  messages: Message[];
+  more: boolean;
+  nextCursor?: string;
+}
+
 export interface SharedSessionCommentRecord {
   authorEmail: string;
   content: string;
@@ -394,6 +400,13 @@ export interface SessionRecoveryReadModel {
   pendingPermissions: PendingPermissionRequest[];
   pendingQuestions: PendingQuestionRequest[];
   ratings: SessionMessageRatingRecord[];
+  /**
+   * 增量续读游标：请求带 `runEventAfterSeq` 时，本次 `session.runEvents` 是**增量**
+   * 而非全量，本字段是这批增量里实际交付到的最大 seq，下次请求用它作为新的
+   * `runEventAfterSeq`。非增量请求与「本次没有新事件」两种情况都为 null / 缺省，
+   * 调用方此时必须保持原游标，不要回退到 0。
+   */
+  runEventCursor?: number | null;
   session: Session;
   tasks: SessionTask[];
   todoLanes: SessionTodoLanes;
@@ -572,6 +585,11 @@ export interface SessionsClient {
     sessionId: string,
     options?: { includeMessages?: boolean; signal?: AbortSignal },
   ): Promise<Session>;
+  listMessages(
+    token: string,
+    sessionId: string,
+    options?: { before?: string; limit?: number; signal?: AbortSignal },
+  ): Promise<SessionMessagesPage>;
   getSharedWithMe(
     token: string,
     sessionId: string,
@@ -598,6 +616,7 @@ export interface SessionsClient {
     sessionId: string,
     options?: {
       messageLimit?: number;
+      runEventAfterSeq?: number;
       runEventLimit?: number;
       signal?: AbortSignal;
       since?: number;
@@ -608,6 +627,7 @@ export interface SessionsClient {
     sessionId: string,
     options?: {
       messageLimit?: number;
+      runEventAfterSeq?: number;
       runEventLimit?: number;
       signal?: AbortSignal;
       since?: number;
@@ -1030,6 +1050,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     sessionId: string,
     options?: {
       messageLimit?: number;
+      runEventAfterSeq?: number;
       runEventLimit?: number;
       signal?: AbortSignal;
       since?: number;
@@ -1044,6 +1065,12 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     // recoverActiveAssistantStream / buildChatRightPanelStateFromRunEvents）必须省略。
     if (typeof options?.runEventLimit === 'number') {
       params.set('runEventLimit', String(options.runEventLimit));
+    }
+    // 增量续读：`session.runEvents` 变成「seq 大于该游标的增量」，由调用方自己把
+    // 「已持有前缀 + 增量」拼成完整序列（`runEventCursor` 给出新的游标）。
+    // 需要全量序列、且没有维护前缀缓冲的调用方必须省略这个参数。
+    if (typeof options?.runEventAfterSeq === 'number') {
+      params.set('runEventAfterSeq', String(options.runEventAfterSeq));
     }
     if (typeof options?.since === 'number') {
       params.set('since', String(options.since));
@@ -1151,6 +1178,28 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
         throw new HttpError(result.errorMessage ?? '加载会话失败', result.status ?? 500);
       }
       return result.session;
+    },
+
+    async listMessages(token, sessionId, options) {
+      const params = new URLSearchParams();
+      if (options?.before) {
+        params.set('before', options.before);
+      }
+      if (typeof options?.limit === 'number') {
+        params.set('limit', String(options.limit));
+      }
+      const query = params.toString();
+      return performSessionRequest<SessionMessagesPage>({
+        actionLabel: '读取会话消息',
+        request: () =>
+          fetchWithTimeout(
+            `${gatewayUrl}/sessions/${encodeURIComponent(sessionId)}/messages${query ? `?${query}` : ''}`,
+            {
+              headers: authHeader(token),
+              signal: options?.signal,
+            },
+          ),
+      });
     },
 
     async getSharedWithMe(token, sessionId, options) {

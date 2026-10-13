@@ -45,6 +45,7 @@ function createMobileProps(): Omit<FusionMobileBottomPanelProps, 'activeTab'> {
     },
     editorOpenFilePaths: [],
     effectiveWorkingDirectory: '/home/await/project/OpenAWork',
+    fileBrowseRoot: '/home/await/project/OpenAWork',
     fetchTree: async () => [],
     gatewayUrl: 'http://localhost:3000',
     handleSaveFile: async () => undefined,

@@ -22,7 +22,9 @@ import {
   convertToLineEnding,
 } from './edit-replacers.js';
 import { formatFileAfterWrite } from './post-write-formatter.js';
+import { hasReadEvidenceForPath } from './edit-tools.js';
 import {
+  assertRegularFileIfExists,
   assertSessionWorkspacePath,
   getSessionWorkspaceRoot,
 } from '../workspace/workspace-safety.js';
@@ -90,6 +92,8 @@ export function createMultiEditTool(
         throw new Error('At least one edit is required.');
       }
 
+      await assertRegularFileIfExists(safePath);
+
       let currentContent: string;
       try {
         currentContent = await fsp.readFile(safePath, 'utf8');
@@ -98,6 +102,10 @@ export function createMultiEditTool(
           throw new Error(`File not found: ${safePath}`);
         }
         throw error;
+      }
+
+      if (!hasReadEvidenceForPath(sessionId, safePath)) {
+        throw new Error(`You must read file "${safePath}" before editing it`);
       }
 
       const originalContent = currentContent;

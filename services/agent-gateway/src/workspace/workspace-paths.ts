@@ -117,6 +117,32 @@ export function resolveWorkspaceEntryPath(
   return isPathWithinRoot(resolvedPath, safeRoot) ? resolvedPath : null;
 }
 
+/**
+ * 把 `path` 解析到 `workspaceRoot` 之下，**跳过 WORKSPACE_ROOT(S) 白名单**。
+ *
+ * 只服务于「根本身由服务端决议、且可能不在全局白名单里」的受控场景——当前唯一
+ * 调用方是未绑定会话的默认工作区回退（`resolveUnboundSessionWorkspaceFallback`，
+ * 通常是 `~/Documents/OpenAWork`，restricted 模式下必然不在白名单里）。
+ *
+ * 白名单检查由调用方用 `validateWorkspacePath` 承担；本函数只保证结果落在给定
+ * 根内：相对路径按根拼接，绝对路径必须在根内，`..` 逃逸 / 越界一律返回 null。
+ */
+export function resolveWorkspaceEntryPathWithinRoot(
+  path: string,
+  workspaceRoot: string,
+): string | null {
+  const flavor = pathFlavorFor(path, workspaceRoot);
+  const safeRoot = flavor.resolve(workspaceRoot);
+  if (flavor.isAbsolute(path)) {
+    const resolvedPath = flavor.resolve(path);
+    return isPathWithinRoot(resolvedPath, safeRoot) ? resolvedPath : null;
+  }
+
+  const normalizedRelativePath = normalizeRelativeSeparators(path, flavor);
+  const resolvedPath = flavor.resolve(safeRoot, normalizedRelativePath);
+  return isPathWithinRoot(resolvedPath, safeRoot) ? resolvedPath : null;
+}
+
 export function validateWorkspacePath(path: string): string | null {
   const flavor = pathFlavorFor(path);
   if (!flavor.isAbsolute(path)) {

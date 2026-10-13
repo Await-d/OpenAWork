@@ -11,6 +11,12 @@ import type {
 import { computeChannelRetryDelayMs } from './channel-http.js';
 import { ChannelRelay } from './channel-relay.js';
 import {
+  clearChannelHealthIssue,
+  getChannelHealthRecord,
+  recordChannelHealthIssue,
+  persistChannelInboundDiagnostic,
+} from './channel-error-store.js';
+import {
   channelLogInfo,
   channelLogWarn,
   summarizeChannelEvent,
@@ -98,6 +104,9 @@ export class ChannelManager {
           this.statuses.set(instance.id, 'running');
           runtime.restartAttempt = 0;
           channelLogInfo('channel service started', summarizeChannelInstance(instance));
+          // 启动成功即视为恢复：清掉上一次失败留下的快照，否则启动一次成功后
+          // 配置页仍显示旧错误，排障时会把已解决的问题当成现存问题。
+          clearChannelHealthIssue(instance.id);
           runtime.wrappedNotify({ type: 'status', pluginId: instance.id, status: 'running' });
         } catch (err) {
           this.stopRelay(instance.id);
@@ -106,6 +115,17 @@ export class ChannelManager {
           channelLogWarn('channel service start failed', {
             ...summarizeChannelInstance(instance),
             error: err instanceof Error ? err.message : String(err),
+          });
+          // 启动失败此前只进日志与内存 statuses，进程重启后配置页看不出任何异常。
+          // 落 channel_health 让「为什么这个频道连不上」跨重启可查。
+          recordChannelHealthIssue({
+            channelId: instance.id,
+            channelType: instance.type,
+            message: `频道服务启动失败：${err instanceof Error ? err.message : String(err)}`,
+            source: 'channel_start',
+            status: 'error',
+            ...(instance.ownerUserId ? { ownerUserId: instance.ownerUserId } : {}),
+            ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
           });
           runtime.wrappedNotify({
             type: 'error',
@@ -154,6 +174,17 @@ export class ChannelManager {
         pluginType: service.pluginType,
         error: err instanceof Error ? err.message : String(err),
       });
+      // 停止失败意味着连接/轮询可能还挂在后台继续跑，属于要人工介入的状态，
+      // 必须留痕 —— 停不掉的服务会继续吞消息或重复投递。
+      recordChannelHealthIssue({
+        channelId: id,
+        channelType: service.pluginType,
+        message: `频道服务停止失败：${err instanceof Error ? err.message : String(err)}`,
+        source: 'channel_stop',
+        status: 'error',
+        ...(runtime?.instance.ownerUserId ? { ownerUserId: runtime.instance.ownerUserId } : {}),
+        ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+      });
       if (runtime) {
         runtime.stopping = false;
       }
@@ -182,18 +213,25 @@ export class ChannelManager {
     const service = this.services.get(id);
     const inbound = this.inboundDiagnostics.get(id);
     const diagnostics = service?.getDiagnostics?.();
+    // 内存快照优先（更新鲜），缺失的字段回落到 DB 快照 —— 进程刚重启时服务
+    // 还没有任何内存诊断，此时只剩 DB 能回答「上次为什么坏」。
+    const persisted = readPersistedChannelFields(id);
+    const base: ChannelDiagnostics = {
+      ...persisted,
+      ...inbound,
+      status,
+      running: service?.isRunning() ?? false,
+    };
     if (diagnostics) {
       return {
+        ...base,
         ...diagnostics,
-        ...inbound,
         status,
         running: service?.isRunning() ?? false,
       };
     }
     return {
-      ...inbound,
-      status,
-      running: service?.isRunning() ?? false,
+      ...base,
       note:
         status === 'running'
           ? 'Channel service has no diagnostics provider.'
@@ -208,14 +246,27 @@ export class ChannelManager {
     readonly error?: string;
     readonly message?: { readonly chatId: string };
   }): void {
+    const at = Date.now();
     this.inboundDiagnostics.set(input.pluginId, {
-      lastInboundAt: Date.now(),
+      lastInboundAt: at,
       lastInboundAccepted: input.accepted,
       ...(input.eventType ? { lastInboundType: input.eventType } : {}),
       ...(input.error ? { lastInboundError: input.error } : {}),
-      ...(input.message
-        ? { lastMessageAt: Date.now(), lastMessageChatId: input.message.chatId }
-        : {}),
+      ...(input.message ? { lastMessageAt: at, lastMessageChatId: input.message.chatId } : {}),
+    });
+
+    // 内存 Map 活不过一次重启，而「这条消息到底有没有进来」恰恰是要在重启后
+    // 回答的问题。成功也写：诊断的价值在于对照，而非只记故障。
+    const runtime = this.runtimes.get(input.pluginId);
+    persistChannelInboundDiagnostic({
+      channelId: input.pluginId,
+      accepted: input.accepted,
+      occurredAt: at,
+      ...(input.eventType ? { eventType: input.eventType } : {}),
+      ...(input.error ? { error: input.error } : {}),
+      ...(input.message ? { chatId: input.message.chatId } : {}),
+      ...(runtime?.instance.type ? { channelType: runtime.instance.type } : {}),
+      ...(runtime?.instance.ownerUserId ? { ownerUserId: runtime.instance.ownerUserId } : {}),
     });
   }
 
@@ -346,6 +397,15 @@ export class ChannelManager {
       delayMs,
       reason,
     });
+    // 触发自动重启本身就是故障信号（连接掉了），留痕让「反复重启」可被追踪。
+    recordChannelHealthIssue({
+      channelId: id,
+      channelType: runtime.instance.type,
+      message: `频道连接异常，准备第 ${attempt} 次自动重启：${reason}`,
+      source: 'channel_restart',
+      status: 'error',
+      ...(runtime.instance.ownerUserId ? { ownerUserId: runtime.instance.ownerUserId } : {}),
+    });
     runtime.restartTimer = setTimeout(() => {
       const current = this.runtimes.get(id);
       if (!current) {
@@ -360,6 +420,15 @@ export class ChannelManager {
           ...summarizeChannelInstance(current.instance),
           attempt: current.restartAttempt,
           error: err instanceof Error ? err.message : String(err),
+        });
+        recordChannelHealthIssue({
+          channelId: id,
+          channelType: current.instance.type,
+          message: `第 ${current.restartAttempt} 次自动重启失败：${err instanceof Error ? err.message : String(err)}`,
+          source: 'channel_restart',
+          status: 'error',
+          ...(current.instance.ownerUserId ? { ownerUserId: current.instance.ownerUserId } : {}),
+          ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
         });
       });
     }, delayMs);
@@ -377,6 +446,43 @@ export class ChannelManager {
   private shouldAutoRestart(instance: ChannelInstance): boolean {
     return instance.enabled && instance.features?.autoStart === true;
   }
+}
+
+/**
+ * 从 `channel_health` 读回可并入 `ChannelDiagnostics` 的字段。
+ *
+ * 逐字段映射而非整行覆盖：内存快照的字段更新鲜、DB 的更持久，两者字段集不同，
+ * 整行合并会丢掉运行时才知道的 transport / socket 细节。
+ */
+function readPersistedChannelFields(channelId: string): Partial<ChannelDiagnostics> {
+  let record: ReturnType<typeof getChannelHealthRecord>;
+  try {
+    record = getChannelHealthRecord(channelId);
+  } catch (error) {
+    // 诊断是只读旁路，读失败不能连带影响配置页渲染。
+    channelLogWarn('read persisted channel diagnostics failed', {
+      channelId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {};
+  }
+
+  if (!record) {
+    return {};
+  }
+
+  return {
+    ...(record.lastError ? { lastError: record.lastError } : {}),
+    ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
+    ...(record.lastInboundAt ? { lastInboundAt: record.lastInboundAt } : {}),
+    ...(record.lastInboundAccepted !== null
+      ? { lastInboundAccepted: record.lastInboundAccepted }
+      : {}),
+    ...(record.lastInboundType ? { lastInboundType: record.lastInboundType } : {}),
+    ...(record.lastInboundError ? { lastInboundError: record.lastInboundError } : {}),
+    ...(record.lastMessageAt ? { lastMessageAt: record.lastMessageAt } : {}),
+    ...(record.lastMessageChatId ? { lastMessageChatId: record.lastMessageChatId } : {}),
+  };
 }
 
 export const channelManager = new ChannelManager();

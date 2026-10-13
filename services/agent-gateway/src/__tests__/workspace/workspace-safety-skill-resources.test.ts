@@ -137,3 +137,33 @@ describe('session workspace skill resource allowance', () => {
     ).toThrow(/outside current session workspace/);
   });
 });
+
+describe('assertRegularFileIfExists', () => {
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('普通文件与不存在的路径都放行', async () => {
+    const { assertRegularFileIfExists } = await loadSafetyModule();
+    const filePath = join(makeTempDir('openawork-regular-file-'), 'note.txt');
+    writeFileSync(filePath, 'hello\n', 'utf8');
+
+    await expect(assertRegularFileIfExists(filePath)).resolves.toBeUndefined();
+    await expect(assertRegularFileIfExists(`${filePath}.missing`)).resolves.toBeUndefined();
+  });
+
+  it('目录作为编辑目标时拒绝', async () => {
+    const { assertRegularFileIfExists } = await loadSafetyModule();
+    const dir = makeTempDir('openawork-regular-dir-');
+
+    await expect(assertRegularFileIfExists(dir)).rejects.toThrow(/Not a regular file/);
+  });
+
+  it.skipIf(process.platform === 'win32')('字符设备 /dev/null 拒绝编辑', async () => {
+    const { assertRegularFileIfExists } = await loadSafetyModule();
+
+    await expect(assertRegularFileIfExists('/dev/null')).rejects.toThrow(/Not a regular file/);
+  });
+});

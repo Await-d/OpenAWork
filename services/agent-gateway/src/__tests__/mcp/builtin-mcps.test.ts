@@ -216,3 +216,64 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
     expect(merged).toEqual(fakeBuiltin);
   });
 });
+
+/**
+ * 搜索入口收口：`open_websearch` 的 `search` 工具默认禁用，只保留其独有的
+ * 取正文 / README 能力。避免模型在 `websearch`（原生）与 `open_websearch/search`
+ * 两个等价入口之间随机二选一；免密钥中文引擎已迁到原生 `websearch`
+ * （见 `websearch-keyless-providers.ts`）。
+ */
+describe('open_websearch 搜索入口默认收口', () => {
+  it('默认 builtin 上禁用了 search 工具', () => {
+    const openWebsearch = buildBuiltinMcpServers({ env: {} }).find(
+      (server) => server.id === 'open_websearch',
+    );
+    expect(openWebsearch?.disabledTools).toEqual(['search']);
+    // 独有能力保持可见（被禁用的仅是 search）。
+    const toolNames = listVirtualMcpTools('open_websearch').map((tool) => tool.name);
+    expect(toolNames).toContain('fetch_web');
+    expect(toolNames).toContain('fetch_github_readme');
+  });
+
+  it('用户只改 enabled 时，收口默认值不被清空', () => {
+    const merged = mergeBuiltinAndConfiguredMcps([
+      { id: 'open_websearch', name: 'ignored', transport: 'stdio', enabled: false },
+    ]);
+    const openWebsearch = merged.find((server) => server.id === 'open_websearch');
+    expect(openWebsearch?.enabled).toBe(false);
+    // 关键：没有显式给出 disabledTools 时必须继承内置默认，否则一条只想
+    // 改启用状态的配置就会把收口一并撤销。
+    expect(openWebsearch?.disabledTools).toEqual(['search']);
+  });
+
+  it('显式 disabledTools: [] 可以重新启用 search', () => {
+    const merged = mergeBuiltinAndConfiguredMcps([
+      {
+        id: 'open_websearch',
+        name: 'ignored',
+        transport: 'stdio',
+        enabled: true,
+        disabledTools: [],
+      },
+    ]);
+    const openWebsearch = merged.find((server) => server.id === 'open_websearch');
+    expect(openWebsearch?.disabledTools).toEqual([]);
+  });
+
+  it('protected builtin 只接受管理字段（endpoint 仍由运行时提供）', () => {
+    const merged = mergeBuiltinAndConfiguredMcps([
+      {
+        id: 'open_websearch',
+        name: 'hijacked',
+        transport: 'sse',
+        url: 'https://evil.example/mcp',
+        enabled: true,
+      },
+    ]);
+    const openWebsearch = merged.find((server) => server.id === 'open_websearch');
+    expect(openWebsearch?.name).toBe('Open WebSearch');
+    expect(openWebsearch?.transport).toBe('stdio');
+    // endpoint 覆盖被忽略：protected builtin 不接受用户指定的 url。
+    expect(openWebsearch?.url).toBeUndefined();
+  });
+});

@@ -80,6 +80,42 @@ describe('resolveTaskToolRuntimeSnapshot', () => {
     expect(snapshot?.taskId).toBe('task_1');
   });
 
+  // 新建任务在工具结算前既无 output 也无 task_id / session_id 输入，
+  // 只能靠网关写入 task.metadata 的 parentToolCallId 关联。
+  it('toolCallId（task.metadata.parentToolCallId）在 pending 阶段命中任务快照', () => {
+    const pendingLookup = buildTaskToolRuntimeLookup(
+      [CHILD_SESSION],
+      [
+        buildTask({
+          id: 'task_2',
+          sessionId: CHILD_SESSION.id,
+          status: 'running',
+          metadata: { parentToolCallId: 'call_abc' },
+        }),
+      ],
+    );
+
+    const snapshot = resolveTaskToolRuntimeSnapshot(
+      { prompt: '调查 foo', description: '调查 foo' },
+      undefined,
+      pendingLookup,
+      'call_abc',
+    );
+    expect(snapshot?.taskId).toBe('task_2');
+    expect(snapshot?.sessionId).toBe('ses_child_1');
+    expect(snapshot?.status).toBe('running');
+  });
+
+  it('toolCallId 未命中时回落到 output / input 侧解析', () => {
+    const snapshot = resolveTaskToolRuntimeSnapshot(
+      { task_id: 'task_1' },
+      undefined,
+      LOOKUP,
+      'call_unknown',
+    );
+    expect(snapshot?.taskId).toBe('task_1');
+  });
+
   it('无法关联时返回 undefined', () => {
     expect(resolveTaskToolRuntimeSnapshot({ prompt: 'x' }, undefined, LOOKUP)).toBeUndefined();
     expect(resolveTaskToolRuntimeSnapshot({ prompt: 'x' }, undefined, undefined)).toBeUndefined();
@@ -114,6 +150,25 @@ describe('buildTaskToolRuntimeLookup 的引用稳定性', () => {
     const second = buildTaskToolRuntimeLookup([], [buildTask({ id: 't1', status: 'completed' })]);
 
     expect(second).not.toBe(first);
+  });
+
+  it('任务 metadata.parentToolCallId 变化时返回新引用', () => {
+    const first = buildTaskToolRuntimeLookup(
+      [],
+      [buildTask({ id: 't1', status: 'running', metadata: { parentToolCallId: 'call_a' } })],
+    );
+    const second = buildTaskToolRuntimeLookup(
+      [],
+      [buildTask({ id: 't1', status: 'running', metadata: { parentToolCallId: 'call_b' } })],
+    );
+
+    expect(second).not.toBe(first);
+    expect(
+      resolveTaskToolRuntimeSnapshot({ prompt: 'x' }, undefined, second, 'call_b')?.taskId,
+    ).toBe('t1');
+    expect(
+      resolveTaskToolRuntimeSnapshot({ prompt: 'x' }, undefined, second, 'call_a'),
+    ).toBeUndefined();
   });
 
   it('任务结果回填时返回新引用', () => {

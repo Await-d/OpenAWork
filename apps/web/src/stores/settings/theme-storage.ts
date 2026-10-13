@@ -28,11 +28,11 @@ const VALID_STYLES: ThemeStyle[] = [
 
 const VALID_MODES: ThemeMode[] = ['system', 'light', 'dark'];
 
-function isValidStyle(v: unknown): v is ThemeStyle {
+export function isValidStyle(v: unknown): v is ThemeStyle {
   return typeof v === 'string' && VALID_STYLES.includes(v as ThemeStyle);
 }
 
-function isValidMode(v: unknown): v is ThemeMode {
+export function isValidMode(v: unknown): v is ThemeMode {
   return typeof v === 'string' && VALID_MODES.includes(v as ThemeMode);
 }
 

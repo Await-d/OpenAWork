@@ -212,6 +212,7 @@ export interface ChatRightPanelProps {
     input: Record<string, unknown>,
     output: unknown,
     lookup: TaskToolRuntimeLookup | undefined,
+    toolCallId?: string,
   ) => TaskToolRuntimeSnapshot | undefined;
   onCompactSession: () => void;
   onOpenRecoveryStrategy: () => void;
@@ -1188,6 +1189,7 @@ function ToolsPanel({
     input: Record<string, unknown>,
     output: unknown,
     lookup: TaskToolRuntimeLookup | undefined,
+    toolCallId?: string,
   ) => TaskToolRuntimeSnapshot | undefined;
   selectedChildSessionId: string | null;
 }) {
@@ -1285,6 +1287,7 @@ function ToolsPanel({
                 toolCall.input,
                 toolCall.output,
                 taskToolRuntimeLookup,
+                toolCall.toolCallId,
               )}
               selectedChildSessionId={selectedChildSessionId}
             />

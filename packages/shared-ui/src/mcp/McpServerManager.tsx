@@ -177,6 +177,132 @@ function EnabledSwitch({
   );
 }
 
+/**
+ * 单个 MCP server 的**工具级开关**。
+ *
+ * 数据必须来自两半：**已启用**的工具在运行状态里（`status.tools`，带描述），
+ * **被禁用**的工具只在配置里留名字（`server.disabledTools`）—— 目录侧隐藏禁用
+ * 项是既有契约（模型不该看到永远调不通的工具，见 `callMcpToolForSession` 的
+ * 执行侧拦截），所以 UI 必须把两者合起来渲染，否则用户没有任何入口把工具改回来。
+ *
+ * 写入走与 `EnabledSwitch` 相同的 `onUpdate` 通路（上层负责把 `source: 'builtin'`
+ * 提升为可持久化的 `system` / `user`）。勾选全部即显式写出 `disabledTools: []`，
+ * 这正是「内置默认收口」的反转开关。
+ */
+function ToolToggles({
+  server,
+  status,
+  onUpdate,
+}: {
+  server: MCPServerEntry;
+  status?: MCPServerStatus;
+  onUpdate?: (id: string, entry: MCPServerEntry) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const disabledNames = server.disabledTools ?? [];
+  const enabledTools = status?.tools ?? [];
+  const disabledSet = new Set(disabledNames);
+  // 已知工具 = 运行状态里的已启用项 ∪ 配置里的已禁用项。
+  // 同名同时出现在两处属矛盾数据（目录侧已按 disabledTools 过滤，不会发生）；
+  // 真出现时以「禁用」为准 —— 与执行侧 `callMcpToolForSession` 的拒绝语义一致。
+  const rows = [
+    ...enabledTools.map((tool) => tool.name),
+    ...disabledNames.filter((name) => !enabledTools.some((tool) => tool.name === name)),
+  ].map((name) => ({
+    name,
+    description: enabledTools.find((tool) => tool.name === name)?.description,
+    off: disabledSet.has(name),
+  }));
+
+  if (!onUpdate || rows.length === 0) {
+    return null;
+  }
+
+  const toggle = (name: string): void => {
+    const next = new Set(disabledNames);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    onUpdate(server.id, sanitizeProtectedMcpEndpoint({ ...server, disabledTools: [...next] }));
+  };
+
+  return (
+    <div style={{ marginTop: spacing[2], minWidth: 0 }}>
+      <div style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: spacing[2] }}>
+        <button
+          type="button"
+          className="mcp-action"
+          aria-expanded={open}
+          onClick={() => setOpen((previous) => !previous)}
+        >
+          {open ? '收起工具' : `管理工具（${rows.length}）`}
+        </button>
+        {disabledNames.length > 0 ? (
+          <span style={{ color: color.fgMuted, fontSize: 10 }}>
+            已禁用 {disabledNames.length} 个
+          </span>
+        ) : null}
+      </div>
+
+      {open ? (
+        <div
+          style={{
+            border: `1px solid ${color.borderSubtle}`,
+            borderRadius: radius.md,
+            display: 'grid',
+            gap: spacing[2],
+            marginTop: spacing[2],
+            padding: spacing[3],
+          }}
+        >
+          {rows.map((row) => (
+            <label
+              key={row.name}
+              style={{
+                alignItems: 'flex-start',
+                cursor: 'pointer',
+                display: 'flex',
+                gap: spacing[2],
+                minWidth: 0,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={!row.off}
+                onChange={() => toggle(row.name)}
+                style={{ accentColor: color.accent, flexShrink: 0, marginTop: 2 }}
+              />
+              <span style={{ minWidth: 0 }}>
+                <span
+                  style={{
+                    color: row.off ? color.fgMuted : color.fgStrong,
+                    fontFamily: font.mono,
+                    fontSize: 11,
+                    textDecoration: row.off ? 'line-through' : 'none',
+                  }}
+                >
+                  {row.name}
+                </span>
+                {row.description ? (
+                  <span
+                    style={{
+                      color: color.fgMuted,
+                      display: 'block',
+                      fontSize: 10,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {row.description}
+                  </span>
+                ) : null}
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function removeLabel(server: MCPServerEntry): string {
   if (server.builtin) {
     return server.source === 'builtin' ? '禁用' : '恢复默认';
@@ -472,6 +598,8 @@ export function McpServerManager({
                     ) : null}
                   </div>
                 </div>
+
+                <ToolToggles server={server} status={status} onUpdate={onUpdate} />
 
                 {isEditing ? (
                   <div

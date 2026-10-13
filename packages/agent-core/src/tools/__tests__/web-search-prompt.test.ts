@@ -15,7 +15,7 @@ describe('Web 搜索工具提示词', () => {
 
     it('应该导出提供商列表', () => {
       expect(WEB_SEARCH_PROVIDERS).toBeDefined();
-      expect(WEB_SEARCH_PROVIDERS.length).toBe(9);
+      expect(WEB_SEARCH_PROVIDERS.length).toBe(12);
       expect(WEB_SEARCH_PROVIDERS).toEqual([
         'duckduckgo',
         'tavily',
@@ -26,6 +26,10 @@ describe('Web 搜索工具提示词', () => {
         'zhipu',
         'google',
         'bing',
+        // 免密钥引擎：由网关注册进 `websearch` 的 provider 插槽。
+        'baidu',
+        'sogou',
+        'startpage',
       ]);
     });
 

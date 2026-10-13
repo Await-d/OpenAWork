@@ -1,4 +1,4 @@
-import { startTransition, useCallback } from 'react';
+import { startTransition, useCallback, useRef } from 'react';
 import type { UpstreamStreamSummary, WorkflowRuntimeState } from '@openAwork/shared';
 import type {
   Session,
@@ -32,6 +32,11 @@ import {
   preserveEqualValue,
 } from '../../../../components/conversation-runtime/session/session-runtime.js';
 import { recoverActiveAssistantStream } from '../../../../components/conversation-runtime/stream/stream-recovery.js';
+import {
+  planRunEventRequest,
+  settleRunEventBuffer,
+  type RunEventPrefixBuffer,
+} from '../../../../utils/session/recovery-run-event-buffer.js';
 
 export interface SessionSnapshotLoaderRefs {
   currentSessionViewRef: React.MutableRefObject<{ epoch: number; sessionId: string | null }>;
@@ -110,6 +115,12 @@ export interface SessionSnapshotLoaderReturn {
     targetSessionId: string,
     options?: {
       expectedSessionViewEpoch?: number;
+      /**
+       * 对 run event 走增量续读：只有持续轮询同一条活跃流的调用方
+       * （远端运行中的 1s 快照轮询）才应开启，且必须传 `messageLimit`。
+       * 详见实现内的注释。
+       */
+      incrementalRunEvents?: boolean;
       messageLimit?: number;
       replaceMessages?: boolean;
       signal?: AbortSignal;
@@ -144,6 +155,14 @@ export function useSessionSnapshotLoader(
     setIsSessionSnapshotReady,
   } = setters;
 
+  /**
+   * 活跃 scope 的 run event 前缀（增量续读的客户端状态）。
+   *
+   * 放 ref 不放 state：它只是「下一拍少读一点」的传输层优化，任何一次渲染都不需要它，
+   * 也不该因为它的变化触发重渲染。
+   */
+  const runEventBufferRef = useRef<RunEventPrefixBuffer | null>(null);
+
   const loadSessionRuntimeSnapshot = useCallback(
     async (targetSessionId: string, signal?: AbortSignal, expectedSessionViewEpoch?: number) => {
       if (!token) return;
@@ -152,6 +171,18 @@ export function useSessionSnapshotLoader(
         signal,
       });
       if (signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch)) return;
+      // 该会话已无活跃流：增量前缀随之释放。run 结束后 1s 快照轮询会停（前台条件
+      // `remoteSessionBusyState` 转 false），这条 3s 轻量轮询是兜住「最后一次前缀」的
+      // 地方——不清的话，一份完整事件序列会一直挂到下一次快照加载。只在会话对齐时清，
+      // 避免把另一个会话的前缀误清。
+      const runEventBuffer = runEventBufferRef.current;
+      if (
+        status.activeStream === null &&
+        runEventBuffer !== null &&
+        runEventBuffer.sessionId === targetSessionId
+      ) {
+        runEventBufferRef.current = null;
+      }
       const pendingInteractions = getRecoveryPendingInteractions(status);
       // 全部走「值等则沿用旧引用」的 setter：本函数每 3s 跑一次，无条件写新对象
       // 会让 ChatPage 每拍重渲染，并把不稳定的对象引用喂进依赖它们的 effect
@@ -224,6 +255,15 @@ export function useSessionSnapshotLoader(
       targetSessionId: string,
       options?: {
         expectedSessionViewEpoch?: number;
+        /**
+         * 对 run event 走增量续读（仅本 hook 维护了前缀缓冲的调用方可开启）。
+         *
+         * 远端运行中的 1s 轮询必须开启：活跃 scope 的行数随这一轮 run 只增不减，
+         * 每拍全量读会把单拍成本绑在 O(本轮已产生事件数) 上，正是接口在对话期间卡住的
+         * 直接原因。开启后冷启动仍取全量，其后每拍只取 `seq > cursor` 的增量，再由
+         * `settleRunEventBuffer` 拼回完整序列 —— 下游（累加 reduce）看到的仍是全量。
+         */
+        incrementalRunEvents?: boolean;
         messageLimit?: number;
         replaceMessages?: boolean;
         signal?: AbortSignal;
@@ -233,13 +273,64 @@ export function useSessionSnapshotLoader(
       if (!token) return;
       const sessionViewEpoch =
         options?.expectedSessionViewEpoch ?? currentSessionViewRef.current.epoch;
-      const recovery = await createSessionsClient(gatewayUrl).getRecovery(token, targetSessionId, {
+      const sessionsClient = createSessionsClient(gatewayUrl);
+      // 增量续读要求 messageLimit 生效（服务端只在活跃 scope 的 turnLimit 分支下认游标），
+      // 否则退回全量，避免把「全 session 事件」和「单 scope 增量」拼在一起。
+      const incrementalEnabled =
+        options?.incrementalRunEvents === true && typeof options?.messageLimit === 'number';
+      const requestedAfterSeq = incrementalEnabled
+        ? planRunEventRequest({ buffer: runEventBufferRef.current, sessionId: targetSessionId })
+        : undefined;
+      let recovery = await sessionsClient.getRecovery(token, targetSessionId, {
+        ...(requestedAfterSeq === undefined ? {} : { runEventAfterSeq: requestedAfterSeq }),
         messageLimit: options?.messageLimit,
         signal: options?.signal,
         since: options?.since,
       });
       if (options?.signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch))
         return;
+
+      if (incrementalEnabled) {
+        let settlement = settleRunEventBuffer({
+          activeStream: recovery.activeStream,
+          buffer: runEventBufferRef.current,
+          requestedAfterSeq,
+          runEventCursor: recovery.runEventCursor,
+          runEvents: recovery.session.runEvents,
+          sessionId: targetSessionId,
+        });
+        if (settlement.needsFullReload) {
+          // 换了 run / scope 被清掉重建：本地前缀已作废，重发一次不带游标的全量请求。
+          // 只在这一拍发生，代价是一次额外往返，换来的是「绝不拿残缺序列重建流」。
+          recovery = await sessionsClient.getRecovery(token, targetSessionId, {
+            messageLimit: options?.messageLimit,
+            signal: options?.signal,
+            since: options?.since,
+          });
+          if (options?.signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch))
+            return;
+          settlement = settleRunEventBuffer({
+            activeStream: recovery.activeStream,
+            buffer: null,
+            requestedAfterSeq: undefined,
+            runEventCursor: recovery.runEventCursor,
+            runEvents: recovery.session.runEvents,
+            sessionId: targetSessionId,
+          });
+        }
+
+        runEventBufferRef.current = settlement.buffer;
+        // 下游（recoverActiveAssistantStream / buildRightPanelStateFromRunEvents）
+        // 拿到的仍是完整序列，本函数之外没有任何调用方需要知道增量协议。
+        recovery = {
+          ...recovery,
+          session: { ...recovery.session, runEvents: settlement.events },
+        };
+      } else {
+        // 全量调用方：前缀缓冲与它无关，但要防止「它读了一轮新 scope 的全量，而缓冲还停在
+        // 上一轮」——静默作废，下一拍增量会先走一次重载。
+        runEventBufferRef.current = null;
+      }
 
       const prepared = prepareSessionRecoveryState(recovery);
       // Mark recovery-driven state syncs as a transition so React can split

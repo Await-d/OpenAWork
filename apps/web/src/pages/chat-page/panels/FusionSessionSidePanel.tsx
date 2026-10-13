@@ -236,6 +236,9 @@ export function FusionSessionSidePanel({
               onOpenFullSession={onOpenFullSession}
               parentTaskRuntimeLookup={taskToolRuntimeLookup}
               providerCatalog={providerCatalog}
+              sequence={
+                subAgentItems?.find((item) => item.sessionId === selectedChildSessionId)?.sequence
+              }
               token={token}
             />
           </div>

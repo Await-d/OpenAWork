@@ -20,6 +20,8 @@ import {
   restoreQueuedComposerFiles,
 } from '../../../pages/chat-page/conversation/composer/queued-composer-file-store.js';
 import { useComposerQueueBackend } from '../../../pages/chat-page/conversation/composer/use-composer-queue-backend.js';
+import type { ComposerQueueClaimResult } from '@openAwork/web-client';
+import { onQueuedMessageSendRejected } from '../../../utils/chat/composer-queue-events.js';
 import type {
   ComposerMenuState,
   WorkspaceFileMentionItem,
@@ -285,7 +287,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   // 都是新引用，直接把它放进 useEffect 依赖会让水合 / 同步逻辑每帧重跑。各方法内部
   // 已是稳定引用（依赖收敛到 gatewayUrl）。
   const {
-    claim: claimQueueItemOnBackend,
+    claimMany: claimQueueItemsOnBackend,
     enqueue: enqueueOnBackend,
     hydrate: hydrateQueueFromBackend,
     releaseClaim: releaseQueueClaimOnBackend,
@@ -749,20 +751,35 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     };
 
     void (async () => {
-      // ① 认领发送权——多端互斥的关键一步。必须先于任何发送动作。
-      let ownsItem: boolean;
+      // ① 认领发送权——多端互斥 + 会话空闲校验，两者同源于网关的同一次往返。
+      // 会话被单飞锁占用（另一端的请求 / 网关自己唤醒的 run / 上一回合收尾）时，
+      // 网关返回 `session_running` 而不发放租约：此时硬发必被拒成
+      // SESSION_ALREADY_RUNNING，用户看到的就是「当前会话已有请求正在运行。」，
+      // 而条目已经出队，等于凭空丢一条消息。
+      let claimOutcome: ComposerQueueClaimResult;
       try {
-        ownsItem = await claimQueueItemOnBackend(nextQueuedMessage.id);
+        const batchItemIds = queuedComposerMessages.slice(0, 8).map((item) => item.id);
+        const claimResults = await claimQueueItemsOnBackend(batchItemIds);
+        claimOutcome = claimResults.find((result) => result.itemId === nextQueuedMessage.id) ?? {
+          claimed: false,
+          reason: 'held_by_other',
+        };
       } catch (error) {
-        // 没问成（网关不可达）：所有权未知，**保留**本地条目并退避重试。
+        // 没问成（网关不可达）：状态未知，**保留**本地条目并退避重试。
         // 若在这里移除，消息会静默消失；硬发则可能出现重复——都不接受。
         logger.warn('待发队列发送权认领失败，稍后重试', error);
         scheduleFlushRetry();
         return;
       }
 
-      if (!ownsItem) {
-        // ② 另一端正在发：本地副本作废即可，**不要**触发重新水合。
+      if (!claimOutcome.claimed) {
+        if (claimOutcome.reason === 'session_running') {
+          // 会话仍在跑：条目**保留**在本地队列，退避后由定时器驱动重试，
+          // 绝不能在这里丢弃或触发重新水合。
+          scheduleFlushRetry();
+          return;
+        }
+        // ② 另一端正在发这条条目：本地副本作废即可，**不要**触发重新水合。
         // 那会拉回同一条仍在服务端的条目 → 再次 claim 失败 → 再次水合，形成死循环。
         // 交由持有权的那一端负责发出并删除，本端移除后自然收敛。
         setQueuedComposerMessages((previous) =>
@@ -801,7 +818,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     });
   }, [
     canStopSession,
-    claimQueueItemOnBackend,
+    claimQueueItemsOnBackend,
     queuedComposerMessages,
     queuedComposerScope,
     queueFlushRetryNonce,
@@ -810,6 +827,44 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     stoppingStream,
     streaming,
   ]);
+
+  // 队列来源的发送被网关单飞锁拒成 SESSION_ALREADY_RUNNING 时的回流:
+  // 先幂等重写服务端记录(与 run-send-message 的兜底重入队共用同一 itemId,重复入队
+  // 不产生第二条),确认落库后再回填本地——顺序不能反,否则回填触发的下一轮 flush 会
+  // claim 到一条尚不存在的记录,被当作「他端持有」而把条目丢掉。
+  useEffect(() => {
+    return onQueuedMessageSendRejected((payload) => {
+      if (payload.sessionId !== sessionId) {
+        return;
+      }
+      void (async () => {
+        const restored = await enqueueOnBackend({
+          attachmentItems: payload.attachmentItems,
+          enqueuedAt: Date.now(),
+          id: payload.itemId,
+          requiresAttachmentRebind: false,
+          text: payload.text,
+        });
+        if (!restored) {
+          return;
+        }
+        setQueuedComposerMessages((previous) =>
+          previous.some((item) => item.id === payload.itemId)
+            ? previous
+            : [
+                ...previous,
+                {
+                  attachmentItems: payload.attachmentItems,
+                  files: payload.files,
+                  id: payload.itemId,
+                  requiresAttachmentRebind: false,
+                  text: payload.text,
+                },
+              ],
+        );
+      })();
+    });
+  }, [enqueueOnBackend, sessionId, setQueuedComposerMessages]);
 
   // 卸载时清掉退避定时器，避免对已卸载组件 setState。
   useEffect(

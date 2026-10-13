@@ -40,6 +40,12 @@ const DEVTOOLS_SOURCE_DEFINITIONS: Record<
     status: 'loading',
     detail: '正在聚合最近异常记录',
   },
+  channelTroubleshooting: {
+    label: '消息频道路障',
+    endpoint: '/settings/channel-troubleshooting',
+    status: 'loading',
+    detail: '正在拉取频道健康快照与错误留痕',
+  },
   desktopAutomation: {
     label: '桌面自动化',
     endpoint: '/desktop-automation/status',

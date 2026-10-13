@@ -2273,28 +2273,26 @@ export async function handleStreamRequest(input: {
     }
   }
 
-  let workspaceCtx: Awaited<ReturnType<typeof buildWorkspaceContext>>;
-  try {
+  const workspacePath = resolveSessionWorkspacePath({
+    metadataJson: input.sessionContext.metadataJson,
+    sessionId: input.sessionId,
+    userId: input.user.sub,
+  });
+  const workspaceContextPromise = (async () => {
     // 会话级冻结（对齐参考库 instructions 基线语义）：避免工作区内容变化（新增
     // 根级文件 / 编辑 AGENTS.md 等）打断 stable system 前缀的 prompt-cache。
     // 回退开关：OPENAWORK_DISABLE_WORKSPACE_CTX_FREEZE=1。
-    workspaceCtx = await resolveFrozenWorkspaceContext({
+    return resolveFrozenWorkspaceContext({
       sessionId: input.sessionId,
       userId: input.user.sub,
-      workspacePath: resolveSessionWorkspacePath({
-        metadataJson: input.sessionContext.metadataJson,
-        sessionId: input.sessionId,
-        userId: input.user.sub,
-      }),
+      workspacePath,
       build: () =>
         buildWorkspaceContext(input.sessionContext.metadataJson, {
           sessionId: input.sessionId,
           userId: input.user.sub,
         }),
     });
-  } catch (error) {
-    return failReservation(error);
-  }
+  })();
   const interactionModes = resolveStreamInteractionModes({
     metadataJson: input.sessionContext.metadataJson,
     requestData,
@@ -2323,12 +2321,7 @@ export async function handleStreamRequest(input: {
   // Detect "ultrawork/ulw" keyword and inject plan context + create boulder state.
   let startWorkContext: string | null = null;
   // 已绑定：用会话路径；未绑定：回退到桌面端默认目录（禁止 process.cwd() 落到盘符根）。
-  const workspaceRootForStartWork =
-    resolveSessionWorkspacePath({
-      metadataJson: input.sessionContext.metadataJson,
-      sessionId: input.sessionId,
-      userId: input.user.sub,
-    }) ?? resolveUnboundSessionWorkspaceFallback();
+  const workspaceRootForStartWork = workspacePath ?? resolveUnboundSessionWorkspaceFallback();
   if (detectUltraworkKeyword(requestData.message)) {
     try {
       startWorkContext = await processStartWork(
@@ -2357,6 +2350,17 @@ export async function handleStreamRequest(input: {
   const yoloModePrompt = interactionModes.yoloMode === true ? YOLO_MODE_SYSTEM_PROMPT : null;
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
+
+  const dynamicToolDefsPromise = runtimePolicy.includeDynamicWorkspaceTools
+    ? loadDynamicToolsForWorkspace(workspaceRootForStartWork, input.sessionId).catch(
+        (error: unknown) => {
+          logGatewayWarn(
+            `[stream] Failed to load dynamic tools for ${workspaceRootForStartWork}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return [] as DynamicToolEntry[];
+        },
+      )
+    : Promise.resolve([] as DynamicToolEntry[]);
 
   clearStaleReplayRequestArtifacts({
     clientRequestId: requestData.clientRequestId,
@@ -2449,6 +2453,12 @@ export async function handleStreamRequest(input: {
     createStreamUpstreamRouteChunk(route, runId, eventSequence, requestData.clientRequestId),
   );
   const execution: Promise<HandleStreamResult> = (async () => {
+    let workspaceCtx: Awaited<ReturnType<typeof buildWorkspaceContext>>;
+    try {
+      workspaceCtx = await workspaceContextPromise;
+    } catch (error) {
+      return failReservation(error);
+    }
     let shouldKeepPausedState = false;
     const runtimeThreadStartedAt = Date.now();
     setPersistedSessionStateStatus({
@@ -2582,19 +2592,7 @@ export async function handleStreamRequest(input: {
       }
 
       // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
-      let dynamicToolDefs: DynamicToolEntry[] = [];
-      if (runtimePolicy.includeDynamicWorkspaceTools) {
-        try {
-          dynamicToolDefs = await loadDynamicToolsForWorkspace(
-            workspaceRootForStartWork,
-            input.sessionId,
-          );
-        } catch (err) {
-          logGatewayWarn(
-            `[stream] Failed to load dynamic tools: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
+      const dynamicToolDefs = await dynamicToolDefsPromise;
 
       const effectiveSkills = getEffectiveSkillsFromSessionContext({
         userId: input.user.sub,
@@ -3068,9 +3066,6 @@ export async function handleStreamRequest(input: {
         }
 
         if (result.stopReason === 'error' || result.shouldStop) {
-          // TODO continuation enforcer (oh-my-opencode pattern):
-          // When the assistant stops without tool calls but incomplete TODOs remain,
-          // inject a continuation prompt to keep working instead of stopping.
           if (result.stopReason !== 'error' && result.shouldStop) {
             const incompleteTodos = listSessionTodos(input.sessionId).filter(
               (t) => t.status !== 'completed' && t.status !== 'cancelled',

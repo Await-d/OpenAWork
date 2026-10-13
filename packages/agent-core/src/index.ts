@@ -118,6 +118,11 @@ export {
   type WebSearchMultiEntry,
   type WebSearchMultiConfig,
   type WebSearchRolloutMode,
+  type WebSearchProvider,
+  type WebSearchProviderExecutor,
+  registerWebSearchProvider,
+  WEB_SEARCH_PROVIDER_API_KEY_ENV,
+  WEB_SEARCH_PROVIDER_BASE_URL_ENV,
   WEB_SEARCH_TOOL_USAGE_GUIDE,
   WEB_SEARCH_TOOLS_LIST,
   WEB_SEARCH_PROVIDERS,
@@ -520,6 +525,8 @@ export * from './cli/index.js';
 
 export {
   SSHConnectionManagerImpl,
+  SshRemotePathError,
+  SshSftpUnavailableError,
   type SSHConnection,
   type ExecResult,
   type SSHExecOptions,

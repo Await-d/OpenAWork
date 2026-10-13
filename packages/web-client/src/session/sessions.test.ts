@@ -129,6 +129,67 @@ describe('createSessionsClient.getRecoveryResult', () => {
     expect(result.recovery?.session.id).toBe('session-1');
   });
 
+  it('runEventAfterSeq 作为查询参数下发，并回传新的 runEventCursor', async () => {
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return {
+        ok: true,
+        json: async () => ({
+          recovery: {
+            activeStream: null,
+            children: [],
+            pendingPermissions: [],
+            pendingQuestions: [],
+            ratings: [],
+            runEventCursor: 42,
+            session: { id: 'session-1', messages: [] },
+            tasks: [],
+            todoLanes: { main: [], temp: [] },
+          },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    const result = await client.getRecoveryResult('token-1', 'session-1', {
+      messageLimit: 10,
+      runEventAfterSeq: 7,
+    });
+
+    expect(urls[0]).toBe(
+      'http://localhost:3000/sessions/session-1/recovery?messageLimit=10&runEventAfterSeq=7',
+    );
+    expect(result.recovery?.runEventCursor).toBe(42);
+  });
+
+  it('省略 runEventAfterSeq 时不带该查询参数（保持全量语义）', async () => {
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return {
+        ok: true,
+        json: async () => ({
+          recovery: {
+            activeStream: null,
+            children: [],
+            pendingPermissions: [],
+            pendingQuestions: [],
+            ratings: [],
+            session: { id: 'session-1', messages: [] },
+            tasks: [],
+            todoLanes: { main: [], temp: [] },
+          },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    await client.getRecoveryResult('token-1', 'session-1', { messageLimit: 10 });
+
+    expect(urls[0]).toBe('http://localhost:3000/sessions/session-1/recovery?messageLimit=10');
+  });
+
   it('HTTP 错误时返回结构化失败信息', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

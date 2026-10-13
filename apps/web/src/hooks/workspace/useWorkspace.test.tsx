@@ -577,4 +577,128 @@ describe('useWorkspace', () => {
       }),
     );
   });
+
+  it('未绑定的普通会话解析默认工作区根（fallbackWorkspacePath），workingDirectory 保持 null', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-unbound')) {
+        return new Response(
+          JSON.stringify({ session: { id: 'session-unbound', metadata_json: '{}' } }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+      if (url.includes('/workspace/files/index-version')) {
+        // 省略 path：网关回退到未绑定会话默认工作区并回传 root。
+        expect(url).not.toContain('path=');
+        expect(url).toContain('sessionId=session-unbound');
+        return new Response(
+          JSON.stringify({ root: '/home/user/Documents/OpenAWork', version: 3 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace('session-unbound'));
+
+    await waitFor(() => {
+      expect(result.current.fallbackWorkspacePath).toBe('/home/user/Documents/OpenAWork');
+    });
+
+    // 未绑定语义不变：文件浏览根只是附加信息，不能改写 workingDirectory。
+    expect(result.current.workingDirectory).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it('未绑定的 team 会话（role_layer）不回退默认工作区', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-team')) {
+        return new Response(
+          JSON.stringify({
+            session: { id: 'session-team', metadata_json: '{}', role_layer: 'executor' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace('session-team'));
+
+    await waitFor(() => {
+      expect(result.current.workingDirectory).toBeNull();
+    });
+
+    expect(result.current.fallbackWorkspacePath).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('index-version'))).toBe(
+      false,
+    );
+  });
+
+  it('默认工作区解析失败时静默降级为 null，不写入 error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/sessions/session-unbound')) {
+          return new Response(
+            JSON.stringify({ session: { id: 'session-unbound', metadata_json: '{}' } }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (url.includes('/workspace/files/index-version')) {
+          return new Response(JSON.stringify({ error: 'gateway unavailable' }), {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() => useWorkspace('session-unbound'));
+
+    await waitFor(() => {
+      expect(useUIStateStore.getState().activeSessionWorkspace?.sessionId).toBe('session-unbound');
+    });
+
+    expect(result.current.fallbackWorkspacePath).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it('已绑定会话不请求默认工作区', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/sessions/session-1')) {
+        return new Response(
+          JSON.stringify({
+            session: {
+              id: SESSION_ID,
+              metadata_json: JSON.stringify({ workingDirectory: '/workspace/demo' }),
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useWorkspace(SESSION_ID));
+
+    await waitFor(() => {
+      expect(result.current.workingDirectory).toBe('/workspace/demo');
+    });
+
+    expect(result.current.fallbackWorkspacePath).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('index-version'))).toBe(
+      false,
+    );
+  });
 });

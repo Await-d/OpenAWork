@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   FileBackupRef,
+  FileChangeGuaranteeLevel,
   FileChangeSourceKind,
   FileDiffContent,
   RunEvent,
@@ -98,6 +99,7 @@ import {
   getLatestSessionRunEventSeqByRequest,
   listSessionRunEvents,
   listSessionRunEventsByRequest,
+  listSessionRunEventsByRequestAfterSeq,
   listSessionRunEventsByRequestTail,
 } from '../session/session-run-events.js';
 import {
@@ -147,7 +149,9 @@ import {
 import {
   listSessionMessagesV2,
   readSessionMessagesWithRuntimeSplit,
+  v2ToV1Message,
 } from '../message/message-v2-adapter.js';
+import { decodeCursor, pageMessagesWithParts } from '../message/message-store-v2.js';
 import {
   rollbackSessionTurn,
   RollbackScopeLimitExceededError,
@@ -354,6 +358,163 @@ function buildSessionFileChangesSummary(input: { sessionId: string; userId: stri
   }).summary;
 }
 
+interface SessionFileChangesSummaryAccumulator {
+  latestSnapshotAt?: string;
+  latestSnapshotRef?: string;
+  latestSnapshotScopeKind?: 'request' | 'backup' | 'scope' | 'unknown';
+  snapshotCount: number;
+  sourceKinds: Set<FileChangeSourceKind>;
+  totalAdditions: number;
+  totalDeletions: number;
+  totalFileDiffs: number;
+  guaranteeLevels: Array<FileChangeGuaranteeLevel | undefined>;
+}
+
+function buildSessionFileChangesSummaries(input: {
+  sessionIds: string[];
+  userId: string;
+}): Map<string, ReturnType<typeof buildSessionFileChangesSummary>> {
+  const summaries = new Map<string, SessionFileChangesSummaryAccumulator>();
+  for (const sessionId of input.sessionIds) {
+    summaries.set(sessionId, {
+      snapshotCount: 0,
+      sourceKinds: new Set<FileChangeSourceKind>(),
+      totalAdditions: 0,
+      totalDeletions: 0,
+      totalFileDiffs: 0,
+      guaranteeLevels: [],
+    });
+  }
+  if (input.sessionIds.length === 0) {
+    return new Map();
+  }
+
+  for (const batchSessionIds of chunkSqliteBindValues(input.sessionIds)) {
+    const placeholders = buildSqlitePlaceholders(batchSessionIds.length, ', ');
+    const diffRows = sqliteAll<{
+      additions: number;
+      deletions: number;
+      guarantee_level: string | null;
+      session_id: string;
+      source_kind: string | null;
+    }>(
+      `SELECT session_id, additions, deletions, source_kind, guarantee_level
+       FROM session_file_diffs
+       WHERE user_id = ? AND session_id IN (${placeholders})`,
+      [input.userId, ...batchSessionIds],
+    );
+    for (const row of diffRows) {
+      const summary = summaries.get(row.session_id);
+      if (!summary) {
+        continue;
+      }
+      summary.totalFileDiffs += 1;
+      summary.totalAdditions += row.additions;
+      summary.totalDeletions += row.deletions;
+      if (
+        row.source_kind === 'structured_tool_diff' ||
+        row.source_kind === 'session_snapshot' ||
+        row.source_kind === 'restore_replay' ||
+        row.source_kind === 'workspace_reconcile' ||
+        row.source_kind === 'manual_revert'
+      ) {
+        summary.sourceKinds.add(row.source_kind);
+      }
+      summary.guaranteeLevels.push(
+        row.guarantee_level === 'strong' ||
+          row.guarantee_level === 'medium' ||
+          row.guarantee_level === 'weak'
+          ? row.guarantee_level
+          : undefined,
+      );
+    }
+
+    const snapshotRows = sqliteAll<{
+      client_request_id: string;
+      created_at: string;
+      session_id: string;
+      summary_json: string;
+    }>(
+      `SELECT session_id, client_request_id, summary_json, created_at
+       FROM session_snapshots
+       WHERE user_id = ? AND session_id IN (${placeholders})
+       ORDER BY created_at DESC, client_request_id DESC`,
+      [input.userId, ...batchSessionIds],
+    );
+    for (const row of snapshotRows) {
+      const summary = summaries.get(row.session_id);
+      if (!summary) {
+        continue;
+      }
+      let parsed: {
+        additions?: unknown;
+        deletions?: unknown;
+        guaranteeLevel?: unknown;
+        sourceKinds?: unknown;
+        scopeKind?: unknown;
+      };
+      try {
+        const value = JSON.parse(row.summary_json) as unknown;
+        parsed = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      } catch {
+        parsed = {};
+      }
+      // 增删行数只按 session_file_diffs 累加,与单会话 buildSessionFileChangesProjection
+      // 同口径:快照 summary_json 的 additions/deletions 正是由同一批 file diff 汇总而来
+      // (buildSnapshotSummary),再累加一次会把列表页的总量翻倍。
+      summary.snapshotCount += 1;
+      if (Array.isArray(parsed.sourceKinds)) {
+        for (const sourceKind of parsed.sourceKinds) {
+          if (
+            sourceKind === 'structured_tool_diff' ||
+            sourceKind === 'session_snapshot' ||
+            sourceKind === 'restore_replay' ||
+            sourceKind === 'workspace_reconcile' ||
+            sourceKind === 'manual_revert'
+          ) {
+            summary.sourceKinds.add(sourceKind);
+          }
+        }
+      }
+      summary.guaranteeLevels.push(
+        parsed.guaranteeLevel === 'strong' ||
+          parsed.guaranteeLevel === 'medium' ||
+          parsed.guaranteeLevel === 'weak'
+          ? parsed.guaranteeLevel
+          : undefined,
+      );
+      if (!summary.latestSnapshotAt && row.client_request_id.startsWith('req:')) {
+        summary.latestSnapshotAt = row.created_at;
+        summary.latestSnapshotRef = row.client_request_id;
+        summary.latestSnapshotScopeKind = 'request';
+      }
+    }
+  }
+
+  return new Map(
+    [...summaries.entries()].map(([sessionId, summary]) => [
+      sessionId,
+      {
+        latestSnapshotAt: summary.latestSnapshotAt,
+        latestSnapshotRef: summary.latestSnapshotRef,
+        latestSnapshotScopeKind: summary.latestSnapshotScopeKind,
+        snapshotCount: summary.snapshotCount,
+        sourceKinds: [...summary.sourceKinds],
+        totalAdditions: summary.totalAdditions,
+        totalDeletions: summary.totalDeletions,
+        totalFileDiffs: summary.totalFileDiffs,
+        weakestGuaranteeLevel: summary.guaranteeLevels.includes('weak')
+          ? 'weak'
+          : summary.guaranteeLevels.includes('medium')
+            ? 'medium'
+            : summary.guaranteeLevels.includes('strong')
+              ? 'strong'
+              : undefined,
+      },
+    ]),
+  );
+}
+
 /**
  * `GET /sessions/:sessionId` 的查询参数。
  *
@@ -369,6 +530,25 @@ const sessionGetQuerySchema = z.object({
     .string()
     .optional()
     .transform((value) => value !== '0' && value !== 'false'),
+});
+
+const sessionMessagesQuerySchema = z.object({
+  // `before` 是 base64url 编码的分页游标,在边界层就校验「可解码且形状正确」:
+  // 否则非法取值会穿透到 decodeCursor 的裸 JSON.parse,以 500 而非 400 暴露。
+  before: z
+    .string()
+    .min(1)
+    .max(500)
+    .refine((value) => {
+      try {
+        const cursor = decodeCursor(value);
+        return typeof cursor.time === 'number' && typeof cursor.id === 'string';
+      } catch {
+        return false;
+      }
+    }, '无效的分页游标。')
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 /**
@@ -1063,6 +1243,59 @@ function collectAncestorSessionIds(
   return collectedSessionIds;
 }
 
+function listSessionTreeRows(input: {
+  includeAncestors?: boolean;
+  rootSessionId: string;
+  userId: string;
+}): SessionRow[] {
+  const safeSessionCols = buildSafeSessionSelectColumns({ includeMessages: false });
+  const hasTeamParentColumn = sqliteAll<{ name: string }>('PRAGMA table_info(sessions)').some(
+    (column) => column.name === 'team_parent_session_id',
+  );
+  const parentPredicates = [
+    ...(hasTeamParentColumn ? ['s.team_parent_session_id = tree.id'] : []),
+    "(json_valid(s.metadata_json) = 1 AND json_extract(s.metadata_json, '$.parentSessionId') = tree.id)",
+  ];
+  const ancestorPredicates = [
+    ...(hasTeamParentColumn ? ['child.team_parent_session_id = parent.id'] : []),
+    "(json_valid(child.metadata_json) = 1 AND json_extract(child.metadata_json, '$.parentSessionId') = parent.id)",
+  ];
+  const query = input.includeAncestors
+    ? `WITH RECURSIVE descendants(id) AS (
+         SELECT ?
+         UNION
+         SELECT s.id FROM sessions s
+         JOIN descendants tree ON ${parentPredicates.join(' OR ')}
+         WHERE s.user_id = ?
+       ), ancestors(id) AS (
+         SELECT ?
+         UNION
+         SELECT parent.id FROM sessions parent
+         JOIN sessions child ON child.user_id = parent.user_id
+         JOIN ancestors tree ON tree.id = child.id
+         WHERE parent.user_id = ? AND (${ancestorPredicates.join(' OR ')})
+       )
+       SELECT ${safeSessionCols} FROM sessions
+       WHERE user_id = ? AND id IN (SELECT id FROM descendants UNION SELECT id FROM ancestors)
+       ORDER BY updated_at DESC`
+    : `WITH RECURSIVE session_tree(id) AS (
+         SELECT ?
+         UNION
+         SELECT s.id FROM sessions s
+         JOIN session_tree tree ON ${parentPredicates.join(' OR ')}
+         WHERE s.user_id = ?
+       )
+       SELECT ${safeSessionCols} FROM sessions
+       WHERE user_id = ? AND id IN (SELECT id FROM session_tree)
+       ORDER BY updated_at DESC`;
+  return sqliteAll<SessionRow>(
+    query,
+    input.includeAncestors
+      ? [input.rootSessionId, input.userId, input.rootSessionId, input.userId, input.userId]
+      : [input.rootSessionId, input.userId, input.userId],
+  );
+}
+
 function getSessionParentIds(session: SessionRow): string[] {
   const parentIds = [
     parseSessionParentId(session.metadata_json),
@@ -1631,13 +1864,7 @@ function listRecoveryQuestionRequests(sessionIds: string[]) {
 
 async function buildSessionStatusReadModel(input: { session: SessionRow; userId: string }) {
   const sessionId = input.session.id;
-  // 状态读模型只用到 id / metadata_json / team_parent_session_id 等轻字段(子会话消息走空数组),
-  // 因此跳过 messages_json 大字段:本次扫描是「该用户全部会话」,带上大字段会把整列读进内存。
-  const safeSessionCols = buildSafeSessionSelectColumns({ includeMessages: false });
-  const allSessions = sqliteAll<SessionRow>(
-    `SELECT ${safeSessionCols} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
-    [input.userId],
-  );
+  const allSessions = listSessionTreeRows({ rootSessionId: sessionId, userId: input.userId });
   const descendantSessionIds = [...collectDescendantSessionIds(allSessions, sessionId)].filter(
     (candidateSessionId) => candidateSessionId !== sessionId,
   );
@@ -1710,6 +1937,18 @@ async function buildSessionRecoveryReadModel(input: {
   session: SessionRow;
   userId: string;
   messageLimit?: number;
+  /**
+   * 增量续读游标（上次响应里的 `runEventCursor`）。
+   *
+   * 传了它就只回该 seq 之后的新事件，消费方自己把「已持有的前缀 + 本次增量」拼起来
+   * ——正在进行的 run 每个 delta chunk 一行，scope 内行数随 run 时长只增不减，
+   * 而 chat 页的 1s 快照轮询（远端运行中）每拍都要重建整轮流式预览：全量读把单拍
+   * 成本绑定在「本轮已产生事件数」上，增量续读把它钉在「这一拍新增事件数」上。
+   *
+   * 仅在 `messageLimit`（hasTurnLimit）生效的活跃分支下有意义，且与 `runEventLimit`
+   * 互斥：两者同时给出时以本参数为准（尾部截断会破坏「前缀 + 增量 = 全量」）。
+   */
+  runEventAfterSeq?: number;
   runEventLimit?: number;
   since?: number;
 }) {
@@ -1723,10 +1962,11 @@ async function buildSessionRecoveryReadModel(input: {
   const sessionId = input.session.id;
   // `/recovery` 返回体同样经 `toPublicSessionResponse` 白名单构造(消息走 listSessionMessagesV2,
   // 不含 messages_json),因此与 `/status` 一样跳过该大字段:本扫描覆盖该用户全部会话。
-  const sessions = sqliteAll<SessionRow>(
-    `SELECT ${buildSafeSessionSelectColumns({ includeMessages: false })} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
-    [input.userId],
-  );
+  const sessions = listSessionTreeRows({
+    includeAncestors: true,
+    rootSessionId: sessionId,
+    userId: input.userId,
+  });
   const descendantSessionIds = [...collectDescendantSessionIds(sessions, sessionId)].filter(
     (candidateSessionId) => candidateSessionId !== sessionId,
   );
@@ -1838,20 +2078,39 @@ async function buildSessionRecoveryReadModel(input: {
   // 逐行 JSON.parse + 整包回传正是活跃期超时的主因。不传该参数时保持全量语义 ——
   // chat 页的 `recoverActiveAssistantStream` / `buildChatRightPanelStateFromRunEvents`
   // 是累加 reduce，依赖完整序列，截断会让它们重建出残缺状态。
+  //
+  // `runEventAfterSeq` 是给同一批调用方的**续读**通道：它们已经持有前缀，只需增量，
+  // 于是单拍成本从 O(本轮已产生事件数) 降到 O(这一拍新增事件数)。交付到的最大 seq 由
+  // `runEventCursor` 回传，客户端据此推进游标；缺省仍走全量，语义与其他入口一致。
   let filteredRunEvents: RunEvent[];
+  let runEventCursor: number | null = null;
   if (hasTurnLimit) {
-    filteredRunEvents = !activeThread
-      ? []
-      : typeof input.runEventLimit === 'number' && input.runEventLimit > 0
-        ? listSessionRunEventsByRequestTail({
-            sessionId,
-            clientRequestId: activeThread.clientRequestId,
-            limit: input.runEventLimit,
-          })
-        : listSessionRunEventsByRequest({
-            sessionId,
-            clientRequestId: activeThread.clientRequestId,
-          });
+    if (!activeThread) {
+      filteredRunEvents = [];
+    } else if (typeof input.runEventAfterSeq === 'number') {
+      const incremental = listSessionRunEventsByRequestAfterSeq({
+        sessionId,
+        clientRequestId: activeThread.clientRequestId,
+        afterSeq: input.runEventAfterSeq,
+      });
+      filteredRunEvents = incremental.map((entry) => entry.event);
+      // null（本次没有新事件）时客户端保持原游标，不要把它回退成 0。
+      runEventCursor = incremental.reduce<number | null>(
+        (maxSeq, entry) => (maxSeq === null || entry.seq > maxSeq ? entry.seq : maxSeq),
+        null,
+      );
+    } else if (typeof input.runEventLimit === 'number' && input.runEventLimit > 0) {
+      filteredRunEvents = listSessionRunEventsByRequestTail({
+        sessionId,
+        clientRequestId: activeThread.clientRequestId,
+        limit: input.runEventLimit,
+      });
+    } else {
+      filteredRunEvents = listSessionRunEventsByRequest({
+        sessionId,
+        clientRequestId: activeThread.clientRequestId,
+      });
+    }
   } else {
     const allRunEvents = listSessionRunEvents(sessionId);
     filteredRunEvents =
@@ -1894,6 +2153,10 @@ async function buildSessionRecoveryReadModel(input: {
     pendingPermissions: listRecoveryPermissionRequests(relevantSessionIds),
     pendingQuestions: listRecoveryQuestionRequests(relevantSessionIds),
     ratings: listSessionMessageRatings({ sessionId, userId: input.userId }),
+    // 仅 `runEventAfterSeq` 增量模式可能非 null：本次交付到的最大 seq，客户端下次请求
+    // 用它作为 `runEventAfterSeq`。非增量模式显式回 null（该字段在那边语义未定义），
+    // 本次没有任何新事件时也回 null —— 客户端据此保持原游标而不是回退到 0。
+    runEventCursor,
     session: {
       ...sessionResponse,
       fileChangesSummary: buildSessionFileChangesSummary({ sessionId, userId: input.userId }),
@@ -2055,17 +2318,17 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       // 才能让状态真正自愈。回收范围是本批次的超集（该用户全部会话），语义只更强。
       releaseStaleDecidingSessionRecordsForUser(user.sub);
 
-      const sessions = await reconcileSessionRuntimeRowsForResponse(filtered, user.sub, {
+      const reconciledSessions = await reconcileSessionRuntimeRowsForResponse(filtered, user.sub, {
         releaseStaleDeciding: false,
-      }).then((rows) =>
-        rows.map((session) => ({
-          ...session,
-          fileChangesSummary: buildSessionFileChangesSummary({
-            sessionId: session.id,
-            userId: user.sub,
-          }),
-        })),
-      );
+      });
+      const fileChangesSummaries = buildSessionFileChangesSummaries({
+        sessionIds: reconciledSessions.map((session) => session.id),
+        userId: user.sub,
+      });
+      const sessions = reconciledSessions.map((session) => ({
+        ...session,
+        fileChangesSummary: fileChangesSummaries.get(session.id),
+      }));
       step.succeed(undefined, {
         count: sessions.length,
         ...(path ? { pathFiltered: true, includeDescendants } : {}),
@@ -2159,6 +2422,45 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       deleteSessionMessageRating({ messageId, sessionId, userId: user.sub });
       step.succeed();
       return reply.status(204).send();
+    },
+  );
+
+  app.get(
+    '/sessions/:sessionId/messages',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const query = parseQuery(
+        sessionMessagesQuerySchema,
+        (request as FastifyRequest & { query: unknown }).query,
+      );
+      const { step } = startRequestWorkflow(request, 'session.messages.page', undefined, {
+        sessionId,
+      });
+      const session = sqliteGet<{ id: string }>(
+        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
+        [sessionId, user.sub],
+      );
+      if (!session) {
+        throw ApiError.notFound('目标会话不存在。');
+      }
+      const page = pageMessagesWithParts({
+        before: query.before,
+        limit: query.limit,
+        sessionId,
+        userId: user.sub,
+      });
+      step.succeed(undefined, {
+        count: page.items.length,
+        hasMore: page.more,
+        sessionId,
+      });
+      return reply.send({
+        messages: page.items.map((item) => v2ToV1Message(item)),
+        more: page.more,
+        ...(page.cursor ? { nextCursor: page.cursor } : {}),
+      });
     },
   );
 
@@ -2283,6 +2585,12 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         typeof query.runEventLimit === 'string' && /^\d+$/u.test(query.runEventLimit)
           ? Number(query.runEventLimit)
           : undefined;
+      // 增量续读游标（上次响应里的 `runEventCursor`）：只回该 seq 之后的新事件。
+      // 缺省 / 非法值 → 全量，保持旧语义。
+      const runEventAfterSeq =
+        typeof query.runEventAfterSeq === 'string' && /^\d+$/u.test(query.runEventAfterSeq)
+          ? Number(query.runEventAfterSeq)
+          : undefined;
       const since =
         typeof query.since === 'string' && /^\d+$/u.test(query.since)
           ? Number(query.since)
@@ -2292,6 +2600,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         session,
         userId: user.sub,
         messageLimit,
+        runEventAfterSeq,
         runEventLimit,
         since,
       });

@@ -856,10 +856,8 @@ export function ProviderSettings({
       ? []
       : [...(visibleProvider?.defaultModels ?? [])].sort(compareModelsByName);
     const contextLabel = formatContextWindow(
-      selectedModel?.contextWindow !== undefined &&
-        selectedModel.contextWindowOverride !== undefined
-        ? Math.min(selectedModel.contextWindow, selectedModel.contextWindowOverride)
-        : (selectedModel?.contextWindowOverride ?? selectedModel?.contextWindow),
+      // 挡位是权威值：配置后直接生效（可高于模型预设），与网关解析口径一致。
+      selectedModel?.contextWindowOverride ?? selectedModel?.contextWindow,
     );
     const thinkingMode: keyof ThinkingDefaultsRef | null = mode === 'image' ? null : mode;
     const thinkingTitle = mode === 'fast' ? 'Fast 默认思考' : '默认思考';
@@ -902,11 +900,7 @@ export function ProviderSettings({
       total: number,
     ) => {
       const isActive = provider.id === selected.providerId && model.id === selected.modelId;
-      const modelContext = formatContextWindow(
-        model.contextWindow !== undefined && model.contextWindowOverride !== undefined
-          ? Math.min(model.contextWindow, model.contextWindowOverride)
-          : (model.contextWindowOverride ?? model.contextWindow),
-      );
+      const modelContext = formatContextWindow(model.contextWindowOverride ?? model.contextWindow);
       const capabilitySummary = [
         model.supportsVision ? '视觉' : null,
         model.supportsImageGeneration ? '生图' : null,

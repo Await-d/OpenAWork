@@ -8,10 +8,18 @@ export function resolveEffectiveContextWindow(
   contextWindow?: number,
   contextWindowOverride?: number,
 ): number | undefined {
-  const candidates = [contextWindow, contextWindowOverride].filter(
-    (value): value is number => value !== undefined && Number.isFinite(value) && value > 0,
-  );
-  return candidates.length > 0 ? Math.min(...candidates) : undefined;
+  // 挡位是权威值：配置后直接作为有效窗口（可高于模型预设，与网关解析口径一致），
+  // 未配置时回落模型预设。
+  if (
+    contextWindowOverride !== undefined &&
+    Number.isFinite(contextWindowOverride) &&
+    contextWindowOverride > 0
+  ) {
+    return contextWindowOverride;
+  }
+  return contextWindow !== undefined && Number.isFinite(contextWindow) && contextWindow > 0
+    ? contextWindow
+    : undefined;
 }
 
 export function buildChatContextUsageSnapshot({

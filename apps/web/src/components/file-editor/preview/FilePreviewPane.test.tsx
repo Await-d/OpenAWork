@@ -175,6 +175,39 @@ describe('FilePreviewPane', () => {
     expect(screen.getByText('第一行')).toBeTruthy();
     expect(screen.getByText('第二行')).toBeTruthy();
   });
+
+  it('纯文本预览：超过首屏上限时用「显示更多」渐进加载', () => {
+    const lines = Array.from({ length: 2600 }, (_, index) => `line-${index + 1}`);
+    render(<FilePreviewPane path="/workspace/demo/long.log" content={lines.join('\n')} />);
+
+    const truncated = screen.getByTestId('file-editor-text-truncated');
+    expect(truncated.textContent).toContain('已展示前 2000 行，共 2600 行');
+    expect(screen.queryByText('line-2600')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('file-editor-text-show-more'));
+
+    // 剩余 600 行不足一档步进（5000），一次点击即全部展开。
+    expect(screen.queryByTestId('file-editor-text-truncated')).toBeNull();
+    expect(screen.getByText('line-2600')).toBeTruthy();
+  });
+
+  it('CSV 预览：超过首屏行数时用「显示更多」渐进加载', () => {
+    const rows = [
+      'name,age',
+      ...Array.from({ length: 260 }, (_, index) => `user-${index + 1},${index + 1}`),
+    ];
+    render(<FilePreviewPane path="/workspace/demo/people.csv" content={rows.join('\n')} />);
+
+    const truncated = screen.getByTestId('file-editor-csv-truncated');
+    // 表头 + 199 行数据进入首屏（200 行上限），其余 61 行只计数。
+    expect(truncated.textContent).toContain('另有 61 行未渲染');
+    expect(screen.queryByText('user-260')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('file-editor-csv-show-more'));
+
+    expect(screen.queryByTestId('file-editor-csv-truncated')).toBeNull();
+    expect(screen.getByText('user-260')).toBeTruthy();
+  });
 });
 
 describe('FilePreviewPane 无语言围栏代码块', () => {

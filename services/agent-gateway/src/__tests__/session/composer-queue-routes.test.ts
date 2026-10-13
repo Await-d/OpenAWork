@@ -9,6 +9,10 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  clearInFlightStreamRequest,
+  registerInFlightStreamRequest,
+} from '../../routes/stream-cancellation.js';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
 import type * as ErrorHandlerModule from '../../infra/error-handler.js';
@@ -283,6 +287,120 @@ describe('发送权认领（多端互斥）', () => {
     // 「别人正在处理」不是错误，回 200 + claimed:false，避免客户端把它当失败去重试。
     expect(second.statusCode).toBe(200);
     expect(second.json<{ claimed: boolean }>().claimed).toBe(false);
+  });
+
+  it('批量认领一次返回逐条结果，并在会话运行时保留 session_running 原因', async () => {
+    await enqueueOne('batch-route-1');
+    await enqueueOne('batch-route-2');
+
+    const first = await app.inject({
+      headers: authHeaders(),
+      method: 'POST',
+      payload: { clientId: 'batch-client-a', itemIds: ['batch-route-1', 'batch-route-2'] },
+      url: queueUrl(SESSION_ID, '/claim'),
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json<{ claims: Array<{ claimed: boolean; itemId: string }> }>().claims).toEqual([
+      { claimed: true, itemId: 'batch-route-1' },
+      { claimed: true, itemId: 'batch-route-2' },
+    ]);
+
+    const second = await app.inject({
+      headers: authHeaders(),
+      method: 'POST',
+      payload: { clientId: 'batch-client-b', itemIds: ['batch-route-1', 'batch-route-2'] },
+      url: queueUrl(SESSION_ID, '/claim'),
+    });
+    expect(
+      second.json<{ claims: Array<{ claimed: boolean; itemId: string; reason?: string }> }>()
+        .claims,
+    ).toEqual([
+      { claimed: false, itemId: 'batch-route-1', reason: 'held_by_other' },
+      { claimed: false, itemId: 'batch-route-2', reason: 'held_by_other' },
+    ]);
+
+    const execution = new Promise<{ statusCode: number }>(() => undefined);
+    registerInFlightStreamRequest({
+      abortController: new AbortController(),
+      clientRequestId: 'batch-in-flight',
+      execution,
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+    });
+    try {
+      const busy = await app.inject({
+        headers: authHeaders(),
+        method: 'POST',
+        payload: { clientId: 'batch-client-c', itemIds: ['batch-route-1', 'batch-route-2'] },
+        url: queueUrl(SESSION_ID, '/claim'),
+      });
+      expect(busy.json<{ claims: Array<{ claimed: boolean; reason?: string }> }>().claims).toEqual([
+        { claimed: false, itemId: 'batch-route-1', reason: 'session_running' },
+        { claimed: false, itemId: 'batch-route-2', reason: 'session_running' },
+      ]);
+    } finally {
+      clearInFlightStreamRequest({
+        clientRequestId: 'batch-in-flight',
+        execution,
+        sessionId: SESSION_ID,
+      });
+    }
+  });
+
+  it('批量认领未拥有的会话返回 404', async () => {
+    dbModule.sqliteRun('UPDATE sessions SET user_id = ? WHERE id = ?', [
+      OTHER_USER_ID,
+      OTHER_SESSION_ID,
+    ]);
+    const response = await app.inject({
+      headers: authHeaders(USER_ID),
+      method: 'POST',
+      payload: { clientId: 'batch-client', itemIds: ['missing'] },
+      url: queueUrl(OTHER_SESSION_ID, '/claim'),
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('会话仍被单飞锁占用时返回 session_running 且不发放租约', async () => {
+    await enqueueOne('claim-busy');
+    // 模拟该会话有一条在途流：与 stream.ts 的 409 SESSION_ALREADY_RUNNING 判定
+    // 共用同一张注册表，claim 的空闲校验必须与之同源。
+    const execution = new Promise<{ statusCode: number }>(() => undefined);
+    registerInFlightStreamRequest({
+      abortController: new AbortController(),
+      clientRequestId: 'in-flight-1',
+      execution,
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+    });
+
+    try {
+      const response = await app.inject({
+        headers: authHeaders(),
+        method: 'POST',
+        payload: { clientId: 'client-a' },
+        url: queueUrl(SESSION_ID, '/claim-busy/claim'),
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json<{ claimed: boolean; reason?: string }>();
+      expect(body.claimed).toBe(false);
+      expect(body.reason).toBe('session_running');
+    } finally {
+      clearInFlightStreamRequest({
+        clientRequestId: 'in-flight-1',
+        execution,
+        sessionId: SESSION_ID,
+      });
+    }
+
+    // 未发放租约：单飞锁释放后，同一端可以直接认领成功。
+    const afterRelease = await app.inject({
+      headers: authHeaders(),
+      method: 'POST',
+      payload: { clientId: 'client-a' },
+      url: queueUrl(SESSION_ID, '/claim-busy/claim'),
+    });
+    expect(afterRelease.json<{ claimed: boolean }>().claimed).toBe(true);
   });
 
   it('交还发送权后其他端可以接手', async () => {

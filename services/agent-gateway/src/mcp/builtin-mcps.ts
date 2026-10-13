@@ -92,7 +92,14 @@ function buildRuntimeBuiltinMcpServer(
   };
   switch (descriptor.id) {
     case 'open_websearch':
-      return virtualBuiltinMcpServer(base, 'openawork-virtual-open-websearch');
+      // 联网搜索已由网关原生 `websearch` 工具收口（多提供商编排 + 策略/凭据
+      // 解析），这里默认只保留本 MCP 独有的取正文 / README 能力，避免模型
+      // 面对两个等价的搜索入口而随机二选一。需要重新启用时，在
+      // user_settings.mcp_servers 里写同 id 配置并显式 `disabledTools: []`。
+      return {
+        ...virtualBuiltinMcpServer(base, 'openawork-virtual-open-websearch'),
+        disabledTools: ['search'],
+      };
     case 'websearch':
       return {
         ...base,
@@ -175,13 +182,20 @@ export function mergeBuiltinAndConfiguredMcps(
         builtin: true,
         builtinKind: getBuiltinMcpKind(builtinServer.id),
         source: protectedSource,
-        ...(server.disabledTools ? { disabledTools: server.disabledTools } : {}),
+        // 用户未显式给出 disabledTools 时保留内置默认值：否则一条只想改
+        // enabled 的配置就会把 `open_websearch` 的 search 收口一并撤销。
+        // 显式 `disabledTools: []`（空数组，非 nullish）即可重新启用。
+        ...(server.disabledTools !== undefined
+          ? { disabledTools: server.disabledTools }
+          : { disabledTools: builtinServer.disabledTools }),
       };
     }
     return {
       ...builtinServer,
       enabled: server.enabled,
-      ...(server.disabledTools ? { disabledTools: server.disabledTools } : {}),
+      ...(server.disabledTools !== undefined
+        ? { disabledTools: server.disabledTools }
+        : { disabledTools: builtinServer.disabledTools }),
     };
   });
   const userIds = new Set(normalizedConfigured.map((server) => server.id));

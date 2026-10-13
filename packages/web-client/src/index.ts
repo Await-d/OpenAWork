@@ -225,6 +225,9 @@ export type { ConfirmClarifySwitchResult, DialogueModeClient } from './session/d
 export { createComposerQueueClient } from './session/composer-queue.js';
 export type {
   ComposerQueueAttachment,
+  ComposerQueueBatchClaim,
+  ComposerQueueClaimRejectionReason,
+  ComposerQueueClaimResult,
   ComposerQueueClient,
   ComposerQueueItem,
   EnqueueComposerQueueInput,
@@ -521,7 +524,15 @@ export type {
 } from './team/team-workflows.js';
 
 export { createSettingsClient } from './infra/settings.js';
-export type { SettingsClient, SettingsProvidersLoadResult } from './infra/settings.js';
+export type {
+  ChannelErrorAuditRecord,
+  ChannelHealthRecord,
+  ChannelTroubleshootingClearResult,
+  ChannelTroubleshootingReport,
+  SettingsClient,
+  SettingsDisplayPreferencesResponse,
+  SettingsProvidersLoadResult,
+} from './infra/settings.js';
 
 export { createSkillsClient } from './infra/skills.js';
 export type { SkillsClient } from './infra/skills.js';

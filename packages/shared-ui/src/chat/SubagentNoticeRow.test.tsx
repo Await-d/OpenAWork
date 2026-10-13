@@ -163,4 +163,28 @@ describe('SubagentNoticeRow', () => {
     const heading = container.querySelector('button[data-subagent-notice-heading="true"]');
     expect(heading?.querySelector('button')).toBeNull();
   });
+
+  it('注入 renderBody 时正文交由渲染器输出（如 Markdown），且不套纯文本排版', () => {
+    const renderBody = vi.fn((markdown: string) => <mark data-testid="injected">{markdown}</mark>);
+    const { container } = render(
+      <SubagentNoticeRow notice={buildNotice({ text: EXPLORE_RESULTS })} renderBody={renderBody} />,
+    );
+
+    const injected = container.querySelector('[data-testid="injected"]');
+    expect(injected?.textContent).toContain('状态机在 file1.ts 中定义。');
+    expect(renderBody).toHaveBeenCalled();
+    // 注入路径不套纯文本排版：外层 pre-wrap 会把 Markdown 段落软换行再渲染一遍。
+    const bodyBlock = injected?.parentElement as HTMLElement | null;
+    expect(bodyBlock?.style.whiteSpace).toBe('');
+  });
+
+  it('未注入 renderBody 时正文保持纯文本渲染（pre-wrap 保留换行）', () => {
+    const { container } = render(
+      <SubagentNoticeRow notice={buildNotice({ text: EXPLORE_RESULTS })} />,
+    );
+
+    expect(container.querySelector('[data-testid="injected"]')).toBeNull();
+    expect(container.textContent).toContain('状态机在 file1.ts 中定义。');
+    expect(container.innerHTML).toContain('pre-wrap');
+  });
 });

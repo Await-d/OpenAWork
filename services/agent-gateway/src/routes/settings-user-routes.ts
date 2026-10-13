@@ -22,6 +22,11 @@ import {
   saveUserProfileSettings,
   userProfileSettingsUpdateSchema,
 } from '../user/user-profile-settings.js';
+import {
+  loadUserDisplayPreferences,
+  saveUserDisplayPreferences,
+  userDisplayPreferencesUpdateSchema,
+} from '../user/user-display-preferences.js';
 
 export async function registerSettingsUserRoutes(app: FastifyInstance): Promise<void> {
   const companionSettingsQuerySchema = z.object({
@@ -82,6 +87,48 @@ export async function registerSettingsUserRoutes(app: FastifyInstance): Promise<
           nickname: settings.nickname,
         }),
         updatedAt: settings.updatedAt ?? null,
+      });
+    },
+  );
+
+  // ── Display preferences（显示偏好，跨设备恢复）─────────────────
+
+  app.get(
+    '/settings/display-preferences',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.display-preferences.get');
+      const user = request.user as JwtPayload;
+
+      const stored = loadUserDisplayPreferences(user.sub);
+      step.succeed(undefined, { hasPreferences: stored !== null });
+
+      return reply.send({
+        preferences: stored?.preferences ?? null,
+        updatedAt: stored?.updatedAt ?? null,
+      });
+    },
+  );
+
+  app.put(
+    '/settings/display-preferences',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.display-preferences.put');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = parseBody(userDisplayPreferencesUpdateSchema, request.body);
+      parseStep.succeed(undefined, { fieldCount: Object.keys(body).length });
+
+      const saveStep = child('save');
+      const saved = saveUserDisplayPreferences(user.sub, body);
+      saveStep.succeed(undefined, { fieldCount: Object.keys(saved.preferences).length });
+      step.succeed(undefined, { fieldCount: Object.keys(saved.preferences).length });
+
+      return reply.send({
+        preferences: saved.preferences,
+        updatedAt: saved.updatedAt,
       });
     },
   );

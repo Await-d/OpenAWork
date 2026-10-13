@@ -80,6 +80,7 @@ export interface UpstreamRetrySettingsRef {
 export type DevtoolsSourceKey =
   | 'devLogs'
   | 'diagnostics'
+  | 'channelTroubleshooting'
   | 'desktopAutomation'
   | 'desktopControl'
   | 'sshConnections'
@@ -97,4 +98,40 @@ export interface DevtoolsSourceState {
   error: string | null;
   count: number | null;
   updatedAt: number | null;
+}
+
+/**
+ * 消息频道路障数据。
+ *
+ * 刻意**不复用** `@openAwork/web-client` 的传输层类型作为页面 state：
+ * 后端可能领先网关版本返回新字段，直接展开会让「多出来的字段」与
+ * 「恰好为 undefined 的字段」在前端无法区分。展示层只需要这些窄化的视图字段。
+ */
+export interface DevtoolsChannelRecord {
+  channelId: string;
+  channelType: string | null;
+  lastError: string | null;
+  /** 后端 `lastErrorAt`，epoch 毫秒。 */
+  lastErrorAt: number | null;
+  lastErrorSource: string | null;
+  lastInboundAccepted: boolean | null;
+  lastInboundAt: number | null;
+  lastInboundError: string | null;
+  lastInboundType: string | null;
+  lastMessageAt: number | null;
+  lastMessageChatId: string | null;
+  status: string | null;
+}
+
+export interface DevtoolsChannelAuditRecord {
+  id: number;
+  channelId: string | null;
+  code: string | null;
+  createdAt: string;
+  message: string;
+  sessionId: string | null;
+  source: string | null;
+  toolName: string;
+  /** 完整堆栈；默认折叠，按需展开查看。 */
+  stack: string | null;
 }

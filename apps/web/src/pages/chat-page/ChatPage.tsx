@@ -614,10 +614,15 @@ export default function ChatPage() {
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
+  // 文件浏览根：已绑定时与 effectiveWorkingDirectory 相同；未绑定的普通会话
+  // 回退到默认工作区（`~/Documents/OpenAWork`，由 useWorkspace 异步解析），让
+  // 文件树 / @ 引用在无工作区会话里也能浏览 Agent 创建的文件。绑定 chip 与
+  // 编辑器作用域仍使用 effectiveWorkingDirectory（未绑定语义不变）。
+  const fileBrowseRoot = effectiveWorkingDirectory ?? workspace.fallbackWorkspacePath;
   const searchMentionFiles = useMemo<MentionFileSearchFn>(
     () => (query, signal) =>
-      effectiveWorkingDirectory
-        ? workspace.searchFileIndex(effectiveWorkingDirectory, {
+      fileBrowseRoot
+        ? workspace.searchFileIndex(fileBrowseRoot, {
             query,
             limit: MENTION_SEARCH_LIMIT,
             signal,
@@ -629,12 +634,7 @@ export default function ChatPage() {
               : { sshConnectionId: selectedSshConnectionId }),
           })
         : Promise.resolve({ files: [], directories: [] }),
-    [
-      currentSessionId,
-      effectiveWorkingDirectory,
-      selectedSshConnectionId,
-      workspace.searchFileIndex,
-    ],
+    [currentSessionId, fileBrowseRoot, selectedSshConnectionId, workspace.searchFileIndex],
   );
   const uiWorkspaceScope = resolveChatUiWorkspaceScope(effectiveWorkingDirectory, currentSessionId);
 
@@ -1851,7 +1851,9 @@ export default function ChatPage() {
 
   useChatDataLoaders({
     currentSessionId,
-    effectiveWorkingDirectory,
+    // 传文件浏览根（而非 effectiveWorkingDirectory）：未绑定会话同样加载
+    // 默认工作区的文件树，让 @ 引用在无工作区会话里可用。
+    effectiveWorkingDirectory: fileBrowseRoot,
     workspace,
     workspaceTreeVersion,
     setWorkspaceFileItems,
@@ -1915,6 +1917,10 @@ export default function ChatPage() {
         } else {
           await loadCurrentSessionSnapshot(targetSessionId, {
             expectedSessionViewEpoch,
+            // 远端运行中的这条 1s 轮询是全程唯一会「反复」拉取活跃 scope 的调用方：
+            // run event 走增量续读，单拍成本从 O(本轮已产生事件数) 降到 O(新增事件数)，
+            // 下游累加 reduce 拿到的仍是完整序列（拼接由 loader 内的前缀缓冲完成）。
+            incrementalRunEvents: true,
             messageLimit: INITIAL_TURN_LIMIT,
             signal,
           });
@@ -2323,6 +2329,13 @@ export default function ChatPage() {
     [],
   );
 
+  // 提交单飞闩：从点击到 `startStandardChatStream` 置位 streaming 之间存在异步窗口
+  // （新建会话、上传附件都可能有秒级延迟），期间 streaming / streamingRef 都还是
+  // false，第二次点击会绕过 runSendMessage 的忙判定再起一个流，两个流撞在一起被
+  // 网关单飞锁拒成 SESSION_ALREADY_RUNNING——用户看到的就是「第一次没反应，再点
+  // 一次报错」。闩在入口同步置位、结算即释放；释放后若流已在跑，由 streamingRef 兜底。
+  const sendingRef = useRef(false);
+
   async function sendMessage(
     overrideText?: string,
     options?: {
@@ -2333,6 +2346,15 @@ export default function ChatPage() {
       queuedMessageId?: string;
     },
   ): Promise<boolean> {
+    if (sendingRef.current) {
+      // 队列来源的发送是后台行为，静默返回即可（flush 会自行回填并退避重试）；
+      // 用户手动再点则必须给出反馈，否则又一次「看起来没反应」。
+      if (!options?.queuedMessageId) {
+        toast('上一条消息正在发送中，请稍候', 'warning');
+      }
+      return false;
+    }
+    sendingRef.current = true;
     return runSendMessage(
       {
         activeModelOption,
@@ -2418,7 +2440,9 @@ export default function ChatPage() {
       },
       overrideText,
       options,
-    );
+    ).finally(() => {
+      sendingRef.current = false;
+    });
   }
 
   const {
@@ -3372,6 +3396,7 @@ export default function ChatPage() {
     effectiveContextMessageCount,
     effectiveReportedStreamUsage,
     effectiveWorkingDirectory,
+    fileBrowseRoot,
     fileEditor,
     fusionChatLayout,
     handleCompactCurrentSession,
@@ -3932,6 +3957,7 @@ export default function ChatPage() {
                 editorFileState={fileEditor}
                 editorOpenFilePaths={fileEditor.openFiles.map((file) => file.path)}
                 effectiveWorkingDirectory={effectiveWorkingDirectory}
+                fileBrowseRoot={fileBrowseRoot}
                 fetchTree={workspace.fetchTree}
                 gatewayUrl={gatewayUrl}
                 handleSaveFile={handleSaveFile}
@@ -4110,7 +4136,7 @@ export default function ChatPage() {
                 }
                 fileTree={
                   <WorkspaceFileTreePanel
-                    workspacePath={effectiveWorkingDirectory}
+                    workspacePath={fileBrowseRoot}
                     sessionId={currentSessionId}
                     onOpenFile={(path) => void fileEditor.openFile(path)}
                     fetchTree={workspace.fetchTree}

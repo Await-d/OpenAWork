@@ -2,17 +2,18 @@
  * ChatPage 侧栏布局 hook（域 D 子集 · 最小独立单元）
  *
  * 聚合 sidebar 相关的所有状态、副作用与派生值：
- * - 持久化 sidebar 开关（来自 useUIStateStore）
+ * - 持久化 sidebar 开关（来自 useUIStateStore，刷新后保持用户上次的开关状态）
  * - 视口断点监听（窄屏 ≤960px 时切到 overlay 模式）
- * - 挂载首次自愈：宽屏下若 sidebar 因历史原因被关闭，自动展开一次
  * - 派生 overlay 模式标志与宽度
  *
- * 对外契约见返回类型；调用方仅需消费返回值，不再关心内部 effect 编排。
+ * 注意：这里不再做「挂载自愈」。开合是用户的显式持久化偏好，刷新 / 进路由
+ * 时必须原样恢复；历史脏数据已由 persist 的 v8 migrate 一次性修复，
+ * 运行时强制展开只会让「收起面板」在刷新后被静默撤销。
  *
  * @see docs/architecture/chat-page-split-plan.md 域 D
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 const NARROW_VIEWPORT_QUERY = '(max-width: 960px)';
@@ -48,18 +49,6 @@ export function useChatSidebarLayout(): ChatSidebarLayout {
     update();
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
-  }, []);
-
-  // 自愈:首次进入 chat 路由 + 宽屏时,如果 sidebar 因历史原因被关闭,自动展开一次。
-  // 只在 hook 挂载的"首次"跑(empty deps),用户后续手动关闭后不会被强制重开。
-  const sidebarSelfHealRef = useRef(false);
-  useEffect(() => {
-    if (sidebarSelfHealRef.current) return;
-    sidebarSelfHealRef.current = true;
-    if (!leftSidebarOpen && !isNarrowViewport) {
-      setLeftSidebarOpen(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const shouldOverlaySidebar = isNarrowViewport;

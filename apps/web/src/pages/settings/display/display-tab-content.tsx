@@ -24,6 +24,7 @@ import { DIALOGUE_MODE_OPTIONS } from '../../../pages/chat-page/mode/dialogue-mo
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
 import { CurrentUserProfileSection } from './current-user-profile-section.js';
+import { DisplayPreferencesSyncStatusRow } from './display-preferences-sync-status.js';
 
 // ── 设置行组件 ──────────────────────────────────────────────
 
@@ -240,6 +241,8 @@ export function DisplayTabContent() {
 
   return (
     <>
+      <DisplayPreferencesSyncStatusRow />
+
       <CurrentUserProfileSection />
 
       <MessageLayoutSection />

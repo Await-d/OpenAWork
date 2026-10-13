@@ -28,6 +28,57 @@ export interface SettingsProvidersLoadResult {
   status?: number;
 }
 
+/**
+ * 单个频道的持久化健康快照（对应网关 `channel_health` 表）。
+ *
+ * 与「运行时 diagnostics」的区别：这组字段**跨进程重启存活**，回答的是
+ * 「上次这个频道坏在哪」，而非「此刻它是否在线」。所有字段可空 —— 频道刚创建
+ * 还没出过任何状况时表里只有归属信息。
+ */
+export interface ChannelHealthRecord {
+  /** 频道实例 id；兜底场景（pluginId 不可知）可能是 `'unknown'`。 */
+  readonly channelId: string;
+  readonly lastError: string | null;
+  readonly lastErrorAt: number | null;
+  readonly lastErrorChannelType: string | null;
+  readonly lastErrorSource: string | null;
+  readonly lastInboundAccepted: boolean | null;
+  readonly lastInboundAt: number | null;
+  readonly lastInboundError: string | null;
+  readonly lastInboundType: string | null;
+  readonly lastMessageAt: number | null;
+  readonly lastMessageChatId: string | null;
+  readonly ownerUserId: string | null;
+  readonly status: string | null;
+  readonly updatedAt: string;
+}
+
+/** 单条频道错误审计行（对应网关 `audit_logs` 中 `tool_name LIKE 'channel:%'`）。 */
+export interface ChannelErrorAuditRecord {
+  readonly id: number;
+  readonly channelId: string | null;
+  readonly code: string | null;
+  readonly createdAt: string;
+  readonly message: string;
+  /** 可空：没有会话的频道级故障（启停 / 队列 / 投递）无法按会话归属。 */
+  readonly sessionId: string | null;
+  readonly source: string | null;
+  readonly stack: string | null;
+  readonly toolName: string;
+  readonly requestId: string;
+}
+
+export interface ChannelTroubleshootingReport {
+  readonly auditLogs: readonly ChannelErrorAuditRecord[];
+  readonly channels: readonly ChannelHealthRecord[];
+}
+
+export interface ChannelTroubleshootingClearResult {
+  readonly clearedAuditRows: number;
+  readonly clearedHealthRows: number;
+  readonly ok: boolean;
+}
+
 export interface SettingsProfileResponse {
   displayName: string;
   email: string;
@@ -39,9 +90,23 @@ export interface SettingsProfileUpdateInput {
   nickname?: string | null;
 }
 
+export interface SettingsDisplayPreferencesResponse {
+  preferences: Record<string, unknown> | null;
+  updatedAt: string | null;
+}
+
 export interface SettingsClient {
   getProfile(token: string, options?: { signal?: AbortSignal }): Promise<SettingsProfileResponse>;
   putProfile(token: string, payload: SettingsProfileUpdateInput): Promise<SettingsProfileResponse>;
+  // 显示偏好（跨设备恢复；服务端无记录时 preferences 为 null）
+  getDisplayPreferences(
+    token: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SettingsDisplayPreferencesResponse>;
+  putDisplayPreferences(
+    token: string,
+    payload: Record<string, unknown>,
+  ): Promise<SettingsDisplayPreferencesResponse>;
   // Providers / 模型选择
   getProviders(
     token: string,
@@ -114,6 +179,12 @@ export interface SettingsClient {
   getWorkers(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   getDiagnostics(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   clearDiagnostics(token: string): Promise<void>;
+  // 消息频道路障（频道健康快照 + 频道错误审计行）
+  getChannelTroubleshooting(
+    token: string,
+    options?: { limit?: number; signal?: AbortSignal },
+  ): Promise<ChannelTroubleshootingReport>;
+  clearChannelTroubleshooting(token: string): Promise<ChannelTroubleshootingClearResult>;
   // Permission rules / decisions
   getPermissionRules(token: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   putPermissionRules(token: string, payload: unknown): Promise<void>;
@@ -317,6 +388,29 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
         actionLabel: '保存个人资料',
         request: () =>
           fetchWithTimeout(`${baseUrl}/settings/profile`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
+    },
+
+    async getDisplayPreferences(token, options) {
+      return performSettingsRequest<SettingsDisplayPreferencesResponse>({
+        actionLabel: '读取显示偏好',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/display-preferences`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async putDisplayPreferences(token, payload) {
+      return performSettingsRequest<SettingsDisplayPreferencesResponse>({
+        actionLabel: '保存显示偏好',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/display-preferences`, {
             method: 'PUT',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(payload),
@@ -611,6 +705,39 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
         parseJson: false,
         request: () =>
           fetchWithTimeout(`${baseUrl}/settings/diagnostics`, {
+            method: 'DELETE',
+            headers: authHeader(token),
+          }),
+      });
+    },
+
+    async getChannelTroubleshooting(token, options) {
+      // 沿用 getDiagnostics 的失败语义：抛错交给上层 hook 转成「加载失败」态。
+      // 排障页刻意区别于普通设置页 —— 加载失败本身就是需要被看到的状态，
+      // 静默降级成空列表会把「没查到」和「查不到」混为一谈。
+      return performSettingsRequest<ChannelTroubleshootingReport>({
+        actionLabel: '读取频道路障信息',
+        request: () =>
+          fetchWithTimeout(
+            withQuery(
+              `${baseUrl}/settings/channel-troubleshooting`,
+              new URLSearchParams(
+                typeof options?.limit === 'number' ? { limit: String(options.limit) } : {},
+              ),
+            ),
+            {
+              headers: authHeader(token),
+              signal: options?.signal,
+            },
+          ),
+      });
+    },
+
+    async clearChannelTroubleshooting(token) {
+      return performSettingsRequest<ChannelTroubleshootingClearResult>({
+        actionLabel: '清空频道路障信息',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/channel-troubleshooting`, {
             method: 'DELETE',
             headers: authHeader(token),
           }),

@@ -427,6 +427,26 @@ async function resolveBashWorkdir(
   return safe;
 }
 
+/**
+ * bash 调用的准入校验：shell 选择 → 命令守卫 → workdir 解析。
+ *
+ * 单独导出是为了让 `run_bash_in_background` 能在**返回 terminalId 之前**跑完这
+ * 三步。终端登记发生在 `runBashCommand` 内部、且排在这三步之后，一旦这里被拒
+ * 绝（命令含 `$()` / 反引号 / 多行 / sudo，或 workdir 越界 / 不存在），registry
+ * 里就永远不会出现该 terminalId 的行；而模型已经拿到「启动成功 + id」，随后
+ * `bash_output` 只能读到「terminal_id 不存在或不属于当前用户」——既误导又无法
+ * 自纠（2026-10-12 线上排障命中的就是这条路径）。
+ */
+export async function resolveBashPreflight(
+  input: BashInput,
+  sessionId?: string,
+): Promise<BashPreflight> {
+  const shellChoice = pickShell();
+  assertSafeShellCommand(input.command, { isPowerShell: shellChoice.isPowerShell });
+  const cwd = await resolveBashWorkdir(input.workdir, sessionId);
+  return { cwd, shellChoice };
+}
+
 // ---------- Process orchestration ----------
 
 /**
@@ -467,6 +487,13 @@ export interface BashRunTracking {
   metadata?: Record<string, unknown>;
 }
 
+export interface BashPreflight {
+  /** 校验通过后的工作目录（绝对路径，已完成会话工作区边界判定）。 */
+  cwd: string;
+  /** 本次调用选定的 shell；执行必须与校验用同一个，避免两次选择漂移。 */
+  shellChoice: ShellChoice;
+}
+
 interface RunOptions {
   signal?: AbortSignal;
   sessionId?: string;
@@ -485,6 +512,12 @@ interface RunOptions {
    * individually without aborting the LLM stream.
    */
   tracking?: BashRunTracking;
+  /**
+   * 已完成的前置校验结果。调用方（`run_bash_in_background`）必须在返回
+   * terminalId 之前先跑 {@link resolveBashPreflight} 做准入，把同一份结果传给
+   * 这里执行，避免重复 stat / 重复选择 shell。
+   */
+  preflight?: BashPreflight;
 }
 
 interface SpawnOutcome {
@@ -729,9 +762,11 @@ export async function runBashCommand(
   input: BashInput,
   options: RunOptions = {},
 ): Promise<BashExecutionResult> {
-  const shellChoice = pickShell();
-  assertSafeShellCommand(input.command, { isPowerShell: shellChoice.isPowerShell });
-  const cwd = await resolveBashWorkdir(input.workdir, options.sessionId);
+  // 准入校验与执行必须共用同一份结果（shell 选择 + cwd）。调用方若已提前跑过
+  // （见 `resolveBashPreflight` 的注释），这里直接复用，避免二次 stat 与两次
+  // 选择 shell 之间的漂移。
+  const preflight = options.preflight ?? (await resolveBashPreflight(input, options.sessionId));
+  const { cwd, shellChoice } = preflight;
   const timeoutMs = input.timeout ?? DEFAULT_BASH_TIMEOUT_MS;
   // Many models (especially smaller / non-Claude variants) skip the
   // `description` field even though the tool schema requests it. We
