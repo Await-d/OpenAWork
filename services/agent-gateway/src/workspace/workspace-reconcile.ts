@@ -1,6 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FileDiffContent } from '@openAwork/shared';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import { countLineChanges, normalizeLineEndings } from './line-change-stats.js';
 import type { WorkspaceReviewChange } from './workspace-review.js';
 import { listWorkspaceReviewChanges } from './workspace-review.js';
@@ -22,10 +23,46 @@ interface WorkspaceReconcileSnapshotEntry {
 
 export type WorkspaceReconcileSnapshot = ReadonlyMap<string, WorkspaceReconcileSnapshotEntry>;
 
+/**
+ * 快照预算：每条 bash 命令前后各跑一次，必须给脏工作区设上限。
+ *
+ * 超限时直接返回空快照（放弃本次文件 diff），而不是读一半文件：
+ * 部分快照会让 before/after 的「一侧缺失」判定失真，反而报出错误的
+ * 新增/删除。日志只告警，不影响 bash 结果。
+ */
+export const MAX_RECONCILE_FILES = 400;
+export const MAX_RECONCILE_TOTAL_BYTES = 8 * 1024 * 1024;
+
 export async function captureWorkspaceReconcileSnapshot(
   workspaceRoot: string,
 ): Promise<WorkspaceReconcileSnapshot> {
   const changes = await listWorkspaceReviewChanges(workspaceRoot);
+  if (changes.length > MAX_RECONCILE_FILES) {
+    logGatewayWarn(
+      `[workspace-reconcile] changed files (${changes.length}) exceed ${MAX_RECONCILE_FILES}; skip file-diff snapshot for ${workspaceRoot}`,
+    );
+    return new Map();
+  }
+
+  let totalBytes = 0;
+  await Promise.all(
+    changes.map(async (change) => {
+      if (change.status === 'deleted') return;
+      try {
+        const info = await stat(join(workspaceRoot, change.path));
+        totalBytes += info.size;
+      } catch {
+        // 读不到 size 的文件交给 readWorkspaceFileContent 的失败兜底。
+      }
+    }),
+  );
+  if (totalBytes > MAX_RECONCILE_TOTAL_BYTES) {
+    logGatewayWarn(
+      `[workspace-reconcile] changed file bytes (${totalBytes}) exceed ${MAX_RECONCILE_TOTAL_BYTES}; skip file-diff snapshot for ${workspaceRoot}`,
+    );
+    return new Map();
+  }
+
   const entries = await Promise.all(
     changes.map(async (change) => {
       const canReadHead = change.status !== 'added';

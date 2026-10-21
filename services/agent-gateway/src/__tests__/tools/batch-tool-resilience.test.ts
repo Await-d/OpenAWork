@@ -106,6 +106,45 @@ describe('batch tool per-sub-call resilience', () => {
     expect(toolExecute).toHaveBeenCalledTimes(1);
   }, 15_000);
 
+  it('batch 拒绝 mcp_call 时给出原因与替代动作，而非只回一句英文', async () => {
+    const { ToolSandbox } = await import('../../tools/tool-sandbox.js');
+
+    const sandbox = new ToolSandbox({
+      allowedTools: ['unit_tool', 'batch'],
+      defaultTimeoutMs: 1000,
+    });
+    sandbox.register({
+      name: 'unit_tool',
+      description: 'unit tool',
+      inputSchema: z.object({ value: z.string() }),
+      outputSchema: z.object({ output: z.string() }),
+      execute: async () => ({ output: 'ok', isError: false, durationMs: 1 }),
+    });
+
+    const result = await sandbox.execute(
+      {
+        toolCallId: 'call-batch-mcp',
+        toolName: 'batch',
+        rawInput: {
+          tool_calls: [
+            { tool: 'mcp_call', parameters: { serverId: 'open_websearch', toolName: 'search' } },
+          ],
+        },
+      },
+      new AbortController().signal,
+      'session-1',
+    );
+
+    const output = result.output as { results: Array<{ isError: boolean; output: string }> };
+    expect(result.isError).toBe(true);
+    const message = output.results[0]?.output ?? '';
+    // 保留可检索的既有标识前缀，且必须交代原因与下一步。
+    expect(message).toContain('mcp_call');
+    expect(message).toContain('不能作为 batch 子调用');
+    expect(message).toContain('拆出来在 batch 外单独发起');
+    expect(message).not.toBe('Tool "mcp_call" cannot be called from batch');
+  }, 15_000);
+
   testOnNonWindows(
     'batch 中的 grep 对 Windows 路径返回明确跨主机错误，而不是 No files found',
     async () => {

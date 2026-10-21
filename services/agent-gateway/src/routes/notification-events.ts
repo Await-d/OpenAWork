@@ -120,7 +120,18 @@ export async function notificationEventsRoutes(app: FastifyInstance): Promise<vo
           socket.ping();
         } catch {
           closeSocket(1011, 'NOTIFICATION_EVENTS_PING_FAILED', 'PING_FAILED');
+          return;
         }
+        // 协议层 ping 浏览器收不到，而客户端的空闲判定看的是**应用层**最后收包时间
+        // （web-client `notification-events.ts` 的 livenessTimer）。只发 `socket.ping()`
+        // 会让两端互等：客户端满 40s 没收到应用层帧就主动 close，服务端满 45s 也判定
+        // 空闲——页面只要静默超过 40s 就必然互断，表现为控制台反复刷
+        // 「实时通知通道断开，正在退避重连」。因此这里额外发一条**应用层** pong，
+        // 同时刷新自己的活动基准（自身心跳即活动，不再依赖对端先开口）。
+        sendOrClose(
+          safeSend(socket, { type: 'pong', timestamp: Date.now() }),
+          'HEARTBEAT_PONG_SEND_FAILED',
+        );
       }, HEARTBEAT_INTERVAL_MS);
 
       socket.on('message', (data: Buffer) => {

@@ -73,7 +73,11 @@ export function buildInteractionAndWebParameters(name: string): ToolParameters |
               properties: {
                 question: { type: 'string' },
                 header: { type: 'string' },
-                multiSelect: { type: 'boolean' },
+                multiSelect: {
+                  type: 'boolean',
+                  description:
+                    '是否允许多选。用户需要圈定多项（如「选择要清理的项目」「选择要包含的模块」）时必须设为 true；否则题目只会渲染成单选。仅单选题留空或设 false。',
+                },
                 options: {
                   type: 'array',
                   items: {

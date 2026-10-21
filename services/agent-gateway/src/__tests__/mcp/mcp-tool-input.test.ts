@@ -115,4 +115,35 @@ describe('parseMcpCallRawInput', () => {
     });
     expect(nullArgs.ok).toBe(false);
   });
+
+  // 回归（2026-10-18 排障）：上游流式中断会把整个入参对象降级成 `{ raw: "<JSON>" }`，
+  // 此前 mcp_call 不做还原，模型只收到「requires a non-empty serverId」。
+  it('restores the streamed fallback shape { raw: "<json>" }', () => {
+    const result = parseMcpCallRawInput({
+      raw: '{"serverId":"open_websearch","toolName":"search","arguments":{"query":"x"}}',
+    });
+    expect(result).toEqual({
+      ok: true,
+      serverId: 'open_websearch',
+      toolName: 'search',
+      arguments: { query: 'x' },
+    });
+  });
+
+  it('只对「仅含 raw 键 + raw 是对象型 JSON」的形态做还原，其余保持原判定', () => {
+    // 半截 JSON：保持原样，仍报 serverId 缺失而非静默吞掉。
+    const truncated = parseMcpCallRawInput({
+      raw: '{"serverId":"open_websearch","toolName":',
+    });
+    expect(truncated.ok).toBe(false);
+    if (!truncated.ok) {
+      expect(truncated.reason).toContain('serverId');
+    }
+
+    // raw 是 JSON 数组（非 mcp_call 形）：不还原。
+    expect(parseMcpCallRawInput({ raw: '["x"]' }).ok).toBe(false);
+
+    // 存在其它键时 `raw` 视为真实入参，不做展开。
+    expect(parseMcpCallRawInput({ raw: '{"serverId":"x"}', serverId: '' }).ok).toBe(false);
+  });
 });

@@ -40,7 +40,7 @@ describe('runUpstreamStream', () => {
       OpenCodeLLM.LLMEvent.toolInputDelta({ id: 'call-1', name: 'read', text: '{"path":"a"}' }),
       OpenCodeLLM.LLMEvent.toolCall({ id: 'call-1', name: 'read', input: { path: 'a' } }),
       OpenCodeLLM.LLMEvent.finish({
-        reason: 'tool-calls',
+        reason: { normalized: 'tool-calls' },
         usage: new OpenCodeLLM.Usage({ inputTokens: 4, outputTokens: 7, totalTokens: 11 }),
       }),
     ]);
@@ -69,7 +69,7 @@ describe('runUpstreamStream', () => {
   it('forwards native usage once to onFinish', async () => {
     mockNativeStream([
       OpenCodeLLM.LLMEvent.finish({
-        reason: 'stop',
+        reason: { normalized: 'stop' },
         usage: new OpenCodeLLM.Usage({
           inputTokens: 5,
           outputTokens: 8,
@@ -171,7 +171,9 @@ describe('runUpstreamStream', () => {
   });
 
   it('passes native generation and HTTP override fields to LLMClient.request', async () => {
-    const streamSpy = mockNativeStream([OpenCodeLLM.LLMEvent.finish({ reason: 'stop' })]);
+    const streamSpy = mockNativeStream([
+      OpenCodeLLM.LLMEvent.finish({ reason: { normalized: 'stop' } }),
+    ]);
     await collect(
       runUpstreamStream({
         model,

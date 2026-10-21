@@ -11,6 +11,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   readResponseJsonWithLimit,
+  readResponseTextUpToLimit,
   readResponseTextWithLimit,
   resolveHttpBodyLimitBytes,
 } from '../../infra/http-body-limit.js';
@@ -78,6 +79,50 @@ describe('readResponseTextWithLimit', () => {
     const res = fakeResponse({ body: [new Uint8Array(1024)] });
     const text = await readResponseTextWithLimit(res, 1024);
     expect(text.length).toBe(1024);
+  });
+});
+
+describe('readResponseTextUpToLimit', () => {
+  it('未超限时行为与正常读取一致且 truncated=false', async () => {
+    const res = fakeResponse({ body: [enc('hello '), enc('world')] });
+    const result = await readResponseTextUpToLimit(res, 1024);
+    expect(result).toEqual({ text: 'hello world', truncated: false });
+  });
+
+  it('超限时保留前缀（不抛错）并 truncated=true', async () => {
+    // No content-length; stream 4 chunks of 400 bytes = 1600 > 1024 cap.
+    const chunk = new Uint8Array(400);
+    const res = fakeResponse({ body: [chunk, chunk, chunk, chunk] });
+    const result = await readResponseTextUpToLimit(res, 1024);
+    expect(result.truncated).toBe(true);
+    expect(result.text.length).toBe(1024);
+  });
+
+  it('content-length 超限时同样保留前缀且立即停止读取', async () => {
+    const res = fakeResponse({ body: [new Uint8Array(10_000)], contentLength: 10_000 });
+    const result = await readResponseTextUpToLimit(res, 1024);
+    expect(result.truncated).toBe(true);
+    expect(result.text.length).toBe(1024);
+  });
+
+  it('多字节字符没有在截断点被劈开', async () => {
+    // 600 个 `中` = 1800 字节；每 chunk 450 字节会切在字符中间（450 = 150 * 3，
+    // 恰好对齐 —— 改用会不对齐的 chunk 尺寸：400 字节 / 3B 每字符）。
+    const bytes = new TextEncoder().encode('中'.repeat(500)); // 1500 bytes
+    const dodge = 512; // 截断点 512 % 3 = 1 → 必劈开一个字符
+    const res = fakeResponse({ body: [bytes.subarray(0, 300), bytes.subarray(300)] });
+    const result = await readResponseTextUpToLimit(res, dodge);
+    expect(result.truncated).toBe(true);
+    expect(result.text.length).toBeLessThanOrEqual(500);
+    expect(result.text.endsWith('\uFFFD')).toBe(false);
+  });
+
+  it('maxBytes<=0 时禁用上限', async () => {
+    const chunk = new Uint8Array(2048);
+    const res = fakeResponse({ body: [chunk] });
+    const result = await readResponseTextUpToLimit(res, 0);
+    expect(result.text.length).toBe(2048);
+    expect(result.truncated).toBe(false);
   });
 });
 

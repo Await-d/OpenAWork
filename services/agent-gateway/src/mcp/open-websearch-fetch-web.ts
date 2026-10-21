@@ -14,7 +14,8 @@ import {
 } from './open-websearch-html.js';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
-const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
+const MAX_DOWNLOAD_BYTES = 4 * 1024 * 1024;
+export const MAX_FETCH_PAGE_BYTES = MAX_DOWNLOAD_BYTES;
 const CONTENT_HEADERS = {
   Accept:
     'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',

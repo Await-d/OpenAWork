@@ -10,8 +10,17 @@
  *   `readyState` 非 OPEN 时不再入队，close 由终态标志去重，保证调用方只收到一次关闭通知。
  */
 
-import { BROWSER_LIVE_REST_PREFIX, BROWSER_LIVE_WS_PATH } from '@openAwork/shared';
-import type { BrowserLiveClientMessage, BrowserLiveEnvelope } from '@openAwork/shared';
+import {
+  BROWSER_LIVE_BINARY_FRAME_KIND,
+  BROWSER_LIVE_REST_PREFIX,
+  BROWSER_LIVE_WS_PATH,
+} from '@openAwork/shared';
+import type {
+  BrowserLiveBinaryFramePayload,
+  BrowserLiveClientMessage,
+  BrowserLiveEnvelope,
+  BrowserLiveFrameBinaryHeader,
+} from '@openAwork/shared';
 
 import {
   authHeader,
@@ -114,6 +123,58 @@ async function performBrowserLiveRequest<T>(input: {
   return JSON.parse(text) as T;
 }
 
+/**
+ * 解析二进制帧消息（线路格式见 shared 的 `BROWSER_LIVE_BINARY_FRAME_KIND`）。
+ *
+ * 任何校验失败都返回 null 而不是抛出：线路数据不可信，坏一帧只该丢一帧。
+ */
+export function parseBinaryFrameMessage(
+  data: ArrayBuffer,
+): BrowserLiveEnvelope<BrowserLiveBinaryFramePayload> | null {
+  if (data.byteLength < 5) return null;
+  const view = new DataView(data);
+  if (view.getUint8(0) !== BROWSER_LIVE_BINARY_FRAME_KIND) return null;
+  const headerLength = view.getUint32(1, true);
+  if (headerLength <= 0 || 5 + headerLength >= data.byteLength) return null;
+
+  let header: BrowserLiveFrameBinaryHeader;
+  try {
+    header = JSON.parse(
+      new TextDecoder().decode(new Uint8Array(data, 5, headerLength)),
+    ) as BrowserLiveFrameBinaryHeader;
+  } catch {
+    return null;
+  }
+  if (
+    typeof header.deviceWidth !== 'number' ||
+    typeof header.deviceHeight !== 'number' ||
+    typeof header.frameSessionId !== 'number'
+  ) {
+    return null;
+  }
+
+  return {
+    ch: 'frame',
+    seq: typeof header.seq === 'number' ? header.seq : 0,
+    ts: typeof header.ts === 'number' ? header.ts : Date.now(),
+    payload: {
+      mimeType: 'image/jpeg',
+      // 复制一次图像字节：Blob 需要独立 buffer，不能长期占着整条 WS 的缓冲区
+      // （`slice` 在这里既完成复制又保持 `ArrayBuffer` 类型，后续 decode 直接吃它）。
+      data: data.slice(5 + headerLength),
+      deviceWidth: header.deviceWidth,
+      deviceHeight: header.deviceHeight,
+      offsetTop: typeof header.offsetTop === 'number' ? header.offsetTop : 0,
+      pageScaleFactor: typeof header.pageScaleFactor === 'number' ? header.pageScaleFactor : 1,
+      scrollOffsetX: typeof header.scrollOffsetX === 'number' ? header.scrollOffsetX : 0,
+      scrollOffsetY: typeof header.scrollOffsetY === 'number' ? header.scrollOffsetY : 0,
+      frameSessionId: header.frameSessionId,
+      // 代次透传给画面管线：二进制路径同样要能丢弃旧页面的迟到帧。
+      ...(typeof header.generation === 'number' ? { generation: header.generation } : {}),
+    },
+  };
+}
+
 class BrowserLiveSocketConnection implements BrowserLiveConnection {
   private readonly ws: WebSocket;
   private readonly callbacks: BrowserLiveCallbacks;
@@ -128,6 +189,8 @@ class BrowserLiveSocketConnection implements BrowserLiveConnection {
     const params = new URLSearchParams({ token });
     const wsUrl = `${baseUrl.replace(/^http/, 'ws')}${BROWSER_LIVE_WS_PATH}?${params.toString()}`;
     const ws = new WebSocket(wsUrl);
+    // 二进制帧走 ArrayBuffer；不设这个时浏览器会给 Blob，每帧还要异步读一次。
+    ws.binaryType = 'arraybuffer';
     this.ws = ws;
 
     ws.onopen = () => {
@@ -141,9 +204,24 @@ class BrowserLiveSocketConnection implements BrowserLiveConnection {
     };
 
     ws.onmessage = (event: MessageEvent) => {
+      // 二进制帧（controller 协商 `binary: true` 后出现）：不经过 JSON，直接构造信封。
+      if (event.data instanceof ArrayBuffer) {
+        const binaryFrame = parseBinaryFrameMessage(event.data);
+        if (binaryFrame === null) {
+          this.callbacks.onError?.(new Error('BROWSER_LIVE_INVALID_PAYLOAD'));
+          return;
+        }
+        this.callbacks.onEnvelope(binaryFrame);
+        return;
+      }
+      if (typeof event.data !== 'string') {
+        // Blob（binaryType 未生效）或其它可传输对象：当前协议不认识，丢弃并上报。
+        this.callbacks.onError?.(new Error('BROWSER_LIVE_INVALID_PAYLOAD'));
+        return;
+      }
       let envelope: BrowserLiveEnvelope;
       try {
-        envelope = JSON.parse(event.data as string) as BrowserLiveEnvelope;
+        envelope = JSON.parse(event.data) as BrowserLiveEnvelope;
       } catch {
         // 信封不是 RunEvent，不能复用 dispatchStreamEvent；解析失败只上报并继续收流。
         this.callbacks.onError?.(new Error('BROWSER_LIVE_INVALID_PAYLOAD'));

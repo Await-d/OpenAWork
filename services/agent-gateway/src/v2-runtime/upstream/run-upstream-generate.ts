@@ -366,7 +366,7 @@ export function runUpstreamGenerate(
       outputTokens: normalizeTokenCount(result.usage?.outputTokens),
       cacheReadTokens: normalizeTokenCount(result.usage?.cacheReadInputTokens),
       cacheWriteTokens: normalizeTokenCount(result.usage?.cacheWriteInputTokens),
-      finishReason: result.finishReason,
+      finishReason: result.finishReason.normalized,
       raw: result,
     } satisfies RunUpstreamGenerateResult;
   });

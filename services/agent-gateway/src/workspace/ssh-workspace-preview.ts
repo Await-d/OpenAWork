@@ -13,6 +13,7 @@
 
 import { posix } from 'node:path';
 import { createSSHToolProxy } from '@openAwork/agent-core';
+import { SSH_SFTP_UNAVAILABLE_MESSAGE, SshSftpUnavailableError } from '@openAwork/agent-core';
 import {
   isRemoteNotFoundError,
   resolveSshRemoteExecutionContext,
@@ -300,6 +301,19 @@ export async function readRemoteDirectoryTree(input: {
 }
 
 /**
+ * 识别「远端未启用 SFTP 子系统」。
+ *
+ * 归一类型由 agent-core 打开 SFTP 通道处抛出（`normalizeSftpChannelError`），但注入
+ * 实现 / 旧链路可能只留下 ssh2 的裸英文文案，故与 `routes/ssh.ts` 保持同一正则兜底。
+ */
+function isSshSftpUnavailableError(error: unknown): boolean {
+  if (error instanceof SshSftpUnavailableError) return true;
+  return /unable to start subsystem/i.test(
+    error instanceof Error ? error.message : typeof error === 'string' ? error : '',
+  );
+}
+
+/**
  * 把远端读取阶段抛出的任意错误收敛为带状态码的 {@link SshPreviewError}。
  * 未知错误统一 500，并保留原始错误文案便于排查。
  */
@@ -309,6 +323,13 @@ export function classifySshPreviewError(error: unknown): SshPreviewError {
   const message =
     error instanceof Error ? error.message : typeof error === 'string' ? error : String(error);
 
+  // 远端 sshd 未启用 sftp 子系统：属远端环境能力缺失（重试不恢复、也不是网关故障），
+  // 必须与 `/ssh/files` 的 501 保持同口径。否则同一根因在 `/workspace/tree`、
+  // `/workspace/file` 上落进末尾的 500 兜底，与相邻的 `/ssh/files`(501) 自相矛盾
+  // （2026-10-16 排障包命中：同一连接上 tree → 500、files → 501）。
+  if (isSshSftpUnavailableError(error)) {
+    return new SshPreviewError(501, SSH_SFTP_UNAVAILABLE_MESSAGE);
+  }
   if (isRemoteNotFoundError(error)) {
     return new SshPreviewError(404, SSH_FILE_NOT_FOUND_MESSAGE);
   }

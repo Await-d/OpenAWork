@@ -27,6 +27,16 @@ import {
   saveUserDisplayPreferences,
   userDisplayPreferencesUpdateSchema,
 } from '../user/user-display-preferences.js';
+import {
+  loadUserBrowserTabs,
+  saveUserBrowserTabs,
+  userBrowserTabsUpdateSchema,
+} from '../user/user-browser-tabs.js';
+import {
+  loadUserWorkspaceState,
+  saveUserWorkspaceState,
+  workspaceStateSchema,
+} from '../user/user-workspace-state.js';
 
 export async function registerSettingsUserRoutes(app: FastifyInstance): Promise<void> {
   const companionSettingsQuerySchema = z.object({
@@ -128,6 +138,97 @@ export async function registerSettingsUserRoutes(app: FastifyInstance): Promise<
 
       return reply.send({
         preferences: saved.preferences,
+        updatedAt: saved.updatedAt,
+      });
+    },
+  );
+
+  // ── Browser tabs（内置浏览器标签，跨设备 / 跨重装恢复）──────────────
+
+  app.get(
+    '/settings/browser-tabs',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.browser-tabs.get');
+      const user = request.user as JwtPayload;
+
+      const stored = loadUserBrowserTabs(user.sub);
+      step.succeed(undefined, { hasTabs: stored !== null });
+
+      return reply.send({
+        tabs: stored?.tabs ?? null,
+        updatedAt: stored?.updatedAt ?? null,
+      });
+    },
+  );
+
+  app.put(
+    '/settings/browser-tabs',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.browser-tabs.put');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = parseBody(userBrowserTabsUpdateSchema, request.body);
+      parseStep.succeed(undefined, { tabCount: body.tabs?.length ?? 0 });
+
+      const saveStep = child('save');
+      const saved = saveUserBrowserTabs(user.sub, body);
+      saveStep.succeed(undefined, { tabCount: saved.tabs.tabs?.length ?? 0 });
+      step.succeed(undefined, { tabCount: saved.tabs.tabs?.length ?? 0 });
+
+      return reply.send({
+        tabs: saved.tabs,
+        updatedAt: saved.updatedAt,
+      });
+    },
+  );
+
+  // ── Workspace state（工作台现场：打开记录 + 面板布局）──────────────
+  //
+  // 整体快照语义：客户端提交的是「当前完整现场」，服务端整体替换；
+  // 老的 `/settings/browser-tabs` 全局标签接口保留兼容，但前端已不再写入。
+
+  app.get(
+    '/settings/workspace-state',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'settings.workspace-state.get');
+      const user = request.user as JwtPayload;
+
+      const stored = loadUserWorkspaceState(user.sub);
+      step.succeed(undefined, { hasState: stored !== null });
+
+      return reply.send({
+        state: stored?.state ?? null,
+        updatedAt: stored?.updatedAt ?? null,
+      });
+    },
+  );
+
+  app.put(
+    '/settings/workspace-state',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step, child } = startRequestWorkflow(request, 'settings.workspace-state.put');
+      const user = request.user as JwtPayload;
+
+      const parseStep = child('parse-body');
+      const body = parseBody(workspaceStateSchema, request.body);
+      parseStep.succeed(undefined, {
+        bookmarkCount: body.bookmarks.length,
+        workspaceCount: Object.keys(body.browserTabsByWorkspace).length,
+      });
+
+      const saveStep = child('save');
+      const saved = saveUserWorkspaceState(user.sub, body);
+      const byteSize = JSON.stringify(saved.state).length;
+      saveStep.succeed(undefined, { byteSize });
+      step.succeed(undefined, { byteSize });
+
+      return reply.send({
+        state: saved.state,
         updatedAt: saved.updatedAt,
       });
     },

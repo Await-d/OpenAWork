@@ -13,7 +13,7 @@ describe('native stream generation settings', () => {
     let request: OpenCodeLLM.LLMRequest | undefined;
     vi.spyOn(OpenCodeLLM.LLMClient, 'stream').mockImplementation((value) => {
       request = value;
-      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: 'stop' })]);
+      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: { normalized: 'stop' } })]);
     });
 
     const values = await Effect.runPromise(
@@ -37,7 +37,7 @@ describe('native stream generation settings', () => {
     let request: OpenCodeLLM.LLMRequest | undefined;
     vi.spyOn(OpenCodeLLM.LLMClient, 'stream').mockImplementation((value) => {
       request = value;
-      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: 'stop' })]);
+      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: { normalized: 'stop' } })]);
     });
 
     await Effect.runPromise(

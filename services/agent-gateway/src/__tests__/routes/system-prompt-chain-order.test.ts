@@ -105,6 +105,18 @@ describe('buildTwoPartSystemPrompts · stable / dynamic 分段', () => {
     expect(stable).toContain('tool_search');
   });
 
+  // 回归（2026-10-18 排障）：本批 202 项异常里，重复最多的是模型对已明确拒绝的
+  // 调用姿势反复重试（多行 bash ×15、batch 内 mcp_call ×6、tavily 无 Key ×2、
+  // 跨会话 toolCallId ×2）。这些约束必须进 stable 段，逐轮生效。
+  it('stable 段固化防重试纪律：多行 bash / mcp_call 禁入 batch / provider 无 Key / toolCallId 不跨会话', () => {
+    const { stable } = buildTwoPartSystemPrompts(INPUT);
+
+    expect(stable).toContain('禁止出现任何换行');
+    expect(stable).toContain('不能**作为 batch 的子调用');
+    expect(stable).toContain('只在**当前会话**有效');
+    expect(stable).toContain('不要**再指定这个 provider');
+  });
+
   it('dynamicAgent / startWork / command 进 dynamic 段（每轮可变）', () => {
     const { stable, dynamic } = buildTwoPartSystemPrompts(INPUT);
     expect(dynamic).toContain('<<DYNAMIC_AGENT>>');

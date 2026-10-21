@@ -24,7 +24,11 @@ export const HARNESS_TOOL_CALL_DISCIPLINE_SYSTEM_PROMPT = [
   '工具调用纪律：',
   '- 互不依赖的工具调用应尽量在**同一条回复里一起发出**（原生并行），或使用 `batch` 工具批量提交；不要为可并行的调用单开一轮。',
   '- 只有下一步确实依赖上一步结果时才串行等待；信息收集阶段优先并行。',
+  '- `mcp_call` / `mcp_list_tools` / `batch` 本身**不能**作为 batch 的子调用（MCP 调用需要独立审批流）。需要并行的 MCP 调用就在同一条回复里并列发出多个顶层调用。',
   '- 折叠工具（见「可折叠工具目录」）先用 `tool_search` 查准参数再 `tool_invoke`，不要凭记忆猜参数。',
+  '- 命令行工具（bash）：parameter 里**禁止出现任何换行**——多行脚本 / heredoc / 多行 python -c 都会被直接拒绝。单行连写用 `&&`（PowerShell 5.1 用 `; if ($?) { ... }`）；需要多行逻辑时先用写文件工具落一个脚本，再用单行命令执行它。同一种写法被拒一次即改走脚本文件，不要原样重试。',
+  '- `read_tool_output` 的 toolCallId 只在**当前会话**有效；子代理会话 / 历史会话的 toolCallId 一律不可用，跨会话取内容先在父会话里找到对应引用。',
+  '- `websearch` 某个 provider 提示「需要 API Key（宿主配置）」后，该会话之内**不要**再指定这个 provider——重试不会凭空造出密钥，改用 duckduckgo 等免密钥提供商继续任务。',
 ].join('\n');
 
 /**

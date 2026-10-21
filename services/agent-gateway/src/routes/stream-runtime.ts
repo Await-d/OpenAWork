@@ -93,7 +93,10 @@ import {
   triggerProactiveCompaction,
 } from '../compaction/auto-compaction-trigger.js';
 import { runModelRound, MAX_CONTINUATION_ROUNDS } from './stream-model-round.js';
-import { resolveSessionInteractionStateUpdate } from '../session/session-runtime-state.js';
+import {
+  hasPendingSessionInteraction,
+  resolveSessionInteractionStateUpdate,
+} from '../session/session-runtime-state.js';
 import {
   autoExtractMemoriesForRequest,
   buildMemoryBlockForSession,
@@ -206,6 +209,71 @@ export function deriveResumeRound(input: {
     }
   }
   return maxRound > 0 ? maxRound + 1 : input.fallbackRound;
+}
+
+/**
+ * 续跑等待同会话在途流让出执行权的上限 / 轮询间隔。
+ *
+ * 暂停（paused）现在不再是前端意义上的「禁止发送」：用户在等待审批 / 回答问题期间
+ * 可以继续发消息，那条新消息会正常起一轮流。等用户随后点批准 / 提交回答时，该轮
+ * 可能仍在跑——旧实现此时直接抛 `Another request is already running for this
+ * session.`，用户看到的就是「审批点了没反应」（且挂起请求要等 10 分钟僵尸回收才
+ * 消失）。改为有界等待：占用方收尾后立刻续跑，语义上等价于「排队生效」。
+ *
+ * 上限刻意取 5 分钟——足够覆盖最长的一轮正常生成，又远小于挂起交互的 10 分钟
+ * 僵尸判定，超时后仍回落旧行为（抛错 + 状态收敛），不引入新的永久挂起形态。
+ */
+const RESUME_IN_FLIGHT_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+const RESUME_IN_FLIGHT_WAIT_POLL_MS = 250;
+
+/**
+ * 等待同会话的其它在途流让出执行权。
+ *
+ * 返回 `true` = 执行权已空出（或本来就空着）；`false` = 超过等待上限。
+ *
+ * 两条唤醒路径，缺一不可：
+ *   - **await 占用方的 `execution`**（主路径）：占用方跑完的瞬间即可继续，不必等满
+ *     一个轮询周期。`execution` 可能 reject（被取消 / 上游报错），必须吞掉——我们要的
+ *     只是「它结束了」这个信号，不是它的结果。
+ *   - **定时轮询**（兜底）：`execution` 已 settled 但条目尚未被占用方的 `finally`
+ *     清掉时（两个 continuation 的先后不确定），再 await 同一个已 settled 的 Promise
+ *     会立刻返回，形成紧循环空转。因此同一个占用方只 await 一次，之后退化成定时轮询，
+ *     等它的 `clearInFlightStreamRequest` 把条目摘掉。
+ *
+ * 只观测内存中的 in-flight 注册表，不引入持久化状态：进程重启后本来也没有需要
+ * 续跑的挂起轮次。
+ */
+async function waitForSessionStreamSlot(input: {
+  clientRequestId: string;
+  sessionId: string;
+  userId: string;
+}): Promise<boolean> {
+  const deadline = Date.now() + RESUME_IN_FLIGHT_WAIT_TIMEOUT_MS;
+  let awaitedOccupantKey: string | null = null;
+  for (;;) {
+    const occupant = getAnyInFlightStreamRequestForSession({
+      excludeClientRequestId: input.clientRequestId,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    });
+    if (!occupant) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+
+    const occupantKey = `${occupant.clientRequestId}:${occupant.startedAt}`;
+    if (occupantKey !== awaitedOccupantKey) {
+      awaitedOccupantKey = occupantKey;
+      await occupant.execution.catch(() => undefined);
+      continue;
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, RESUME_IN_FLIGHT_WAIT_POLL_MS);
+    });
+  }
 }
 
 async function continueFromApprovedToolResult(input: {
@@ -503,15 +571,28 @@ async function continueFromApprovedToolResult(input: {
     // leaving a stale `session_runtime_thread` row behind.
     let unsubscribeSessionEvents: (() => void) | undefined;
     try {
+      // 用户在暂停期间可能已经发过一条新消息（暂停不再禁用输入框），那轮流此时可能
+      // 仍在跑。旧实现直接抛错，等价于「审批点了没反应」；现在排队等待其让出执行权。
+      // 超时才回落旧行为，避免把一次点击变成永久挂起。
       if (
-        getAnyInFlightStreamRequestForSession({
-          excludeClientRequestId: input.payload.clientRequestId,
+        !(await waitForSessionStreamSlot({
+          clientRequestId: input.payload.clientRequestId,
           sessionId: input.sessionId,
           userId: input.userId,
-        })
+        }))
       ) {
         throw new Error('Another request is already running for this session.');
       }
+
+      // 等待期间占用方可能已把会话收尾成 idle/paused（它的 done / finally 都会写
+      // state_status）。此刻执行权已空出、本轮马上要跑，必须把 running 重新断言回去，
+      // 否则前端会在这段时间里看到「空闲」而误判可停止，并且续跑输出没有 running
+      // 状态兜底。
+      setPersistedSessionStateStatus({
+        sessionId: input.sessionId,
+        status: 'running',
+        userId: input.userId,
+      });
 
       // Append every resumed tool result (the blocked call plus any held-back
       // siblings), in `tool_use` order.
@@ -957,6 +1038,41 @@ async function continueFromApprovedToolResult(input: {
   }
 }
 
+/**
+ * 审批 resume 早期失败后的会话状态收敛（"批准后卡住"修复）。
+ *
+ * 抛点落在 `continueFromApprovedToolResult` 的 execution 兜底（其 `.catch` 负责把
+ * 状态置回 idle）之前时——被批准工具执行崩溃、payload / 模型路由 / 工作区上下文
+ * 解析失败——没有任何其它路径会把会话收回 idle：权限路由的 `.catch` 只记日志。
+ * 会话将永远停在 running 却没有活跃流，客户端 attach 重试全部落空、恢复轮询无限
+ * 循环、发送键长期禁用。
+ *
+ * 收敛口径与 `reconcileSessionStateStatus` 一致：仍有未处理交互（held-back 兄弟
+ * 请求 / 待回答问题）时保持 paused 让浮窗继续可操作，否则回 idle。「他人在途」
+ * 保护：同会话另一请求正在跑时不能把它的 running 置成 idle。
+ */
+function convergeSessionStateAfterFailedResume(input: {
+  payload: ApprovedPermissionResumePayload;
+  sessionId: string;
+  userId: string;
+}): void {
+  const hasOtherInFlightRequest =
+    getAnyInFlightStreamRequestForSession({
+      excludeClientRequestId: input.payload.clientRequestId,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    }) !== undefined;
+  if (hasOtherInFlightRequest) {
+    return;
+  }
+
+  setPersistedSessionStateStatus({
+    sessionId: input.sessionId,
+    status: hasPendingSessionInteraction(input.sessionId) ? 'paused' : 'idle',
+    userId: input.userId,
+  });
+}
+
 export async function resumeApprovedPermissionRequest(input: {
   payload: ApprovedPermissionResumePayload;
   sessionId: string;
@@ -972,9 +1088,12 @@ export async function resumeApprovedPermissionRequest(input: {
     return;
   }
 
-  // 先解析阻塞调用（纯函数、不产生副作用），确保后续注册的清理路径
-  // 一旦进入 try/finally 就不会被中间的解析异常跳过。
-  const blockedCalls = resolveBlockedCalls(input.payload);
+  // 阻塞调用解析刻意留在 try 内：线程注册与心跳都发生在它之前，finally 的清理
+  // 路径因此对「解析抛错（payload 畸形）」同样生效；且解析失败也必须走 catch 的
+  // 会话状态收敛，否则会话会停在 running 却没有活跃流（客户端 attach 重试全部
+  // 落空、恢复轮询无限循环、发送键长期禁用）。解析本身是纯函数、不产生副作用，
+  // 「先解析后注册」的旧顺序并无残留语义依赖。
+  let blockedCalls: BlockedToolCallResumeEntry[] = [];
 
   // 运行线程必须在执行被批准的工具之前注册：工具执行期间（可能持续数秒）续跑
   // 已经在发布 terminal_* / tool_result 事件，但 `/stream/active`（以及 `/status`
@@ -1009,6 +1128,8 @@ export async function resumeApprovedPermissionRequest(input: {
 
   let resumeResult: { pendingInteraction: boolean; statusCode: number };
   try {
+    blockedCalls = resolveBlockedCalls(input.payload);
+
     const sandbox = createDefaultSandbox([], { userId: input.userId });
     const executionContext = createStreamExecutionContext(
       input.payload.clientRequestId,
@@ -1111,6 +1232,7 @@ export async function resumeApprovedPermissionRequest(input: {
       statusCode: 500,
       userId: input.userId,
     });
+    convergeSessionStateAfterFailedResume(input);
     throw error;
   } finally {
     clearInterval(resumeRuntimeThreadHeartbeat);
@@ -1189,6 +1311,9 @@ export async function resumeRejectedPermissionRequest(input: {
       statusCode: 500,
       userId: input.userId,
     });
+    // 与 approve 路径对称：continue-on-deny 开启时路由置的是 running，早期失败
+    // （解析 / 上下文 / 模型路由）同样没有任何兜底会把状态收回 idle。
+    convergeSessionStateAfterFailedResume(input);
     throw error;
   }
 }

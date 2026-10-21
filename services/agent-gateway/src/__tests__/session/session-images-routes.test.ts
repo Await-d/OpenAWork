@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
     MockOpenAiImageGenerationError,
     editImageWithOpenAiMock: vi.fn(),
     createArtifactMock: vi.fn(),
+    generateImageStreamWithOpenAiMock: vi.fn(),
     generateImageWithOpenAiMock: vi.fn(),
     getArtifactByIdMock: vi.fn(),
     getImageProviderConfigMock: vi.fn(),
@@ -71,12 +72,16 @@ vi.mock('../../provider/provider-config.js', () => ({
     quality: 'medium',
     outputFormat: 'png',
     background: 'auto',
+    moderation: 'auto',
   },
   imageGenerationDefaultsSchema: z.object({
     size: z.string(),
-    quality: z.enum(['low', 'medium', 'high']),
+    quality: z.enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max']),
     outputFormat: z.enum(['png', 'jpeg', 'webp']),
-    background: z.enum(['auto', 'opaque']),
+    background: z.enum(['auto', 'opaque', 'transparent']),
+    moderation: z.enum(['auto', 'low']).optional(),
+    outputCompression: z.number().int().min(0).max(100).optional(),
+    count: z.number().int().min(1).max(4).optional(),
   }),
   getImageProviderConfig: mocks.getImageProviderConfigMock,
   parseStoredImageGenerationDefaults: mocks.parseStoredImageGenerationDefaultsMock,
@@ -84,8 +89,11 @@ vi.mock('../../provider/provider-config.js', () => ({
 
 vi.mock('../../image-generation/openai-image-generation.js', () => ({
   OpenAiImageGenerationError: mocks.MockOpenAiImageGenerationError,
-  editImageWithOpenAi: mocks.editImageWithOpenAiMock,
-  generateImageWithOpenAi: mocks.generateImageWithOpenAiMock,
+  // 路由走复数版本（`n>1` 会一次返回多张），mock 仍复用同一组 spy，
+  // 但解析值必须是**数组**——单张只是长度为 1 的特例。
+  editImagesWithOpenAi: mocks.editImageWithOpenAiMock,
+  generateImagesWithOpenAi: mocks.generateImageWithOpenAiMock,
+  generateImageStreamWithOpenAi: mocks.generateImageStreamWithOpenAiMock,
 }));
 
 import { sessionImagesRoutes } from '../../routes/session-images.js';
@@ -94,6 +102,7 @@ describe('session images routes', () => {
   beforeEach(() => {
     mocks.createArtifactMock.mockReset();
     mocks.editImageWithOpenAiMock.mockReset();
+    mocks.generateImageStreamWithOpenAiMock.mockReset();
     mocks.generateImageWithOpenAiMock.mockReset();
     mocks.getArtifactByIdMock.mockReset();
     mocks.getImageProviderConfigMock.mockReset();
@@ -137,16 +146,18 @@ describe('session images routes', () => {
       providerType: 'openai',
       requestOverrides: {},
     });
-    mocks.editImageWithOpenAiMock.mockResolvedValue({
-      bytes: Buffer.from('edited-image-binary'),
-      mimeType: 'image/png',
-      outputFormat: 'png',
-      prompt: '把这张图改成极简蓝鲸海报',
-      quality: 'medium',
-      requestId: 'req-image-edit-1',
-      revisedPrompt: '一张极简蓝鲸海报',
-      size: '1024x1024',
-    });
+    mocks.editImageWithOpenAiMock.mockResolvedValue([
+      {
+        bytes: Buffer.from('edited-image-binary'),
+        mimeType: 'image/png',
+        outputFormat: 'png',
+        prompt: '把这张图改成极简蓝鲸海报',
+        quality: 'medium',
+        requestId: 'req-image-edit-1',
+        revisedPrompt: '一张极简蓝鲸海报',
+        size: '1024x1024',
+      },
+    ]);
     mocks.getArtifactByIdMock.mockReturnValue(undefined);
     mocks.sqliteGetMock.mockImplementation((query: string) => {
       if (query.includes('FROM sessions')) {
@@ -176,16 +187,18 @@ describe('session images routes', () => {
   });
 
   it('allows 4K image requests even when the selected model declares no 4K support', async () => {
-    mocks.generateImageWithOpenAiMock.mockResolvedValue({
-      bytes: Buffer.from('4k-image-binary'),
-      mimeType: 'image/png',
-      outputFormat: 'png',
-      prompt: '画一张 4K 蓝鲸海报',
-      quality: 'high',
-      requestId: 'req-image-4k-1',
-      revisedPrompt: '一张 4K 蓝鲸海报',
-      size: '3840x2160',
-    });
+    mocks.generateImageWithOpenAiMock.mockResolvedValue([
+      {
+        bytes: Buffer.from('4k-image-binary'),
+        mimeType: 'image/png',
+        outputFormat: 'png',
+        prompt: '画一张 4K 蓝鲸海报',
+        quality: 'high',
+        requestId: 'req-image-4k-1',
+        revisedPrompt: '一张 4K 蓝鲸海报',
+        size: '3840x2160',
+      },
+    ]);
     mocks.createArtifactMock.mockReturnValue({
       id: 'artifact-image-4k-1',
       sessionId: 'session-1',
@@ -260,16 +273,18 @@ describe('session images routes', () => {
   });
 
   it('creates an image artifact and returns route metadata', async () => {
-    mocks.generateImageWithOpenAiMock.mockResolvedValue({
-      bytes: Buffer.from('png-image-binary'),
-      mimeType: 'image/png',
-      outputFormat: 'png',
-      prompt: '画一只极简蓝鲸',
-      quality: 'medium',
-      requestId: 'req-image-1',
-      revisedPrompt: '一张极简蓝鲸海报',
-      size: '1024x1024',
-    });
+    mocks.generateImageWithOpenAiMock.mockResolvedValue([
+      {
+        bytes: Buffer.from('png-image-binary'),
+        mimeType: 'image/png',
+        outputFormat: 'png',
+        prompt: '画一只极简蓝鲸',
+        quality: 'medium',
+        requestId: 'req-image-1',
+        revisedPrompt: '一张极简蓝鲸海报',
+        size: '1024x1024',
+      },
+    ]);
     mocks.createArtifactMock.mockReturnValue({
       id: 'artifact-image-1',
       sessionId: 'session-1',
@@ -584,6 +599,222 @@ describe('session images routes', () => {
       },
     });
     expect(mocks.editImageWithOpenAiMock).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('creates one artifact per image when n > 1 and reports the full batch', async () => {
+    mocks.generateImageWithOpenAiMock.mockResolvedValue([
+      {
+        bytes: Buffer.from('batch-image-1'),
+        mimeType: 'image/png',
+        outputFormat: 'png',
+        prompt: '画两张极简海报',
+        quality: 'medium',
+        requestId: 'req-image-batch',
+        size: '1024x1024',
+      },
+      {
+        bytes: Buffer.from('batch-image-2'),
+        mimeType: 'image/png',
+        outputFormat: 'png',
+        prompt: '画两张极简海报',
+        quality: 'medium',
+        requestId: 'req-image-batch',
+        size: '1024x1024',
+      },
+    ]);
+    let createdCount = 0;
+    mocks.createArtifactMock.mockImplementation(
+      (_userId: string, input: { sessionId: string; title: string; fileName: string }) => {
+        createdCount += 1;
+        return {
+          id: `artifact-image-batch-${createdCount}`,
+          sessionId: input.sessionId,
+          userId: 'user-a',
+          type: 'image',
+          title: input.title,
+          content: 'data:image/png;base64,YmF0Y2g=',
+          version: 1,
+          parentVersionId: null,
+          metadata: { fileName: input.fileName },
+          createdAt: '2026-04-22T00:00:00.000Z',
+          updatedAt: '2026-04-22T00:00:00.000Z',
+        };
+      },
+    );
+
+    const app = Fastify();
+    await app.register(sessionImagesRoutes);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-1/images/generations',
+      payload: { prompt: '画两张极简海报', count: 2 },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.body) as {
+      artifact: { id: string };
+      artifacts: Array<{ id: string; metadata?: { fileName?: string } }>;
+      parameters: { count: number };
+      messageSummary: string;
+    };
+    expect(body.artifacts).toHaveLength(2);
+    expect(body.artifact.id).toBe('artifact-image-batch-1');
+    expect(body.parameters.count).toBe(2);
+    expect(body.messageSummary).toContain('已生成 2 张图片');
+    expect(mocks.generateImageWithOpenAiMock).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 2 }),
+    );
+    // 同名文件在多张批次里会互相覆盖，文件名必须带序号区分。
+    const fileNames = body.artifacts.map((artifact) => artifact.metadata?.fileName);
+    expect(new Set(fileNames).size).toBe(2);
+
+    await app.close();
+  });
+
+  it('rejects a mask without a reference image', async () => {
+    const app = Fastify();
+    await app.register(sessionImagesRoutes);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-1/images/generations',
+      payload: {
+        prompt: '只改局部',
+        maskArtifact: { artifactId: 'artifact-input-1' },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((JSON.parse(response.body) as { error: { code: string } }).error.code).toBe(
+      'image_mask_invalid',
+    );
+    expect(mocks.generateImageWithOpenAiMock).not.toHaveBeenCalled();
+    expect(mocks.editImageWithOpenAiMock).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('streams partial images and a final artifact payload', async () => {
+    mocks.createArtifactMock.mockReturnValue({
+      id: 'artifact-image-stream-1',
+      sessionId: 'session-1',
+      userId: 'user-a',
+      type: 'image',
+      title: '画一条羽毛河流',
+      content: 'data:image/png;base64,c3RyZWFtZWQtaW1hZ2U=',
+      version: 1,
+      parentVersionId: null,
+      metadata: { modelId: 'gpt-image-2' },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      updatedAt: '2026-04-22T00:00:00.000Z',
+    });
+    mocks.generateImageStreamWithOpenAiMock.mockImplementation(
+      async (
+        _input: unknown,
+        handlers: {
+          onPartial?: (partial: { bytes: Buffer; index: number; mimeType: string }) => void;
+        },
+      ) => {
+        handlers.onPartial?.({
+          bytes: Buffer.from('partial-image'),
+          index: 0,
+          mimeType: 'image/png',
+        });
+        return {
+          bytes: Buffer.from('streamed-image'),
+          mimeType: 'image/png',
+          outputFormat: 'png',
+          prompt: '画一条羽毛河流',
+          quality: 'high',
+          requestId: 'req-image-stream-1',
+          size: '1024x1024',
+        };
+      },
+    );
+
+    const app = Fastify();
+    await app.register(sessionImagesRoutes);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-1/images/generations/stream',
+      payload: { prompt: '画一条羽毛河流' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/event-stream');
+    expect(response.body).toContain('event: partial');
+    expect(response.body).toContain('event: done');
+    const doneLine = response.body
+      .split('\n')
+      .find((line) => line.startsWith('data:') && line.includes('"artifact"'));
+    expect(doneLine).toContain('"artifacts"');
+    expect(mocks.generateImageStreamWithOpenAiMock).toHaveBeenCalledTimes(1);
+
+    await app.close();
+  });
+
+  it('rejects the stream endpoint without session ownership', async () => {
+    mocks.sqliteGetMock.mockReturnValue(undefined);
+
+    const app = Fastify();
+    await app.register(sessionImagesRoutes);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-404/images/generations/stream',
+      payload: { prompt: '画一条羽毛河流' },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(mocks.generateImageStreamWithOpenAiMock).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('passes the mask through to the edit call when a reference image is present', async () => {
+    mocks.createArtifactMock.mockReturnValue({
+      id: 'artifact-image-mask-1',
+      sessionId: 'session-1',
+      userId: 'user-a',
+      type: 'image',
+      title: '只改遮罩区域',
+      content: 'data:image/png;base64,bWFzaw==',
+      version: 1,
+      parentVersionId: null,
+      metadata: { maskArtifactId: 'artifact-input-1' },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      updatedAt: '2026-04-22T00:00:00.000Z',
+    });
+
+    const app = Fastify();
+    await app.register(sessionImagesRoutes);
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/sessions/session-1/images/generations',
+      payload: {
+        prompt: '只改遮罩区域',
+        inputArtifacts: [{ artifactId: 'artifact-input-1' }],
+        maskArtifact: { artifactId: 'artifact-input-1' },
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(mocks.editImageWithOpenAiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mask: expect.objectContaining({ fileName: 'input.png', mimeType: 'image/png' }),
+        inputImage: expect.objectContaining({ fileName: 'input.png' }),
+      }),
+    );
 
     await app.close();
   });

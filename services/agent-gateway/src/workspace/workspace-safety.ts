@@ -10,7 +10,10 @@ import {
 import { createPlatformAdapter } from '@openAwork/platform-adapter';
 import { WORKSPACE_ROOT, WORKSPACE_ROOTS, sqliteGet } from '../infra/db.js';
 import { resolveGatewayDataDir } from '../infra/storage-paths.js';
-import { resolveSessionWorkspacePath } from '../session/session-workspace-resolution.js';
+import {
+  resolveSessionWorkspacePath,
+  resolveSessionWorkspaceResolution,
+} from '../session/session-workspace-resolution.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { isPathWithinSkillResources } from './skill-resource-roots.js';
 import {
@@ -50,7 +53,26 @@ export function resolveWorkspaceRootForPath(path: string | null | undefined): st
   return matched ?? WORKSPACE_ROOT;
 }
 
+/**
+ * 会话工作目录 + 其「语义来源」。
+ *
+ * `remote` 为 true 表示提供该路径的会话绑定了 SSH 连接，因此 `path` 是**远端主机
+ * 上的绝对路径**：本地文件系统入口（任务图落盘、ignore 规则加载等）若直接使用它，
+ * 会把远端路径当本地路径操作（曾命中 `mkdir('/.agentdocs')` → EACCES）。调用方必须
+ * 先看 `remote` 再决定如何使用 `path`。
+ */
+export interface SessionWorkspaceResolutionInfo {
+  path: string;
+  remote: boolean;
+}
+
 export function getSessionWorkingDirectory(sessionId: string): string | null {
+  return getSessionWorkspaceResolution(sessionId)?.path ?? null;
+}
+
+export function getSessionWorkspaceResolution(
+  sessionId: string,
+): SessionWorkspaceResolutionInfo | null {
   const row = sqliteGet<SessionMetadataRow>(
     'SELECT metadata_json, user_id FROM sessions WHERE id = ? LIMIT 1',
     [sessionId],
@@ -60,12 +82,12 @@ export function getSessionWorkingDirectory(sessionId: string): string | null {
   }
   // 递归解析 workingDirectory：子 session 可能没有直接设置，
   // 需要通过 DB 列 team_parent_session_id 向上查找父 session 链。
-  const workingDirectory = resolveSessionWorkspacePath({
+  const resolution = resolveSessionWorkspaceResolution({
     metadataJson: row.metadata_json,
     sessionId,
     userId: row.user_id,
   });
-  return workingDirectory;
+  return resolution ? { path: resolution.path, remote: resolution.remote } : null;
 }
 
 export function getSessionWorkingDirectoryForUser(

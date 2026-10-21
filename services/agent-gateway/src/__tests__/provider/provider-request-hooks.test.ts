@@ -36,12 +36,12 @@ const nativeResponse = () =>
     events: [
       OpenCodeLLM.LLMEvent.textDelta({ id: 'text-1', text: 'hello' }),
       OpenCodeLLM.LLMEvent.finish({
-        reason: 'stop',
+        reason: { normalized: 'stop' },
         usage: new OpenCodeLLM.Usage({ inputTokens: 3, outputTokens: 5, totalTokens: 8 }),
       }),
     ],
     usage: new OpenCodeLLM.Usage({ inputTokens: 3, outputTokens: 5, totalTokens: 8 }),
-    finishReason: 'stop',
+    finishReason: { normalized: 'stop' },
   });
 
 afterEach(() => {
@@ -163,7 +163,7 @@ describe('request.body hook 接线', () => {
     let request: OpenCodeLLM.LLMRequest | undefined;
     vi.spyOn(OpenCodeLLM.LLMClient, 'stream').mockImplementation((value) => {
       request = value;
-      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: 'stop' })]);
+      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: { normalized: 'stop' } })]);
     });
 
     await Effect.runPromise(
@@ -254,7 +254,7 @@ describe('runUpstreamGenerate() 派发 chat.params', () => {
     let request: OpenCodeLLM.LLMRequest | undefined;
     vi.spyOn(OpenCodeLLM.LLMClient, 'stream').mockImplementation((value) => {
       request = value;
-      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: 'stop' })]);
+      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: { normalized: 'stop' } })]);
     });
 
     await Effect.runPromise(

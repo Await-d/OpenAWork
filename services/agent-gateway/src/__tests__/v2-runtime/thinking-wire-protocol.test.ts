@@ -106,8 +106,11 @@ describe('thinking wire protocol mapping', () => {
     const prepared = await prepareWithUiThinking(input);
 
     expect(prepared.route).toBe('anthropic-messages');
+    // 思考预算必须小于实际下发的 `max_tokens`（对齐 opencode 参考库的钳制）：
+    // 该模型未配置输出上限，走 4096 回退，因此 16384 被压到一半 2048。
+    // 需要更大思考预算的模型应显式配置输出上限。
     expect(prepared.body).toMatchObject({
-      thinking: { type: 'enabled', budget_tokens: 16_384 },
+      thinking: { type: 'enabled', budget_tokens: 2_048 },
     });
   });
 

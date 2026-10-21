@@ -17,7 +17,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@openAwork/shared';
-import { slimMessagesForRecovery } from '../../routes/session-route-helpers.js';
+import {
+  OUTPUT_HARD_CAP_BYTES,
+  slimMessagesForRecovery,
+} from '../../routes/session-route-helpers.js';
 
 function toolResultMessage(output: unknown): Message {
   return {
@@ -154,5 +157,72 @@ describe('slimMessagesForRecovery — batch output structure', () => {
     const slimmed = (slimMsg!.content[0] as { output: unknown }).output;
     expect(typeof slimmed).toBe('string');
     expect(slimmed as string).toContain('truncated');
+  });
+});
+
+describe('slimMessagesForRecovery — 64KB 字节硬上限', () => {
+  it('把超限的 bash 输出压到上限内，同时保住对象结构与退出码', () => {
+    // 单个 leaf 逐字段截断后仍可能累加超限：stdout/stderr/diffs 各自独立受
+    // `SLIM_STRING_MAX` 约束，但叶子一多总量就无界。这里 20 个子字段各 2000 字符。
+    const bash: Record<string, unknown> = {
+      command: 'pnpm build',
+      cwd: '/repo',
+      exitCode: 0,
+      stdout: 'x'.repeat(20_000),
+      stderr: 'y'.repeat(20_000),
+    };
+    for (let i = 0; i < 20; i += 1) {
+      bash[`extra_${i}`] = 'z'.repeat(2000);
+    }
+    const [slimMsg] = slimMessagesForRecovery([toolResultMessage(bash)]);
+    const slimmed = (slimMsg!.content[0] as { output: unknown }).output as Record<string, unknown>;
+
+    expect(typeof slimmed).toBe('object');
+    expect(slimmed.exitCode).toBe(0);
+    expect(slimmed.command).toBe('pnpm build');
+    const serialized = JSON.stringify(slimmed);
+    expect(Buffer.byteLength(serialized, 'utf8')).toBeLessThanOrEqual(OUTPUT_HARD_CAP_BYTES);
+  });
+
+  it('batch 子结果再多也不会突破字节上限，且 results 结构仍在', () => {
+    const results = Array.from({ length: 40 }, (_, index) => ({
+      tool: `bash_${index}`,
+      status: 'completed',
+      isError: false,
+      output: { command: `pnpm ${index}`, exitCode: 0, stdout: 'a'.repeat(5000) },
+    }));
+    const [slimMsg] = slimMessagesForRecovery([toolResultMessage({ results })]);
+    const slimmed = (slimMsg!.content[0] as { output: unknown }).output as Record<string, unknown>;
+
+    expect(Array.isArray(slimmed.results)).toBe(true);
+    expect((slimmed.results as unknown[]).length).toBe(40);
+    expect(Buffer.byteLength(JSON.stringify(slimmed), 'utf8')).toBeLessThanOrEqual(
+      OUTPUT_HARD_CAP_BYTES,
+    );
+  });
+
+  it('未超限的输出保持原样，不引入任何截断标记', () => {
+    const small = { command: 'ls', exitCode: 0, stdout: 'file.txt', stderr: '' };
+    const [slimMsg] = slimMessagesForRecovery([toolResultMessage(small)]);
+    const slimmed = (slimMsg!.content[0] as { output: unknown }).output as Record<string, unknown>;
+    expect(slimmed).toEqual(small);
+  });
+});
+
+describe('slimMessagesForRecovery — slim 开关', () => {
+  it('默认瘦身（不再依赖 messageLimit）', () => {
+    const long = { command: 'cat', exitCode: 0, stdout: 'a'.repeat(50_000), stderr: '' };
+    const [slimMsg] = slimMessagesForRecovery([toolResultMessage(long)]);
+    const slimmed = (slimMsg!.content[0] as { output: unknown }).output as Record<string, unknown>;
+    expect((slimmed.stdout as string).length).toBeLessThan(50_000);
+    expect(slimmed.stdout as string).toContain('truncated');
+  });
+
+  it('显式 slim:false 时原样返回（供要把历史写回存储的调用方）', () => {
+    const long = { command: 'cat', exitCode: 0, stdout: 'a'.repeat(50_000), stderr: '' };
+    const [kept] = slimMessagesForRecovery([toolResultMessage(long)], false);
+    const output = (kept!.content[0] as { output: Record<string, unknown> }).output;
+    expect(output.stdout).toBe('a'.repeat(50_000));
+    expect(output.stdout as string).not.toContain('truncated');
   });
 });

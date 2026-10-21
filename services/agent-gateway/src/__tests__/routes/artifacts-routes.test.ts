@@ -217,3 +217,109 @@ describe('artifacts routes error contracts', () => {
     }
   });
 });
+
+/**
+ * 磁盘型附件（`POST /sessions/:id/artifacts` 写入的那套）的读取 / 删除面。
+ *
+ * 这是「待发队列附件跨端」依赖的两条路由：另一台设备凭 artifactId 拉回二进制、
+ * 孤儿副本凭同一 id 回收。
+ */
+describe('磁盘型附件的上传 / 下载 / 删除', () => {
+  async function uploadArtifact(
+    app: FastifyInstance,
+    name: string,
+    bytes: number[],
+  ): Promise<string> {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/artifacts`,
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: {
+        contentBase64: Buffer.from(bytes).toString('base64'),
+        mimeType: 'image/png',
+        name,
+        sizeBytes: bytes.length,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    return response.json<{ artifact: { id: string } }>().artifact.id;
+  }
+
+  it('上传后可下载原始字节，删除后下载 404', async () => {
+    const app = await buildApp();
+    try {
+      const artifactId = await uploadArtifact(app, '跨端截图.png', [1, 2, 3]);
+
+      const download = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/artifacts/${artifactId}/content`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(download.statusCode).toBe(200);
+      expect(String(download.headers['content-type'])).toContain('image/png');
+      expect(download.rawPayload.equals(Buffer.from([1, 2, 3]))).toBe(true);
+      // 中文文件名经 RFC 5987 编码，不产生非法 header。
+      expect(String(download.headers['content-disposition'])).toContain(
+        `filename*=UTF-8''${encodeURIComponent('跨端截图.png')}`,
+      );
+
+      const remove = await app.inject({
+        method: 'DELETE',
+        url: `/sessions/${SESSION_ID}/artifacts/${artifactId}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(remove.statusCode).toBe(200);
+      expect(remove.json<{ removed: boolean }>().removed).toBe(true);
+
+      const afterRemove = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/artifacts/${artifactId}/content`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(afterRemove.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('跨会话读取同一 artifactId 一律 404（产物存在也不能绕过归属）', async () => {
+    const otherSessionId = 'sess-artifacts-routes-scope';
+    seedSession(otherSessionId);
+    const app = await buildApp();
+    try {
+      const artifactId = await uploadArtifact(app, 'private.png', [7]);
+      const response = await app.inject({
+        method: 'GET',
+        url: `/sessions/${otherSessionId}/artifacts/${artifactId}/content`,
+        headers: { authorization: bearer(app) },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({ error: '目标产物不存在。' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('下载 / 删除不存在的产物返回中文 404', async () => {
+    const app = await buildApp();
+    try {
+      const download = await app.inject({
+        method: 'GET',
+        url: `/sessions/${SESSION_ID}/artifacts/missing-artifact/content`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(download.statusCode).toBe(404);
+      expect(download.json()).toMatchObject({ error: '目标产物不存在。' });
+
+      const remove = await app.inject({
+        method: 'DELETE',
+        url: `/sessions/${SESSION_ID}/artifacts/missing-artifact`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(remove.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});

@@ -16,7 +16,11 @@ import {
   createStreamErrorChunk,
 } from './stream.js';
 import { formatStreamRequestIssues } from './stream-request-issues.js';
-import { buildRunEventEnvelope, deriveRunEventBookend } from '../session/run-event-envelope.js';
+import {
+  buildRunEventEnvelope,
+  deriveRunEventBookend,
+  isStreamEndingRunEvent,
+} from '../session/run-event-envelope.js';
 import {
   getRunEventRunId,
   getLatestSessionRunEventSeqByRequest,
@@ -801,10 +805,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
       'Access-Control-Allow-Credentials': 'true',
       Vary: 'Origin',
     });
-    if (!safeWriteReplyRaw(reply, 'retry: 1000\n\n')) {
-      safeEndReplyRaw(reply);
-      return;
-    }
+    // `retry: 1000` 改到下面的「确实会挂起订阅」分支再下发，理由见该处注释。
 
     if (!isRequestedRequestActive) {
       const replayEvents = listSessionRunEventsByRequestAfterSeq({
@@ -827,6 +828,20 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
+      // 明确告知客户端「本次 attach 是重放完毕后的正常结束」，而不是传输中断。
+      //
+      // 没有这个信号时，EventSource 对「服务端正常 EOF」与「网络断开」只会同样触发
+      // `onerror`（浏览器不提供区分手段）。只要上面重放出了任何一条新事件，客户端就会
+      // 按 `receivedEventCount > 0` 判成 `attach_stream_disconnected`，进而走 800ms 起
+      // 指数退避（封顶 30s）的断线重连——用户看到的就是「自动重连中 · 约 25.6s 后重试」，
+      // 而这条流其实早已正常结束。
+      //
+      // 用具名事件而非注释：`:` 开头的注释行不会派发给 `onmessage`，客户端无法观测。
+      safeWriteReplyRaw(
+        reply,
+        `event: attach-replay-end\ndata: ${JSON.stringify({ replayedCount: replayEvents.length })}\n\n`,
+      );
+
       wl.succeed(routeStep, undefined, {
         attached: false,
         clientRequestId: query.data.clientRequestId,
@@ -834,6 +849,16 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         sessionId,
       });
       wl.flush(ctx, 200);
+      safeEndReplyRaw(reply);
+      return;
+    }
+    // 只在**真正会长期挂起**的订阅分支才给 EventSource 下发 `retry: 1000`。
+    // 上面那个「重放完立即 EOF」的分支不适用：EventSource 收到 `retry` 会在 EOF 后
+    // 自行按该间隔重连，与前端应用层的退避重连叠加，形成两条并发的重连循环
+    // （控制台可见 `closeExistingTransports gen` 连续自增、attach 成功即秒断）。
+    // 不下发时，浏览器默认重连间隔（约 3s）仍兜底，而正常结束由前端按
+    // `silent_close` 静默收敛，不会误报「连接中断」。
+    if (!safeWriteReplyRaw(reply, 'retry: 1000\n\n')) {
       safeEndReplyRaw(reply);
       return;
     }
@@ -860,21 +885,35 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
           }),
         );
         if (!delivered) {
-          cleanup();
+          cleanup('write_failed');
           return;
         }
         lastSeq = seq;
-        if (deriveRunEventBookend(event)?.terminal === true) {
-          cleanup();
+        // 只对**客户端也会结算**的终态事件收尾。`isStreamEndingRunEvent` 与
+        // `isTerminalRunEvent` 的差别就在非终态 error（如 TOOL_ERROR）上：客户端
+        // 收到它只透传提示、不断连，若这里把响应结束掉，那次正常 EOF 会被判成
+        // 「流式传输中连接中断」，进而进入「重连 → 再撞上下一条同类错误 → 再断开」
+        // 的死循环。
+        if (isStreamEndingRunEvent(event)) {
+          cleanup('terminal_event');
         }
       };
 
       let heartbeat: NodeJS.Timeout | null = null;
-      const cleanup = () => {
+      /**
+       * 关闭原因。此前只有布尔 `settled`，导致「客户端主动断开」「写失败」「终态事件」
+       * 三种情形在日志里完全无法区分——客户端看到 `[ATTACH] stream closed` 时无从判断
+       * 是链路被掐断还是服务端正常收尾。
+       */
+      let closeReason = 'unknown';
+      /** 订阅已建立后的存活时长，用于区分「刚连上就断」与「跑了一会儿被中断」。 */
+      const attachedAtMs = Date.now();
+      const cleanup = (reason: string) => {
         if (settled) {
           return;
         }
         settled = true;
+        closeReason = reason;
         if (heartbeat) {
           clearInterval(heartbeat);
           heartbeat = null;
@@ -882,11 +921,21 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         unsubscribe();
         request.raw.off('close', cleanup);
         safeEndReplyRaw(reply);
+        wl.succeed(routeStep, undefined, {
+          attached: true,
+          clientRequestId: query.data.clientRequestId,
+          closeReason,
+          elapsedMs: Date.now() - attachedAtMs,
+          lastSeq,
+          replayedCount,
+          sessionId,
+        });
+        wl.flush(ctx, 200);
         resolve();
       };
       heartbeat = setInterval(() => {
         if (!safeWriteReplyRaw(reply, ': keepalive\n\n')) {
-          cleanup();
+          cleanup('heartbeat_failed');
         }
       }, 10_000);
       unsubscribe = subscribeSessionRunEvents(sessionId, (event, meta?: PublishRunEventMeta) => {
@@ -905,7 +954,9 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         deliverEvent(event, meta.seq);
       });
 
-      request.raw.on('close', cleanup);
+      request.raw.on('close', () => {
+        cleanup('client_closed');
+      });
 
       const replayEvents = listSessionRunEventsByRequestAfterSeq({
         sessionId,
@@ -923,15 +974,8 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         deliverEvent(pendingEvent.event, pendingEvent.seq);
       }
 
-      if (!settled) {
-        wl.succeed(routeStep, undefined, {
-          attached: true,
-          clientRequestId: query.data.clientRequestId,
-          replayedCount,
-          sessionId,
-        });
-        wl.flush(ctx, 200);
-      }
+      // 收尾日志统一由 `cleanup` 产出（带 closeReason / elapsedMs），此处不再重复
+      // `wl.succeed` + `wl.flush`——否则会往同一个 workflow 里写两条终态步骤。
     });
   });
 

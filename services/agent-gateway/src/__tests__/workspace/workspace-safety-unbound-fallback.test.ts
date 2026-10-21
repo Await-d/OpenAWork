@@ -50,6 +50,16 @@ vi.mock('../../infra/db.js', () => ({
 
 vi.mock('../../session/session-workspace-resolution.js', () => ({
   resolveSessionWorkspacePath: mocks.resolveSessionWorkspacePath,
+  // `getSessionWorkspaceResolution` 会走这条出口取「路径 + 远端语义」；本文件的
+  // 会话都是本地工作区，故 remote 恒为 false（SSH 远端分支由 task-graph-root 测试覆盖）。
+  resolveSessionWorkspaceResolution: (input: {
+    metadataJson: string;
+    sessionId: string;
+    userId: string;
+  }) => {
+    const path = mocks.resolveSessionWorkspacePath(input);
+    return path === null ? null : { path, remote: false };
+  },
 }));
 
 vi.mock('../../session/session-workspace-metadata.js', () => ({

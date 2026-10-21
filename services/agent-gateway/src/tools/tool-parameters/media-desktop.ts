@@ -1,3 +1,4 @@
+import { IMAGE_GENERATION_COUNT_RANGE } from '@openAwork/shared';
 import type { ToolParameters } from './tool-parameter-schema.js';
 import {
   buildDesktopAutomationParameters,
@@ -65,13 +66,13 @@ export function buildMediaDesktopParameters(name: string): ToolParameters | unde
           size: {
             type: 'string',
             description:
-              '图片尺寸，WxH 格式。优先选预设：1K — "1024x1024"（1:1）、"1536x1024"（3:2）、"1024x1536"（2:3）；2K（自动提到 high quality）— "2048x2048"（1:1）、"2048x1152"（16:9）、"1152x2048"（9:16）；4K（实验性、慢、仅走 relay）— "3840x2160"（16:9）、"2160x3840"（9:16）。自定义尺寸须同时满足：最长边 ≤ 3840、宽高都是 16 的倍数、长宽比 ≤ 3:1、总像素 [655360, 8294400]。不传时用用户配置。',
+              '图片尺寸，WxH 格式，或 "auto"（由模型按 prompt 选择）。优先选预设：1K — "1024x1024"（1:1）、"1536x1024"（3:2）、"1024x1536"（2:3）；2K — "2048x2048"（1:1）、"2048x1152"（16:9）、"1152x2048"（9:16）；4K（实验性、慢、仅走 relay）— "3840x2160"（16:9）、"2160x3840"（9:16）。自定义尺寸须同时满足：最长边 ≤ 3840、宽高都是 16 的倍数、长宽比 ≤ 3:1、总像素 [655360, 8294400]。不传时用用户配置。',
           },
           quality: {
             type: 'string',
-            enum: ['low', 'medium', 'high'],
+            enum: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
             description:
-              '图片质量："low"重速度、"medium"平衡、"high"重细节。2K / 4K 尺寸会被服务端自动提到 "high"。不传时用用户配置。',
+              '图片质量："auto" 由模型决定（官方默认）、"low" 重速度、"medium" 平衡、"high" 重细节；"xhigh" / "max" 仅 GPT Image 2.5 支持，更早的模型会被服务端收敛到 "high"。旧模型在 2K / 4K 尺寸下会被服务端自动提到 "high"。不传时用用户配置。',
           },
           outputFormat: {
             type: 'string',
@@ -81,9 +82,25 @@ export function buildMediaDesktopParameters(name: string): ToolParameters | unde
           },
           background: {
             type: 'string',
-            enum: ['auto', 'opaque'],
+            enum: ['auto', 'opaque', 'transparent'],
             description:
-              '背景处理："auto" 由模型决定（PNG/WebP 下可能产生透明）；"opaque" 强制不透明。不传时用用户配置。',
+              '背景处理："auto" 由模型决定；"opaque" 强制不透明；"transparent" 透明背景（需配合 png / webp）。不传时用用户配置。',
+          },
+          moderation: {
+            type: 'string',
+            enum: ['auto', 'low'],
+            description:
+              '内容审核严格度："auto" 为标准过滤（默认），"low" 更宽松。不传时用用户配置。',
+          },
+          outputCompression: {
+            type: 'number',
+            description: '输出压缩率（0-100 百分比），仅 jpeg / webp 生效。不传时由上游决定。',
+          },
+          count: {
+            type: 'integer',
+            minimum: IMAGE_GENERATION_COUNT_RANGE.min,
+            maximum: IMAGE_GENERATION_COUNT_RANGE.max,
+            description: `一次生成的张数（对应官方 n 参数，${IMAGE_GENERATION_COUNT_RANGE.min}-${IMAGE_GENERATION_COUNT_RANGE.max}），默认 1。张数会线性放大耗时与成本。`,
           },
         },
         required: ['prompt'],

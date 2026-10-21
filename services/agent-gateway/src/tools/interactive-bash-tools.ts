@@ -1,12 +1,9 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { execFileWithEscalation } from '../infra/exec-file-escalation.js';
 import { ensureUnboundSessionWorkspaceDirectory } from '../workspace/workspace-safety.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
-
-const execFileAsync = promisify(execFile);
 
 const interactiveBashInputSchema = z.object({
   tmux_command: z.string().min(1),
@@ -139,9 +136,9 @@ export async function runInteractiveBashCommand(
   let outputText: string;
   let outputIsError = false;
   try {
-    const { stdout, stderr } = await execFileAsync(tmuxPath, parts, {
+    const { stdout, stderr } = await execFileWithEscalation(tmuxPath, parts, {
       ...(trackingContext?.workingDirectory ? { cwd: trackingContext.workingDirectory } : {}),
-      timeout: 60000,
+      timeoutMs: 60_000,
       maxBuffer: 2 * 1024 * 1024,
     });
     if (stderr.trim().length > 0) {

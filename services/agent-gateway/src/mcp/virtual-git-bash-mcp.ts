@@ -57,12 +57,23 @@ export async function callGitBashVirtualMcp(
   }
 }
 
-function resolveGitBash(): {
+interface GitBashResolution {
   found: boolean;
   path: string | null;
   source: string;
   checkedPaths: string[];
-} {
+}
+
+let gitBashResolutionCache: GitBashResolution | null = null;
+
+function resolveGitBash(): GitBashResolution {
+  // `where.exe` / 固定路径探测是同步的；Git Bash 的安装位置在进程生命周期内
+  // 不会变化，缓存结果避免每次 git_bash 调用都同步阻塞事件循环。
+  gitBashResolutionCache ??= detectGitBash();
+  return gitBashResolutionCache;
+}
+
+function detectGitBash(): GitBashResolution {
   if (process.platform !== 'win32') {
     return { found: true, path: null, source: 'not-required', checkedPaths: [] };
   }
@@ -131,7 +142,13 @@ async function runGitBashTool(sessionId: string, args: Record<string, unknown>):
       ? assertSessionWorkspacePath({ path: args['workdir'], sessionId })
       : assertSessionWorkingDirectory(sessionId);
   const timeout = typeof args['timeout'] === 'number' ? Math.floor(args['timeout']) : 120_000;
-  return spawnGitBash(resolution.path, command, workdir, timeout);
+  const result = await spawnGitBash(resolution.path, command, workdir, timeout);
+  // MCP 的结果形状只认顶层 isError；不在这里补的话，非零退出 / 超时
+  // 在工具层仍会显示为成功，模型只能自己从 exitCode 里猜。
+  return {
+    ...result,
+    isError: result.timedOut || result.exitCode !== 0,
+  };
 }
 
 function spawnGitBash(
@@ -148,14 +165,33 @@ function spawnGitBash(
     });
     const chunks: Buffer[] = [];
     let timedOut = false;
+    let exited = false;
+    let killEscalation: NodeJS.Timeout | null = null;
+    const clearKillEscalation = () => {
+      if (killEscalation) {
+        clearTimeout(killEscalation);
+        killEscalation = null;
+      }
+    };
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill('SIGTERM');
+      // SIGTERM 只是请求；忽略它的子进程必须靠 SIGKILL 兜底，否则
+      // `run` 会永久 pending，前端/模型都只能等到工具层超时。
+      killEscalation = setTimeout(() => {
+        killEscalation = null;
+        if (!exited) {
+          child.kill('SIGKILL');
+        }
+      }, 3_000);
+      killEscalation.unref?.();
     }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => chunks.push(chunk));
     child.on('exit', (code) => {
+      exited = true;
       clearTimeout(timer);
+      clearKillEscalation();
       resolveRun({
         exitCode: typeof code === 'number' ? code : timedOut ? 124 : 1,
         cwd,
@@ -164,7 +200,9 @@ function spawnGitBash(
       });
     });
     child.on('error', (error) => {
+      exited = true;
       clearTimeout(timer);
+      clearKillEscalation();
       resolveRun({ exitCode: 1, cwd, output: error.message, timedOut });
     });
   });

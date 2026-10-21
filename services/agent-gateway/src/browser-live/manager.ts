@@ -39,13 +39,12 @@ export interface BrowserLiveStackFrameLike {
   functionName?: string;
 }
 
-/** 套用 source map 后栈帧的结构镜像。 */
+/** 套用 source map 后栈帧的结构镜像（不含源码全文，理由见 `BrowserLiveResolvedStackFrame`）。 */
 export interface BrowserLiveResolvedStackFrameLike {
   url: string;
   line: number;
   column: number;
   functionName?: string;
-  source: string | null;
   sourceLine: number | null;
   sourceColumn: number | null;
   sourceName: string | null;
@@ -61,6 +60,8 @@ export type BrowserLiveEventLike =
       timestamp: number;
       stack?: BrowserLiveStackFrameLike[];
       sourceMappedStack?: BrowserLiveResolvedStackFrameLike[];
+      /** 产出该日志时的页面代次（主文档导航自增）。 */
+      generation?: number;
     }
   | {
       type: 'pageerror';
@@ -68,6 +69,8 @@ export type BrowserLiveEventLike =
       timestamp: number;
       stack?: BrowserLiveStackFrameLike[];
       sourceMappedStack?: BrowserLiveResolvedStackFrameLike[];
+      /** 产出该异常时的页面代次。 */
+      generation?: number;
     }
   | {
       type: 'network';
@@ -82,8 +85,10 @@ export type BrowserLiveEventLike =
       errorText?: string;
       requestHeadersSanitized?: Record<string, string>;
       responseHeadersSanitized?: Record<string, string>;
+      /** 该请求所属的页面代次。 */
+      generation?: number;
     }
-  | { type: 'nav'; url: string; title: string; timestamp: number }
+  | { type: 'nav'; url: string; title: string; timestamp: number; generation?: number }
   | {
       type: 'screencastFrame';
       data: string;
@@ -95,6 +100,8 @@ export type BrowserLiveEventLike =
       scrollOffsetY: number;
       frameSessionId: number;
       timestamp: number;
+      /** 该帧所属页面代次（主文档导航时自增），供客户端丢弃过期页面的帧。 */
+      generation?: number;
     }
   | { type: 'screencastEnd' };
 
@@ -115,7 +122,12 @@ export type BrowserLiveInputEventLike =
       text?: string;
       code?: string;
       windowsVirtualKeyCode?: number;
-    };
+      /** CDP 修饰键位掩码：Alt=1、Ctrl=2、Meta=4、Shift=8。 */
+      modifiers?: number;
+      /** Blink 级编辑命令（`selectAll` / `undo` / `redo` / `cut` …）。 */
+      commands?: string[];
+    }
+  | { kind: 'text'; text: string };
 
 export interface BrowserLiveDeviceMetricsLike {
   width: number;
@@ -177,6 +189,7 @@ export interface BrowserLiveScreencastOptionsLike {
   quality?: number;
   maxWidth?: number;
   maxHeight?: number;
+  format?: 'jpeg' | 'png';
   everyNthFrame?: number;
 }
 
@@ -184,6 +197,14 @@ export interface BrowserLiveScreenshotOptionsLike {
   fullPage?: boolean;
   type?: 'png' | 'jpeg';
   quality?: number;
+}
+
+/** 主文档滚动几何（`control.scroll.metrics` 的回包）。 */
+export interface BrowserLiveScrollMetricsLike {
+  scrollY: number;
+  maxScrollY: number;
+  viewportHeight: number;
+  contentHeight: number;
 }
 
 /** `BrowserLiveSession` 的结构镜像，供测试注入 fake，无需加载 Playwright。 */
@@ -195,6 +216,8 @@ export interface BrowserLiveSessionLike {
   onEvent(handler: (event: BrowserLiveEventLike) => void): () => void;
   goto(url: string): Promise<void>;
   reload(): Promise<void>;
+  goBack(): Promise<void>;
+  goForward(): Promise<void>;
   currentUrl(): Promise<string>;
   currentTitle(): Promise<string>;
   startScreencast(options?: BrowserLiveScreencastOptionsLike): Promise<void>;
@@ -204,6 +227,17 @@ export interface BrowserLiveSessionLike {
   clearDeviceMetricsOverride(): Promise<void>;
   setUserAgentOverride(userAgent: string | null): Promise<void>;
   dispatchInput(event: BrowserLiveInputEventLike): Promise<void>;
+  /**
+   * 读取主文档滚动几何（`scroll.metrics` / `scrollTo` 的回包）。
+   *
+   * 实时画面不渲染浏览器滚动条，客户端靠它画出按比例、可拖动的滚动条。缺省实现
+   * （老会话 / 测试替身）不下发指标，前端自动隐藏滚动条。
+   */
+  scrollMetrics?(): Promise<BrowserLiveScrollMetricsLike>;
+  /** 把主文档滚到指定位置；缺省实现视为不支持拖动滚动。 */
+  scrollTo?(y: number): Promise<void>;
+  /** 读取页面当前选中文本（`copySelection` 用）；缺省实现返回空串。 */
+  selectedText?(): Promise<string>;
   nodeAtPoint(
     x: number,
     y: number,

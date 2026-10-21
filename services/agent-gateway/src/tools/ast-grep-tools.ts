@@ -1,11 +1,8 @@
-import { execFile } from 'node:child_process';
 import { isAbsolute, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { z } from 'zod';
+import { execFileWithEscalation } from '../infra/exec-file-escalation.js';
 import { isPathWithinRoot } from '../workspace/workspace-paths.js';
-
-const execFileAsync = promisify(execFile);
 
 export const AST_GREP_LANGUAGES = [
   'bash',
@@ -74,7 +71,9 @@ async function resolveAstGrepBinary(): Promise<string | null> {
     : ['ast-grep', 'ast-grep.exe'];
   for (const candidate of candidates) {
     try {
-      const { stdout, stderr } = await execFileAsync(candidate, ['--version'], { timeout: 3000 });
+      const { stdout, stderr } = await execFileWithEscalation(candidate, ['--version'], {
+        timeoutMs: 3_000,
+      });
       const output = `${stdout}\n${stderr}`.toLowerCase();
       if (output.includes('ast-grep')) {
         return candidate;
@@ -183,9 +182,9 @@ async function runAstGrepRaw(args: string[], options?: { cwd?: string }): Promis
     );
   }
   try {
-    const { stdout } = await execFileAsync(binary, args, {
+    const { stdout } = await execFileWithEscalation(binary, args, {
       ...(options?.cwd ? { cwd: options.cwd } : {}),
-      timeout: 60000,
+      timeoutMs: 60_000,
       maxBuffer: 10 * 1024 * 1024,
     });
     return stdout;

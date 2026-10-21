@@ -40,6 +40,9 @@ vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOTS: [],
   sqliteGet: mocks.sqliteGet,
+  // 用户消息落库被合并进一个事务（见 stream-session-title 的注释），桩必须提供它。
+  // 真实实现的嵌套语义是「已在事务内则直接执行」，这里同理。
+  sqliteTransaction: <T>(fn: () => T): T => fn(),
 }));
 
 import { persistStreamUserMessage } from '../../session/stream-session-title.js';

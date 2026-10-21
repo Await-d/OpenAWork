@@ -24,6 +24,8 @@ interface MessageRow {
   time_created: number;
   /** 反规范化自 data.role 的索引列（见 message-v2-projectors 的 upsert）。 */
   role: string;
+  /** 反规范化自 data.clientRequestId 的索引列（同样由 upsert 维护）。 */
+  client_request_id: string;
   data: string;
 }
 
@@ -80,12 +82,14 @@ vi.mock('../../infra/db.js', () => ({
         user_id: params[2] as string,
         time_created: params[3] as number,
         role: params[4] as string,
-        data: params[5] as string,
+        client_request_id: params[5] as string,
+        data: params[6] as string,
       };
       const existing = messageRows.findIndex((r) => r.id === row.id);
       if (existing >= 0) {
-        // ON CONFLICT DO UPDATE SET role = excluded.role, data = excluded.data
+        // ON CONFLICT DO UPDATE SET role, client_request_id, data = excluded.*
         messageRows[existing]!.role = row.role;
+        messageRows[existing]!.client_request_id = row.client_request_id;
         messageRows[existing]!.data = row.data;
       } else {
         messageRows.push(row);

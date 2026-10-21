@@ -95,6 +95,56 @@ export interface SettingsDisplayPreferencesResponse {
   updatedAt: string | null;
 }
 
+/**
+ * 内置浏览器标签的同步载荷（服务端 `user_settings` 里的 `user_browser_tabs_v1`）。
+ *
+ * 只包含「可恢复的部分」：地址与历史。页面运行态（滚动位置、表单内容）不属于标签语义。
+ */
+export interface SettingsBrowserTab {
+  id: string;
+  url: string;
+  title?: string;
+  faviconUrl?: string;
+  history: string[];
+  historyIndex: number;
+}
+
+export interface SettingsBrowserTabsResponse {
+  /** 服务端无记录时为 `null`（客户端应保留本机缓存，而不是清空）。 */
+  tabs: { tabs?: SettingsBrowserTab[]; activeTabId?: string } | null;
+  updatedAt: string | null;
+}
+
+/** 工作台现场的浏览器书签条目。 */
+export interface SettingsWorkspaceBookmark {
+  id: string;
+  url: string;
+  title: string;
+  faviconUrl?: string;
+  createdAt: number;
+}
+
+/**
+ * 工作台现场快照（`/settings/workspace-state`）。
+ *
+ * `uiState` 是前端 UI store 的持久化载荷原样透传：服务端不解释字段，只限制大小，
+ * 这样新增面板 / 布局字段不需要同步改协议。
+ */
+export interface SettingsWorkspaceStatePayload {
+  version: number;
+  /** 前端 UI store 的持久化版本，回灌时用于跑迁移。 */
+  uiStateVersion: number;
+  uiState: Record<string, unknown>;
+  bookmarks: SettingsWorkspaceBookmark[];
+  browserTabsByWorkspace: Record<string, { tabs: SettingsBrowserTab[]; activeTabId: string }>;
+}
+
+export interface SettingsWorkspaceStateResponse {
+  /** 服务端无记录时为 `null`（客户端以本地为种子推上去）。 */
+  state: SettingsWorkspaceStatePayload | null;
+  updatedAt: string | null;
+}
+
 export interface SettingsClient {
   getProfile(token: string, options?: { signal?: AbortSignal }): Promise<SettingsProfileResponse>;
   putProfile(token: string, payload: SettingsProfileUpdateInput): Promise<SettingsProfileResponse>;
@@ -107,6 +157,24 @@ export interface SettingsClient {
     token: string,
     payload: Record<string, unknown>,
   ): Promise<SettingsDisplayPreferencesResponse>;
+  // 内置浏览器标签（跨设备 / 跨重装恢复；服务端无记录时 tabs 为 null）
+  getBrowserTabs(
+    token: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SettingsBrowserTabsResponse>;
+  putBrowserTabs(
+    token: string,
+    payload: { tabs?: SettingsBrowserTab[]; activeTabId?: string },
+  ): Promise<SettingsBrowserTabsResponse>;
+  // 工作台现场（打开记录 + 面板布局；服务端无记录时 state 为 null）
+  getWorkspaceState(
+    token: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SettingsWorkspaceStateResponse>;
+  putWorkspaceState(
+    token: string,
+    payload: SettingsWorkspaceStatePayload,
+  ): Promise<SettingsWorkspaceStateResponse>;
   // Providers / 模型选择
   getProviders(
     token: string,
@@ -411,6 +479,52 @@ export function createSettingsClient(baseUrl: string): SettingsClient {
         actionLabel: '保存显示偏好',
         request: () =>
           fetchWithTimeout(`${baseUrl}/settings/display-preferences`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
+    },
+
+    async getBrowserTabs(token, options) {
+      return performSettingsRequest<SettingsBrowserTabsResponse>({
+        actionLabel: '读取浏览器标签',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/browser-tabs`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async putBrowserTabs(token, payload) {
+      return performSettingsRequest<SettingsBrowserTabsResponse>({
+        actionLabel: '保存浏览器标签',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/browser-tabs`, {
+            method: 'PUT',
+            headers: jsonAuthHeaders(token),
+            body: JSON.stringify(payload),
+          }),
+      });
+    },
+
+    async getWorkspaceState(token, options) {
+      return performSettingsRequest<SettingsWorkspaceStateResponse>({
+        actionLabel: '读取工作台状态',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/workspace-state`, {
+            headers: authHeader(token),
+            signal: options?.signal,
+          }),
+      });
+    },
+
+    async putWorkspaceState(token, payload) {
+      return performSettingsRequest<SettingsWorkspaceStateResponse>({
+        actionLabel: '保存工作台状态',
+        request: () =>
+          fetchWithTimeout(`${baseUrl}/settings/workspace-state`, {
             method: 'PUT',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(payload),

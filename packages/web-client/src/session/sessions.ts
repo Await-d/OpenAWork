@@ -10,6 +10,7 @@ import type {
 } from '@openAwork/shared';
 import type { PendingPermissionRequest, PermissionDecision } from './permissions.js';
 import type { PendingQuestionRequest } from './questions.js';
+import { normalizePendingQuestionRequests } from './question-normalization.js';
 import { fetchWithTimeout, isGenericFetchErrorMessage } from '../gateway/http.js';
 
 export type SessionSnapshotScopeKind = 'request' | 'backup' | 'scope' | 'unknown';
@@ -619,6 +620,8 @@ export interface SessionsClient {
       runEventAfterSeq?: number;
       runEventLimit?: number;
       signal?: AbortSignal;
+      /** 显式关闭 tool 输出瘦身（默认开启）；仅供要把历史写回存储的调用方。 */
+      slim?: boolean;
       since?: number;
     },
   ): Promise<SessionRecoveryReadModel>;
@@ -630,6 +633,8 @@ export interface SessionsClient {
       runEventAfterSeq?: number;
       runEventLimit?: number;
       signal?: AbortSignal;
+      /** 显式关闭 tool 输出瘦身（默认开启）；仅供要把历史写回存储的调用方。 */
+      slim?: boolean;
       since?: number;
     },
   ): Promise<SessionRecoveryLoadResult>;
@@ -1053,6 +1058,8 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       runEventAfterSeq?: number;
       runEventLimit?: number;
       signal?: AbortSignal;
+      /** 显式关闭 tool 输出瘦身（默认开启）；仅供要把历史写回存储的调用方。 */
+      slim?: boolean;
       since?: number;
     },
   ): Promise<SessionRecoveryLoadResult> => {
@@ -1074,6 +1081,11 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     }
     if (typeof options?.since === 'number') {
       params.set('since', String(options.since));
+    }
+    // 关闭 tool 输出瘦身（默认开启）。仅给「要把历史写回存储」的调用方用；
+    // 完整转录的正规通道是 `GET /sessions/:id`。
+    if (options?.slim === false) {
+      params.set('slim', '0');
     }
     const qs = params.toString();
     try {
@@ -1099,7 +1111,14 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       return {
         ok: true,
         retryable: false,
-        recovery: data.recovery,
+        // 网关原样透传 `questions_json`，多选标记的字段名（工具入参的 `multiSelect`）
+        // 与前端模型（`multiple`）不一致。**必须在这里归一化**：本读模型的消费方
+        // （`use-chat-conversation-state` / `use-team-conversation-state-snapshot`）
+        // 直接把 `recovery.pendingQuestions` 灌进面板，漏掉这步就会把题目按单选渲染。
+        recovery: {
+          ...data.recovery,
+          pendingQuestions: normalizePendingQuestionRequests(data.recovery?.pendingQuestions),
+        },
       };
     } catch (error) {
       return {
@@ -1203,7 +1222,7 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     },
 
     async getSharedWithMe(token, sessionId, options) {
-      return performSessionRequest<SharedSessionDetailRecord>({
+      const detail = await performSessionRequest<SharedSessionDetailRecord>({
         actionLabel: '读取共享会话详情',
         request: () =>
           fetchWithTimeout(`${gatewayUrl}/sessions/shared-with-me/${sessionId}`, {
@@ -1211,6 +1230,12 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
             signal: options?.signal,
           }),
       });
+      // 共享会话详情同样回传原始 `questions_json`；团队观看面板会用它渲染问答卡，
+      // 漏掉归一化会让多选退化成单选。
+      return {
+        ...detail,
+        pendingQuestions: normalizePendingQuestionRequests(detail.pendingQuestions),
+      };
     },
 
     async createSharedComment(token, sessionId, input) {
@@ -1284,7 +1309,13 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
             signal: options?.signal,
           }),
       });
-      return data.status;
+      // 同上（recovery）：这条路径由 `use-session-snapshot-loader` 以 3s 轮询驱动，会用
+      // 未归一化的原始条目覆盖掉 `listPending` 已归一化的那份（`preserveEqualList`
+      // 深比较不相等 → 替换），症状即「刚出来是可多选、几秒后又变回单选」。
+      return {
+        ...data.status,
+        pendingQuestions: normalizePendingQuestionRequests(data.status?.pendingQuestions),
+      };
     },
 
     async search(token, query, options) {

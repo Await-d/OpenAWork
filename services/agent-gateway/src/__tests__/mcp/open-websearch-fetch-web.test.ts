@@ -170,7 +170,9 @@ describe('fetch_web failure diagnostics', () => {
   });
 
   it.each([
-    { status: 401, expected: '需要登录' },
+    // 401 文案已按 2026-10-18 排障改写：点明「对爬虫一律要求登录、别重试」，
+    // 避免模型把「登录」当成待办任务去反复换 URL 重试。
+    { status: 401, expected: '要求登录' },
     { status: 403, expected: '反爬' },
     { status: 404, expected: '不存在' },
     { status: 408, expected: '响应超时' },
@@ -188,6 +190,20 @@ describe('fetch_web failure diagnostics', () => {
     const message = readFirstText(result);
     expect(message).toContain(expected);
     expect(message).toContain(String(status));
+  });
+
+  it('maps download size-exceeded errors to an actionable hint (not a timeout)', async () => {
+    requestWithSafeRedirectsMock.mockRejectedValueOnce(
+      axiosLikeError('maxContentLength size of 4194304 exceeded', { code: 'ECONNABORTED' }),
+    );
+
+    const result = await callFetchWeb();
+
+    expect(result.isError).toBe(true);
+    const message = readFirstText(result);
+    expect(message).toContain('体积超过');
+    expect(message).toContain('4MB');
+    expect(message).not.toContain('请求超时');
   });
 
   it('maps timeout error codes to a retry hint', async () => {

@@ -193,6 +193,17 @@ export const SESSION_DELETE_RECOVERY_STATEMENTS: ReadonlyArray<SessionDeleteReco
     sql: 'UPDATE team_audit_logs SET session_id = NULL WHERE session_id = ?',
     params: ({ sessionId }) => [sessionId],
   },
+  // ── 待发队列：FK 是 sessions(id) ON DELETE CASCADE，FK 关闭时不会级联，
+  //    此前遗漏会留下悬挂的队列行（附件的磁盘副本由正常删除路径回收，
+  //    见 routes/sessions.ts 的 deleteSessionTree；此畸形恢复路径只保证行级清理）。──
+  {
+    sql: 'DELETE FROM session_composer_queue WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  {
+    sql: 'DELETE FROM session_composer_input_history WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
   {
     sql: 'DELETE FROM sessions WHERE id = ? AND user_id = ?',
     params: ({ sessionId, userId }) => [sessionId, userId],

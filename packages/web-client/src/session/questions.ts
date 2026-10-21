@@ -1,6 +1,10 @@
 import type { DialogueMode } from '@openAwork/shared';
 import { HttpError } from './sessions.js';
 import {
+  normalizePendingQuestionRequest,
+  normalizePendingQuestionRequests,
+} from './question-normalization.js';
+import {
   extractJsonErrorMessage,
   isGenericFetchErrorMessage,
   type JsonErrorData,
@@ -61,6 +65,17 @@ function authHeader(token: string): { Authorization: string } {
 function toDialogueMode(value: unknown): DialogueMode | undefined {
   return value === 'clarify' || value === 'coding' || value === 'programmer' ? value : undefined;
 }
+
+/**
+ * 网关所有返回待处理问题的地方给的都是**原始 JSON 透传**：多选标记的字段名是工具
+ * 入参的 `multiSelect`，而本文件的模型用 `multiple`。归一化实现放在
+ * `./question-normalization.js`（`sessions.ts` 的 `getStatus` / `getRecovery` /
+ * `getSharedWithMe` 也要用，留在本文件会与 `sessions.js` 形成循环导入）。
+ *
+ * 这里重新导出，保持既有消费者（`index.ts` 的公开出口、recovery 读模型）的导入路径
+ * 不变。
+ */
+export { normalizePendingQuestionRequest, normalizePendingQuestionRequests };
 
 function buildQuestionsActionErrorMessage(
   actionLabel: string,
@@ -133,7 +148,7 @@ async function performQuestionsRequest<T>(input: {
 export function createQuestionsClient(gatewayUrl: string): QuestionsClient {
   return {
     async listPending(token, sessionId, options) {
-      const data = await performQuestionsRequest<{ requests?: PendingQuestionRequest[] }>({
+      const data = await performQuestionsRequest<{ requests?: unknown[] }>({
         actionLabel: '读取待处理问题请求',
         request: () =>
           fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/questions/pending`, {
@@ -141,7 +156,9 @@ export function createQuestionsClient(gatewayUrl: string): QuestionsClient {
             signal: options?.signal,
           }),
       });
-      return data.requests ?? [];
+      // 网关按原始 JSON 透传，多选标记的字段名（`multiSelect`）与前端模型
+      // （`multiple`）不一致，必须在这里归一化，否则一律按单选渲染 / 提交。
+      return normalizePendingQuestionRequests(data.requests);
     },
 
     async reply(token, sessionId, payload) {

@@ -12,6 +12,7 @@
 import type { InputImageContent, Message, MessageContent, MessageRole } from '@openAwork/shared';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
+import type { SqliteBindableValue } from '../infra/sqlite-bind-params.js';
 import {
   type AssistantMessage,
   type AssistantErrorObject,
@@ -25,11 +26,13 @@ import {
   type ReasoningPart,
   type ToolPart,
   type PartV2Row,
+  type MessageV2Row,
   type ModifiedFilesSummaryPart,
   type ToolStatePending,
   type ToolStateRunning,
   makeMessageId,
   makePartId,
+  mapMessageInfoRows,
   tryPartFromRow,
 } from './message-v2-schema.js';
 import {
@@ -37,6 +40,7 @@ import {
   getPart,
   listMessagesWithParts,
   listMessagesWithPartsByTurnLimit,
+  listPartRowsByMessageIds,
   findToolPartByCallID,
   transitionToolToRunning,
 } from './message-store-v2.js';
@@ -334,14 +338,27 @@ function normalizeTokenCount(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
 
+/**
+ * 由 assistant 消息的 `tokens` 构建 providerUsage。
+ *
+ * 入参按**可能残缺**处理：`message_v2.data` 是 JSON blob，历史版本 / 半写入 / 缺键的行都
+ * 可能没有 `tokens`（甚至没有 `cache`）。读路径是整个聊天 UI 的唯一数据源，一个残缺字段
+ * 不该让 `listMessagesWithParts` 抛 TypeError 而把整会话的消息接口打成 500（实测：缺少
+ * `tokens` 的 assistant 行会让同一会话的所有读接口一起失败；生产库里的幽灵行恰好带着
+ * 完整 tokens 才没有暴露这一点）。缺失即视为「无用量」，不猜也不补 0 上报。
+ */
 function buildProviderUsageFromAssistantTokens(
-  tokens: AssistantMessage['tokens'],
+  tokens: Partial<AssistantMessage['tokens']> | null | undefined,
 ): NonNullable<Message['providerUsage']> | undefined {
+  if (!tokens) {
+    return undefined;
+  }
+
   const inputTokens = normalizeTokenCount(tokens.input);
   const outputTokens = normalizeTokenCount(tokens.output);
   const reasoningTokens = normalizeTokenCount(tokens.reasoning);
-  const cacheReadTokens = normalizeTokenCount(tokens.cache.read);
-  const cacheWriteTokens = normalizeTokenCount(tokens.cache.write);
+  const cacheReadTokens = normalizeTokenCount(tokens.cache?.read);
+  const cacheWriteTokens = normalizeTokenCount(tokens.cache?.write);
   const summedTotal =
     inputTokens + outputTokens + reasoningTokens + cacheReadTokens + cacheWriteTokens;
   const totalTokens = normalizeTokenCount(tokens.total ?? summedTotal);
@@ -505,16 +522,13 @@ function deleteSessionMessagesByExactRequestRole(input: {
   sessionId: string;
   userId: string;
 }): void {
-  const rows = sqliteAll<{ id: string; data: string }>(
-    'SELECT id, data FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
-    [input.sessionId, input.userId],
-  );
-  const targetIds = rows
-    .filter((row) => {
-      const data = JSON.parse(row.data) as MessageInfo;
-      return data.clientRequestId === input.clientRequestId && data.role === input.role;
-    })
-    .map((row) => row.id);
+  const targetIds = listRequestScopeRows({
+    clientRequestId: input.clientRequestId,
+    exact: true,
+    roles: [input.role],
+    sessionId: input.sessionId,
+    userId: input.userId,
+  }).map((row) => row.id);
 
   for (const id of targetIds) {
     emitEvent({
@@ -1057,39 +1071,34 @@ export function truncateSessionMessagesAfterV2(input: {
   messageText?: string;
 }): TruncateSessionMessagesAfterV2Result {
   // ── V2 truncate: delete messages after the given messageId ──
-  const rows = sqliteAll<{ id: string; time_created: number; data: string }>(
-    'SELECT id, time_created, data FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
-    [input.sessionId, input.userId],
-  );
-  let targetIndex = rows.findIndex((row) => row.id === input.messageId);
+  const cutoff = resolveTruncateCutoff(input);
 
-  // Fallback: when the frontend message ID does not match any backend row
-  // (frontend uses makeOrderedMessageId, backend uses makeMessageId), try to
-  // locate the user message by matching its text content.
-  if (targetIndex === -1 && input.messageText) {
-    const allMessages = listMessagesWithParts({
-      sessionId: input.sessionId,
-      userId: input.userId,
-    });
-    for (let i = allMessages.length - 1; i >= 0; i--) {
-      const msg = allMessages[i]!;
-      if (msg.info.role !== 'user') continue;
-      const textPart = msg.parts.find(
-        (p): p is TextPart => p.type === 'text' && p.text === input.messageText,
-      );
-      if (textPart) {
-        targetIndex = rows.findIndex((row) => row.id === msg.info.id);
-        break;
-      }
-    }
-  }
-
-  if (targetIndex !== -1) {
-    const cutoffIndex = input.inclusive === false ? targetIndex + 1 : targetIndex;
-    const deleteRows = rows.slice(cutoffIndex);
+  if (cutoff) {
+    // 被删窗口 = 排序键 (time_created ASC, id ASC) 上「≥ 定位点」（inclusive，缺省）
+    // 或「> 定位点」（inclusive === false）。行值比较直接骑
+    // `idx_message_v2_session_user_time` 做范围扫描（EXPLAIN 实测：`SEARCH message_v2
+    // USING INDEX ... (session_id=? AND user_id=? AND (time_created,id)>(?,?))`），因此只
+    // 读出**真正要删的行**；窗口之前的整段历史既不进内存、也不做 JSON 解析。
+    //
+    // 旧实现在这里 `SELECT id, time_created, data` 拉全会话再 `findIndex`：生产库单会话
+    // 228 万行 / 805 MiB 时单条 SELECT 就要 2.6s，且阻塞单线程 SQLite 的事件循环。
+    //
+    // `id IS NOT NULL` 排除不可寻址的幽灵行（成因见 message-v2-projectors 的守卫与
+    // `infra/db.ts` 的 `purgeUnidentifiableMessageRows`）：它们没有 id，不该出现在
+    // `removedMessageIds` 这类归因键里（旧实现会把 `null` 直接塞进 receipt），也无法按 id
+    // 删除；存量幽灵行由启动时的一次性迁移清理，此处不再为它们增加扫描。
+    const windowOperator = input.inclusive === false ? '>' : '>=';
+    const deleteRows = sqliteAll<{ id: string; time_created: number; data: string }>(
+      `SELECT id, time_created, data FROM message_v2
+        WHERE session_id = ? AND user_id = ? AND id IS NOT NULL
+          AND (time_created, id) ${windowOperator} (?, ?)
+        ORDER BY time_created ASC, id ASC`,
+      [input.sessionId, input.userId, cutoff.timeCreated, cutoff.id],
+    );
     const deleteIds = deleteRows.map((r) => r.id);
-    const cutoffTimeMs =
-      deleteRows[0]?.time_created ?? rows[targetIndex]?.time_created ?? Date.now();
+    // 窗口为空（inclusive: false 命中末条）时取定位点自身的时间：与旧实现
+    // 「deleteRows[0] ?? rows[targetIndex]」同义，不发明时间戳。
+    const cutoffTimeMs = deleteRows[0]?.time_created ?? cutoff.timeCreated;
 
     // 回合键只存在于 `message_v2.data` JSON（message_v2 无 client_request_id 列）。
     // 缺失 / 损坏的行按「不可归因的历史行」跳过，但仍计入 removedMessageIds。
@@ -1166,6 +1175,105 @@ export function truncateSessionMessagesAfterV2(input: {
     cutoffTimeMs: 0,
     invalidatedClientRequestIds: [],
   };
+}
+
+/**
+ * 截断定位点：`(timeCreated, id)` 即该消息在 `(time_created ASC, id ASC)` 排序键上的位置。
+ */
+interface TruncateCutoff {
+  id: string;
+  timeCreated: number;
+}
+
+/**
+ * 解析「从哪条消息开始截」，**只读一个定位点**。
+ *
+ * 先按主键点查（走 `sqlite_autoindex_message_v2_1`）；未命中才退到文本兜底——前端与后端
+ * 各自生成消息 id（`makeOrderedMessageId` vs `makeMessageId`），前端 id 在后端不存在的
+ * 情况是常态而非例外，因此兜底路径的代价同样在关键路径上。
+ */
+function resolveTruncateCutoff(input: {
+  sessionId: string;
+  userId: string;
+  messageId: string;
+  messageText?: string;
+}): TruncateCutoff | null {
+  const exact = sqliteGet<{ id: string; time_created: number }>(
+    `SELECT id, time_created FROM message_v2
+      WHERE id = ? AND session_id = ? AND user_id = ?
+      LIMIT 1`,
+    [input.messageId, input.sessionId, input.userId],
+  );
+  if (exact) {
+    return { id: exact.id, timeCreated: exact.time_created };
+  }
+
+  if (!input.messageText) {
+    return null;
+  }
+
+  return findTruncateCutoffByMessageText({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    messageText: input.messageText,
+  });
+}
+
+/**
+ * 文本兜底：定位**最后一条正文完全等于 messageText 的 user 消息**。
+ *
+ * 只扫 user 消息（走覆盖索引 `idx_message_v2_session_role_time`，不读任何 `data`），再按需
+ * 取这些消息的 text part——不再像旧实现那样 `listMessagesWithParts` 把整会话消息连同全部
+ * part 拉进内存（生产库 228 万行时实测 6.6s，其中 228 万次 `JSON.parse`）。
+ */
+function findTruncateCutoffByMessageText(input: {
+  sessionId: string;
+  userId: string;
+  messageText: string;
+}): TruncateCutoff | null {
+  const candidates = sqliteAll<{ id: string; time_created: number }>(
+    `SELECT id, time_created FROM message_v2
+      WHERE session_id = ? AND user_id = ? AND role = 'user' AND id IS NOT NULL
+      ORDER BY time_created DESC, id DESC`,
+    [input.sessionId, input.userId],
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const textPartsByMessage = loadTextPartsByMessageIds(
+    input.sessionId,
+    candidates.map((candidate) => candidate.id),
+  );
+  for (const candidate of candidates) {
+    if (textPartsByMessage.get(candidate.id)?.has(input.messageText)) {
+      return { id: candidate.id, timeCreated: candidate.time_created };
+    }
+  }
+  return null;
+}
+
+/** 按消息 id 批量取文本 part 正文（复用 store 的分片 part 读取，避免第二份分片实现）。 */
+function loadTextPartsByMessageIds(
+  sessionId: string,
+  messageIds: readonly string[],
+): Map<string, Set<string>> {
+  const textPartsByMessage = new Map<string, Set<string>>();
+  // 行里的 id 是裸字符串，MessageID 只是品牌类型（与 `messageInfoFromRow` 的还原方式一致）。
+  const brandedIds = messageIds.map((id) => id as MessageID);
+  for (const row of listPartRowsByMessageIds(sessionId, brandedIds)) {
+    let parsed: { type?: unknown; text?: unknown };
+    try {
+      parsed = JSON.parse(row.data) as { type?: unknown; text?: unknown };
+    } catch {
+      continue;
+    }
+    if (parsed.type !== 'text' || typeof parsed.text !== 'string') continue;
+    const texts = textPartsByMessage.get(row.message_id) ?? new Set<string>();
+    texts.add(parsed.text);
+    textPartsByMessage.set(row.message_id, texts);
+  }
+  return textPartsByMessage;
 }
 
 function parseClientRequestIdFromMessageRow(dataJson: string): string | null {
@@ -1704,13 +1812,145 @@ export function publishTodoUpdated(input: {
 
 // ─── V2-native request-scope operations ───
 
+/**
+ * 请求族的候选行：骑 `idx_message_v2_session_request (session_id, user_id, client_request_id)`
+ * 做一次范围扫描。
+ *
+ * 下面这些「按请求族读写」的函数过去一律 `SELECT id, data …` 拉**整会话**再逐行
+ * `JSON.parse` 过滤（`getSessionMessageByRequestId` / `listSessionMessagesByRequestScope`
+ * 走的是更重的 `listSessionMessagesV2`，还要连带取全部 part）。会话越长这笔固定开销越高，
+ * 而且全程把 `data` 大 blob 搬进 JS。
+ *
+ * 谓词统一写成区间 `[root, root || ';')`：':' 是 0x3A，它的下一字节 ';'（0x3B）保证
+ * 「`root` 本身」与「以 `root:` 开头的任意串」都落在区间内。之所以两种命中都用区间、
+ * 而不用 `=` / `LIKE`：
+ *   - `LIKE 'root:%'` 默认大小写不敏感，在 BINARY 列上用不上索引；
+ *   - `client_request_id = ?`（精确族）看着更贴切，但优化器会因为「(session_id, user_id,
+ *     time_created, id) 索引能顺便满足 ORDER BY、不必排序」而改判给它 —— 于是退化成扫描
+ *     整个会话（EXPLAIN 实测）。区间写法在两种情况下都骑 idx_message_v2_session_request。
+ * 区间是**超集**（`root-abc`、`root!` 也落进来），精确判定仍由 `matchesRequestScopeRow`
+ * 完成，`exact` 只是个判定开关，所以 SQL 这边只需要快、不需要准。
+ *
+ * role 过滤同样留给 JS：候选集本来就只到个位数，为它加 `role IN (…)` 反而要求 `role`
+ * 反规范化列必须与 `data.role` 严格同步，凭白多一条隐性不变量。
+ */
+function listRequestScopeCandidateRows(input: {
+  clientRequestId: string;
+  exact?: boolean;
+  roles?: readonly MessageRole[];
+  sessionId: string;
+  userId: string;
+}): MessageV2Row[] {
+  const clauses = [
+    'session_id = ?',
+    'user_id = ?',
+    // 不可寻址的幽灵行（见 message-v2-projectors 的守卫说明）没有 id，既改不动也删不掉。
+    'id IS NOT NULL',
+    'client_request_id >= ? AND client_request_id < ?',
+  ];
+  const params: SqliteBindableValue[] = [
+    input.sessionId,
+    input.userId,
+    input.clientRequestId,
+    `${input.clientRequestId};`,
+  ];
+
+  return sqliteAll<MessageV2Row>(
+    `SELECT * FROM message_v2
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY time_created ASC, id ASC`,
+    params,
+  );
+}
+
+/**
+ * 命中判定，条件与旧实现的 JS 过滤逐字一致：`matchesRequestScope` 前缀语义 + 可选 role
+ * 过滤（role 以 **data** 为准，反规范化列只在预筛阶段用来剪枝）。
+ */
+function matchesRequestScopeRow(
+  row: MessageV2Row,
+  input: { clientRequestId: string; exact?: boolean; roles?: readonly MessageRole[] },
+): boolean {
+  let data: MessageInfo;
+  try {
+    data = JSON.parse(row.data) as MessageInfo;
+  } catch (error) {
+    logGatewayWarn(
+      `[message-v2] ${row.id} data 列 JSON 解析失败，已跳过请求族匹配：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return false;
+  }
+
+  if (input.roles && input.roles.length > 0 && !input.roles.includes(data.role)) {
+    return false;
+  }
+
+  return input.exact
+    ? data.clientRequestId === input.clientRequestId
+    : matchesRequestScope(input.clientRequestId, data.clientRequestId);
+}
+
+/** 精确命中请求族的消息行（预筛 + 逐行判定，顺序 time_created → id 升序）。 */
+function listRequestScopeRows(input: {
+  clientRequestId: string;
+  exact?: boolean;
+  roles?: readonly MessageRole[];
+  sessionId: string;
+  userId: string;
+}): MessageV2Row[] {
+  return listRequestScopeCandidateRows(input).filter((row) => matchesRequestScopeRow(row, input));
+}
+
+/**
+ * 精确命中请求族的消息（含 part）。过滤与 `listSessionMessagesV2` 同款：跳过损坏行、
+ * 丢弃正文为空的消息，顺序 `time_created, id` 升序 —— 调用方拿到的 Message 与旧实现
+ * 从整会话读回来后过滤的结果完全一致。
+ */
+function listRequestScopeMessages(input: {
+  clientRequestId: string;
+  exact?: boolean;
+  roles?: readonly MessageRole[];
+  sessionId: string;
+  userId: string;
+}): Message[] {
+  const rows = listRequestScopeRows(input);
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const partsByMessage = new Map<string, MessagePart[]>();
+  // 同上：行 id 是裸字符串，品牌类型在此处补齐。
+  const messageIds = rows.map((row) => row.id as MessageID);
+  for (const partRow of listPartRowsByMessageIds(input.sessionId, messageIds)) {
+    const part = tryPartFromRow(partRow);
+    if (!part) continue;
+    const existing = partsByMessage.get(partRow.message_id) ?? [];
+    existing.push(part);
+    partsByMessage.set(partRow.message_id, existing);
+  }
+
+  return mapMessageInfoRows(rows)
+    .map((info) => ({ info, parts: partsByMessage.get(info.id) ?? [] }))
+    .map((message) => v2ToV1Message(message))
+    .filter((message) => message.content.length > 0);
+}
+
 export function getSessionMessageByRequestId(input: {
   clientRequestId: string;
   role: MessageRole;
   sessionId: string;
   userId: string;
 }): { message: Message; status: 'final' | 'error' } | null {
-  const messages = listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId });
+  // 旧实现读整会话再 `find`；这里只取「该请求精确 id + 该 role」的行。
+  const messages = listRequestScopeMessages({
+    clientRequestId: input.clientRequestId,
+    exact: true,
+    roles: [input.role],
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
   const msg = messages.find(
     (m) => m.role === input.role && m.clientRequestId === input.clientRequestId,
   );
@@ -1728,8 +1968,11 @@ export function listSessionMessagesByRequestScope(input: {
   sessionId: string;
   userId: string;
 }): Message[] {
-  const messages = listSessionMessagesV2({ sessionId: input.sessionId, userId: input.userId });
-  return messages.filter((m) => matchesRequestScope(input.clientRequestId, m.clientRequestId));
+  return listRequestScopeMessages({
+    clientRequestId: input.clientRequestId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
 }
 
 export function updateSessionMessagesStatusByRequestScope(input: {
@@ -1739,50 +1982,56 @@ export function updateSessionMessagesStatusByRequestScope(input: {
   status: 'final' | 'error';
   userId: string;
 }): void {
-  const roleFilter = input.roles ? new Set(input.roles) : null;
-  const rows = sqliteAll<{ id: string; data: string }>(
-    'SELECT id, data FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
-    [input.sessionId, input.userId],
-  );
-  const targetIds = rows
-    .filter((row) => {
-      const data = JSON.parse(row.data) as MessageInfo;
-      const matchesRequest = matchesRequestScope(input.clientRequestId, data.clientRequestId);
-      const matchesRole = roleFilter ? roleFilter.has(data.role) : true;
-      return matchesRequest && matchesRole;
-    })
-    .map((row) => row.id);
+  // 命中的行只有个位数（预筛已把候选压到本回合），这里的二次解析是刻意为之：单写路径与
+  // 兜底 UPDATE 都需要完整 info 回投，而 `listRequestScopeRows` 的判定只看
+  // clientRequestId / role，没必要为它把整条 info 留在内存里。
+  const targets = listRequestScopeRows({
+    clientRequestId: input.clientRequestId,
+    roles: input.roles,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  }).map((row) => ({ id: row.id, data: JSON.parse(row.data) as MessageInfo }));
 
-  if (targetIds.length === 0) {
+  if (targets.length === 0) {
     return;
   }
 
   // Single-write path: emit MessageEvents.Updated → projector upserts the
   // row in `message_v2`. Mirrors append/truncate flows so all status
   // transitions land in the event_log for replay symmetry.
-  for (const id of targetIds) {
-    const row = rows.find((r) => r.id === id);
-    if (!row) continue;
-    const data = JSON.parse(row.data) as MessageInfo;
-    const updated: MessageInfo = { ...data, status: input.status };
+  for (const target of targets) {
+    // 行 JSON 里没有 id（`messageInfoToRowData` 会剥掉），回投前必须补回来：缺 id 的
+    // info 曾被 projector 插成幽灵行（唯一写入点现已守卫，但仍不该依赖守卫兜底）。
+    const info: MessageInfo = {
+      ...target.data,
+      id: target.id as MessageID,
+      sessionID: input.sessionId,
+      status: input.status,
+    };
     emitEvent({
       definition: MessageEvents.Updated,
       aggregateID: input.sessionId,
-      data: { sessionID: input.sessionId, info: updated },
+      data: { sessionID: input.sessionId, info },
     });
   }
   // Defensive sweep — if any row remains stale (e.g. partially-migrated
   // session where projector registration is skipped) fall back to explicit
   // SQL so the caller's invariant ``status == input.status'' still holds.
-  for (const id of targetIds) {
-    const row = rows.find((r) => r.id === id);
-    if (!row) continue;
-    const data = JSON.parse(row.data) as MessageInfo;
-    const updated = { ...data, status: input.status };
-    sqliteRun("UPDATE message_v2 SET data = ?, updated_at = datetime('now') WHERE id = ?", [
-      JSON.stringify(updated),
-      id,
-    ]);
+  // 落库形态保持与 projector 一致（剥掉 id / sessionID），避免同一行出现两种 JSON 形状；
+  // 反规范化列（role / client_request_id）一并按新 `data` 写回 —— 这两个列与 `data` 的
+  // 一致性是读侧索引查询的前提，绕过 projector 的裸 UPDATE 必须自己维持它。
+  for (const target of targets) {
+    sqliteRun(
+      `UPDATE message_v2
+          SET data = ?, role = ?, client_request_id = ?, updated_at = datetime('now')
+        WHERE id = ?`,
+      [
+        JSON.stringify({ ...target.data, status: input.status }),
+        typeof target.data.role === 'string' ? target.data.role : '',
+        typeof target.data.clientRequestId === 'string' ? target.data.clientRequestId : '',
+        target.id,
+      ],
+    );
   }
 }
 
@@ -1792,19 +2041,12 @@ export function deleteSessionMessagesByRequestScope(input: {
   sessionId: string;
   userId: string;
 }): void {
-  const roleFilter = input.roles ? new Set(input.roles) : null;
-  const rows = sqliteAll<{ id: string; data: string }>(
-    'SELECT id, data FROM message_v2 WHERE session_id = ? AND user_id = ? ORDER BY time_created ASC, id ASC',
-    [input.sessionId, input.userId],
-  );
-  const targetIds = rows
-    .filter((row) => {
-      const data = JSON.parse(row.data) as MessageInfo;
-      const matchesRequest = matchesRequestScope(input.clientRequestId, data.clientRequestId);
-      const matchesRole = roleFilter ? roleFilter.has(data.role) : true;
-      return matchesRequest && matchesRole;
-    })
-    .map((row) => row.id);
+  const targetIds = listRequestScopeRows({
+    clientRequestId: input.clientRequestId,
+    roles: input.roles,
+    sessionId: input.sessionId,
+    userId: input.userId,
+  }).map((row) => row.id);
 
   if (targetIds.length === 0) {
     return;

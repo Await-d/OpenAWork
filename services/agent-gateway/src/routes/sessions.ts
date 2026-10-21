@@ -52,6 +52,7 @@ import { buildFileDiff } from '../tools/file-diff-format.js';
 import { deleteSpilledToolOutputsForSession } from '../tools/tool-output-spill.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { registerSessionClientErrorRoutes } from './session-client-error-routes.js';
+import { registerSessionComposerInputHistoryRoutes } from './session-composer-input-history.js';
 import { registerSessionComposerQueueRoutes } from './session-composer-queue.js';
 import { buildSessionTaskProjection, type SessionTaskResponse } from './session-task-projection.js';
 import { resolveTaskGraphProjectRoot } from '../task/task-graph-root.js';
@@ -108,6 +109,8 @@ import {
 } from './stream-cancellation.js';
 import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
 import { deleteSessionWithMalformedRecovery } from '../session/session-delete-recovery.js';
+import { purgeComposerQueueAttachments } from '../session/composer-queue-artifact-purge.js';
+import { listComposerQueueItems } from '../session/composer-queue-store.js';
 import {
   buildSessionFileChangesProjection,
   buildSessionTurnDiffReadModel,
@@ -1415,6 +1418,14 @@ async function deleteSessionTree(input: {
       clearExternalAccessTracking(session.id);
       resetDoomLoopHistory(session.id);
 
+      // 待发队列的附件跨端副本（磁盘型产物）不随 FK 级联消失：级联只清队列行，
+      // 磁盘文件必须在这里按条目回收，否则会话删除后副本永久残留。
+      purgeComposerQueueAttachments(
+        listComposerQueueItems({ sessionId: session.id, userId: input.userId }).flatMap(
+          (item) => item.attachmentItems,
+        ),
+      );
+
       try {
         sqliteTransaction(() => {
           sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [
@@ -1950,6 +1961,13 @@ async function buildSessionRecoveryReadModel(input: {
    */
   runEventAfterSeq?: number;
   runEventLimit?: number;
+  /**
+   * 是否对 tool 输出做 recovery 瘦身，默认 true。
+   *
+   * 只有「要把这部分历史写回存储」这类必须拿到完整输出的调用方才传 false；
+   * 常规读取一律走默认值（见 `slimMessagesForRecovery`）。
+   */
+  slim?: boolean;
   since?: number;
 }) {
   // `/recovery` 被团队会话快照（2.5s）与子会话详情（2.5s）轮询，且下面会对子树跑
@@ -2121,9 +2139,10 @@ async function buildSessionRecoveryReadModel(input: {
         : allRunEvents;
   }
 
-  const slimmedMessages = hasTurnLimit
-    ? slimMessagesForRecovery(allVisibleMessages)
-    : allVisibleMessages;
+  // 瘦身默认生效，与 `messageLimit` 解耦（见 `slimMessagesForRecovery` 注释）：
+  // 是否瘦身不该取决于调用方顺手传了哪个参数。确需完整输出（要把历史写回存储的
+  // 入口）显式传 `slim: false`；完整转录的正规通道是 `GET /sessions/:id`。
+  const slimmedMessages = slimMessagesForRecovery(allVisibleMessages, input.slim !== false);
 
   const sessionResponse = toPublicSessionResponse(
     {
@@ -2362,6 +2381,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
   await registerSessionSharedReadRoutes(app);
   await registerSessionClientErrorRoutes(app);
   await registerSessionComposerQueueRoutes(app);
+  await registerSessionComposerInputHistoryRoutes(app);
 
   app.get(
     '/sessions/:sessionId/message-ratings',
@@ -2595,6 +2615,8 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         typeof query.since === 'string' && /^\d+$/u.test(query.since)
           ? Number(query.since)
           : undefined;
+      // `slim=0` 关闭 tool 输出瘦身（默认开启）。仅给「要把历史写回存储」的调用方用。
+      const slim = query.slim === '0' || query.slim === 'false' ? false : undefined;
 
       const recovery = await buildSessionRecoveryReadModel({
         session,
@@ -2602,6 +2624,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         messageLimit,
         runEventAfterSeq,
         runEventLimit,
+        slim,
         since,
       });
       step.succeed(undefined, {

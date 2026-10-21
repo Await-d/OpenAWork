@@ -6,6 +6,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   captureWorkspaceReconcileSnapshot,
   collectWorkspaceReconcileDiffs,
+  MAX_RECONCILE_FILES,
+  MAX_RECONCILE_TOTAL_BYTES,
 } from '../../workspace/workspace-reconcile.js';
 
 /**
@@ -258,5 +260,35 @@ describe('collectWorkspaceReconcileDiffs 行级统计口径', () => {
     // 0/0 出现（git 侧仍报 modified）。绝不能像旧实现那样报出接近行数的增删。
     expect(diff?.additions ?? 0).toBe(0);
     expect(diff?.deletions ?? 0).toBe(0);
+  });
+
+  it('变更文件数超过预算时直接返回空快照，不读取任何正文', async () => {
+    const files: string[] = [];
+    try {
+      for (let index = 0; index <= MAX_RECONCILE_FILES; index += 1) {
+        const filePath = join(workDir, `budget-${index}.txt`);
+        writeFileSync(filePath, 'x\n');
+        files.push(filePath);
+      }
+
+      const snapshot = await captureWorkspaceReconcileSnapshot(workDir);
+
+      expect(snapshot.size).toBe(0);
+    } finally {
+      for (const filePath of files) {
+        rmSync(filePath, { force: true });
+      }
+    }
+  });
+
+  it('变更文件总字节超过预算时返回空快照', async () => {
+    const filePath = join(workDir, 'over-budget.bin');
+    try {
+      writeFileSync(filePath, Buffer.alloc(MAX_RECONCILE_TOTAL_BYTES + 1));
+      const snapshot = await captureWorkspaceReconcileSnapshot(workDir);
+      expect(snapshot.size).toBe(0);
+    } finally {
+      rmSync(filePath, { force: true });
+    }
   });
 });

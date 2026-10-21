@@ -32,7 +32,7 @@ describe('runUpstreamStream retry policy', () => {
     const streamSpy = vi.spyOn(OpenCodeLLM.LLMClient, 'stream').mockImplementation(() => {
       attempts += 1;
       if (attempts < 3) return Stream.fail(upstreamError);
-      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: 'stop' })]);
+      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: { normalized: 'stop' } })]);
     });
 
     const pending = collect(
@@ -98,7 +98,7 @@ describe('runUpstreamStream retry policy', () => {
     const streamSpy = vi.spyOn(OpenCodeLLM.LLMClient, 'stream').mockImplementation(() => {
       attempts += 1;
       if (attempts === 1) return Stream.fail(upstreamError);
-      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: 'stop' })]);
+      return Stream.fromIterable([OpenCodeLLM.LLMEvent.finish({ reason: { normalized: 'stop' } })]);
     });
 
     const pending = collect(

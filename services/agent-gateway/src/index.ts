@@ -93,6 +93,7 @@ import { sshRoutes } from './routes/ssh.js';
 import { toolsRoutes } from './routes/tools.js';
 import { artifactsRoutes } from './routes/artifacts.js';
 import { reconcileAllSessionRuntimes } from './session/session-runtime-reconciler.js';
+import { startEventLoopLagMonitor } from './infra/event-loop-lag-monitor.js';
 import { reconcileStaleRunningTerminalsAtBoot } from './session/session-terminal-registry.js';
 import { SshService, setSshService } from './ssh/ssh-service.js';
 import qrcodeTerminal from 'qrcode-terminal';
@@ -706,6 +707,15 @@ try {
   step = bootLogger.start('gateway.listen', undefined, { host, port });
   await app.listen({ port, host });
   bootLogger.succeed(step);
+
+  // 事件循环 lag 探针：网关的 SQLite 是同步 API + busy_timeout=5000，写锁争用会把
+  // 整个事件循环堵住（SSE 心跳、/status、全部在途请求一起停摆）。这里做纯观测，
+  // 让「发消息停顿 / 偶发 attach 断线 / 页面卡顿」能被证实或证伪为同一个根因。
+  startEventLoopLagMonitor({
+    warn: (payload, message) => {
+      app.log.warn(payload, message);
+    },
+  });
 
   // 启用桌面端父进程死亡监视（仅 OPENAWORK_PARENT_PID 设置时生效）。
   // 必须在 listen 之后启动；否则 Tauri 主进程在 sidecar 还没绑定端口时崩溃，

@@ -11,6 +11,24 @@ export interface TokenPair {
   expiresIn: string;
 }
 
+/**
+ * `/auth/*` 服务端明确拒绝（非 2xx）时抛出，携带 HTTP 状态码。
+ *
+ * 与「瞬态失败」（网络中断、墙钟超时、5xx）严格区分：只有 401/403 这类明确的
+ * 凭证拒绝才代表 refresh token 真的失效。调用方（`token-refresh`）据此决定是否
+ * 清除登录态——若对瞬态失败也清 token，网关一次 10s 卡顿就会把用户登出，且此后
+ * 所有请求在发出前直接 401，只能靠刷新页面 / 重新登录恢复。
+ */
+export class AuthRequestRejectedError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'AuthRequestRejectedError';
+  }
+}
+
 const LOGIN_TIMEOUT_MS = 15_000;
 
 function isGenericAuthNetworkErrorMessage(message: string): boolean {
@@ -75,7 +93,10 @@ export async function refreshAccessToken(
     });
     if (!res.ok) {
       const err = await readAuthError(res);
-      throw new Error(extractJsonErrorMessage(err) ?? '刷新凭证失败。');
+      throw new AuthRequestRejectedError(
+        extractJsonErrorMessage(err) ?? '刷新凭证失败。',
+        res.status,
+      );
     }
     return res.json() as Promise<TokenPair>;
   } catch (error) {

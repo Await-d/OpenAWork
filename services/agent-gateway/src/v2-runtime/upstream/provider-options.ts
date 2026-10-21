@@ -654,15 +654,6 @@ export function buildProviderOptions(input: {
         : configuredProviderType;
   const supportsThinking = isExtendedConfig ? thinking.supportsThinking : true;
 
-  // 调试日志
-  console.log('[DEBUG buildProviderOptions] 输入参数:', {
-    model: input.model,
-    isExtendedConfig,
-    thinkingConfig,
-    providerType,
-    supportsThinking,
-  });
-
   // 对于新版 ThinkingConfig，通过 catalog 推断支持情况
   const styleProviderType =
     configuredProviderType === 'opencode-go' && input.upstreamProtocol === 'responses'
@@ -716,43 +707,25 @@ export function buildProviderOptions(input: {
       if (thinkingConfig.type === 'adaptive') {
         // Adaptive thinking — Claude 4.6+
         const supportsAdaptive = modelSupportsAdaptiveThinking(input.model, providerType);
-        console.log('[DEBUG anthropic_budget] adaptive 模式检测:', {
-          model: input.model,
-          providerType,
-          supportsAdaptive,
-        });
-
         if (supportsAdaptive) {
           anthropic['thinking'] = { type: 'adaptive' };
-          console.log('[DEBUG anthropic_budget] 使用 adaptive thinking');
         } else {
           // 模型不支持 adaptive，降级为 enabled + 默认预算
           anthropic['thinking'] = {
             type: 'enabled',
             budgetTokens: ANTHROPIC_THINKING_BUDGETS['medium'],
           };
-          console.log('[DEBUG anthropic_budget] adaptive 降级为 enabled，budgetTokens=8192');
         }
       } else if (thinkingConfig.type === 'enabled') {
         anthropic['thinking'] = {
           type: 'enabled',
           budgetTokens: thinkingConfig.budgetTokens,
         };
-        console.log(
-          '[DEBUG anthropic_budget] 使用 enabled，budgetTokens=',
-          thinkingConfig.budgetTokens,
-        );
       } else {
         // type === 'disabled'
         anthropic['thinking'] = { type: 'disabled' };
-        console.log('[DEBUG anthropic_budget] thinking 已禁用');
       }
-
       const result = providerOptions(modelInfo, anthropic);
-      console.log(
-        '[DEBUG anthropic_budget] 最终 providerOptions:',
-        JSON.stringify(result, null, 2),
-      );
       return result;
     }
 

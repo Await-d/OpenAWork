@@ -9,7 +9,7 @@ import type { RunArtifact } from '@openAwork/artifacts';
 import { maybeAutoTitle } from './session-title.js';
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import { generateSessionTitleLlm, isFirstUserMessage } from './session-title-llm.js';
-import { sqliteGet } from '../infra/db.js';
+import { sqliteGet, sqliteTransaction } from '../infra/db.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { isGatewayInternalRequestKey } from '../handoff/store/handoff-store.js';
 import { appendSessionEvent } from './session-entry-store.js';
@@ -153,30 +153,45 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
     return text;
   }
 
-  appendSessionMessage({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    role: 'user',
-    content: resolvePersistedUserContent(
-      input.sessionId,
-      input.content,
-      text,
-      input.syntheticContext,
-    ),
-    clientRequestId: input.clientRequestId,
+  // 这批写入原本是 4–6 个独立事务：`appendSessionMessage` 对「消息」与「每个 part」
+  // 各发一次事件、每次各自开事务，用户消息常带 3 个 part（正文 + 前置 system-reminder
+  // + 尾块 hint），于是首 token 之前要抢 3 次 SQLite 写锁，再叠加 session event 与
+  // 自动标题。
+  //
+  // 网关用**同步** `bun:sqlite` 且 `busy_timeout=5000`：每次 `BEGIN IMMEDIATE` 撞上
+  // 其它会话的并发写，整个事件循环会被同步阻塞最长 5 秒——期间 `/status`、SSE 心跳
+  // （attach 的 10s keepalive）以及所有在途 HTTP 请求全部停摆。这正是「发一条消息要
+  // 等很久才出字」「偶尔提示重连」的共同来源。
+  //
+  // 合并成一个事务后，这批写入只抢一次写锁。`sqliteTransaction` 支持嵌套（内部调用
+  // 直接执行），所以包裹 `appendSessionMessage` 不会改变其内部逐 part 投影的语义。
+  // 标题生成是 fire-and-forget，刻意留在事务外以免把上游调用纳入写事务。
+  sqliteTransaction(() => {
+    appendSessionMessage({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      role: 'user',
+      content: resolvePersistedUserContent(
+        input.sessionId,
+        input.content,
+        text,
+        input.syntheticContext,
+      ),
+      clientRequestId: input.clientRequestId,
+    });
+    appendSessionEvent({
+      clientRequestId: input.clientRequestId,
+      sessionId: input.sessionId,
+      userId: input.userId,
+      event: {
+        id: makeSessionEventId(),
+        timestamp: Date.now(),
+        type: 'prompt',
+        text,
+      },
+    });
+    maybeAutoTitle({ sessionId: input.sessionId, userId: input.userId, text });
   });
-  appendSessionEvent({
-    clientRequestId: input.clientRequestId,
-    sessionId: input.sessionId,
-    userId: input.userId,
-    event: {
-      id: makeSessionEventId(),
-      timestamp: Date.now(),
-      type: 'prompt',
-      text,
-    },
-  });
-  maybeAutoTitle({ sessionId: input.sessionId, userId: input.userId, text });
 
   const sessionRow = sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',

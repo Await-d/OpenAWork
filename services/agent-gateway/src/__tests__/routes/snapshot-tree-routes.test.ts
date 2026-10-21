@@ -60,6 +60,11 @@ vi.mock('../../session/session-workspace-metadata.js', () => ({
     const value = metadata['workingDirectory'];
     return typeof value === 'string' && value.length > 0 ? value : null;
   },
+  // 会话工作区解析现在会问「该路径是否来自 SSH 远端」；本文件的会话都是本地工作区。
+  extractSessionSshConnectionId: (metadata: Record<string, unknown>) => {
+    const value = metadata['sshConnectionId'];
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+  },
   parseSessionMetadataJson: (raw: string) => {
     try {
       return JSON.parse(raw) as Record<string, unknown>;

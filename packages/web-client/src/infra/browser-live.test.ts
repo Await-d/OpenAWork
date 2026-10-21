@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { BROWSER_LIVE_BINARY_FRAME_KIND } from '@openAwork/shared';
+
 import { HttpError } from '../gateway/http.js';
-import { createBrowserLiveClient } from './browser-live.js';
+import { createBrowserLiveClient, parseBinaryFrameMessage } from './browser-live.js';
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -55,6 +57,79 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+/** 按线路格式拼一帧二进制消息：kind + headerLen + header JSON + 图像字节。 */
+function buildBinaryFrame(header: Record<string, unknown>, imageBytes: Uint8Array): ArrayBuffer {
+  const headerBytes = new TextEncoder().encode(JSON.stringify(header));
+  const frame = new Uint8Array(5 + headerBytes.length + imageBytes.length);
+  frame[0] = BROWSER_LIVE_BINARY_FRAME_KIND;
+  new DataView(frame.buffer).setUint32(1, headerBytes.length, true);
+  frame.set(headerBytes, 5);
+  frame.set(imageBytes, 5 + headerBytes.length);
+  return frame.buffer;
+}
+
+describe('parseBinaryFrameMessage', () => {
+  const HEADER = {
+    mimeType: 'image/jpeg',
+    deviceWidth: 800,
+    deviceHeight: 600,
+    offsetTop: 0,
+    pageScaleFactor: 1,
+    scrollOffsetX: 0,
+    scrollOffsetY: 0,
+    frameSessionId: 7,
+  };
+
+  it('把二进制帧还原成 frame 信封（图像字节不经过 JSON）', () => {
+    const imageBytes = new Uint8Array([1, 2, 3, 4]);
+
+    const envelope = parseBinaryFrameMessage(buildBinaryFrame(HEADER, imageBytes));
+
+    expect(envelope?.ch).toBe('frame');
+    expect(envelope?.payload.mimeType).toBe('image/jpeg');
+    expect(envelope?.payload.deviceWidth).toBe(800);
+    expect(envelope?.payload.deviceHeight).toBe(600);
+    expect(envelope?.payload.frameSessionId).toBe(7);
+    expect(new Uint8Array(envelope?.payload.data ?? new ArrayBuffer(0))).toEqual(imageBytes);
+  });
+
+  it('保留二进制头中的 seq 与 ts，和 JSON 信封保持同一序列', () => {
+    const envelope = parseBinaryFrameMessage(
+      buildBinaryFrame({ ...HEADER, seq: 42, ts: 1_700_000_000_123 }, new Uint8Array([1])),
+    );
+
+    expect(envelope?.seq).toBe(42);
+    expect(envelope?.ts).toBe(1_700_000_000_123);
+  });
+
+  it('二进制帧头里的 generation 透传到载荷（代次过滤在快路径上同样生效）', () => {
+    const envelope = parseBinaryFrameMessage(
+      buildBinaryFrame({ ...HEADER, generation: 4 }, new Uint8Array([7])),
+    );
+
+    expect(envelope?.payload.generation).toBe(4);
+  });
+
+  it('老网关的二进制帧没有 generation 时不臆造该字段', () => {
+    const envelope = parseBinaryFrameMessage(buildBinaryFrame(HEADER, new Uint8Array([7])));
+
+    expect(envelope?.payload).not.toHaveProperty('generation');
+  });
+
+  it('kind 不符 / 头部长度越界 / 头部 JSON 损坏时返回 null 而不是抛错', () => {
+    const imageBytes = new Uint8Array([9]);
+    const wrongKind = new Uint8Array(buildBinaryFrame(HEADER, imageBytes).slice(0));
+    wrongKind[0] = 9;
+
+    const brokenHeader = new Uint8Array(buildBinaryFrame(HEADER, imageBytes).slice(0));
+    brokenHeader[5] = 0x20; // 头部不再是合法 JSON
+
+    expect(parseBinaryFrameMessage(wrongKind.buffer)).toBeNull();
+    expect(parseBinaryFrameMessage(new ArrayBuffer(3))).toBeNull();
+    expect(parseBinaryFrameMessage(brokenHeader.buffer)).toBeNull();
+  });
 });
 
 describe('createBrowserLiveClient WebSocket', () => {

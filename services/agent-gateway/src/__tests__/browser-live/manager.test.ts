@@ -99,6 +99,8 @@ function createFakeSession(): {
     onEvent: vi.fn().mockReturnValue(() => undefined),
     goto: vi.fn().mockResolvedValue(undefined),
     reload: vi.fn().mockResolvedValue(undefined),
+    goBack: vi.fn().mockResolvedValue(undefined),
+    goForward: vi.fn().mockResolvedValue(undefined),
     currentUrl: vi.fn().mockResolvedValue('https://example.com/'),
     currentTitle: vi.fn().mockResolvedValue('Example'),
     startScreencast: vi.fn().mockResolvedValue(undefined),

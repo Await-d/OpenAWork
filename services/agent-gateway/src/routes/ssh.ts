@@ -1,4 +1,8 @@
-import { SshRemotePathError, SshSftpUnavailableError } from '@openAwork/agent-core';
+import {
+  SSH_SFTP_UNAVAILABLE_MESSAGE,
+  SshRemotePathError,
+  SshSftpUnavailableError,
+} from '@openAwork/agent-core';
 import { replaceSshHostKey, SshHostKeyError } from '../ssh/ssh-host-trust.js';
 import { SshCredentialPolicyError } from '../ssh/ssh-credential-policy.js';
 /**
@@ -101,11 +105,7 @@ function classifySshRouteError(error: unknown, actionLabel: string): ClassifiedS
   // 属远端环境能力缺失，重试无法恢复，也不是网关故障，故回 501 而非 500，
   // 并给出可操作建议（2026-10-12 线上排障命中：/ssh/files 曾被映射成 500）。
   if (error instanceof SshSftpUnavailableError || /unable to start subsystem/i.test(message)) {
-    return {
-      statusCode: 501,
-      error:
-        '远端服务器未启用 SFTP 子系统，无法进行文件操作。请在远端 sshd 配置中启用 sftp（Subsystem sftp ...），或改用「远端命令」完成该操作。',
-    };
+    return { statusCode: 501, error: SSH_SFTP_UNAVAILABLE_MESSAGE };
   }
   // 未经归一的原始 SFTP 错误（注入实现 / 旧链路）：按 isRemoteNotFoundError
   // 的既有约定补齐裸 message 的归宿，避免「No such file / Permission denied /

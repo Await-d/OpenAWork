@@ -20,6 +20,7 @@ import type {
   BrowserLiveErrorPayload,
   BrowserLiveInputMessage,
   BrowserLiveNodePayload,
+  BrowserLiveScrollPayload,
 } from '@openAwork/shared';
 import { BROWSER_LIVE_WS_PATH } from '@openAwork/shared';
 import type { JwtPayload } from '../infra/auth.js';
@@ -46,6 +47,18 @@ import type { BrowserLiveSink } from '../browser-live/hub.js';
 import { installWsHeartbeat } from './ws-heartbeat.js';
 
 const WS_OPEN = 1;
+
+/** JPEG 质量上限（CDP 只接受 0–100）。 */
+const MAX_SCREENCAST_QUALITY = 100;
+
+/**
+ * 客户端协商的帧盒上限（物理像素）。
+ *
+ * 服务端默认盒是 1024（见 `BROWSER_LIVE_SCREENCAST_MAX_EDGE`）；客户端按显示器
+ * DPR 协商时可以要得更大——高 DPR 面板上 1024 会让画面明显发糊。上限 2048 是为了
+ * 兜住异常值，正常协商不会到这里。
+ */
+const MAX_SCREENCAST_FRAME_EDGE = 2048;
 
 const startBodySchema = z.object({
   url: z.string().url().optional(),
@@ -174,6 +187,46 @@ function isOptionalBoolean(value: unknown): value is boolean | undefined {
   return value === undefined || typeof value === 'boolean';
 }
 
+/**
+ * 解析客户端的「可选正整数」字段（screencast 帧盒 / 质量）。
+ *
+ * 返回 `undefined` = 未提供（用服务端默认），`null` = 提供了但非法（整条消息拒绝）。
+ * 上限由调用方给出：尺寸与质量都必须是有限正整数，避免 `Infinity` / 负值把
+ * `Page.startScreencast` 打挂。
+ */
+/** 编辑命令 / 一次性插入文本的硬上限：上行是用户输入，不能让它无界撑爆 CDP 与 WS。 */
+const MAX_EDIT_COMMANDS = 4;
+const MAX_EDIT_COMMAND_CHARS = 32;
+const MAX_INSERT_TEXT_CHARS = 32_000;
+
+/**
+ * 校验 `commands`：只接受少量非空短字符串。
+ *
+ * 不在这里维护白名单——Blink 认识的命令会随版本增加，拒绝未知命令反而会误伤；
+ * 限制「条数 + 长度」足以防止把任意长字符串透传进 CDP。
+ */
+function isOptionalEditCommands(value: unknown): value is string[] | undefined {
+  if (value === undefined) {
+    return true;
+  }
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_EDIT_COMMANDS) {
+    return false;
+  }
+  return value.every(
+    (item) => typeof item === 'string' && item.length > 0 && item.length <= MAX_EDIT_COMMAND_CHARS,
+  );
+}
+
+function readOptionalPositiveInt(value: unknown, max: number): number | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.min(Math.round(value), max);
+}
+
 function parseInputMessage(value: JsonObject): BrowserLiveInputMessage | null {
   const kind = value['kind'];
 
@@ -237,9 +290,21 @@ function parseInputMessage(value: JsonObject): BrowserLiveInputMessage | null {
       !isOptionalString(value['key']) ||
       !isOptionalString(value['text']) ||
       !isOptionalString(value['code']) ||
-      !isOptionalNumber(value['windowsVirtualKeyCode'])
+      !isOptionalNumber(value['windowsVirtualKeyCode']) ||
+      !isOptionalNumber(value['modifiers']) ||
+      !isOptionalEditCommands(value['commands'])
     ) {
       return null;
+    }
+    // CDP 只认 0–15（Alt/Ctrl/Meta/Shift 的组合）；越界值一律按无修饰处理。
+    if (value['modifiers'] !== undefined) {
+      if (
+        !Number.isInteger(value['modifiers']) ||
+        value['modifiers'] < 0 ||
+        value['modifiers'] > 15
+      ) {
+        return null;
+      }
     }
 
     const message: Extract<BrowserLiveInputMessage, { kind: 'key' }> = {
@@ -259,7 +324,21 @@ function parseInputMessage(value: JsonObject): BrowserLiveInputMessage | null {
     if (value['windowsVirtualKeyCode'] !== undefined) {
       message.windowsVirtualKeyCode = value['windowsVirtualKeyCode'];
     }
+    if (value['modifiers'] !== undefined) {
+      message.modifiers = value['modifiers'];
+    }
+    if (value['commands'] !== undefined) {
+      message.commands = value['commands'];
+    }
     return message;
+  }
+
+  if (kind === 'text') {
+    const text = value['text'];
+    if (typeof text !== 'string' || text.length === 0) {
+      return null;
+    }
+    return { ch: 'input', kind: 'text', text: text.slice(0, MAX_INSERT_TEXT_CHARS) };
   }
 
   return null;
@@ -280,12 +359,70 @@ function parseControlMessage(value: JsonObject): BrowserLiveControlMessage | nul
     return { ch: 'control', action: 'reload' };
   }
 
+  if (action === 'goBack') {
+    return { ch: 'control', action: 'goBack' };
+  }
+
+  if (action === 'goForward') {
+    return { ch: 'control', action: 'goForward' };
+  }
+
   if (action === 'screencast.start') {
-    return { ch: 'control', action: 'screencast.start' };
+    // 帧盒 / 质量是可选加法字段：缺省时沿用服务端默认，老客户端不受影响。
+    const maxWidth = readOptionalPositiveInt(value['maxWidth'], MAX_SCREENCAST_FRAME_EDGE);
+    const maxHeight = readOptionalPositiveInt(value['maxHeight'], MAX_SCREENCAST_FRAME_EDGE);
+    const quality = readOptionalPositiveInt(value['quality'], MAX_SCREENCAST_QUALITY);
+    const format = value['format'];
+    if (maxWidth === null || maxHeight === null || quality === null) {
+      return null;
+    }
+    if (format !== undefined && format !== 'jpeg' && format !== 'png') {
+      return null;
+    }
+    if (!isOptionalBoolean(value['binary'])) {
+      return null;
+    }
+    const message: Extract<BrowserLiveControlMessage, { action: 'screencast.start' }> = {
+      ch: 'control',
+      action: 'screencast.start',
+    };
+    if (maxWidth !== undefined) {
+      message.maxWidth = maxWidth;
+    }
+    if (maxHeight !== undefined) {
+      message.maxHeight = maxHeight;
+    }
+    if (quality !== undefined) {
+      message.quality = quality;
+    }
+    if (format !== undefined) {
+      message.format = format;
+    }
+    if (value['binary'] !== undefined) {
+      message.binary = value['binary'];
+    }
+    return message;
   }
 
   if (action === 'screencast.stop') {
     return { ch: 'control', action: 'screencast.stop' };
+  }
+
+  if (action === 'screencast.refresh') {
+    return { ch: 'control', action: 'screencast.refresh' };
+  }
+
+  if (action === 'scroll.metrics') {
+    return { ch: 'control', action: 'scroll.metrics' };
+  }
+
+  if (action === 'scrollTo') {
+    const y = value['y'];
+    if (typeof y !== 'number' || !Number.isFinite(y)) {
+      return null;
+    }
+    // 负值 / 超界由服务端（页面滚动本身）夹取，这里只保证是有限数。
+    return { ch: 'control', action: 'scrollTo', y };
   }
 
   if (action === 'pick') {
@@ -293,6 +430,10 @@ function parseControlMessage(value: JsonObject): BrowserLiveControlMessage | nul
       return null;
     }
     return { ch: 'control', action: 'pick', x: value['x'], y: value['y'] };
+  }
+
+  if (action === 'copySelection') {
+    return { ch: 'control', action: 'copySelection' };
   }
 
   if (action === 'screenshot') {
@@ -420,6 +561,8 @@ async function handleClientMessage(input: {
   try {
     switch (message.ch) {
       case 'input': {
+        // 先标记「正在交互」，再转发：交互窗口内取消产帧限速，拖动 / 输入才跟手。
+        browserLiveHub.noteUserInput(userId);
         await handle.session.dispatchInput(message);
         return;
       }
@@ -446,6 +589,27 @@ async function handleClientMessage(input: {
   }
 }
 
+/**
+ * 读取并下发一次主文档滚动几何。
+ *
+ * 会话没有实现 `scrollMetrics`（老会话 / 测试替身）时静默跳过：前端收不到指标就
+ * 不画滚动条，比画一条动不了的假滚动条更诚实。
+ */
+async function publishScrollMetrics(input: {
+  handle: BrowserLiveHandle;
+  sink: BrowserLiveSink;
+}): Promise<void> {
+  const metrics = await input.handle.session.scrollMetrics?.();
+  if (!metrics) return;
+  const payload: BrowserLiveScrollPayload = {
+    scrollY: metrics.scrollY,
+    maxScrollY: metrics.maxScrollY,
+    viewportHeight: metrics.viewportHeight,
+    contentHeight: metrics.contentHeight,
+  };
+  input.sink.send(buildEnvelope('scroll', payload));
+}
+
 async function handleControlMessage(input: {
   message: BrowserLiveControlMessage;
   socket: WebSocket;
@@ -464,12 +628,50 @@ async function handleControlMessage(input: {
       await handle.session.reload();
       return;
     }
+    case 'goBack': {
+      await handle.session.goBack();
+      return;
+    }
+    case 'goForward': {
+      await handle.session.goForward();
+      return;
+    }
     case 'screencast.start': {
-      await browserLiveHub.beginScreencast(userId, sink);
+      // 只把客户端真正给出的字段透传下去：缺省时不覆盖服务端默认定档。
+      await browserLiveHub.beginScreencast(userId, sink, {
+        ...(message.maxWidth !== undefined ? { maxWidth: message.maxWidth } : {}),
+        ...(message.maxHeight !== undefined ? { maxHeight: message.maxHeight } : {}),
+        ...(message.quality !== undefined ? { quality: message.quality } : {}),
+        ...(message.format !== undefined ? { format: message.format } : {}),
+        ...(message.binary !== undefined ? { binary: message.binary } : {}),
+      });
       return;
     }
     case 'screencast.stop': {
       await browserLiveHub.endScreencast(userId);
+      return;
+    }
+    case 'screencast.refresh': {
+      // 静态页不再产生 damage 就不再推帧；客户端切标签丢弃旧文档帧后靠这里补一帧。
+      await browserLiveHub.refreshScreencast(userId);
+      return;
+    }
+    case 'scroll.metrics': {
+      await publishScrollMetrics({ handle, sink });
+      return;
+    }
+    case 'scrollTo': {
+      // 拖动滚动条：先把主文档滚到位，再把落点回给前端（页面可能夹取超界值，
+      // 客户端用自己的估算值画 thumb 会与真实位置错开）。
+      await handle.session.scrollTo?.(message.y);
+      await publishScrollMetrics({ handle, sink });
+      return;
+    }
+    case 'copySelection': {
+      // 选区在远端页面：取回纯文本走 `clipboard` 通道，由前端写入本地剪贴板。
+      // 没有实现 selectedText 的会话（测试替身）回空串，前端按「无选区」处理。
+      const text = (await handle.session.selectedText?.()) ?? '';
+      sink.send(buildEnvelope('clipboard', { text }));
       return;
     }
     case 'pick': {
@@ -598,6 +800,16 @@ export async function browserLiveRoutes(app: FastifyInstance): Promise<void> {
       const sink: BrowserLiveSink = {
         send: (envelope) => safeSendEnvelope(socket, envelope),
         isOpen: () => !closed && socket.readyState === WS_OPEN,
+        // 二进制帧：`ws` 直接发 Buffer 走 binary opcode，不再套 JSON + base64。
+        sendBinary: (data) => {
+          try {
+            socket.send(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+            return true;
+          } catch (error) {
+            void error;
+            return false;
+          }
+        },
       };
 
       const stopHeartbeat = installWsHeartbeat(socket);

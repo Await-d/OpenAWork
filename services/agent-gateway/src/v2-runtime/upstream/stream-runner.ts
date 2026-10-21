@@ -450,6 +450,20 @@ function makeMapper(
             ...meta({}),
           },
         ];
+      case 'tool-input-error':
+        // 上游（对齐 opencode）不再把畸形工具入参修补成 `{}` 后照常执行，而是显式
+        // 上报。这里把它转成客户端可见的错误：静默丢一次工具调用比暴露「这段 JSON
+        // 解不出来」更难排查。
+        diagnostics.sawError = true;
+        input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
+        return [
+          {
+            type: 'error',
+            code: 'TOOL_ERROR',
+            message: `Tool ${event.name} 的入参不是合法 JSON，已放弃本次调用`,
+            ...meta({}),
+          },
+        ];
       case 'step-finish': {
         const serviceTier = providerMetadataText(
           event.providerMetadata,
@@ -458,7 +472,7 @@ function makeMapper(
           'service_tier',
         );
         if (serviceTier !== undefined) diagnostics.openaiServiceTier = serviceTier;
-        reportFinish(input, state, event.reason, event.usage, event.providerMetadata);
+        reportFinish(input, state, event.reason.normalized, event.usage, event.providerMetadata);
         return [];
       }
       case 'finish': {
@@ -469,12 +483,14 @@ function makeMapper(
           'service_tier',
         );
         if (serviceTier !== undefined) diagnostics.openaiServiceTier = serviceTier;
-        reportFinish(input, state, event.reason, event.usage, event.providerMetadata);
+        reportFinish(input, state, event.reason.normalized, event.usage, event.providerMetadata);
         if (state.doneEmitted) return [];
         state.doneEmitted = true;
         diagnostics.sawDone = true;
         input.onDiagnostics?.(diagnosticsSnapshot(diagnostics));
-        return [{ type: 'done', stopReason: mapFinishReason(event.reason), ...meta({}) }];
+        return [
+          { type: 'done', stopReason: mapFinishReason(event.reason.normalized), ...meta({}) },
+        ];
       }
       case 'provider-error':
         diagnostics.sawError = true;

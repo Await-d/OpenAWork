@@ -233,6 +233,159 @@ describe('createSessionsClient.getRecoveryResult', () => {
   });
 });
 
+/**
+ * 回归：`multiSelect` → `multiple` 归一化必须挂在**每条**读取路径上。
+ *
+ * `pendingQuestions` 由四条互不知情的链路写入（listPending / status / recovery /
+ * 共享会话详情）。任何一条漏掉归一化，它写回的原始条目都会覆盖掉已归一化的那份，
+ * 症状是「刚打开是可多选、几秒后又被 3s 轮询改回单选」。
+ */
+describe('createSessionsClient 问题多选标记归一化', () => {
+  const MULTI_SELECT_QUESTIONS_JSON = [
+    {
+      header: '清理范围',
+      multiSelect: true,
+      options: [{ label: '清空回收站', description: '最推荐' }],
+      question: '请选择要立即清理的项目（可多选）',
+    },
+  ];
+
+  function recoveryBody() {
+    return {
+      recovery: {
+        activeStream: null,
+        children: [],
+        pendingPermissions: [],
+        pendingQuestions: [
+          {
+            createdAt: '2026-10-18T07:14:29.000Z',
+            questions: MULTI_SELECT_QUESTIONS_JSON,
+            requestId: 'question-multi',
+            sessionId: 'session-1',
+            status: 'pending',
+            title: '清理范围',
+            toolName: 'AskUserQuestion',
+          },
+        ],
+        session: { id: 'session-1' },
+        tasks: [],
+        todoLanes: { main: [], temp: [] },
+      },
+    };
+  }
+
+  it('getRecovery 把 multiSelect 归一化成 multiple', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return { ok: true, json: async () => recoveryBody() } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    const recovery = await client.getRecovery('token-1', 'session-1');
+
+    expect(recovery.pendingQuestions[0]?.questions[0]?.multiple).toBe(true);
+  });
+
+  it('getRecoveryResult 同样归一化（在途单飞层走的是这个出口）', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return { ok: true, json: async () => recoveryBody() } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    const result = await client.getRecoveryResult('token-1', 'session-1');
+
+    expect(result.ok).toBe(true);
+    expect(result.recovery?.pendingQuestions[0]?.questions[0]?.multiple).toBe(true);
+  });
+
+  it('getStatus 把 multiSelect 归一化成 multiple（3s 轮询路径）', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          status: {
+            activeStream: null,
+            children: [],
+            pendingPermissions: [],
+            pendingQuestions: [
+              {
+                createdAt: '2026-10-18T07:14:29.000Z',
+                questions: MULTI_SELECT_QUESTIONS_JSON,
+                requestId: 'question-multi',
+                sessionId: 'session-1',
+                status: 'pending',
+                title: '清理范围',
+                toolName: 'AskUserQuestion',
+              },
+            ],
+            tasks: [],
+            todoLanes: { main: [], temp: [] },
+            workflowRuntime: {},
+          },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    const status = await client.getStatus('token-1', 'session-1');
+
+    expect(status.pendingQuestions[0]?.questions[0]?.multiple).toBe(true);
+  });
+
+  it('getSharedWithMe 把 multiSelect 归一化成 multiple', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          comments: [],
+          pendingPermissions: [],
+          pendingQuestions: [
+            {
+              createdAt: '2026-10-18T07:14:29.000Z',
+              questions: MULTI_SELECT_QUESTIONS_JSON,
+              requestId: 'question-multi',
+              sessionId: 'session-1',
+              status: 'pending',
+              title: '清理范围',
+              toolName: 'AskUserQuestion',
+            },
+          ],
+          presence: [],
+          session: { id: 'session-1' },
+          share: { sessionId: 'session-1' },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    const detail = await client.getSharedWithMe('token-1', 'session-1');
+
+    expect(detail.pendingQuestions[0]?.questions[0]?.multiple).toBe(true);
+  });
+
+  it('pendingQuestions 缺省时返回空数组而不是崩溃', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          status: {
+            activeStream: null,
+            children: [],
+            pendingPermissions: [],
+            tasks: [],
+            todoLanes: { main: [], temp: [] },
+            workflowRuntime: {},
+          },
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createSessionsClient('http://localhost:3000');
+    const status = await client.getStatus('token-1', 'session-1');
+
+    expect(status.pendingQuestions).toEqual([]);
+  });
+});
+
 describe('createSessionsClient mutation error handling', () => {
   it('list 失败时会保留后端 error 文案', async () => {
     globalThis.fetch = vi.fn(async () => {

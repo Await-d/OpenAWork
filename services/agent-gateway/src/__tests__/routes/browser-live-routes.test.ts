@@ -7,6 +7,7 @@ import type {
   BrowserLiveEnvelope,
   BrowserLiveHelloPayload,
   BrowserLiveNodePayload,
+  BrowserLiveScrollPayload,
 } from '@openAwork/shared';
 import type * as AuthModule from '../../infra/auth.js';
 import type * as DbModule from '../../infra/db.js';
@@ -35,6 +36,8 @@ const liveMocks = vi.hoisted(() => {
     }),
     goto: vi.fn(),
     reload: vi.fn(),
+    goBack: vi.fn(),
+    goForward: vi.fn(),
     currentUrl: vi.fn(),
     currentTitle: vi.fn(),
     startScreencast: vi.fn(),
@@ -44,6 +47,8 @@ const liveMocks = vi.hoisted(() => {
     clearDeviceMetricsOverride: vi.fn(),
     setUserAgentOverride: vi.fn(),
     dispatchInput: vi.fn(),
+    scrollMetrics: vi.fn(),
+    scrollTo: vi.fn(),
     nodeAtPoint: vi.fn(),
     domTree: vi.fn(),
     accessibilitySnapshot: vi.fn(),
@@ -235,6 +240,8 @@ beforeEach(() => {
   liveMocks.session.ackScreencastFrame.mockReset();
   liveMocks.session.stopScreencast.mockReset();
   liveMocks.session.dispatchInput.mockReset();
+  liveMocks.session.scrollMetrics.mockReset();
+  liveMocks.session.scrollTo.mockReset();
   liveMocks.session.setDeviceMetricsOverride.mockReset();
   liveMocks.session.setUserAgentOverride.mockReset();
   liveMocks.session.goto.mockReset();
@@ -494,7 +501,11 @@ describe('browser live routes', () => {
     }
   });
 
-  it('applies screencast credit gating over a live WS connection', async () => {
+  /**
+   * 帧背压走的是「收到帧即 ack CDP、controller 侧限帧 + 只保最新」，因此线路上的
+   * frameSessionId 只用于客户端 ack 关联，网关不会再拿它去 ack CDP。
+   */
+  it('acks CDP immediately on each frame and streams over a live WS connection', async () => {
     const app = await buildApp();
     try {
       const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
@@ -517,6 +528,19 @@ describe('browser live routes', () => {
         frameSessionId: 11,
         timestamp: Date.now(),
       });
+
+      const firstFrame =
+        await socket.nextMessage<BrowserLiveEnvelope<{ frameSessionId: number }>>();
+      expect(firstFrame.ch).toBe('frame');
+      const firstWireId = firstFrame.payload.frameSessionId;
+      expect(Number.isInteger(firstWireId)).toBe(true);
+
+      // 不等客户端 ack：收到帧就立刻把信用还给 CDP，否则帧率被一个完整往返钉死。
+      await expect(
+        waitFor(() => liveMocks.session.ackScreencastFrame.mock.calls.length === 1),
+      ).resolves.toBe(true);
+      expect(liveMocks.session.ackScreencastFrame).toHaveBeenCalledWith(11);
+
       liveMocks.emitEvent({
         type: 'screencastFrame',
         data: 'second',
@@ -530,20 +554,8 @@ describe('browser live routes', () => {
         timestamp: Date.now(),
       });
 
-      const firstFrame =
-        await socket.nextMessage<BrowserLiveEnvelope<{ frameSessionId: number }>>();
-      expect(firstFrame.ch).toBe('frame');
-      const firstWireId = firstFrame.payload.frameSessionId;
-      expect(Number.isInteger(firstWireId)).toBe(true);
-      expect(liveMocks.session.ackScreencastFrame).not.toHaveBeenCalled();
-
+      // 客户端的 ack 只用于测往返 / 降质，不再阻塞下发。
       socket.ws.send(JSON.stringify({ ch: 'ack', frameSessionId: firstWireId }));
-      await expect(
-        waitFor(() => liveMocks.session.ackScreencastFrame.mock.calls.length === 1),
-      ).resolves.toBe(true);
-      // 网关必须把线路帧 id 映射回真实 CDP session id 后再 ack。
-      expect(liveMocks.session.ackScreencastFrame).toHaveBeenCalledWith(11);
-
       const secondFrame =
         await socket.nextMessage<BrowserLiveEnvelope<{ frameSessionId: number }>>();
       expect(secondFrame.ch).toBe('frame');
@@ -566,6 +578,49 @@ describe('browser live routes', () => {
 
       expect(pong.ch).toBe('pong');
       expect(typeof pong.payload.timestamp).toBe('number');
+
+      socket.ws.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('replies on the scroll channel with remote scroll metrics and applies scrollTo', async () => {
+    liveMocks.session.scrollMetrics.mockResolvedValue({
+      scrollY: 0,
+      maxScrollY: 900,
+      viewportHeight: 600,
+      contentHeight: 1500,
+    });
+    liveMocks.session.scrollTo.mockResolvedValue(undefined);
+
+    const app = await buildApp();
+    try {
+      const socket = await openSocket(app, `/browser-live?token=${encodeURIComponent(token(app))}`);
+      await socket.nextMessage();
+
+      socket.ws.send(JSON.stringify({ ch: 'control', action: 'scroll.metrics' }));
+      const metrics = await socket.nextMessage<BrowserLiveEnvelope<BrowserLiveScrollPayload>>();
+      expect(metrics.ch).toBe('scroll');
+      expect(metrics.payload).toEqual({
+        scrollY: 0,
+        maxScrollY: 900,
+        viewportHeight: 600,
+        contentHeight: 1500,
+      });
+
+      // 滚动后回包必须带**落点**：拖动 thumb 的客户端据此校正本地估算。
+      liveMocks.session.scrollMetrics.mockResolvedValue({
+        scrollY: 450,
+        maxScrollY: 900,
+        viewportHeight: 600,
+        contentHeight: 1500,
+      });
+      socket.ws.send(JSON.stringify({ ch: 'control', action: 'scrollTo', y: 450 }));
+      const scrolled = await socket.nextMessage<BrowserLiveEnvelope<BrowserLiveScrollPayload>>();
+      expect(liveMocks.session.scrollTo).toHaveBeenCalledWith(450);
+      expect(scrolled.ch).toBe('scroll');
+      expect(scrolled.payload.scrollY).toBe(450);
 
       socket.ws.terminate();
     } finally {

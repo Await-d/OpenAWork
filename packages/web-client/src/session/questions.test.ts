@@ -37,6 +37,82 @@ describe('createQuestionsClient', () => {
     expect(result[0]?.requestId).toBe('question-1');
   });
 
+  it('listPending 把工具入参的 multiSelect 归一化成 multiple', async () => {
+    // 实测本地库里 `questions_json` 只有 question/header/options，多选标记来自工具
+    // 入参的 `multiSelect`；字段名不匹配时前端会一律按单选处理——题干写着「可多选」，
+    // 但勾第二个会把第一个顶掉，提交后只回显一项。
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          requests: [
+            {
+              createdAt: '2026-10-18T07:14:29.000Z',
+              questions: [
+                {
+                  header: '清理范围',
+                  multiSelect: true,
+                  options: [{ label: '清空回收站', description: '最推荐' }],
+                  question: '请选择要立即清理的项目（可多选）',
+                },
+                {
+                  header: '回收站',
+                  options: [{ label: '保留', description: '' }],
+                  question: '回收站里的副本要删吗？',
+                },
+                {
+                  header: '字符串布尔',
+                  multiSelect: 'true',
+                  options: [],
+                  question: '兼容 JSON 里的字符串 true',
+                },
+              ],
+              requestId: 'question-multi',
+              sessionId: 'session-1',
+              status: 'pending',
+              title: '清理范围',
+              toolName: 'AskUserQuestion',
+            },
+          ],
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createQuestionsClient('http://localhost:3000');
+    const result = await client.listPending('token-1', 'session-1');
+
+    expect(result[0]?.questions[0]?.multiple).toBe(true);
+    // 未声明多选的问题保持 undefined（调用方按 `=== true` 判定，等价于单选）。
+    expect(result[0]?.questions[1]?.multiple).toBeUndefined();
+    expect(result[0]?.questions[2]?.multiple).toBe(true);
+  });
+
+  it('listPending 同时兼容已经叫 multiple 的数据', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          requests: [
+            {
+              createdAt: '2026-10-18T07:14:29.000Z',
+              questions: [{ header: 'H', multiple: false, options: [], question: 'Q' }],
+              requestId: 'question-legacy',
+              sessionId: 'session-1',
+              status: 'pending',
+              title: 'T',
+              toolName: 'AskUserQuestion',
+            },
+          ],
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createQuestionsClient('http://localhost:3000');
+    const result = await client.listPending('token-1', 'session-1');
+
+    expect(result[0]?.questions[0]?.multiple).toBe(false);
+  });
+
   it('reply 失败时会保留后端 error 文案', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

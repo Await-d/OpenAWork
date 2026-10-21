@@ -44,6 +44,7 @@
 import { spawn } from 'node:child_process';
 import { promises as fsp, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import { constants as osConstants } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolDefinition } from '@openAwork/agent-core';
@@ -100,6 +101,15 @@ export const DEFAULT_BASH_TIMEOUT_MS = (() => {
 export const MAX_BASH_TIMEOUT_MS = 30 * 60 * 1000;
 
 const SIGKILL_GRACE_MS = 3_000;
+
+/**
+ * 将终止信号映射为 shell 习惯的 `128 + signalNumber`（如 SIGKILL → 137）。
+ * 无信号号时退回 128，避免把被信号杀死的进程误报成普通 exit 1。
+ */
+export function resolveSignalExitCode(signal: NodeJS.Signals): number {
+  const signalNumber = osConstants.signals[signal];
+  return typeof signalNumber === 'number' ? 128 + signalNumber : 128;
+}
 
 /**
  * Patterns rejected before exec. We keep a deliberately *minimal* deny-list
@@ -525,6 +535,8 @@ interface SpawnOutcome {
   code: number;
   rawOutput: string;
   spawnError?: Error;
+  /** POSIX 信号名，仅在子进程被信号终止时出现。 */
+  signal?: NodeJS.Signals;
 }
 
 /**
@@ -595,6 +607,11 @@ function spawnAndCollect(
     }
 
     let exited = false;
+    // `exited` 表示结果已结算；`processClosed` 表示子进程真的结束了。
+    // 二者必须分开：超时/中止会在进程退出前就返回结果，若复用同一个标志，
+    // SIGKILL 兜底会因为 `exited === true` 而永远不触发。
+    let processClosed = false;
+    let escalationHandle: NodeJS.Timeout | null = null;
     let kind: SpawnOutcome['kind'] = 'exit';
     const chunks: Buffer[] = [];
     let totalSize = 0;
@@ -655,11 +672,34 @@ function spawnAndCollect(
 
     function onAbort(): void {
       if (exited) return;
-      killTree('SIGTERM');
-      setTimeout(() => {
-        if (!exited) killTree('SIGKILL');
-      }, SIGKILL_GRACE_MS);
+      terminateWithEscalation();
       finalize('aborted', 130);
+    }
+
+    /**
+     * SIGTERM 只是请求；捕获/忽略 TERM 的命令必须靠 SIGKILL 兜底。
+     * 升级计时器只受 `processClosed` 约束，不能复用 `exited`——超时/中止
+     * 会在进程真正退出前结算结果，复用 `exited` 会让兜底永远不执行。
+     */
+    function terminateWithEscalation(): void {
+      if (processClosed) return;
+      killTree('SIGTERM');
+      // killTree 可能同步触发 close（测试替身/极端平台实现），再确认一次。
+      if (processClosed || escalationHandle) return;
+      escalationHandle = setTimeout(() => {
+        escalationHandle = null;
+        if (!processClosed) {
+          killTree('SIGKILL');
+        }
+      }, SIGKILL_GRACE_MS);
+      escalationHandle.unref?.();
+    }
+
+    function clearEscalation(): void {
+      if (escalationHandle) {
+        clearTimeout(escalationHandle);
+        escalationHandle = null;
+      }
     }
 
     const cleanup = () => {
@@ -672,7 +712,7 @@ function spawnAndCollect(
       }
     };
 
-    const finalize = (next: SpawnOutcome['kind'], code: number) => {
+    const finalize = (next: SpawnOutcome['kind'], code: number, signal?: NodeJS.Signals) => {
       if (exited) return;
       exited = true;
       kind = next;
@@ -690,6 +730,7 @@ function spawnAndCollect(
           kind,
           code,
           rawOutput: Buffer.concat(chunks).toString('utf-8'),
+          ...(signal ? { signal } : {}),
         });
       });
     };
@@ -721,10 +762,7 @@ function spawnAndCollect(
 
     timeoutHandle = setTimeout(() => {
       if (exited) return;
-      killTree('SIGTERM');
-      setTimeout(() => {
-        if (!exited) killTree('SIGKILL');
-      }, SIGKILL_GRACE_MS);
+      terminateWithEscalation();
       finalize('timeout', 124);
     }, timeoutMs);
 
@@ -737,6 +775,8 @@ function spawnAndCollect(
     }
 
     child.on('error', (error) => {
+      processClosed = true;
+      clearEscalation();
       cleanup();
       if (exited) return;
       exited = true;
@@ -749,9 +789,11 @@ function spawnAndCollect(
     });
 
     child.on('close', (code, signal) => {
+      processClosed = true;
+      clearEscalation();
       if (exited) return;
-      const exitCode = typeof code === 'number' ? code : signal ? 128 : 1;
-      finalize('exit', exitCode);
+      const exitCode = typeof code === 'number' ? code : signal ? resolveSignalExitCode(signal) : 1;
+      finalize('exit', exitCode, signal ?? undefined);
     });
   });
 }
@@ -880,6 +922,11 @@ export async function runBashCommand(
     const reason = outcome.spawnError?.message ?? 'unknown spawn error';
     metadataLines.push(`bash tool failed to spawn the command: ${reason}`);
   }
+  if (outcome.signal) {
+    metadataLines.push(
+      `Process terminated by signal ${outcome.signal} (exit code ${outcome.code}).`,
+    );
+  }
   const shellCompatibilityHint = buildShellCompatibilityHint({
     cwd,
     output: outcome.rawOutput,
@@ -894,6 +941,25 @@ export async function runBashCommand(
   });
   if (packageManagerHint) {
     metadataLines.push(packageManagerHint);
+  }
+  const benignExitHint = buildBenignExitHint({
+    command: input.command,
+    exitCode: outcome.code,
+    kind: outcome.kind,
+  });
+  if (benignExitHint) {
+    metadataLines.push(benignExitHint);
+  } else {
+    // 良性退出码 1 与「stderr 被抑制」的提示互斥：grep 无匹配时
+    // 再加“去掉 2>/dev/null”只会把模型引向错误方向。
+    const suppressedStderrHint = buildSuppressedStderrHint({
+      command: input.command,
+      exitCode: outcome.code,
+      kind: outcome.kind,
+    });
+    if (suppressedStderrHint) {
+      metadataLines.push(suppressedStderrHint);
+    }
   }
 
   let finalOutput = truncated.content || '(no output)';
@@ -1048,6 +1114,68 @@ function buildPackageManagerHint(input: { cwd: string; output: string }): string
     return `当前目录 ${input.cwd} 下没有 pnpm importer manifest。请把 workdir 指到包含 package.json / package.json5 / package.yaml / pnpm-workspace.yaml 的目录后重试。`;
   }
   return null;
+}
+
+/**
+ * 命令把 stderr 丢进「空设备」的写法:POSIX `/dev/null`、PowerShell `$null`、cmd `nul`。
+ * 覆盖 `2>/dev/null`、`&>/dev/null`、`>/dev/null 2>&1`、`2>$null`、`2>nul`。
+ */
+const SUPPRESSED_STDERR_REDIRECT =
+  /(?:&>>?|2>>?|\*>)\s*(?:\/dev\/null|\$null|nul)\b|>>?\s*\/dev\/null\s+2>&1\b/i;
+
+/**
+ * 退出码 1 在下列命令里是正常语义（未匹配 / 存在差异），不是执行失败。
+ * 只在命令起始位置或 shell 分隔符后匹配，避免命中 `--grep` 之类的参数。
+ */
+const BENIGN_EXIT_ONE_COMMANDS = /(?:^|[;&|]\s*)(?:grep|rg|git\s+grep|diff|cmp)\b/u;
+const GIT_DIFF_EXIT_FLAGS = /(?:^|[;&|]\s*)git\s+diff\b[^;&|]*\s--(?:exit-code|quiet)\b/u;
+
+/**
+ * 为 `grep` / `rg` / `git grep` / `diff` / `cmp` 的退出码 1 追加解释。
+ *
+ * 这里只补模型可见的 `<bash_metadata>`，不改变 `isError`：把退出码 1
+ * 直接判成成功会掩盖真实失败，保守做法是先消除“工具误报”的误导。
+ */
+export function buildBenignExitHint(input: {
+  command: string;
+  exitCode: number;
+  kind: BashExecutionResult['kind'];
+}): string | null {
+  if (input.kind !== 'exit' || input.exitCode !== 1) {
+    return null;
+  }
+  if (!BENIGN_EXIT_ONE_COMMANDS.test(input.command) && !GIT_DIFF_EXIT_FLAGS.test(input.command)) {
+    return null;
+  }
+  return [
+    '命令退出码为 1；对 grep / rg / git grep / diff / cmp 来说，这通常表示',
+    '“未匹配”或“存在差异”，不是执行失败。若预期有匹配，请检查 pattern、路径或比较对象。',
+  ].join('');
+}
+
+/**
+ * `cmd 2>/dev/null` 会把命令唯一能解释「为什么退出码非零」的 stderr 一并丢弃,
+ * 结果只剩一份看起来正常(或残缺)的 stdout 配一个非零退出码——典型如 `du` 遍历到
+ * 无权读取的子目录 / 不存在的路径时仍打印其余目标,却以 1 退出。此时模型很容易把
+ * 真实失败误读成「工具误报」,故显式提示去掉抑制重定向。
+ */
+export function buildSuppressedStderrHint(input: {
+  command: string;
+  exitCode: number;
+  kind: BashExecutionResult['kind'];
+}): string | null {
+  if (input.kind !== 'exit' || input.exitCode === 0) {
+    return null;
+  }
+  if (!SUPPRESSED_STDERR_REDIRECT.test(input.command)) {
+    return null;
+  }
+  return [
+    `命令退出码为 ${input.exitCode},但 stderr 已被重定向到空设备(如 2>/dev/null)——`,
+    '唯一能说明失败原因的错误输出被丢弃,当前 stdout 可能只是本次运行的残存结果。',
+    '请去掉 stderr 抑制后重试(如改为 `2>&1 | tail -n 20`),',
+    '或先用 `[ -e <path> ]` 判断路径是否存在再统计。',
+  ].join(' ');
 }
 
 // ---------- Tool registration ----------

@@ -47,7 +47,17 @@ function pickDefaultWindowsShell(commandExists: (command: string) => boolean): s
   return commandExists('pwsh.exe') ? 'pwsh.exe' : 'powershell.exe';
 }
 
+const commandExistsCache = new Map<string, boolean>();
+
 function commandExistsOnPath(command: string): boolean {
+  // Windows 上没有配置 OPENAWORK_WINDOWS_SHELL 时，每次 bash preflight 都会走到
+  // 这里。spawnSync 会同步阻塞整个网关事件循环，长任务/多会话并发时尤其明显；
+  // 按「命令 + PATH」缓存结果，PATH 变化时自然失效。
+  const cacheKey = `${command}\0${process.env['PATH'] ?? ''}`;
+  const cached = commandExistsCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
   const result = spawnSync(
     command,
     ['-NoLogo', '-NoProfile', '-Command', '$PSVersionTable.PSVersion'],
@@ -56,5 +66,12 @@ function commandExistsOnPath(command: string): boolean {
       windowsHide: true,
     },
   );
-  return result.status === 0 && !result.error;
+  const exists = result.status === 0 && !result.error;
+  commandExistsCache.set(cacheKey, exists);
+  return exists;
+}
+
+/** Test hook: clear the PATH-probe cache. */
+export function __resetShellChoiceCacheForTest(): void {
+  commandExistsCache.clear();
 }

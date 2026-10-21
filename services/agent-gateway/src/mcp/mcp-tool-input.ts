@@ -40,6 +40,34 @@ export function parseMcpListToolsRawInput(
   return trimmed.length > 0 ? { serverId: trimmed } : {};
 }
 
+/**
+ * 还原上游流式中断留下的降级形态 `{ raw: "<JSON 文本>" }`。
+ *
+ * agent-core 的 `repairToolInput` 已对注册型工具做同样还原；mcp_call 是
+ * 非注册包装工具（无 zod schema、不经 RepairPlugin），需要自行处理。
+ * 触发条件全部满足才展开，避免误伤真实入参：
+ *   1. 对象只有 `raw` 一个键；
+ *   2. `raw` 是字符串且首字符为 `{`；
+ *   3. 该字符串能解析为普通对象（mcp_call 的形）。
+ */
+function unwrapRawJsonObject(rawInput: Record<string, unknown>): Record<string, unknown> | null {
+  const keys = Object.keys(rawInput);
+  if (keys.length !== 1 || keys[0] !== 'raw') return null;
+  const rawText = rawInput['raw'];
+  if (typeof rawText !== 'string') return null;
+  const trimmed = rawText.trim();
+  if (!trimmed.startsWith('{')) return null;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // 半截 JSON：保持原样，让下方校验产出明确的字段级错误。
+  }
+  return null;
+}
+
 function unwrapQuotedJson(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length >= 2) {
@@ -83,19 +111,22 @@ function coerceArgumentsValue(value: unknown): Record<string, unknown> | null {
  * `skill_mcp`'s contract).
  */
 export function parseMcpCallRawInput(rawInput: Record<string, unknown>): McpCallParseResult {
-  const serverIdRaw = rawInput['serverId'];
+  // 上游错误写入习惯的还原：调用方可能把整个入参对象塞进 `raw` 字段。
+  const effectiveInput = unwrapRawJsonObject(rawInput) ?? rawInput;
+
+  const serverIdRaw = effectiveInput['serverId'];
   const serverId = typeof serverIdRaw === 'string' ? serverIdRaw.trim() : '';
   if (!serverId) {
     return { ok: false, reason: 'mcp_call requires a non-empty serverId' };
   }
 
-  const toolNameRaw = rawInput['toolName'];
+  const toolNameRaw = effectiveInput['toolName'];
   const toolName = typeof toolNameRaw === 'string' ? toolNameRaw.trim() : '';
   if (!toolName) {
     return { ok: false, reason: 'mcp_call requires a non-empty toolName' };
   }
 
-  const argumentsObject = coerceArgumentsValue(rawInput['arguments']);
+  const argumentsObject = coerceArgumentsValue(effectiveInput['arguments']);
   if (!argumentsObject) {
     return {
       ok: false,

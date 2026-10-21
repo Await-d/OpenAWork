@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
+import { IMAGE_GENERATION_COUNT_RANGE } from '@openAwork/shared';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { sqliteGet } from '../infra/db.js';
@@ -9,10 +10,11 @@ import {
 import { resolveModelRouteFromProvider } from '../provider/model-router.js';
 import { resolveImageGenerationDefaults } from '../image-generation/image-generation-schema.js';
 import {
-  generateImageWithOpenAi,
+  generateImagesWithOpenAi,
   OpenAiImageGenerationError,
 } from '../image-generation/openai-image-generation.js';
 import { createArtifact } from '../session/artifact-content-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import { isImageGenerationPluginEnabledForUser } from './plugin-tool-settings.js';
 
 const generateImageInputSchema = z.object({
@@ -22,30 +24,57 @@ const generateImageInputSchema = z.object({
     .optional()
     .describe(
       [
-        '图片尺寸，WxH 格式。可能时优先选预设：',
+        '图片尺寸，WxH 格式，或 "auto"（由模型按 prompt 选择）。可能时优先选预设：',
         '• 1K（默认档）："1024x1024"（1:1）、"1536x1024"（3:2）、"1024x1536"（2:3）。',
-        '• 2K（高细节；quality 会被服务端自动提到 "high"）："2048x2048"（1:1）、"2048x1152"（16:9）、"1152x2048"（9:16）。',
+        '• 2K（高细节）："2048x2048"（1:1）、"2048x1152"（16:9）、"1152x2048"（9:16）。',
         '• 4K（实验性、仅走 relay、可能耗时 ~6 分钟）："3840x2160"（16:9）、"2160x3840"（9:16）。',
         '也接受自定义尺寸，但必须同时满足：最长边 ≤ 3840px、宽高都是 16 的倍数、长宽比 ≤ 3:1、总像素在 655,360 – 8,294,400 之间。不传时使用用户配置的默认尺寸。',
       ].join(' '),
     ),
   quality: z
-    .enum(['low', 'medium', 'high'])
+    .enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max'])
     .optional()
     .describe(
-      '图片质量："low"重速度、"medium"平衡、"high"重细节。2K / 4K 尺寸会被服务端自动提到 "high"。不传时用用户配置。',
+      [
+        '图片质量："auto" 由模型决定（官方默认）、"low" 重速度、"medium" 平衡、"high" 重细节；',
+        '"xhigh" / "max" 是 GPT Image 2.5 新增的更高档位，更早的 GPT Image 模型不支持（服务端会收敛到 "high"）。',
+        '旧模型（gpt-image-2 及更早）在 2K / 4K 尺寸下会被服务端自动提到 "high"。不传时用用户配置。',
+      ].join(' '),
     ),
   outputFormat: z
     .enum(['png', 'jpeg', 'webp'])
     .optional()
     .describe(
-      '输出文件格式："png"（默认，无损）、"jpeg"（文件较小、不支持透明）、"webp"（现代、较小）。不传时用用户配置。',
+      '输出文件格式："png"（默认，无损）、"jpeg"（文件较小、不支持透明，延迟更低）、"webp"（现代、较小）。不传时用用户配置。',
     ),
   background: z
-    .enum(['auto', 'opaque'])
+    .enum(['auto', 'opaque', 'transparent'])
     .optional()
     .describe(
-      '背景处理："auto" 由模型决定（PNG/WebP 下可能产生透明）；"opaque" 强制不透明。不传时用用户配置。',
+      '背景处理："auto" 由模型决定；"opaque" 强制不透明；"transparent" 透明背景（需配合 png / webp，jpeg 不支持）。不传时用用户配置。',
+    ),
+  moderation: z
+    .enum(['auto', 'low'])
+    .optional()
+    .describe(
+      '内容审核严格度："auto" 为标准过滤（默认），"low" 更宽松。仅在支持该参数的模型上生效。不传时用用户配置。',
+    ),
+  outputCompression: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe('输出压缩率（0-100 百分比），仅 jpeg / webp 生效。不传时由上游决定。'),
+  count: z
+    .number()
+    .int()
+    .min(IMAGE_GENERATION_COUNT_RANGE.min)
+    .max(IMAGE_GENERATION_COUNT_RANGE.max)
+    .optional()
+    .describe(
+      `一次生成的张数（对应官方 n 参数，${IMAGE_GENERATION_COUNT_RANGE.min}-${IMAGE_GENERATION_COUNT_RANGE.max}），默认 1。` +
+        '仅在需要多个候选方案时使用——张数会线性放大耗时与成本。',
     ),
 });
 
@@ -59,12 +88,14 @@ export const generateImageToolDefinition: ToolDefinition<
 > = {
   name: 'generate_image',
   description:
-    '使用配置好的图片生成模型（GPT Image 2 系列）按文本 prompt 生成图片。' +
+    '使用配置好的图片生成模型（GPT Image 2.5 / 2 系列）按文本 prompt 生成图片。' +
     '用户要你创建、画、设计、生成图片时使用本工具。' +
     '如果用户要抓取、查找、获取、展示互联网上已经存在的图片，必须优先使用 open_websearch 配合 webfetch 返回原图 URL；只有 open_websearch 不可用时才回退到 websearch 等联网工具，不要调用本工具。' +
     '生成的图片会在对话中内联展示。' +
     '**不需要**用户切到图片模式——本工具在普通聊天中直接可用。' +
-    '请选择能满足需求的最小尺寸档（1K 最快；2K 适海报 / 精细画面；4K 实验性且慢，仅在用户明确要求超高分辨率时使用）。',
+    '请选择能满足需求的最小尺寸档（1K 最快；2K 适海报 / 精细画面；4K 实验性且慢，仅在用户明确要求超高分辨率时使用）；' +
+    '质量档同理，优先用默认档，只有用户明确要求更高细节（材质 / 光影 / 保真度）时才升到 xhigh / max；' +
+    '默认只出 1 张，只有用户明确要多个候选方案时才用 count 一次多出几张。',
   inputSchema: generateImageInputSchema,
   outputSchema: generateImageOutputSchema,
   execute: async () => {
@@ -91,12 +122,13 @@ function buildImageArtifactTitle(prompt: string): string {
   return normalized.length > 48 ? `${normalized.slice(0, 48)}…` : normalized;
 }
 
-function buildImageFileName(prompt: string, extension: string): string {
+function buildImageFileName(prompt: string, extension: string, index?: number): string {
   const base = buildImageArtifactTitle(prompt)
     .toLowerCase()
     .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '-')
     .replace(/^-+|-+$/g, '');
-  return `${base || 'generated-image'}-${createHash('sha1').update(prompt).digest('hex').slice(0, 8)}.${extension}`;
+  const indexSuffix = index === undefined ? '' : `-${index}`;
+  return `${base || 'generated-image'}${indexSuffix}-${createHash('sha1').update(prompt).digest('hex').slice(0, 8)}.${extension}`;
 }
 
 export async function executeGenerateImageTool(input: {
@@ -149,9 +181,17 @@ export async function executeGenerateImageTool(input: {
       quality: toolInput.quality,
       outputFormat: toolInput.outputFormat,
       background: toolInput.background,
+      moderation: toolInput.moderation,
+      outputCompression: toolInput.outputCompression,
+      count: toolInput.count,
     },
     storedDefaults,
+    { modelId: imageProviderConfig.modelId },
   );
+
+  if (resolved.backgroundNotice) {
+    return { output: resolved.backgroundNotice, isError: true };
+  }
 
   const route = resolveModelRouteFromProvider(
     imageProviderConfig.provider,
@@ -160,11 +200,14 @@ export async function executeGenerateImageTool(input: {
   );
 
   try {
-    const generated = await generateImageWithOpenAi({
+    const generatedImages = await generateImagesWithOpenAi({
       apiBaseUrl: route.apiBaseUrl,
       apiKey: route.apiKey,
       background: resolved.background,
+      count: resolved.count,
       model: route.model,
+      moderation: resolved.moderation,
+      outputCompression: resolved.outputCompression,
       outputFormat: resolved.outputFormat,
       prompt: toolInput.prompt,
       providerType: route.providerType,
@@ -174,67 +217,96 @@ export async function executeGenerateImageTool(input: {
       size: resolved.size,
     });
 
-    const contentBase64 = generated.bytes.toString('base64');
-    const content = `data:${generated.mimeType};base64,${contentBase64}`;
-    const fileExtension =
-      generated.outputFormat === 'jpeg'
-        ? 'jpg'
-        : generated.outputFormat === 'webp'
-          ? 'webp'
-          : 'png';
+    const artifacts = generatedImages.map((generated, index) => {
+      const fileExtension =
+        generated.outputFormat === 'jpeg'
+          ? 'jpg'
+          : generated.outputFormat === 'webp'
+            ? 'webp'
+            : 'png';
 
-    const artifact = createArtifact(userId, {
-      sessionId,
-      title: buildImageArtifactTitle(toolInput.prompt),
-      content,
-      type: 'image',
-      fileName: buildImageFileName(toolInput.prompt, fileExtension),
-      mimeType: generated.mimeType,
-      metadata: {
-        sourceKind: 'tool_generate_image',
-        providerId: imageProviderConfig.provider.id,
-        modelId: imageProviderConfig.modelId,
-        prompt: toolInput.prompt,
-        revisedPrompt: generated.revisedPrompt,
-        size: resolved.size,
-        quality: resolved.quality,
-        outputFormat: resolved.outputFormat,
-        background: resolved.background,
-        toolCallId,
-      },
-      createdBy: 'agent',
-      createdByNote: 'generate_image tool',
+      return createArtifact(userId, {
+        sessionId,
+        title: buildImageArtifactTitle(toolInput.prompt),
+        content: `data:${generated.mimeType};base64,${generated.bytes.toString('base64')}`,
+        type: 'image',
+        fileName: buildImageFileName(
+          toolInput.prompt,
+          fileExtension,
+          generatedImages.length > 1 ? index + 1 : undefined,
+        ),
+        mimeType: generated.mimeType,
+        metadata: {
+          sourceKind: 'tool_generate_image',
+          providerId: imageProviderConfig.provider.id,
+          modelId: imageProviderConfig.modelId,
+          prompt: toolInput.prompt,
+          revisedPrompt: generated.revisedPrompt,
+          size: resolved.size,
+          quality: resolved.quality,
+          outputFormat: resolved.outputFormat,
+          background: resolved.background,
+          moderation: resolved.moderation,
+          outputCompression: resolved.outputCompression,
+          toolCallId,
+          ...(generatedImages.length > 1
+            ? { batchIndex: index + 1, batchSize: generatedImages.length }
+            : {}),
+        },
+        createdBy: 'agent',
+        createdByNote: 'generate_image tool',
+      });
     });
 
-    const resolvedFileName = buildImageFileName(toolInput.prompt, fileExtension);
     const summaryParts = [
-      `✅ 已生成图片（${imageProviderConfig.modelId} · ${resolved.size} · ${resolved.outputFormat.toUpperCase()}）`,
+      `✅ 已生成 ${artifacts.length} 张图片（${imageProviderConfig.modelId} · ${resolved.size} · ${resolved.outputFormat.toUpperCase()}）`,
     ];
     if (resolved.qualityAutoLifted) {
       summaryParts.push(
         `（已自动将 quality 从 ${resolved.requestedQuality} 提升到 high，因为 ${resolved.size} 属于 2K/4K 档位）`,
       );
     }
+    if (resolved.qualityClamped) {
+      summaryParts.push(
+        `（${imageProviderConfig.modelId} 不支持 quality=${resolved.requestedQuality}，已收敛为 ${resolved.quality}）`,
+      );
+    }
     const result = {
       success: true,
-      artifactId: artifact.id,
-      title: artifact.title,
-      fileName: resolvedFileName,
+      // `artifactId` 保持单张语义（首张），多张时用 `artifactIds` 取全量。
+      artifactId: artifacts[0]?.id ?? null,
+      artifactIds: artifacts.map((artifact) => artifact.id),
+      title: artifacts[0]?.title ?? buildImageArtifactTitle(toolInput.prompt),
       modelId: imageProviderConfig.modelId,
       providerId: imageProviderConfig.provider.id,
+      count: artifacts.length,
       size: resolved.size,
       quality: resolved.quality,
       requestedQuality: resolved.requestedQuality,
       qualityAutoLifted: resolved.qualityAutoLifted,
+      qualityClamped: resolved.qualityClamped,
       outputFormat: resolved.outputFormat,
       background: resolved.background,
-      revisedPrompt: generated.revisedPrompt ?? null,
+      moderation: resolved.moderation,
+      outputCompression: resolved.outputCompression ?? null,
+      revisedPrompt: generatedImages[0]?.revisedPrompt ?? null,
       summary: summaryParts.join(''),
     };
 
     return { output: JSON.stringify(result), isError: false };
   } catch (error) {
     if (error instanceof OpenAiImageGenerationError) {
+      // 官方要求 moderation_details 只进日志/排查链路，不面向终端用户。
+      if (error.code || error.upstreamType) {
+        logGatewayWarn('image.generation.upstream_error', {
+          code: error.code,
+          moderationCategories: error.moderationCategories,
+          moderationStage: error.moderationStage,
+          statusCode: error.statusCode,
+          toolCallId,
+          upstreamType: error.upstreamType,
+        });
+      }
       return {
         output: `图片生成失败: ${error.message}`,
         isError: true,

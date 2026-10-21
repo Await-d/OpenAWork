@@ -11,8 +11,11 @@ import {
 } from '@openAwork/agent-core';
 import {
   DEFAULT_IMAGE_GENERATION_SIZE,
+  IMAGE_GENERATION_COUNT_RANGE,
+  IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE,
   normalizeImageGenerationSize,
   type ImageGenerationBackground,
+  type ImageGenerationModeration,
   type ImageGenerationOutputFormat,
   type ImageGenerationQuality,
   validateImageGenerationSize,
@@ -106,9 +109,12 @@ const imageGenerationSizeSchema = z
     }
   });
 const imageGenerationQualitySchema = z.enum([
+  'auto',
   'low',
   'medium',
   'high',
+  'xhigh',
+  'max',
 ]) satisfies z.ZodType<ImageGenerationQuality>;
 const imageGenerationOutputFormatSchema = z.enum([
   'png',
@@ -118,13 +124,34 @@ const imageGenerationOutputFormatSchema = z.enum([
 const imageGenerationBackgroundSchema = z.enum([
   'auto',
   'opaque',
+  'transparent',
 ]) satisfies z.ZodType<ImageGenerationBackground>;
+const imageGenerationModerationSchema = z.enum([
+  'auto',
+  'low',
+]) satisfies z.ZodType<ImageGenerationModeration>;
+const imageGenerationOutputCompressionSchema = z
+  .number()
+  .int()
+  .min(IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE.min)
+  .max(IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE.max);
 
 export const imageGenerationDefaultsSchema = z.object({
   size: imageGenerationSizeSchema,
   quality: imageGenerationQualitySchema,
   outputFormat: imageGenerationOutputFormatSchema,
   background: imageGenerationBackgroundSchema,
+  /** 内容审核严格度；缺省时按官方默认 `auto`。 */
+  moderation: imageGenerationModerationSchema.optional(),
+  /** 压缩率（仅 jpeg / webp 生效）；缺省表示不发送该字段，由上游决定。 */
+  outputCompression: imageGenerationOutputCompressionSchema.optional(),
+  /** 单次生成张数（官方 `n`）；缺省为 1。 */
+  count: z
+    .number()
+    .int()
+    .min(IMAGE_GENERATION_COUNT_RANGE.min)
+    .max(IMAGE_GENERATION_COUNT_RANGE.max)
+    .optional(),
 });
 
 export type ImageGenerationDefaults = z.infer<typeof imageGenerationDefaultsSchema>;
@@ -139,6 +166,7 @@ export const DEFAULT_IMAGE_GENERATION_DEFAULTS: ImageGenerationDefaults = {
   quality: 'medium',
   outputFormat: 'png',
   background: 'auto',
+  moderation: 'auto',
 };
 
 const requestOverridesSchema = z.object({

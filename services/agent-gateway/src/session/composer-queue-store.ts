@@ -28,6 +28,14 @@ import {
 
 /** 附件元数据（与前端 `AttachmentItem` 对齐，仅保留重建预览所需字段）。 */
 export interface ComposerQueueAttachment {
+  /**
+   * 跨端存储引用：客户端入队后把附件上传到 `/sessions/:id/artifacts` 得到的 id。
+   *
+   * 有它，另一台设备水合时才能把二进制拉回去（`GET .../artifacts/:id/content`）；
+   * 没有它，条目在这端只能退化成本地附件（取不到就标记需重新选择）。
+   * 可选是刻意的：上传失败、旧版本客户端写入的条目都不带该字段。
+   */
+  artifactId?: string;
   id: string;
   name: string;
   sizeBytes: number;
@@ -90,7 +98,11 @@ function parseAttachmentItems(raw: string): ComposerQueueAttachment[] {
       continue;
     }
     const rawSize = candidate.sizeBytes;
+    const rawArtifactId = candidate.artifactId;
     attachments.push({
+      ...(typeof rawArtifactId === 'string' && rawArtifactId.length > 0
+        ? { artifactId: rawArtifactId }
+        : {}),
       id,
       name,
       sizeBytes: typeof rawSize === 'number' && Number.isFinite(rawSize) ? rawSize : 0,
@@ -197,6 +209,60 @@ export function enqueueComposerQueueItem(input: {
     };
   }
   return { created: true, item: toComposerQueueItem(persisted) };
+}
+
+/** 按 id 读取单条待发消息；不存在或不属于该会话 / 用户时返回 null。 */
+export function getComposerQueueItem(input: {
+  itemId: string;
+  sessionId: string;
+  userId: string;
+}): ComposerQueueItem | null {
+  const row = sqliteGet<ComposerQueueRow>(
+    `SELECT id, text, attachment_items_json, requires_attachment_rebind, enqueued_at
+       FROM session_composer_queue
+      WHERE id = ? AND session_id = ? AND user_id = ?
+      LIMIT 1`,
+    [input.itemId, input.sessionId, input.userId],
+  );
+  return row ? toComposerQueueItem(row) : null;
+}
+
+/**
+ * 回填条目的附件元数据（客户端把跨端副本上传成功后写入 `artifactId`），
+ * 可选地同时清除「需重新选择附件」标记。
+ *
+ * 只更新附件 JSON 与 rebind 两列：文本、入队时间与 claim 租约都不受影响——上传通常
+ * 在入队后几百毫秒内完成，而此刻另一端可能已经抢到发送权，动 claim 字段会破坏租约互斥。
+ * 条目不存在（已被消费 / 移出）时返回 null，调用方据此回收刚上传的孤儿副本。
+ */
+export function updateComposerQueueItemAttachments(input: {
+  attachmentItems: ComposerQueueAttachment[];
+  itemId: string;
+  requiresAttachmentRebind?: boolean;
+  sessionId: string;
+  userId: string;
+}): ComposerQueueItem | null {
+  const existing = getComposerQueueItem(input);
+  if (!existing) {
+    return null;
+  }
+  const attachmentItems = input.attachmentItems.slice(0, COMPOSER_QUEUE_ATTACHMENT_MAX_COUNT);
+  // 未显式传值时保持原状：附件回填与 rebind 标记是两个独立事实，不互相隐式覆盖。
+  const requiresAttachmentRebind =
+    input.requiresAttachmentRebind ?? existing.requiresAttachmentRebind;
+  sqliteRun(
+    `UPDATE session_composer_queue
+        SET attachment_items_json = ?, requires_attachment_rebind = ?
+      WHERE id = ? AND session_id = ? AND user_id = ?`,
+    [
+      JSON.stringify(attachmentItems),
+      requiresAttachmentRebind ? 1 : 0,
+      input.itemId,
+      input.sessionId,
+      input.userId,
+    ],
+  );
+  return { ...existing, attachmentItems, requiresAttachmentRebind };
 }
 
 /** 移除单条待发消息（移出队列 / 恢复回输入框）。返回是否确实删掉了行。 */

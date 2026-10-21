@@ -1,3 +1,4 @@
+import { isNonTerminalStreamErrorCode } from '@openAwork/shared';
 import type {
   RunEvent,
   RunEventBookend,
@@ -93,6 +94,29 @@ export function deriveRunEventBookend(event: RunEvent): RunEventBookend | undefi
 
 export function isTerminalRunEvent(event: RunEvent): boolean {
   return deriveRunEventBookend(event)?.terminal === true;
+}
+
+/**
+ * 这条事件是否**真的**代表本次运行结束——供 `/stream/attach` 的活订阅决定是否收尾。
+ *
+ * 与 `isTerminalRunEvent` 的差别只在一处：`error` 的通用语义是 `run_failed`
+ * （`terminal: true`），但 `NON_TERMINAL_STREAM_ERROR_CODES` 里的错误码（如
+ * `TOOL_ERROR`：上游丢弃一次入参畸形的工具调用）只是单次操作失败，run 会继续
+ * 产出后续事件与最终的 `done`。客户端对这类错误码明确定义为「只透传提示、不结算、
+ * 不断连」（`apps/web/.../stream-error-classification.ts`），因此服务端也**不能**
+ * 在此收尾：否则客户端收到的是一段没有 `done` 的普通错误 chunk，随后的正常 EOF
+ * 会被它判成「连接在流式传输中中断」，进入重连退避；而 `/stream/active` 始终报告
+ * 活跃流（run 确实还在跑），重连永远收敛不了——表现为「attach 成功 → 数秒断开 →
+ * 自动重连 → 再断开」的死循环，每出现一次这种错误就循环一次。
+ */
+export function isStreamEndingRunEvent(event: RunEvent): boolean {
+  if (deriveRunEventBookend(event)?.terminal !== true) {
+    return false;
+  }
+  if (event.type === 'error' && isNonTerminalStreamErrorCode(event.code)) {
+    return false;
+  }
+  return true;
 }
 
 export function buildRunEventEnvelope(input: {

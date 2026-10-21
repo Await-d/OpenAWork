@@ -59,6 +59,24 @@ function safeUpsert(fn: () => void, label: string, context: Record<string, strin
 const messageUpsertProjector = (event: { data: unknown }) => {
   const data = event.data as { sessionID: string; info: MessageInfo };
   const info = data.info;
+
+  // `id` 是 message_v2 的主键，但 SQLite 对**非 INTEGER** 主键仍允许 NULL（唯一索引把
+  // 多个 NULL 视为互不相同），而绑定层又把 `undefined` 归一成 NULL（见
+  // `infra/sqlite-bind-params.ts`）。两者叠加的后果是灾难性的：调用方只要把「从行 JSON
+  // 还原出来的 info」直接回投（`messageInfoToRowData` 会剥掉 id，回投时 id 就成了
+  // undefined），每次调用都会插进一行**新的**不可寻址幽灵行——ON CONFLICT 永不命中，
+  // 按 id 删除永不匹配，读路径却仍把它们当成合法消息参与回合归因。生产库上单个会话
+  // 曾因此累积 228 万行（805 MiB），把 truncate / 列表接口拖到秒级。
+  //
+  // 这里是 message_v2 的唯一写入点，缺 id 一律按编程错误处理：告警并丢弃，绝不落库。
+  if (typeof info?.id !== 'string' || info.id.length === 0) {
+    logGatewayWarn('[Projector] 丢弃缺少 message id 的消息写入（不落库）', {
+      sessionID: typeof data?.sessionID === 'string' ? data.sessionID : '',
+      role: typeof info?.role === 'string' ? info.role : '',
+    });
+    return;
+  }
+
   const dataJson = messageInfoToRowData(info);
 
   // Resolve user_id from sessions table to satisfy FK constraint
@@ -66,21 +84,27 @@ const messageUpsertProjector = (event: { data: unknown }) => {
     data.sessionID,
   ]);
   const userId = sessionRow?.user_id ?? '';
+  // 请求族（clientRequestId）与 `role` 一样反规范化落列：按请求族读写的五个入口靠它做
+  // 索引范围扫描，不再把整会话的 `data` 拉进 JS 逐行 JSON.parse。缺失时写 ''（列 NOT NULL），
+  // '' 落在任何非空 root 的区间之外，因此不会被误命中。
+  const clientRequestId = typeof info.clientRequestId === 'string' ? info.clientRequestId : '';
 
   safeUpsert(
     () =>
       sqliteRun(
-        // `role` 与 `time_created` 一起作为反规范化列落库：读侧的回合窗口查询与回合
-        // 计数靠 (session_id, user_id, role, time_created, id) 索引定位，不再对 `data`
-        // 做前导通配符 LIKE 全表扫。ON CONFLICT 分支必须一并刷新 —— role 可能随
-        // 消息状态流转而变化，只更新 `data` 会让索引列与 JSON 脱节。
-        `INSERT INTO message_v2 (id, session_id, user_id, time_created, role, data)
-         VALUES (?, ?, ?, ?, ?, ?)
+        // `role` / `client_request_id` 与 `time_created` 一起作为反规范化列落库：读侧的回合
+        // 窗口查询、回合计数与请求族查询靠索引定位，不再对 `data` 做前导通配符 LIKE 或整表
+        // JSON 解析。ON CONFLICT 分支必须一并刷新 —— role 可能随消息状态流转而变化，
+        // clientRequestId 也可能后补（compaction / 重试回填），只更新 `data` 会让索引列与
+        // JSON 脱节。
+        `INSERT INTO message_v2 (id, session_id, user_id, time_created, role, client_request_id, data)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            role = excluded.role,
+           client_request_id = excluded.client_request_id,
            data = excluded.data,
            updated_at = datetime('now')`,
-        [info.id, data.sessionID, userId, info.time.created, info.role, dataJson],
+        [info.id, data.sessionID, userId, info.time.created, info.role, clientRequestId, dataJson],
       ),
     'message update',
     { messageID: info.id, sessionID: data.sessionID },

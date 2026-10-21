@@ -1,7 +1,11 @@
 import type { ToolDefinition } from '@openAwork/agent-core';
 import TurndownService from 'turndown';
 import { z } from 'zod';
-import { readResponseTextWithLimit, resolveHttpBodyLimitBytes } from '../infra/http-body-limit.js';
+import {
+  readResponseTextUpToLimit,
+  readResponseTextWithLimit,
+  resolveHttpBodyLimitBytes,
+} from '../infra/http-body-limit.js';
 
 const MAX_WEBFETCH_TIMEOUT_SECONDS = 120;
 
@@ -49,8 +53,19 @@ const WEBFETCH_DIAGNOSTIC_HEADERS = [
   'cf-mitigated',
 ] as const;
 
-/** 错误正文回灌上限：够看清 GitHub 的 `message` / Reddit 的拦截说明，又不至于撑爆上下文。 */
-const WEBFETCH_ERROR_BODY_MAX_CHARS = 512;
+/**
+ * 错误正文回灌上限：够看清 GitHub 的 `message` / Cloudflare 挑战页 / 常见新闻站的
+ * 「需要登录」整页说明，又不至于撑爆上下文。
+ *
+ * 曾为 512，但线上最常见的失败体（Reuters/WSJ 的 401 拦截页）恰好是 767–771 字节：
+ * 上限一超，正文被整包丢弃，模型只看到 `<响应正文读取失败：response body too large>`
+ * ——零诊断信息，于是对同一个被反爬的站点换了十几个 URL 反复重试（2026-10-18 排障）。
+ * 现在改为**保留前缀**而非丢弃（见 `readResponseTextUpToLimit`），并把上限放宽到 4k。
+ */
+const WEBFETCH_ERROR_BODY_MAX_CHARS = 4096;
+
+/** 错误正文被上限截断时的显式标注，避免模型把前缀误当成完整正文。 */
+const WEBFETCH_ERROR_BODY_TRUNCATION_NOTE = `（响应正文超过 ${WEBFETCH_ERROR_BODY_MAX_CHARS} 字节，已截断）`;
 
 function isAllowedWebfetchUrl(value: string): boolean {
   try {
@@ -147,19 +162,32 @@ async function buildWebfetchFailureMessage(response: Response): Promise<string> 
 
   let bodySnippet: string;
   try {
-    const raw = await readResponseTextWithLimit(response, WEBFETCH_ERROR_BODY_MAX_CHARS);
+    // 保留前缀而非丢弃：错误正文是模型判断「限流 / 反爬 / 路径写错」的唯一证据，
+    // 超限时截断 + 标注，绝不整包吞掉（见常量注释里的 2026-10-18 排障）。
+    const { text: raw, truncated } = await readResponseTextUpToLimit(
+      response,
+      WEBFETCH_ERROR_BODY_MAX_CHARS,
+    );
     const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
     const cleaned = contentType.includes('text/html') ? htmlToText(raw) : raw.trim();
-    bodySnippet = cleaned.length > 0 ? cleaned : '<空正文>';
+    const suffix = truncated ? WEBFETCH_ERROR_BODY_TRUNCATION_NOTE : '';
+    bodySnippet = cleaned.length > 0 ? `${cleaned}${suffix}` : `<空正文>${suffix}`;
   } catch (error) {
     // 诊断信息读失败不能盖掉原始 HTTP 错误，把读取失败原因并入文案即可。
     bodySnippet = `<响应正文读取失败：${error instanceof Error ? error.message : String(error)}>`;
   }
   lines.push(`响应正文：${bodySnippet}`);
 
-  if (response.status === 403 || response.status === 429) {
+  if (response.status === 401) {
     lines.push(
-      '排查建议：403/429 通常是限流或 UA 拦截 —— GitHub API 可设置 GITHUB_TOKEN 环境变量，或在 headers 中传浏览器 user-agent 后重试；若响应头 x-ratelimit-remaining=0，请等待限流恢复再试。',
+      '排查建议：401 常见于站点对爬虫返回「需要登录」—— Reuters / WSJ / 彭博等付费站点无论换哪个 URL 或怎么改请求头都会 401，重试同一站点属于无效动作；请改用 search 拿摘要，或换可达的免费来源。',
+    );
+  } else if (response.status === 403 || response.status === 429) {
+    const isCloudflareChallenge = response.headers.get('cf-mitigated') === 'challenge';
+    lines.push(
+      isCloudflareChallenge
+        ? '排查建议：403 且响应头 cf-mitigated=challenge 表示命中了 Cloudflare 人机校验 —— 换 UA 重试已由本工具自动做过一次，仍失败说明该站点要求真实浏览器，请改用 search 拿摘要或换来源，不要继续重试同一 URL。'
+        : '排查建议：403/429 通常是限流或 UA 拦截 —— GitHub API 可设置 GITHUB_TOKEN 环境变量，或在 headers 中传浏览器 user-agent 后重试；若响应头 x-ratelimit-remaining=0，请等待限流恢复再试；新闻类站点多为反爬，请改用 search 拿摘要。',
     );
   } else if (response.status === 404) {
     lines.push(
@@ -365,7 +393,7 @@ export const webfetchTool: ToolDefinition<typeof webfetchInputSchema, typeof web
   {
     name: 'webfetch',
     description:
-      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use websearch for discovery — it is the only web-search entry — and use webfetch (or open_websearch/fetch_web) for a concrete URL; open_websearch/fetch_github_readme reads a GitHub repository README. If the user asks to fetch, find, show, or display an existing web image, use websearch plus webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image. On 403/429 do not retry the same URL blindly: the error message carries the rate-limit headers and the response body needed to tell限流、UA 拦截与路径写错 apart.',
+      'Fetch content from a specific URL in markdown, text, html, or image-preview format. Use websearch for discovery — it is the only web-search entry — and use webfetch (or open_websearch/fetch_web) for a concrete URL; open_websearch/fetch_github_readme reads a GitHub repository README. If the user asks to fetch, find, show, or display an existing web image, use websearch plus webfetch and return the existing image URL; do not use generate_image unless the user explicitly asks to create/draw/design a new image. On 401/403/429 do NOT retry the same site with different URLs or headers — Reuters / WSJ 等站点对爬虫一概拒绝（401 常伪装成“需要登录”，403 常是 Cloudflare challenge，换 UA 重试已由本工具自动做过一次），此时改用 search 拿摘要或换可达的免费来源；the error message carries the rate-limit headers and the response body needed to tell 限流、UA 拦截与路径写错 apart.',
     inputSchema: webfetchInputSchema,
     outputSchema: webfetchOutputSchema,
     timeout: MAX_WEBFETCH_TIMEOUT_SECONDS * 1000,

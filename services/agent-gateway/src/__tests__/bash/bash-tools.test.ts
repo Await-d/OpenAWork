@@ -45,9 +45,12 @@ const {
   assertSafeShellCommand,
   bashToolDefinition,
   buildBashPermissionScope,
+  buildBenignExitHint,
   buildShellCompatibilityHint,
+  buildSuppressedStderrHint,
   deriveBashDescription,
   resolveShellChoiceForPlatform,
+  resolveSignalExitCode,
   runBashCommand,
 } = await import('../../tools/bash-tools.js');
 const { buildBashApprovalPatterns } = await import('../../tools/bash-arity.js');
@@ -445,6 +448,131 @@ describe('bash-tools', () => {
           shellChoice: { shell: '/bin/bash', isPowerShell: false, name: 'bash' },
         }),
       ).toBeNull();
+    });
+  });
+
+  describe('buildSuppressedStderrHint', () => {
+    it('退出码非零且命令抑制 stderr 时提示去掉重定向(du 权限/路径缺失场景)', () => {
+      const hint = buildSuppressedStderrHint({
+        command: 'du -sh /var/log /tmp /var/tmp /var/cache 2>/dev/null',
+        exitCode: 1,
+        kind: 'exit',
+      });
+      expect(hint).toMatch(/2>\/dev\/null/);
+      expect(hint).toMatch(/退出码为 1/);
+    });
+
+    it('退出码为 0 时不提示', () => {
+      expect(
+        buildSuppressedStderrHint({
+          command: 'du -sh /tmp 2>/dev/null',
+          exitCode: 0,
+          kind: 'exit',
+        }),
+      ).toBeNull();
+    });
+
+    it('未抑制 stderr 时不提示', () => {
+      expect(
+        buildSuppressedStderrHint({
+          command: 'du -sh /var/log',
+          exitCode: 1,
+          kind: 'exit',
+        }),
+      ).toBeNull();
+    });
+
+    it('非正常退出(timeout / spawn_error)不提示,避免与既有的终止原因混淆', () => {
+      expect(
+        buildSuppressedStderrHint({
+          command: 'sleep 10 2>/dev/null',
+          exitCode: 1,
+          kind: 'timeout',
+        }),
+      ).toBeNull();
+      expect(
+        buildSuppressedStderrHint({
+          command: 'nosuchcmd 2>/dev/null',
+          exitCode: 1,
+          kind: 'spawn_error',
+        }),
+      ).toBeNull();
+    });
+
+    it('识别 PowerShell $null 与 cmd nul 两种空设备写法', () => {
+      expect(
+        buildSuppressedStderrHint({
+          command: 'Get-Item C:\\nope 2>$null',
+          exitCode: 1,
+          kind: 'exit',
+        }),
+      ).not.toBeNull();
+      expect(
+        buildSuppressedStderrHint({
+          command: 'dir C:\\nope 2>nul',
+          exitCode: 1,
+          kind: 'exit',
+        }),
+      ).not.toBeNull();
+    });
+
+    it('2>&1 只是合流而非抑制,不应提示', () => {
+      expect(
+        buildSuppressedStderrHint({
+          command: 'du -sh /var/log 2>&1',
+          exitCode: 1,
+          kind: 'exit',
+        }),
+      ).toBeNull();
+    });
+  });
+
+  describe('buildBenignExitHint', () => {
+    it.each([
+      ['grep -q foo file.txt', 'grep 无匹配'],
+      ['rg foo src', 'rg 无匹配'],
+      ['git grep foo', 'git grep 无匹配'],
+      ['git diff --exit-code', 'git diff 有差异'],
+      ['git diff --cached --quiet', 'git diff 有差异'],
+      ['cd /tmp && diff a.txt b.txt', '链式命令中的 diff'],
+    ])('%s 的退出码 1 给出未匹配/有差异提示（%s）', (command) => {
+      const hint = buildBenignExitHint({ command, exitCode: 1, kind: 'exit' });
+      expect(hint).toContain('退出码为 1');
+      expect(hint).toContain('未匹配');
+    });
+
+    it.each([
+      ['git diff --stat', '未带 --exit-code / --quiet 的 git diff'],
+      ['npm test -- --grep foo', '参数里的 --grep 不应被当成 grep 命令'],
+      ['du -sh /var/log', '普通命令'],
+    ])('%s 不提示（%s）', (command) => {
+      expect(buildBenignExitHint({ command, exitCode: 1, kind: 'exit' })).toBeNull();
+    });
+
+    it('退出码不是 1 时不提示', () => {
+      expect(
+        buildBenignExitHint({ command: 'grep foo file', exitCode: 0, kind: 'exit' }),
+      ).toBeNull();
+      expect(
+        buildBenignExitHint({ command: 'grep foo file', exitCode: 2, kind: 'exit' }),
+      ).toBeNull();
+    });
+
+    it('非正常退出不提示', () => {
+      expect(
+        buildBenignExitHint({ command: 'grep foo big.log', exitCode: 1, kind: 'timeout' }),
+      ).toBeNull();
+      expect(
+        buildBenignExitHint({ command: 'grep foo big.log', exitCode: 1, kind: 'spawn_error' }),
+      ).toBeNull();
+    });
+  });
+
+  describe('resolveSignalExitCode', () => {
+    it('按 shell 习惯映射为 128 + signal number', () => {
+      expect(resolveSignalExitCode('SIGINT')).toBe(130);
+      expect(resolveSignalExitCode('SIGKILL')).toBe(137);
+      expect(resolveSignalExitCode('SIGTERM')).toBe(143);
     });
   });
 

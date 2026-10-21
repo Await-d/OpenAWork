@@ -8,11 +8,16 @@
  * DELETE /sessions/:sessionId/composer-queue          清空
  * POST   /sessions/:sessionId/composer-queue/:itemId/claim   独占发送权（多端互斥）
  * DELETE /sessions/:sessionId/composer-queue/:itemId/claim   交还发送权（发送失败）
+ * PATCH  /sessions/:sessionId/composer-queue/:itemId/attachments  回填附件跨端引用
  * ```
  *
  * 归属校验与会话子域保持一致：未拥有该会话一律 404 而非 403，避免会话 id 可探测。
  * 入队不触碰 `message_v2`——待发条目在真正发出前对模型不可见，这与
  * `task/task-job-delivery.ts` 的「先落库、消费时再唤醒」是同一套语义。
+ *
+ * 条目离开队列（移出 / 清空）时会**联动回收附件跨端副本**：上传的副本只为「换端
+ * 仍能取回附件」而存在，条目没了就无消费者。回收细节与已知边界见
+ * `session/composer-queue-artifact-purge.ts`。
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -23,6 +28,7 @@ import { sqliteGet } from '../infra/db.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseParams } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
+import { purgeComposerQueueAttachments } from '../session/composer-queue-artifact-purge.js';
 import { getAnyInFlightStreamRequestForSession } from './stream-cancellation.js';
 import {
   claimComposerQueueItem,
@@ -32,13 +38,18 @@ import {
   COMPOSER_QUEUE_CLAIM_LEASE_MS,
   COMPOSER_QUEUE_TEXT_MAX_LENGTH,
   enqueueComposerQueueItem,
+  getComposerQueueItem,
   listComposerQueueItems,
   releaseComposerQueueItem,
   removeComposerQueueItem,
+  updateComposerQueueItemAttachments,
   type ComposerQueueAttachment,
+  type ComposerQueueItem,
 } from '../session/composer-queue-store.js';
 
 const attachmentItemSchema = z.object({
+  // 上传成功后回填的跨端产物 id；未上传 / 上传失败 / 旧客户端写入的条目没有。
+  artifactId: z.string().min(1).max(200).optional(),
   id: z.string().min(1).max(200),
   name: z.string().min(1).max(500),
   sizeBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -96,6 +107,12 @@ const releaseBodySchema = z.object({
   clientId: z.string().min(1).max(200),
 });
 
+const updateAttachmentsBodySchema = z.object({
+  attachmentItems: z.array(attachmentItemSchema).max(COMPOSER_QUEUE_ATTACHMENT_MAX_COUNT),
+  // 上传成功即跨端可取回附件，「需重新选择」标记失去依据；不传则保持原值。
+  requiresAttachmentRebind: z.boolean().optional(),
+});
+
 /**
  * 校验会话归属。返回 false 时调用方一律 404。
  *
@@ -116,6 +133,16 @@ function toAttachmentPayload(attachments: ComposerQueueAttachment[]): unknown[] 
   return attachments.map((attachment) => ({ ...attachment }));
 }
 
+function toItemPayload(item: ComposerQueueItem): Record<string, unknown> {
+  return {
+    attachmentItems: toAttachmentPayload(item.attachmentItems),
+    enqueuedAt: item.enqueuedAt,
+    id: item.id,
+    requiresAttachmentRebind: item.requiresAttachmentRebind,
+    text: item.text,
+  };
+}
+
 export async function registerSessionComposerQueueRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/sessions/:sessionId/composer-queue',
@@ -132,13 +159,7 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
       step.succeed(undefined, { count: items.length });
       return reply.send({
         ok: true,
-        items: items.map((item) => ({
-          attachmentItems: toAttachmentPayload(item.attachmentItems),
-          enqueuedAt: item.enqueuedAt,
-          id: item.id,
-          requiresAttachmentRebind: item.requiresAttachmentRebind,
-          text: item.text,
-        })),
+        items: items.map((item) => toItemPayload(item)),
       });
     },
   );
@@ -169,14 +190,48 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
       return reply.send({
         ok: true,
         created: result.created,
-        item: {
-          attachmentItems: toAttachmentPayload(result.item.attachmentItems),
-          enqueuedAt: result.item.enqueuedAt,
-          id: result.item.id,
-          requiresAttachmentRebind: result.item.requiresAttachmentRebind,
-          text: result.item.text,
-        },
+        item: toItemPayload(result.item),
       });
+    },
+  );
+
+  /**
+   * 回填附件跨端引用（客户端上传副本成功后调用）。
+   *
+   * 入队是乐观的：条目先不带 `artifactId` 落库（保证 Enter 即入队），副本上传完成
+   * 后再把 `attachmentItems` 整体补齐。条目此时可能已被消费 / 移出（返回 404），
+   * 调用方据此把刚上传的副本当孤儿回收，而不是留下无人引用的磁盘文件。
+   */
+  app.patch(
+    '/sessions/:sessionId/composer-queue/:itemId/attachments',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { itemId, sessionId } = parseParams(queueItemParamsSchema, request.params);
+      const { step } = startRequestWorkflow(
+        request,
+        'session.composer_queue.update_attachments',
+        undefined,
+        { itemId, sessionId },
+      );
+      const body = parseBody(updateAttachmentsBodySchema, request.body);
+
+      assertSessionOwnership(sessionId, user.sub);
+      const item = updateComposerQueueItemAttachments({
+        attachmentItems: body.attachmentItems,
+        itemId,
+        ...(body.requiresAttachmentRebind === undefined
+          ? {}
+          : { requiresAttachmentRebind: body.requiresAttachmentRebind }),
+        sessionId,
+        userId: user.sub,
+      });
+      if (!item) {
+        step.succeed(undefined, { updated: false });
+        return reply.status(404).send({ ok: false, error: '目标待发条目不存在。' });
+      }
+      step.succeed(undefined, { updated: true });
+      return reply.send({ ok: true, updated: true, item: toItemPayload(item) });
     },
   );
 
@@ -192,7 +247,14 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
       });
 
       assertSessionOwnership(sessionId, user.sub);
+      // 先读条目再删：副本回收需要它的 attachmentItems。两步之间的并发删除
+      // （同一会话的另一个端）只会让本次 purge 拿到陈旧的副本列表——remove 幂等，
+      // 重复回收无害；真正的孤儿由 PATCH 404 的调用方兜底。
+      const existing = getComposerQueueItem({ itemId, sessionId, userId: user.sub });
       const removed = removeComposerQueueItem({ itemId, sessionId, userId: user.sub });
+      if (removed && existing) {
+        purgeComposerQueueAttachments(existing.attachmentItems);
+      }
       // 条目已不在（可能刚被本会话的另一个标签页消费掉）不算失败：
       // 删除是幂等语义，调用方拿到 ok:true 即可继续。
       step.succeed(undefined, { removed });
@@ -211,7 +273,11 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
       });
 
       assertSessionOwnership(sessionId, user.sub);
+      const existingItems = listComposerQueueItems({ sessionId, userId: user.sub });
       const removedCount = clearComposerQueue({ sessionId, userId: user.sub });
+      if (removedCount > 0) {
+        purgeComposerQueueAttachments(existingItems.flatMap((item) => item.attachmentItems));
+      }
       step.succeed(undefined, { removedCount });
       return reply.send({ ok: true, removedCount });
     },

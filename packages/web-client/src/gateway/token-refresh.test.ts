@@ -83,4 +83,95 @@ describe('acquireRefresh', () => {
     expect(result).toBeNull();
     expect(store.clearAuth).toHaveBeenCalledOnce();
   });
+
+  it('瞬态刷新失败保留登录态并抛出原始错误（不再清 auth）', async () => {
+    const { acquireRefresh } = await import('./token-refresh.js');
+
+    vi.spyOn(await import('./auth.js'), 'refreshAccessToken').mockRejectedValue(
+      new Error('网络异常，刷新凭证失败。'),
+    );
+
+    const store = {
+      getAccessToken: () => 'old-access',
+      getRefreshToken: () => 'old-refresh',
+      setTokens: vi.fn(),
+      clearAuth: vi.fn(),
+    };
+
+    await expect(acquireRefresh('http://localhost:3000', store)).rejects.toThrow(
+      '网络异常，刷新凭证失败。',
+    );
+    expect(store.clearAuth).not.toHaveBeenCalled();
+    expect(store.setTokens).not.toHaveBeenCalled();
+  });
+
+  it('refresh token 被服务端拒绝（401）时清除登录态并返回 null', async () => {
+    const { acquireRefresh } = await import('./token-refresh.js');
+    const authModule = await import('./auth.js');
+
+    vi.spyOn(authModule, 'refreshAccessToken').mockRejectedValue(
+      new authModule.AuthRequestRejectedError('Invalid or expired refresh token', 401),
+    );
+
+    const store = {
+      getAccessToken: () => 'old-access',
+      getRefreshToken: () => 'old-refresh',
+      setTokens: vi.fn(),
+      clearAuth: vi.fn(),
+    };
+
+    await expect(acquireRefresh('http://localhost:3000', store)).resolves.toBeNull();
+    expect(store.clearAuth).toHaveBeenCalledOnce();
+    expect(store.setTokens).not.toHaveBeenCalled();
+  });
+
+  it('瞬态失败后单飞 promise 复位，下一次调用会重新发起刷新', async () => {
+    const { acquireRefresh } = await import('./token-refresh.js');
+
+    const refreshSpy = vi
+      .spyOn(await import('./auth.js'), 'refreshAccessToken')
+      .mockRejectedValueOnce(new Error('网络异常，刷新凭证失败。'))
+      .mockResolvedValueOnce({
+        accessToken: 'fresh-access',
+        refreshToken: 'fresh-refresh',
+        expiresIn: '15m',
+      });
+
+    const store = {
+      getAccessToken: () => 'old-access',
+      getRefreshToken: () => 'old-refresh',
+      setTokens: vi.fn(),
+      clearAuth: vi.fn(),
+    };
+
+    await expect(acquireRefresh('http://localhost:3000', store)).rejects.toThrow(
+      '网络异常，刷新凭证失败。',
+    );
+    await expect(acquireRefresh('http://localhost:3000', store)).resolves.toBe('fresh-access');
+    expect(refreshSpy).toHaveBeenCalledTimes(2);
+    expect(store.clearAuth).not.toHaveBeenCalled();
+  });
+
+  it('401 被动刷新遇瞬态失败时抛出瞬态错误，而不是「登录态已过期」', async () => {
+    const { withTokenRefresh } = await import('./token-refresh.js');
+    const { HttpError } = await import('../session/sessions.js');
+
+    vi.spyOn(await import('./auth.js'), 'refreshAccessToken').mockRejectedValue(
+      new Error('网络异常，刷新凭证失败。'),
+    );
+
+    const store = {
+      getAccessToken: () => 'stale-access',
+      getRefreshToken: () => 'old-refresh',
+      setTokens: vi.fn(),
+      clearAuth: vi.fn(),
+    };
+
+    await expect(
+      withTokenRefresh('http://localhost:3000', store, async () => {
+        throw new HttpError('unauthorized', 401);
+      }),
+    ).rejects.toThrow('网络异常，刷新凭证失败。');
+    expect(store.clearAuth).not.toHaveBeenCalled();
+  });
 });

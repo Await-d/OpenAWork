@@ -26,7 +26,7 @@ describe('native stream idle timeout', () => {
       Stream.fromIterable([
         OpenCodeLLM.LLMEvent.textDelta({ id: 'text-1', text: 'one' }),
         OpenCodeLLM.LLMEvent.textDelta({ id: 'text-1', text: 'two' }),
-        OpenCodeLLM.LLMEvent.finish({ reason: 'stop' }),
+        OpenCodeLLM.LLMEvent.finish({ reason: { normalized: 'stop' } }),
       ]),
     );
     const values = await collect(

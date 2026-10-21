@@ -35,6 +35,7 @@ export const CLARIFY_DIALOGUE_MODE_PROMPT = [
   '- frontier 就绪时，用一次 AskUserQuestion 成组提出本轮要问的问题（questions[] 多题，单轮最多 5 题）。',
   '- 每题的 options 至少 2 个，且必须恰好有一项标记 recommended: true（你的推荐答案）。',
   '- 用 nodeId 关联决策树节点 id（便于多轮追踪与去重），用 round 标注当前轮次（从 0 开始）。',
+  '- 需要用户圈定多项的问题（如「选择要清理的项目」「选择要包含的模块」）必须在该题上设 multiSelect: true——只在题干写「可多选」不会生效，界面仍按单选渲染。单选问题留空即可。',
   '- AskUserQuestion 会生成结构化问题卡片，用户可直接点选，体验更好。',
   '- 仅在完全开放、无法结构化为选项的问题上，才退化为纯文本提问。',
   '',

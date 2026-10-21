@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { MCPToolDef, MCPToolResult } from '@openAwork/mcp-client';
 import type { OpenWebSearchRuntime } from 'open-websearch/build/runtime/createRuntime.js';
-import { fetchOpenWebSearchPage } from './open-websearch-fetch-web.js';
+import { fetchOpenWebSearchPage, MAX_FETCH_PAGE_BYTES } from './open-websearch-fetch-web.js';
 import {
   loadOpenWebSearchGithubReadmeService,
   loadOpenWebSearchSearchService,
@@ -65,7 +65,9 @@ export const OPEN_WEBSEARCH_VIRTUAL_MCP_TOOLS = [
   },
   {
     name: 'fetch_web',
-    description: '提取公开网页的可读正文。目标必须是可公开访问的 HTTP(S) URL。',
+    description:
+      '提取公开网页的可读正文。目标必须是可公开访问的 HTTP(S) URL。整页下载上限 4MB，' +
+      '页面更大时提取会失败，可改用 search 或其他来源。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -211,6 +213,17 @@ function readFetchWebErrorMessage(error: unknown): string {
   }
 
   const code = readErrorCode(error);
+  const message = readErrorMessage(error);
+
+  // 整页超过下载上限（axios 在请求阶段以 ECONNABORTED + "size of N exceeded"
+  // 抛出，不带响应状态）。这是内容超限而非网络超时，必须先于通用 ECONNABORTED
+  // 超时分支识别，否则会误导成「请求超时，请稍后重试」。
+  if (message.includes('size of') && message.includes('exceeded')) {
+    return (
+      `目标网页体积超过 ${MAX_FETCH_PAGE_BYTES / (1024 * 1024)}MB 下载上限，无法提取正文，` +
+      '请改用 search 检索摘要，或选择更小的页面来源。'
+    );
+  }
   if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
     return `请求超时（${code}），请稍后重试。`;
   }
@@ -218,7 +231,6 @@ function readFetchWebErrorMessage(error: unknown): string {
     return `域名解析失败（${code}），${DNS_RESOLUTION_HINT}`;
   }
 
-  const message = readErrorMessage(error);
   const localized = localizeSsrfMessage(message);
   if (localized) {
     return localized;
@@ -241,8 +253,11 @@ function localizeSsrfMessage(message: string): string | null {
 }
 
 function describeHttpStatus(status: number): string | null {
+  // 401 文案必须点破「这是反爬拦截，不是真的登录墙」：Reuters / WSJ 等站点对爬虫
+  // 固定回 401（甚至 statusText 写成 Forbidden），曾诱导模型把「登录」当任务目标，
+  // 对同一站点换了十几个 URL 反复重试（2026-10-18 排障）。
   if (status === 401) {
-    return '需要登录后才能访问该网页（HTTP 401）。';
+    return '该站点对自动抓取一概要求登录（HTTP 401），换 URL 或请求头都无济于事，请改用 search 拿摘要或换来源，不要重试同一站点。';
   }
   if (status === 403) {
     return '目标站点拒绝访问（HTTP 403，可能触发反爬策略），请尝试其他来源。';

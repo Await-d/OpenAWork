@@ -10,12 +10,12 @@ const response = () =>
     events: [
       OpenCodeLLM.LLMEvent.textDelta({ id: 'text-1', text: 'hello' }),
       OpenCodeLLM.LLMEvent.finish({
-        reason: 'stop',
+        reason: { normalized: 'stop' },
         usage: new OpenCodeLLM.Usage({ inputTokens: 3, outputTokens: 5, totalTokens: 8 }),
       }),
     ],
     usage: new OpenCodeLLM.Usage({ inputTokens: 3, outputTokens: 5, totalTokens: 8 }),
-    finishReason: 'stop',
+    finishReason: { normalized: 'stop' },
   });
 
 const generateSpy = vi.spyOn(OpenCodeLLM.LLMClient, 'generate');

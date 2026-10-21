@@ -15,6 +15,8 @@
  * 的具体形状，跨包重复定义会带来同步成本——客户端只兜底协议层细节。
  */
 
+import { resolveImageGenerationTimeoutMs } from '@openAwork/shared';
+import { createSseFrameParser } from '../gateway/sse-frames.js';
 import {
   authHeader,
   extractJsonErrorMessage,
@@ -26,6 +28,16 @@ import {
   withQuery,
   fetchWithTimeout,
 } from '../gateway/http.js';
+
+/**
+ * 二进制附件上传 / 下载的超时上限（ms）。
+ *
+ * `fetchWithTimeout` 的默认上限（20s）是按「读 JSON 接口」定的：一个 10MiB 的附件在
+ * 慢上行或远端网关下，光是传输 + base64 编解码就很容易超过它——而超时会被归一成
+ * 「网络异常」，用户看到的是随机失败，排查方向也会被带偏。这里给足余量；需要更早
+ * 放弃的调用方可以自行传 `signal`。
+ */
+const ARTIFACT_TRANSFER_TIMEOUT_MS = 120_000;
 
 export interface ArtifactSessionArtifactsResponse<TArtifact> {
   contentArtifacts?: TArtifact[];
@@ -56,13 +68,55 @@ export interface RevertArtifactInput {
   createdBy?: string;
 }
 
+export interface ImageGenerationArtifactRef {
+  artifactId: string;
+  fileName?: string;
+  mimeType?: string;
+}
+
 export interface ImageGenerationInput {
   prompt: string;
   size: string;
   quality?: string;
   outputFormat?: string;
   background?: string;
-  inputArtifacts?: Array<{ artifactId: string; fileName?: string; mimeType?: string }>;
+  moderation?: string;
+  outputCompression?: number;
+  /** 单次生成张数（对应官方 `n`）；缺省 1。 */
+  count?: number;
+  inputArtifacts?: ImageGenerationArtifactRef[];
+  /** 局部编辑遮罩（官方 `/images/edits` 的 `mask`），必须与参考图同格式同尺寸且带 alpha。 */
+  maskArtifact?: ImageGenerationArtifactRef;
+}
+
+/** 生图响应里可消费到的产物描述（`artifacts` 为 `n>1` 的全量列表）。 */
+export interface ImageGenerationResponseArtifact {
+  id: string;
+  title: string;
+  type: 'image';
+  metadata?: Record<string, unknown>;
+}
+
+/** 流式生图的中间稿（官方 `image_generation.partial_image`）。 */
+export interface ImageGenerationPartialImage {
+  index: number;
+  mimeType: string;
+  partialImageBase64: string;
+}
+
+/** 流式生图的失败事件（结构与 JSON 端点的 `error` 对象一致）。 */
+export interface ImageGenerationStreamError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface ImageGenerationStreamHandlers {
+  /** 最终产物负载，与 `generateImage` 的成功响应同构。 */
+  onDone: (payload: unknown) => void;
+  onError: (error: ImageGenerationStreamError) => void;
+  /** 中间稿预览；调用方不应把它当产物持久化。 */
+  onPartial?: (partial: ImageGenerationPartialImage) => void;
 }
 
 export interface UploadSessionArtifactInput {
@@ -87,6 +141,20 @@ export interface ArtifactsClient<
     sessionId: string,
     input: UploadSessionArtifactInput,
   ): Promise<{ artifact: TArtifact }>;
+  /**
+   * GET `/sessions/:id/artifacts/:artifactId/content` — 下载上传附件的二进制内容。
+   *
+   * 与 `get` 的区别：`get` 查询的是 SQLite 内容型产物（`GET /artifacts/:id`），
+   * 上传路由写入的磁盘型产物不在其中；跨端恢复附件必须走这条读取面。
+   */
+  downloadFromSession(
+    token: string,
+    sessionId: string,
+    artifactId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<Blob>;
+  /** DELETE `/sessions/:id/artifacts/:artifactId` — 删除磁盘型附件（索引 + 磁盘文件）。 */
+  removeFromSession(token: string, sessionId: string, artifactId: string): Promise<boolean>;
   get(
     token: string,
     artifactId: string,
@@ -122,6 +190,18 @@ export interface ArtifactsClient<
    * 错误响应通常带 `error.message`，由调用方决定文案。
    */
   generateImage(token: string, sessionId: string, input: ImageGenerationInput): Promise<unknown>;
+  /**
+   * POST `/sessions/:id/images/generations/stream`：流式生图。
+   * 中间稿经 `handlers.onPartial` 实时回调，最终产物经 `handlers.onDone`（与
+   * `generateImage` 的成功响应同构），失败经 `handlers.onError`。
+   */
+  generateImageStream(
+    token: string,
+    sessionId: string,
+    input: ImageGenerationInput,
+    handlers: ImageGenerationStreamHandlers,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
 }
 
 function buildArtifactsActionErrorMessage(
@@ -225,11 +305,55 @@ export function createArtifactsClient<
         actionLabel: '上传会话产物',
         request: () =>
           fetchWithTimeout(`${baseUrl}/sessions/${encodeURIComponent(sessionId)}/artifacts`, {
+            timeoutMs: ARTIFACT_TRANSFER_TIMEOUT_MS,
             method: 'POST',
             headers: jsonAuthHeaders(token),
             body: JSON.stringify(input),
           }),
       });
+    },
+
+    async downloadFromSession(token, sessionId, artifactId, options) {
+      try {
+        const response = await fetchWithTimeout(
+          `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(
+            artifactId,
+          )}/content`,
+          {
+            timeoutMs: ARTIFACT_TRANSFER_TIMEOUT_MS,
+            headers: authHeader(token),
+            signal: options?.signal,
+          },
+        );
+        if (!response.ok) {
+          const data = await readJsonErrorData<
+            JsonErrorData & { error?: string | { message?: string } }
+          >(response);
+          throw new HttpError(
+            buildArtifactsActionErrorMessage('下载会话产物', response.status, data),
+            response.status,
+            data,
+          );
+        }
+        // 二进制响应不解析 JSON：调用方拿 Blob 后自行构造 File（名字以队列元数据为准）。
+        return await response.blob();
+      } catch (error) {
+        throw normalizeArtifactsError('下载会话产物', error);
+      }
+    },
+
+    async removeFromSession(token, sessionId, artifactId) {
+      const payload = await performArtifactsRequest<{ removed?: unknown }>({
+        actionLabel: '删除会话产物',
+        request: () =>
+          fetchWithTimeout(
+            `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(
+              artifactId,
+            )}`,
+            { method: 'DELETE', headers: authHeader(token) },
+          ),
+      });
+      return payload?.removed === true;
     },
 
     async get(token, artifactId, options) {
@@ -317,19 +441,112 @@ export function createArtifactsClient<
     },
 
     async generateImage(token, sessionId, input) {
+      // 生图是长任务：官方给出的上限是「复杂 prompt 最长约 2 分钟」，4K 更久。
+      // 固定的 120s 会把正常请求掐断，而超时会被归一成「网络异常」，排查方向被带偏。
       return performArtifactsRequest<unknown>({
         actionLabel: '生成图片',
         request: () =>
           fetchWithTimeout(
             `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/images/generations`,
             {
-              timeoutMs: 120_000,
+              timeoutMs: resolveImageGenerationTimeoutMs(input.size),
               method: 'POST',
               headers: jsonAuthHeaders(token),
               body: JSON.stringify(input),
             },
           ),
       });
+    },
+
+    async generateImageStream(token, sessionId, input, handlers, options) {
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(
+          `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/images/generations/stream`,
+          {
+            // 与 JSON 端点同一条超时阶梯：整条流超过该档位预算即判失败，
+            // 避免半开连接把 UI 永久挂在「生成中」。
+            timeoutMs: resolveImageGenerationTimeoutMs(input.size),
+            method: 'POST',
+            headers: { ...jsonAuthHeaders(token), Accept: 'text/event-stream' },
+            body: JSON.stringify(input),
+            ...(options?.signal ? { signal: options.signal } : {}),
+          },
+        );
+      } catch (error) {
+        throw normalizeArtifactsError('生成图片', error);
+      }
+
+      if (!response.ok) {
+        const data = await readJsonErrorData<
+          JsonErrorData & { error?: string | { message?: string } }
+        >(response);
+        throw new HttpError(
+          buildArtifactsActionErrorMessage('生成图片', response.status, data),
+          response.status,
+          data,
+        );
+      }
+
+      if (!response.body) {
+        throw new Error('图片生成流式响应不可用。');
+      }
+
+      const parser = createSseFrameParser();
+      const decoder = new TextDecoder();
+      const dispatch = (frame: { data: string; event: string | null }): void => {
+        if (frame.event !== 'partial' && frame.event !== 'done' && frame.event !== 'error') {
+          return;
+        }
+
+        let payload: unknown;
+        try {
+          payload = JSON.parse(frame.data) as unknown;
+        } catch {
+          if (frame.event === 'error') {
+            handlers.onError({
+              code: 'stream_invalid_payload',
+              message: '图片生成流式响应解析失败。',
+              retryable: false,
+            });
+          }
+          return;
+        }
+
+        if (frame.event === 'partial' && handlers.onPartial) {
+          handlers.onPartial(payload as ImageGenerationPartialImage);
+          return;
+        }
+        if (frame.event === 'done') {
+          handlers.onDone(payload);
+          return;
+        }
+        if (frame.event === 'error') {
+          handlers.onError(payload as ImageGenerationStreamError);
+        }
+      };
+
+      const reader = response.body.getReader();
+      try {
+        let finished = false;
+        while (!finished) {
+          const { done, value } = await reader.read();
+          if (done) {
+            finished = true;
+            break;
+          }
+          for (const frame of parser.push(decoder.decode(value, { stream: true }))) {
+            dispatch(frame);
+          }
+        }
+        for (const frame of parser.flush()) {
+          dispatch(frame);
+        }
+      } catch (error) {
+        throw normalizeArtifactsError('生成图片', error);
+      } finally {
+        reader.releaseLock();
+      }
     },
   };
 }

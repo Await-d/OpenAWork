@@ -13,12 +13,20 @@ import {
  * 迁到网关后本客户端是唯一的写入通道——`apps/` 下任何直接 `fetch` 网关的写法都被
  * 项目规约禁止，消费端必须经由此处。
  *
- * 附件二进制不在此传输：只同步附件元数据，用于重建队列预览；真正的 File 仍由
- * 客户端 IndexedDB 持有，取不到时前端会置 `requiresAttachmentRebind`。
+ * 附件二进制不在此传输：只同步附件元数据，用于重建队列预览。真正的 File 优先由
+ * 客户端 IndexedDB 持有；跨端（换设备 / 清缓存）取不到本地 Blob 时，凭条目里的
+ * `attachmentItems[].artifactId` 经由 `createArtifactsClient` 的
+ * `downloadFromSession` 拉回二进制，两者都不可得才置 `requiresAttachmentRebind`。
  */
 
 /** 与网关 `ComposerQueueAttachment` 对齐，并与 shared-ui 的 `AttachmentItem` 保持同一取值域。 */
 export interface ComposerQueueAttachment {
+  /**
+   * 附件跨端副本的网关产物 id（`POST /sessions/:id/artifacts` 的返回）。
+   * 入队时先不带它落库、上传成功后再经 `updateAttachments` 回填；缺失表示该附件
+   * 没有跨端副本（上传失败或旧版本客户端写入）。
+   */
+  artifactId?: string;
   id: string;
   name: string;
   sizeBytes: number;
@@ -44,6 +52,17 @@ export interface EnqueueComposerQueueInput {
 export interface EnqueueComposerQueueResult {
   created: boolean;
   item: ComposerQueueItem;
+}
+
+export interface UpdateComposerQueueAttachmentsInput {
+  attachmentItems: ComposerQueueAttachment[];
+  /**
+   * 附件就绪后清除「需重新选择附件」标记。
+   *
+   * 该标记同时来自两个不足：本地 IndexedDB 写失败、条目没有跨端副本。上传成功即
+   * 第二个不足消失，配合水合时的远端下载，条目在任意端都能取回附件，标记无意义。
+   */
+  requiresAttachmentRebind?: boolean;
 }
 
 /** `claimed: false` 时的拒绝原因。 */
@@ -118,6 +137,19 @@ export interface ComposerQueueClient {
     itemId: string,
     options?: { signal?: AbortSignal },
   ): Promise<boolean>;
+  /**
+   * 回填附件跨端引用（附件副本上传成功后调用）。
+   *
+   * 条目在两步之间可能已被消费 / 移出，网关对此回 404——本方法**不抛错**而是返回
+   * `null`，调用方据此把刚上传的副本当孤儿回收（而不是重试一个永远不会成功的回填）。
+   */
+  updateAttachments(
+    token: string,
+    sessionId: string,
+    itemId: string,
+    input: UpdateComposerQueueAttachmentsInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<ComposerQueueItem | null>;
 }
 
 const ACTION_LIST = '读取待发队列';
@@ -127,6 +159,7 @@ const ACTION_CLEAR = '清空待发队列';
 const ACTION_CLAIM = '获取待发消息发送权';
 const ACTION_CLAIM_MANY = '批量获取待发消息发送权';
 const ACTION_RELEASE = '交还待发消息发送权';
+const ACTION_UPDATE_ATTACHMENTS = '回填待发队列附件引用';
 
 function authHeader(token: string): { Authorization: string } {
   return { Authorization: `Bearer ${token}` };
@@ -197,7 +230,11 @@ function toAttachment(value: unknown): ComposerQueueAttachment | null {
   }
   const sizeBytes = candidate.sizeBytes;
   const rawType = candidate.type;
+  const rawArtifactId = candidate.artifactId;
   return {
+    ...(typeof rawArtifactId === 'string' && rawArtifactId.length > 0
+      ? { artifactId: rawArtifactId }
+      : {}),
     id: candidate.id,
     name: candidate.name,
     sizeBytes: typeof sizeBytes === 'number' && Number.isFinite(sizeBytes) ? sizeBytes : 0,
@@ -385,6 +422,40 @@ export function createComposerQueueClient(gatewayUrl: string): ComposerQueueClie
         return payload?.removed === true;
       } catch (error) {
         throw normalizeError(ACTION_REMOVE, error);
+      }
+    },
+
+    async updateAttachments(token, sessionId, itemId, input, options) {
+      try {
+        const response = await fetchWithTimeout(
+          `${base(sessionId)}/${encodeURIComponent(itemId)}/attachments`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...authHeader(token) },
+            body: JSON.stringify({
+              attachmentItems: input.attachmentItems,
+              ...(input.requiresAttachmentRebind === undefined
+                ? {}
+                : { requiresAttachmentRebind: input.requiresAttachmentRebind }),
+            }),
+            signal: options?.signal,
+          },
+        );
+        // 404 是「条目已不在队列」（已被消费 / 移出）的正常结果，按 null 交给调用方
+        // 回收孤儿副本；其余错误照常抛出。
+        if (response.status === 404) {
+          return null;
+        }
+        const payload = (await readJsonOrThrow(response, ACTION_UPDATE_ATTACHMENTS)) as {
+          item?: unknown;
+        } | null;
+        const item = toComposerQueueItem(payload?.item);
+        if (!item) {
+          throw new Error(`${ACTION_UPDATE_ATTACHMENTS}失败：网关未返回可识别的队列条目。`);
+        }
+        return item;
+      } catch (error) {
+        throw normalizeError(ACTION_UPDATE_ATTACHMENTS, error);
       }
     },
 

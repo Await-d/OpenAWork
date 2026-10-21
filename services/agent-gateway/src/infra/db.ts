@@ -752,6 +752,23 @@ export async function migrate(): Promise<void> {
     'CREATE INDEX IF NOT EXISTS idx_composer_queue_claim ON session_composer_queue(session_id, claimed_until)',
   );
 
+  // ─── 输入框历史：上下键调出的已提交输入 (2026-10-19) ───
+  // 原先只活在浏览器内存（Zustand，无 persist），刷新 / 换端即清空。落库后按会话
+  // 隔离、每会话只保留最新 50 条；写入在「发送成功 / 入队」之后发生，草稿不入库。
+  // `id` 自增同时充当顺序与裁剪依据，避免同毫秒写入时靠时间戳排序产生歧义。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_composer_input_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_composer_input_history_scope ON session_composer_input_history(session_id, user_id, id)',
+  );
+
   // ─── 消息频道健康与错误留痕 ───
   // 频道侧的错误此前只存在于 `ChannelManager` 的内存 Map，进程重启即全部丢失，
   // 留下「Web 上不显示任何异常、IM 里也没回消息」的盲区。这里给每个频道一份
@@ -1447,6 +1464,22 @@ export async function migrate(): Promise<void> {
   );
   backfillMessageRole();
 
+  // `client_request_id` 反规范化列：按请求族（`root` 或 `root:…` 派生子回合）读写的五个入口
+  // （状态流转 / 按范围删除 / 精确删除 / 重放判定 / 记忆抽取）此前都是拉整会话再逐行
+  // `JSON.parse` 过滤，会话越长越慢。落列 + 索引后查询变成一次范围扫描。
+  //
+  // 区间用 `>= root AND < root || ';'` 而不是 `LIKE 'root:%'`：'0x3A' 的下一字节是 ';'
+  // （0x3B），因此「以 `root:` 开头」的任意字符串都落在 `[root, root;)` 内，且区间按 BINARY
+  // 比较即可走索引 —— 而 LIKE 默认大小写不敏感，在 BINARY 列上根本用不上索引。
+  // 该区间是**超集**（`root-abc` 这类也落在区间里），精确判定仍由读侧完成。
+  //
+  // 默认值同样给 ''：ALTER TABLE ADD COLUMN 只接受常量默认值，且 `WHERE client_request_id = ''`
+  // 能命中索引等值前缀，让下面的回填在「无待回填行」时只是一次索引探测。
+  ensureColumn('message_v2', 'client_request_id', "TEXT NOT NULL DEFAULT ''");
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_message_v2_session_request ON message_v2(session_id, user_id, client_request_id)',
+  );
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS part_v2 (
       id TEXT PRIMARY KEY,
@@ -1525,6 +1558,14 @@ export async function migrate(): Promise<void> {
   // ─── V1 → V2 Data Migration ───
   migrateV1MessagesToV2();
   repairLegacyMigratedPartOrder();
+  // message_v2 / part_v2 与它们的索引都已建好，才做幽灵行的物理清理：删除 message_v2
+  // 行会触发 part_v2 的 ON DELETE CASCADE 探测，缺 `idx_part_v2_message` 时该探测会退化成
+  // 逐行全表扫描。
+  purgeUnidentifiableMessageRows();
+  // 回填 `client_request_id` 必须在这之后：V1→V2 迁移过来的行只写了 `data`（含
+  // client_request_id 键）而没写反规范化列，必须在本启动周期内补齐，否则按请求族读写的
+  // 入口会漏掉这批历史行。`backfillMessageRole` 在上面先跑，道理相同。
+  backfillMessageClientRequestId();
 
   // ─── V2 Session Columns (event-sourcing projectors) ───
   ensureColumn('sessions', 'parent_id', 'TEXT DEFAULT NULL');
@@ -2363,6 +2404,80 @@ export function backfillMessageRole(): void {
   sqliteRun(
     `UPDATE message_v2 SET role = COALESCE(json_extract(data, '$.role'), '')
       WHERE role = '' AND json_valid(data) = 1`,
+  );
+}
+
+/** 每批物理删除的行数：单条 DELETE 清 4M 行会在一个事务里改写近 2.4 GiB 的页。 */
+const GHOST_MESSAGE_PURGE_BATCH_SIZE = 20_000;
+/** 每清理这么多行打一次进度日志，避免大库上长时间静默。 */
+const GHOST_MESSAGE_PURGE_LOG_INTERVAL = 400_000;
+
+/**
+ * 一次性清理「幽灵消息行」——`message_v2.id IS NULL` 的行。
+ *
+ * 成因：`id` 是**非 INTEGER** 主键，SQLite 仍允许 NULL（唯一索引把多个 NULL 视为互不
+ * 相同），而绑定层又把 `undefined` 归一成 NULL（见 `infra/sqlite-bind-params.ts`）。两者
+ * 叠加后，任何「把从行 JSON 还原出来的 info 直接回投」的调用方（历史版本见
+ * `updateSessionMessagesStatusByRequestScope`）每次调用都会插进一行**新**幽灵行：
+ * `ON CONFLICT (id)` 永不命中，按 id 删除永不匹配，而读路径仍把它们当合法消息参与回合
+ * 归因 —— 生产库上单个会话因此累计 228 万行 / 805 MiB，把 truncate、消息列表、状态流转
+ * 全部拖到秒级（`message_v2` 单表 2.3 GiB，占整库一半）。
+ *
+ * 写入侧守卫已补上（见 `message-v2-projectors.ts`），这里负责清除存量：这些行读不到正文
+ * （没有 part）、无法按 id 寻址、也不可能被任何回合归因，删除是安全且幂等的。
+ *
+ * 分批 + 逐批提交：默认 WAL 自动 checkpoint 会在每 1000 页（4 MiB）后截断 WAL，因此
+ * 峰值开销被控制在一批之内，而不是一次性 2.4 GiB。用 `app_meta` 标记保证只跑一次——
+ * 清空后每行都在走索引（`id IS NULL` 命中主键覆盖索引），但没必要每次启动都扫一遍。
+ */
+export function purgeUnidentifiableMessageRows(): void {
+  const markerKey = 'message_v2_ghost_row_purge_v1';
+  if (getAppMetaValue(markerKey) === 'done') {
+    return;
+  }
+
+  const probe = sqliteGet<{ rowid: number }>(
+    'SELECT rowid FROM message_v2 WHERE id IS NULL LIMIT 1',
+  );
+  if (!probe) {
+    setAppMetaValue(markerKey, 'done');
+    return;
+  }
+
+  console.info('[V2_MIGRATION] 开始清理无 id 的幽灵消息行（message_v2）…');
+  const startedAt = Date.now();
+  let removed = 0;
+  for (;;) {
+    const changes = sqliteRunWithChanges(
+      `DELETE FROM message_v2
+        WHERE rowid IN (SELECT rowid FROM message_v2 WHERE id IS NULL LIMIT ?)`,
+      [GHOST_MESSAGE_PURGE_BATCH_SIZE],
+    );
+    removed += changes;
+    if (changes === 0) break;
+    if (removed % GHOST_MESSAGE_PURGE_LOG_INTERVAL < changes) {
+      console.info(`[V2_MIGRATION] 幽灵消息行清理进度：已删除 ${removed} 行…`);
+    }
+  }
+
+  console.info(
+    `[V2_MIGRATION] 幽灵消息行清理完成：删除 ${removed} 行，耗时 ${Date.now() - startedAt}ms`,
+  );
+  setAppMetaValue(markerKey, 'done');
+}
+
+/**
+ * 回填 `message_v2.client_request_id`（新增该列时的存量数据迁移）。
+ *
+ * 与 `backfillMessageRole` 同款：用 `json_extract` 在 SQL 内取值，不把 `data` 拉进 JS；
+ * `json_valid` 让手改 / 损坏行退化为 ''（而不是让整条 UPDATE 抛 malformed JSON —— 那会让
+ * 每次启动都失败）。`WHERE client_request_id = ''` 命中新索引的等值前缀，空库 / 已回填完成的
+ * 库上只是一次索引探测。
+ */
+export function backfillMessageClientRequestId(): void {
+  sqliteRun(
+    `UPDATE message_v2 SET client_request_id = COALESCE(json_extract(data, '$.clientRequestId'), '')
+      WHERE client_request_id = '' AND json_valid(data) = 1`,
   );
 }
 

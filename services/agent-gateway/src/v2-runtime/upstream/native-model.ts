@@ -18,6 +18,14 @@ const isAnthropic = (providerType: string | undefined): boolean => {
   return normalized === 'anthropic' || normalized === 'claude';
 };
 
+/**
+ * Venice 的原生协议（`venice_parameters` / 加密推理 / `thought_signature`）只在官方
+ * 端点可用。用户自建中转通常只实现 OpenAI 兼容子集，下发 Venice 专有字段会被拒，
+ * 因此这类端点继续走下面的 `OpenAICompatible` 回落。
+ */
+const isVeniceOfficialEndpoint = (baseURL: string | undefined): boolean =>
+  baseURL === undefined || baseURL.toLowerCase().includes('api.venice.ai');
+
 const routeDefaults = (input: NativeModelInput) => ({
   ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
   ...(input.baseURL === undefined ? {} : { baseURL: input.baseURL }),
@@ -54,6 +62,11 @@ export function buildNativeModel(input: NativeModelInput): OpenCodeLLM.Model {
     return OpenCodeLLM.Model.update(openAI.chat(input.model), {
       compatibility: { supportsPromptCacheKey: true },
     });
+  }
+
+  // Venice 走原生协议：官方端点才能承载 `venice_parameters` 与加密推理回传。
+  if (providerType === 'venice' && isVeniceOfficialEndpoint(input.baseURL)) {
+    return OpenCodeLLM.Providers.Venice.configure(defaults).model(input.model);
   }
 
   return OpenCodeLLM.Providers.OpenAICompatible.configure({

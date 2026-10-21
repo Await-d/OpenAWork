@@ -8,12 +8,9 @@
  * Detection is lazy and cached per workspace root for the process lifetime.
  */
 
-import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
+import { execFileWithEscalation } from '../infra/exec-file-escalation.js';
 
 // ---------------------------------------------------------------------------
 // which — locate an executable on $PATH
@@ -339,9 +336,9 @@ export async function formatFileAfterWrite(
   if (!bin) return;
 
   try {
-    await execFileAsync(bin, args, {
+    await execFileWithEscalation(bin, args, {
       cwd: workspaceRoot,
-      timeout: timeoutMs,
+      timeoutMs,
       maxBuffer: 2 * 1024 * 1024,
     });
   } catch {

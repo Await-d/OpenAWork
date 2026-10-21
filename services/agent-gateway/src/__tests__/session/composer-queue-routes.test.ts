@@ -8,6 +8,9 @@
  */
 
 import Fastify, { type FastifyInstance } from 'fastify';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearInFlightStreamRequest,
@@ -19,9 +22,14 @@ import type * as ErrorHandlerModule from '../../infra/error-handler.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
 import type { ComposerQueueItem } from '../../session/composer-queue-store.js';
 import type * as ComposerQueueRoutesModule from '../../routes/session-composer-queue.js';
+import { getGatewayArtifactManager } from '../../infra/artifact-manager.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+// 附件跨端副本的回收用例会经磁盘型产物走真实文件系统：把数据目录钉到临时目录，
+// 绝不能落到开发者本机的 ~/.local/share/OpenAWork。
+const dataDir = mkdtempSync(join(tmpdir(), 'openawork-composer-queue-routes-'));
+process.env['OPENAWORK_DATA_DIR'] = dataDir;
 
 let authPlugin: typeof AuthModule.default;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
@@ -95,6 +103,7 @@ beforeEach(async () => {
 afterAll(async () => {
   await app.close();
   await dbModule.closeDb();
+  rmSync(dataDir, { recursive: true, force: true });
 });
 
 describe('POST /sessions/:sessionId/composer-queue', () => {
@@ -462,6 +471,167 @@ describe('发送权认领（多端互斥）', () => {
       url: queueUrl(SESSION_ID, '/claim-5/claim'),
     });
     expect(response.statusCode).toBe(401);
+  });
+});
+
+describe('PATCH /sessions/:sessionId/composer-queue/:itemId/attachments', () => {
+  it('回填 artifactId 并清除 rebind 标记', async () => {
+    await app.inject({
+      headers: authHeaders(),
+      method: 'POST',
+      payload: {
+        attachmentItems: [{ id: 'att-1', name: '截图.png', sizeBytes: 3, type: 'image' }],
+        itemId: 'fill',
+        requiresAttachmentRebind: true,
+        text: '带附件',
+      },
+      url: queueUrl(),
+    });
+
+    const response = await app.inject({
+      headers: authHeaders(),
+      method: 'PATCH',
+      payload: {
+        attachmentItems: [
+          {
+            artifactId: 'artifact-cross-1',
+            id: 'att-1',
+            name: '截图.png',
+            sizeBytes: 3,
+            type: 'image',
+          },
+        ],
+        requiresAttachmentRebind: false,
+      },
+      url: queueUrl(SESSION_ID, '/fill/attachments'),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ updated: boolean }>().updated).toBe(true);
+
+    const listed = await app.inject({ headers: authHeaders(), method: 'GET', url: queueUrl() });
+    const items = listed.json<QueueListBody>().items;
+    expect(items[0]?.attachmentItems).toEqual([
+      {
+        artifactId: 'artifact-cross-1',
+        id: 'att-1',
+        name: '截图.png',
+        sizeBytes: 3,
+        type: 'image',
+      },
+    ]);
+    // 副本就绪后「需重新选择附件」不再成立。
+    expect(items[0]?.requiresAttachmentRebind).toBe(false);
+  });
+
+  it('条目已不存在（已被消费 / 移出）时返回 404，上传方据此回收孤儿副本', async () => {
+    const response = await app.inject({
+      headers: authHeaders(),
+      method: 'PATCH',
+      payload: { attachmentItems: [] },
+      url: queueUrl(SESSION_ID, '/missing/attachments'),
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json<{ ok: boolean }>().ok).toBe(false);
+  });
+
+  it('无法回填其他会话的条目', async () => {
+    await app.inject({
+      headers: authHeaders(),
+      method: 'POST',
+      payload: { itemId: 'scoped', text: '本会话条目' },
+      url: queueUrl(),
+    });
+
+    const response = await app.inject({
+      headers: authHeaders(),
+      method: 'PATCH',
+      payload: { attachmentItems: [] },
+      url: queueUrl(OTHER_SESSION_ID, '/scoped/attachments'),
+    });
+    expect(response.statusCode).toBe(404);
+
+    // 原条目未被改动。
+    const listed = await app.inject({ headers: authHeaders(), method: 'GET', url: queueUrl() });
+    expect(listed.json<QueueListBody>().items[0]?.attachmentItems).toEqual([]);
+  });
+});
+
+describe('条目离开队列时回收附件跨端副本', () => {
+  /** 造一个「上传到会话的磁盘型附件」并把它塞进队列条目。 */
+  function seedArtifact(name: string): string {
+    const artifact = getGatewayArtifactManager().add({
+      sessionId: SESSION_ID,
+      type: 'document',
+      name,
+      path: join(dataDir, 'artifacts', SESSION_ID, name),
+      mimeType: 'image/png',
+      sizeBytes: 3,
+    });
+    return artifact.id;
+  }
+
+  async function enqueueWithArtifact(itemId: string, artifactId: string): Promise<void> {
+    await app.inject({
+      headers: authHeaders(),
+      method: 'POST',
+      payload: {
+        attachmentItems: [
+          { artifactId, id: `att-${itemId}`, name: '队列附件.png', sizeBytes: 3, type: 'image' },
+        ],
+        itemId,
+        text: '带跨端副本的待发消息',
+      },
+      url: queueUrl(),
+    });
+  }
+
+  it('移出条目时删除其 artifactId 指向的磁盘副本', async () => {
+    const manager = getGatewayArtifactManager();
+    const artifactId = seedArtifact('purge-single.png');
+    await enqueueWithArtifact('purge-me', artifactId);
+    expect(manager.get(artifactId)).toBeDefined();
+
+    const response = await app.inject({
+      headers: authHeaders(),
+      method: 'DELETE',
+      url: queueUrl(SESSION_ID, '/purge-me'),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(manager.get(artifactId)).toBeUndefined();
+  });
+
+  it('清空队列时回收全部条目的副本', async () => {
+    const manager = getGatewayArtifactManager();
+    const first = seedArtifact('purge-clear-1.png');
+    const second = seedArtifact('purge-clear-2.png');
+    await enqueueWithArtifact('clear-1', first);
+    await enqueueWithArtifact('clear-2', second);
+
+    await app.inject({ headers: authHeaders(), method: 'DELETE', url: queueUrl() });
+
+    expect(manager.get(first)).toBeUndefined();
+    expect(manager.get(second)).toBeUndefined();
+  });
+
+  it('没有 artifactId 的条目删除时不触碰产物索引', async () => {
+    const manager = getGatewayArtifactManager();
+    const unrelated = seedArtifact('untouched.png');
+    await app.inject({
+      headers: authHeaders(),
+      method: 'POST',
+      payload: { itemId: 'plain', text: '纯文本条目' },
+      url: queueUrl(),
+    });
+
+    await app.inject({
+      headers: authHeaders(),
+      method: 'DELETE',
+      url: queueUrl(SESSION_ID, '/plain'),
+    });
+
+    expect(manager.get(unrelated)).toBeDefined();
+    // 收尾：清掉本用例的产物，避免影响后续用例对索引的假设。
+    manager.remove(unrelated);
   });
 });
 

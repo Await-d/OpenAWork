@@ -2153,9 +2153,30 @@ export async function handleStreamRequest(input: {
   const ctx = createRequestContext(input.method, input.path, input.headers, input.ip);
   // 用户**真实**交互重置「连续自动唤醒」计数；网关内部请求（唤醒、回流、handoff 等）不重置，
   // 否则唤醒自身会把计数清零，上限永远触发不了。判定与标题守卫共用同一内部键注册表。
+  //
+  // 这两步是纯记账：失败不应连带丢掉整轮对话。更重要的是它们发生在「取锁之后、
+  // `execution` 建立之前」的同步窗口里——此处同步 SQLite 异常若逃逸，会绕过
+  // handleStreamRequest 末尾 `finally { clearReservation() }` 的释放点，把该会话的
+  // 单飞锁滞留到 TTL（后续请求恒定 409 SESSION_ALREADY_RUNNING）。与运行时线程
+  // 心跳（见下方 heartbeat 定时器）保持同一隔离口径：记录并继续。两步各自隔离，
+  // 一步失败不会跳过另一步。
   if (!isGatewayInternalRequestKey(requestData.clientRequestId)) {
-    noteManualSessionInteraction({ sessionId: input.sessionId, userId: input.user.sub });
-    completeConsumedBackgroundJobs({ sessionId: input.sessionId, userId: input.user.sub });
+    try {
+      noteManualSessionInteraction({ sessionId: input.sessionId, userId: input.user.sub });
+    } catch (error) {
+      logGatewayWarn(
+        '[stream] noteManualSessionInteraction failed',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    try {
+      completeConsumedBackgroundJobs({ sessionId: input.sessionId, userId: input.user.sub });
+    } catch (error) {
+      logGatewayWarn(
+        '[stream] completeConsumedBackgroundJobs failed',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
   const userVisibleMessage = input.teamResumeRootSessionId
     ? (requestData.displayMessage ?? '恢复团队会话')
@@ -2299,6 +2320,10 @@ export async function handleStreamRequest(input: {
   });
   const sessionMeta = parseSessionMetadataJson(input.sessionContext.metadataJson);
   const runtimePolicy = resolveSessionRuntimePolicy(sessionMeta);
+  // 首 token 前的同步准备工作可能包含数 ms 到数十 ms 的 CPU / 同步 SQLite 写，
+  // 在并发写抢锁时还会被 busy_timeout 放大。单独计时以便在网关日志里直接归因，
+  // 避免只能靠客户端的「首token」总指标去猜。
+  const stepPrepare = wl.start('stream.prepare-sync');
   const companionPrompt = buildCompanionPrompt(
     loadCompanionSettingsForUser(input.user.sub, input.user.email, requestData.agentId),
     userVisibleMessage,
@@ -2330,6 +2355,7 @@ export async function handleStreamRequest(input: {
         requestData.message,
       );
     } catch (error) {
+      wl.fail(stepPrepare, 'start-work 失败');
       return failReservation(error);
     }
   }
@@ -2457,6 +2483,7 @@ export async function handleStreamRequest(input: {
     try {
       workspaceCtx = await workspaceContextPromise;
     } catch (error) {
+      wl.fail(stepPrepare, 'workspace 上下文构建失败');
       return failReservation(error);
     }
     let shouldKeepPausedState = false;
@@ -2566,6 +2593,7 @@ export async function handleStreamRequest(input: {
 
       // 唤醒请求不落用户轮：输入（合成通知）已在历史中，且对模型表现为 user 轮。
       if (!input.continueFromHistory) {
+        const stepPersistUser = wl.start('stream.persist-user-message');
         persistStreamUserMessage({
           content: buildStreamUserContent({
             inputParts: input.teamResumeRootSessionId ? undefined : requestData.inputParts,
@@ -2589,6 +2617,7 @@ export async function handleStreamRequest(input: {
             thinkingLanguageHint,
           },
         });
+        wl.succeed(stepPersistUser);
       }
 
       // Dynamic tool loading: scan workspace {tool,tools}/*.{js,ts} for custom tools
@@ -2654,6 +2683,9 @@ export async function handleStreamRequest(input: {
         }),
         input.user.sub,
       );
+      wl.succeed(stepPrepare, undefined, {
+        toolCount: baseTools.length,
+      });
 
       // Flatten MCP tools into the LLM tool dictionary (PR-C).
       // Mirrors opencode's `mcp.tools()` injection
@@ -2793,11 +2825,21 @@ export async function handleStreamRequest(input: {
         sessionId: input.sessionId,
         userId: input.user.sub,
       });
+      const stepTeamStack = wl.start('stream.team-instruction-stack');
       const teamInstructionStackResult = await buildTeamInstructionStack({
         userId: input.user.sub,
         workspaceRoot: workingDirectoryForStack,
         teamWorkspaceId: teamWorkspaceIdForStack,
         roleLayer: sessionRoleLayer,
+      });
+      wl.succeed(stepTeamStack, undefined, {
+        // 非 team 会话也在跑这一段（无 roleLayer gate），故记录层命中情况以便判断
+        // 「为了团队栈付出了多少首 token 前的时间」。
+        layers:
+          Object.entries(teamInstructionStackResult.layers)
+            .filter(([, present]) => present)
+            .map(([name]) => name)
+            .join('|') || 'none',
       });
       let teamInstructionStack = teamInstructionStackResult.stableBlock;
       // 动态注入「团队编制清单」+「当前可用工具清单」（与 stream-runtime 共享同一实现，

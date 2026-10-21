@@ -92,11 +92,18 @@ export async function handleBatchTool(ctx: SandboxHandlerContext): Promise<ToolC
       }
 
       if (BATCH_TOOL_DISALLOWED.has(tool)) {
+        // 拒绝文案必须交代「为什么不能 + 该怎么办」，否则模型只会看到一句
+        // 冷冰冰的英文并原样重试（2026-10-18 排障：同一 batch 里 6 个 mcp_call
+        // 子调用全部失败后模型又重组了一个 batch 继续撞同一堵墙）。
+        const reason =
+          tool === 'batch'
+            ? 'batch 工具不允许嵌套自身（会产生无法追踪的审批上下文）。请把内层各调用拆成顶层调用单独发出。'
+            : 'MCP 类工具需要独立的权限审计与审批流，无法在 batch 子调用里执行。请把该调用拆出来在 batch 外单独发起（顶层直接调 mcp_call，或 flat MCP 模式下的 mcp__<server>__<tool>），batch 里只保留可并行的本地工具调用。';
         const progress: BatchSubToolProgress = {
           index,
           tool,
           status: 'skipped',
-          output: `Tool "${tool}" cannot be called from batch`,
+          output: `${tool} 不能作为 batch 子调用：${reason}`,
           isError: true,
         };
         subToolStates[index] = progress;
@@ -107,7 +114,7 @@ export async function handleBatchTool(ctx: SandboxHandlerContext): Promise<ToolC
         return {
           tool,
           isError: true,
-          output: `Tool "${tool}" cannot be called from batch`,
+          output: `${tool} 不能作为 batch 子调用：${reason}`,
         };
       }
 

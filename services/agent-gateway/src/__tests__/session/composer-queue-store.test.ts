@@ -16,9 +16,11 @@ import {
   COMPOSER_QUEUE_CLAIM_LEASE_MS,
   countComposerQueueItems,
   enqueueComposerQueueItem,
+  getComposerQueueItem,
   listComposerQueueItems,
   releaseComposerQueueItem,
   removeComposerQueueItem,
+  updateComposerQueueItemAttachments,
 } from '../../session/composer-queue-store.js';
 
 process.env['DATABASE_URL'] = ':memory:';
@@ -130,6 +132,42 @@ describe('enqueueComposerQueueItem', () => {
     expect(result.item.requiresAttachmentRebind).toBe(true);
   });
 
+  it('落库并回读附件的 artifactId（跨端副本引用）', () => {
+    const result = enqueueComposerQueueItem({
+      attachmentItems: [
+        {
+          artifactId: 'artifact-remote-1',
+          id: 'att-1',
+          name: '截图.png',
+          sizeBytes: 2048,
+          type: 'image',
+        },
+        { id: 'att-2', name: '录音.mp3', sizeBytes: 4096, type: 'audio' },
+      ],
+      enqueuedAt: 1,
+      itemId: 'with-artifact-refs',
+      requiresAttachmentRebind: false,
+      sessionId: SESSION_ID,
+      text: '带跨端副本的附件',
+      userId: OWNER_ID,
+    });
+
+    expect(result.item.attachmentItems).toEqual([
+      {
+        artifactId: 'artifact-remote-1',
+        id: 'att-1',
+        name: '截图.png',
+        sizeBytes: 2048,
+        type: 'image',
+      },
+      // 没有副本的附件不凭空长出字段。
+      { id: 'att-2', name: '录音.mp3', sizeBytes: 4096, type: 'audio' },
+    ]);
+    expect(
+      listComposerQueueItems({ sessionId: SESSION_ID, userId: OWNER_ID })[0]?.attachmentItems,
+    ).toEqual(result.item.attachmentItems);
+  });
+
   it('附件 JSON 脏数据时收敛解析，不让整条队列读取失败', () => {
     enqueue({ enqueuedAt: 1, itemId: 'good', text: '正常条目' });
     dbModule.sqliteRun(
@@ -186,6 +224,116 @@ describe('removeComposerQueueItem', () => {
       removeComposerQueueItem({ itemId: 'mine', sessionId: SESSION_ID, userId: OTHER_USER_ID }),
     ).toBe(false);
     expect(countComposerQueueItems({ sessionId: SESSION_ID, userId: OWNER_ID })).toBe(1);
+  });
+});
+
+describe('updateComposerQueueItemAttachments（回填跨端副本）', () => {
+  it('写入 artifactId 并清除 rebind 标记，不触碰文本与 claim 租约', () => {
+    enqueueComposerQueueItem({
+      attachmentItems: [{ id: 'att-1', name: 'a.png', sizeBytes: 10, type: 'image' }],
+      enqueuedAt: 1,
+      itemId: 'fill',
+      requiresAttachmentRebind: true,
+      sessionId: SESSION_ID,
+      text: '带附件',
+      userId: OWNER_ID,
+    });
+    // 回填可能发生在另一端已经 claim 之后：租约不能被这次更新破坏。
+    expect(
+      claimComposerQueueItem({
+        clientId: 'client-a',
+        itemId: 'fill',
+        leaseMs: COMPOSER_QUEUE_CLAIM_LEASE_MS,
+        now: 1_700_000_000_000,
+        sessionId: SESSION_ID,
+        userId: OWNER_ID,
+      }),
+    ).toBe(true);
+
+    const updated = updateComposerQueueItemAttachments({
+      attachmentItems: [
+        { artifactId: 'artifact-1', id: 'att-1', name: 'a.png', sizeBytes: 10, type: 'image' },
+      ],
+      itemId: 'fill',
+      requiresAttachmentRebind: false,
+      sessionId: SESSION_ID,
+      userId: OWNER_ID,
+    });
+
+    expect(updated?.attachmentItems).toEqual([
+      { artifactId: 'artifact-1', id: 'att-1', name: 'a.png', sizeBytes: 10, type: 'image' },
+    ]);
+    expect(updated?.requiresAttachmentRebind).toBe(false);
+    expect(updated?.text).toBe('带附件');
+    expect(updated?.enqueuedAt).toBe(1);
+    // claim 未被破坏：他端仍拿不到发送权。
+    expect(
+      claimComposerQueueItem({
+        clientId: 'client-b',
+        itemId: 'fill',
+        leaseMs: COMPOSER_QUEUE_CLAIM_LEASE_MS,
+        now: 1_700_000_000_001,
+        sessionId: SESSION_ID,
+        userId: OWNER_ID,
+      }),
+    ).toBe(false);
+  });
+
+  it('不传 requiresAttachmentRebind 时保持原值', () => {
+    enqueueComposerQueueItem({
+      attachmentItems: [],
+      enqueuedAt: 1,
+      itemId: 'keep-flag',
+      requiresAttachmentRebind: true,
+      sessionId: SESSION_ID,
+      text: '保持标记',
+      userId: OWNER_ID,
+    });
+
+    const updated = updateComposerQueueItemAttachments({
+      attachmentItems: [{ id: 'att-9', name: 'b.txt', sizeBytes: 1, type: 'file' }],
+      itemId: 'keep-flag',
+      sessionId: SESSION_ID,
+      userId: OWNER_ID,
+    });
+
+    expect(updated?.requiresAttachmentRebind).toBe(true);
+  });
+
+  it('条目不存在（已被消费 / 移出）时返回 null，调用方据此回收孤儿副本', () => {
+    expect(
+      updateComposerQueueItemAttachments({
+        attachmentItems: [],
+        itemId: 'missing',
+        sessionId: SESSION_ID,
+        userId: OWNER_ID,
+      }),
+    ).toBeNull();
+  });
+
+  it('无法回填其他会话 / 其他用户的条目', () => {
+    enqueue({ enqueuedAt: 1, itemId: 'mine', text: '本会话' });
+
+    expect(
+      updateComposerQueueItemAttachments({
+        attachmentItems: [],
+        itemId: 'mine',
+        sessionId: OTHER_SESSION_ID,
+        userId: OWNER_ID,
+      }),
+    ).toBeNull();
+    expect(
+      updateComposerQueueItemAttachments({
+        attachmentItems: [],
+        itemId: 'mine',
+        sessionId: SESSION_ID,
+        userId: OTHER_USER_ID,
+      }),
+    ).toBeNull();
+    // 原条目未被改动。
+    expect(
+      getComposerQueueItem({ itemId: 'mine', sessionId: SESSION_ID, userId: OWNER_ID })?.text,
+    ).toBe('本会话');
   });
 });
 

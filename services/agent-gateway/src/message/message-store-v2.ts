@@ -70,7 +70,14 @@ function mapPartRows(rows: PartV2Row[]): MessagePart[] {
 const MAX_SQLITE_BIND_PARAMS = 900;
 const PART_QUERY_MESSAGE_ID_BATCH_SIZE = MAX_SQLITE_BIND_PARAMS - 1;
 
-function listPartRowsByMessageIds(
+/**
+ * 按消息 id 批量取 part 行（`message_id, id` 升序 = 每个消息内的 part 顺序）。
+ *
+ * 分片是为了避开 SQLite 的绑定参数上限；调用方的 id 列表可能上千。导出给适配层复用，
+ * 避免「按 id 取 part」在网关里出现第二份实现（两处一旦分片策略或排序不一致，读出来的
+ * 消息正文顺序就会随调用来源变化）。
+ */
+export function listPartRowsByMessageIds(
   sessionId: string,
   messageIds: readonly MessageID[],
 ): PartV2Row[] {

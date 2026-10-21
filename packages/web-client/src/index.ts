@@ -16,7 +16,7 @@ export type {
   ClientStreamErrorReportResult,
   ReportClientStreamErrorInput,
 } from './session/client-errors.js';
-export { login, refreshAccessToken, logout } from './gateway/auth.js';
+export { AuthRequestRejectedError, login, refreshAccessToken, logout } from './gateway/auth.js';
 export type { TokenPair } from './gateway/auth.js';
 export { getPairingQr, loginWithDesktopDefault, loginWithPairingToken } from './gateway/pairing.js';
 export type { PairingQrResponse } from './gateway/pairing.js';
@@ -212,7 +212,7 @@ export {
   isPendingPermissionRequest,
   toPendingPermissionRequests,
 } from './session/permissions.js';
-export { createQuestionsClient } from './session/questions.js';
+export { createQuestionsClient, normalizePendingQuestionRequest } from './session/questions.js';
 export type {
   PendingQuestionItem,
   PendingQuestionOption,
@@ -222,6 +222,12 @@ export type {
 } from './session/questions.js';
 export { createDialogueModeClient } from './session/dialogue-mode.js';
 export type { ConfirmClarifySwitchResult, DialogueModeClient } from './session/dialogue-mode.js';
+export {
+  COMPOSER_INPUT_HISTORY_MAX_ENTRIES,
+  COMPOSER_INPUT_HISTORY_TEXT_MAX_LENGTH,
+  createComposerInputHistoryClient,
+} from './session/composer-input-history.js';
+export type { ComposerInputHistoryClient } from './session/composer-input-history.js';
 export { createComposerQueueClient } from './session/composer-queue.js';
 export type {
   ComposerQueueAttachment,
@@ -232,6 +238,7 @@ export type {
   ComposerQueueItem,
   EnqueueComposerQueueInput,
   EnqueueComposerQueueResult,
+  UpdateComposerQueueAttachmentsInput,
 } from './session/composer-queue.js';
 export {
   createSessionsClient,
@@ -441,11 +448,19 @@ export type {
   ArtifactVersionsResponse,
   ArtifactsClient,
   CreateArtifactInput,
+  ImageGenerationArtifactRef,
   ImageGenerationInput,
+  ImageGenerationPartialImage,
+  ImageGenerationResponseArtifact,
+  ImageGenerationStreamError,
+  ImageGenerationStreamHandlers,
   RevertArtifactInput,
   UpdateArtifactInput,
   UploadSessionArtifactInput,
 } from './infra/artifacts.js';
+
+export { createSseFrameParser } from './gateway/sse-frames.js';
+export type { ParsedSseFrame, SseFrameParser } from './gateway/sse-frames.js';
 
 export { createSessionTerminalsClient, openTerminalSocket } from './session/session-terminals.js';
 export type {
@@ -531,7 +546,12 @@ export type {
   ChannelTroubleshootingReport,
   SettingsClient,
   SettingsDisplayPreferencesResponse,
+  SettingsBrowserTab,
+  SettingsBrowserTabsResponse,
   SettingsProvidersLoadResult,
+  SettingsWorkspaceBookmark,
+  SettingsWorkspaceStatePayload,
+  SettingsWorkspaceStateResponse,
 } from './infra/settings.js';
 
 export { createSkillsClient } from './infra/skills.js';

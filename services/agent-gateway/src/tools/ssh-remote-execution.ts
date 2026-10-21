@@ -32,7 +32,11 @@ import type {
   ToolCallRequest,
   ToolCallResult,
 } from '@openAwork/agent-core';
-import { createSSHToolProxy } from '@openAwork/agent-core';
+import {
+  SSH_SFTP_UNAVAILABLE_MESSAGE,
+  SshSftpUnavailableError,
+  createSSHToolProxy,
+} from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet } from '../infra/db.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { peekSshService } from '../ssh/ssh-service.js';
@@ -40,6 +44,7 @@ import {
   DEFAULT_BASH_TIMEOUT_MS,
   MAX_BASH_TIMEOUT_MS,
   bashToolDefinition,
+  buildSuppressedStderrHint,
   deriveBashDescription,
   type BashExecutionResult,
 } from './bash-tools.js';
@@ -328,8 +333,41 @@ export function formatSshUnavailableToolMessage(
   ].join(' ');
 }
 
-// ─── 路径工具 ────────────────────────────────────────────────────────────────
+/** 依赖 SFTP 通道的远程工具（glob / grep 走远端 find / grep，不受影响）。 */
+const SSH_SFTP_DEPENDENT_TOOLS = 'read / write / edit / multi_edit / list';
 
+/**
+ * 识别「远端未启用 SFTP 子系统」。归一类型由 agent-core 打开 SFTP 通道处抛出，
+ * 但注入实现 / 旧链路可能只留下裸文案，故保留与路由层一致的正则兜底。
+ */
+function isSftpUnavailableError(error: unknown): boolean {
+  if (error instanceof SshSftpUnavailableError) return true;
+  return error instanceof Error && /unable to start subsystem/i.test(error.message);
+}
+
+/**
+ * SFTP 能力缺失时的工具出口文案。
+ *
+ * 远端缺 sftp 是**不可重试**的失败，而 ssh2 只给一句英文裸串
+ * （`SSH remote server did not start the sftp subsystem`），模型从中推不出
+ * 「该换条路」——2026-10-15 的排障包里同一会话 `read` 连撞两次后转去 bash 试错
+ * 17 条。故此处补上模型真正需要的两件事：哪些工具会一起失败、改用 bash 做什么。
+ */
+export function formatSshSftpUnavailableToolMessage(toolName: string): string {
+  return [
+    SSH_SFTP_UNAVAILABLE_MESSAGE,
+    `工具 "${toolName}" 依赖 SFTP 通道，同一连接上的 ${SSH_SFTP_DEPENDENT_TOOLS} 都会同因失败，重试不会恢复；`,
+    '请改用 bash 在远端完成等价操作（如 cat、sed -n、ls、find）。',
+  ].join(' ');
+}
+
+/** 远端工具错误出口：SFTP 能力缺失换成可操作文案，其余错误原样透传（不掩盖真实故障）。 */
+function formatRemoteToolError(toolName: string, error: unknown): string {
+  if (isSftpUnavailableError(error)) return formatSshSftpUnavailableToolMessage(toolName);
+  return error instanceof Error ? error.message : String(error);
+}
+
+// ─── 路径工具 ────────────────────────────────────────────────────────────────
 export function normalizeRemotePath(input: string): string {
   const normalized = path.posix.normalize(input);
   if (normalized.length > 1 && normalized.endsWith('/')) return normalized.slice(0, -1);
@@ -468,7 +506,7 @@ export async function executeSshRemoteTool(
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: error instanceof Error ? error.message : String(error),
+      output: formatRemoteToolError(request.toolName, error),
       isError: true,
       durationMs: Date.now() - startedAt,
     };
@@ -580,6 +618,55 @@ function truncateRemoteBashOutput(raw: string): { content: string; truncated: bo
   return { content, truncated };
 }
 
+/**
+ * 远端 sshd 为 `exec` 通道启动的是**非登录、非交互** shell：不读取 /etc/profile，
+ * PATH 通常只有 `/usr/bin:/bin:/usr/sbin:/sbin`，装在 `/usr/local/bin` 的命令
+ * （群晖 DSM 上的 docker 即在此）会直接 `command not found`。命令本身没写错，
+ * 输出里却看不出原因——2026-10-15 的排障包里有 5 条 bash 卡死在这里，
+ * 故与 `buildSuppressedStderrHint` 同样在本工具的 metadata 里显式提示。
+ */
+export function buildRemoteCommandNotFoundHint(input: {
+  exitCode: number;
+  output: string;
+}): string | null {
+  if (input.exitCode !== 127 && !/command not found/i.test(input.output)) return null;
+  return [
+    '远端 sshd 以非登录、非交互 shell 执行命令，不读取 /etc/profile，PATH 通常只有 /usr/bin:/bin:/usr/sbin:/sbin，',
+    '装在 /usr/local/bin 等目录的命令会直接「command not found」。',
+    '请用 `command -v <name>` 确认，改用绝对路径，或在命令内显式补 PATH：`PATH=/usr/local/bin:$PATH <cmd>`。',
+  ].join('');
+}
+
+/**
+ * 远端 bash 的 workdir 不存在时的可操作提示。
+ *
+ * 远端命令形如 `cd <workdir> && <command>`（见 {@link executeRemoteBash}），因此
+ * workdir 不存在时 shell 会先报 `cd: <path>: No such file or directory`，**用户的
+ * 命令一行都没跑**。输出里看不出「失败在 cd 而不是命令本身」，模型容易误判为
+ * 「目录里有问题」而反复调整命令（2026-10-16 排障包命中）。
+ *
+ * 与本地 bash 的差别：本地 `resolveBashWorkdir` 会在执行前 `stat` 并抛
+ * `Workdir does not exist`，远端没有 stat 能力（只有 exec），故改为在出口按输出
+ * 特征补提示，而不额外增加一次远端往返。
+ */
+export function buildRemoteWorkdirMissingHint(input: {
+  command: string;
+  workdir: string;
+  output: string;
+}): string | null {
+  // 只在「命令确实是 cd ... && ...」时才可能由 cd 触发，避免误报普通命令里的同名文案。
+  if (!input.command.startsWith('cd ')) return null;
+  const escapedWorkdir = input.workdir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const cdFailed = new RegExp(`cd: [^\\n]*${escapedWorkdir}[^\\n]*No such file or directory`, 'i');
+  if (!cdFailed.test(input.output)) return null;
+
+  return [
+    `远端工作目录 ${input.workdir} 不存在，命令在 \`cd\` 阶段即失败（命令体未执行）。`,
+    '请先确认目录路径（如 `ls -d <path>`），或改用 workdir 传入已存在的目录；',
+    '若目录尚未创建，可先用不带 workdir 的调用执行 `mkdir -p <path>` 再重试。',
+  ].join('');
+}
+
 async function executeRemoteBash(
   context: SshRemoteExecutionContext,
   input: { command: string; timeout?: number; workdir?: string; description?: string },
@@ -602,6 +689,29 @@ async function executeRemoteBash(
     metadataLines.push(
       'Remote output exceeded the per-stream cap and was truncated before transmission.',
     );
+  }
+  const suppressedStderrHint = buildSuppressedStderrHint({
+    command: input.command,
+    exitCode: result.exitCode,
+    kind: result.timedOut ? 'timeout' : 'exit',
+  });
+  if (suppressedStderrHint) {
+    metadataLines.push(suppressedStderrHint);
+  }
+  const commandNotFoundHint = buildRemoteCommandNotFoundHint({
+    exitCode: result.exitCode,
+    output: truncated.content,
+  });
+  if (commandNotFoundHint) {
+    metadataLines.push(commandNotFoundHint);
+  }
+  const workdirMissingHint = buildRemoteWorkdirMissingHint({
+    command: remoteCommand,
+    workdir,
+    output: truncated.content,
+  });
+  if (workdirMissingHint) {
+    metadataLines.push(workdirMissingHint);
   }
 
   let finalOutput = truncated.content.length > 0 ? truncated.content : '(no output)';

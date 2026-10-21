@@ -33,6 +33,9 @@ const REQUIRED_TABLE_HITS: ReadonlyArray<{
   { table: 'question_requests' },
   { table: 'session_todos' },
   { table: 'task_parent_auto_resume_contexts' },
+  // 待发队列 / 输入历史（FK → sessions ON DELETE CASCADE，FK 关闭时必须显式删）。
+  { table: 'session_composer_queue' },
+  { table: 'session_composer_input_history' },
   { table: 'sessions' },
   // V2 event-sourced storage — these were missing prior to the
   // single-write-path audit and are the core of this regression.

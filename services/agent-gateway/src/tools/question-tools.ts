@@ -32,7 +32,7 @@ export const questionToolDefinition: ToolDefinition<
 > = {
   name: 'question',
   description:
-    '向用户提出一个或多个结构化问题，等待回答后再继续。选项可用 recommended:true 标记推荐答案，题目可用 nodeId/round 关联澄清轮次；提问密度与是否成组提问由当前对话模式决定。',
+    '向用户提出一个或多个结构化问题，等待回答后再继续。选项可用 recommended:true 标记推荐答案，题目可用 nodeId/round 关联澄清轮次；提问密度与是否成组提问由当前对话模式决定。需要用户圈定多项时（如「选择要清理的项目」「选择要包含的模块」）必须给该题设 multiSelect:true，仅在题干文字里写「可多选」不会生效——界面仍按单选渲染，用户勾第二项会把第一项顶掉。',
   inputSchema: questionToolInputSchema,
   outputSchema: questionToolOutputSchema,
   timeout: 30000,
