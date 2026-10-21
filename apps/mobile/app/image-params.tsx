@@ -1,11 +1,23 @@
 import { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput } from 'react-native';
 import {
+  IMAGE_GENERATION_COUNT_RANGE,
+  IMAGE_GENERATION_QUALITY_OPTIONS,
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
   resolveImageGenerationSizePresetId,
   sizeForPreset,
   validateImageGenerationSize,
+  type ImageGenerationBackground,
+  type ImageGenerationModeration,
+  type ImageGenerationOutputFormat,
+  type ImageGenerationQuality,
 } from '@openAwork/shared';
+
+/** 可选的生成张数档位（官方 `n`），与生图面板共用同一区间定义。 */
+const COUNT_VALUES: number[] = Array.from(
+  { length: IMAGE_GENERATION_COUNT_RANGE.max - IMAGE_GENERATION_COUNT_RANGE.min + 1 },
+  (_unused, index) => IMAGE_GENERATION_COUNT_RANGE.min + index,
+);
 import { colors } from '../src/theme/colors';
 import { radii } from '../src/theme/radii';
 import { textPresets } from '../src/theme/typography';
@@ -15,9 +27,11 @@ import { ScreenHeader } from '../src/components/ui';
 /** S09: 图片参数编辑 */
 export default function ImageParamsScreen() {
   const [size, setSize] = useState('1024x1024');
-  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
-  const [format, setFormat] = useState<'png' | 'jpeg' | 'webp'>('png');
-  const [background, setBackground] = useState<'auto' | 'opaque'>('auto');
+  const [quality, setQuality] = useState<ImageGenerationQuality>('medium');
+  const [format, setFormat] = useState<ImageGenerationOutputFormat>('png');
+  const [background, setBackground] = useState<ImageGenerationBackground>('auto');
+  const [moderation, setModeration] = useState<ImageGenerationModeration>('auto');
+  const [count, setCount] = useState<number>(IMAGE_GENERATION_COUNT_RANGE.min);
 
   const sizeValidation = validateImageGenerationSize(size);
 
@@ -91,16 +105,19 @@ export default function ImageParamsScreen() {
         {/* Quality */}
         <Text style={styles.sectionTitle}>质量</Text>
         <View style={styles.chipRow}>
-          {(['low', 'medium', 'high'] as const).map((q) => (
+          {IMAGE_GENERATION_QUALITY_OPTIONS.map((option) => (
             <TouchableOpacity
-              key={q}
-              style={[styles.chip, quality === q && styles.chipActive]}
-              onPress={() => setQuality(q)}
+              key={option.value}
+              style={[styles.chip, quality === option.value && styles.chipActive]}
+              onPress={() => setQuality(option.value)}
             >
-              <Text style={[styles.chipText, quality === q && styles.chipTextActive]}>{q}</Text>
+              <Text style={[styles.chipText, quality === option.value && styles.chipTextActive]}>
+                {option.label}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
+        <Text style={styles.hint}>极高 / 最高仅 GPT Image 2.5 支持，其他模型会自动收敛。</Text>
 
         {/* Format */}
         <Text style={styles.sectionTitle}>格式</Text>
@@ -121,14 +138,49 @@ export default function ImageParamsScreen() {
         {/* Background */}
         <Text style={styles.sectionTitle}>背景</Text>
         <View style={styles.chipRow}>
-          {(['auto', 'opaque'] as const).map((bg) => (
+          {(['auto', 'opaque', 'transparent'] as const).map((bg) => (
             <TouchableOpacity
               key={bg}
               style={[styles.chip, background === bg && styles.chipActive]}
               onPress={() => setBackground(bg)}
             >
               <Text style={[styles.chipText, background === bg && styles.chipTextActive]}>
-                {bg === 'auto' ? '自动' : '不透明'}
+                {bg === 'auto' ? '自动' : bg === 'opaque' ? '不透明' : '透明'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {background === 'transparent' && format === 'jpeg' && (
+          <Text style={styles.hint}>透明背景需要 PNG 或 WebP，JPEG 不支持。</Text>
+        )}
+
+        {/* Moderation */}
+        <Text style={styles.sectionTitle}>内容审核</Text>
+        <View style={styles.chipRow}>
+          {(['auto', 'low'] as const).map((level) => (
+            <TouchableOpacity
+              key={level}
+              style={[styles.chip, moderation === level && styles.chipActive]}
+              onPress={() => setModeration(level)}
+            >
+              <Text style={[styles.chipText, moderation === level && styles.chipTextActive]}>
+                {level === 'auto' ? '标准' : '宽松'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Count */}
+        <Text style={styles.sectionTitle}>张数</Text>
+        <View style={styles.chipRow}>
+          {COUNT_VALUES.map((value) => (
+            <TouchableOpacity
+              key={value}
+              style={[styles.chip, count === value && styles.chipActive]}
+              onPress={() => setCount(value)}
+            >
+              <Text style={[styles.chipText, count === value && styles.chipTextActive]}>
+                {value} 张
               </Text>
             </TouchableOpacity>
           ))}
@@ -140,7 +192,11 @@ export default function ImageParamsScreen() {
           <Text style={styles.summaryLine}>尺寸：{size}</Text>
           <Text style={styles.summaryLine}>质量：{quality}</Text>
           <Text style={styles.summaryLine}>格式：{format.toUpperCase()}</Text>
-          <Text style={styles.summaryLine}>背景：{background === 'auto' ? '自动' : '不透明'}</Text>
+          <Text style={styles.summaryLine}>
+            背景：{background === 'auto' ? '自动' : background === 'opaque' ? '不透明' : '透明'}
+          </Text>
+          <Text style={styles.summaryLine}>审核：{moderation === 'auto' ? '标准' : '宽松'}</Text>
+          <Text style={styles.summaryLine}>张数：{count} 张</Text>
         </View>
       </ScrollView>
     </Screen>

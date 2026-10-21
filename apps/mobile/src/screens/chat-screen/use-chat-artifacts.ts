@@ -137,9 +137,13 @@ export function useChatArtifacts({
           quality: imageDefaults.quality,
           outputFormat: imageDefaults.outputFormat,
           background: imageDefaults.background,
+          moderation: imageDefaults.moderation,
+          count: imageDefaults.count,
         },
       )) as {
+        /** 首张产物；`n>1` 时用下面的 `artifacts` 取全量。 */
         artifact?: { id: string; title: string; type: 'image' };
+        artifacts?: Array<{ id: string; title: string; type: 'image' }>;
         error?: { message?: string };
         messageSummary?: string;
         parameters?: { modelId?: string; providerId?: string };

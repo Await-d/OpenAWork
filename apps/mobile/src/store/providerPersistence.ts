@@ -2,7 +2,15 @@ import * as SecureStore from 'expo-secure-store';
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import type { ProviderPersistenceAdapter } from '@openAwork/agent-core';
 import type { AIProvider, ActiveSelection } from '@openAwork/agent-core';
-import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
+import {
+  DEFAULT_IMAGE_GENERATION_SIZE,
+  IMAGE_GENERATION_COUNT_RANGE,
+  normalizeImageGenerationSize,
+  type ImageGenerationBackground,
+  type ImageGenerationModeration,
+  type ImageGenerationOutputFormat,
+  type ImageGenerationQuality,
+} from '@openAwork/shared';
 
 const API_KEY_PREFIX = 'apikey_';
 const PROVIDER_CONFIG_KEY = 'provider-config';
@@ -61,9 +69,12 @@ export interface MobileMcpServer {
 }
 
 export interface MobileImageGenerationDefaults {
-  background: 'auto' | 'opaque';
-  outputFormat: 'png' | 'jpeg' | 'webp';
-  quality: 'low' | 'medium' | 'high';
+  background: ImageGenerationBackground;
+  /** 单次生成张数（对应官方 `n`）。 */
+  count: number;
+  moderation: ImageGenerationModeration;
+  outputFormat: ImageGenerationOutputFormat;
+  quality: ImageGenerationQuality;
   size: string;
 }
 
@@ -72,6 +83,8 @@ export const DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS: MobileImageGenerationDefa
   quality: 'medium',
   outputFormat: 'png',
   background: 'auto',
+  moderation: 'auto',
+  count: IMAGE_GENERATION_COUNT_RANGE.min,
 };
 
 interface ProviderConfigData {
@@ -169,6 +182,32 @@ export function restoreMobileProviderSelection(
   };
 }
 
+const MOBILE_IMAGE_QUALITY_VALUES: readonly ImageGenerationQuality[] = [
+  'auto',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+function normalizeImageGenerationQuality(value: unknown): ImageGenerationQuality {
+  return (
+    MOBILE_IMAGE_QUALITY_VALUES.find((candidate) => candidate === value) ??
+    DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS.quality
+  );
+}
+
+function normalizeImageGenerationCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS.count;
+  }
+  return Math.min(
+    Math.max(value, IMAGE_GENERATION_COUNT_RANGE.min),
+    IMAGE_GENERATION_COUNT_RANGE.max,
+  );
+}
+
 export async function saveImageGenerationDefaults(
   defaults: MobileImageGenerationDefaults,
 ): Promise<void> {
@@ -197,18 +236,17 @@ export async function loadImageGenerationDefaults(): Promise<MobileImageGenerati
         parsed.size,
         DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS.size,
       ),
-      quality:
-        parsed.quality === 'low' || parsed.quality === 'high'
-          ? parsed.quality
-          : DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS.quality,
+      quality: normalizeImageGenerationQuality(parsed.quality),
       outputFormat:
         parsed.outputFormat === 'jpeg' || parsed.outputFormat === 'webp'
           ? parsed.outputFormat
           : DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS.outputFormat,
       background:
-        parsed.background === 'opaque'
-          ? 'opaque'
+        parsed.background === 'opaque' || parsed.background === 'transparent'
+          ? parsed.background
           : DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS.background,
+      moderation: parsed.moderation === 'low' ? 'low' : 'auto',
+      count: normalizeImageGenerationCount(parsed.count),
     };
   } catch {
     return { ...DEFAULT_MOBILE_IMAGE_GENERATION_DEFAULTS };

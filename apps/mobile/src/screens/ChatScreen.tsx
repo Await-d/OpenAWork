@@ -666,10 +666,17 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
             return;
           }
 
+          // `n>1` 时 `artifact` 只是首张：只报首张标题会让用户以为只生成了一张，
+          // 故补齐张数（全部图片在下方附件历史里）。
+          const generatedCount = payload.artifacts?.length ?? (payload.artifact ? 1 : 0);
+          const resultLine =
+            generatedCount > 1
+              ? `结果：${payload.artifact?.title ?? '图片结果'} 等 ${generatedCount} 张`
+              : `结果：${payload.artifact?.title ?? '图片结果'}`;
           const summary =
             payload.revisedPrompt?.trim() && payload.revisedPrompt !== text
-              ? `${payload.messageSummary}\n结果：${payload.artifact?.title ?? '图片结果'}\n提示词改写：${payload.revisedPrompt}\n已写入附件历史。`
-              : `${payload.messageSummary}\n结果：${payload.artifact?.title ?? '图片结果'}\n已写入附件历史。`;
+              ? `${payload.messageSummary}\n${resultLine}\n提示词改写：${payload.revisedPrompt}\n已写入附件历史。`
+              : `${payload.messageSummary}\n${resultLine}\n已写入附件历史。`;
           setMessages((prev) => [
             ...prev,
             {

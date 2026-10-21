@@ -1,6 +1,8 @@
 import type { Dispatch, SetStateAction } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import {
+  IMAGE_GENERATION_COUNT_RANGE,
+  IMAGE_GENERATION_QUALITY_OPTIONS,
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
   resolveImageGenerationSizePresetId,
   sizeForPreset,
@@ -9,6 +11,12 @@ import {
 import type { MobileImageGenerationDefaults } from '../../store/providerPersistence';
 import { colors } from '../../theme/colors';
 import { styles } from './styles';
+
+/** 可选的生成张数档位（官方 `n`），由共享区间派生，避免两端各写一份魔法数组。 */
+const COUNT_VALUES: number[] = Array.from(
+  { length: IMAGE_GENERATION_COUNT_RANGE.max - IMAGE_GENERATION_COUNT_RANGE.min + 1 },
+  (_unused, index) => IMAGE_GENERATION_COUNT_RANGE.min + index,
+);
 
 interface ChatImageGenerationPanelProps {
   hasConfiguredImageModel: boolean;
@@ -115,23 +123,23 @@ export function ChatImageGenerationPanel({
           : validateImageGenerationSize(imageDefaults.size).message}
       </Text>
       <View style={styles.imageOptionRow}>
-        {(['low', 'medium', 'high'] as const).map((quality) => (
+        {IMAGE_GENERATION_QUALITY_OPTIONS.map((option) => (
           <TouchableOpacity
-            key={quality}
+            key={option.value}
             style={[
               styles.optionChip,
-              imageDefaults.quality === quality && styles.optionChipActive,
+              imageDefaults.quality === option.value && styles.optionChipActive,
             ]}
-            onPress={() => setImageDefaults((prev) => ({ ...prev, quality }))}
+            onPress={() => setImageDefaults((prev) => ({ ...prev, quality: option.value }))}
             disabled={imageGenerationBusy}
           >
             <Text
               style={[
                 styles.optionChipText,
-                imageDefaults.quality === quality && styles.optionChipTextActive,
+                imageDefaults.quality === option.value && styles.optionChipTextActive,
               ]}
             >
-              {quality}
+              {option.label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -157,7 +165,7 @@ export function ChatImageGenerationPanel({
             </Text>
           </TouchableOpacity>
         ))}
-        {(['auto', 'opaque'] as const).map((background) => (
+        {(['auto', 'opaque', 'transparent'] as const).map((background) => (
           <TouchableOpacity
             key={background}
             style={[
@@ -173,7 +181,30 @@ export function ChatImageGenerationPanel({
                 imageDefaults.background === background && styles.optionChipTextActive,
               ]}
             >
-              {background === 'auto' ? '自动背景' : '不透明背景'}
+              {background === 'auto'
+                ? '自动背景'
+                : background === 'opaque'
+                  ? '不透明背景'
+                  : '透明背景'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={styles.imageOptionRow}>
+        {COUNT_VALUES.map((count) => (
+          <TouchableOpacity
+            key={count}
+            style={[styles.optionChip, imageDefaults.count === count && styles.optionChipActive]}
+            onPress={() => setImageDefaults((prev) => ({ ...prev, count }))}
+            disabled={imageGenerationBusy}
+          >
+            <Text
+              style={[
+                styles.optionChipText,
+                imageDefaults.count === count && styles.optionChipTextActive,
+              ]}
+            >
+              {count} 张
             </Text>
           </TouchableOpacity>
         ))}
