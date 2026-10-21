@@ -77,9 +77,11 @@ OpenAWork/
 - **哈希锚定编辑**：自定义文件编辑工具（`packages/agent-core/src/tools/hash-edit.ts`）使用 SHA-256 行哈希替代行号，防止编辑漂移。
 - **路由分级**：`packages/agent-core/src/routing.ts` 定义 R0–R3 路由分级（复杂度层级），用于 Agent 任务调度。
 - **子代理结果交付（单通道）**：子代理结算后由 `services/agent-gateway/src/task/task-job-delivery.ts` 的 `deliverTaskCompletion` 投递——先幂等准入（`injectSyntheticSessionMessage`，`notificationId` 同时作消息 id 与唤醒请求键），再由纯函数 `resolveTaskJobWakeDecision` 决策，最后 `continueSessionFromHistory` 唤醒。通知以 **`synthetic` 角色**落库（对模型可见、客户端不得按用户输入渲染；`description` + `metadata = { source:'subagent', childID, agent, state }` 是 notice 契约）。**通知正文由 `formatSubagentNoticeText` 渲染为参考库的 `<subagent sessionID state description>` 标签形态**（标签内 `state` 用上游 wire 词表 `completed|error|cancelled`；客户端 `parseSubagentNotice` 解析时剥离标签），并带 4k 字符上限（超出截断 + 指引去子会话读全文）；**同步 task 结果只取子代理最后一条 assistant 文本**（`extractLatestChildSessionSummary`，不再全量拼接子会话文本/工具输出），并同样以 `<subagent sessionID state>` 包裹（保留 `task_id` resume 提示行），正文另有 20k 字符上限（`delegated-task-display.ts`）。**通知已落库 ⇒ 延后永不丢**，故禁止恢复「定时重试 / 伪造用户请求」类补偿路径；自动唤醒受 `task/task-wake-budget.ts` 上限约束（用户真实交互才重置计数）。
-- **待发队列（服务端落库）**：输入框在流式期间按 Enter 排队的消息，**以网关 SQLite `session_composer_queue` 表为唯一真相源**（`session/composer-queue-store.ts` + `routes/session-composer-queue.ts`，按 `user_id` + `session_id` 归属，未拥有会话一律 404）。客户端只在三处与后端交互——`use-composer-queue-backend.ts` 的 `hydrate`（进会话拉全量）/ `enqueue`（**入队即落库**，失败则回滚内存条目并把文本退回输入框）/ `remove`；**消费时机仍是「发送成功后」**才删服务端记录（`run-send-message.ts` 的 `cleanupConsumedQueuedMessage`），因为 flush 会先摘队首再发送、失败还要放回，出队即删会让重试凭空丢消息。localStorage 快照降级为**只读兜底**（仅网关没问成时顶上），不再写入。**附件二进制不入库**，仍由 IndexedDB 持有，网关只存附件元数据用于重建预览；取不到本地 Blob 时条目被标记 `requiresAttachmentRebind` 提示重新选文件，而非静默丢附件。幂等键复用客户端生成的 `itemId`，天然抵抗入队重试与双标签页。
+- **待发队列（服务端落库）**：输入框在流式期间按 Enter 排队的消息，**以网关 SQLite `session_composer_queue` 表为唯一真相源**（`session/composer-queue-store.ts` + `routes/session-composer-queue.ts`，按 `user_id` + `session_id` 归属，未拥有会话一律 404）。客户端只在三处与后端交互——`use-composer-queue-backend.ts` 的 `hydrate`（进会话拉全量）/ `enqueue`（**入队即落库**，失败则回滚内存条目并把文本退回输入框）/ `remove`；**消费时机仍是「发送成功后」**才删服务端记录（`run-send-message.ts` 的 `cleanupConsumedQueuedMessage`），因为 flush 会先摘队首再发送、失败还要放回，出队即删会让重试凭空丢消息。localStorage 快照降级为**只读兜底**（仅网关没问成时顶上），不再写入。幂等键复用客户端生成的 `itemId`，天然抵抗入队重试与双标签页。
+- **待发队列附件跨端（磁盘型产物副本）**：附件二进制**不入库**，而是入队落库后由客户端**后台补传**到 `/sessions/:id/artifacts`（磁盘型产物，经 `infra/artifact-manager.ts` 的**进程内单例**读写索引 `artifacts-index.json` + 磁盘文件；上传是顺序执行、总量上限 64MiB，任一文件失败即回滚已传副本），成功后用 `PATCH /sessions/:id/composer-queue/:itemId/attachments` 把 `artifactId` 回填条目并顺带清 `requiresAttachmentRebind`。换端水合按**两级**取回附件：本地 IndexedDB → 网关 `GET /sessions/:id/artifacts/:artifactId/content`（下载成功后 best-effort 写回 IndexedDB 缓存）；两级都不可得才标记 `requiresAttachmentRebind` 提示重新选文件。**条目离开队列即回收副本**：`session/composer-queue-artifact-purge.ts` 在 DELETE 单条 / 清空路由里联动删除磁盘产物（客户端有 5 条消费出口 + 移出 / 恢复 / 清空共 8 个调用点，逐点删除必漏，故下沉到服务端）；「上传完成但条目已消失」的孤儿窗口由客户端在 PATCH 404 时回收。上传路径走 `@openAwork/web-client` 的 `createArtifactsClient`（`uploadToSession` / `downloadFromSession` / `removeFromSession`），严禁在 apps 内直连。上传侧的硬约束：**单文件 24MiB**（服务端该路由 `bodyLimit` 40MiB，而 body 里是 base64，膨胀 4/3 后超限必然 413，故客户端提前跳过而非白传一次）、单条总量 64MiB；上传 / 下载**超时单独放宽到 120s**（`fetchWithTimeout` 默认 20s 是按读 JSON 接口定的，大附件必然超时并被归一成「网络异常」，排查方向会被带偏）；同一条目**按 `itemId` 串行化上传**——入队补传与水合补齐会撞车，双份副本互相覆盖后再也没人引用先完成的那份。服务端以**实际落盘字节**写 `sizeBytes`，不采信客户端上报值（跨端恢复要用它校验下载结果）。回收侧用 `ArtifactManager.removeMany` **一次落盘**（`remove` 逐条会把整个索引重写 N 遍，清空队列 / 删除会话时退化成 O(n²) 写放大），且回收**必须吞掉自己的失败**：它的调用点都在「条目已删」之后，此处抛错会让响应变 500，客户端据此把条目放回本地 → 与服务端状态分叉。
 - **.evidence/**：fastify、ioredis、postgres 的只读参考源码，禁止编辑。
-- **待发队列的跨端互斥（消费租约）**：队列落在服务端，而「判断空闲 → 发送」发生在客户端，因此同一会话被多端（桌面端 ↔ Web）或同机多标签页打开时，各端会各自把同一条待发消息发一遍。互斥由**数据库层的原子 claim** 保证：`session_composer_queue` 的 `claimed_by` / `claimed_until` 两列 + `POST/DELETE .../:itemId/claim`，单条 UPDATE 的 WHERE 同时判定「未被他人持有」与「自己的持有可续期」，不依赖事务隔离级别。客户端身份是**每标签页一个**的 `clientId`（sessionStorage，`composer-queue-client-id.ts`）——共用 id 会让同机双标签页互认为「自己人」而双双放行。`claim` 是**三态**，调用方必须区分：`true` 拿到权可发；`false` 另一端正在处理，跳过并**丢弃本地副本**（切勿就此重新水合，那会拉回同一条仍在该会话队列里的条目 → 再次 claim 失败 → 再次水合，形成死循环）；抛错 = 没问成，必须**保留**本地条目并退避重试（`QUEUE_CLAIM_RETRY_MS`），移除会让消息静默消失、硬发则可能重复。flush 流程中**不得预先摘队首**，摘除必须在 claim 成功之后。发送失败要 `releaseClaim` 交还租约，否则该条目要等租约（默认 60s）过期才能被接手。**已知边界**：附件二进制仍不跨端（见上条）。
+- **待发队列的跨端互斥（消费租约）**：队列落在服务端，而「判断空闲 → 发送」发生在客户端，因此同一会话被多端（桌面端 ↔ Web）或同机多标签页打开时，各端会各自把同一条待发消息发一遍。互斥由**数据库层的原子 claim** 保证：`session_composer_queue` 的 `claimed_by` / `claimed_until` 两列 + `POST/DELETE .../:itemId/claim`，单条 UPDATE 的 WHERE 同时判定「未被他人持有」与「自己的持有可续期」，不依赖事务隔离级别。客户端身份是**每标签页一个**的 `clientId`（sessionStorage，`composer-queue-client-id.ts`）——共用 id 会让同机双标签页互认为「自己人」而双双放行。`claim` 是**三态**，调用方必须区分：`true` 拿到权可发；`false` 另一端正在处理，跳过并**丢弃本地副本**（切勿就此重新水合，那会拉回同一条仍在该会话队列里的条目 → 再次 claim 失败 → 再次水合，形成死循环）；抛错 = 没问成，必须**保留**本地条目并退避重试（`QUEUE_CLAIM_RETRY_MS`），移除会让消息静默消失、硬发则可能重复。flush 流程中**不得预先摘队首**，摘除必须在 claim 成功之后。发送失败要 `releaseClaim` 交还租约，否则该条目要等租约（默认 60s）过期才能被接手。**已知边界**：`SESSION_ALREADY_RUNNING` 的兜底回流会先删条目（此刻副本随删除被回收）再幂等重建，重建条目在**另一台设备**上会退化为「需重新选择附件」（本端不受影响，本地 Blob 仍在）——这是「宁可能力降级、不留磁盘泄漏」的取舍；发送路径目前仍是「把附件重新上传一份新副本」，复用队列副本而跳过重传是后续优化方向。
+- **输入历史（服务端落库）**：输入框上下键调出的历史原先只活在浏览器 Zustand 内存（无 persist，刷新即丢），现以网关 `session_composer_input_history` 表为唯一真相源（`session/composer-input-history-store.ts` + `routes/session-composer-input-history.ts`）。按 `session_id` + `user_id` 归属，**每会话固定只保留最新 50 条**（写入后在同一事务内裁剪，自增 id 兼作顺序与裁剪依据）；相邻重复不重复插入，非相邻重复保留。`GET/POST /sessions/:id/composer-input-history` 分别水合与追加，POST 支持批量（新会话建立后把 pending 期间的输入一次迁入）并返回落库后的全量，客户端直接覆盖本地缓存，避免两端各写一份裁剪逻辑。客户端 `use-composer-input-history` 保留内存缓存做即时上下键体验：进入会话时水合、发送成功 / 入队时乐观写入后台落库，晚到的水合响应按请求代号丢弃；网关不可达时降级为本地记录，**不阻塞发送**。草稿不入库；会话删除经 FK CASCADE + `session-delete-recovery-statements.ts` 清理。
 
 ## 约定
 
@@ -164,13 +166,22 @@ bun run dev
 # 构建所有包
 bun run build
 
-# 代码检查（仅 packages + services）
+# 代码检查（lint:eslint 覆盖 packages/services/mobile/desktop/scripts，
+# lint:web 覆盖 apps/web 的 React Compiler 规则）
 bun run lint
 bun run lint:fix
+
+# 仅 apps/web 的 React Compiler 反模式检查
+bun run --filter @openAwork/web lint
 
 # 格式化
 bun run format
 bun run format:check
+
+# React Compiler 脱靶监控（判断手写 memo 能否清理的唯一依据）
+bun run check:react-compiler
+bun run check:react-compiler -- --json=compiler-report.json
+bun run check:react-compiler -- --baseline=compiler-report.json
 
 # 提交 / 推送前门禁（本地已在 husky 里自动接好，等价于 CI quality job）
 bun run preflight

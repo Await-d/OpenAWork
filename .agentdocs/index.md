@@ -774,6 +774,18 @@
 
 > 本节仅保留**真实未完成 / 阻塞 / 在途**任务；已完成条目一律登记于上方「已完成的任务」区与「归档全量索引」（2026-10-09 清理整理完成归位，原「（明细）」章节取消）。
 
+### 🟡 261013-opencode-llm 对齐 packages/ai - 由 v1 线 packages/llm 基线追平 v2 线 v2.0.28
+**状态**: ⏸️ **等待 Gate 0 决策与批准**（2026-10-13 规划完成，未开工）
+**复杂度**: Full orchestration（score +7；38 个任务簇、四条子域需串行验证、单文件重写 2000+ 行、存在在途改动冲突）
+**开始日期**: 2026-10-13（规划）
+**方案文档**: [workflow/261013-opencode-llm对齐packages-ai.md](workflow/261013-opencode-llm对齐packages-ai.md)
+**运行计划**: [runtime/261013-opencode-llm对齐packages-ai/master_plan.md](runtime/261013-opencode-llm对齐packages-ai/master_plan.md)
+**目标**: 把 `packages/opencode-llm`（移植自上游 v1 线 `packages/llm`）对齐到上游 v2 线 `packages/ai@v2.0.28`；用户已选定**方案 A 全量对齐**。
+**差距基线（2026-10-13 实测）**: 57 个可对应文件归一化差异 **13,870 行** + Responses 拆分新增 901 行；未移植文本类 104 文件/9,243 行、媒体类 37 文件/5,911 行（**排除**）。分层占比：协议层 61%、契约层 16%、路由层 16%、providers 7%。
+**关键前提（已实测纠正）**: ① SSE 的裸 `null` / `: keepalive` 过滤**本地已实现**（`protocols/shared.ts`），勿重复当待办；② 本地命名 `Model*` 对应 v1 线，v2 线已改名 `LanguageModel*`；③ 上游 `route/*` 用 `effect/http`（Effect 4.0.1），本地是 `effect/unstable/http`（rc.117）；④ 网关协议可达面仅 `chat_completions | responses | anthropic_messages`，`gemini.ts` / `bedrock-converse.ts` **未接线**故后置。
+**待用户决策**: D-1 基线 tag / D-2 命名策略 / D-3 Effect 版本 / D-4 Responses 是否采纳上游拆分 / D-5 覆盖范围 / D-6 自研层处置。
+**阻塞**: 工作区非干净——`packages/opencode-llm/src/error/*` 与 `src/index.ts` 共 7 文件 `+504/-258` 未提交，归属待确认。
+
 ### 🟢 261009-tool-sandbox 拆分 - 7540 行单文件降为「薄门面 + 按域模块」
 **状态**: ✅ **已交付**（2026-10-09；P0 tripwire + P1 公共模块 + P2 全量 handler 抽取（批一~批四）+ P4 `delegation` 全部完成；P3 派发器按条件未触发）
 **复杂度**: Full orchestration(score +5;跨 5 个子域、单一热点文件串行接线、最高风险块需专门验证门)

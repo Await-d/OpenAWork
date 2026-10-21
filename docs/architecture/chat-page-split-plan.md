@@ -164,11 +164,13 @@
 
 ## 四、风险点
 
-### 风险 1 · `messagesRef.current = messages` 同步赋值
+### 风险 1 · `messagesRef.current = messages` 镜像（已收口，改为 effect 期同步）
 
-- 当前主组件直接在 render 时同步 ref 镜像（行 341 等多处）
-- 抽出域 A 时必须保留此模式（多处 effect 读取最新 messages 又不能把 messages 加入依赖）
-- **缓解**：在 `useChatSessionLifecycle` 内部维持同样的 ref 镜像，通过 hook 返回值暴露 `messagesRef`
+- 原实现：主组件 / `useChatSessionLifecycle` 在 **render 期**同步 ref 镜像（行 341 等多处）——属于「渲染期写 ref」违规，会让该 hook 整体退出 React Compiler 优化（脱靶 `Cannot access refs during render`）
+- 现状：已在 `useChatSessionLifecycle` 内下沉为 effect 期镜像（`useEffect(() => { messagesRef.current = messages; }, [messages])`），修复后该 hook 已接管（脱靶 0），仍通过 hook 返回值暴露 `messagesRef`
+- **等价性依据**：唯一读取点是父组件的会话切换 effect（`run-chat-session-switch-effect.ts` 的 `sessionViewCache.save(previousSessionId, messagesRef.current, …)`）；被动 effect 按注册顺序执行，本 hook 的调用位置先于该 effect，因此同一提交内「镜像先写、会话切换 effect 后读」，读到的是同一次提交的 messages
+- **首渲染差异无害**：读取点受 `previousSessionId && previousSessionId !== requestedSessionId` 门控，首渲染 `currentLoadedSessionIdRef.current` 为 `null`，不会发生读取
+- 约束保留：多处 effect 需读最新 messages 又不能把 messages 加入依赖，故该镜像不可删除
 
 ### 风险 2 · 跨域状态在同一 effect 中协调
 

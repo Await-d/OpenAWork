@@ -90,7 +90,7 @@
 | `OPENAWORK_BROWSER_LIVE=1`          | 只启用浏览器实时预览（Web / 服务器部署推荐）                           |
 | `DESKTOP_AUTOMATION=1`              | 兼容别名；桌面端 sidecar 一直注入它，同时会启用 Agent 的桌面自动化工具 |
 | `BROWSER_LIVE_IDLE_TTL_MS`          | 会话空闲回收毫秒数，默认 `120000`                                      |
-| `BROWSER_LIVE_FRAME_ACK_TIMEOUT_MS` | 单帧 ack watchdog 毫秒数，默认 `4000`                                  |
+| `BROWSER_LIVE_FRAME_ACK_TIMEOUT_MS` | 单帧 ack watchdog **上限**毫秒数，默认 `4000`（实测往返低时自动收紧）  |
 
 关闭时 `GET /browser-live/status` 返回 `available: false` + disabled-runtime reason，
 前端显示开关提示（见 §4），面板自动留在 iframe 回退。
@@ -179,7 +179,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3000/browser-live/sta
 - **REST**（前缀 `/browser-live`）：
   - `GET /status` —— 能力协商（`available` / `engine` / `screencast` / `reason` / `installable` / `source` / `expectedRevision` / `executablePath`）；
   - `POST /start` `{ url? }` —— 预热会话（不长期占订阅引用计数）；
-  - `POST /stop` —— 停止会话；**必须发合法 JSON body（`{}`）**，见 §7.3；
+  - `POST /stop` —— 停止会话；**必须发合法 JSON body（`{}`）**，见 §7.6；
   - `POST /screenshot` `{ sessionId, fullPage? }` —— 截图并落 artifact，返回
     `{ artifactId, fileName, mimeType, sizeBytes }`。
 
@@ -195,15 +195,209 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3000/browser-live/sta
 `control`（`navigate` / `reload` / `screencast.start` / `screencast.stop` / `pick` /
 `node.styles` / `screenshot` / `dom.tree` / `a11y.tree` / `ping`）。
 
-### 5.3 帧背压（credit / ack）
+### 5.3 帧背压（两段式 credit / ack）
 
-- 任意时刻**只有一帧在途**：网关发出 `frame` 后等待 controller 回 `ack`（携带该帧的线路
-  `frameSessionId`），收到后才 `Page.screencastFrameAck` 并放行下一帧；
-- 浏览器端在 `<img>` `onLoad` 后 ack，另有 500ms 兜底定时器（解码异常时也能放行）；
-- **4s watchdog**：超时未 ack 时网关强制放行（`BROWSER_LIVE_FRAME_ACK_TIMEOUT_MS`），
-  避免 controller 卡死整条链路；
-- 帧队列高水位 `BROWSER_LIVE_HIGH_WATER_FRAMES = 3`；单帧 base64 超
-  `BROWSER_LIVE_MAX_FRAME_BYTES = 1_500_000` 直接丢弃但仍回 ack，避免撑爆 WS 缓冲。
+- **对 CDP 侧立即 ack**：网关一收到 `Page.screencastFrame` 就 `Page.screencastFrameAck`，
+  Chromium 随即开始编码下一帧（编码与客户端解码并行）。旧实现要等 controller ack 才放行，
+  帧率被一个完整链路往返钉死（`fps ≈ 1 / RTT`，60ms 就只剩 16fps），点击反馈也被同一环拖慢；
+- **对 controller 侧限量 + 只保最新**：未 ack 的在途帧不超过
+  `BROWSER_LIVE_HIGH_WATER_FRAMES = 3`；等待下发的帧只保留**最新一帧**，客户端跟不上时
+  丢掉的是过期画面而不是新画面。controller 的 `ack` 只用于采样往返、降质/回升与回收配额，
+  不再阻塞 CDP 产帧；
+- **自适应 watchdog**：队首在途帧超时即回收配额，耐心值为
+  `clamp(4 × ack 往返 EMA, 500ms, BROWSER_LIVE_FRAME_ACK_TIMEOUT_MS)`。固定 4s 的代价是
+  「丢一次 ack 就冻结 4 秒」，收紧后只损失几百毫秒；没有样本时仍用配置值（4s）；
+- 单帧 base64 超 `BROWSER_LIVE_MAX_FRAME_BYTES = 1_500_000` 直接丢弃但仍回 ack，
+  避免撑爆 WS 缓冲。
+
+### 5.4 起流定档（帧尺寸 / 画质）与自适应
+
+定档不再由网关单方面决定：客户端在 `control.screencast.start` 里带上 `maxWidth` / `maxHeight` /
+`quality` / `binary`，网关只负责校验（尺寸 ≤ 2048、质量 ≤ 100）与回落默认
+（`BROWSER_LIVE_SCREENCAST_MAX_EDGE = 1024`、`BROWSER_LIVE_SCREENCAST_QUALITY = 50`）：
+
+- **帧盒按显示尺寸 × 实得像素倍数**：客户端用
+  `canvas 显示尺寸 × min(档位倍数, devicePixelRatio)` 计算（`resolveDisplayScale`）。
+  窄面板不再按 1024 边产帧（多出来的像素只会变成编码 / 传输 / 解码成本），高 DPR 面板也不会
+  停在 1x 发糊。**1x 屏上「均衡 / 清晰」档会退化成 1:1**：按 1.5 / 2 倍取像素只是让 Chromium
+  多光栅化一遍再缩回去显示，清晰度不涨而编码 / 传输 / 解码全额变慢。`device` 上行必须带
+  同一个 `deviceScaleFactor`——CDP 的 screencast 只缩不放，视口物理像素才是清晰度的上限，
+  只改盒子不生效。
+- **定档在推流期间可改**：`beginScreencast` 只在定档（quality / maxWidth / maxHeight）
+  真正变化时重发 `Page.startScreencast`，参数一致则幂等早退。切换画质档位因此即时生效，
+  不需要收起面板或断线重连。
+- **慢帧降档 / 快帧回升**（`hub.ts` 的 `noteFrameLatency`）：按 ack 往返采样，> 250ms 连续
+  15 帧降一档，< 60ms 连续 30 帧回升 5；质量下限 40、上限回到客户端协商值，两次调整间冷却
+  10s。`Page.startScreencast` 幂等，调整只重发参数、不必停流。
+  **降档前提是「降了有用」**：还要 `isProduceRateLagging` 判定产帧间隔确实超过 ack 限速周期
+  的 1.5 倍（即编码 / 页面渲染真的是瓶颈）。产帧正常而只是往返慢时不动质量——否则会形成
+  把「产帧慢」误判成「消费慢」的降档螺旋：越降越糊、帧率还不回升。
+- **二进制帧**：客户端声明 `binary: true` 后，网关直接发 WS binary
+  （`[kind][headerLen][header JSON][JPEG]`，见 shared 的 `BROWSER_LIVE_BINARY_FRAME_KIND`），
+  省掉 base64 的 33% 体积与前端 `atob` + 逐字节搬运；没有 `sendBinary` 的 sink 自动回退
+  JSON 信封。
+- CDP 不设 `maxWidth` / `maxHeight` 时，每帧都按视口**原始像素**产出——大面板与高 DPR 的设备
+  预设（手机 375×812 @2 = 750×1624 物理像素）下单帧是百万级像素的 JPEG，客户端每帧都要
+  解码 + 重绘面板，主线程被吃满后**整个应用**都会卡；
+- 盒子是「最长边不超过 1024 物理像素」的等比缩放盒（只缩不放、不拉伸）；客户端仍按帧元数据
+  `deviceWidth / deviceHeight` 定位与换算坐标，画面只是变清晰度、不变比例，因此坐标映射、
+  元素拾取、letterbox 全部不受影响；
+- **截图不受影响**：`POST /browser-live/screenshot` 与 WS `control.screenshot` 走
+  Playwright `page.screenshot`，仍是全分辨率；
+- 尺寸收敛（§7.2）必须与盒子保持一致：`ScreencastConvergence` 的 `target.bitmapBounds`
+  按同一规则推算期望位图尺寸（带 2px 取整容差），否则位图永远「不等于视口尺寸」，
+  每次设备覆写都会空转到预算耗尽。
+
+### 5.5 不可见即停流
+
+预览「不可见」有两层，任一层成立都停流：
+
+1. **宿主把容器隐藏**：预览宿主（`EditorBrowserWorkspace` / `BuiltInBrowser`）是 keep-alive 的，
+   切走 tab / 收起面板只把容器 `display: none`，帧照样推；
+2. **整个标签页 / 窗口不可见**（切到别的标签、最小化）：宿主毫不知情，但页面仍在收帧、解码。
+
+`CdpLiveEngine` 的停流判定是 `hidden || !documentVisible`（`use-document-visibility` 监听
+`visibilitychange`）：为真时下发 `control.screencast.stop`，重新可见时再下发
+`control.screencast.start`（幂等，且会立即产出一帧，画面不会停在旧帧上）。
+
+> 取舍：`screencast.stop` 停的是**整条会话**的产帧（与卸载路径同一套语义）。多端同时观看时
+> 由仍在观看的一端重新拉起；`task` 侧不感知流状态。
+
+### 5.6 前端渲染与输入节流
+
+预览卡的主因是「每帧都要在主线程上做重活」，因此前端侧按三条规定收口：
+
+- **帧数据不进 React 状态**：只有「元数据尺寸」与「是否已有画面」两份轻量状态参与渲染，
+  帧本身留在 ref 里，由 `useCdpLiveFrames` 直接画进 `<canvas>`（不再每帧 `setState` +
+  重设 `<img src="data:…">`）；
+- **backing store 按显示尺寸定档**（`resolveBackingSize`）：画布位图**宽高各自**按
+  `显示尺寸 × DPR × zoom` 取整，并且不超过帧位图本身。之前按位图尺寸定档时，帧盒可到
+  2048 物理像素，而画面只显示在几百 CSS 像素的盒子里——每帧都要向合成器上传并缩放一张
+  大纹理，这部分开销与清晰度无关。宽高必须分别换算：canvas 的 CSS 尺寸就是显示尺寸，
+  若按位图比例反推高度，比例不一致时浏览器会把 backing store 拉伸变形。显示尺寸未测量时
+  退回位图尺寸，保证首帧照常可画；
+- **2d 上下文选项一致**：`alpha: false` / `desynchronized: true` 只在**首次**创建上下文时
+  生效，因此 `clear()` 与 `paint()` 必须用同一组 `getContext` 选项——`clear()` 通常在
+  首帧之前执行（切标签），若它用默认选项建了上下文，后续的低延迟绘制路径就永久失效；
+- **解码离主线程**：走 `createImageBitmap`（JPEG 解码不占主线程），画完（或解码失败）立刻回
+  `ack`——失败也必须回，否则整条链路要等 watchdog。缺 `createImageBitmap` 的老 WebKit
+  回落离屏 `<img>` + data URL（慢但画面不消失）；
+- **串行解码、只解最新一帧**：网关对 CDP 侧是 `BROWSER_LIVE_HIGH_WATER_FRAMES` 帧在途，
+  客户端跟不上时这些帧会同时到达。若对每帧都直接解码，除最新那张外全部会被代次判定丢弃
+  ——JPEG 解码是整条链路最贵的一段，白解两次就把帧预算吃光。因此客户端只保留一个待解码槽
+  （新帧顶掉旧帧）且同一时刻只允许一个解码在飞，被顶掉的帧**立即归还配额**；
+- **指针输入按帧合并**：`mouseMoved` 每个动画帧只发最后一次坐标，且与上次下发坐标的位移
+  不足 `POINTER_MOVE_MIN_DISTANCE_PX = 1` 时不发（亚像素抖动对远端毫无意义，却每次都会
+  让页面重新命中测试并产出一帧全量 JPEG）；`wheel` 在帧内累加增量合成一条，且**不参与**
+  位移阈值——滚轮的每一分增量都对应真实位移，筛掉会让滚动距离缩水；
+- **控制台 / 网络事件批量归并**：`applyConsoleOps` 按 tab 一次性应用整批操作——每个 tab
+  只复制一次数组、`networkId → 下标` 索引只建一次，批量结束后统一裁剪。逐条
+  `upsertNetworkEntry` / `append` 的写法是「操作数 × 表长」的全表扫描加整表复制，首屏
+  日志洪峰（几百条）时会涨到数万次元素搬运，正好和画面解码抢主线程；
+- **两层 ack 职责不同，不能混为一谈**：
+  - **客户端 → 网关的 `ack`** 只表示「我消费完了」，用于测往返 / 降质 / 回收配额。客户端在
+    「解码 + 绘制完成」后**立即**回，不叠加任何最小间隔；定时器版本会在挂起期间丢弃新 ack，
+    把那一帧拖到 watchdog（帧率瞬间跌到 0.25fps）。
+  - **网关 → CDP 的 `Page.screencastFrameAck`** 才是**产帧速率限制器**：它的语义是「可以编
+    下一帧了」。收到就回等于让 Chromium 编码器全速运转，而编码与页面自身的 JS / 布局 /
+    绘制在同一进程里抢 CPU——页面越重被挤压得越狠，实测表现为画面 1–3fps、点击半天才有
+    反应。网关因此保留最小间隔 `BROWSER_LIVE_CDP_ACK_FLOOR_MS = 16`（≈60fps 上限；环境
+    变量可覆盖，`0` = 关闭）：间隔内到达的帧只记账**最新**一帧的 `frameSessionId`，到点补
+    一次 ack。取 16ms 而非更保守的值：限速只该拦掉「无意义的全速空转」，不该成为帧率主瓶颈
+    ——实测客户端解码 2ms、单帧 10KB、带宽与 CPU 双双空闲仍只有 8fps 时，瓶颈在别处，
+    把上限压到 25fps 只会白白损失流畅度。
+  - **但限速必须对交互让路**：限速的等待会原封不动加到「手动了、画面还没动」的感知延迟
+    上——这正是「拖动明显卡顿」。因此网关在 `BROWSER_LIVE_INTERACTIVE_WINDOW_MS = 250`
+    窗口内（自最近一次输入起算，由 `noteUserInput` 标记）**取消限速**：拖动 / 输入期间每
+    帧立即放行（追求跟手），空闲时恢复限速（把 CPU 让回页面）。
+
+- **降档有两级杠杆，先质量后分辨率**（`hub.adjustScreencastQuality`）：JPEG 质量降到
+  `BROWSER_LIVE_MIN_QUALITY = 40` 见底后，改按 15% 步长缩**帧盒**——编码成本与像素量成
+  正比，而像素量是边长的平方，缩到 85% 就少 28% 像素，这是质量见底后唯一还有明显效果的
+  手段。帧盒下限是协商值的 `BROWSER_LIVE_MIN_FRAME_SCALE = 0.5`，再小就糊到看不清；回升
+  时顺序相反（先补分辨率再补质量）。
+
+- **拖动期间指针输入不走按帧合并**：合并要等下一个动画帧（0–16ms），而拖拽对这段延迟极
+  其敏感。`pointerInput.moveImmediate()` 当帧直接上行（仍过 `POINTER_MOVE_MIN_DISTANCE_PX`
+  阈值，亚像素抖动不产帧）；悬停移动仍走合并压噪声。拖动状态由 `mousedown`/`mouseup`
+  维护，并用全局 `mouseup` + `blur` 兜底——否则拖到面板外松手会让状态永久卡在「拖动中」，
+  此后所有悬停都变成即时上行、持续产帧。
+
+  不使用 CDP 的 `everyNthFrame`：尺寸收敛（§7.2）依赖「每次 rearm 立即产出一帧」，而 Chromium
+  对 `everyNthFrame` 的计数口径不在协议契约里，本机无 Chromium 可验证（`live-session` 集成
+  测试 `skipIf(!chromiumAvailable)`）。
+
+### 5.6.1 低帧率诊断口径
+
+实时画面角标现在同时展示两组尺寸：`视口 WxH` 是 CDP 元数据，`位图 WxH` 是
+`createImageBitmap` 成功解码后的真实 JPEG 像素尺寸；两者不能混用来判断帧盒是否生效。
+角标中的 `总 / 排队 / 解码 / 绘制` 分别表示从客户端收帧入口到 ack 的总耗时、等待串行解码槽的
+耗时、JPEG 解码耗时和 Canvas 绘制耗时。WebSocket 消息进入浏览器后、进入信封回调前的二进制
+header 解析与 `ArrayBuffer` 复制不包含在这四个数中。
+
+网关可通过 `OPENAWORK_BROWSER_LIVE_DIAGNOSTICS=1` 每秒输出一次帧生命周期采样，字段包括
+`produceIntervalMs`、`produceFps`、`sendMs`、`ackRttEmaMs`、`inflightFrames` 和
+`pendingFrame`。该开关默认关闭，避免诊断日志干扰实时链路。
+
+FPS 对照必须使用持续产生 damage 的动画页；`about:blank` 或纯静态页只适合验证首帧和
+`screencast.refresh`，不能作为持续帧率基准。
+
+### 5.7 两条渲染通道（实时画面 / 原生渲染）
+
+实测环境里 CDP 链路的帧率由**网关侧编码 + 传输 + 客户端解码**共同决定；容器 / 无 GPU /
+远程网关下可能只有个位数 fps。因此预览提供两条通道，由工具栏显示器图标切换（偏好持久化到
+`NATIVE_RENDER_KEY`）：
+
+|                 | 实时画面（缺省）                             | 原生渲染                                                   |
+| --------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| 画面            | 网关 Chromium 的 screencast，画进 canvas     | 本地 iframe，浏览器原生合成                                |
+| 帧率 / 输入     | 受编码 + 传输 + 解码限制，输入多一次往返     | 60fps，输入直达页面                                        |
+| 地址同步        | CDP `nav` 事件，跨域页面也准确               | 跨域页面读不到 `location`，地址栏不跟随                    |
+| 后退 / 前进     | CDP `goBack` / `goForward`（保留 SPA state） | 前端历史定向导航（整页重载；跨域 iframe 禁止访问 history） |
+| 拾取 / 设备模拟 | 可用                                         | 不可用（画面不经过 canvas）                                |
+
+原生渲染下网关侧页面仍由 `useBrowserLiveNavigation` 跟随 URL，因此**控制台 / 网络采集**继续
+可用。实时画面连续 3 个采样窗口低于 8fps 时，画面顶部会出现「切换原生渲染」提示条——这是
+「卡到不可用」时的确定性出路，不必让用户自己猜。
+
+- **切标签：清空 + 拉闸门，等远端真到目标地址才放行**。实时分支只有一块 canvas + 一个远端
+  页面。只清一次 `clearRect` 不够——远端此时还停在旧文档上，下一帧立刻把旧内容画回来（切到
+  新建的空白标签最明显）。因此 `CdpLiveEngine` 在 `tabId` / `url` 变化时：
+  1. `clearRect` 清空；
+  2. 拉上 `frameGateRef`——闸门期间收到的帧**不解码不绘制**，只回 ack 维持背压；
+  3. 等网关的 `nav` 事件（主文档已切换）才放开；1.5s 兜底放行，避免目标页自我跳转 / 加载
+     失败导致画面永久空白；
+  4. **放行时必须补一帧**：screencast 只在页面产生 damage 时推帧，静态页（尤其
+     `about:blank`）加载完就不再产帧，而闸门期间那些帧已被丢弃——不补就是永久空白。
+     走 `control: screencast.refresh`（网关重发幂等的 `Page.startScreencast`，沿用当前
+     定档、立即按当前视口产一帧）。
+  5. 两个标签 URL 相同时补一次 `reload`（url effect 不会重复下发 navigate，远端不产生新
+     damage，清空后会一直空白）。
+
+  **帧带页面代次（根治快速来回切换）**：闸门只覆盖「导航确认前」的窗口，覆盖不了竞态——
+  切走再切回时，上一轮页面产出的帧可能在新一轮导航之后才到达，仅按时序判定就会画进新标签。
+  因此 `Page.screencastFrame` 被打上 `generation`（复用 `navigationGeneration`，主文档每导航
+  一次自增）并一路透传到 `frame` 信封。客户端维护 `minGenerationRef`：低于门槛的帧一律丢弃
+  （仍回 ack 维持背压），门槛在「拉闸门」与「收到更大代次」两处抬高。老网关不下发该字段时
+  退回原来的时序判定，行为不变。
+
+  **远端自身导航不重复下发 `navigate`**：SPA 路由 / 页内点链接会先由网关回报 `nav`，地址
+  再写回标签、触发 `url` 变化。若这时照常清空 + `navigate`，等于把页面整页重载——画面闪白、
+  状态全丢（用户感受是「点个链接就卡住」）。引擎用 `remoteUrlRef`（`nav` 回报的实际地址）
+  区分「谁发起的导航」：地址来自远端就只更新记录，不再下发。
+
+  **占位页也必须真实下发 `navigate about:blank`**：这是合法的 CDP 导航，能把网关侧主文档
+  真的切到空白页。早期实现用 `NAVIGABLE_URL_PATTERN` 挡掉它，远端就一直停在旧页面继续推
+  旧帧——既画面错位，也让控制台 / 网络采集挂在上一个页面上。
+
+配套的两条量产约束：
+
+- **写盘自动刷新有 8s 冷却**（`WORKSPACE_INDEX_REFRESH_MIN_INTERVAL_MS`）：Agent 连续写盘时
+  索引版本几乎每轮都在变，不加冷却就等于每 2.5s 整页 reload 一次；冷却期内的变化会合并成
+  一次**尾随**刷新，最后一次写盘不会漏。
+- **控制台面板是 memo 组件**：`BuiltInBrowser` 未被 React Compiler 接管（`check:react-compiler`
+  实测 compiled 0 / bailout 1，compiler-limit），因此 `logs` 与 `inspector` 两个大 props 的
+  引用必须在宿主侧手工稳定，否则每次父渲染都会重刷上百行日志。
 
 ## 6. 已知限制
 
@@ -212,12 +406,20 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3000/browser-live/sta
   因此只可能来自同源 iframe 注入。
 - **HAR 是纯客户端导出**：瀑布视图由前端 `network-har.ts` 把已采集记录拼成 HAR 1.2 后
   用 Blob 下载，不经过网关；未采集的字段（`headersSize` / `bodySize` / 分段耗时）按规范写 `-1`。
-- **source map 只覆盖前 ~12 帧**：`DEFAULT_SOURCE_MAP_MAX_FRAMES = 12`，且只处理 `http(s)`
-  帧（`data:` / `chrome-*` 等一律跳过）；脚本无 `sourceMappingURL`、map 抓取失败或位置未命中时，
-  该帧回落为打包后位置并标记「未映射」。
+- **source map 只覆盖 `error` 级别、前 ~12 帧**：`DEFAULT_SOURCE_MAP_MAX_FRAMES = 12`，且只处理
+  `http(s)` 帧（`data:` / `chrome-*` 等一律跳过）；普通 `log` / `info` / `debug` 不解析（见 §7.7）。
+  脚本无 `sourceMappingURL`、map 抓取失败或位置未命中时，该帧回落为打包后位置并标记「未映射」。
+  解析结果只带位置、**不带源码全文**。
 - **DOM 树被钳制**：深度默认 4、上限 12（`BROWSER_LIVE_DOM_DEFAULT_DEPTH` /
   `BROWSER_LIVE_DOM_MAX_DEPTH`），节点上限 2000（`BROWSER_LIVE_DOM_MAX_NODES`）；
   无障碍树节点上限同为 2000。命中上限时 `dom` 回包带 `truncated: true`。
+- **实时画面按需定档**：位图由客户端按「显示尺寸 × `min(档位倍数, DPR)`」协商（§5.4），
+  JPEG 质量 50 起、慢帧自动降档（下限 40）；帧率不再有固定上限，由链路（编码 + 传输 +
+  解码）与在途配额决定（§5.3 / §5.6）。预览角标的 `N×M · nfps · KB · ms` 依次是位图尺寸、
+  实测帧率、最近一帧的体量与处理耗时，可直接区分「带宽 / 主线程 / 静态页」三类情况。
+  大面板 / 桌面预设下放大观赏仍会偏糊、高帧率动画也不会完全跟随；要原始分辨率请用截图
+  （不受限帧影响）。
+- **写盘后的自动刷新不是实时的**：最短 8s 一次（§5.6），Agent 连续写盘期间预览不会逐轮跟随。
 - **一个用户最多一条 live session**，引用计数归零后保温 `BROWSER_LIVE_IDLE_TTL_MS`
   （默认 120s）再关闭浏览器。
 - WS 的 `control.screenshot` 回传**内联 base64**（不落 artifact）；需要 artifact 的截图走
@@ -257,7 +459,78 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3000/browser-live/sta
 所以：切换后 1–2 秒内未更新属正常收敛窗口；持续停在旧尺寸时，检查连接是否仍是已连接状态
 （掉线重连会由 `hello` 重新拉起 screencast），并确认预设下拉确实发出了变更。
 
-### 7.3 「停止实时预览」返回 400
+### 7.3 拖动面板 / 拖拽窗口时画面明显卡
+
+**原因**：帧盒由面板测量尺寸算出，而 `screencast.start` 的 effect 依赖帧盒；网关发现定档
+变化就会重发 `Page.startScreencast`，而重发会**重启流失并全量重编码一帧**。若按像素级
+变化触发，整个拖拽过程会持续重编码，画面就一直抖着卡。
+
+**修复**：面板尺寸测量带比例容差（`SURFACE_SIZE_EPSILON_RATIO = 0.1`，最少 1px），容差内的
+尺寸变化不产生新的 `surfaceSize`，因此不会重开流失。
+
+若拖拽**停止后**依然卡，看预览角标：`nfps` 接近 60 且 `ms` 很小说明链路健康，卡顿来自
+页面自身渲染；`nfps` 只有个位数而 `KB` 极小、`ms` 也极小时，说明 Chromium 侧编码 / 页面
+渲染是瓶颈——此时应降档（缩帧盒）或改用原生渲染，而不是继续调链路参数。
+
+### 7.4 重启应用后标签全没了
+
+**症状**：关掉应用再打开，内置浏览器的所有标签与网址都消失，只剩一个空白新标签。
+
+**原因**：标签按 workspace 存在 `localStorage`，key 为
+`openawork:builtin-browser:tabs:v1:<workspacePath>`。冷启动时 `workspacePath`
+（`uiWorkspaceScope`）往往**先以 `null` 出现**，等会话 / 工作目录解析完才变成真实路径。
+旧实现在 `null` 阶段就按 `__default__` 桶读写，于是：
+
+1. 读 `__default__` 读不到真实历史 → 界面回落成「一个空白新标签」；
+2. 真实路径到位后，持久化 effect 把这个占位标签**写进了真实 workspace 的 key**，
+   把用户历史整个覆盖掉。
+
+**修复**：
+
+- `isWorkspaceStorageReady` 判定「workspace 是否已知」，未就绪时**既不读也不写**，
+  等真实路径到位后一次性加载；
+- `migrateDefaultWorkspaceTabs` 收拾现场：就绪时若真实桶为空、而 `__default__` 桶里
+  有真实历史（至少一个非 `about:blank`），就把它搬回来并清掉临时桶；
+- 迁移必须在**首次读盘之前**执行，否则这一帧已经拿着「读不到」的结果建了占位标签。
+
+同时修掉了 `persistState` 漏写 `faviconUrl` 的问题（类型里声明了但实际没写，
+导致重启后所有标签图标消失）。
+
+**服务端持久化（跨设备 / 跨重装）**：标签另有一份存在服务端 `user_settings`
+（key `user_browser_tabs_v1`，`services/agent-gateway/src/user/user-browser-tabs.ts`），
+接口 `GET/PUT /settings/browser-tabs`。客户端启动时**以服务端为准**（这才是「换设备后接着
+上次浏览」），只有服务端返回 `null`（无记录）时才用本机缓存初始化并推上去。
+
+两条安全边界（都在 `browser-tabs-remote-sync.ts` 里，并有单测钉住）：
+
+- **服务端无记录返回 `null` 而不是空数组**：返回空数组会让客户端清空本机标签；
+- **空列表拒绝推送**：本机为空时推上去会覆盖服务端的真实记录，正是「历史被删掉」的形态。
+
+`tabs` 采用**整体替换**而非按下标合并——按下标合并会让已关闭的标签「自己回来」。
+推送有 800ms 去抖，拖拽 / 连续导航不会打出一串请求。
+
+### 7.5 切回空白标签后，它被替换成上一个标签的地址
+
+**症状**：新建一个空白标签 → 切到前面已打开的标签（已有地址）→ 再切回空白标签，
+空白标签的地址变成了前一个标签的地址。
+
+**原因**：`nav` 是**延迟**回报——网关侧要等主文档提交、再等 150ms settle、读完 title
+才 emit。用户在这个窗口里切标签，旧标签的回报就会在「新标签已是激活标签」之后才到达，
+而宿主原来无条件把它写回激活标签。
+
+**修复**：`attributeNavReport`（`browser/browser-nav-attribution.ts`）做归属判定，
+两条独立判据任一命中即丢弃：
+
+- **代次单调**：`nav.generation` 是网关侧主文档导航的自增计数，比本标签已接受的代次
+  更小 ⇒ 迟到回报；
+- **地址归属**：回报地址等于**其它**标签当前的地址、且不等于本标签的地址 ⇒ 别人的回报。
+  真正的页面内跳转（SPA / 点链接 / 重定向）给的是「不属于任何其它标签」的地址，
+  因此不会被误伤。
+
+切标签时会复位已接受代次（换的是另一个页面实例）。已知边界：两端标签访问同一地址时，
+判据 2 理论上可能误丢——代价是地址栏不更新（刷新后自动纠正），好过把地址写到别的标签上。
+
+### 7.6 「停止实时预览」返回 400
 
 **症状**：调用 `POST /browser-live/stop` 得到 `400`（Fastify 5 的 body 校验错误）。
 
@@ -267,11 +540,18 @@ body；Fastify 5 对「JSON content-type + 空 body」直接返回 400，而不�
 **修复**：客户端必须发合法 JSON body（`{}`）。`packages/web-client/src/infra/browser-live.ts`
 的 `stop()` 已如此实现；新增客户端 / 脚本时照抄该约定。
 
-### 7.4 控制台条目没有调用栈
+### 7.7 控制台条目没有调用栈
 
 控制台条目的 `stack` / `sourceMappedStack` 由 CDP `Runtime.consoleAPICalled` /
 `Runtime.exceptionThrown` 提供，再经网关 source map 解析：
 
+- **`sourceMappedStack` 只对 `error` 级别生成**（`shouldResolveSourceMap`）：解析要抓脚本、
+  抓 map、跑 `SourceMap.findEntry`，一次最多 12 帧；而 `log` / `info` / `debug` 在真实页面上
+  是成百上千条的量级，逐条解析会把网关 CPU 与 WS 带宽一起吃掉、直接压低画面帧率。
+  因此普通日志只有 `stack`（打包后位置），`pageerror` 与 `console.error` 才带源码位置；
+- **线上协议不含源码全文**：`BrowserLiveResolvedStackFrame` 刻意没有 `source` 字段。
+  一条日志最多 12 帧，若每帧都捎一份源文件，单条日志可能几十 KB，而这些字节要经
+  CDP → 网关 → WS 全链路 JSON 序列化与传输——这是「页面一打日志画面就卡」的典型来源；
 - 没有任何帧时不渲染调用栈入口（`buildConsoleStackView` 返回 null）——CDP 未采集到栈时即是此
   情形（例如非脚本求值路径产生的日志）；
 - 有栈但与源码对不上时，帧会标记「未映射」并展示打包后位置，常见原因：
@@ -280,7 +560,7 @@ body；Fastify 5 对「JSON content-type + 空 body」直接返回 400，而不�
 - dev server（Vite / webpack）下需要能访问到被服务脚本与其 map；局域网 / 权限问题会让抓取
   失败并整体回落为未映射。
 
-### 7.5 `POST /browser-live/screenshot` 返回 404 `browser_live_session_not_found`
+### 7.8 `POST /browser-live/screenshot` 返回 404 `browser_live_session_not_found`
 
 该错误码**不是**「实时会话不存在」，而是 artifact 落库前的**会话所有权校验失败**：
 `body.sessionId` 对应的聊天会话必须存在且属于当前 token 的用户，否则直接 404
@@ -293,19 +573,24 @@ body；Fastify 5 对「JSON content-type + 空 body」直接返回 400，而不�
 
 ## 8. 相关文件
 
-| 作用                      | 路径                                                                             |
-| ------------------------- | -------------------------------------------------------------------------------- |
-| 引擎能力矩阵（单一入口）  | `apps/web/src/components/chat/misc/browser/hooks/use-engine-capability.ts`       |
-| 实时接线（事件 → 控制台） | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-wiring.ts`     |
-| Tauri 采集导航同步        | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-navigation.ts` |
-| 实时会话生命周期          | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-session.ts`    |
-| CDP 实时视图              | `apps/web/src/components/chat/misc/browser/engines/cdp-live-engine.tsx`          |
-| 内容区（三引擎分支）      | `apps/web/src/components/chat/misc/browser/engines/browser-content-area.tsx`     |
-| 引擎可用性探测            | `packages/browser-automation/src/live-browser-availability.ts`                   |
-| 实时会话实现 + source map | `packages/browser-automation/src/live-session.ts`、`source-map-resolver.ts`      |
-| 网关 WS / REST 路由       | `services/agent-gateway/src/routes/browser-live.ts`                              |
-| 会话管理器 + 开关         | `services/agent-gateway/src/browser-live/manager.ts`                             |
-| 扇出 + 帧背压             | `services/agent-gateway/src/browser-live/hub.ts`                                 |
-| 线路协议（shared）        | `packages/shared/src/browser-live.ts`                                            |
-| 客户端（web-client）      | `packages/web-client/src/infra/browser-live.ts`                                  |
-| 桌面端浏览器目录注入      | `apps/desktop/src-tauri/src/lib.rs`（`playwright_browsers_dir`）                 |
+| 作用                        | 路径                                                                             |
+| --------------------------- | -------------------------------------------------------------------------------- |
+| 引擎能力矩阵（单一入口）    | `apps/web/src/components/chat/misc/browser/hooks/use-engine-capability.ts`       |
+| 实时接线（事件 → 控制台）   | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-wiring.ts`     |
+| Tauri 采集导航同步          | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-navigation.ts` |
+| 实时会话生命周期            | `apps/web/src/components/chat/misc/browser/hooks/use-browser-live-session.ts`    |
+| CDP 实时视图                | `apps/web/src/components/chat/misc/browser/engines/cdp-live-engine.tsx`          |
+| 画面面（解码 / 绘制 / ack） | `apps/web/src/components/chat/misc/browser/hooks/use-cdp-live-frames.ts`         |
+| 帧解码（离主线程 + 回退）   | `apps/web/src/components/chat/misc/browser/frame-decode.ts`                      |
+| 指针输入按帧合并            | `apps/web/src/components/chat/misc/browser/pointer-input-batch.ts`               |
+| 整页可见性（停流判定）      | `apps/web/src/components/chat/misc/browser/hooks/use-document-visibility.ts`     |
+| 预览自动刷新（含冷却）      | `apps/web/src/components/chat/misc/browser/hooks/use-workspace-index-refresh.ts` |
+| 内容区（三引擎分支）        | `apps/web/src/components/chat/misc/browser/engines/browser-content-area.tsx`     |
+| 引擎可用性探测              | `packages/browser-automation/src/live-browser-availability.ts`                   |
+| 实时会话实现 + source map   | `packages/browser-automation/src/live-session.ts`、`source-map-resolver.ts`      |
+| 网关 WS / REST 路由         | `services/agent-gateway/src/routes/browser-live.ts`                              |
+| 会话管理器 + 开关           | `services/agent-gateway/src/browser-live/manager.ts`                             |
+| 扇出 + 帧背压               | `services/agent-gateway/src/browser-live/hub.ts`                                 |
+| 线路协议（shared）          | `packages/shared/src/browser-live.ts`                                            |
+| 客户端（web-client）        | `packages/web-client/src/infra/browser-live.ts`                                  |
+| 桌面端浏览器目录注入        | `apps/desktop/src-tauri/src/lib.rs`（`playwright_browsers_dir`）                 |

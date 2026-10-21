@@ -6,9 +6,21 @@ Service / Layer，而不必一次性重写入口。
 
 ## 依赖与编译配置
 
-当前仓库统一使用 `effect@4.0.0-beta.83`。`@effect/platform-node` 与该版本的
+当前仓库统一使用 `effect@4.0.4`（正式版）。`@effect/platform-node` 与该版本的
 peer dependency 对齐；不要在同一个包中混用 Effect 3 的 `@effect/platform`，否则
 会得到两套不兼容的 `Context`、`Stream` 和运行时类型。
+
+正式版与 rc 的模块布局差异（升级时踩过的点）：
+
+- `effect/unstable/http` → `effect/http`，`effect/unstable/encoding/Sse` →
+  `effect/encoding/Sse`（unstable 子路径在正式版被提升）。
+- 顶层 `Encoding` 命名空间被拆分为 `effect/encoding/{Base64,Base64Url,Hex,Sse,...}`
+  子模块，例如 `Encoding.encodeBase64` → `Base64.encode`。
+- Schema 对象（`Schema.Struct` 等）把 `make` / `is` / `guards` 暴露为**原型上的只读
+  getter**，因此给 schema 附加静态成员**不能用 `Object.assign`**（会在赋值阶段抛
+  `Cannot set property make of #<Object> which has only a getter`）；本仓统一走
+  `packages/opencode-llm/src/utils/with-statics.ts` 的 `withStatics`（按 own
+  enumerable 键 `defineProperty`）。
 
 `packages/opencode-llm/tsconfig.json` 与 `services/agent-gateway/tsconfig.json`
 显式开启了 `downlevelIteration`。这保持 Effect Generator 在不同 TypeScript 输出
