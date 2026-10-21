@@ -301,7 +301,6 @@ export interface ParserState {
   readonly providerMetadataKey: string;
   readonly tools: ToolStream.State<number>;
   readonly pendingToolArguments: Partial<Record<number, string>>;
-  readonly toolCallEvents: ReadonlyArray<LLMEvent>;
   readonly usage?: Usage;
   readonly finishReason?: FinishReason;
   readonly finishReasonRaw?: string;
@@ -1150,10 +1149,13 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     }
 
     const choice = event.choices?.[0];
+    // 终态只认第一帧：迟到尾块重复携带的 finish_reason 不能覆盖已经确定的
+    // 终态，否则上层会按错误的 reason 决定续写 / 截断处理。
+    const finishAlreadyObserved = state.finishReason !== undefined;
     // 对齐 opencode：不受支持的 finish_reason 是上游异常，必须显式失败，
     // 否则会被下游静默当作正常结束（详见 mapFinishReason 注释）。
     let finishReason = state.finishReason;
-    if (choice?.finish_reason) {
+    if (choice?.finish_reason && !finishAlreadyObserved) {
       const mapped = mapFinishReason(choice.finish_reason);
       if (mapped === undefined) {
         return yield* ProviderShared.eventError(
@@ -1164,36 +1166,37 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       }
       finishReason = mapped;
     }
-    const finishReasonRaw =
-      choice?.native_finish_reason ?? choice?.finish_reason ?? state.finishReasonRaw;
+    const finishReasonRaw = finishAlreadyObserved
+      ? state.finishReasonRaw
+      : (choice?.native_finish_reason ?? choice?.finish_reason ?? state.finishReasonRaw);
     const delta = choice?.delta;
     const toolDeltas = delta?.tool_calls ?? [];
 
-    // 对齐 opencode：finish 之后仍收到内容 = 上游流异常（协议不允许）。
-    // 原样返回状态、不重复产出事件；有内容则显式失败。
-    if (state.finishReason !== undefined) {
-      const lateRefusal = delta?.['refusal'];
-      const hasLateContent =
-        Boolean(delta?.content) ||
-        (typeof lateRefusal === 'string' && lateRefusal.length > 0) ||
-        pickReasoningDelta(delta, state.reasoningField) !== undefined ||
-        reasoningDetailText(delta?.['reasoning_details']) !== undefined ||
+    // `finish_reason` 之后仍收到内容：协议不允许，但兼容网关普遍如此
+    // （代理内部重试把第二个 completion 接在同一流上、思维链尾包、
+    // 提前宣告 `tool_calls` 后再补参数分片）。此时回答已经完整，把它判成
+    // 整轮失败会让一次成功的响应凭空消失，因此按通道分别降级：
+    //   - 正文 / 拒绝文本 / 思维链：丢弃（只会把已输出的回答重复一遍）；
+    //   - 工具调用分片：继续合并，统一在 `finishEvents` 收尾时 finalize。
+    if (finishAlreadyObserved) {
+      // `length` / `content-filter` 的残缺工具调用早已按定义丢弃，迟到分片
+      // 同样不再接收——否则会拿半截 JSON 拼出一个不可用的调用。
+      const discardTools =
+        state.finishReason === 'length' || state.finishReason === 'content-filter';
+      const hasLateToolDelta =
+        !discardTools &&
         toolDeltas.some(
           (tool) =>
             Boolean(tool.id) || Boolean(tool.function?.name) || Boolean(tool.function?.arguments),
         );
-      if (hasLateContent) {
-        return yield* ProviderShared.eventError(
-          ADAPTER,
-          'OpenAI Chat received content after the finish reason',
-          ProviderShared.encodeJson(event),
-        );
-      }
-      return [{ ...state, usage }, events] as const;
+      if (!hasLateToolDelta) return [{ ...state, usage }, events] as const;
     }
+    // 迟到尾块里还有工具分片要合并时，正文/思维链通道一律关闭：
+    // 它们只会造成重复输出，且此时对应的块早已关闭。
+    const acceptTextChannels = !finishAlreadyObserved;
 
     let tools = state.tools;
-    const pendingToolArguments = { ...state.pendingToolArguments };
+    let pendingToolArguments = { ...state.pendingToolArguments };
     let lastToolIndex = state.lastToolIndex ?? -1;
     let nextToolIndex = state.nextToolIndex ?? 0;
     const toolIndexById = { ...state.toolIndexById };
@@ -1212,11 +1215,13 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     //      （字段名 + 累计条目），供上层持久化后历史回传；
     //   3. 思维链是「响应级通道」——**保持打开**，由 `finishEvents` 统一关闭，
     //      这样迟到的思维链 delta 会并入同一块，而不是反复开关产生多个块。
-    const pickedReasoning = pickReasoningDelta(delta, state.reasoningField);
+    const pickedReasoning = acceptTextChannels
+      ? pickReasoningDelta(delta, state.reasoningField)
+      : undefined;
     const reasoningField = state.reasoningField ?? pickedReasoning?.field;
-    const rawDetails = (delta as unknown as Record<string, unknown> | undefined)?.[
-      'reasoning_details'
-    ];
+    const rawDetails = acceptTextChannels
+      ? (delta as unknown as Record<string, unknown> | undefined)?.['reasoning_details']
+      : undefined;
     const detailDelta = Array.isArray(rawDetails) ? rawDetails : undefined;
     const reasoningDetails =
       detailDelta === undefined
@@ -1245,7 +1250,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     }
     const reasoningEmitted = state.reasoningEmitted || lifecycle.reasoning.has('reasoning-0');
 
-    if (delta?.content) {
+    if (acceptTextChannels && delta?.content) {
       const text =
         typeof delta.content === 'string'
           ? delta.content
@@ -1253,7 +1258,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', text);
     }
 
-    if (hasRefusal) {
+    if (acceptTextChannels && hasRefusal) {
       lifecycle = Lifecycle.textDelta(lifecycle, events, 'text-0', refusal);
     }
 
@@ -1306,8 +1311,8 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     // and let the caller's incomplete-stream continuation re-request.
     const incompleteTools = finishReason === 'length' || finishReason === 'content-filter';
 
-    // Finalize accumulated tool inputs eagerly when finish_reason arrives so
-    // JSON parse failures fail the stream at the boundary rather than at halt.
+    // 身份缺失的参数分片无法归属到任何工具调用：继续攒下去只会在收尾时
+    // 静默丢失，于是在 `finish_reason` 边界直接显式失败。
     if (
       finishReason !== undefined &&
       !incompleteTools &&
@@ -1317,20 +1322,19 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       return yield* invalid(
         `OpenAI Chat tool call delta is missing id or name (unresolvedIndexes=${Object.keys(pendingToolArguments).join(',')})`,
       );
-    const finished =
-      finishReason !== undefined &&
-      !incompleteTools &&
-      state.finishReason === undefined &&
-      Object.keys(tools).length > 0
-        ? yield* ToolStream.finishAll(ADAPTER, tools)
-        : undefined;
+    // 兼容网关常在宣告 `tool_calls` 之后才补最后一片 arguments（甚至把第二个
+    // completion 的 delta 接在后面），所以这里**不立即 finalize**：提前解析会
+    // 把半截 JSON 交给工具，也堵死了迟到分片的合并。统一等 `finishEvents`。
+    if (incompleteTools && state.finishReason === undefined) {
+      tools = ToolStream.empty<number>();
+      pendingToolArguments = {};
+    }
 
     return [
       {
         providerMetadataKey: state.providerMetadataKey,
-        tools: finished?.tools ?? tools,
+        tools,
         pendingToolArguments,
-        toolCallEvents: finished?.events ?? state.toolCallEvents,
         usage,
         finishReason,
         finishReasonRaw,
@@ -1385,13 +1389,13 @@ export const finishEvents = (
           )
         : state.lifecycle;
     const reasoned = Lifecycle.reasoningEnd(started, events, 'reasoning-0', reasoningMetadataValue);
-    // 对齐参考库：`requireFinishReason=false` 且上游未给终态时，仍要收尾
-    // 未完成的工具调用，并合成一个终态 reason，否则外层
-    // `requireTerminalEvent` 会因为缺少 finish / provider-error 事件再次失败。
+    // 工具入参统一在流终止时 finalize：既覆盖 `requireFinishReason=false`
+    // 没等到终态的情况，也覆盖 `finish_reason` 之后才补到的参数分片
+    // （`length` / `content-filter` 的残缺工具已在 `step` 里丢弃）。
     const toolCallEvents =
-      state.finishReason === undefined && Object.keys(state.tools).length > 0
+      Object.keys(state.tools).length > 0
         ? (yield* ToolStream.finishAll(ADAPTER, state.tools)).events
-        : state.toolCallEvents;
+        : [];
     const hasToolCalls = toolCallEvents.length > 0;
     const reason =
       state.finishReason === 'stop' && hasToolCalls
@@ -1443,7 +1447,6 @@ export const protocol = Protocol.make({
         request.model.route.providerMetadataKey ?? String(request.model.provider),
       tools: ToolStream.empty<number>(),
       pendingToolArguments: {},
-      toolCallEvents: [],
       lifecycle: Lifecycle.initial(),
       // 对齐 opencode：思维链字段名可由模型兼容配置指定；
       // 未配置时由 delta 探测首个命中的字段。
