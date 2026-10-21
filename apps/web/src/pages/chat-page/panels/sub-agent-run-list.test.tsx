@@ -9,10 +9,12 @@ import {
   SubAgentRunList,
   type SubAgentRunItem,
 } from './sub-agent-run-list.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
 
 afterEach(() => {
   cleanup();
-  // 折叠状态会写入 localStorage；测试之间必须清理，避免污染后续渲染的初始态。
+  // 折叠态现在存在单例 store 里；测试之间必须清理，避免污染后续渲染的初始态。
+  useUIStateStore.setState({ collapsedSubagentRunListBySession: {} });
   window.localStorage.clear();
 });
 
@@ -250,62 +252,76 @@ describe('SubAgentRunList 折叠', () => {
     ).toBe('flex');
   });
 
-  it('折叠状态持久化：写入 localStorage，重新挂载后保持折叠', () => {
+  it('折叠状态按会话写入 uiState（随工作台快照同步）：重新挂载后保持折叠', () => {
     const items = [makeItem({ sessionId: 's-1', status: 'running', title: '运行中任务' })];
     const { unmount } = render(
-      <SubAgentRunList items={items} selectedSessionId={null} onSelectSession={vi.fn()} />,
+      <SubAgentRunList
+        items={items}
+        selectedSessionId={null}
+        onSelectSession={vi.fn()}
+        sessionId="parent-a"
+      />,
     );
 
     fireEvent.click(screen.getByLabelText('折叠子代理列表'));
-    expect(window.localStorage.getItem('chat.subagentRunList.collapsed')).toBe('1');
+    // 落进按会话分桶的 store（而非组件内 state / 裸 localStorage）——
+    // 这是能随 `/settings/workspace-state` 同步到后端、换端后回灌的前提。
+    expect(useUIStateStore.getState().collapsedSubagentRunListBySession['parent-a']).toBe(true);
 
-    // 模拟刷新 / 重新挂载：初始态从 localStorage 恢复为折叠。
     unmount();
-    render(<SubAgentRunList items={items} selectedSessionId={null} onSelectSession={vi.fn()} />);
+    render(
+      <SubAgentRunList
+        items={items}
+        selectedSessionId={null}
+        onSelectSession={vi.fn()}
+        sessionId="parent-a"
+      />,
+    );
     const collapsedToggle = screen.getByLabelText('展开子代理列表');
     expect(collapsedToggle.getAttribute('aria-expanded')).toBe('false');
 
     fireEvent.click(collapsedToggle);
-    expect(window.localStorage.getItem('chat.subagentRunList.collapsed')).toBe('0');
+    // 展开时删除桶键（等价于缺省展开），不留 `false` 垃圾记录。
+    expect(
+      useUIStateStore.getState().collapsedSubagentRunListBySession['parent-a'],
+    ).toBeUndefined();
   });
 
-  it('localStorage 不可读时回落默认展开', () => {
-    const getItem = vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
-      throw new Error('storage disabled');
-    });
-    try {
-      render(
-        <SubAgentRunList
-          items={[makeItem({ sessionId: 's-1', status: 'completed', title: '已完成任务' })]}
-          selectedSessionId={null}
-          onSelectSession={vi.fn()}
-        />,
-      );
+  it('折叠态按会话隔离：A 会话收起不影响 B 会话', () => {
+    const items = [makeItem({ sessionId: 's-1', status: 'completed', title: '已完成任务' })];
 
-      expect(screen.getByLabelText('折叠子代理列表').getAttribute('aria-expanded')).toBe('true');
-    } finally {
-      getItem.mockRestore();
-    }
+    const { unmount } = render(
+      <SubAgentRunList
+        items={items}
+        selectedSessionId={null}
+        onSelectSession={vi.fn()}
+        sessionId="parent-a"
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('折叠子代理列表'));
+    expect(screen.getByLabelText('展开子代理列表').getAttribute('aria-expanded')).toBe('false');
+    unmount();
+
+    render(
+      <SubAgentRunList
+        items={items}
+        selectedSessionId={null}
+        onSelectSession={vi.fn()}
+        sessionId="parent-b"
+      />,
+    );
+    expect(screen.getByLabelText('折叠子代理列表').getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('localStorage 不可写时折叠交互仍生效', () => {
-    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
-      throw new Error('quota exceeded');
-    });
-    try {
-      render(
-        <SubAgentRunList
-          items={[makeItem({ sessionId: 's-1', status: 'completed', title: '已完成任务' })]}
-          selectedSessionId={null}
-          onSelectSession={vi.fn()}
-        />,
-      );
+  it('未传 sessionId 时落 __default__ 桶，不影响具体会话的折叠态', () => {
+    const items = [makeItem({ sessionId: 's-1', status: 'completed', title: '已完成任务' })];
 
-      fireEvent.click(screen.getByLabelText('折叠子代理列表'));
-      expect(screen.getByLabelText('展开子代理列表').getAttribute('aria-expanded')).toBe('false');
-    } finally {
-      setItem.mockRestore();
-    }
+    render(<SubAgentRunList items={items} selectedSessionId={null} onSelectSession={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('折叠子代理列表'));
+
+    const buckets = useUIStateStore.getState().collapsedSubagentRunListBySession;
+    expect(buckets['__default__']).toBe(true);
+    expect(buckets['parent-a']).toBeUndefined();
   });
 });
 
@@ -531,12 +547,12 @@ describe('SubAgentRunList 折叠态后台计数', () => {
     expect(screen.queryByText('2 活跃')).toBeNull();
 
     unmount();
-    // 折叠偏好已写入 localStorage：第二段渲染前清掉，确保从默认展开态开始。
-    window.localStorage.clear();
 
+    // 换一个会话桶：折叠态按会话隔离，第二段从默认展开态开始（无需清 store）。
     render(
       <SubAgentRunList
         items={[makeItem({ sessionId: 's-3', status: 'completed', title: '已完成任务' })]}
+        sessionId="parent-other"
         selectedSessionId={null}
         onSelectSession={vi.fn()}
         shellItems={[

@@ -365,8 +365,9 @@ async function bootstrapRemoteSync(ctx: BootstrapContext): Promise<void> {
     if (ctx.signal?.aborted || !isCurrentScope(ctx)) {
       return;
     }
-    // GET 在途期间已有推送落地（如 token 刷新触发的重跑 + 用户此刻的修改）：
-    // 响应对应的可能是推送前的旧数据，必须按「本地优先」处理，防止回滚用户改动。
+    // GET 在途期间已有推送落地（用户此刻的修改，或重新登录 / retry 触发的又一次
+    // bootstrap）：响应对应的可能是推送前的旧数据，必须按「本地优先」处理，
+    // 防止回滚用户改动。
     const hadPushDuringGet = saveSeq !== seqBeforeGet;
 
     const remotePreferences = result.preferences;
@@ -436,27 +437,39 @@ async function bootstrapRemoteSyncFromAuth(): Promise<void> {
 /**
  * 挂到各端 App 顶层（Web：`authHydrated && desktopGatewayReady`；桌面端：`Boolean(accessToken)`）。
  * 认证就绪后触发一次远端方向决策；未登录时回到「仅本地」状态。
+ *
+ * **依赖里放的是「有没有令牌」而不是令牌本身**：access token 每 ~13 分钟轮换一次
+ * （`stores/auth/auth.ts` 的到期检查），而轮换与「该不该重新做一次同步方向决策」无关。
+ * 把令牌值写进依赖会让每次轮换都重跑一次 GET + 全量回灌——其中
+ * `applyRemoteValues` 会改 `workbenchLayoutMode`，导致 classic / fusion 布局在用户
+ * 毫无操作时被重建，表现为「放着不动界面自己刷新了」。
+ * 令牌在 effect 内部从 store 现取，拿到的始终是最新值。
  */
 export function useDisplayPreferencesSyncBootstrap(enabled: boolean): void {
-  const accessToken = useAuthStore((state) => state.accessToken);
   const email = useAuthStore((state) => state.email);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
+  const hasAccessToken = useAuthStore((state) => state.accessToken !== null);
 
   useEffect(() => {
     if (!enabled) {
       return;
     }
-    if (!accessToken || !email || !gatewayUrl) {
+    if (!hasAccessToken || !email || !gatewayUrl) {
       resetModuleState();
       currentScope = null;
       setSyncStatus('local');
+      return;
+    }
+    // 现取：effect 只在「是否已登录」翻转时重跑，令牌本身可能已经轮换过。
+    const accessToken = useAuthStore.getState().accessToken;
+    if (!accessToken) {
       return;
     }
 
     const controller = new AbortController();
     void bootstrapRemoteSync({ accessToken, email, gatewayUrl, signal: controller.signal });
     return () => controller.abort();
-  }, [accessToken, email, enabled, gatewayUrl]);
+  }, [email, enabled, gatewayUrl, hasAccessToken]);
 }
 
 // ── 订阅：任何本地偏好变化都进入防抖推送（含 setState 旁路）──────────

@@ -19,6 +19,7 @@ import type { RecoveredActiveAssistantStream } from '../../../components/convers
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
+import { readRefCurrent } from '../../../utils/ref/ref-current.js';
 import { extractWorkingDirectory } from '../../../utils/session/session-metadata.js';
 import { fetchSessionRecoveryOnce } from '../../../utils/session/session-recovery-flight.js';
 import type { SessionViewCacheReturn } from '../conversation/snapshot/use-session-view-cache.js';
@@ -148,7 +149,15 @@ export interface ChatSessionSwitchDeps {
     activeStream: SessionActiveStream | null,
     messages: ChatMessage[],
   ) => void;
-  readonly token: string | null;
+  /**
+   * access token 的 ref 镜像（**不是**直接的 token 值）。
+   *
+   * 刻意不接收值：调用方（`ChatPage`）若把 token 值传进来就必须进 effect 依赖，
+   * 于是 token 轮换会让整个「会话切换」流程重跑一遍——重置快照就绪标记、挂骨架屏、
+   * 重拉全量 recovery。对一个**已停止**的会话，这就是「放着不动界面自己刷新了」。
+   * token 与「用户在看哪个会话」无关，只能以 ref 形式按需读取。
+   */
+  readonly tokenRef: RefObject<string | null>;
   readonly webSearchAvailable: boolean;
   readonly DEFAULT_VISIBLE_MESSAGE_COUNT: 20;
   readonly INITIAL_TURN_LIMIT: 10;
@@ -223,11 +232,16 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     streamingRef,
     streamingSegmentsRef,
     syncRecoveredStreamSnapshot,
-    token,
+    tokenRef,
     webSearchAvailable,
     DEFAULT_VISIBLE_MESSAGE_COUNT,
     INITIAL_TURN_LIMIT,
   } = deps;
+
+  // 读 ref 走收敛函数：本函数是 effect 体，但解构出来的 ref 属「hook 参数」，
+  // 直接 `.current` 会让调用方整个 hook 退出 React Compiler 优化（见 ref-current.js）。
+  // 读取时机等价于原来的「闭包捕获 token 值」，只是不再把 token 写进依赖数组。
+  const token = readRefCurrent(tokenRef);
 
   const requestedSessionId = sessionId ?? null;
   const shouldPreserveBootstrapState = pendingBootstrapSessionRef.current === requestedSessionId;

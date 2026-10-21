@@ -46,6 +46,7 @@ type AuthStoreModule = typeof import('../auth/auth.js');
 interface Harness {
   sync: SyncModule;
   ui: UiStoreModule;
+  auth: AuthStoreModule;
 }
 
 async function loadHarness(): Promise<Harness> {
@@ -58,7 +59,7 @@ async function loadHarness(): Promise<Harness> {
     email: 'ada@example.com',
     gatewayUrl: 'http://gateway.test',
   });
-  return { sync, ui };
+  return { sync, ui, auth };
 }
 
 beforeEach(() => {
@@ -261,5 +262,45 @@ describe('workspace state bootstrap', () => {
     );
     expect(ui.useUIStateStore.getState().rightOpen).toBe(false);
     expect(settingsMocks.putWorkspaceState).not.toHaveBeenCalled();
+  });
+
+  it('access token 轮换（仍是同一账号）不重跑同步方向决策', async () => {
+    settingsMocks.getWorkspaceState.mockResolvedValue({ state: null, updatedAt: null });
+    const { sync, auth } = await loadHarness();
+    renderHook(() => sync.useWorkspaceStateSyncBootstrap(true));
+
+    await waitFor(() => expect(settingsMocks.putWorkspaceState).toHaveBeenCalledTimes(1));
+    expect(settingsMocks.getWorkspaceState).toHaveBeenCalledTimes(1);
+
+    // 令牌轮换：值变了，但「有没有令牌」没变。effect 不该重跑，否则会重新 GET
+    // 并把远端快照整包回灌（重写标签页 / 面板开关 / 布局）。
+    act(() => {
+      auth.useAuthStore.setState({ accessToken: 'token-2' });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(settingsMocks.getWorkspaceState).toHaveBeenCalledTimes(1);
+    expect(settingsMocks.putWorkspaceState).toHaveBeenCalledTimes(1);
+  });
+
+  it('登出（有令牌 → 无令牌）时重置同步现场', async () => {
+    settingsMocks.getWorkspaceState.mockResolvedValue({ state: null, updatedAt: null });
+    const { sync, auth } = await loadHarness();
+    renderHook(() => sync.useWorkspaceStateSyncBootstrap(true));
+
+    await waitFor(() => expect(settingsMocks.putWorkspaceState).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      auth.useAuthStore.setState({ accessToken: null });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // 登出后不再发起任何同步往返。
+    expect(settingsMocks.getWorkspaceState).toHaveBeenCalledTimes(1);
+    expect(settingsMocks.putWorkspaceState).toHaveBeenCalledTimes(1);
   });
 });

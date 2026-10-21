@@ -26,6 +26,10 @@ const sessionsClientMocks = vi.hoisted(() => ({
   // 显式标注返回值类型，否则 vi.fn(async () => []) 会被推断成 never[]，
   // 后续 mockResolvedValueOnce([...]) 无法传入真实会话对象。
   list: vi.fn(async (): Promise<unknown[]> => []),
+  // 删除返回 `deletedSessionIds`（含级联删除出的关联会话），走真实响应形状。
+  delete: vi.fn(async (_token: string, sessionId: string): Promise<unknown> => ({
+    deletedSessionIds: [sessionId],
+  })),
 }));
 
 vi.mock('@openAwork/web-client', async (importOriginal) => {
@@ -35,6 +39,7 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
     createSessionsClient: () => ({
       create: sessionsClientMocks.create,
       list: sessionsClientMocks.list,
+      delete: sessionsClientMocks.delete,
     }),
   };
 });
@@ -75,12 +80,15 @@ beforeEach(() => {
   capturedNavigate = null;
   sessionsClientMocks.create.mockClear();
   sessionsClientMocks.list.mockClear();
+  sessionsClientMocks.delete.mockClear();
   useAuthStore.setState({ accessToken: 'test-token', gatewayUrl: 'http://localhost:3000' });
   useUIStateStore.setState({
     activeSessionWorkspace: null,
     activeTabId: null,
     chatView: 'session',
     collapsedSubagentParentIds: [],
+    collapsedSubagentRunListBySession: {},
+    activeChildSessionIdBySession: {},
     savedWorkspaces: [],
     selectedWorkspacePath: null,
     // 草稿的 SSH 连接是独立字段，跨用例不重置会残留上一轮的远端绑定。
@@ -442,6 +450,46 @@ describe('useSessions — 后台静默刷新失败不打断列表', () => {
     expect(sessionsClientMocks.list).toHaveBeenCalledTimes(2);
     expect(result.current.sessionsError).toBeNull();
     expect(result.current.sessions).toHaveLength(1);
+  });
+});
+
+describe('useSessions — 删除会话时注销子视图现场', () => {
+  it('删除成功（含级联删除的关联会话）后清掉对应折叠态与「当前子会话」记忆', async () => {
+    sessionsClientMocks.list.mockResolvedValueOnce([]);
+    sessionsClientMocks.delete.mockResolvedValueOnce({
+      deletedSessionIds: ['parent-a', 'child-cascade'],
+    });
+    useUIStateStore.setState({
+      collapsedSubagentRunListBySession: { 'parent-a': true, 'parent-b': true },
+      activeChildSessionIdBySession: { 'parent-a': 'child-1', 'parent-b': 'child-cascade' },
+    });
+
+    const { result } = renderUseSessions();
+    await waitFor(() => expect(result.current).not.toBeNull());
+
+    await act(async () => {
+      await result.current.quickDeleteSession('parent-a');
+    });
+
+    const state = useUIStateStore.getState();
+    // parent-a 作为父会话被删 → 折叠桶与子会话桶都清掉。
+    expect(state.collapsedSubagentRunListBySession).toEqual({ 'parent-b': true });
+    // child-cascade 作为**值**被删 → parent-b 那条记忆也一并失效。
+    expect(state.activeChildSessionIdBySession).toEqual({});
+  });
+
+  it('会话页删除路径（SessionsPage）同样注销', async () => {
+    // 该路径在 SessionsPage 内直接调用 store，这里只验证 store 方法本身幂等可重入。
+    useUIStateStore.setState({
+      collapsedSubagentRunListBySession: { gone: true },
+      activeChildSessionIdBySession: { gone: 'child-x' },
+    });
+
+    useUIStateStore.getState().forgetSessionSubviews(['gone']);
+    useUIStateStore.getState().forgetSessionSubviews(['gone']);
+
+    expect(useUIStateStore.getState().collapsedSubagentRunListBySession).toEqual({});
+    expect(useUIStateStore.getState().activeChildSessionIdBySession).toEqual({});
   });
 });
 

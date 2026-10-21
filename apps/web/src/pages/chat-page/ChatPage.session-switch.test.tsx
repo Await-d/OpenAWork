@@ -495,6 +495,35 @@ describe('ChatPage — 会话切换', () => {
     expect(useUIStateStore.getState().sidePanelActiveTab).toBe('code');
   });
 
+  it('切会话只更新选中态，不把子会话写进新会话的「上次查看」记忆', async () => {
+    // A 已经记住自己看过的子会话；切到 B 时若在 effect 里监听 selectedChildSessionId
+    // 落库，就会把 A 的子会话 id 写成 B 的记忆（B 之后打开会指向不存在的子会话）。
+    useUIStateStore.setState({
+      activeChildSessionIdBySession: { 'session-a': 'child-of-a' },
+    });
+
+    const router = renderChatPageAt('/chat/session-a');
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_A_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    await switchToSession(router, '/chat/session-b');
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_B_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    const buckets = useUIStateStore.getState().activeChildSessionIdBySession;
+    // A 的记忆保持原样，B 不得凭空多出一条（自动选择不回填记忆）。
+    expect(buckets['session-a']).toBe('child-of-a');
+    expect(buckets['session-b']).toBeUndefined();
+  });
+
   it('首屏挂载不回收预览视图（刷新后仍停在上次预览）', async () => {
     // 刷新场景：lastChatPath 与当前路由一致（持久化恢复），因此不会触发会话换镜。
     useUIStateStore.setState({

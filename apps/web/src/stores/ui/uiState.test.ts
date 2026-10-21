@@ -38,6 +38,8 @@ function resetLayoutState(): void {
     activeTabId: null,
     closedSessionTabIds: [],
     collapsedSubagentParentIds: [],
+    collapsedSubagentRunListBySession: {},
+    activeChildSessionIdBySession: {},
     expandedDirsBySession: {},
     lastChatPath: null,
     reviewPanelOpened: false,
@@ -1046,8 +1048,8 @@ function fullBinaryLayout(depth: number): unknown {
 }
 
 describe('terminalLayoutBySession v24 → v25 迁移', () => {
-  it('persist 版本已提升到 28（v28 起 savedWorkspaces 带 SSH 连接维度）', () => {
-    expect(useUIStateStore.persist.getOptions().version).toBe(28);
+  it('persist 版本已提升到 29（v29 起子视图折叠 / 当前子会话按会话分桶）', () => {
+    expect(useUIStateStore.persist.getOptions().version).toBe(29);
   });
 
   it('v24 快照迁移得到空桶（分屏能力本轮才引入，无历史值可迁移）', () => {
@@ -1616,6 +1618,131 @@ describe('collapsedSubagentParentIds 子代理列表折叠', () => {
     useUIStateStore.getState().retainSubagentCollapsed([]);
 
     expect(useUIStateStore.getState().collapsedSubagentParentIds).toEqual([]);
+  });
+});
+
+describe('会话内子视图持久化（子代理列表折叠 / 当前子会话）', () => {
+  it('子代理列表折叠按会话分桶：展开时删除桶键而非写 false', () => {
+    const store = useUIStateStore.getState();
+
+    store.setSubagentRunListCollapsed('parent-a', true);
+    expect(useUIStateStore.getState().collapsedSubagentRunListBySession).toEqual({
+      'parent-a': true,
+    });
+
+    useUIStateStore.getState().setSubagentRunListCollapsed('parent-a', false);
+    expect(useUIStateStore.getState().collapsedSubagentRunListBySession).toEqual({});
+  });
+
+  it('无实际变化时返回原引用，不产生多余订阅通知', () => {
+    useUIStateStore.getState().setSubagentRunListCollapsed('parent-a', true);
+    const before = useUIStateStore.getState().collapsedSubagentRunListBySession;
+
+    useUIStateStore.getState().setSubagentRunListCollapsed('parent-a', true);
+
+    expect(useUIStateStore.getState().collapsedSubagentRunListBySession).toBe(before);
+  });
+
+  it('未提供会话 id 时落 __default__ 桶', () => {
+    useUIStateStore.getState().setSubagentRunListCollapsed(null, true);
+
+    expect(useUIStateStore.getState().collapsedSubagentRunListBySession).toEqual({
+      __default__: true,
+    });
+  });
+
+  it('当前子会话按会话记录；传 null 清除该会话的记录', () => {
+    useUIStateStore.getState().setActiveChildSessionId('parent-a', 'child-1');
+    useUIStateStore.getState().setActiveChildSessionId('parent-b', 'child-2');
+
+    expect(useUIStateStore.getState().activeChildSessionIdBySession).toEqual({
+      'parent-a': 'child-1',
+      'parent-b': 'child-2',
+    });
+
+    useUIStateStore.getState().setActiveChildSessionId('parent-a', null);
+
+    expect(useUIStateStore.getState().activeChildSessionIdBySession).toEqual({
+      'parent-b': 'child-2',
+    });
+  });
+
+  it('v29 迁移初始化空桶，且不覆盖其它既有偏好', () => {
+    const migrated = runPersistMigration({ collapsedSessionGroups: ['ws-a'] }, 28);
+
+    expect(migrated.collapsedSubagentRunListBySession).toEqual({});
+    expect(migrated.activeChildSessionIdBySession).toEqual({});
+    expect(migrated.collapsedSessionGroups).toEqual(['ws-a']);
+  });
+
+  it.each([
+    ['字符串', 'x'],
+    ['数字', 42],
+    ['null', null],
+    ['数组', ['a']],
+  ] as ReadonlyArray<[string, unknown]>)('同版本脏数据（%s）在迁移尾部归一为空桶', (_l, value) => {
+    const migrated = runPersistMigration(
+      { collapsedSubagentRunListBySession: value, activeChildSessionIdBySession: value },
+      29,
+    );
+
+    expect(migrated.collapsedSubagentRunListBySession).toEqual({});
+    expect(migrated.activeChildSessionIdBySession).toEqual({});
+  });
+
+  it('forgetSessionSubviews 注销被删除会话的折叠 / 子会话记录，保留 __default__', () => {
+    useUIStateStore.setState({
+      collapsedSubagentRunListBySession: { 'parent-a': true, 'parent-b': true, __default__: true },
+      activeChildSessionIdBySession: { 'parent-a': 'child-1', 'parent-b': 'child-2' },
+    });
+
+    useUIStateStore.getState().forgetSessionSubviews(['parent-a']);
+
+    const state = useUIStateStore.getState();
+    expect(state.collapsedSubagentRunListBySession).toEqual({
+      'parent-b': true,
+      __default__: true,
+    });
+    expect(state.activeChildSessionIdBySession).toEqual({ 'parent-b': 'child-2' });
+  });
+
+  it('被删除的是子会话时，一并清掉指向它的「当前子会话」记忆', () => {
+    useUIStateStore.setState({
+      activeChildSessionIdBySession: { 'parent-a': 'child-1', 'parent-b': 'child-2' },
+    });
+
+    useUIStateStore.getState().forgetSessionSubviews(['child-1']);
+
+    expect(useUIStateStore.getState().activeChildSessionIdBySession).toEqual({
+      'parent-b': 'child-2',
+    });
+  });
+
+  it('forgetSessionSubviews 无命中时返回原 state（不触发多余通知）', () => {
+    useUIStateStore.setState({
+      collapsedSubagentRunListBySession: { 'parent-b': true },
+      activeChildSessionIdBySession: { 'parent-b': 'child-2' },
+    });
+    const before = useUIStateStore.getState();
+
+    useUIStateStore.getState().forgetSessionSubviews(['not-exist']);
+    expect(useUIStateStore.getState()).toBe(before);
+
+    useUIStateStore.getState().forgetSessionSubviews([]);
+    expect(useUIStateStore.getState()).toBe(before);
+  });
+
+  it('桶内非法条目逐条丢弃（折叠桶只认 true，子会话桶只认非空字符串）', () => {
+    const migrated = runPersistMigration(
+      {
+        collapsedSubagentRunListBySession: { ok: true, no: false, str: 'true' },
+        activeChildSessionIdBySession: { ok: 'child-1', empty: '', num: 1 },
+      },
+      29,
+    );
+
+    expect(migrated.collapsedSubagentRunListBySession).toEqual({ ok: true });
+    expect(migrated.activeChildSessionIdBySession).toEqual({ ok: 'child-1' });
   });
 });
 

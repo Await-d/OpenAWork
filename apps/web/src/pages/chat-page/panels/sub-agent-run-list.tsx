@@ -11,6 +11,8 @@ import {
   resolveSubAgentRunStatus,
   type SubAgentRunStatus,
 } from './sub-agent-status.js';
+import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { sessionSubviewKey } from '../../../stores/ui/session-subview-buckets.js';
 
 export interface SubAgentRunItem {
   sessionId: string;
@@ -631,33 +633,15 @@ function ShellItemCard({
 }
 
 /**
- * 折叠状态的持久化键。这是**视图偏好**（不是会话数据），全局记忆：
- * 无记录时默认展开（首次见到列表即展开）；存储不可用时静默回落，不阻塞交互。
+ * 折叠状态的归属说明（读写在 `uiState`，不在这里）。
+ *
+ * 这是**视图偏好**（不是会话数据），但必须按会话记忆：在 A 会话收起了子代理列表，
+ * 切到 B 会话时 B 的列表不能被一起收起。因此状态落在 `uiState` 的
+ * `collapsedSubagentRunListBySession`（键为 sessionId），既跨刷新 / 跨会话保留，
+ * 也随工作台快照同步到网关——换设备 / 重启后仍是上次的展开态。
+ *
+ * 无记录时默认展开（首次见到列表即展开）。
  */
-const COLLAPSED_STORAGE_KEY = 'chat.subagentRunList.collapsed';
-
-function readCollapsedPreference(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-  try {
-    return window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === '1';
-  } catch {
-    /* swallow — 隐私模式 / 沙箱下不可读，回落默认展开 */
-    return false;
-  }
-}
-
-function writeCollapsedPreference(collapsed: boolean): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  try {
-    window.localStorage.setItem(COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
-  } catch {
-    /* swallow — 仅保留内存态，不影响本次交互 */
-  }
-}
 
 /** 分组标题（两组共存时才出现）：弱化的小号标签，计数与标题同一文本节点便于读取。 */
 const GROUP_HEADER_STYLE: React.CSSProperties = {
@@ -675,6 +659,7 @@ export function SubAgentRunList({
   onSelectSession,
   onStopSession,
   stoppingSessionIds,
+  sessionId,
   shellItems,
   onPreviewShell,
   onKillShell,
@@ -685,6 +670,8 @@ export function SubAgentRunList({
   selectedSessionId: string | null;
   onStopSession?: (sessionId: string) => void;
   stoppingSessionIds?: ReadonlySet<string>;
+  /** 所属会话：折叠态按它分桶记忆；缺省落 `__default__` 桶。 */
+  sessionId?: string | null;
   /** 后台命令行（调用方保证只含 `kind === 'shell'`）；不传时行为与「仅子代理」现状一致。 */
   shellItems?: readonly BackgroundTaskRow[];
   onPreviewShell?: (terminalId: string) => void;
@@ -692,18 +679,20 @@ export function SubAgentRunList({
   /** 终止在途的 terminalId 集合：命中时禁用「终止」并显示「终止中」。 */
   pendingKillShellIds?: ReadonlySet<string>;
 }) {
-  // 折叠状态：默认展开（首访）/ 记忆上次选择（刷新与重新挂载后保持）。
-  // 折叠时收起卡片列表，表头收缩为迷你胶囊（箭头 + 总数 + 活跃提示），
-  // 让出消息区空间的同时保留「有后台任务在跑」的可见性。
-  const [collapsed, setCollapsed] = useState(readCollapsedPreference);
+  // 折叠状态按会话分桶存在 `uiState`：默认展开（首访）/ 记忆该会话上次选择，
+  // 并随工作台快照同步（重启、换端后仍保持）。折叠时收起卡片列表，表头收缩为
+  // 迷你胶囊（箭头 + 总数 + 活跃提示），让出消息区空间的同时保留「有任务在跑」的可见性。
+  const bucketKey = sessionSubviewKey(sessionId);
+  const collapsed = useUIStateStore(
+    (state) => state.collapsedSubagentRunListBySession[bucketKey] === true,
+  );
+  const setSubagentRunListCollapsed = useUIStateStore((state) => state.setSubagentRunListCollapsed);
   // 终止后台命令是破坏性操作：与完整面板 / 常驻胶囊共用同一确认弹窗（禁止各自实现一套）。
   const [pendingConfirm, setPendingConfirm] = useState<BackgroundTaskPendingConfirm | null>(null);
   const listId = useId();
 
   const toggleCollapsed = () => {
-    const next = !collapsed;
-    setCollapsed(next);
-    writeCollapsedPreference(next);
+    setSubagentRunListCollapsed(sessionId ?? null, !collapsed);
   };
 
   const shells = shellItems ?? [];

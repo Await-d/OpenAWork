@@ -3,6 +3,7 @@ import type { AttachStreamEligibilityInput } from './attach-stream-eligibility.j
 import {
   isAttachStreamTerminal,
   resolveAttachEffectDisposition,
+  shouldAttemptAttachToSession,
   shouldCancelAttachRetry,
 } from './attach-stream-eligibility.js';
 
@@ -21,6 +22,51 @@ function createEligibility(
     ...overrides,
   };
 }
+
+describe('shouldAttemptAttachToSession', () => {
+  it('本地活跃流提示指向当前会话、且状态未收敛时允许 attach（刷新后抢先续接）', () => {
+    expect(
+      shouldAttemptAttachToSession(
+        createEligibility({
+          activeGatewayStreamSessionId: 'session-1',
+          sessionStateStatus: null,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('会话已权威判为 idle 时忽略陈旧的本地活跃流提示', () => {
+    expect(
+      shouldAttemptAttachToSession(
+        createEligibility({
+          activeGatewayStreamSessionId: 'session-1',
+          recoveryActiveStreamPresent: false,
+          sessionStateStatus: 'idle',
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('idle 但网关仍报活跃流时仍然 attach（权威信号优先于 idle 判定）', () => {
+    expect(
+      shouldAttemptAttachToSession(
+        createEligibility({
+          activeGatewayStreamSessionId: null,
+          recoveryActiveStreamPresent: true,
+          sessionStateStatus: 'idle',
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('running 时照常 attach', () => {
+    expect(
+      shouldAttemptAttachToSession(
+        createEligibility({ activeGatewayStreamSessionId: null, sessionStateStatus: 'running' }),
+      ),
+    ).toBe(true);
+  });
+});
 
 describe('shouldCancelAttachRetry', () => {
   const cases: Array<{

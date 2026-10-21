@@ -59,14 +59,22 @@ interface SyncMeta {
 }
 
 let currentScope: SyncScope | null = null;
-let accessToken: string | null = null;
+/**
+ * 注意：这里**刻意没有**模块级的 access token。
+ *
+ * 本模块的 bootstrap effect 不随令牌轮换重跑（见 `useWorkspaceStateSyncBootstrap`），
+ * 任何模块级缓存的令牌都会在 ~13 分钟后过期：拿它发 PUT 必然 401，还会被计入
+ * 「推送失败 → pendingPush」自愈路径，反过来污染同步元信息。因此每次请求都在
+ * `pushNow` 里从 auth store 现取**当次**令牌，`bootstrapRemoteSync` 则直接用入参。
+ */
 let remoteReady = false;
 let applyingRemote = false;
 /**
  * 本会话内存在尚未成功推送的本地改动。
  *
- * 不能只看「GET 在途期间有没有变化」：token 刷新会重跑 bootstrap，此刻本地改动
- * 已经发生在捕获点之前，若直接回灌远端就会把用户刚做的操作回滚掉。
+ * 不能只看「GET 在途期间有没有变化」：`bootstrapRemoteSync` 可能在本地改动
+ * 已发生之后才被再次调用（例如重新登录、`retry()` 触发），若只比较「在途窗口内
+ * 的差异」就会漏判，直接回灌远端会把用户刚做的操作回滚掉。
  */
 let localDirty = false;
 let lastPushed = '';
@@ -181,7 +189,6 @@ function resetModuleState(): void {
   localDirty = false;
   lastPushed = '';
   pushSeq = 0;
-  accessToken = null;
   // 让队列里尚未执行的推送失效（它们属于上一个 scope，执行时不能读新账号的状态）。
   scopeGeneration += 1;
 }
@@ -217,15 +224,22 @@ async function pushNow(generation: number): Promise<void> {
   // 排队期间发生了登出 / 换账号：这次推送属于旧 scope，直接丢弃。
   if (generation !== scopeGeneration) return;
   const scope = currentScope;
-  const token = accessToken;
+  // 令牌**现取**：bootstrap 不随令牌轮换重跑，模块级缓存的那份早已过期。
+  // scope 仍是同一个账号时，取到的就是该账号的最新令牌。
+  const authState = useAuthStore.getState();
+  const token = authState.accessToken;
   if (!remoteReady || scope === null || token === null) return;
+  // 账号已切换但新 bootstrap 尚未落地：此刻 store 里的令牌属于**新**账号，而
+  // `scope` 还指向旧账号。用新令牌往旧 scope 推，轻则 401 污染 pendingPush 标记，
+  // 重则把本机现场写进另一个账号的记录。等新 bootstrap 重置 scope 之后再推。
+  if (authState.email !== scope.email) return;
 
   const payload = buildSnapshot();
   // 动作函数已被 `readPersistedUiStateSnapshot` 剔除；这里比较的是真正会落库的内容。
   const serialized = JSON.stringify(payload);
   if (serialized === lastPushed) {
     // 内容与上次成功推送一致：此前因「非持久化字段变化」而置脏的标记可以清掉了，
-    // 否则下次 token 刷新会把这条无意义的 dirty 当成「本地有未推改动」而拒绝回灌。
+    // 否则下一次 bootstrap 会把这条无意义的 dirty 当成「本地有未推改动」而拒绝回灌。
     localDirty = false;
     writeMeta({ ownerEmail: scope.email, pendingPush: false });
     return;
@@ -244,8 +258,8 @@ async function pushNow(generation: number): Promise<void> {
     writeMeta({ ownerEmail: scope.email, pendingPush: false });
   } catch (error) {
     if (requestSeq !== pushSeq || currentScope !== scope) return;
-    // 失败后保持 dirty：下次 token 刷新 / 重新 bootstrap 时以本地为准自愈，
-    // 不再拿远端旧值覆盖这次没推上去的改动。
+    // 失败后保持 dirty：下次重新 bootstrap 时以本地为准自愈（pendingPush 也会让
+    // 下次启动跳过 GET 直接推），不再拿远端旧值覆盖这次没推上去的改动。
     localDirty = true;
     writeMeta({ ownerEmail: scope.email, pendingPush: true });
     console.warn('[workspace-state-sync] 工作台状态推送失败，将在下次变更或启动时重试:', error);
@@ -274,7 +288,6 @@ async function bootstrapRemoteSync(
     resetModuleState();
     currentScope = { gatewayUrl: ctx.gatewayUrl, email: ctx.email };
   }
-  accessToken = ctx.accessToken;
 
   const meta = readMeta();
   const ownerMismatch = meta.ownerEmail !== undefined && meta.ownerEmail !== ctx.email;
@@ -294,7 +307,7 @@ async function bootstrapRemoteSync(
     remoteReady = true;
 
     if (result.state !== null) {
-      // 本会话已有未推成功的本地改动（token 刷新重跑 bootstrap 时会走到这里）：
+      // 本会话已有未推成功的本地改动（例如上一次推送失败后重新 bootstrap）：
       // 以本地为准推上去，不用远端把用户刚做的操作回滚掉。
       if (localDirty) {
         await enqueuePush();
@@ -330,23 +343,32 @@ async function bootstrapRemoteSync(
 
 /**
  * 挂到 App 顶层（与显示偏好同步同一时机：认证与桌面网关都就绪后）。
+ *
+ * **依赖里放的是「有没有令牌」而不是令牌本身**：token 轮换不该重做一次
+ * 「读远端工作台快照并回灌」——回灌会重写标签页、面板开关与布局，用户什么都没做
+ * 却看到界面被重建。令牌在 effect 内部现取即可，语义与原来一致。
  */
 export function useWorkspaceStateSyncBootstrap(enabled: boolean): void {
-  const token = useAuthStore((state) => state.accessToken);
   const email = useAuthStore((state) => state.email);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
+  const hasAccessToken = useAuthStore((state) => state.accessToken !== null);
 
   useEffect(() => {
     if (!enabled) return;
-    if (!token || !email || !gatewayUrl) {
+    if (!hasAccessToken || !email || !gatewayUrl) {
       resetModuleState();
       currentScope = null;
+      return;
+    }
+    // 现取：effect 只在「是否已登录」翻转时重跑，令牌本身可能已经轮换过。
+    const token = useAuthStore.getState().accessToken;
+    if (!token) {
       return;
     }
     const controller = new AbortController();
     void bootstrapRemoteSync({ accessToken: token, email, gatewayUrl, signal: controller.signal });
     return () => controller.abort();
-  }, [enabled, token, email, gatewayUrl]);
+  }, [email, enabled, gatewayUrl, hasAccessToken]);
 }
 
 // ── 订阅：任何本地现场变化都进入去抖推送 ────────────────────────────

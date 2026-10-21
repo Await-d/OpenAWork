@@ -606,6 +606,8 @@ export function useSessions() {
               Date.now() + MISSING_PARENT_SESSION_CACHE_TTL_MS,
             );
             setSessions((prev) => prev.filter((s) => s.id !== sessionIdToDelete));
+            // 会话确已不存在：注销它的子视图现场（折叠态 / 记住的子会话）。
+            useUIStateStore.getState().forgetSessionSubviews([sessionIdToDelete]);
             const nextActiveTab = useUIStateStore.getState().closeSessionTabs([sessionIdToDelete]);
             if (sessionId === sessionIdToDelete) {
               navigateToClosedSessionTarget(nextActiveTab, navigate);
@@ -646,6 +648,8 @@ export function useSessions() {
             );
           }
           setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
+          // 子视图现场随会话一起注销（含级联删除出的关联会话）。
+          useUIStateStore.getState().forgetSessionSubviews(Array.from(deletedSessionIds));
           // 顶部会话标签（融合布局）与列表联动：删除后同步关闭对应标签页，
           // 若被删会话正是当前路由，则改跳到关闭后应激活的标签页。
           const nextActiveTab = useUIStateStore

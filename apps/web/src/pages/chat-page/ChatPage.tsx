@@ -290,6 +290,30 @@ export default function ChatPage() {
   const isPageActive = pageActivation;
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
+  /**
+   * `token` 的 ref 镜像，专供「会话切换」大 effect 读取（见下方依赖数组）。
+   *
+   * 该 effect 的职责是「会话身份变化时重建会话视图」：它会重置快照就绪标记、
+   * 挂骨架屏、重拉一次全量 recovery。而 access token 轮换（每 ~13 分钟一次，
+   * 见 `stores/auth/auth.ts` 的到期检查）与「用户切到了哪个会话」毫无关系——
+   * 把 token 放进依赖，等于让一个**停止状态的会话**定期整体重载一遍：状态条归零、
+   * 骨架屏闪一下、消息列表被服务端快照重排，表现为「放着不动界面自己刷新了」。
+   *
+   * 因此 token 走 ref：effect 只在会话身份（或显式刷新信号）变化时重跑，而它
+   * 发起请求时读到的一定是最新 token（ref 由下面这个 effect 在提交后同步）。
+   */
+  const sessionSwitchTokenRef = useRef<string | null>(token);
+  useEffect(() => {
+    writeRefCurrent(sessionSwitchTokenRef, token);
+  }, [token]);
+  /**
+   * 「是否已拿到访问令牌」的布尔镜像，**替代** token 值进入会话切换 effect 的依赖。
+   *
+   * 只用 `token` 的 ref 还不够：令牌从「没有」变成「有」时，该 effect 必须重跑一次
+   * （否则鉴权就绪后会话永远不会加载）。而令牌在非空区间内的**轮换**绝不能触发重跑。
+   * 一个布尔量正好把这两种情况区分开。
+   */
+  const hasSessionToken = token !== null;
 
   // ─── 会话生命周期域 — 抽到 useChatSessionLifecycle。
   // 参见 docs/architecture/chat-page-split-plan.md 域 A。
@@ -1308,6 +1332,30 @@ export default function ChatPage() {
     [childSessions, sessionTasks, currentSessionId],
   );
   /**
+   * 「上次查看了哪个子会话」按会话记在 `uiState` 里：刷新 / 换端 / 切走再切回时，
+   * 右侧「子代理」面板仍停在上次那个子会话，而不是被自动选择改回运行中的那个。
+   */
+  const rememberedChildSessionId = useUIStateStore((s) =>
+    currentSessionId === null ? null : (s.activeChildSessionIdBySession[currentSessionId] ?? null),
+  );
+  const persistActiveChildSessionId = useUIStateStore((s) => s.setActiveChildSessionId);
+  /**
+   * 只在用户**显式**选中子会话时落库（点击卡片 / 通知行 / 列表 / 切换器 / Alt+↑↓）。
+   *
+   * 不用 effect 监听 `selectedChildSessionId` 变化：自动回填也会改它，而切会话时父会话
+   * 与选中态的更新不在同一提交里——监听变化会把上一个会话的子会话 id 写进新会话的桶。
+   * 显式选择发生在当前会话上下文内，归属天然正确。
+   */
+  const rememberActiveChildSession = useCallback(
+    (childSessionId: string) => {
+      if (currentSessionId === null) {
+        return;
+      }
+      persistActiveChildSessionId(currentSessionId, childSessionId);
+    },
+    [currentSessionId, persistActiveChildSessionId],
+  );
+  /**
    * 子代理选择编排：显式选择（点击卡片 / 通知行 / 列表 / 键盘导航）优先，
    * 运行列表变化只做兜底回填，绝不覆盖用户刚点开的目标。
    * 自动选择 / Alt+↑↓ 导航 / 面板打开策略的细节见 hook 内注释。
@@ -1317,6 +1365,7 @@ export default function ChatPage() {
     isFusionLayout,
     isMobileViewport,
     rightTab,
+    rememberedChildSessionId,
     selectedChildSessionId,
     setReviewPanelOpened,
     setRightOpen,
@@ -1324,6 +1373,7 @@ export default function ChatPage() {
     setSelectedChildSessionId,
     setSidePanelActiveTab,
     subAgentRunItems,
+    onExplicitChildSessionSelected: rememberActiveChildSession,
   });
   const userHistoryJumpItems = useMemo(() => buildUserHistoryJumpItems(messages), [messages]);
   /**
@@ -2119,7 +2169,7 @@ export default function ChatPage() {
       streamingRef,
       streamingSegmentsRef,
       syncRecoveredStreamSnapshot,
-      token,
+      tokenRef: sessionSwitchTokenRef,
       webSearchAvailable,
       DEFAULT_VISIBLE_MESSAGE_COUNT,
       INITIAL_TURN_LIMIT,
@@ -2138,7 +2188,11 @@ export default function ChatPage() {
     sessionReloadNonce,
     sessionViewCache,
     syncRecoveredStreamSnapshot,
-    token,
+    // 刻意不含 `token` 值：token 轮换与会话身份无关，放进来会让「已停止的会话」
+    // 每 ~13 分钟整体重载一次（骨架屏 + 状态归零 + 全量 recovery）。effect 内
+    // 通过 `sessionSwitchTokenRef` 读取最新 token，语义不变。
+    // 只保留「有没有令牌」这个布尔量，保证鉴权就绪时仍会跑一次。
+    hasSessionToken,
   ]);
 
   useChatDataLoaders({
@@ -3950,6 +4004,7 @@ export default function ChatPage() {
           onStopSession={handleStopChildSession}
           pendingKillShellIds={sessionTerminals.pendingKillIds}
           selectedSessionId={selectedChildSessionId}
+          sessionId={currentSessionId}
           shellItems={backgroundTaskShellRows}
           stoppingSessionIds={stoppingSubAgentIds}
         />

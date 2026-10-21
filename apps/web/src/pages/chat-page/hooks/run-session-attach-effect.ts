@@ -486,6 +486,35 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     client.closeTransports();
   };
 
+  /**
+   * 释放「本地活跃流提示」与权威状态之间的矛盾态。
+   *
+   * `activeGatewayStreamSessionId` 是客户端快照（跨刷新存于 sessionStorage），
+   * 而会话已被权威判为 `idle`、网关也没有 activeStream——这个提示就是陈旧的。
+   * 不释放的话它会一直把 `shouldAttemptAttachToSession` 的第三个条件点亮，
+   * 于是每次 effect 重跑都「attach → 网关回无活跃流 → settleAsEnded → 全量重拉」，
+   * 对已停止的会话表现为「放着不动界面自己刷新」。
+   *
+   * 硬失败的 attach 已经在 `settleAsEnded()` 里清过；这里补的是**走了 skip 分支**
+   * （因新准入条件而不再 attach）的那一类——否则陈旧键会一直留在 sessionStorage 里。
+   * 只清属于本会话的快照：client 是组件级单例，别的会话的现场不能碰。
+   */
+  const releaseStaleActiveStreamHint = () => {
+    if (activeGatewayStreamSessionId === null) {
+      return;
+    }
+    if (activeGatewayStreamSessionId !== currentSessionId) {
+      return;
+    }
+    if (sessionStateStatus !== 'idle' || recoveryActiveStream !== null) {
+      return;
+    }
+    if (client.getActiveStreamSessionId() !== currentSessionId) {
+      return;
+    }
+    client.clearActiveStreamSnapshot();
+  };
+
   switch (
     resolveAttachEffectDisposition({
       eligibility: attachEligibility,
@@ -531,6 +560,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
       ) {
         attachAttemptedSessionRef.current = null;
       }
+      releaseStaleActiveStreamHint();
       return cleanupAttachTransport;
     }
 

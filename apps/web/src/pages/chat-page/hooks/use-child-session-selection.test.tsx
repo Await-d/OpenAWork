@@ -23,15 +23,18 @@ function buildItem(
 interface RenderInput {
   currentSessionId: string | null;
   items: SubAgentRunItem[];
+  /** 该会话上次查看的子会话（`uiState.activeChildSessionIdBySession` 的投影）。 */
+  rememberedChildSessionId?: string | null;
 }
 
 function renderSelection(initial: RenderInput) {
   const setRightOpen = vi.fn();
   const setReviewPanelOpened = vi.fn();
   const setSidePanelActiveTab = vi.fn();
+  const onExplicitChildSessionSelected = vi.fn();
 
   const hook = renderHook(
-    ({ currentSessionId, items }: RenderInput) => {
+    ({ currentSessionId, items, rememberedChildSessionId = null }: RenderInput) => {
       const [selectedChildSessionId, setSelectedChildSessionId] = useState<string | null>(null);
       const [rightTab, setRightTab] = useState<RightPanelTabId>('overview');
 
@@ -39,6 +42,8 @@ function renderSelection(initial: RenderInput) {
         currentSessionId,
         isFusionLayout: false,
         isMobileViewport: false,
+        rememberedChildSessionId,
+        onExplicitChildSessionSelected,
         rightTab,
         selectedChildSessionId,
         setReviewPanelOpened,
@@ -54,7 +59,13 @@ function renderSelection(initial: RenderInput) {
     { initialProps: initial },
   );
 
-  return { hook, setReviewPanelOpened, setRightOpen, setSidePanelActiveTab };
+  return {
+    hook,
+    setReviewPanelOpened,
+    setRightOpen,
+    setSidePanelActiveTab,
+    onExplicitChildSessionSelected,
+  };
 }
 
 afterEach(() => {
@@ -95,6 +106,43 @@ describe('useChildSessionSelection', () => {
     });
 
     expect(hook.result.current.selectedChildSessionId).toBe('ses_history');
+  });
+
+  it('显式选择会落库，自动回填不会（避免把自动选择当成用户的阅读意图）', () => {
+    const { hook, onExplicitChildSessionSelected } = renderSelection({
+      currentSessionId: 's1',
+      items: [buildItem('ses_done', 'completed'), buildItem('ses_run', 'running')],
+    });
+
+    // 自动回填选中了 running 项，但不得写记忆。
+    expect(hook.result.current.selectedChildSessionId).toBe('ses_run');
+    expect(onExplicitChildSessionSelected).not.toHaveBeenCalled();
+
+    act(() => {
+      hook.result.current.controller.openChildSessionInspector('ses_done');
+    });
+
+    expect(onExplicitChildSessionSelected).toHaveBeenCalledWith('ses_done');
+  });
+
+  it('记住的子会话优先于运行中项（重进会话停在用户上次查看的那个）', () => {
+    const { hook } = renderSelection({
+      currentSessionId: 's1',
+      items: [buildItem('ses_done', 'completed'), buildItem('ses_run', 'running')],
+      rememberedChildSessionId: 'ses_done',
+    });
+
+    expect(hook.result.current.selectedChildSessionId).toBe('ses_done');
+  });
+
+  it('记住的子会话已不在运行列表时回落到 running 优先项', () => {
+    const { hook } = renderSelection({
+      currentSessionId: 's1',
+      items: [buildItem('ses_done', 'completed'), buildItem('ses_run', 'running')],
+      rememberedChildSessionId: 'ses_gone',
+    });
+
+    expect(hook.result.current.selectedChildSessionId).toBe('ses_run');
   });
 
   it('运行列表中的显式选择保持不被兜底替换', () => {

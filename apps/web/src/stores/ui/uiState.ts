@@ -5,6 +5,14 @@ import { useShallow } from 'zustand/react/shallow';
 
 import type { TerminalLayout } from '../../components/chat/terminal/layout/types.js';
 import { isSameWorkspace, type WorkspaceIdentity } from '../../utils/session/session-grouping.js';
+import {
+  forgetSessionSubviews,
+  normalizeActiveChildSessionIds,
+  normalizeCollapsedFlags,
+  sessionSubviewKey,
+  withActiveChildSessionId,
+  withCollapsedFlag,
+} from './session-subview-buckets.js';
 
 /**
  * Throttled localStorage adapter for the persist middleware.
@@ -238,6 +246,28 @@ export interface UIStateStore {
   /** 会话侧栏中被折叠子代理列表的父会话 ID（持久化，跨刷新保留折叠状态）。 */
   collapsedSubagentParentIds: string[];
   toggleSubagentCollapsed: (parentSessionId: string) => void;
+  /**
+   * 会话内「子代理运行列表」的折叠态，按会话分桶（键为 sessionId，见
+   * `sessionSubviewKey`）。持久化并随工作台快照同步，重启 / 换端后保持。
+   */
+  collapsedSubagentRunListBySession: Record<string, boolean>;
+  setSubagentRunListCollapsed: (sessionId: string | null, collapsed: boolean) => void;
+  /**
+   * 当前正在查看的子会话，按会话分桶。这是「打开过的子会话」现场：
+   * 刷新或换端回到该父会话时，右侧「子代理」面板仍停在上次查看的那个子会话。
+   */
+  activeChildSessionIdBySession: Record<string, string>;
+  setActiveChildSessionId: (sessionId: string | null, childSessionId: string | null) => void;
+  /**
+   * 注销指定会话的子视图现场（折叠桶 / 当前子会话桶）。
+   *
+   * **只能由「确定这些会话已被删除」的调用方使用**（删除成功的响应、级联删除的
+   * 受影响 id 列表）。刻意不做「列表里没有就删」的推断：会话列表默认只取最近一页
+   * 且带 `excludeTeam`，「未出现」绝大多数是「更早的会话」或「团队会话」，
+   * 按列表剪除会把用户真实打开过的现场大批误删。
+   * 无变化时返回原 state，避免多余的订阅通知与快照推送。
+   */
+  forgetSessionSubviews: (sessionIds: readonly string[]) => void;
   /**
    * 仅保留仍作为父会话存在的 ID，剪除已删除 / 不再有子代理的残留项。
    * 仅应在调用方确认会话列表完整时使用；无变化时返回原 state，
@@ -1553,6 +1583,45 @@ export const useUIStateStore = create<UIStateStore>()(
             : { collapsedSubagentParentIds: next };
         }),
 
+      // 会话内子视图（子代理运行列表折叠 / 当前查看的子会话）：按会话分桶持久化。
+      collapsedSubagentRunListBySession: {},
+      setSubagentRunListCollapsed: (sessionId, collapsed) =>
+        set((state) => {
+          const key = sessionSubviewKey(sessionId);
+          const next = withCollapsedFlag(state.collapsedSubagentRunListBySession, key, collapsed);
+          return next === state.collapsedSubagentRunListBySession
+            ? state
+            : { collapsedSubagentRunListBySession: next };
+        }),
+      activeChildSessionIdBySession: {},
+      setActiveChildSessionId: (sessionId, childSessionId) =>
+        set((state) => {
+          const key = sessionSubviewKey(sessionId);
+          const next = withActiveChildSessionId(
+            state.activeChildSessionIdBySession,
+            key,
+            childSessionId,
+          );
+          return next === state.activeChildSessionIdBySession
+            ? state
+            : { activeChildSessionIdBySession: next };
+        }),
+      forgetSessionSubviews: (sessionIds) =>
+        set((state) => {
+          const forgotten = forgetSessionSubviews(
+            state.collapsedSubagentRunListBySession,
+            state.activeChildSessionIdBySession,
+            sessionIds,
+          );
+          if (!forgotten.changed) {
+            return state;
+          }
+          return {
+            collapsedSubagentRunListBySession: forgotten.collapsed,
+            activeChildSessionIdBySession: forgotten.active,
+          };
+        }),
+
       // File tree
       expandedDirsBySession: {},
       setExpandedDirsForSession: (sessionKey, dirs) =>
@@ -1947,7 +2016,8 @@ export const useUIStateStore = create<UIStateStore>()(
     }),
     {
       name: UI_STATE_STORAGE_KEY,
-      version: 28,
+      // v29：新增「会话内子视图」按会话分桶（子代理运行列表折叠 / 当前查看的子会话）。
+      version: 29,
       // editorMode 不持久化——每次启动默认关闭；reviewPanelOpened 现已作为布局偏好
       // 持久化（刷新后保持上次展开态，缺省与脏数据回落 false，见 merge 兜底）。
       // closedSessionTabIds 属于瞬态标记（只在路由切走前有效），同样不持久化。
@@ -1988,6 +2058,15 @@ export const useUIStateStore = create<UIStateStore>()(
         // 里的非法条目逐条丢弃——该会话切回时按缺省回落审查。
         merged.sidePanelActiveTabBySession = normalizeSidePanelActiveTabBySession(
           merged.sidePanelActiveTabBySession,
+        );
+        // 会话内子视图（子代理列表折叠 / 当前查看的子会话）同样按会话分桶：
+        // 远端快照回灌时 `uiStateVersion` 已是最新，不会走 migrate，校验必须放在
+        // merge 才能挡住手改与旧版本脏数据。
+        merged.collapsedSubagentRunListBySession = normalizeCollapsedFlags(
+          merged.collapsedSubagentRunListBySession,
+        );
+        merged.activeChildSessionIdBySession = normalizeActiveChildSessionIds(
+          merged.activeChildSessionIdBySession,
         );
         merged.editorMode = false;
         merged.closedSessionTabIds = [];
@@ -2218,6 +2297,20 @@ export const useUIStateStore = create<UIStateStore>()(
 
         nextState.expandedDirsBySession = normalizeExpandedDirsBySession(
           nextState.expandedDirsBySession,
+        );
+
+        // v29:会话内子视图（子代理运行列表折叠 / 当前查看的子会话）改为按会话分桶
+        // 持久化，随工作台快照同步。首次引入无旧值可迁移，只初始化空桶。
+        if (version < 29) {
+          nextState.collapsedSubagentRunListBySession = {};
+          nextState.activeChildSessionIdBySession = {};
+        }
+
+        nextState.collapsedSubagentRunListBySession = normalizeCollapsedFlags(
+          nextState.collapsedSubagentRunListBySession,
+        );
+        nextState.activeChildSessionIdBySession = normalizeActiveChildSessionIds(
+          nextState.activeChildSessionIdBySession,
         );
 
         if (!isStringArray(nextState.collapsedSessionGroups)) {

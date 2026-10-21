@@ -36,6 +36,21 @@ export interface UseChildSessionSelectionOptions {
   readonly setSelectedChildSessionId: (value: string | null) => void;
   readonly setSidePanelActiveTab: (tab: SidePanelActiveTab) => void;
   readonly subAgentRunItems: readonly SubAgentRunItem[];
+  /**
+   * 该父会话上次查看的子会话（从 `uiState.activeChildSessionIdBySession` 读出）。
+   * 仅作为自动选择的**首选候选**：仍必须在 `subAgentRunItems` 里存在，否则说明
+   * 子会话已被清理，按原规则回落到运行中 / 第一项。
+   */
+  readonly rememberedChildSessionId?: string | null;
+  /**
+   * 用户**显式**选中某个子会话时回调（点击卡片 / 通知行 / 列表 / 面板切换器 /
+   * Alt+↑↓）。用于把「这个会话上次看的是谁」持久化。
+   *
+   * 为什么不放在消费端监听 `selectedChildSessionId` 变化：自动回填也会改它，
+   * 而切会话时父会话与选中态的更新不在同一提交里，监听变化会把上一个会话的
+   * 子会话 id 误写到新会话的桶里。只在显式意图处落库，归属天然正确。
+   */
+  readonly onExplicitChildSessionSelected?: (sessionId: string) => void;
 }
 
 export interface ChildSessionSelectionController {
@@ -63,6 +78,8 @@ export function useChildSessionSelection(
     setSelectedChildSessionId,
     setSidePanelActiveTab,
     subAgentRunItems,
+    rememberedChildSessionId = null,
+    onExplicitChildSessionSelected,
   } = options;
 
   const explicitSelectionRef = useRef<string | null>(null);
@@ -77,8 +94,11 @@ export function useChildSessionSelection(
     (sessionId: string) => {
       explicitSelectionRef.current = sessionId;
       setSelectedChildSessionId(sessionId);
+      // 显式意图处落库：此刻 `currentSessionId` 就是用户正在看的会话，
+      // 归属天然正确，不受切会话时序影响。
+      onExplicitChildSessionSelected?.(sessionId);
     },
-    [setSelectedChildSessionId],
+    [onExplicitChildSessionSelected, setSelectedChildSessionId],
   );
 
   const openChildSessionInspector = useCallback(
@@ -129,14 +149,28 @@ export function useChildSessionSelection(
       return;
     }
 
+    // 自动选择优先级：该会话上次查看的子会话（仍是有效候选时）> 运行中 / 待处理 >
+    // 第一项。记住的是「用户的阅读现场」，重新进入会话时不该被运行态抢走焦点。
+    const rememberedCandidate =
+      rememberedChildSessionId !== null &&
+      subAgentRunItems.some((item) => item.sessionId === rememberedChildSessionId)
+        ? rememberedChildSessionId
+        : null;
     const runningCandidate =
       subAgentRunItems.find((item) => item.status === 'running' || item.status === 'pending') ??
       subAgentRunItems[0];
-    const nextId = runningCandidate?.sessionId ?? null;
+    const nextId = rememberedCandidate ?? runningCandidate?.sessionId ?? null;
     if (nextId !== selectedChildSessionId) {
       setSelectedChildSessionId(nextId);
     }
-  }, [rightTab, selectedChildSessionId, setRightTab, setSelectedChildSessionId, subAgentRunItems]);
+  }, [
+    rememberedChildSessionId,
+    rightTab,
+    selectedChildSessionId,
+    setRightTab,
+    setSelectedChildSessionId,
+    subAgentRunItems,
+  ]);
 
   useEffect(() => {
     if (subAgentRunItems.length < 2) {

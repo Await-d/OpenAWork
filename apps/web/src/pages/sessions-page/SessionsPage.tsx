@@ -363,6 +363,9 @@ export default function SessionsPage() {
       return runSessionsActionOnce<boolean>({
         onError: (err) => {
           if (isSessionAlreadyDeletedError(err)) {
+            // 会话确已不存在：连带注销它的子视图现场（折叠态 / 记住的子会话），
+            // 否则这些键会永久留在持久化与远端快照里。
+            useUIStateStore.getState().forgetSessionSubviews([id]);
             useUIStateStore.getState().closeSessionTabs([id]);
             setSessions((prev) => prev.filter((s) => s.id !== id));
             if (selectedId === id) setSelectedId(null);
@@ -397,6 +400,8 @@ export default function SessionsPage() {
           );
           const deletedSessionIds = new Set(resolveDeletedSessionIds(result, id));
           logger.info('session deleted', id);
+          // 子视图现场随会话一起注销（含级联删除出的关联会话）。
+          useUIStateStore.getState().forgetSessionSubviews(Array.from(deletedSessionIds));
           // 顶部会话标签（融合布局）与列表联动：删除后同步关闭对应标签页。
           useUIStateStore.getState().closeSessionTabs(Array.from(deletedSessionIds));
           setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));

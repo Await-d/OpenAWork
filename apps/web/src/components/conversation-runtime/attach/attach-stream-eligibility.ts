@@ -26,7 +26,18 @@ export function shouldAttemptAttachToSession(input: AttachStreamEligibilityInput
     input.sessionModesHydrated &&
     (input.sessionStateStatus === 'running' ||
       input.recoveryActiveStreamPresent ||
-      input.activeGatewayStreamSessionId === input.currentSessionId)
+      /**
+       * 客户端本地的「活跃流」提示（`useGatewayClient` 的快照，跨刷新存于
+       * sessionStorage）。它只是**提示**：网关权威答案在 `recoveryActiveStreamPresent`。
+       *
+       * 因此会话已被明确判为 `idle` 时必须忽略它：陈旧提示会让一个**已停止**的会话
+       * 反复满足 attach 条件，每次 effect 重跑都走一遍
+       * 「attach → 网关回「无活跃流」→ settleAsEnded → 全量重拉 recovery」，
+       * 表现为「什么都没做，界面自己刷新了」。`sessionStateStatus` 尚未收敛
+       * （null）时仍保留该提示，用于刷新后抢先续接真正在跑的流。
+       */
+      (input.sessionStateStatus !== 'idle' &&
+        input.activeGatewayStreamSessionId === input.currentSessionId))
   );
 }
 
