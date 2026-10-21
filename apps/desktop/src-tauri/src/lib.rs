@@ -853,8 +853,29 @@ const STARTUP_HEALTH_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 /// 启动等待期的探测间隔(未监听端口会立即 connection refused,探测本身很快)。
 const STARTUP_HEALTH_PROBE_INTERVAL: Duration = Duration::from_millis(250);
 
+/// 面向**本机回环**的 HTTP 客户端。
+///
+/// 必须 `no_proxy()`：`reqwest` 默认读取 `HTTP_PROXY` / `HTTPS_PROXY` /
+/// `ALL_PROXY` 这类系统代理设置，且**不会**自动豁免 `127.0.0.1`。用户开了代理
+/// 软件（Linux 桌面上常见的是环境变量式代理）时，健康检查会被转发到代理，再由
+/// 代理去连本机回环，必然失败 → 判活恒为 `false`。
+///
+/// 症状即「Web 端能打开网关，桌面端却报健康检查未通过」：浏览器默认绕过
+/// localhost，`reqwest` 不会。连带后果更隐蔽——`start_gateway` 里「端口已有健康
+/// 网关则复用」与「先请孤儿退出」两条分支都依赖同一个判活函数，判活恒 false 时
+/// 它会跳过两者直接 spawn 新 sidecar，撞上已被旧网关占用的端口而静默失败，旧网关
+/// 仍在服务，于是「网关明明在跑，桌面端就是进不去」。
+fn loopback_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        // `build()` 只在 TLS backend 初始化失败时返回 Err，而那种情况下
+        // `Client::new()` 同样会 panic；退化到它只为不新增一个 panic 面。
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 async fn is_local_gateway_healthy(port: u16) -> bool {
-    match reqwest::Client::new()
+    match loopback_client()
         .get(format!("http://127.0.0.1:{port}/health"))
         .timeout(Duration::from_secs(2))
         .send()
@@ -875,7 +896,7 @@ async fn is_local_gateway_healthy(port: u16) -> bool {
 /// 走 HTTP 通道 + desktop auth token 鉴权后，不论是不是我们自己的 child 都能杀，
 /// 同时 LAN 上没有 token 的攻击者也无法远程关掉用户的 sidecar。
 async fn request_sidecar_shutdown(port: u16, desktop_auth_token: &str) -> bool {
-    let result = reqwest::Client::new()
+    let result = loopback_client()
         .post(format!("http://127.0.0.1:{port}/__internal/shutdown"))
         .header("X-OpenAWork-Desktop-Auth", desktop_auth_token)
         .timeout(Duration::from_secs(2))
@@ -932,7 +953,7 @@ async fn authenticate_desktop_gateway(
         (port, guard.desktop_auth_token.clone())
     };
 
-    let response = reqwest::Client::new()
+    let response = loopback_client()
         .post(format!("http://127.0.0.1:{port}/auth/desktop-default"))
         // §0.151: bound a connects-but-hangs sidecar — reqwest has NO default
         // timeout, so without this a wedged gateway leaves this await pending
@@ -978,7 +999,7 @@ async fn admin_password_status(
         (port, guard.desktop_auth_token.clone())
     };
 
-    let response = reqwest::Client::new()
+    let response = loopback_client()
         .get(format!(
             "http://127.0.0.1:{port}/auth/admin-password-status"
         ))
@@ -1015,7 +1036,7 @@ async fn admin_set_password(
         (port, guard.desktop_auth_token.clone())
     };
 
-    let response = reqwest::Client::new()
+    let response = loopback_client()
         .post(format!("http://127.0.0.1:{port}/auth/admin-set-password"))
         // §0.151: bound a connects-but-hangs sidecar — reqwest has NO default
         // timeout, so without this a wedged gateway leaves this await pending
@@ -1266,6 +1287,12 @@ async fn spawn_gateway_sidecar(
     let process_exited = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let process_exited_clone = process_exited.clone();
 
+    // sidecar 最近 stderr 行数上限：只保留尾部，用于把「进程启动即退出」的真实
+    // 原因回传给前端——否则用户只会看到一句与事实不符的「端口可能被占用」。
+    const SIDECAR_STDERR_TAIL_LINES: usize = 40;
+    let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let stderr_tail_for_task = stderr_tail.clone();
+
     let app_for_task = app.clone();
     let gateway_state_for_task = gateway_state.clone();
     tauri::async_runtime::spawn(async move {
@@ -1278,7 +1305,15 @@ async fn spawn_gateway_sidecar(
                 }
                 CommandEvent::Stderr(data) => {
                     if let Ok(text) = String::from_utf8(data) {
-                        eprintln!("[gateway stderr] {}", text.trim());
+                        let line = text.trim().to_string();
+                        eprintln!("[gateway stderr] {}", line);
+                        if let Ok(mut lines) = stderr_tail_for_task.lock() {
+                            lines.push(line);
+                            let overflow = lines.len().saturating_sub(SIDECAR_STDERR_TAIL_LINES);
+                            if overflow > 0 {
+                                lines.drain(0..overflow);
+                            }
+                        }
                     }
                 }
                 CommandEvent::Terminated(status) => {
@@ -1337,6 +1372,28 @@ async fn spawn_gateway_sidecar(
 
     if startup_healthy {
         update_gateway_health(&app, GatewayHealth::Healthy);
+    } else if process_exited.load(std::sync::atomic::Ordering::Acquire) {
+        // 进程在健康等待期间就退出了：这不是「启动慢」，而是启动失败。必须直接
+        // 返回 Err 并带上 sidecar 的 stderr——否则前端只能看到「健康检查未通过」，
+        // 而真实原因（端口被占用、二进制损坏、env 缺失）全留在终端日志里。
+        update_gateway_health(&app, GatewayHealth::Failed);
+        let detail = stderr_tail
+            .lock()
+            .map(|lines| lines.join("\n"))
+            .unwrap_or_default();
+        let detail = if detail.trim().is_empty() {
+            "（sidecar 未输出 stderr）".to_string()
+        } else {
+            detail
+        };
+        return Err(format!(
+            "本地网关启动后立即退出，端口 {port} 可能已被占用。\n\n\
+             建议：\n\
+             1. 关闭占用该端口的程序，或换一个端口重试；\n\
+             2. 若开启了代理软件，请把 127.0.0.1 / localhost 加入排除列表；\n\
+             3. 应用日志中的 [gateway stderr] 有完整输出。\n\n\
+             sidecar 输出：\n{detail}"
+        ));
     }
 
     spawn_health_probe(&app, port);

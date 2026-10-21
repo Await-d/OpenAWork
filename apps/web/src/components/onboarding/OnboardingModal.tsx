@@ -47,7 +47,12 @@ async function startLocalDesktopGatewayWithHealthCheck(
 ): Promise<void> {
   await startDesktopGateway(port);
   if (!(await waitForGatewayHealth(url, { startedAt }))) {
-    throw new Error('本地网关健康检查未通过。请确认该端口未被其他程序占用，或改用其它端口后重试。');
+    // 提示必须覆盖两条真实成因：端口被占用（换端口）与探活被代理劫持
+    // （浏览器默认绕过 localhost，桌面端的本地探测不会，两者症状完全一样）。
+    throw new Error(
+      `本地网关健康检查未通过（${url.replace(/^https?:\/\//, '')}/health 无响应）。` +
+        '请确认该端口未被其他程序占用；若开启了代理软件，请把 127.0.0.1 / localhost 加入排除列表后重试。',
+    );
   }
 
   await completeOnboarding(url, port);

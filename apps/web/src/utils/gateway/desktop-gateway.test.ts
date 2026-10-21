@@ -66,7 +66,7 @@ describe('waitForGatewayHealth(固定总超时)', () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
-  it('startedAt 已耗尽预算时立即失败,不再整段重等', async () => {
+  it('startedAt 已耗尽预算时不再整段重等,但仍会做完最后一次探测', async () => {
     const fetchMock = vi.fn(async () => ({ ok: false }) as Response);
     vi.stubGlobal('fetch', fetchMock);
 
@@ -79,7 +79,25 @@ describe('waitForGatewayHealth(固定总超时)', () => {
     ).resolves.toBe(false);
 
     expect(Date.now() - before).toBeLessThan(200);
-    expect(fetchMock).not.toHaveBeenCalled();
+    // 预算虽已耗尽，仍必须看一眼「此刻是否其实已经就绪」：`start_gateway` 在原生
+    // 侧可能已经吃掉整段预算（它自己也要等健康），直接返回 false 会把「已经启动
+    // 成功的网关」误判成失败——这正是「网关明明在跑、桌面端却报健康检查未通过」
+    // 的一条成因。代价只有一次探测，不会重新整段等待。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('预算已耗尽但网关其实已就绪时仍判定成功', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true }) as Response),
+    );
+
+    await expect(
+      waitForGatewayHealth('http://127.0.0.1:3000', {
+        timeoutMs: 15_000,
+        startedAt: Date.now() - 15_000,
+      }),
+    ).resolves.toBe(true);
   });
 });
 

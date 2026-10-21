@@ -127,11 +127,12 @@ export async function waitForGatewayHealth(
   // 先探测再退避:网关常常已经就绪,第一时间就能通过,不必白等一个间隔。
   // 注意单次探测自身也可能耗时(本地 Tauri 侧 2s 上限),因此每轮结束后都重新
   // 校准剩余预算,而不是累加固定间隔。
+  //
+  // 判超时也必须**排在探测之后**:调用方传进来的 `startedAt` 会让预算覆盖
+  // `start_gateway` 全程,而原生侧本身就要等到健康(down 15s)。冷启动或首次迁移
+  // 数据库时,预算很容易在 IPC 返回那一刻已经耗尽——此时网关其实已经就绪,先判
+  // deadline 就会一次都不探测直接失败,表现为「网关明明起来了,桌面端报未通过」。
   for (;;) {
-    if (Date.now() >= deadline) {
-      return false;
-    }
-
     if (await isGatewayHealthy(url)) {
       return true;
     }
