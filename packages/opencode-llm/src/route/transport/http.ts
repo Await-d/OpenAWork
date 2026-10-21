@@ -1,16 +1,26 @@
 import { release } from 'node:os';
 import process from 'node:process';
 import rootPackageJson from '../../../../../package.json' with { type: 'json' };
-import { Effect, Stream } from 'effect';
-import type { HttpClientRequest } from 'effect/unstable/http';
-import { Headers } from 'effect/unstable/http';
+import { Clock, Duration, Effect, Stream } from 'effect';
+import type { HttpClientRequest } from 'effect/http';
+import { Headers } from 'effect/http';
 import { Auth } from '../auth.js';
 import { render as renderEndpoint } from '../endpoint.js';
+import type { HttpMiddleware } from '../executor.js';
 import { Framing, type Framing as FramingDef } from '../framing.js';
 import type { Transport, TransportPrepareInput } from './index.js';
 import * as ProviderShared from '../../protocols/shared.js';
 import { httpStreamError } from './stream-error.js';
-import { mergeJsonRecords, type LLMRequest } from '../../schema/index.js';
+import {
+  DEFAULT_CHUNK_TIMEOUT_MS,
+  DEFAULT_HTTP_TIMEOUT_MS,
+  LLMError,
+  TransportReason,
+  type HttpTimeout,
+  type TransportOperation,
+  mergeJsonRecords,
+  type LLMRequest,
+} from '../../schema/index.js';
 
 export type JsonRequestInput<Body> = TransportPrepareInput<Body>;
 
@@ -58,6 +68,8 @@ export interface JsonRequestParts<Body = unknown> {
 export interface HttpPrepared<Frame> {
   readonly request: HttpClientRequest.HttpClientRequest;
   readonly framing: FramingDef<Frame>;
+  /** 每次调用可带一个拦截器（`StreamOptions.http`），在状态码分类前拿到原始响应。 */
+  readonly middleware?: HttpMiddleware;
 }
 
 const applyQuery = (url: string, query: Record<string, string> | undefined) => {
@@ -202,6 +214,24 @@ export interface HttpJsonTransport<Body, Frame> extends Transport<
   readonly with: (patch: HttpJsonPatch<Body, Frame>) => HttpJsonTransport<Body, Frame>;
 }
 
+// `false` 显式关闭该超时；未设置时回落到上游默认值。
+const timeoutDuration = (value: HttpTimeout | undefined, fallback: number) =>
+  value === false ? Duration.infinity : Duration.millis(value ?? fallback);
+
+const timeout = (message: string, url: string, operation: TransportOperation = 'request') =>
+  new LLMError({
+    module: 'HttpTransport',
+    method: 'frames',
+    reason: new TransportReason({
+      kind: 'Timeout',
+      message,
+      url,
+      transport: 'http',
+      operation,
+      code: 'Timeout',
+    }),
+  });
+
 export const httpJson = <Body, Frame>(
   input: HttpJsonInput<Body, Frame>,
 ): HttpJsonTransport<Body, Frame> => ({
@@ -216,25 +246,58 @@ export const httpJson = <Body, Frame>(
           url: parts.url,
           body: parts.bodyText,
           headers: parts.headers,
+          encoding: prepareInput.request.http?.encoding,
         }),
         framing: input.framing,
+        middleware: prepareInput.middleware,
       })),
     ),
+  // 三档超时：响应头、相邻分片、整次请求。缺失任一层保护都会让「上游静默」
+  // 表现为无限挂起而不是可诊断的失败——分片超时默认 15 分钟是因为部分上游
+  // （如 DeepSeek）在长推理期间确实会长时间不产出数据。
   frames: (prepared, request, runtime) =>
     Stream.unwrap(
-      runtime.http
-        .execute(prepared.request)
-        .pipe(
-          Effect.map((response) =>
-            prepared.framing.frame(
-              response.stream.pipe(
-                Stream.mapError((error) =>
-                  httpStreamError(`${request.model.provider}/${request.model.route.id}`, error),
+      Effect.gen(function* () {
+        const total = timeoutDuration(request.http?.timeout, DEFAULT_HTTP_TIMEOUT_MS);
+        const started = yield* Clock.currentTimeMillis;
+        const response = yield* runtime.http.execute(prepared.request, prepared.middleware).pipe(
+          Effect.timeoutOrElse({
+            duration: Duration.min(
+              timeoutDuration(request.http?.headerTimeout, DEFAULT_HTTP_TIMEOUT_MS),
+              total,
+            ),
+            orElse: () => timeout('Timed out waiting for response headers', prepared.request.url),
+          }),
+        );
+        const elapsed = Duration.millis((yield* Clock.currentTimeMillis) - started);
+        return prepared.framing.frame(
+          response.stream.pipe(
+            Stream.mapError((error) =>
+              httpStreamError(`${request.model.provider}/${request.model.route.id}`, error),
+            ),
+            Stream.timeoutOrElse({
+              duration: timeoutDuration(request.http?.chunkTimeout, DEFAULT_CHUNK_TIMEOUT_MS),
+              orElse: () =>
+                Stream.fail(
+                  timeout('Timed out waiting for response data', prepared.request.url, 'read'),
+                ),
+            }),
+            Stream.interruptWhen(
+              Effect.sleep(Duration.subtract(total, elapsed)).pipe(
+                Effect.andThen(() =>
+                  Effect.fail(
+                    timeout(
+                      'Timed out waiting for the response to complete',
+                      prepared.request.url,
+                      'read',
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        );
+      }),
     ),
 });
 

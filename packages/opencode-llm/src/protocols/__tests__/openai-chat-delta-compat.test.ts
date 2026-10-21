@@ -154,6 +154,43 @@ describe('OpenAI Chat delta 兼容字段对齐', () => {
     expect(finish?.usage?.nonCachedInputTokens).toBe(100);
   });
 
+  it('顶层 cache_read_input_tokens / cache_created_input_tokens 映射为缓存读写', async () => {
+    const events = await runFrames([
+      chunk({}, 'stop', {
+        usage: {
+          prompt_tokens: 1_000,
+          completion_tokens: 20,
+          total_tokens: 1_020,
+          // 部分网关的顶层计费口径（对齐参考库的 Provider-specific cache accounting）。
+          cache_read_input_tokens: 640,
+          cache_created_input_tokens: 128,
+        },
+      }),
+    ]);
+
+    const finish = events.find((event) => event.type === 'finish') as
+      { usage?: { cacheReadInputTokens?: number; cacheWriteInputTokens?: number } } | undefined;
+    expect(finish?.usage?.cacheReadInputTokens).toBe(640);
+    expect(finish?.usage?.cacheWriteInputTokens).toBe(128);
+  });
+
+  it('usage 的未知计费字段不再让事件解码失败', async () => {
+    const events = await runFrames([
+      chunk({}, 'stop', {
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          total_tokens: 12,
+          some_future_billing_field: { nested: true },
+        },
+      }),
+    ]);
+
+    const finish = events.find((event) => event.type === 'finish') as
+      { usage?: { inputTokens?: number } } | undefined;
+    expect(finish?.usage?.inputTokens).toBe(10);
+  });
+
   it('content 数组形态仍按正文拼接（既有行为保持）', async () => {
     const events = await runFrames([
       chunk(
@@ -235,7 +272,7 @@ describe('OpenAI Chat 终态语义对齐', () => {
 
     expect(collect(events, 'text-delta')).toBe('被截断的正文');
     const finish = events.find((event) => event.type === 'finish');
-    expect(finish?.reason).toBe('stop');
+    expect(finish?.reason.normalized).toBe('stop');
   });
 
   it('requireFinishReason=false：存在未完成工具调用时合成 tool-calls 终态', async () => {
@@ -256,7 +293,7 @@ describe('OpenAI Chat 终态语义对齐', () => {
 
     expect(events.some((event) => event.type === 'tool-call')).toBe(true);
     const finish = events.find((event) => event.type === 'finish');
-    expect(finish?.reason).toBe('tool-calls');
+    expect(finish?.reason.normalized).toBe('tool-calls');
   });
 
   it('顶层 error 体之后 onHalt 不再追加事件（避免终态之后仍有事件）', async () => {

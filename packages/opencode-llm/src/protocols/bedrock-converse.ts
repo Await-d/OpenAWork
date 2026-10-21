@@ -10,7 +10,6 @@ import {
   type JsonSchema,
   type LLMError,
   type LLMRequest,
-  type ModelToolSchemaCompatibility,
   type ProviderMetadata,
   type ReasoningPart,
   type ToolCallPart,
@@ -18,13 +17,12 @@ import {
   type ToolResultPart,
 } from '../schema/index.js';
 import { BedrockEventStream } from './bedrock-event-stream.js';
-import { isContextOverflow } from '../provider-error.js';
+import { providerFailureClassification } from '../provider-error.js';
 import { JsonObject, optionalArray, ProviderShared } from './shared.js';
 import { BedrockAuth } from './utils/bedrock-auth.js';
 import { BedrockCache } from './utils/bedrock-cache.js';
 import { BedrockMedia } from './utils/bedrock-media.js';
 import { Lifecycle } from './utils/lifecycle.js';
-import { ToolSchemaProjection } from './utils/tool-schema.js';
 import { ToolStream } from './utils/tool-stream.js';
 
 const ADAPTER = 'bedrock-converse';
@@ -238,15 +236,13 @@ const lowerToolSpec = (tool: ToolDefinition, inputSchema: JsonSchema): BedrockTo
 });
 
 const lowerTools = (
-  compatibility: ModelToolSchemaCompatibility | undefined,
   breakpoints: BedrockCache.Breakpoints,
   tools: ReadonlyArray<ToolDefinition>,
 ): BedrockTool[] => {
   const result: BedrockTool[] = [];
   for (const tool of tools) {
-    result.push(
-      lowerToolSpec(tool, ToolSchemaProjection.modelCompatibility(tool.inputSchema, compatibility)),
-    );
+    // 工具 schema 已在请求级按规则族投影，这里直接使用。
+    result.push(lowerToolSpec(tool, tool.inputSchema));
     const cachePoint = BedrockCache.block(breakpoints, tool.cache);
     if (cachePoint) result.push(cachePoint);
   }
@@ -304,7 +300,7 @@ const lowerToolCall = (part: ToolCallPart): BedrockToolUseBlock => ({
   },
 });
 
-const lowerToolResultContent = Effect.fn('BedrockConverse.lowerToolResultContent')(function* (
+const lowerToolResultContent = Effect.fnUntraced(function* (
   part: ToolResultPart,
   documentNames: Set<string>,
 ) {
@@ -336,7 +332,7 @@ const lowerToolResultContent = Effect.fn('BedrockConverse.lowerToolResultContent
   return content;
 });
 
-const lowerToolResult = Effect.fn('BedrockConverse.lowerToolResult')(function* (
+const lowerToolResult = Effect.fnUntraced(function* (
   part: ToolResultPart,
   documentNames: Set<string>,
 ) {
@@ -349,7 +345,7 @@ const lowerToolResult = Effect.fn('BedrockConverse.lowerToolResult')(function* (
   } satisfies BedrockToolResultBlock;
 });
 
-const lowerMessages = Effect.fn('BedrockConverse.lowerMessages')(function* (
+const lowerMessages = Effect.fnUntraced(function* (
   request: LLMRequest,
   breakpoints: BedrockCache.Breakpoints,
   documentNames: Set<string>,
@@ -461,7 +457,18 @@ const lowerSystem = (
     .filter((part) => part.text.length > 0)
     .flatMap((part) => textWithCache(breakpoints, part.text, part.cache));
 
-const fromRequest = Effect.fn('BedrockConverse.fromRequest')(function* (request: LLMRequest) {
+// Nova 2 会在高推理 effort 下拒绝 `maxTokens`——那时它的输出可以超过该字段的上限。
+// 其他接受 `reasoningConfig` 的模型（如 Bedrock 上的 Grok）没有这个限制。
+const isNova2 = (model: LLMRequest['model']) => /\bamazon\.nova-2-/.test(model.id);
+const isHighReasoningEffort = Schema.is(
+  Schema.Struct({
+    additionalModelRequestFields: Schema.Struct({
+      reasoningConfig: Schema.Struct({ maxReasoningEffort: Schema.Literal('high') }),
+    }),
+  }),
+);
+
+const fromRequest = Effect.fnUntraced(function* (request: LLMRequest) {
   const toolChoice = request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined;
   const generation = request.generation;
   // Bedrock-Claude shares Anthropic's 4-breakpoint cap. Spend the budget in
@@ -472,7 +479,7 @@ const fromRequest = Effect.fn('BedrockConverse.fromRequest')(function* (request:
   const toolConfig =
     request.tools.length > 0
       ? {
-          tools: lowerTools(request.model.compatibility?.toolSchema, breakpoints, request.tools),
+          tools: lowerTools(breakpoints, request.tools),
           toolChoice,
         }
       : undefined;
@@ -481,6 +488,11 @@ const fromRequest = Effect.fn('BedrockConverse.fromRequest')(function* (request:
   // Converse requires document labels to be unique across the whole request, so
   // one Set is threaded through every media lowering call.
   const documentNames = new Set<string>();
+  // Nova 2 + 高推理 effort 时不下发 maxTokens（见 isNova2 注释）。
+  const maxTokens =
+    isNova2(request.model) && isHighReasoningEffort(request.http?.body)
+      ? undefined
+      : generation?.maxTokens;
   const messages = yield* lowerMessages(request, breakpoints, documentNames);
   if (breakpoints.dropped > 0) {
     yield* Effect.logWarning(
@@ -492,13 +504,13 @@ const fromRequest = Effect.fn('BedrockConverse.fromRequest')(function* (request:
     messages,
     system,
     inferenceConfig:
-      generation?.maxTokens === undefined &&
+      maxTokens === undefined &&
       generation?.temperature === undefined &&
       generation?.topP === undefined &&
       (generation?.stop === undefined || generation.stop.length === 0)
         ? undefined
         : {
-            maxTokens: generation?.maxTokens,
+            maxTokens,
             temperature: generation?.temperature,
             topP: generation?.topP,
             stopSequences: generation?.stop,
@@ -708,9 +720,7 @@ const step = (state: ParserState, event: BedrockEvent) =>
           LLMEvent.providerError({
             message,
             classification:
-              type === 'validationException' && isContextOverflow(message)
-                ? 'context-overflow'
-                : undefined,
+              type === 'validationException' ? providerFailureClassification(message) : undefined,
             retryable:
               type === 'throttlingException' ||
               type === 'internalServerException' ||
@@ -744,10 +754,9 @@ const step = (state: ParserState, event: BedrockEvent) =>
         [
           LLMEvent.providerError({
             message,
-            classification:
-              event.validationException && isContextOverflow(message)
-                ? 'context-overflow'
-                : undefined,
+            classification: event.validationException
+              ? providerFailureClassification(message)
+              : undefined,
             retryable: event.throttlingException !== undefined,
           }),
         ],
@@ -765,11 +774,13 @@ const onHalt = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>, LLME
       ? (() => {
           const events: LLMEvent[] = [];
           Lifecycle.finish(state.lifecycle, events, {
-            reason:
-              state.pendingFinish.reason === 'stop' && state.hasToolCalls
-                ? 'tool-calls'
-                : state.pendingFinish.reason,
-            reasonRaw: state.pendingFinish.raw,
+            reason: {
+              normalized:
+                state.pendingFinish.reason === 'stop' && state.hasToolCalls
+                  ? 'tool-calls'
+                  : state.pendingFinish.reason,
+              raw: state.pendingFinish.raw,
+            },
             usage: state.usage,
           });
           return events;

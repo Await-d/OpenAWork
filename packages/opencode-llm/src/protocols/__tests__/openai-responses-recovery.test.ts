@@ -41,7 +41,7 @@ describe('OpenAI Responses 流式恢复', () => {
     const call = events.find(LLMEvent.is.toolCall);
     expect(call?.name).toBe('bash');
     expect(call?.input).toEqual({ a: 1 });
-    expect(events.find(LLMEvent.is.finish)?.reason).toBe('tool-calls');
+    expect(events.find(LLMEvent.is.finish)?.reason.normalized).toBe('tool-calls');
   });
 
   it('done-only 工具调用补发 tool-input-start', async () => {
@@ -97,7 +97,7 @@ describe('OpenAI Responses 流式恢复', () => {
   it('response.incomplete 无原因时报告 unknown', async () => {
     const { events } = await runFrames([{ type: 'response.incomplete', response: {} }]);
 
-    expect(events.find(LLMEvent.is.finish)?.reason).toBe('unknown');
+    expect(events.find(LLMEvent.is.finish)?.reason.normalized).toBe('unknown');
   });
 
   const hostedItem = {

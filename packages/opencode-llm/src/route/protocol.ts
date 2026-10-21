@@ -1,5 +1,11 @@
 import { Schema, type Effect } from 'effect';
-import type { LLMError, LLMEvent, LLMRequest, ProtocolID } from '../schema/index.js';
+import type {
+  LLMError,
+  LLMEvent,
+  LLMRequest,
+  ModelToolSchemaCompatibility,
+  ProtocolID,
+} from '../schema/index.js';
 
 /**
  * The semantic API contract of one model server family.
@@ -40,6 +46,12 @@ export interface Protocol<Body, Frame, Event, State> {
   readonly body: ProtocolBody<Body>;
   /** Response side: streaming state machine. */
   readonly stream: ProtocolStream<Frame, Event, State>;
+  /**
+   * 工具 schema 投影的默认规则族（对齐上游 `Protocol.sanitizer`）。
+   *
+   * 未设置时由模型名启发式决定；模型级 `compatibility.toolSchema` 仍优先。
+   */
+  readonly sanitizer?: ModelToolSchemaCompatibility;
 }
 
 export interface ProtocolBody<Body> {

@@ -71,14 +71,14 @@ describe('兼容接口工具参数容错', () => {
     expect(error?.retryable).toBe(true);
   });
 
-  it('native_finish_reason 作为 reasonRaw 保留', async () => {
+  it('native_finish_reason 保留为 reason.raw', async () => {
     const events = await collect([
       {
         choices: [{ delta: {}, finish_reason: 'stop', native_finish_reason: 'eos' }],
       },
     ]);
 
-    expect(events.find(LLMEvent.is.finish)?.reasonRaw).toBe('eos');
+    expect(events.find(LLMEvent.is.finish)?.reason.raw).toBe('eos');
   });
 
   it('工具增量缺失 index 时按 id/位置归并', async () => {
@@ -111,8 +111,8 @@ describe('兼容接口工具参数容错', () => {
 
     expect(events.some(LLMEvent.is.toolCall)).toBe(false);
     const finished = events.find(LLMEvent.is.finish);
-    expect(finished?.reason).toBe('length');
-    expect(finished?.reasonRaw).toBe('length');
+    expect(finished?.reason.normalized).toBe('length');
+    expect(finished?.reason.raw).toBe('length');
   });
 
   it('content_filter 终止时同样丢弃未完成的工具调用', async () => {
@@ -121,17 +121,20 @@ describe('兼容接口工具参数容错', () => {
     expect(events.some(LLMEvent.is.toolCall)).toBe(false);
   });
 
-  it('参数含未转义换行时按部分解析收尾，不再抛错', async () => {
+  it('参数含未转义换行（非法 JSON）时上报 tool-input-error 而不是修补', async () => {
     const events = await runFrames([toolDelta('{"command":"echo a\nls"}'), finish('tool_calls')]);
 
-    const call = events.find(LLMEvent.is.toolCall);
-    expect(call?.input).toEqual({ command: 'echo a\nls' });
+    expect(events.some(LLMEvent.is.toolCall)).toBe(false);
+    const failure = events.find(LLMEvent.is.toolInputError);
+    expect(failure?.name).toBe('bash');
+    expect(failure?.raw).toBe('{"command":"echo a\nls"}');
   });
 
-  it('参数完全无法解析时降级为空对象，让工具自行拒绝', async () => {
+  it('参数完全无法解析时同样上报 tool-input-error', async () => {
     const events = await runFrames([toolDelta('not json at all'), finish('tool_calls')]);
 
-    const call = events.find(LLMEvent.is.toolCall);
-    expect(call?.input).toEqual({});
+    expect(events.some(LLMEvent.is.toolCall)).toBe(false);
+    const failure = events.find(LLMEvent.is.toolInputError);
+    expect(failure?.raw).toBe('not json at all');
   });
 });

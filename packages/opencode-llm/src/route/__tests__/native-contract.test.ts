@@ -3,7 +3,7 @@ import { Effect, Layer } from 'effect';
 import { LLMClient, LLMRequest, Message, Model, RequestExecutor } from '../../index.js';
 import { Auth } from '../../route/auth.js';
 import * as OpenAI from '../../providers/openai.js';
-import { HttpClientRequest, HttpClientResponse } from 'effect/unstable/http';
+import { HttpClientRequest, HttpClientResponse } from 'effect/http';
 
 const makeRequest = () => {
   const model = OpenAI.configure({ auth: Auth.none }).chat('contract-test');

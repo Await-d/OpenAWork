@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { Effect, Schema, Stream } from 'effect';
-import * as Sse from 'effect/unstable/encoding/Sse';
-import { Headers, HttpClientRequest } from 'effect/unstable/http';
+import * as Sse from 'effect/encoding/Sse';
+import { Headers, HttpClientRequest } from 'effect/http';
 import {
   InvalidProviderOutputReason,
   InvalidRequestReason,
@@ -12,6 +12,7 @@ import {
   type ToolFileContent,
   type TextPart,
   type ToolResultPart,
+  type RequestEncoding,
 } from '../schema/index.js';
 import { isRecord } from '../utils/record.js';
 export { isRecord };
@@ -92,6 +93,22 @@ export const sumTokens = (...values: ReadonlyArray<number | undefined>): number 
   return values.reduce((acc: number, value) => acc + (value ?? 0), 0);
 };
 
+/**
+ * 把显式思考预算压到输出上限的一半（对齐上游 `fitThinkingBudget`）。
+ *
+ * 思考 token 计入输出上限：预算贴着上限时，正文、工具调用或摘要就没有余量了。
+ * 更小的预算、`-1`/`0` 这类特殊值，以及没有输出上限的请求都原样透传——
+ * 「不干预」比「猜一个值」安全。
+ */
+export const fitThinkingBudget = (
+  budget: number,
+  maxTokens: number | undefined,
+  minimum = 1,
+): number =>
+  maxTokens === undefined || budget <= maxTokens / 2
+    ? budget
+    : Math.max(minimum, Math.floor(maxTokens / 2));
+
 export const eventError = (route: string, message: string, raw?: string, cause?: unknown) =>
   new LLMError({
     module: 'ProviderShared',
@@ -155,7 +172,7 @@ export const wrapSystemUpdate = (parts: ReadonlyArray<{ readonly text: string }>
  * raw retrieved, tool, or web content into privileged updates: keep untrusted
  * data in ordinary user/tool messages instead.
  */
-export const systemUpdateText = Effect.fn('ProviderShared.systemUpdateText')(function* (
+export const systemUpdateText = Effect.fnUntraced(function* (
   route: string,
   message: LLMRequest['messages'][number],
 ) {
@@ -169,7 +186,7 @@ export const systemUpdateText = Effect.fn('ProviderShared.systemUpdateText')(fun
 });
 
 /** Lower an unsupported privileged update into visible, in-order user text. */
-export const wrappedSystemUpdate = Effect.fn('ProviderShared.wrappedSystemUpdate')(function* (
+export const wrappedSystemUpdate = Effect.fnUntraced(function* (
   route: string,
   message: LLMRequest['messages'][number],
 ) {
@@ -328,6 +345,15 @@ export interface SseFramingOptions {
    * the frame to reach `stream.terminal`; everyone else keeps dropping it.
    */
   readonly includeDone?: boolean;
+  /**
+   * Emit only the named events in this set. `undefined` keeps every event.
+   *
+   * Protocols that multiplex several event types over one SSE channel (OpenAI
+   * Responses) need to drop the ones their decoder does not understand, and
+   * their terminal boundary is a non-`message` event — so a filtered stream
+   * keeps `[DONE]` regardless of `includeDone`.
+   */
+  readonly events?: ReadonlySet<string>;
 }
 
 /**
@@ -375,8 +401,11 @@ export const sseFraming = (
     // such an event, so they carry nothing and must not abort the stream.
     Stream.filter(
       (event) =>
+        (options?.events === undefined || options.events.has(event.event)) &&
         event.data.length > 0 &&
-        (event.data !== '[DONE]' || options?.includeDone === true) &&
+        (event.data !== '[DONE]' ||
+          options?.includeDone === true ||
+          (options?.events !== undefined && event.event !== 'message')) &&
         event.data !== 'null' &&
         event.data !== ': keepalive',
     ),
@@ -471,12 +500,43 @@ export const jsonPost = (input: {
   readonly url: string;
   readonly body: string;
   readonly headers?: Headers.Input;
-}) =>
-  HttpClientRequest.post(input.url).pipe(
-    HttpClientRequest.setHeaders(
-      Headers.set(Headers.fromInput(input.headers), 'content-type', 'application/json'),
-    ),
-    HttpClientRequest.bodyText(input.body, 'application/json'),
+  readonly encoding?: RequestEncoding;
+}) => {
+  const headers = Headers.set(Headers.fromInput(input.headers), 'content-type', 'application/json');
+  const compressed = compressBody(input.body, input.encoding);
+  if (!compressed)
+    return HttpClientRequest.post(input.url).pipe(
+      HttpClientRequest.setHeaders(headers),
+      HttpClientRequest.bodyText(input.body, 'application/json'),
+    );
+  return HttpClientRequest.post(input.url).pipe(
+    HttpClientRequest.setHeaders(Headers.set(headers, 'content-encoding', compressed.encoding)),
+    HttpClientRequest.bodyUint8Array(compressed.body, 'application/json'),
   );
+};
+
+// 用到的 zlib 面很窄，且 `zstdCompressSync` 在旧版 Node 上不存在，因此按结构声明，
+// 不依赖 @types/node 的具体版本。
+interface ZlibModule {
+  readonly gzipSync: (data: string) => Uint8Array;
+  readonly zstdCompressSync?: (data: string) => Uint8Array;
+}
+
+// 运行时才查找 `node:zlib`（而不是静态 import）：没有 zlib 的运行时（浏览器、旧 Node、
+// 部分 workerd 环境）发送纯 JSON，而不是加载本模块就失败。
+const compressBody = (text: string, encoding: RequestEncoding | undefined) => {
+  if (encoding === undefined || encoding === 'none') return undefined;
+  const builtins = (
+    globalThis.process as { getBuiltinModule?: (id: string) => ZlibModule | undefined } | undefined
+  )?.getBuiltinModule?.('node:zlib');
+  try {
+    const body =
+      encoding === 'zstd' ? builtins?.zstdCompressSync?.(text) : builtins?.gzipSync(text);
+    return body && { encoding, body };
+  } catch {
+    // 压缩只是优化：失败时退化为纯 JSON，而不是让请求失败。
+    return undefined;
+  }
+};
 
 export * as ProviderShared from './shared.js';

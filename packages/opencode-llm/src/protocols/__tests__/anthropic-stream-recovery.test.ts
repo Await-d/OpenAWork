@@ -40,7 +40,7 @@ describe('Anthropic Messages 流式恢复', () => {
     ]);
 
     expect(events.filter(LLMEvent.is.finish)).toHaveLength(1);
-    expect(events.find(LLMEvent.is.finish)?.reason).toBe('stop');
+    expect(events.find(LLMEvent.is.finish)?.reason.normalized).toBe('stop');
     expect(await haltEvents(state)).toEqual([]);
   });
 
@@ -76,7 +76,7 @@ describe('Anthropic Messages 流式恢复', () => {
       {
         type: 'content_block_delta',
         index: 0,
-        delta: { type: 'input_json_delta', partial_json: '{"command":"ls"' },
+        delta: { type: 'input_json_delta', partial_json: '{"command":"ls"}' },
       },
       { type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 5 } },
       { type: 'message_stop' },
@@ -87,7 +87,7 @@ describe('Anthropic Messages 流式恢复', () => {
     expect(calls[0]?.name).toBe('bash');
     expect(calls[0]?.input).toEqual({ command: 'ls' });
     expect(events.filter(LLMEvent.is.finish)).toHaveLength(1);
-    expect(events.find(LLMEvent.is.finish)?.reason).toBe('length');
+    expect(events.find(LLMEvent.is.finish)?.reason.normalized).toBe('length');
     expect(await haltEvents(state)).toEqual([]);
   });
 
@@ -100,7 +100,7 @@ describe('Anthropic Messages 流式恢复', () => {
     expect(events.filter(LLMEvent.is.finish)).toHaveLength(0);
     const halted = await haltEvents(state);
     expect(halted.filter(LLMEvent.is.finish)).toHaveLength(1);
-    expect(halted.find(LLMEvent.is.finish)?.reason).toBe('stop');
+    expect(halted.find(LLMEvent.is.finish)?.reason.normalized).toBe('stop');
   });
 
   it('redacted_thinking 块以元数据形式保留', async () => {
@@ -172,8 +172,8 @@ describe('Anthropic Messages 流式恢复', () => {
     ]);
 
     const finished = events.find(LLMEvent.is.finish);
-    expect(finished?.reason).toBe('length');
-    expect(finished?.reasonRaw).toBe('model_context_window_exceeded');
+    expect(finished?.reason.normalized).toBe('length');
+    expect(finished?.reason.raw).toBe('model_context_window_exceeded');
   });
 
   it('overloaded_error 映射为可重试的 provider-error', async () => {

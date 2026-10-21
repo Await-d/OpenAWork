@@ -6,7 +6,7 @@ import { AuthOptions, type ProviderAuthOption } from '../route/auth-options.js';
 import { ProviderID, type ModelID, type ProviderOptions } from '../schema/index.js';
 import * as OpenAICompatibleProfiles from './openai-compatible-profile.js';
 import * as OpenAIChat from '../protocols/openai-chat.js';
-import { isRecord } from '../protocols/shared.js';
+import { ProviderShared, isRecord } from '../protocols/shared.js';
 
 export const profile = OpenAICompatibleProfiles.profiles.openrouter;
 export const id = ProviderID.make(profile.provider);
@@ -42,14 +42,25 @@ export const protocol = Protocol.make({
       OpenAIChat.protocol.body.from(request).pipe(
         Effect.map((body) => ({
           ...body,
-          ...bodyOptions(request.providerOptions?.openrouter),
+          ...bodyOptions(request.providerOptions?.openrouter, request.generation?.maxTokens),
         })),
       ),
   },
   stream: OpenAIChat.protocol.stream,
 });
 
-const bodyOptions = (input: unknown) => {
+// OpenRouter 把 `reasoning.max_tokens` 当上游思考预算原样转发；Anthropic /
+// Alibaba 等上游会拒绝「不小于输出上限」的预算，1024 是 Anthropic 的最小值
+// （对齐参考库的 `fitReasoning`）。
+const fitReasoning = (reasoning: Record<string, unknown>, maxTokens: number | undefined) =>
+  typeof reasoning.max_tokens === 'number'
+    ? {
+        ...reasoning,
+        max_tokens: ProviderShared.fitThinkingBudget(reasoning.max_tokens, maxTokens, 1_024),
+      }
+    : reasoning;
+
+const bodyOptions = (input: unknown, maxTokens: number | undefined) => {
   const openrouter = isRecord(input) ? input : {};
   return {
     ...(openrouter.usage === true
@@ -57,7 +68,9 @@ const bodyOptions = (input: unknown) => {
       : isRecord(openrouter.usage)
         ? { usage: openrouter.usage }
         : {}),
-    ...(isRecord(openrouter.reasoning) ? { reasoning: openrouter.reasoning } : {}),
+    ...(isRecord(openrouter.reasoning)
+      ? { reasoning: fitReasoning(openrouter.reasoning, maxTokens) }
+      : {}),
     ...(typeof openrouter.promptCacheKey === 'string'
       ? { prompt_cache_key: openrouter.promptCacheKey }
       : {}),

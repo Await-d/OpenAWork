@@ -1,17 +1,15 @@
-import { Config, Effect, Redacted } from 'effect';
-import { Headers } from 'effect/unstable/http';
-import {
-  AuthenticationReason,
-  InvalidRequestReason,
-  LLMError,
-  type LLMRequest,
-} from '../schema/index.js';
+import { Config, Effect, Option, Redacted } from 'effect';
+import { Headers } from 'effect/http';
+import { AuthenticationReason, LLMError, type LLMRequest } from '../schema/index.js';
 
 export class MissingCredentialError extends Error {
   readonly _tag = 'MissingCredentialError';
 
-  constructor(readonly source: string) {
-    super(`Missing auth credential: ${source}`);
+  constructor(
+    readonly source: string,
+    message = `Missing auth credential: ${source}`,
+  ) {
+    super(message);
   }
 }
 
@@ -102,7 +100,17 @@ export const optional = (secret: Secret | undefined, source = 'optional value') 
     ? credential(Effect.fail(new MissingCredentialError(source)))
     : credentialFromSecret(secret, source);
 
-export const config = (name: string) => credentialFromSecret(Config.Redacted(name), name);
+// 未设置与「设置为空串」都算缺失：上游（对齐 opencode 参考库）对两者都给出
+// `${name} is not set`，且不把空串当成有效凭据下发。
+export const config = (name: string) =>
+  credential(
+    Effect.gen(function* () {
+      const secret = yield* Config.option(Config.Redacted(name));
+      if (!Option.isSome(secret) || Redacted.value(secret.value) === '')
+        return yield* Effect.fail(new MissingCredentialError(name, `${name} is not set`));
+      return secret.value;
+    }),
+  );
 
 export const effect = (load: Effect.Effect<Redacted.Redacted, CredentialError>) => credential(load);
 
@@ -149,20 +157,19 @@ export function bearerHeader(name: string, source?: Secret | Credential) {
   return render(source);
 }
 
+// 凭据解析失败一律归一化为「认证缺失」：调用方（含网关的失败分类）据此
+// 区分「没配凭据」与「上游拒绝」，而不是把它当成请求体非法。
 const toLLMError = (error: AuthError): LLMError => {
-  if (error instanceof MissingCredentialError || error instanceof Config.ConfigError) {
-    return new LLMError({
-      module: 'Auth',
-      method: 'apply',
-      reason:
-        error instanceof MissingCredentialError
-          ? new AuthenticationReason({ message: error.message, kind: 'missing' })
-          : new InvalidRequestReason({
-              message: `Failed to resolve auth config: ${error.message}`,
-            }),
-    });
-  }
-  return error;
+  if (error instanceof LLMError) return error;
+  const message =
+    error instanceof Config.ConfigError
+      ? `Failed to resolve auth config: ${error.message}`
+      : error.message;
+  return new LLMError({
+    module: 'Auth',
+    method: 'apply',
+    reason: new AuthenticationReason({ message, kind: 'missing' }),
+  });
 };
 
 export const toEffect =

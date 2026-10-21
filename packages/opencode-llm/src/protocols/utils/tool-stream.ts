@@ -1,11 +1,14 @@
-import { Effect, Option } from 'effect';
-import { LLMError, LLMEvent, type ProviderMetadata, type ToolCall } from '../../schema/index.js';
+import { Effect } from 'effect';
+import {
+  LLMError,
+  LLMEvent,
+  type ProviderMetadata,
+  type ToolCall,
+  type ToolInputError,
+} from '../../schema/index.js';
 import { eventError, parseToolInput, type ToolAccumulator } from '../shared.js';
-import { parse } from './partial-json.js';
 
 type StreamKey = string | number;
-const parsePartialInput = Option.liftThrowable(parse);
-
 /**
  * One pending streamed tool call. Providers emit the tool identity and JSON
  * argument text across separate chunks; `input` is the raw JSON string collected
@@ -66,12 +69,11 @@ const inputDelta = (tool: PendingTool, text: string) =>
   });
 
 /**
- * Finalize one pending tool call's argument JSON. Providers sometimes emit
- * arguments that are not strictly valid JSON (a raw control character inside a
- * string, a stray backslash) even though the call itself is complete. Failing
- * the whole stream for a locally-executed tool is wasteful: the tool would
- * simply have rejected the input and let the model self-correct. Fall back to a
- * best-effort partial parse, and finally to `{}`, so the round survives.
+ * Finalize one pending tool call's argument JSON.
+ *
+ * 上游（对齐参考库）在区间内改变了畸形入参的处理：本地执行的工具解析失败时
+ * **不再**回退到部分解析或 `{}`，而是上报 `tool-input-error` 事件——带着空参数
+ * 或错参数把工具执行掉，比暴露「这段 JSON 解不出来」更危险。
  *
  * Provider-executed (hosted) tool calls stay strict: their input is passed
  * straight back to the provider on the next turn, so a lossy recovery would be
@@ -81,20 +83,10 @@ const toolCall = (
   route: string,
   tool: PendingTool,
   inputOverride?: string,
-): Effect.Effect<ToolCall, LLMError> => {
+): Effect.Effect<ToolCall | ToolInputError, LLMError> => {
   const raw = inputOverride ?? tool.input;
   return parseToolInput(route, tool.name, raw).pipe(
-    Effect.catch((error) =>
-      tool.providerExecuted
-        ? Effect.fail(error)
-        : Effect.succeed(
-            Option.getOrElse(
-              Option.map(parsePartialInput(raw), (input) => input ?? {}),
-              () => ({}),
-            ),
-          ),
-    ),
-    Effect.map((input): ToolCall =>
+    Effect.map((input): ToolCall | ToolInputError =>
       LLMEvent.toolCall({
         id: tool.id,
         name: tool.name,
@@ -102,6 +94,11 @@ const toolCall = (
         providerExecuted: tool.providerExecuted ? true : undefined,
         providerMetadata: tool.providerMetadata,
       }),
+    ),
+    Effect.catch((error) =>
+      tool.providerExecuted
+        ? Effect.fail(error)
+        : Effect.succeed(LLMEvent.toolInputError({ id: tool.id, name: tool.name, raw })),
     ),
   );
 };
@@ -148,7 +145,12 @@ export const appendOrStart = <K extends StreamKey>(
   route: string,
   tools: State<K>,
   key: K,
-  delta: { readonly id?: string; readonly name?: string; readonly text: string },
+  delta: {
+    readonly id?: string;
+    readonly name?: string;
+    readonly text: string;
+    readonly providerMetadata?: ProviderMetadata;
+  },
   missingToolMessage: string,
 ): AppendOutcome<K> | LLMError => {
   const current = tools[key];
@@ -164,7 +166,7 @@ export const appendOrStart = <K extends StreamKey>(
     name,
     input: `${current?.input ?? ''}${delta.text}`,
     providerExecuted: current?.providerExecuted,
-    providerMetadata: current?.providerMetadata,
+    providerMetadata: current?.providerMetadata ?? delta.providerMetadata,
   };
   if (current && delta.text.length === 0 && current.id === id && current.name === name)
     return { tools, tool: current, events: [] };

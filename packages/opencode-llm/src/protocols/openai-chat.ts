@@ -7,7 +7,6 @@ import { Framing } from '../route/framing.js';
 import { Protocol } from '../route/protocol.js';
 import {
   LLMEvent,
-  ReasoningEfforts,
   Usage,
   type FinishReason,
   type JsonSchema,
@@ -21,8 +20,12 @@ import {
   type ToolContent,
 } from '../schema/index.js';
 import { isRecord, JsonObject, optionalArray, optionalNull, ProviderShared } from './shared.js';
-import { isContextOverflow } from '../provider-error.js';
-import { OpenAIOptions, type OpenAIServiceTier } from './utils/openai-options.js';
+import { providerFailureClassification } from '../provider-error.js';
+import {
+  OpenAIReasoningEffort,
+  OpenAIOptions,
+  type OpenAIServiceTier,
+} from './utils/openai-options.js';
 import { Lifecycle } from './utils/lifecycle.js';
 import { ToolSchemaProjection } from './utils/tool-schema.js';
 import { ToolStream } from './utils/tool-stream.js';
@@ -56,7 +59,7 @@ const OpenAIChatTool = Schema.Struct({
 });
 type OpenAIChatTool = Schema.Schema.Type<typeof OpenAIChatTool>;
 
-const OpenAIChatAssistantToolCall = Schema.Struct({
+export const OpenAIChatAssistantToolCall = Schema.Struct({
   id: Schema.String,
   type: Schema.tag('function'),
   function: Schema.Struct({
@@ -66,16 +69,33 @@ const OpenAIChatAssistantToolCall = Schema.Struct({
 });
 type OpenAIChatAssistantToolCall = Schema.Schema.Type<typeof OpenAIChatAssistantToolCall>;
 
+// 对齐参考库：text part 可带 `cache_control`（提示缓存断点）。本地 lowering 不产出
+// 它（OpenAI 家族不在 cacheFormat 白名单里），但 `http.body` overlay 传入的上游历史
+// 可能带，因此解析侧必须容忍。
+const OpenAIChatCacheControl = Schema.Struct({
+  type: Schema.Literal('ephemeral'),
+  ttl: Schema.optional(Schema.String),
+});
+
+const OpenAIChatTextContent = Schema.Struct({
+  type: Schema.Literal('text'),
+  text: Schema.String,
+  cache_control: Schema.optional(OpenAIChatCacheControl),
+});
+
 const OpenAIChatUserContent = Schema.Union([
-  Schema.Struct({ type: Schema.Literal('text'), text: Schema.String }),
+  OpenAIChatTextContent,
   Schema.Struct({
     type: Schema.Literal('image_url'),
     image_url: Schema.Struct({ url: Schema.String }),
   }),
 ]);
 
-const OpenAIChatMessage = Schema.Union([
-  Schema.Struct({ role: Schema.Literal('system'), content: Schema.String }),
+export const OpenAIChatMessage = Schema.Union([
+  Schema.Struct({
+    role: Schema.Literal('system'),
+    content: Schema.Union([Schema.String, Schema.Array(OpenAIChatUserContent)]),
+  }),
   Schema.Struct({
     role: Schema.Literal('user'),
     content: Schema.Union([Schema.String, Schema.Array(OpenAIChatUserContent)]),
@@ -86,7 +106,8 @@ const OpenAIChatMessage = Schema.Union([
   Schema.StructWithRest(
     Schema.Struct({
       role: Schema.Literal('assistant'),
-      content: Schema.NullOr(Schema.String),
+      // 兼容数组形态的 assistant 正文（带 cache_control 的 text part）。
+      content: Schema.NullOr(Schema.Union([Schema.String, Schema.Array(OpenAIChatTextContent)])),
       tool_calls: optionalArray(OpenAIChatAssistantToolCall),
       reasoning_content: Schema.optional(Schema.String),
       reasoning: Schema.optional(Schema.String),
@@ -98,7 +119,8 @@ const OpenAIChatMessage = Schema.Union([
   Schema.Struct({
     role: Schema.Literal('tool'),
     tool_call_id: Schema.String,
-    content: Schema.String,
+    // 工具结果同样可能是 text part 数组（带 cache_control）。
+    content: Schema.Union([Schema.String, Schema.Array(OpenAIChatTextContent)]),
   }),
 ]).pipe(Schema.toTaggedUnion('role'));
 type OpenAIChatMessage = Schema.Schema.Type<typeof OpenAIChatMessage>;
@@ -120,7 +142,8 @@ export const bodyFields = {
   stream_options: Schema.optional(Schema.Struct({ include_usage: Schema.Boolean })),
   store: Schema.optional(Schema.Boolean),
   service_tier: Schema.optional(OpenAIOptions.OpenAIServiceTier),
-  reasoning_effort: Schema.optional(Schema.Literals(ReasoningEfforts)),
+  // 供应商自定义档位：已知值只作补全，运行期接受任意字符串（对齐上游）。
+  reasoning_effort: Schema.optional(OpenAIReasoningEffort),
   reasoning: Schema.optional(JsonObject),
   thinking: Schema.optional(JsonObject),
   enable_thinking: Schema.optional(Schema.Boolean),
@@ -149,25 +172,43 @@ export type OpenAIChatBody = Schema.Schema.Type<typeof OpenAIChatBody>;
 // The event schema is one decoded SSE `data:` payload. `Framing.sseWithDone`
 // splits the byte stream into strings (keeping the `[DONE]` sentinel), then the
 // union below decodes each string into this provider-native event shape.
-const OpenAIChatUsage = Schema.Struct({
-  prompt_tokens: Schema.optional(Schema.Number),
-  completion_tokens: Schema.optional(Schema.Number),
-  total_tokens: Schema.optional(Schema.Number),
-  // DeepSeek 官方 API 用顶层 `prompt_cache_hit_tokens` 上报自动上下文缓存的
-  // 命中量（不在 `prompt_tokens_details.cached_tokens` 里）。漏读会让直连
-  // DeepSeek 的会话在 UI/usage 事件里永远显示 0% 命中（实测台账全 0）。
-  prompt_cache_hit_tokens: optionalNull(Schema.Number),
-  prompt_tokens_details: optionalNull(
-    Schema.Struct({
-      cached_tokens: Schema.optional(Schema.Number),
-    }),
-  ),
-  completion_tokens_details: optionalNull(
-    Schema.Struct({
-      reasoning_tokens: Schema.optional(Schema.Number),
-    }),
-  ),
-});
+// `StructWithRest` 容忍上游新增的计费字段：usage 是纯上报数据，遇到未知键应当
+// 原样带过来（`providerMetadata` 会整体回传），而不是让整个事件解码失败。
+const OpenAIChatUsage = Schema.StructWithRest(
+  Schema.Struct({
+    prompt_tokens: Schema.optional(Schema.Number),
+    completion_tokens: Schema.optional(Schema.Number),
+    total_tokens: Schema.optional(Schema.Number),
+    // 提供方各自的缓存计费字段（对齐参考库的 Provider-specific cache accounting）。
+    cached_tokens: optionalNull(Schema.Number),
+    // DeepSeek 官方 API 用顶层 `prompt_cache_hit_tokens` 上报自动上下文缓存的
+    // 命中量（不在 `prompt_tokens_details.cached_tokens` 里）。漏读会让直连
+    // DeepSeek 的会话在 UI/usage 事件里永远显示 0% 命中（实测台账全 0）。
+    prompt_cache_hit_tokens: optionalNull(Schema.Number),
+    cache_read_input_tokens: optionalNull(Schema.Number),
+    cache_created_input_tokens: optionalNull(Schema.Number),
+    prompt_tokens_details: optionalNull(
+      Schema.StructWithRest(
+        Schema.Struct({
+          cached_tokens: Schema.optional(Schema.Number),
+          cache_write_tokens: optionalNull(Schema.Number),
+        }),
+        [Schema.Record(Schema.String, Schema.Unknown)],
+      ),
+    ),
+    completion_tokens_details: optionalNull(
+      Schema.StructWithRest(
+        Schema.Struct({
+          reasoning_tokens: Schema.optional(Schema.Number),
+          accepted_prediction_tokens: optionalNull(Schema.Number),
+          rejected_prediction_tokens: optionalNull(Schema.Number),
+        }),
+        [Schema.Record(Schema.String, Schema.Unknown)],
+      ),
+    ),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
 
 const OpenAIChatToolCallDeltaFunction = Schema.Struct({
   name: optionalNull(Schema.String),
@@ -221,7 +262,7 @@ const OpenAIChatChoice = Schema.StructWithRest(
   [Schema.Record(Schema.String, Schema.Unknown)],
 );
 
-const OpenAIChatEvent = Schema.StructWithRest(
+export const OpenAIChatEvent = Schema.StructWithRest(
   Schema.Struct({
     // Error-only bodies carry no `choices`; tolerate their absence.
     choices: optionalArray(OpenAIChatChoice),
@@ -342,9 +383,17 @@ const detectMaxTokensField = (
     p === 'openai-compatible' ||
     p === 'deepseek' ||
     url.includes('deepseek.com') ||
+    // Moonshot / Kimi：上游 provider id 是 `moonshot`（`providers/moonshot.ts`），
+    // catalog 另用 `moonshotai` / `moonshotai-cn`；端点按 `api.moonshot.` 判定，
+    // 国际站 `.ai` 与国内站 `.cn` 都命中（此前只匹配 `.ai`，国内站会误下发
+    // `max_completion_tokens` 而被拒）。
+    p === 'moonshot' ||
+    p === 'moonshot-cn' ||
     p === 'moonshotai' ||
-    url.includes('api.moonshot.ai') ||
+    p === 'moonshotai-cn' ||
+    url.includes('api.moonshot.') ||
     p === 'togetherai' ||
+    p === 'together' ||
     url.includes('api.together.') ||
     p === 'zai' ||
     p === 'zai-coding-plan' ||
@@ -408,7 +457,18 @@ const detectSupportsStore = (provider: string, baseURL: string | undefined): boo
     url.includes('ai-gateway.vercel.sh') ||
     url.includes('vercel.sh') ||
     p === 'ant-ling' ||
-    url.includes('api.ant-ling.com');
+    url.includes('api.ant-ling.com') ||
+    // 上游 `providers/venice.ts`（经 `venice-chat.ts:compatibility`）、
+    // `meta.ts`、`minimax.ts` 都显式声明 `supportsStore: false`：这些端点不接受
+    // `store` 字段，下发即 400。
+    p === 'venice' ||
+    url.includes('api.venice.ai') ||
+    p === 'meta' ||
+    url.includes('api.meta.ai') ||
+    p === 'minimax' ||
+    url.includes('api.minimax.io') ||
+    // Gemini 的 OpenAI 兼容端点不接受 `store`（对齐参考库）。
+    url.includes('generativelanguage.googleapis.com');
   return !isNonStandard;
 };
 
@@ -419,12 +479,19 @@ const detectSupportsStrictMode = (provider: string, baseURL: string | undefined)
   // 与参考库的差异：用户自建的第三方中转（custom / openai-compatible）
   // 同样不下发 `strict`（此前行为是永不下发，保持兼容）。
   if (p === 'custom' || p === 'openai-compatible') return false;
-  const isMoonshot = p === 'moonshotai' || p === 'moonshotai-cn' || url.includes('api.moonshot.');
+  const isMoonshot =
+    p === 'moonshot' ||
+    p === 'moonshot-cn' ||
+    p === 'moonshotai' ||
+    p === 'moonshotai-cn' ||
+    url.includes('api.moonshot.');
   const isTogether = p === 'togetherai' || p === 'together' || url.includes('api.together.');
   const isCloudflareAiGateway =
     p === 'cloudflare-ai-gateway' || url.includes('gateway.ai.cloudflare.com');
   const isNvidia = p === 'nvidia' || url.includes('integrate.api.nvidia.com');
-  return !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia;
+  // 上游 `providers/minimax.ts` 声明 `supportsStrictMode: false`。
+  const isMinimax = p === 'minimax' || url.includes('api.minimax.io');
+  return !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia && !isMinimax;
 };
 
 /**
@@ -515,7 +582,7 @@ const lowerToolCall = (
   },
 });
 
-const lowerMedia = Effect.fn('OpenAIChat.lowerMedia')(function* (part: MediaPart) {
+const lowerMedia = Effect.fnUntraced(function* (part: MediaPart) {
   const media = yield* ProviderShared.validateMedia('OpenAI Chat', part, IMAGE_MIMES);
   return { type: 'image_url' as const, image_url: { url: media.dataUrl } };
 });
@@ -570,9 +637,7 @@ const reasoningDetailsOf = (
   return undefined;
 };
 
-const lowerUserMessage = Effect.fn('OpenAIChat.lowerUserMessage')(function* (
-  message: OpenAIChatRequestMessage,
-) {
+const lowerUserMessage = Effect.fnUntraced(function* (message: OpenAIChatRequestMessage) {
   const content: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = [];
   for (const part of message.content) {
     if (part.type === 'text') {
@@ -590,7 +655,22 @@ const lowerUserMessage = Effect.fn('OpenAIChat.lowerUserMessage')(function* (
   return { role: 'user' as const, content };
 });
 
-const lowerAssistantMessage = Effect.fn('OpenAIChat.lowerAssistantMessage')(function* (
+/**
+ * 协议 lowering 的可选钩子（对齐上游 `LoweringOptions`）。
+ *
+ * 供应商协议（Venice 等）在共享 Chat lowering 之上追加自己的字段：`assistant`
+ * 拿到**本地来源消息**（可取 `providerMetadata`）与已 lowering 的消息，返回改写结果。
+ * 只开放本轮有落点的 `assistant`；上游另有的 `cacheControl` / `toolCallID` 在本地
+ * 已是内建形态（`cache` 字段与 `toolCallIDNormalizer`），不重复开口。
+ */
+export interface OpenAIChatLoweringOptions {
+  readonly assistant?: (
+    source: LLMRequest['messages'][number],
+    message: OpenAIChatMessage,
+  ) => OpenAIChatMessage;
+}
+
+const lowerAssistantMessage = Effect.fnUntraced(function* (
   message: OpenAIChatRequestMessage,
   configuredField: string | undefined,
   requireReasoning: boolean,
@@ -671,7 +751,7 @@ const lowerAssistantMessage = Effect.fn('OpenAIChat.lowerAssistantMessage')(func
   };
 });
 
-const lowerToolMessages = Effect.fn('OpenAIChat.lowerToolMessages')(function* (
+const lowerToolMessages = Effect.fnUntraced(function* (
   message: OpenAIChatRequestMessage,
   toolCallID: (id: string) => string,
 ) {
@@ -705,28 +785,34 @@ const lowerToolMessages = Effect.fn('OpenAIChat.lowerToolMessages')(function* (
   return { messages, images };
 });
 
-const lowerMessage = Effect.fn('OpenAIChat.lowerMessage')(function* (
+const lowerMessage = Effect.fnUntraced(function* (
   message: OpenAIChatRequestMessage,
   configuredField: string | undefined,
   requireReasoning: boolean,
   providerMetadataKey: string,
   toolCallID: (id: string) => string,
+  options: OpenAIChatLoweringOptions | undefined,
 ) {
   if (message.role === 'user') return [yield* lowerUserMessage(message)];
-  if (message.role === 'assistant')
-    return [
-      yield* lowerAssistantMessage(
-        message,
-        configuredField,
-        requireReasoning,
-        providerMetadataKey,
-        toolCallID,
-      ),
-    ];
+  if (message.role === 'assistant') {
+    const lowered = yield* lowerAssistantMessage(
+      message,
+      configuredField,
+      requireReasoning,
+      providerMetadataKey,
+      toolCallID,
+    );
+    // 钩子在共享 lowering **之后**执行，因此既能拿到 lowering 结果，也能回溯
+    // 本地来源消息的 `providerMetadata`（供应商签名/加密推理等回传字段在此附加）。
+    return [options?.assistant === undefined ? lowered : options.assistant(message, lowered)];
+  }
   return (yield* lowerToolMessages(message, toolCallID)).messages;
 });
 
-const lowerMessages = Effect.fn('OpenAIChat.lowerMessages')(function* (request: LLMRequest) {
+const lowerMessages = Effect.fnUntraced(function* (
+  request: LLMRequest,
+  options?: OpenAIChatLoweringOptions,
+) {
   const system: OpenAIChatMessage[] =
     request.system.length === 0
       ? []
@@ -807,6 +893,7 @@ const lowerMessages = Effect.fn('OpenAIChat.lowerMessages')(function* (request: 
         requireReasoning,
         providerMetadataKey,
         toolCallID,
+        options,
       )),
     );
   }
@@ -814,10 +901,7 @@ const lowerMessages = Effect.fn('OpenAIChat.lowerMessages')(function* (request: 
   return messages;
 });
 
-const lowerOptions = Effect.fn('OpenAIChat.lowerOptions')(function* (
-  request: LLMRequest,
-  supportsStore: boolean,
-) {
+const lowerOptions = Effect.fnUntraced(function* (request: LLMRequest, supportsStore: boolean) {
   const store = OpenAIOptions.store(request);
   const serviceTier = OpenAIOptions.serviceTier(request);
   const reasoningEffort = OpenAIOptions.reasoningEffort(request);
@@ -849,7 +933,10 @@ const lowerCompatibleProviderOptions = (request: LLMRequest) =>
     ? (request.providerOptions?.[request.model.provider] ?? {})
     : {};
 
-const fromRequest = Effect.fn('OpenAIChat.fromRequest')(function* (request: LLMRequest) {
+export const fromRequest = Effect.fnUntraced(function* (
+  request: LLMRequest,
+  options?: OpenAIChatLoweringOptions,
+) {
   // `fromRequest` returns the provider body only. Endpoint, auth, framing,
   // validation, and HTTP execution are composed by `Route.make`.
   const reasoningField = request.model.compatibility?.reasoningField;
@@ -858,7 +945,6 @@ const fromRequest = Effect.fn('OpenAIChat.fromRequest')(function* (request: LLMR
       `OpenAI Chat reasoning field conflicts with reserved field ${reasoningField}`,
     );
   const generation = request.generation;
-  const toolSchemaCompatibility = request.model.compatibility?.toolSchema;
   // 对齐参考库：请求侧兼容开关先看显式配置，未配置时按 provider / baseURL 探测。
   const provider = String(request.model.provider);
   const baseURL = request.model.route.endpoint.baseURL;
@@ -878,17 +964,11 @@ const fromRequest = Effect.fn('OpenAIChat.fromRequest')(function* (request: LLMR
   return {
     ...lowerCompatibleProviderOptions(request),
     model: request.model.id,
-    messages: yield* lowerMessages(request),
+    messages: yield* lowerMessages(request, options),
     tools:
       request.tools.length === 0
         ? undefined
-        : request.tools.map((tool) =>
-            lowerTool(
-              tool,
-              ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
-              supportsStrictMode,
-            ),
-          ),
+        : request.tools.map((tool) => lowerTool(tool, tool.inputSchema, supportsStrictMode)),
     tool_choice: request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined,
     stream: true as const,
     ...(zaiToolStream && hasActiveTools ? { tool_stream: true } : {}),
@@ -995,17 +1075,27 @@ const mapUsage = (
   providerMetadataKey: string,
 ): Usage | undefined => {
   if (!usage) return undefined;
-  // 兼容两种上报口径：OpenAI 的 `prompt_tokens_details.cached_tokens` 与
-  // DeepSeek 的顶层 `prompt_cache_hit_tokens`（后者缺失时才回退）。
+  // 兼容多种上报口径：OpenAI 的 `prompt_tokens_details.cached_tokens`、部分网关的
+  // 顶层 `cache_read_input_tokens` / `cached_tokens`，以及 DeepSeek 的顶层
+  // `prompt_cache_hit_tokens`（按序回退）。
   const cached =
-    usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? undefined;
+    usage.prompt_tokens_details?.cached_tokens ??
+    usage.cache_read_input_tokens ??
+    usage.cached_tokens ??
+    usage.prompt_cache_hit_tokens ??
+    undefined;
   const reasoning = usage.completion_tokens_details?.reasoning_tokens;
+  const cacheWrite =
+    usage.cache_created_input_tokens ??
+    usage.prompt_tokens_details?.cache_write_tokens ??
+    undefined;
   const nonCached = ProviderShared.subtractTokens(usage.prompt_tokens, cached);
   return new Usage({
     inputTokens: usage.prompt_tokens,
     outputTokens: usage.completion_tokens,
     nonCachedInputTokens: nonCached,
     cacheReadInputTokens: cached,
+    cacheWriteInputTokens: cacheWrite,
     reasoningTokens: reasoning,
     totalTokens: ProviderShared.totalTokens(
       usage.prompt_tokens,
@@ -1044,7 +1134,10 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
           [
             LLMEvent.providerError({
               message: label || 'OpenAI Chat provider error',
-              classification: isContextOverflow(label) ? 'context-overflow' : undefined,
+              classification: providerFailureClassification(
+                label,
+                code === undefined ? undefined : Number(code),
+              ),
               retryable:
                 code === 'rate_limit_exceeded' ||
                 code === 'insufficient_quota' ||
@@ -1257,7 +1350,9 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     ] as const;
   });
 
-const finishEvents = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+export const finishEvents = (
+  state: ParserState,
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     // 已产生 provider-error（顶层 error 体）时视为已有终态：不再产出任何
     // 事件，否则会触发外层 `requireTerminalEvent` 的「终态之后仍有事件」失败。
@@ -1305,8 +1400,7 @@ const finishEvents = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>
     const lifecycle = toolCallEvents.length ? Lifecycle.stepStart(reasoned, events) : reasoned;
     events.push(...toolCallEvents);
     Lifecycle.finish(lifecycle, events, {
-      reason,
-      reasonRaw: state.finishReasonRaw,
+      reason: { normalized: reason, raw: state.finishReasonRaw },
       usage: state.usage,
       ...(state.serviceTier === undefined
         ? {}

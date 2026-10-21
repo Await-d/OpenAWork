@@ -67,8 +67,20 @@ export const provider = {
 
 export const baseten = define(profiles.baseten);
 export const cerebras = define(profiles.cerebras);
+export const cohere = define(profiles.cohere);
 export const deepinfra = define(profiles.deepinfra);
 export const deepseek = define(profiles.deepseek);
+export const digitalocean = define(profiles.digitalocean);
 export const fireworks = define(profiles.fireworks);
 export const groq = define(profiles.groq);
+export const meta = define(profiles.meta);
+export const moonshot = define(profiles.moonshot);
+export const opencode = define(profiles.opencode);
 export const togetherai = define(profiles.togetherai);
+// 含连字符的 provider id 用驼峰别名导出（标识符不能含 `-`），
+// `profiles['typesafe-ai']` 等原始键名保持不变。
+export const typesafeAi = define(profiles['typesafe-ai']);
+export const venice = define(profiles.venice);
+export const vercelAiGateway = define(profiles['vercel-ai-gateway']);
+export const zai = define(profiles.zai);
+export const zaiCodingPlan = define(profiles['zai-coding-plan']);

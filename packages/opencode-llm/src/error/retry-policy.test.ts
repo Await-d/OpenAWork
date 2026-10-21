@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Effect, Exit } from 'effect';
+import { Duration, Effect, Exit, Schedule } from 'effect';
 import {
   computeRetryDelay,
   createRetrySchedule,
@@ -209,5 +209,155 @@ describe('withRetryStats', () => {
       expect(stats.attempts).toBe(2);
       expect(stats.totalDelayMs).toBeGreaterThan(0);
     }
+  });
+
+  it('统计口径应精确：重试 2 次后成功 → attempts = 3 且累计等待 = 10 + 20', async () => {
+    let attemptCount = 0;
+    const fn = vi.fn(() => {
+      attemptCount++;
+      if (attemptCount < 3) {
+        return Effect.fail(
+          new LLMError({
+            module: 'test',
+            method: 'stats-precise',
+            reason: new RateLimitReason({
+              message: 'Rate limit',
+            }),
+          }),
+        );
+      }
+      return Effect.succeed('ok');
+    });
+
+    const effect = withRetryStats(Effect.suspend(fn), {
+      maxAttempts: 5,
+      initialDelayMs: 10,
+      backoffMultiplier: 2,
+      jitterFactor: 0,
+    });
+
+    const exitPromise = Effect.runPromiseExit(effect);
+    await vi.runAllTimersAsync();
+    const exit = await exitPromise;
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      const { result, stats } = exit.value;
+      expect(result).toBe('ok');
+      expect(stats.attempts).toBe(3);
+      // computeRetryDelay(1) = 10、computeRetryDelay(2) = 20
+      expect(stats.totalDelayMs).toBe(30);
+      expect(stats.lastError).not.toBeNull();
+    }
+  });
+
+  it('重试耗尽时不应超出 maxAttempts 次调用', async () => {
+    const error = new LLMError({
+      module: 'test',
+      method: 'stats-exhausted',
+      reason: new RateLimitReason({
+        message: 'Rate limit',
+      }),
+    });
+    const fn = vi.fn(() => Effect.fail(error));
+    const effect = withRetryStats(Effect.suspend(fn), {
+      maxAttempts: 3,
+      initialDelayMs: 10,
+      jitterFactor: 0,
+    });
+
+    const exitPromise = Effect.runPromiseExit(effect);
+    await vi.runAllTimersAsync();
+    const exit = await exitPromise;
+
+    expect(fn).toHaveBeenCalledTimes(3);
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it('不可重试错误时统计应为单次尝试且无等待', async () => {
+    const error = new LLMError({
+      module: 'test',
+      method: 'stats-noretry',
+      reason: new InvalidRequestReason({ message: 'Invalid request' }),
+    });
+    const fn = vi.fn(() => Effect.fail(error));
+    const effect = withRetryStats(Effect.suspend(fn), {
+      maxAttempts: 5,
+      initialDelayMs: 10,
+      shouldRetry: () => false,
+    });
+
+    const exitPromise = Effect.runPromiseExit(effect);
+    await vi.runAllTimersAsync();
+    await exitPromise;
+
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createRetrySchedule', () => {
+  it('延迟序列应遵守 backoffMultiplier 与 maxDelayMs 封顶', async () => {
+    const schedule = createRetrySchedule({
+      initialDelayMs: 100,
+      backoffMultiplier: 2,
+      maxDelayMs: 1000,
+      jitterFactor: 0,
+    });
+    const step = await Effect.runPromise(Schedule.toStep(schedule));
+
+    const delays: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const [, delay] = await Effect.runPromise(step(0, undefined));
+      delays.push(Duration.toMillis(delay));
+    }
+
+    // 100 → 200 → 400 → 800 → 1600 封顶为 1000
+    expect(delays).toEqual([100, 200, 400, 800, 1000]);
+  });
+
+  it('延迟序列应与 computeRetryDelay 完全一致（jitterFactor = 0）', async () => {
+    const config = {
+      initialDelayMs: 100,
+      backoffMultiplier: 3,
+      maxDelayMs: 2000,
+      jitterFactor: 0,
+    };
+    const schedule = createRetrySchedule(config);
+    const step = await Effect.runPromise(Schedule.toStep(schedule));
+
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const [, delay] = await Effect.runPromise(step(0, undefined));
+      const expected = computeRetryDelay(attempt, { ...DEFAULT_RETRY_POLICY, ...config });
+      expect(Duration.toMillis(delay)).toBe(expected);
+    }
+  });
+
+  it('jitterFactor 应为每个延迟添加比例抖动', async () => {
+    const samples = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const step = yield* Schedule.toStep(
+              createRetrySchedule({
+                initialDelayMs: 1000,
+                backoffMultiplier: 2,
+                maxDelayMs: 100000,
+                jitterFactor: 0.2,
+              }),
+            );
+            const [, delay] = yield* step(0, undefined);
+            return Duration.toMillis(delay);
+          }),
+        ),
+      ),
+    );
+
+    // 首次延迟基准 1000ms，±20% 抖动
+    for (const ms of samples) {
+      expect(ms).toBeGreaterThanOrEqual(800);
+      expect(ms).toBeLessThanOrEqual(1200);
+    }
+    // 抖动应产生多样性
+    expect(new Set(samples).size).toBeGreaterThan(1);
   });
 });

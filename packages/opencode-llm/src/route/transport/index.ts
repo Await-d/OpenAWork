@@ -1,7 +1,7 @@
 import type { Effect, Stream } from 'effect';
 import type { Endpoint } from '../endpoint.js';
 import type { Auth } from '../auth.js';
-import type { Interface as RequestExecutorInterface } from '../executor.js';
+import type { HttpMiddleware, Interface as RequestExecutorInterface } from '../executor.js';
 import type { Interface as WebSocketExecutorInterface } from './websocket.js';
 import type { LLMError, LLMRequest } from '../../schema/index.js';
 
@@ -30,7 +30,10 @@ export interface TransportPrepareInput<Body> {
     readonly request: LLMRequest;
     readonly body: Body;
   }) => Record<string, string>;
+  /** 每次调用的请求拦截器（来自 `StreamOptions.http`）；传输层负责在发起前应用。 */
+  readonly middleware?: HttpMiddleware;
 }
 
 export * as HttpTransport from './http.js';
 export { WebSocketExecutor, WebSocketTransport } from './websocket.js';
+export type { HttpHandler, HttpMiddleware } from '../executor.js';

@@ -17,6 +17,7 @@ import {
   type ContentPart,
 } from './messages.js';
 import { ProviderFailureClassification } from './errors.js';
+import { withStatics } from '../utils/with-statics.js';
 
 /**
  * Token usage reported by an LLM provider.
@@ -167,6 +168,21 @@ export const ToolInputEnd = Schema.Struct({
 }).annotate({ identifier: 'LLM.Event.ToolInputEnd' });
 export type ToolInputEnd = Schema.Schema.Type<typeof ToolInputEnd>;
 
+/**
+ * A local tool call whose final input could not be decoded.
+ *
+ * 上游（对齐参考库）在区间内把「畸形入参」从「静默修补成 {}」改为上报该事件：
+ * 静默修补会让工具带着空/错参数被执行，比暴露解析失败更危险。
+ */
+export const ToolInputError = Schema.Struct({
+  type: Schema.tag('tool-input-error'),
+  id: ToolCallID,
+  name: Schema.String,
+  namespace: Schema.optional(Schema.String),
+  raw: Schema.String,
+}).annotate({ identifier: 'LLM.Event.ToolInputError' });
+export type ToolInputError = Schema.Schema.Type<typeof ToolInputError>;
+
 export const ToolCall = Schema.Struct({
   type: Schema.tag('tool-call'),
   id: ToolCallID,
@@ -198,15 +214,27 @@ export const ToolError = Schema.Struct({
 }).annotate({ identifier: 'LLM.Event.ToolError' });
 export type ToolError = Schema.Schema.Type<typeof ToolError>;
 
+/**
+ * 归一化结束原因及其上游原始值（对齐 opencode 参考库）。
+ *
+ * - `normalized` — 协议无关的归一化原因；
+ * - `raw` — 产出该归一化结果的上游原生 stop reason（如 `end_turn`、
+ *   `max_tokens`、`model_context_window_exceeded`），供诊断区分
+ *   「截断」与「正常停止」；
+ * - `category` / `explanation` — 内容过滤类结束原因的上游策略域与说明。
+ */
+export const FinishReasonDetails = Schema.Struct({
+  normalized: FinishReason,
+  raw: Schema.optional(Schema.String),
+  category: Schema.optional(Schema.String),
+  explanation: Schema.optional(Schema.String),
+}).annotate({ identifier: 'LLM.FinishReasonDetails' });
+export type FinishReasonDetails = Schema.Schema.Type<typeof FinishReasonDetails>;
+
 export const StepFinish = Schema.Struct({
   type: Schema.tag('step-finish'),
   index: Schema.Number,
-  reason: FinishReason,
-  // Provider-native stop reason that produced `reason` (e.g. `end_turn`,
-  // `max_tokens`, `model_context_window_exceeded`). Kept alongside the
-  // normalized union so diagnostics can tell "truncated" apart from "stopped"
-  // without changing the normalized contract.
-  reasonRaw: Schema.optional(Schema.String),
+  reason: FinishReasonDetails,
   usage: Schema.optional(Usage),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: 'LLM.Event.StepFinish' });
@@ -214,8 +242,7 @@ export type StepFinish = Schema.Schema.Type<typeof StepFinish>;
 
 export const Finish = Schema.Struct({
   type: Schema.tag('finish'),
-  reason: FinishReason,
-  reasonRaw: Schema.optional(Schema.String),
+  reason: FinishReasonDetails,
   usage: Schema.optional(Usage),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: 'LLM.Event.Finish' });
@@ -241,6 +268,7 @@ const llmEventTagged = Schema.Union([
   ToolInputStart,
   ToolInputDelta,
   ToolInputEnd,
+  ToolInputError,
   ToolCall,
   ToolResult,
   ToolError,
@@ -264,7 +292,7 @@ const toolCallID = (value: ToolCallID) => ToolCallID.make(value);
  * Lets consumers write `events.filter(LLMEvent.is.toolCall)` instead of
  * `events.filter(LLMEvent.guards["tool-call"])`.
  */
-export const LLMEvent = Object.assign(llmEventTagged, {
+export const LLMEvent = withStatics(llmEventTagged, {
   stepStart: StepStart.make,
   textStart: (input: WithID<TextStart, ContentBlockID>) =>
     TextStart.make({ ...input, id: contentBlockID(input.id) }),
@@ -284,6 +312,8 @@ export const LLMEvent = Object.assign(llmEventTagged, {
     ToolInputDelta.make({ ...input, id: toolCallID(input.id) }),
   toolInputEnd: (input: WithID<ToolInputEnd, ToolCallID>) =>
     ToolInputEnd.make({ ...input, id: toolCallID(input.id) }),
+  toolInputError: (input: WithID<ToolInputError, ToolCallID>) =>
+    ToolInputError.make({ ...input, id: toolCallID(input.id) }),
   toolCall: (input: WithID<ToolCall, ToolCallID>) =>
     ToolCall.make({ ...input, id: toolCallID(input.id) }),
   toolResult: (input: WithID<ToolResult, ToolCallID>) =>
@@ -319,6 +349,7 @@ export const LLMEvent = Object.assign(llmEventTagged, {
     toolInputStart: llmEventTagged.guards['tool-input-start'],
     toolInputDelta: llmEventTagged.guards['tool-input-delta'],
     toolInputEnd: llmEventTagged.guards['tool-input-end'],
+    toolInputError: llmEventTagged.guards['tool-input-error'],
     toolCall: llmEventTagged.guards['tool-call'],
     toolResult: llmEventTagged.guards['tool-result'],
     toolError: llmEventTagged.guards['tool-error'],
@@ -412,7 +443,7 @@ interface ResponseState {
   readonly events: ReadonlyArray<LLMEvent>;
   readonly message: Message;
   readonly usage?: Usage;
-  readonly finishReason?: FinishReason;
+  readonly finishReason?: FinishReasonDetails;
   readonly textParts: Readonly<Record<string, ContentAssembly>>;
   readonly reasoningParts: Readonly<Record<string, ContentAssembly>>;
   readonly toolInputs: Readonly<Record<string, ToolInputAssembly>>;
@@ -440,7 +471,7 @@ const appendEvent = (state: ResponseState, event: LLMEvent): ResponseState => {
     return {
       ...state,
       events,
-      finishReason: state.finishReason ?? 'error',
+      finishReason: state.finishReason ?? { normalized: 'error' },
     };
   }
   return {
@@ -651,7 +682,7 @@ export class LLMResponse extends Schema.Class<LLMResponse>('LLM.Response')({
   message: Message,
   events: Schema.Array(LLMEvent),
   usage: Schema.optional(Usage),
-  finishReason: FinishReason,
+  finishReason: FinishReasonDetails,
 }) {
   /** Concatenated assistant text assembled from streamed `text-delta` events. */
   get text() {

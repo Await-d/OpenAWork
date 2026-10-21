@@ -32,6 +32,82 @@ const makeRequest = () =>
     providerOptions: { openai: { store: false } },
   });
 
+describe('OpenAI Responses hosted image generation tool', () => {
+  const bodyFor = (openai: Record<string, unknown>) =>
+    Effect.runPromise(
+      OpenAIResponses.protocol.body.from(
+        new LLMRequest({
+          model: OpenAIResponses.route.model({ id: 'gpt-6-astra' }),
+          system: [],
+          messages: [],
+          tools: [],
+          providerOptions: { openai },
+        }),
+      ),
+    );
+
+  it('lowers the hosted image generation tool to the official wire shape', async () => {
+    const body = await bodyFor({
+      store: false,
+      imageGenerationTool: {
+        model: 'gpt-image-2.5-sunburst',
+        quality: 'max',
+        size: '1024x1024',
+        background: 'transparent',
+        outputFormat: 'webp',
+        outputCompression: 70,
+        moderation: 'low',
+        partialImages: 2,
+        action: 'generate',
+      },
+    });
+
+    expect(body.tools).toEqual([
+      {
+        type: 'image_generation',
+        model: 'gpt-image-2.5-sunburst',
+        quality: 'max',
+        size: '1024x1024',
+        background: 'transparent',
+        output_format: 'webp',
+        output_compression: 70,
+        moderation: 'low',
+        partial_images: 2,
+        action: 'generate',
+      },
+    ]);
+  });
+
+  it('still declares the tool when the agent has no function tools', async () => {
+    const body = await bodyFor({
+      store: false,
+      imageGenerationTool: { model: 'gpt-image-2.5-flare' },
+    });
+
+    expect(body.tools).toEqual([{ type: 'image_generation', model: 'gpt-image-2.5-flare' }]);
+  });
+
+  it('drops unknown fields and out-of-range values instead of forwarding them', async () => {
+    const body = await bodyFor({
+      store: false,
+      imageGenerationTool: {
+        model: 'gpt-image-2.5-flare',
+        quality: 'ultra',
+        partialImages: 9,
+        typoField: 'ignored',
+      },
+    });
+
+    expect(body.tools).toEqual([{ type: 'image_generation', model: 'gpt-image-2.5-flare' }]);
+  });
+
+  it('omits the tool entirely when the model is missing', async () => {
+    const body = await bodyFor({ store: false, imageGenerationTool: { quality: 'high' } });
+
+    expect(body.tools).toBeUndefined();
+  });
+});
+
 describe('OpenAI Responses reasoning replay', () => {
   it('keeps a summary delta on the active summary part when the relay omits its index', async () => {
     const request = makeRequest();

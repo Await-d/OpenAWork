@@ -8,7 +8,7 @@ import { Effect } from 'effect';
 import type { LLMRequest } from '../schema/index.js';
 import type { Model } from '../schema/index.js';
 import type { CircuitBreakerOpenError } from './circuit-breaker.js';
-import { createCircuitBreaker, type CircuitBreakerConfig } from './circuit-breaker.js';
+import { makeCircuitBreakerUnsafe, type CircuitBreakerConfig } from './circuit-breaker.js';
 import { withRetry, type RetryPolicyConfig } from './retry-policy.js';
 import type { AllFallbacksFailedError } from './fallback.js';
 import { withFallback, type FallbackConfig } from './fallback.js';
@@ -99,11 +99,19 @@ export function createResilientExecutor<A, E, R>(
     fallbackConfig,
   } = { ...DEFAULT_ERROR_HANDLING_STRATEGY, ...strategy };
 
+  // 断路器在 executor 构造期同步创建，跨「同一 executor 的多次运行」共享。
+  // 若每次运行都重建，失败计数无法累计，断路器将永远不会打开。
+  const circuitBreaker = enableCircuitBreaker
+    ? makeCircuitBreakerUnsafe(circuitBreakerConfig)
+    : null;
+
   return Effect.gen(function* () {
     // 层次 3：基础执行（可能带重试）
+    // 统一用 Effect.suspend 延迟调用：execute 只在 effect 真正执行时被调用，
+    // 构造期不得触发（否则被断路器 / 降级拦截的 effect 仍会调用 execute）。
     const executeWithRetry = (m: Model, req: LLMRequest) => {
       if (!enableRetry) {
-        return execute(m, req);
+        return Effect.suspend(() => execute(m, req));
       }
       return withRetry(
         Effect.suspend(() => execute(m, req)),
@@ -123,9 +131,8 @@ export function createResilientExecutor<A, E, R>(
     }
 
     // 层次 1：断路器
-    if (enableCircuitBreaker) {
-      const breaker = yield* createCircuitBreaker(circuitBreakerConfig);
-      const result = yield* breaker.protect(effectWithFallback);
+    if (circuitBreaker) {
+      const result = yield* circuitBreaker.protect(effectWithFallback);
       return result;
     }
 
@@ -204,75 +211,53 @@ export const FAIL_FAST_STRATEGY: ErrorHandlingStrategy = {
 };
 
 /**
+ * 提取 LLMError 形状错误的 `reason._tag`（失败原因标签）。
+ * 非 LLMError 形状的未知错误（普通 Error、null、原始值等）返回 `undefined`。
+ */
+function reasonTagOf(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('reason' in error)) {
+    return undefined;
+  }
+  const reason = error.reason;
+  if (typeof reason !== 'object' || reason === null || !('_tag' in reason)) {
+    return undefined;
+  }
+  const tag = reason._tag;
+  return typeof tag === 'string' ? tag : undefined;
+}
+
+/**
  * 错误分类助手
  */
 export const ErrorClassifier = {
   /**
    * 是否为网络错误
    */
-  isNetworkError: (error: unknown): boolean => {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'reason' in error &&
-      typeof error.reason === 'object' &&
-      (error as { reason: { _tag?: unknown } }).reason !== null
-    ) {
-      const tag = (error as { reason: { _tag?: string } }).reason._tag;
-      return tag === 'Transport';
-    }
-    return false;
-  },
+  isNetworkError: (error: unknown): boolean => reasonTagOf(error) === 'Transport',
 
   /**
    * 是否为速率限制错误
    */
-  isRateLimitError: (error: unknown): boolean => {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'reason' in error &&
-      typeof error.reason === 'object' &&
-      (error as { reason: { _tag?: unknown } }).reason !== null
-    ) {
-      const tag = (error as { reason: { _tag?: string } }).reason._tag;
-      return tag === 'RateLimit';
-    }
-    return false;
-  },
+  isRateLimitError: (error: unknown): boolean => reasonTagOf(error) === 'RateLimit',
 
   /**
    * 是否为认证错误
    */
-  isAuthenticationError: (error: unknown): boolean => {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'reason' in error &&
-      typeof error.reason === 'object' &&
-      (error as { reason: { _tag?: unknown } }).reason !== null
-    ) {
-      const tag = (error as { reason: { _tag?: string } }).reason._tag;
-      return tag === 'Authentication';
-    }
-    return false;
-  },
+  isAuthenticationError: (error: unknown): boolean => reasonTagOf(error) === 'Authentication',
 
   /**
    * 是否为上下文溢出错误
    */
   isContextOverflowError: (error: unknown): boolean => {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'reason' in error &&
-      typeof error.reason === 'object' &&
-      (error as { reason: { _tag?: unknown; classification?: unknown } }).reason !== null
-    ) {
-      const reason = (error as { reason: { _tag?: string; classification?: string } }).reason;
-      return reason._tag === 'InvalidRequest' && reason.classification === 'context-overflow';
+    if (typeof error !== 'object' || error === null || !('reason' in error)) {
+      return false;
     }
-    return false;
+    const reason = error.reason;
+    if (typeof reason !== 'object' || reason === null) {
+      return false;
+    }
+    const { _tag, classification } = reason as { _tag?: unknown; classification?: unknown };
+    return _tag === 'InvalidRequest' && classification === 'context-overflow';
   },
 
   /**

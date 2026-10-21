@@ -9,3 +9,4 @@ export * as OpenAI from './openai.js';
 export * as OpenAICompatible from './openai-compatible.js';
 export * as OpenRouter from './openrouter.js';
 export * as XAI from './xai.js';
+export * as Venice from './venice.js';

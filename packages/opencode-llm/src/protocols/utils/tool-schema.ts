@@ -1,4 +1,5 @@
-import type { JsonSchema, ModelToolSchemaCompatibility } from '../../schema/index.js';
+import type { JsonSchema, LLMRequest } from '../../schema/index.js';
+import { ToolDefinition } from '../../schema/index.js';
 import { isRecord } from '../../utils/record.js';
 import { GeminiToolSchema } from './gemini-tool-schema.js';
 
@@ -70,22 +71,81 @@ const openAI = (schema: JsonSchema): JsonSchema => {
 
 const gemini = (schema: JsonSchema): JsonSchema => GeminiToolSchema.convert(schema) ?? {};
 
-const modelCompatibility = (
-  schema: JsonSchema,
-  compatibility: ModelToolSchemaCompatibility | undefined,
-): JsonSchema => {
-  if (compatibility === undefined) return schema;
-  switch (compatibility) {
+// 工具入参永远是 JSON object，多数上游会拒绝根节点未声明 `type: "object"` 的 schema
+// （`{}`、裸 `properties`）。有了对象根之后，Effect 的空结构体标记
+// `{ not: { type: "null" } }` 与旧版本留下的 `anyOf` 都成了冗余，一并丢弃，
+// 让根节点是一个干净的 object schema。
+const objectRoot = (schema: JsonSchema): JsonSchema => {
+  if (
+    (schema.type === undefined || schema.type === 'object') &&
+    isRecord(schema.not) &&
+    schema.not.type === 'null' &&
+    Object.keys(schema.not).length === 1
+  )
+    return {
+      type: 'object',
+      ...Object.fromEntries(Object.entries(schema).filter(([key]) => key !== 'not')),
+    };
+  if (schema.type !== undefined) return schema;
+  if (
+    Array.isArray(schema.anyOf) &&
+    schema.anyOf.some(
+      (branch) => isRecord(branch) && branch.type === 'object' && Object.keys(branch).length === 1,
+    )
+  )
+    return {
+      type: 'object',
+      ...Object.fromEntries(Object.entries(schema).filter(([key]) => key !== 'anyOf')),
+    };
+  return { type: 'object', ...schema };
+};
+
+// 模型名 → 工具 schema 规则族的启发式（对齐上游 `MODEL_NAMES`）。经网关或
+// OpenAI 兼容端点访问的模型，与直连该家族时得到同样的处理。
+const MODEL_NAMES = [
+  [/gemini/i, 'gemini'],
+  [/kimi/i, 'moonshot'],
+] as const;
+
+/**
+ * 单个工具入参的投影：先落地对象根，再按规则族转换。
+ *
+ * 规则来源优先级（对齐上游）：显式 `compatibility.toolSchema` > 路由声明的
+ * `sanitizer` > 模型名启发式。本地额外保留 `ModelToolSchemaCompatibility` 的
+ * 两参调用形态给既有协议使用，故这里收窄为按模型解析。
+ */
+const modelCompatibility = (schema: JsonSchema, model: LLMRequest['model']): JsonSchema => {
+  const root = objectRoot(schema);
+  switch (
+    model.compatibility?.toolSchema ??
+    model.route.sanitizer ??
+    MODEL_NAMES.find(([name]) => name.test(model.id))?.[1]
+  ) {
     case 'gemini':
-      return gemini(schema);
+      return gemini(root);
     case 'moonshot':
-      return moonshot(schema);
+      return moonshot(root);
+    case undefined:
+      return root;
   }
 };
 
+/**
+ * 请求级工具投影（对齐上游 `ToolSchemaProjection.tools`）：在协议构造 body
+ * **之前**统一应用一次，避免同一份 schema 被逐协议重复转换。
+ */
+export const tools = (
+  entries: ReadonlyArray<ToolDefinition>,
+  model: LLMRequest['model'],
+): ReadonlyArray<ToolDefinition> =>
+  entries.map((tool) =>
+    ToolDefinition.make({ ...tool, inputSchema: modelCompatibility(tool.inputSchema, model) }),
+  );
+
 export const ToolSchemaProjection = {
   gemini,
-  modelCompatibility,
   moonshot,
   openAI,
+  modelCompatibility,
+  tools,
 } as const;

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as LLM from '../../llm.js';
 import type { HttpPrepared } from '../../route/transport/http.js';
 import * as AnthropicMessages from '../anthropic-messages.js';
+import { Message } from '../../schema/index.js';
 
 /**
  * Anthropic thinking provider options 对齐（对齐 opencode 参考库）：
@@ -45,14 +46,50 @@ describe('Anthropic thinking provider options', () => {
     const camel = await prepare({
       thinking: { type: 'enabled', budgetTokens: 4096, display: 'summarized' },
     });
+    // 4096 顶着默认输出上限（4096），被压到一半 2048（对齐参考库的预算钳制）。
     expect(camel.body.thinking).toEqual({
       type: 'enabled',
-      budget_tokens: 4096,
+      budget_tokens: 2048,
       display: 'summarized',
     });
 
     const snake = await prepare({ thinking: { type: 'enabled', budget_tokens: 2048 } });
     expect(snake.body.thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
+  });
+
+  it('思考预算贴着输出上限时被压到一半，且不低于 1024', async () => {
+    const { body } = await prepare({
+      thinking: { type: 'enabled', budgetTokens: 100_000 },
+    });
+
+    expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
+  });
+
+  it('输出上限极小时预算钳到最小值 1024', async () => {
+    const model = AnthropicMessages.route.model({ id: 'claude-opus-5' });
+    const request = LLM.request({
+      model,
+      prompt: 'hello',
+      generation: { maxTokens: 1500 },
+      providerOptions: { anthropic: { thinking: { type: 'enabled', budgetTokens: 1400 } } },
+    });
+    const body = await Effect.runPromise(AnthropicMessages.protocol.body.from(request));
+
+    expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 });
+  });
+
+  it('低于上限一半的预算原样透传（-1 / 0 等特殊值不干预）', async () => {
+    for (const budgetTokens of [1024, 2048, -1, 0]) {
+      const { body } = await prepare({ thinking: { type: 'enabled', budgetTokens } });
+
+      expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: budgetTokens });
+    }
+  });
+
+  it('between_tools 思考模式原样下发（不补 block_binding）', async () => {
+    const { body } = await prepare({ thinking: { type: 'between_tools' } });
+
+    expect(body.thinking).toEqual({ type: 'between_tools' });
   });
 
   it('enabled 缺少 budget 时在边界报错', async () => {
@@ -135,5 +172,57 @@ describe('Anthropic thinking block binding', () => {
     const body = await Effect.runPromise(AnthropicMessages.protocol.body.from(request));
 
     expect(body.thinking).toBeUndefined();
+  });
+});
+
+/**
+ * 无签名 thinking block 的 provider 判定（`requireThinkingSignature`）。
+ *
+ * Moonshot / Kimi 系经 anthropic 端点时不产出签名，必须按「不需要签名」处理，
+ * 否则无签名块会被丢弃、思维链从回传历史里消失。上游把这些写在
+ * `providers/moonshot.ts` 的 `requireSignature: false`；本地按 provider id /
+ * 模型名 / 端点三路推断 —— 这里守护上游 provider id `moonshot` 也命中。
+ */
+describe('无签名 thinking block 的 provider 判定', () => {
+  const lowerWithProvider = async (provider: string, modelID = 'kimi-k2') => {
+    const route = AnthropicMessages.route.with({ provider });
+    const model = route.model({ id: modelID });
+    const request = LLM.request({
+      model,
+      messages: [
+        Message.make({
+          role: 'assistant',
+          content: [{ type: 'reasoning', text: '内部推理' }],
+        }),
+      ],
+    });
+    return Effect.runPromise(AnthropicMessages.protocol.body.from(request));
+  };
+
+  const blocksOf = (body: { messages: ReadonlyArray<{ content: unknown }> }, type: string) =>
+    (body.messages[0]?.content as ReadonlyArray<{ type?: string }> | undefined)?.filter(
+      (part) => part.type === type,
+    ) ?? [];
+
+  it('上游 provider id `moonshot` 保留无签名 thinking 块（空签名）', async () => {
+    const body = await lowerWithProvider('moonshot');
+    const thinking = blocksOf(body, 'thinking') as ReadonlyArray<{ signature?: string }>;
+
+    expect(thinking).toHaveLength(1);
+    expect(thinking[0]?.signature).toBe('');
+    expect(blocksOf(body, 'text')).toHaveLength(0);
+  });
+
+  it('catalog id `moonshotai` 同样保留（别名一致性）', async () => {
+    const body = await lowerWithProvider('moonshotai');
+
+    expect(blocksOf(body, 'thinking')).toHaveLength(1);
+  });
+
+  it('原生 Anthropic 把无签名 thinking 块降级为 text（需要签名）', async () => {
+    const body = await lowerWithProvider('anthropic', 'claude-opus-5');
+
+    expect(blocksOf(body, 'thinking')).toHaveLength(0);
+    expect(blocksOf(body, 'text')).toHaveLength(1);
   });
 });

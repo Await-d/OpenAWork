@@ -10,6 +10,7 @@ import {
   ProviderOptions,
 } from './options.js';
 import { isRecord } from '../utils/record.js';
+import { withStatics } from '../utils/with-statics.js';
 
 const systemPartSchema = Schema.Struct({
   type: Schema.Literal('text'),
@@ -21,7 +22,7 @@ export type SystemPart = Schema.Schema.Type<typeof systemPartSchema>;
 
 const makeSystemPart = (text: string): SystemPart => ({ type: 'text', text });
 
-export const SystemPart = Object.assign(systemPartSchema, {
+export const SystemPart = withStatics(systemPartSchema, {
   make: makeSystemPart,
   content: (input?: string | SystemPart | ReadonlyArray<SystemPart>) => {
     if (input === undefined) return [];
@@ -87,7 +88,7 @@ const isToolResultValue = (value: unknown): value is ToolResultValue =>
   'value' in value;
 
 // Export with additional methods
-export const ToolResultValue = Object.assign(ToolResultValueSchema, {
+export const ToolResultValue = withStatics(ToolResultValueSchema, {
   is: isToolResultValue,
   make: (value: unknown, type: ToolResultValue['type'] = 'json'): ToolResultValue => {
     if (isToolResultValue(value)) return value;
@@ -101,7 +102,7 @@ export interface ToolOutput {
   readonly content: ReadonlyArray<ToolContent>;
 }
 
-export const ToolOutput = Object.assign(
+export const ToolOutput = withStatics(
   Schema.Struct({
     structured: Schema.Unknown,
     content: Schema.Array(ToolContent),
@@ -144,7 +145,7 @@ const toolResultText = (value: unknown) => {
   }
 };
 
-export const ToolCallPart = Object.assign(
+export const ToolCallPart = withStatics(
   Schema.Struct({
     type: Schema.Literal('tool-call'),
     id: Schema.String,
@@ -160,7 +161,7 @@ export const ToolCallPart = Object.assign(
 );
 export type ToolCallPart = Schema.Schema.Type<typeof ToolCallPart>;
 
-export const ToolResultPart = Object.assign(
+export const ToolResultPart = withStatics(
   Schema.Struct({
     type: Schema.Literal('tool-result'),
     id: Schema.String,

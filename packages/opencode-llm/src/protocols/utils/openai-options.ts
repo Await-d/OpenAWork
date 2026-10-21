@@ -7,7 +7,8 @@ import type {
 import { ReasoningEfforts, TextVerbosity } from '../../schema/index.js';
 
 export const OpenAIReasoningEfforts = ReasoningEfforts;
-export type OpenAIReasoningEffort = (typeof OpenAIReasoningEfforts)[number];
+// 供应商自定义档位：已知值只作补全，运行期接受任意字符串（对齐上游 OpenString）。
+export type OpenAIReasoningEffort = (typeof OpenAIReasoningEfforts)[number] | (string & {});
 
 // Mirrors OpenAI's `ResponseIncludable` union from the official SDK. Keep this
 // in lockstep with `openai-node/src/resources/responses/responses.ts`.
@@ -22,7 +23,18 @@ export const OpenAIResponseIncludables = [
   'message.output_text.logprobs',
 ] as const;
 export type OpenAIResponseIncludable = (typeof OpenAIResponseIncludables)[number];
-export const OpenAIServiceTiers = ['auto', 'default', 'flex', 'priority'] as const;
+// 对齐官方 SDK 的 `ServiceTier`：在基础档位之后追加 scale / fast / ultrafast。
+// 上游（对齐参考库）的 schema 对 service tier 是「任意字符串都接受」，本地保留白名单
+// 校验——未知档位不转发，避免把拼写错误原样发给上游。
+export const OpenAIServiceTiers = [
+  'auto',
+  'default',
+  'flex',
+  'priority',
+  'scale',
+  'fast',
+  'ultrafast',
+] as const;
 export type OpenAIServiceTier = (typeof OpenAIServiceTiers)[number];
 
 const REASONING_EFFORTS = new Set<string>(ReasoningEfforts);
@@ -31,7 +43,12 @@ const TEXT_VERBOSITY = new Set<string>(['low', 'medium', 'high']);
 const INCLUDABLES = new Set<string>(OpenAIResponseIncludables);
 const SERVICE_TIERS = new Set<string>(OpenAIServiceTiers);
 
-export const OpenAIReasoningEffort = Schema.Literals(OpenAIReasoningEfforts);
+// 供应商自定义档位：已知值只作补全与白名单校验（见 `isReasoningEffort`），
+// 运行期接受任意字符串（对齐上游 `Schema.declare`）。
+export const OpenAIReasoningEffort = Schema.declare<OpenAIReasoningEffort>(
+  (value): value is OpenAIReasoningEffort => typeof value === 'string',
+  { title: 'OpenAIReasoningEffort' },
+);
 export const OpenAITextVerbosity = TextVerbosity;
 export const OpenAIResponseIncludable = Schema.Literals(OpenAIResponseIncludables);
 export const OpenAIServiceTier = Schema.Literals(OpenAIServiceTiers);
@@ -125,6 +142,93 @@ export const parallelToolCalls = (request: LLMRequest): boolean | undefined => {
 export const maxToolCalls = (request: LLMRequest): number | undefined => {
   const value = options(request)?.['maxToolCalls'];
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+};
+
+// ---------------------------------------------------------------------------
+// Responses hosted 工具：image_generation
+// ---------------------------------------------------------------------------
+
+export const OpenAIImageGenerationQualities = [
+  'auto',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
+export const OpenAIImageGenerationBackgrounds = ['auto', 'opaque', 'transparent'] as const;
+export const OpenAIImageGenerationFormats = ['png', 'jpeg', 'webp'] as const;
+export const OpenAIImageGenerationModerations = ['auto', 'low'] as const;
+export const OpenAIImageGenerationActions = ['auto', 'generate', 'edit'] as const;
+
+/**
+ * hosted `image_generation` 工具的配置（camelCase，下发时由协议层转 snake_case）。
+ * `model` 是**被调用的生图模型**，与顶层主模型是两回事——必填。
+ */
+export interface OpenAIImageGenerationToolInput {
+  readonly action?: (typeof OpenAIImageGenerationActions)[number];
+  readonly background?: (typeof OpenAIImageGenerationBackgrounds)[number];
+  readonly model: string;
+  readonly moderation?: (typeof OpenAIImageGenerationModerations)[number];
+  readonly outputCompression?: number;
+  readonly outputFormat?: (typeof OpenAIImageGenerationFormats)[number];
+  readonly partialImages?: number;
+  readonly quality?: (typeof OpenAIImageGenerationQualities)[number];
+  readonly size?: string;
+}
+
+const pickLiteral = <T extends string>(value: unknown, allowed: ReadonlyArray<T>): T | undefined =>
+  typeof value === 'string' && (allowed as ReadonlyArray<string>).includes(value)
+    ? (value as T)
+    : undefined;
+
+const pickInteger = (value: unknown, min: number, max: number): number | undefined =>
+  typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+    ? value
+    : undefined;
+
+/**
+ * 读取并校验 hosted 生图工具配置。
+ *
+ * 只白名单转发已知字段：`providerOptions` 可能来自用户手写的 provider 配置，
+ * 把拼错的字段原样送上 Responses 会得到一个 400，而且报错信息指不回配置本身。
+ * 缺 `model` 时整体返回 `undefined`（不下发该工具）而不是降级成一个裸工具——
+ * 官方对 `model` 是必填的。
+ */
+export const imageGenerationTool = (
+  request: LLMRequest,
+): OpenAIImageGenerationToolInput | undefined => {
+  const value = options(request)?.imageGenerationTool;
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const model = typeof record['model'] === 'string' ? record['model'].trim() : '';
+  if (!model) {
+    return undefined;
+  }
+
+  const quality = pickLiteral(record['quality'], OpenAIImageGenerationQualities);
+  const background = pickLiteral(record['background'], OpenAIImageGenerationBackgrounds);
+  const outputFormat = pickLiteral(record['outputFormat'], OpenAIImageGenerationFormats);
+  const moderation = pickLiteral(record['moderation'], OpenAIImageGenerationModerations);
+  const action = pickLiteral(record['action'], OpenAIImageGenerationActions);
+  const outputCompression = pickInteger(record['outputCompression'], 0, 100);
+  const partialImages = pickInteger(record['partialImages'], 0, 3);
+  const size = typeof record['size'] === 'string' ? record['size'].trim() : '';
+
+  return {
+    model,
+    ...(quality ? { quality } : {}),
+    ...(size ? { size } : {}),
+    ...(background ? { background } : {}),
+    ...(outputFormat ? { outputFormat } : {}),
+    ...(moderation ? { moderation } : {}),
+    ...(action ? { action } : {}),
+    ...(outputCompression === undefined ? {} : { outputCompression }),
+    ...(partialImages === undefined ? {} : { partialImages }),
+  };
 };
 
 export * as OpenAIOptions from './openai-options.js';

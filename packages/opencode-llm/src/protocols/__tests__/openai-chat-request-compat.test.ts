@@ -345,3 +345,56 @@ describe('OpenAI Chat providerMetadataKey', () => {
     expect(Chat.protocol.stream.initial(request).providerMetadataKey).toBe('myprov');
   });
 });
+
+/**
+ * 供应商别名与端点探测的一致性（对齐上游 `providers/*.ts` 的 compatibility 声明）。
+ *
+ * 此前这些别名只在部分探测函数里成立（例如 `detectMaxTokensField` 认 `moonshotai`
+ * 却不认上游的 provider id `moonshot`，URL 又只匹配 `.ai`），国内站或自建中转会
+ * 漏判，进而下发上游拒绝的字段（`max_completion_tokens` / `store` / `strict`）。
+ */
+describe('供应商别名与端点探测一致性', () => {
+  it('Moonshot 按上游 provider id、catalog id 与国内站端点都判定为 max_tokens', async () => {
+    const byUpstreamId = await lower({ provider: 'moonshot', maxTokens: 512 });
+    expect(byUpstreamId.max_tokens).toBe(512);
+    expect(byUpstreamId.max_completion_tokens).toBeUndefined();
+
+    const byCnBaseURL = await lower({ baseURL: 'https://api.moonshot.cn/v1', maxTokens: 512 });
+    expect(byCnBaseURL.max_tokens).toBe(512);
+
+    const byCatalogId = await lower({ provider: 'moonshotai-cn', maxTokens: 512 });
+    expect(byCatalogId.max_tokens).toBe(512);
+  });
+
+  it('Together 的两种 provider 写法都判定为 max_tokens', async () => {
+    const canonical = await lower({ provider: 'togetherai', maxTokens: 512 });
+    expect(canonical.max_tokens).toBe(512);
+
+    const alias = await lower({ provider: 'together', maxTokens: 512 });
+    expect(alias.max_tokens).toBe(512);
+    expect(alias.max_completion_tokens).toBeUndefined();
+  });
+
+  it('Venice / Meta / MiniMax 都不下发 store（上游声明 supportsStore:false）', async () => {
+    for (const provider of ['venice', 'meta', 'minimax']) {
+      const body = await lower({ provider, tools: [testTool] });
+      expect(body.store, provider).toBeUndefined();
+    }
+
+    const byURL = await lower({ baseURL: 'https://api.venice.ai/api/v1' });
+    expect(byURL.store).toBeUndefined();
+  });
+
+  it('MiniMax 不下发工具 strict（上游声明 supportsStrictMode:false）', async () => {
+    const body = await lower({ provider: 'minimax', tools: [testTool] });
+
+    expect(body.tools?.[0]?.function.strict).toBeUndefined();
+  });
+
+  it('Venice 仍用 max_completion_tokens（上游 venice-chat 的默认字段）', async () => {
+    const body = await lower({ provider: 'venice', maxTokens: 512 });
+
+    expect(body.max_completion_tokens).toBe(512);
+    expect(body.max_tokens).toBeUndefined();
+  });
+});

@@ -1,6 +1,6 @@
 import {
   LLMEvent,
-  type FinishReason,
+  type FinishReasonDetails,
   type ProviderMetadata,
   type Usage,
 } from '../../schema/index.js';
@@ -109,8 +109,7 @@ export const finish = (
   state: State,
   events: LLMEvent[],
   input: {
-    readonly reason: FinishReason;
-    readonly reasonRaw?: string;
+    readonly reason: FinishReasonDetails;
     readonly usage?: Usage;
     readonly providerMetadata?: ProviderMetadata;
   },
@@ -120,7 +119,6 @@ export const finish = (
     LLMEvent.stepFinish({
       index: 0,
       reason: input.reason,
-      reasonRaw: input.reasonRaw,
       usage: input.usage,
       providerMetadata: input.providerMetadata,
     }),

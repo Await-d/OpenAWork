@@ -102,19 +102,67 @@ export const mergeProviderOptions = (
   return Object.keys(result).length === 0 ? undefined : result;
 };
 
+/** HTTP 超时毫秒数；`false` 显式关闭该超时。 */
+export const HttpTimeout = Schema.Union([
+  Schema.Number.check(Schema.isGreaterThan(0)),
+  Schema.Literal(false),
+]);
+export type HttpTimeout = Schema.Schema.Type<typeof HttpTimeout>;
+
+/** `headerTimeout` 未显式设置时的默认值（5 分钟）。 */
+export const DEFAULT_HTTP_TIMEOUT_MS = 300_000;
+
+/**
+ * `chunkTimeout` 未显式设置时的默认值（15 分钟）。
+ *
+ * 部分上游（如 DeepSeek）明确要求客户端至少容忍 15 分钟静默——模型推理期间
+ * 可能长时间不产出任何流式分片。
+ */
+export const DEFAULT_CHUNK_TIMEOUT_MS = 900_000;
+
+/** JSON 请求体的 `Content-Encoding`；`none` 表示发送明文 JSON。 */
+export const RequestEncoding = Schema.Literals(['zstd', 'gzip', 'none']);
+export type RequestEncoding = Schema.Schema.Type<typeof RequestEncoding>;
+
 export class HttpOptions extends Schema.Class<HttpOptions>('LLM.HttpOptions')({
   body: Schema.optional(JsonSchema),
   headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   query: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  /** 整次请求的时限（发出到响应结束）；未设置表示不限时。 */
+  timeout: Schema.optional(HttpTimeout),
+  /** 响应头到达的时限。 */
+  headerTimeout: Schema.optional(HttpTimeout),
+  /** 响应头到达后，相邻流式分片之间的时限。 */
+  chunkTimeout: Schema.optional(HttpTimeout),
+  /** JSON 请求体的压缩方式；仅对已知能解码该编码的端点设置。 */
+  encoding: Schema.optional(RequestEncoding),
 }) {}
 
 export namespace HttpOptions {
   export type Input = HttpOptions | ConstructorParameters<typeof HttpOptions>[0];
 
-  /** Normalize HTTP option input into the canonical `HttpOptions` class. */
-  export const make = (input: Input) =>
-    input instanceof HttpOptions ? input : new HttpOptions(input);
+  /** Normalize HTTP option input into the canonical `HttpOptions` class; `undefined` stays `undefined`. */
+  export function make(input: Input): HttpOptions;
+  export function make(input: Input | undefined): HttpOptions | undefined;
+  export function make(input: Input | undefined) {
+    if (input === undefined || input instanceof HttpOptions) return input;
+    return new HttpOptions(input);
+  }
 }
+
+type HttpOptionKey = 'timeout' | 'headerTimeout' | 'chunkTimeout' | 'encoding';
+
+const latestHttpOption = <Key extends HttpOptionKey>(
+  items: ReadonlyArray<HttpOptions | undefined>,
+  key: Key,
+): HttpOptions[Key] | undefined => {
+  // `findLast` 不在 ES2022 lib 内，用倒序循环保证「后者覆盖前者」。
+  for (let i = items.length - 1; i >= 0; i--) {
+    const value = items[i]?.[key];
+    if (value !== undefined) return value;
+  }
+  return undefined;
+};
 
 export const mergeHttpOptions = (
   ...items: ReadonlyArray<HttpOptions | undefined>
@@ -122,8 +170,21 @@ export const mergeHttpOptions = (
   const body = mergeJsonRecords(...items.map((item) => item?.body));
   const headers = mergeStringRecords(...items.map((item) => item?.headers));
   const query = mergeStringRecords(...items.map((item) => item?.query));
-  if (!body && !headers && !query) return undefined;
-  return new HttpOptions({ body, headers, query });
+  const timeout = latestHttpOption(items, 'timeout');
+  const headerTimeout = latestHttpOption(items, 'headerTimeout');
+  const chunkTimeout = latestHttpOption(items, 'chunkTimeout');
+  const encoding = latestHttpOption(items, 'encoding');
+  if (
+    !body &&
+    !headers &&
+    !query &&
+    timeout === undefined &&
+    headerTimeout === undefined &&
+    chunkTimeout === undefined &&
+    encoding === undefined
+  )
+    return undefined;
+  return new HttpOptions({ body, headers, query, timeout, headerTimeout, chunkTimeout, encoding });
 };
 
 export class GenerationOptions extends Schema.Class<GenerationOptions>('LLM.GenerationOptions')({
@@ -288,6 +349,15 @@ export class ModelCompatibility extends Schema.Class<ModelCompatibility>('LLM.Mo
    */
   supportsPromptCacheKey: Schema.optional(Schema.Boolean),
   /**
+   * 提示词缓存标记语法（对齐 opencode 参考库）。
+   *
+   * 显式声明后覆盖路由白名单与模型名启发式：
+   * - `anthropic`：按断点语义下发 `cache_control`；
+   * - `alibaba`：同样下发 `cache_control`，但跳过工具定义（Qwen 在工具定义上
+   *   忽略断点，工具定义随 system 一起缓存）。
+   */
+  cacheFormat: Schema.optional(Schema.Literals(['anthropic', 'alibaba'])),
+  /**
    * 上游支持 thinking block binding（对齐 opencode 参考库）。
    *
    * 未配置时按 Claude 版本推断（>= 5.1）；命中后协议默认下发
@@ -407,7 +477,7 @@ export const CachePolicyObject = Schema.Struct({
     Schema.Union([
       Schema.Literal('latest-user-message'),
       Schema.Literal('latest-assistant'),
-      Schema.Struct({ tail: Schema.Number }),
+      Schema.Struct({ tail: Schema.Natural }),
     ]),
   ),
   ttlSeconds: Schema.optional(Schema.Number),

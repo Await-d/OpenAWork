@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Effect, Exit } from 'effect';
+import { Cause, Effect, Exit, Option } from 'effect';
 import {
   createResilientExecutor,
   ErrorClassifier,
@@ -9,6 +9,7 @@ import {
   FAIL_FAST_STRATEGY,
   type ExecutionContext,
 } from './error-handler.js';
+import { CircuitBreakerOpenError } from './circuit-breaker.js';
 import {
   LLMError,
   RateLimitReason,
@@ -238,6 +239,57 @@ describe('createResilientExecutor', () => {
 
     // 断路器已启用，但具体行为需要多次调用才能触发
     expect(execute).toHaveBeenCalled();
+  });
+
+  it('同一 executor 多次运行应共享断路器状态（失败累计直至打开）', async () => {
+    const model = createMockModel('test');
+    const request = createMockRequest();
+
+    const error = new LLMError({
+      module: 'test',
+      method: 'shared-breaker',
+      reason: new RateLimitReason({
+        message: 'Rate limit',
+      }),
+    });
+    const execute = vi.fn(() => Effect.fail(error));
+
+    const context: ExecutionContext<string, LLMError, never> = {
+      model,
+      request,
+      execute,
+      strategy: {
+        enableRetry: false,
+        enableCircuitBreaker: true,
+        circuitBreakerConfig: {
+          failureThreshold: 2,
+          successThreshold: 1,
+          timeoutMs: 60000,
+        },
+        enableFallback: false,
+      },
+    };
+
+    const executor = createResilientExecutor(context);
+
+    const first = await Effect.runPromiseExit(executor);
+    const second = await Effect.runPromiseExit(executor);
+    const third = await Effect.runPromiseExit(executor);
+
+    expect(Exit.isFailure(first)).toBe(true);
+    expect(Exit.isFailure(second)).toBe(true);
+    expect(Exit.isFailure(third)).toBe(true);
+
+    // 第三次运行时断路器已打开：execute 不应再被调用
+    expect(execute).toHaveBeenCalledTimes(2);
+
+    if (Exit.isFailure(third)) {
+      const failure = Cause.findErrorOption(third.cause);
+      expect(Option.isSome(failure)).toBe(true);
+      if (Option.isSome(failure)) {
+        expect(failure.value).toBeInstanceOf(CircuitBreakerOpenError);
+      }
+    }
   });
 });
 

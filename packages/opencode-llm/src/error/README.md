@@ -76,6 +76,10 @@ const executor = createResilientExecutor({
 const result = yield * executor;
 ```
 
+> 断路器实例在 `createResilientExecutor` 构造时创建，并由**同一个 executor 的多次运行共享**
+> ——失败计数跨运行累计，达到阈值后真正打开。需要独立容错状态时，为每次场景创建
+> 各自的 executor，而不是复用同一个。
+
 ## 预设策略
 
 ### AGGRESSIVE_RETRY_STRATEGY

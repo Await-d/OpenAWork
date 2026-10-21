@@ -8,7 +8,9 @@ export type {
   RouteRoutedModelInput,
   Interface as LLMClientShape,
   Service as LLMClientService,
+  StreamOptions,
 } from './route/client.js';
+export type { HttpHandler, HttpMiddleware } from './route/transport/index.js';
 export type {
   Interface as RequestExecutorShape,
   Service as RequestExecutorService,
@@ -39,8 +41,9 @@ export type {
 export * from './provider/index.js';
 export * as Providers from './providers/index.js';
 
-// TODO: 错误处理模块需要更新以适配 Effect 4.0 API
-// export * from "./error/index.js"
+// 错误处理与容错（已对齐 Effect 4.0 API）：
+// 智能重试（指数退避 + 抖动）、断路器、优雅降级、统一错误处理器
+export * from './error/index.js';
 
 // 工具调用协议适配
 export * as Tools from './tools/index.js';

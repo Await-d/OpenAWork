@@ -1,6 +1,6 @@
 import type { JsonSchema } from 'effect';
-import { Effect, Schema } from 'effect';
-import { LLMClient } from './route/client.js';
+import { Effect, Schema, Stream } from 'effect';
+import { LLMClient, type LLMClientService, type StreamOptions } from './route/client.js';
 import type { LLMResponse, ToolResultPart } from './schema/index.js';
 import {
   GenerationOptions,
@@ -42,9 +42,42 @@ export type RequestInput = Omit<
   readonly http?: HttpOptions.Input;
 };
 
-export const generate = LLMClient.generate;
+/** 归一化入口：既接受 `RequestInput`（内部转 `LLMRequest`），也接受已构造的 `LLMRequest`。 */
+const normalizeRequest = (input: LLMRequest | RequestInput): Effect.Effect<LLMRequest> =>
+  input instanceof LLMRequest ? Effect.succeed(input) : Effect.succeed(request(input));
 
-export const stream = LLMClient.stream;
+/**
+ * 生成完整响应（对齐上游 `generate` 重载）。
+ *
+ * 传 `RequestInput` 时内部构造 `LLMRequest`；传已构造的 `LLMRequest` 时原样使用
+ * （调用方可能已经做过 effort/cache 标注，重复构造会丢掉这些标注）。
+ */
+export function generate(
+  input: LLMRequest | RequestInput,
+  options?: StreamOptions,
+): Effect.Effect<LLMResponse, LLMError, LLMClientService>;
+export function generate(
+  input: LLMRequest | RequestInput,
+  options?: StreamOptions,
+): Effect.Effect<LLMResponse, LLMError> {
+  return Effect.flatMap(normalizeRequest(input), (resolved) =>
+    LLMClient.generate(resolved, options),
+  );
+}
+
+/** 流式生成（对齐上游 `stream` 重载），入参归一化规则同 `generate`。 */
+export function stream(
+  input: LLMRequest | RequestInput,
+  options?: StreamOptions,
+): Stream.Stream<LLMEvent, LLMError, LLMClientService>;
+export function stream(
+  input: LLMRequest | RequestInput,
+  options?: StreamOptions,
+): Stream.Stream<LLMEvent, LLMError> {
+  return Stream.unwrap(
+    Effect.map(normalizeRequest(input), (resolved) => LLMClient.stream(resolved, options)),
+  );
+}
 
 export const requestInput = (input: LLMRequest): RequestInput => ({
   ...LLMRequest.input(input),

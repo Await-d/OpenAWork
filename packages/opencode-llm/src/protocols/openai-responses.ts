@@ -1,4 +1,5 @@
-import { Effect, Encoding, Schema } from 'effect';
+import { Effect, Schema } from 'effect';
+import * as Base64 from 'effect/encoding/Base64';
 import { Route } from '../route/client.js';
 import { Auth } from '../route/auth.js';
 import { Endpoint } from '../route/endpoint.js';
@@ -18,324 +19,34 @@ import {
   type ToolContent,
   type ToolResultPart,
 } from '../schema/index.js';
-import { JsonObject, optionalArray, optionalNull, ProviderShared } from './shared.js';
-import { isContextOverflow } from '../provider-error.js';
+import { ProviderShared } from './shared.js';
+import { providerFailureClassification } from '../provider-error.js';
 import { OpenAIOptions } from './utils/openai-options.js';
 import { Lifecycle } from './utils/lifecycle.js';
 import { ToolSchemaProjection } from './utils/tool-schema.js';
 import { ToolStream } from './utils/tool-stream.js';
+import * as ResponsesHostedTools from './utils/responses-hosted-tools.js';
 
 const ADAPTER = 'openai-responses';
 export const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 export const PATH = '/responses';
 
-// =============================================================================
-// Request Body Schema
-// =============================================================================
-const OpenAIResponsesInputText = Schema.Struct({
-  type: Schema.tag('input_text'),
-  text: Schema.String,
-});
-const OpenAIResponsesInputImage = Schema.Struct({
-  type: Schema.tag('input_image'),
-  image_url: Schema.String,
-});
-const OpenAIResponsesInputContent = Schema.Union([
-  OpenAIResponsesInputText,
-  OpenAIResponsesInputImage,
-]);
-type OpenAIResponsesInputContent = Schema.Schema.Type<typeof OpenAIResponsesInputContent>;
-
-const OpenAIResponsesOutputText = Schema.Struct({
-  type: Schema.tag('output_text'),
-  text: Schema.String,
-});
-
-const OpenAIResponsesReasoningSummaryText = Schema.Struct({
-  type: Schema.tag('summary_text'),
-  text: Schema.String,
-});
-
-const OpenAIResponsesReasoningItem = Schema.Struct({
-  type: Schema.tag('reasoning'),
-  id: Schema.optionalKey(Schema.String),
-  summary: Schema.Array(OpenAIResponsesReasoningSummaryText),
-  encrypted_content: optionalNull(Schema.String),
-});
-
-const OpenAIResponsesItemReference = Schema.Struct({
-  type: Schema.tag('item_reference'),
-  id: Schema.String,
-});
-
-// `function_call_output.output` accepts either a plain string or an ordered
-// array of content items so tools can return images in addition to text.
-// https://platform.openai.com/docs/api-reference/responses/object
-const OpenAIResponsesFunctionCallOutputContent = Schema.Union([
-  OpenAIResponsesInputText,
-  OpenAIResponsesInputImage,
-]);
-
-const OpenAIResponsesFunctionCallOutput = Schema.Union([
-  Schema.String,
-  Schema.Array(OpenAIResponsesFunctionCallOutputContent),
-]);
-
-// Hosted (provider-executed) items that OpenAI accepts back as `input`. With
-// `store: false` there is no server-side item to reference, so the recorded item
-// itself must be replayed to keep hosted-tool context across turns.
-const OpenAIResponsesHostedToolItem = Schema.Union([
-  Schema.StructWithRest(
-    Schema.Struct({
-      type: Schema.tag('computer_call'),
-      id: Schema.String,
-      status: Schema.optional(Schema.String),
-      call_id: Schema.optional(Schema.String),
-      action: optionalNull(JsonObject),
-      pending_safety_checks: Schema.optional(Schema.Array(JsonObject)),
-    }),
-    [Schema.Record(Schema.String, Schema.Unknown)],
-  ),
-  Schema.StructWithRest(
-    Schema.Struct({
-      type: Schema.tag('web_search_call'),
-      id: Schema.String,
-      status: Schema.optional(Schema.String),
-      action: optionalNull(JsonObject),
-    }),
-    [Schema.Record(Schema.String, Schema.Unknown)],
-  ),
-  Schema.StructWithRest(
-    Schema.Struct({
-      type: Schema.tag('web_search_preview_call'),
-      id: Schema.String,
-      status: Schema.optional(Schema.String),
-      action: optionalNull(JsonObject),
-    }),
-    [Schema.Record(Schema.String, Schema.Unknown)],
-  ),
-  Schema.StructWithRest(
-    Schema.Struct({
-      type: Schema.tag('image_generation_call'),
-      id: Schema.String,
-      status: Schema.optional(Schema.String),
-      result: optionalNull(Schema.String),
-      output_format: Schema.optional(Schema.Literals(['png', 'jpeg', 'webp'])),
-      revised_prompt: optionalNull(Schema.String),
-    }),
-    [Schema.Record(Schema.String, Schema.Unknown)],
-  ),
-]);
-type OpenAIResponsesHostedToolItem = Schema.Schema.Type<typeof OpenAIResponsesHostedToolItem>;
-
-const OpenAIResponsesInputItem = Schema.Union([
-  Schema.Struct({ role: Schema.tag('system'), content: Schema.String }),
-  Schema.Struct({ role: Schema.tag('user'), content: Schema.Array(OpenAIResponsesInputContent) }),
-  Schema.Struct({
-    role: Schema.tag('assistant'),
-    content: Schema.Array(OpenAIResponsesOutputText),
-  }),
-  OpenAIResponsesReasoningItem,
-  OpenAIResponsesItemReference,
-  OpenAIResponsesHostedToolItem,
-  Schema.Struct({
-    type: Schema.tag('function_call'),
-    call_id: Schema.String,
-    name: Schema.String,
-    arguments: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.tag('function_call_output'),
-    call_id: Schema.String,
-    output: OpenAIResponsesFunctionCallOutput,
-  }),
-]);
-type OpenAIResponsesInputItem = Schema.Schema.Type<typeof OpenAIResponsesInputItem>;
-
-// Mutable counterpart of the schema reasoning item so `lowerMessages` can fold
-// multiple streamed summary parts into the same item before flushing.
-type OpenAIResponsesReasoningInput = {
-  type: 'reasoning';
-  id: string;
-  summary: Array<{ type: 'summary_text'; text: string }>;
-  encrypted_content?: string | null;
-};
-type OpenAIResponsesReasoningReplay = OpenAIResponsesReasoningInput;
-
-const OpenAIResponsesTool = Schema.Struct({
-  type: Schema.tag('function'),
-  name: Schema.String,
-  description: Schema.String,
-  parameters: JsonObject,
-  strict: Schema.optional(Schema.Boolean),
-});
-type OpenAIResponsesTool = Schema.Schema.Type<typeof OpenAIResponsesTool>;
-
-const OpenAIResponsesToolChoice = Schema.Union([
-  Schema.Literals(['auto', 'none', 'required']),
-  Schema.Struct({ type: Schema.tag('function'), name: Schema.String }),
-]);
-
-// Fields shared between the HTTP body and the WebSocket `response.create`
-// message. The HTTP body adds `stream: true`; the WebSocket message adds
-// `type: "response.create"`. Defining the shared shape once keeps the two
-// transports in sync without a destructure-and-strip dance.
-const OpenAIResponsesCoreFields = {
-  model: Schema.String,
-  input: Schema.Array(OpenAIResponsesInputItem),
-  instructions: Schema.optional(Schema.String),
-  tools: optionalArray(OpenAIResponsesTool),
-  tool_choice: Schema.optional(OpenAIResponsesToolChoice),
-  store: Schema.optional(Schema.Boolean),
-  service_tier: Schema.optional(OpenAIOptions.OpenAIServiceTier),
-  prompt_cache_key: Schema.optional(Schema.String),
-  include: optionalArray(OpenAIOptions.OpenAIResponseIncludable),
-  reasoning: Schema.optional(
-    Schema.Struct({
-      effort: Schema.optional(OpenAIOptions.OpenAIReasoningEffort),
-      summary: Schema.optional(Schema.Literal('auto')),
-    }),
-  ),
-  text: Schema.optional(
-    Schema.Struct({
-      verbosity: Schema.optional(OpenAIOptions.OpenAITextVerbosity),
-    }),
-  ),
-  max_output_tokens: Schema.optional(Schema.Number),
-  temperature: Schema.optional(Schema.Number),
-  top_p: Schema.optional(Schema.Number),
-  // 对齐参考库：由 `parallelToolCalls` / `ToolChoice.disableParallelToolUse` 推导。
-  parallel_tool_calls: Schema.optional(Schema.Boolean),
-  // 对齐参考库：单次响应内工具调用上限（providerOptions.openai.maxToolCalls）。
-  max_tool_calls: Schema.optional(Schema.Number),
-};
-
-const OpenAIResponsesBody = Schema.Struct({
-  ...OpenAIResponsesCoreFields,
-  stream: Schema.Literal(true),
-});
-export type OpenAIResponsesBody = Schema.Schema.Type<typeof OpenAIResponsesBody>;
-
-const OpenAIResponsesWebSocketMessage = Schema.StructWithRest(
-  Schema.Struct({
-    type: Schema.tag('response.create'),
-    ...OpenAIResponsesCoreFields,
-  }),
-  [Schema.Record(Schema.String, Schema.Unknown)],
-);
-type OpenAIResponsesWebSocketMessage = Schema.Schema.Type<typeof OpenAIResponsesWebSocketMessage>;
-const encodeWebSocketMessage = Schema.encodeSync(
-  Schema.fromJsonString(OpenAIResponsesWebSocketMessage),
-);
-
-const OpenAIResponsesUsage = Schema.Struct({
-  input_tokens: optionalNull(Schema.Number),
-  input_tokens_details: optionalNull(Schema.Struct({ cached_tokens: optionalNull(Schema.Number) })),
-  output_tokens: optionalNull(Schema.Number),
-  output_tokens_details: optionalNull(
-    Schema.Struct({ reasoning_tokens: optionalNull(Schema.Number) }),
-  ),
-  total_tokens: optionalNull(Schema.Number),
-});
-type OpenAIResponsesUsage = Schema.Schema.Type<typeof OpenAIResponsesUsage>;
-
-const OpenAIResponsesStreamItem = Schema.StructWithRest(
-  Schema.Struct({
-    type: Schema.String,
-    id: optionalNull(Schema.String),
-    call_id: optionalNull(Schema.String),
-    name: optionalNull(Schema.String),
-    arguments: optionalNull(Schema.String),
-    // Hosted (provider-executed) tool fields. Each hosted tool item carries its
-    // own subset of these — we capture them generically so we can surface the
-    // call's typed input portion and round-trip the full result payload without
-    // hand-rolling a per-tool schema.
-    status: optionalNull(Schema.String),
-    action: optionalNull(Schema.Unknown),
-    queries: optionalNull(Schema.Unknown),
-    results: optionalNull(Schema.Unknown),
-    code: optionalNull(Schema.String),
-    container_id: optionalNull(Schema.String),
-    outputs: optionalNull(Schema.Unknown),
-    // `image_generation_call` returns its bytes as base64 in `result`.
-    result: optionalNull(Schema.String),
-    output_format: optionalNull(Schema.String),
-    server_label: optionalNull(Schema.String),
-    output: optionalNull(Schema.Unknown),
-    error: optionalNull(Schema.Unknown),
-    encrypted_content: optionalNull(Schema.String),
-  }),
-  [Schema.Record(Schema.String, Schema.Unknown)],
-);
-type OpenAIResponsesStreamItem = Schema.Schema.Type<typeof OpenAIResponsesStreamItem>;
-
-// OpenAI Responses surfaces provider failures in two related shapes. The
-// streaming `error` event carries the details at the top level
-// (`{ type: "error", code, message, param, sequence_number }`), while
-// `response.failed` carries them under `response.error`. We capture both so
-// the parser can surface a useful provider-error message in either path.
-const OpenAIResponsesErrorPayload = Schema.StructWithRest(
-  Schema.Struct({
-    code: optionalNull(Schema.String),
-    message: optionalNull(Schema.String),
-    param: optionalNull(Schema.String),
-  }),
-  [Schema.Record(Schema.String, Schema.Unknown)],
-);
-
-const OpenAIResponsesEvent = Schema.StructWithRest(
-  Schema.Struct({
-    type: Schema.String,
-    delta: optionalNull(Schema.String),
-    // `output_text.done` / `reasoning_*.done` carry the authoritative complete
-    // text; `function_call_arguments.done` carries the authoritative arguments.
-    text: optionalNull(Schema.String),
-    arguments: optionalNull(Schema.String),
-    item_id: optionalNull(Schema.String),
-    summary_index: optionalNull(Schema.Number),
-    item: optionalNull(OpenAIResponsesStreamItem),
-    response: optionalNull(
-      Schema.StructWithRest(
-        Schema.Struct({
-          id: optionalNull(Schema.String),
-          service_tier: optionalNull(Schema.String),
-          incomplete_details: optionalNull(Schema.Struct({ reason: optionalNull(Schema.String) })),
-          usage: optionalNull(OpenAIResponsesUsage),
-          error: optionalNull(OpenAIResponsesErrorPayload),
-          // Completed responses repeat the final output items here; used to
-          // recover tool calls whose `output_item.done` was omitted.
-          output: optionalNull(Schema.Array(Schema.Unknown)),
-        }),
-        [Schema.Record(Schema.String, Schema.Unknown)],
-      ),
-    ),
-    error: optionalNull(OpenAIResponsesErrorPayload),
-    code: optionalNull(Schema.String),
-    message: optionalNull(Schema.String),
-    param: optionalNull(Schema.String),
-  }),
-  [Schema.Record(Schema.String, Schema.Unknown)],
-);
-type OpenAIResponsesEvent = Schema.Schema.Type<typeof OpenAIResponsesEvent>;
-
-interface ParserState {
-  readonly tools: ToolStream.State<string>;
-  readonly hasFunctionCall: boolean;
-  readonly lifecycle: Lifecycle.State;
-  readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>;
-  readonly store: boolean | undefined;
-}
-
-type ReasoningSummaryStatus = 'active' | 'can-conclude' | 'concluded';
-
-interface ReasoningStreamItem {
-  readonly encryptedContent: string | null | undefined;
-  readonly activeSummaryIndex?: number;
-  // Keyed by OpenAI's numeric `summary_index`. JS object keys coerce to
-  // strings, but typing the map as `Record<number, ...>` documents intent
-  // and matches the wire field.
-  readonly summaryParts: Readonly<Record<number, ReasoningSummaryStatus>>;
-}
+import {
+  OpenAIResponsesBody,
+  OpenAIResponsesWebSocketMessage,
+  encodeWebSocketMessage,
+  OpenAIResponsesEvent,
+} from './open-responses.js';
+import type {
+  OpenAIResponsesInputItem,
+  OpenAIResponsesImageGenerationTool,
+  OpenAIResponsesReasoningInput,
+  OpenAIResponsesReasoningReplay,
+  OpenAIResponsesTool,
+  OpenAIResponsesUsage,
+  OpenAIResponsesStreamItem,
+  ParserState,
+} from './open-responses.js';
 
 const invalid = ProviderShared.invalidRequest;
 
@@ -350,6 +61,43 @@ const lowerTool = (tool: ToolDefinition, inputSchema: JsonSchema): OpenAIRespons
   // TODO: Read this from OpenAI-specific tool options so direct LLM callers can opt into strict schemas.
   strict: false,
 });
+
+/** hosted 生图工具：camelCase 配置 → 官方 wire 字段。 */
+const lowerImageGenerationTool = (
+  config: OpenAIOptions.OpenAIImageGenerationToolInput,
+): OpenAIResponsesImageGenerationTool => ({
+  type: 'image_generation',
+  model: config.model,
+  ...(config.quality ? { quality: config.quality } : {}),
+  ...(config.size ? { size: config.size } : {}),
+  ...(config.background ? { background: config.background } : {}),
+  ...(config.outputFormat ? { output_format: config.outputFormat } : {}),
+  ...(config.moderation ? { moderation: config.moderation } : {}),
+  ...(config.action ? { action: config.action } : {}),
+  ...(config.outputCompression === undefined
+    ? {}
+    : { output_compression: config.outputCompression }),
+  ...(config.partialImages === undefined ? {} : { partial_images: config.partialImages }),
+});
+
+/**
+ * `tools` 数组：本地 function 工具 + 可选的 hosted `image_generation`。
+ *
+ * 注意「没有任何 function 工具但配了 hosted 工具」时**必须**下发一个只含
+ * hosted 条目的数组——旧逻辑在这里返回 `undefined`，会让整条生图协议路径
+ * 静默失效（模型既看不到工具，也不会产出 `image_generation_call`）。
+ */
+const buildResponsesTools = (
+  request: LLMRequest,
+): ReadonlyArray<OpenAIResponsesTool> | undefined => {
+  const hostedImageTool = OpenAIOptions.imageGenerationTool(request);
+  const functionTools = request.tools.map((tool) => lowerTool(tool, tool.inputSchema));
+  if (!hostedImageTool) {
+    return functionTools.length > 0 ? functionTools : undefined;
+  }
+
+  return [...functionTools, lowerImageGenerationTool(hostedImageTool)];
+};
 
 const lowerToolChoice = (toolChoice: NonNullable<LLMRequest['toolChoice']>) =>
   ProviderShared.matchToolChoice('OpenAI Responses', toolChoice, {
@@ -388,20 +136,6 @@ const lowerReasoning = (part: ReasoningPart): OpenAIResponsesReasoningInput | un
   };
 };
 
-const hostedToolItemID = (part: ToolResultPart) => {
-  const openai = part.providerMetadata?.openai;
-  return ProviderShared.isRecord(openai) &&
-    typeof openai.itemId === 'string' &&
-    openai.itemId.length > 0
-    ? openai.itemId
-    : undefined;
-};
-
-// The stream recorder stores the whole hosted item as the tool result value, so
-// it can be replayed verbatim when the server has no stored copy (`store:false`).
-const restoreHostedToolItem = (item: unknown): OpenAIResponsesHostedToolItem | undefined =>
-  Schema.is(OpenAIResponsesHostedToolItem)(item) ? item : undefined;
-
 // The input union includes open (`StructWithRest`) hosted items, so `in`/discriminant
 // narrowing alone degrades `content` to `unknown`. This guard pins the user variant.
 const isUserInputItem = (
@@ -409,7 +143,7 @@ const isUserInputItem = (
 ): item is Extract<OpenAIResponsesInputItem, { role: 'user' }> =>
   item !== undefined && 'role' in item && item.role === 'user';
 
-const lowerUserContent = Effect.fn('OpenAIResponses.lowerUserContent')(function* (
+const lowerUserContent = Effect.fnUntraced(function* (
   part: LLMRequest['messages'][number]['content'][number],
 ) {
   if (part.type === 'text') return { type: 'input_text' as const, text: part.text };
@@ -426,23 +160,19 @@ const lowerUserContent = Effect.fn('OpenAIResponses.lowerUserContent')(function*
 
 // Tool results may carry structured text/images. Keep media as provider-native
 // content instead of JSON-stringifying base64 into a prompt string.
-const lowerToolResultContentItem = Effect.fn('OpenAIResponses.lowerToolResultContentItem')(
-  function* (item: ToolContent) {
-    if (item.type === 'text') return { type: 'input_text' as const, text: item.text };
-    // Type guard ensures item is file type here
-    if (item.type !== 'file') throw new Error('Unexpected content type');
-    const media = yield* ProviderShared.validateToolFile(
-      'OpenAI Responses',
-      item,
-      new Set<string>(ProviderShared.IMAGE_MIMES),
-    );
-    return { type: 'input_image' as const, image_url: media.dataUrl };
-  },
-);
+const lowerToolResultContentItem = Effect.fnUntraced(function* (item: ToolContent) {
+  if (item.type === 'text') return { type: 'input_text' as const, text: item.text };
+  // Type guard ensures item is file type here
+  if (item.type !== 'file') throw new Error('Unexpected content type');
+  const media = yield* ProviderShared.validateToolFile(
+    'OpenAI Responses',
+    item,
+    new Set<string>(ProviderShared.IMAGE_MIMES),
+  );
+  return { type: 'input_image' as const, image_url: media.dataUrl };
+});
 
-const lowerToolResultOutput = Effect.fn('OpenAIResponses.lowerToolResultOutput')(function* (
-  part: ToolResultPart,
-) {
+const lowerToolResultOutput = Effect.fnUntraced(function* (part: ToolResultPart) {
   // Text/json/error results are encoded as a plain string for backward
   // compatibility with existing cassettes and provider expectations.
   if (part.result.type !== 'content') return ProviderShared.toolResultText(part);
@@ -451,7 +181,7 @@ const lowerToolResultOutput = Effect.fn('OpenAIResponses.lowerToolResultOutput')
   return yield* Effect.forEach(content, lowerToolResultContentItem);
 });
 
-const lowerMessages = Effect.fn('OpenAIResponses.lowerMessages')(function* (request: LLMRequest) {
+const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest) {
   const system: OpenAIResponsesInputItem[] =
     request.system.length === 0
       ? []
@@ -533,7 +263,7 @@ const lowerMessages = Effect.fn('OpenAIResponses.lowerMessages')(function* (requ
         }
         if (part.type === 'tool-result' && part.providerExecuted === true) {
           flushText();
-          const itemID = hostedToolItemID(part);
+          const itemID = ResponsesHostedTools.hostedToolItemID(part);
           if (store !== false) {
             if (itemID && !hostedToolReferences.has(itemID))
               input.push({ type: 'item_reference', id: itemID });
@@ -543,7 +273,9 @@ const lowerMessages = Effect.fn('OpenAIResponses.lowerMessages')(function* (requ
           // `store:false` cannot use `item_reference`; replay the recorded item
           // itself when we captured it so hosted context survives the turn.
           const hosted =
-            part.result.type === 'json' ? restoreHostedToolItem(part.result.value) : undefined;
+            part.result.type === 'json'
+              ? ResponsesHostedTools.restoreHostedToolItem(part.result.value)
+              : undefined;
           if (itemID !== undefined && hosted?.id === itemID) {
             if (!hostedToolReferences.has(itemID)) {
               input.push(hosted);
@@ -596,7 +328,7 @@ const lowerMessages = Effect.fn('OpenAIResponses.lowerMessages')(function* (requ
     : input;
 });
 
-const lowerOptions = Effect.fn('OpenAIResponses.lowerOptions')(function* (request: LLMRequest) {
+const lowerOptions = Effect.fnUntraced(function* (request: LLMRequest) {
   const store = OpenAIOptions.store(request);
   const promptCacheKey = OpenAIOptions.promptCacheKey(request);
   const effort = OpenAIOptions.reasoningEffort(request);
@@ -622,22 +354,13 @@ const lowerOptions = Effect.fn('OpenAIResponses.lowerOptions')(function* (reques
   };
 });
 
-const fromRequest = Effect.fn('OpenAIResponses.fromRequest')(function* (request: LLMRequest) {
+const fromRequest = Effect.fnUntraced(function* (request: LLMRequest) {
   const generation = request.generation;
   const options = yield* lowerOptions(request);
-  const toolSchemaCompatibility = request.model.compatibility?.toolSchema;
   return {
     model: request.model.id,
     input: yield* lowerMessages(request),
-    tools:
-      request.tools.length === 0
-        ? undefined
-        : request.tools.map((tool) =>
-            lowerTool(
-              tool,
-              ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
-            ),
-          ),
+    tools: buildResponsesTools(request),
     tool_choice: request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined,
     stream: true as const,
     max_output_tokens: generation?.maxTokens,
@@ -744,16 +467,14 @@ const isReasoningItem = (
 // Round-trip the full item as the structured result so consumers can extract
 // outputs / sources / status without re-decoding. Generated images are surfaced
 // as media content (with base64 validation) instead of an opaque blob.
-const hostedToolResult = Effect.fn('OpenAIResponses.hostedToolResult')(function* (
-  item: OpenAIResponsesStreamItem,
-) {
+const hostedToolResult = Effect.fnUntraced(function* (item: OpenAIResponsesStreamItem) {
   const isError = typeof item.error !== 'undefined' && item.error !== null;
   if (
     item.type === 'image_generation_call' &&
     typeof item.result === 'string' &&
     item.result.length > 0
   ) {
-    yield* Effect.fromResult(Encoding.decodeBase64(item.result)).pipe(
+    yield* Effect.fromResult(Base64.decode(item.result)).pipe(
       Effect.mapError((cause) =>
         ProviderShared.eventError(
           ADAPTER,
@@ -780,7 +501,7 @@ const hostedToolResult = Effect.fn('OpenAIResponses.hostedToolResult')(function*
     : { type: 'json' as const, value: item };
 });
 
-const hostedToolEvents = Effect.fn('OpenAIResponses.hostedToolEvents')(function* (
+const hostedToolEvents = Effect.fnUntraced(function* (
   item: OpenAIResponsesStreamItem & { type: HostedToolType; id: string },
 ) {
   const tool = HOSTED_TOOLS[item.type];
@@ -1073,49 +794,50 @@ const onReasoningSummaryPartDone = (
   ];
 };
 
-const onFunctionCallArgumentsDelta = Effect.fn('OpenAIResponses.onFunctionCallArgumentsDelta')(
-  function* (state: ParserState, event: OpenAIResponsesEvent) {
-    if (!event.item_id) return [state, NO_EVENTS] satisfies StepResult;
-    const tool = state.tools[event.item_id];
-    // A delta for an item we never registered (out-of-order/omitted
-    // `output_item.added`) is ignored instead of failing the whole response.
-    if (!tool) return [state, NO_EVENTS] satisfies StepResult;
-    const final =
-      event.type === 'response.function_call_arguments.done'
-        ? (event.arguments ?? undefined)
-        : undefined;
-    if (event.type === 'response.function_call_arguments.done' && final === undefined)
-      return [state, NO_EVENTS] satisfies StepResult;
-    // The `.done` event repeats the complete arguments; resync if the streamed
-    // prefix disagrees rather than appending a duplicated tail.
-    if (final !== undefined && !final.startsWith(tool.input))
-      return [
-        {
-          ...state,
-          tools: ToolStream.start(state.tools, event.item_id, { ...tool, input: final }),
-        },
-        NO_EVENTS,
-      ] satisfies StepResult;
-    const delta = final === undefined ? event.delta : final.slice(tool.input.length);
-    if (!delta) return [state, NO_EVENTS] satisfies StepResult;
-    const result = ToolStream.appendExisting(
-      ADAPTER,
-      state.tools,
-      event.item_id,
-      delta,
-      'OpenAI Responses tool argument delta is missing its tool call',
-    );
-    if (ToolStream.isError(result)) return yield* result;
-    const events: LLMEvent[] = [];
-    const lifecycle = result.events.length
-      ? Lifecycle.stepStart(state.lifecycle, events)
-      : state.lifecycle;
-    events.push(...result.events);
-    return [{ ...state, lifecycle, tools: result.tools }, events] satisfies StepResult;
-  },
-);
+const onFunctionCallArgumentsDelta = Effect.fnUntraced(function* (
+  state: ParserState,
+  event: OpenAIResponsesEvent,
+) {
+  if (!event.item_id) return [state, NO_EVENTS] satisfies StepResult;
+  const tool = state.tools[event.item_id];
+  // A delta for an item we never registered (out-of-order/omitted
+  // `output_item.added`) is ignored instead of failing the whole response.
+  if (!tool) return [state, NO_EVENTS] satisfies StepResult;
+  const final =
+    event.type === 'response.function_call_arguments.done'
+      ? (event.arguments ?? undefined)
+      : undefined;
+  if (event.type === 'response.function_call_arguments.done' && final === undefined)
+    return [state, NO_EVENTS] satisfies StepResult;
+  // The `.done` event repeats the complete arguments; resync if the streamed
+  // prefix disagrees rather than appending a duplicated tail.
+  if (final !== undefined && !final.startsWith(tool.input))
+    return [
+      {
+        ...state,
+        tools: ToolStream.start(state.tools, event.item_id, { ...tool, input: final }),
+      },
+      NO_EVENTS,
+    ] satisfies StepResult;
+  const delta = final === undefined ? event.delta : final.slice(tool.input.length);
+  if (!delta) return [state, NO_EVENTS] satisfies StepResult;
+  const result = ToolStream.appendExisting(
+    ADAPTER,
+    state.tools,
+    event.item_id,
+    delta,
+    'OpenAI Responses tool argument delta is missing its tool call',
+  );
+  if (ToolStream.isError(result)) return yield* result;
+  const events: LLMEvent[] = [];
+  const lifecycle = result.events.length
+    ? Lifecycle.stepStart(state.lifecycle, events)
+    : state.lifecycle;
+  events.push(...result.events);
+  return [{ ...state, lifecycle, tools: result.tools }, events] satisfies StepResult;
+});
 
-const onOutputItemDone = Effect.fn('OpenAIResponses.onOutputItemDone')(function* (
+const onOutputItemDone = Effect.fnUntraced(function* (
   state: ParserState,
   event: OpenAIResponsesEvent,
 ) {
@@ -1198,7 +920,7 @@ const onOutputItemDone = Effect.fn('OpenAIResponses.onOutputItemDone')(function*
   return [state, NO_EVENTS] satisfies StepResult;
 });
 
-const onResponseFinish = Effect.fn('OpenAIResponses.onResponseFinish')(function* (
+const onResponseFinish = Effect.fnUntraced(function* (
   state: ParserState,
   event: OpenAIResponsesEvent,
 ) {
@@ -1235,8 +957,10 @@ const onResponseFinish = Effect.fn('OpenAIResponses.onResponseFinish')(function*
   hasFunctionCall = hasFunctionCall || pending.events.some((item) => LLMEvent.is.toolCall(item));
   events.push(...pending.events);
   lifecycle = Lifecycle.finish(lifecycle, events, {
-    reason: mapFinishReason(event, hasFunctionCall),
-    reasonRaw: event.response?.incomplete_details?.reason ?? undefined,
+    reason: {
+      normalized: mapFinishReason(event, hasFunctionCall),
+      raw: event.response?.incomplete_details?.reason ?? undefined,
+    },
     usage: mapUsage(event.response?.usage),
     providerMetadata:
       event.response?.id || event.response?.service_tier
@@ -1282,9 +1006,9 @@ const providerError = (event: OpenAIResponsesEvent, fallback: string) => {
   return LLMEvent.providerError({
     message,
     classification:
-      code === 'context_length_exceeded' || isContextOverflow(message)
+      code === 'context_length_exceeded'
         ? 'context-overflow'
-        : undefined,
+        : providerFailureClassification(message),
     retryable: code !== undefined && RETRYABLE_ERROR_CODES.has(code),
   });
 };

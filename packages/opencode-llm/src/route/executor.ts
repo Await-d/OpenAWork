@@ -1,6 +1,6 @@
 import { Cause, Context, Effect, Layer, Random } from 'effect';
-import type { HttpClientRequest, HttpClientResponse } from 'effect/unstable/http';
-import { FetchHttpClient, Headers, HttpClient, HttpClientError } from 'effect/unstable/http';
+import type { HttpClientRequest, HttpClientResponse } from 'effect/http';
+import { FetchHttpClient, Headers, HttpClient, HttpClientError } from 'effect/http';
 import {
   AuthenticationReason,
   ContentPolicyReason,
@@ -15,13 +15,32 @@ import {
   RateLimitReason,
   TransportReason,
   UnknownProviderReason,
+  type TransportOperation,
 } from '../schema/index.js';
-import { isContextOverflow, providerErrorText } from '../provider-error.js';
+import { providerErrorMessage, providerFailureClassification } from '../provider-error.js';
 import { redactTransportText, redactTransportUrl } from './transport/redaction.js';
+
+/** 传输出口：把请求真正发出去（`HttpMiddleware` 调它继续下发）。 */
+export type HttpHandler = (
+  request: HttpClientRequest.HttpClientRequest,
+) => Effect.Effect<HttpClientResponse.HttpClientResponse, Error>;
+
+/**
+ * 请求拦截中间件（对齐上游 `HttpMiddleware`）。
+ *
+ * 在**状态码分类之前**拿到原始响应，因此可以改写请求、短路返回，或调 `handler`
+ * 继续下发（多个中间件按调用顺序包裹，最后一个先看到响应）。错误统一收敛成
+ * `LLMError`：中间件自身抛错也会走 `toHttpError` 的分类路径。
+ */
+export type HttpMiddleware = (
+  request: HttpClientRequest.HttpClientRequest,
+  handler: HttpHandler,
+) => Effect.Effect<HttpClientResponse.HttpClientResponse, Error>;
 
 export interface Interface {
   readonly execute: (
     request: HttpClientRequest.HttpClientRequest,
+    middleware?: HttpMiddleware,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError>;
 }
 
@@ -196,11 +215,21 @@ const responseBody = (body: string | void, request: HttpClientRequest.HttpClient
   return { body: redacted.slice(0, BODY_LIMIT), bodyTruncated: true };
 };
 
+// 回显正文的上限。HTML 错误页（网关/代理在故障或限流时返回）既不是错误信息、
+// 又往往很长，回显它只会把真正的状态码淹没，因此直接丢弃。
+const MAX_BODY_CHARS = 2000;
+const HTML_DOCUMENT = /^<(?:!doctype|html)/i;
+
 const providerMessage = (status: number, body: { readonly body?: string }) => {
-  const detail = body.body === undefined ? '' : providerErrorText(body.body);
-  if (detail.length > 0 && detail.length <= 500)
-    return `Provider request failed with HTTP ${status}: ${detail}`;
-  return `Provider request failed with HTTP ${status}`;
+  const raw = body.body;
+  if (raw === undefined) return `Provider request failed with HTTP ${status}`;
+
+  const structured = providerErrorMessage(raw);
+  const echo = structured ?? (HTML_DOCUMENT.test(raw.trimStart()) ? '' : raw);
+  const detail = echo.slice(0, MAX_BODY_CHARS);
+  if (detail.length === 0) return `Provider request failed with HTTP ${status}`;
+
+  return `Provider request failed with HTTP ${status}: ${detail}`;
 };
 
 const responseHttp = (input: {
@@ -228,24 +257,39 @@ const statusReason = (input: {
 }) => {
   const body = input.http.body ?? '';
   if (/content[-_\s]?policy|content_filter|safety/i.test(body)) {
-    return new ContentPolicyReason({ message: input.message, http: input.http });
+    return new ContentPolicyReason({
+      message: input.message,
+      body: input.http.body,
+      http: input.http,
+    });
   }
   if (input.status === 401) {
-    return new AuthenticationReason({ message: input.message, kind: 'invalid', http: input.http });
+    return new AuthenticationReason({
+      message: input.message,
+      body: input.http.body,
+      kind: 'invalid',
+      http: input.http,
+    });
   }
   if (input.status === 403) {
     return new AuthenticationReason({
       message: input.message,
+      body: input.http.body,
       kind: 'insufficient-permissions',
       http: input.http,
     });
   }
   if (input.status === 429) {
     if (/insufficient[-_\s]?quota|quota[-_\s]?exceeded/i.test(body)) {
-      return new QuotaExceededReason({ message: input.message, http: input.http });
+      return new QuotaExceededReason({
+        message: input.message,
+        body: input.http.body,
+        http: input.http,
+      });
     }
     return new RateLimitReason({
       message: input.message,
+      body: input.http.body,
       retryAfterMs: input.retryAfterMs,
       rateLimit: input.rateLimit,
       http: input.http,
@@ -260,13 +304,15 @@ const statusReason = (input: {
   ) {
     return new InvalidRequestReason({
       message: input.message,
-      classification: isContextOverflow(body) ? 'context-overflow' : undefined,
+      body: input.http.body,
+      classification: providerFailureClassification(body, input.status),
       http: input.http,
     });
   }
   if (input.status >= 500 || retryableStatus(input.status)) {
     return new ProviderInternalReason({
       message: input.message,
+      body: input.http.body,
       status: input.status,
       retryAfterMs: input.retryAfterMs,
       http: input.http,
@@ -274,6 +320,7 @@ const statusReason = (input: {
   }
   return new UnknownProviderReason({
     message: input.message,
+    body: input.http.body,
     status: input.status,
     http: input.http,
   });
@@ -309,11 +356,26 @@ const statusError =
       });
     });
 
+const rootCause = (error: unknown, seen = new Set<unknown>()): unknown => {
+  if (error === null || typeof error !== 'object' || seen.has(error) || seen.size >= 6)
+    return error;
+  seen.add(error);
+
+  const nested = (error as { readonly cause?: unknown }).cause;
+  if (nested !== undefined && nested !== error) return rootCause(nested, seen);
+
+  const reason = (error as { readonly reason?: unknown }).reason;
+  if (reason !== undefined && reason !== error) return rootCause(reason, seen);
+
+  return error;
+};
+
 const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: unknown) => {
   const transportError = (input: {
     readonly message: string;
     readonly kind?: string | undefined;
     readonly request?: HttpClientRequest.HttpClientRequest | undefined;
+    readonly operation?: TransportOperation | undefined;
   }) =>
     new LLMError({
       module: 'RequestExecutor',
@@ -325,6 +387,8 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
         http: input.request
           ? new HttpContext({ request: requestDetails(input.request, redactedNames) })
           : undefined,
+        transport: 'http',
+        operation: input.operation ?? 'request',
       }),
     });
 
@@ -335,6 +399,12 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
     return transportError({ message: 'HTTP transport failed' });
   }
   const request = 'request' in error ? error.request : undefined;
+  // 传输异常常被包了几层（HttpClientError → reason → cause …），只看最外层会把真正的
+  // 原因掩盖成笼统的 transport 失败——尤其内层超时，必须还原成 Timeout 才能被上层判定为可重试。
+  const source = rootCause(error.reason);
+  if (Cause.isTimeoutError(source)) {
+    return transportError({ message: source.message, kind: 'Timeout', request });
+  }
   if (error.reason._tag === 'TransportError') {
     return transportError({
       message: error.reason.description ?? 'HTTP transport failed',
@@ -375,18 +445,36 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
   Service,
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient;
-    const executeOnce = (request: HttpClientRequest.HttpClientRequest) =>
+    const executeOnce = (
+      request: HttpClientRequest.HttpClientRequest,
+      middleware?: HttpMiddleware,
+    ) =>
       Effect.gen(function* () {
         const redactedNames = yield* Headers.CurrentRedactedNames;
-        return yield* http
-          .execute(request)
-          .pipe(
+        // 分类统一收口：无论响应来自中间件短路还是真实传输，都走同一条
+        // mapError → statusError 链路，避免中间件成为绕过错误分类的后门。
+        const classify = (
+          response: Effect.Effect<HttpClientResponse.HttpClientResponse, unknown>,
+        ) =>
+          response.pipe(
             Effect.mapError(toHttpError(redactedNames)),
             Effect.flatMap(statusError(request, redactedNames)),
           );
+        if (middleware === undefined) return yield* classify(http.execute(request));
+        return yield* classify(
+          middleware(request, (input) =>
+            http
+              .execute(input)
+              .pipe(
+                Effect.mapError((cause) =>
+                  cause instanceof Error ? cause : new Error(String(cause)),
+                ),
+              ),
+          ),
+        );
       });
     return Service.of({
-      execute: (request) => retryStatusFailures(executeOnce(request)),
+      execute: (request, middleware) => retryStatusFailures(executeOnce(request, middleware)),
     });
   }),
 );

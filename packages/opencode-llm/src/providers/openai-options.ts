@@ -1,11 +1,13 @@
 import type { ProviderOptions, ReasoningEffort, TextVerbosity } from '../schema/index.js';
 import { mergeProviderOptions } from '../schema/index.js';
 import type {
+  OpenAIImageGenerationToolInput,
   OpenAIResponseIncludable,
   OpenAIServiceTier,
 } from '../protocols/utils/openai-options.js';
 
 export type {
+  OpenAIImageGenerationToolInput,
   OpenAIResponseIncludable,
   OpenAIServiceTier,
 } from '../protocols/utils/openai-options.js';
@@ -22,6 +24,12 @@ export interface OpenAIOptionsInput {
   readonly include?: ReadonlyArray<OpenAIResponseIncludable>;
   readonly textVerbosity?: TextVerbosity;
   readonly serviceTier?: OpenAIServiceTier;
+  /**
+   * Responses API 的 hosted `image_generation` 工具（`model` 指被调用的生图模型）。
+   * 配了它，协议层就会在 `tools` 里追加对应条目；响应侧的
+   * `image_generation_call` 解析与 base64 图片输出早已支持。
+   */
+  readonly imageGenerationTool?: OpenAIImageGenerationToolInput;
 }
 
 export type OpenAIProviderOptionsInput = ProviderOptions & {
@@ -52,16 +60,14 @@ const openAIProviderOptions = (
       include: options?.include,
       textVerbosity: options?.textVerbosity,
       serviceTier: options?.serviceTier,
+      imageGenerationTool: options?.imageGenerationTool,
     }),
   );
   if (Object.keys(openai).length === 0) return undefined;
   return { openai };
 };
 
-export const gpt5DefaultOptions = (
-  modelID: string,
-  options: { readonly textVerbosity?: boolean } = {},
-): ProviderOptions | undefined => {
+export const gpt5DefaultOptions = (modelID: string): ProviderOptions | undefined => {
   const id = modelID.toLowerCase();
   if (!id.includes('gpt-5') || id.includes('gpt-5-chat') || id.includes('gpt-5-pro'))
     return undefined;
@@ -75,38 +81,21 @@ export const gpt5DefaultOptions = (
     // this, callers using the default model facade get reasoning summaries
     // they cannot replay statelessly.
     include: ['reasoning.encrypted_content'],
-    textVerbosity:
-      options.textVerbosity === true &&
-      id.includes('gpt-5.') &&
-      !id.includes('codex') &&
-      !id.includes('-chat')
-        ? 'low'
-        : undefined,
   });
 };
 
-export const openAIDefaultOptions = (
-  modelID: string,
-  options: { readonly textVerbosity?: boolean } = {},
-): ProviderOptions | undefined =>
-  mergeProviderOptions(
-    openAIProviderOptions({ store: false }),
-    gpt5DefaultOptions(modelID, options),
-  );
+export const openAIDefaultOptions = (modelID: string): ProviderOptions | undefined =>
+  mergeProviderOptions(openAIProviderOptions({ store: false }), gpt5DefaultOptions(modelID));
 
 export const withOpenAIOptions = <
   Options extends { readonly providerOptions?: OpenAIProviderOptionsInput },
 >(
   modelID: string,
   options: Options,
-  defaults: { readonly textVerbosity?: boolean } = {},
 ): Omit<Options, 'providerOptions'> & { readonly providerOptions?: ProviderOptions } => {
   return {
     ...options,
-    providerOptions: mergeProviderOptions(
-      openAIDefaultOptions(modelID, defaults),
-      options.providerOptions,
-    ),
+    providerOptions: mergeProviderOptions(openAIDefaultOptions(modelID), options.providerOptions),
   };
 };
 

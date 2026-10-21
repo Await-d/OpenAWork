@@ -31,4 +31,10 @@ export const sseWithDone = {
     ProviderShared.sseFraming(bytes, { includeDone: true }),
 } as Framing<string>;
 
+/** Server-Sent Events framing that emits only the given named events. */
+export const sseEvents = (events: ReadonlySet<string>): Framing<string> => ({
+  id: 'sse',
+  frame: (bytes) => ProviderShared.sseFraming(bytes, { events }),
+});
+
 export * as Framing from './framing.js';

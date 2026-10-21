@@ -48,7 +48,9 @@ export class InvalidRequestReason extends Schema.Class<InvalidRequestReason>(
   // Underlying exception, when the failure was caused by one (e.g. a Schema
   // decode error). Kept so diagnostics can distinguish a syntax error from a
   // shape mismatch instead of collapsing both into the message.
-  cause: Schema.optional(Schema.Unknown),
+  cause: Schema.optional(Schema.Defect({ includeStack: true })),
+  // Preserve the complete original response or triggering event before decoding narrows it.
+  body: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
   http: Schema.optional(HttpContext),
 }) {
@@ -78,6 +80,8 @@ export class AuthenticationReason extends Schema.Class<AuthenticationReason>(
   _tag: Schema.tag('Authentication'),
   message: Schema.String,
   kind: Schema.Literals(['missing', 'invalid', 'expired', 'insufficient-permissions', 'unknown']),
+  // Preserve the complete original response or triggering event before decoding narrows it.
+  body: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
   http: Schema.optional(HttpContext),
 }) {
@@ -91,6 +95,8 @@ export class RateLimitReason extends Schema.Class<RateLimitReason>('LLM.Error.Ra
   message: Schema.String,
   retryAfterMs: Schema.optional(Schema.Number),
   rateLimit: Schema.optional(HttpRateLimitDetails),
+  // Preserve the complete original response or triggering event before decoding narrows it.
+  body: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
   http: Schema.optional(HttpContext),
 }) {
@@ -104,6 +110,8 @@ export class QuotaExceededReason extends Schema.Class<QuotaExceededReason>(
 )({
   _tag: Schema.tag('QuotaExceeded'),
   message: Schema.String,
+  // Preserve the complete original response or triggering event before decoding narrows it.
+  body: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
   http: Schema.optional(HttpContext),
 }) {
@@ -117,6 +125,8 @@ export class ContentPolicyReason extends Schema.Class<ContentPolicyReason>(
 )({
   _tag: Schema.tag('ContentPolicy'),
   message: Schema.String,
+  // Preserve the complete original response or triggering event before decoding narrows it.
+  body: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
   http: Schema.optional(HttpContext),
 }) {
@@ -132,6 +142,8 @@ export class ProviderInternalReason extends Schema.Class<ProviderInternalReason>
   message: Schema.String,
   status: Schema.Number,
   retryAfterMs: Schema.optional(Schema.Number),
+  // Preserve the complete original response or triggering event before decoding narrows it.
+  body: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
   http: Schema.optional(HttpContext),
 }) {
@@ -140,12 +152,24 @@ export class ProviderInternalReason extends Schema.Class<ProviderInternalReason>
   }
 }
 
+/** 传输载体（对齐上游 `TransportError.transport`）。 */
+export const TransportType = Schema.Literals(['http', 'websocket']);
+export type TransportType = Schema.Schema.Type<typeof TransportType>;
+
+/** 传输阶段（对齐上游 `TransportError.operation`）。 */
+export const TransportOperation = Schema.Literals(['request', 'read', 'write']);
+export type TransportOperation = Schema.Schema.Type<typeof TransportOperation>;
+
 export class TransportReason extends Schema.Class<TransportReason>('LLM.Error.Transport')({
   _tag: Schema.tag('Transport'),
   message: Schema.String,
   kind: Schema.optional(Schema.String),
   url: Schema.optional(Schema.String),
   http: Schema.optional(HttpContext),
+  // 传输维度：区分「连接阶段」与「读/写阶段」的失败，便于上层按阶段决定重试。
+  transport: Schema.optional(TransportType),
+  operation: Schema.optional(TransportOperation),
+  code: Schema.optional(Schema.String),
 }) {
   get retryable() {
     return false;
@@ -164,7 +188,9 @@ export class InvalidProviderOutputReason extends Schema.Class<InvalidProviderOut
   // and decide whether to continue or retry.
   classification: Schema.optional(Schema.Literals(['incomplete-stream'])),
   // Underlying exception from the JSON/Schema decode that failed.
-  cause: Schema.optional(Schema.Unknown),
+  cause: Schema.optional(Schema.Defect({ includeStack: true })),
+  // Preserve the complete original response or triggering event before decoding narrows it.
+  body: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
 }) {
   get retryable() {
@@ -178,6 +204,8 @@ export class UnknownProviderReason extends Schema.Class<UnknownProviderReason>(
   _tag: Schema.tag('UnknownProvider'),
   message: Schema.String,
   status: Schema.optional(Schema.Number),
+  // Preserve the complete original response or triggering event before decoding narrows it.
+  body: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
   http: Schema.optional(HttpContext),
 }) {

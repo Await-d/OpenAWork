@@ -3,6 +3,7 @@ import * as Option from 'effect/Option';
 import { Auth, type Auth as AuthDef } from './auth.js';
 import { Endpoint, type EndpointPatch } from './endpoint.js';
 import { RequestExecutor } from './executor.js';
+import type { HttpMiddleware } from './executor.js';
 import type { Framing } from './framing.js';
 import { HttpTransport } from './transport/index.js';
 import type { Transport, TransportRuntime } from './transport/index.js';
@@ -11,7 +12,15 @@ import type { Protocol } from './protocol.js';
 import { applyCachePolicy } from '../cache-policy.js';
 import { applyEffortUpdates } from '../effort-updates.js';
 import * as ProviderShared from '../protocols/shared.js';
-import type { LLMError, PreparedRequestOf, ProtocolID, ProviderOptions } from '../schema/index.js';
+import { ToolSchemaProjection } from '../protocols/utils/tool-schema.js';
+import { sanitizeSurrogates } from '../utils/sanitize.js';
+import type {
+  LLMError,
+  ModelToolSchemaCompatibility,
+  PreparedRequestOf,
+  ProtocolID,
+  ProviderOptions,
+} from '../schema/index.js';
 import {
   GenerationOptions,
   HttpOptions,
@@ -52,6 +61,12 @@ export interface Route<Body, Prepared = unknown> {
    * `Message.effort(...)` 标记，避免把标记泄漏给上游。
    */
   readonly supportsEffortUpdates?: (request: LLMRequest) => boolean;
+  /**
+   * 工具 schema 投影的默认规则族（对齐上游 `Route.sanitizer`）。
+   *
+   * 优先级低于模型级 `compatibility.toolSchema`，高于模型名启发式。
+   */
+  readonly sanitizer?: ModelToolSchemaCompatibility;
   readonly protocol: ProtocolID;
   readonly endpoint: Endpoint<Body>;
   readonly auth: AuthDef;
@@ -60,7 +75,11 @@ export interface Route<Body, Prepared = unknown> {
   readonly body: RouteBody<Body>;
   readonly with: (patch: RoutePatch<Body, Prepared>) => Route<Body, Prepared>;
   readonly model: (input: RouteMappedModelInput) => Model;
-  readonly prepareTransport: (body: Body, request: LLMRequest) => Effect.Effect<Prepared, LLMError>;
+  readonly prepareTransport: (
+    body: Body,
+    request: LLMRequest,
+    middleware?: HttpMiddleware,
+  ) => Effect.Effect<Prepared, LLMError>;
   readonly streamPrepared: (
     prepared: Prepared,
     request: LLMRequest,
@@ -101,6 +120,7 @@ export interface RoutePatch<Body, Prepared> extends RouteDefaultsInput {
   readonly provider?: string | ProviderID;
   readonly providerMetadataKey?: string;
   readonly supportsEffortUpdates?: (request: LLMRequest) => boolean;
+  readonly sanitizer?: ModelToolSchemaCompatibility;
   readonly auth?: AuthDef;
   readonly transport?: Transport<Body, Prepared, unknown>;
   readonly endpoint?: EndpointPatch<Body>;
@@ -142,7 +162,7 @@ const mergeRouteDefaults = (
     providerOptions: mergeProviderOptions(base?.providerOptions, patch.providerOptions),
     http: mergeHttpOptions(
       base?.http,
-      httpOptions(patch.http),
+      HttpOptions.make(patch.http),
       headers === undefined ? undefined : new HttpOptions({ headers }),
     ),
   };
@@ -164,11 +184,6 @@ const mergeHeaders = (...items: ReadonlyArray<Record<string, string> | undefined
 export const generationOptions = (input: GenerationOptions.Input | undefined) =>
   input === undefined ? undefined : GenerationOptions.make(input);
 
-export const httpOptions = (input: HttpOptionsInput | undefined) => {
-  if (input === undefined) return input;
-  return HttpOptions.make(input);
-};
-
 export interface Interface {
   /**
    * Compile a request through protocol body construction, validation, and HTTP
@@ -182,20 +197,40 @@ export interface Interface {
    */
   readonly prepare: <Body = unknown>(
     request: LLMRequest,
+    options?: StreamOptions,
   ) => Effect.Effect<PreparedRequestOf<Body>, LLMError>;
   readonly stream: StreamMethod;
   readonly generate: GenerateMethod;
 }
 
+/**
+ * 每次调用的可选项（对齐上游 `StreamOptions`）。
+ *
+ * 只含本地有落点的字段：`http` 拦截器在传输层生效。上游还有
+ * `webSocket?: WebSocketChannelExecutor`，本地无 channel 传输概念 → 不引入
+ * （登记为已知分歧）。
+ */
+export interface StreamOptions {
+  /** 请求拦截器：在状态码分类前拿到原始响应，可改写请求或短路返回。 */
+  readonly http?: HttpMiddleware;
+}
+
 export interface StreamMethod {
-  (request: LLMRequest): Stream.Stream<LLMEvent, LLMError>;
+  (request: LLMRequest, options?: StreamOptions): Stream.Stream<LLMEvent, LLMError>;
 }
 
 export interface GenerateMethod {
-  (request: LLMRequest): Effect.Effect<LLMResponse, LLMError>;
+  (request: LLMRequest, options?: StreamOptions): Effect.Effect<LLMResponse, LLMError>;
 }
 
-export class Service extends Context.Service<Service, Interface>()('@opencode/LLMClient') {}
+/** 客户端服务标签（对齐上游 `LLMClientService` 命名）。 */
+export class LLMClientService extends Context.Service<LLMClientService, Interface>()(
+  '@opencode/LLMClient',
+) {}
+
+/** 兼容别名：包内历史命名为 `Service`。 */
+export const Service = LLMClientService;
+export type Service = LLMClientService;
 
 const resolveRequestOptions = (request: LLMRequest) => {
   const routeDefaults = request.model.route.defaults;
@@ -225,6 +260,8 @@ export interface MakeInput<Body, Frame, Event, State> {
   readonly providerMetadataKey?: string;
   /** Route-level opt-in for native per-message effort updates (see `applyEffortUpdates`). */
   readonly supportsEffortUpdates?: (request: LLMRequest) => boolean;
+  /** Default tool-schema rule family for this route (see `Route.sanitizer`). */
+  readonly sanitizer?: ModelToolSchemaCompatibility;
   /** Semantic API contract — owns body construction, body schema, and parsing. */
   readonly protocol: Protocol<Body, Frame, Event, State>;
   /** Where the request is sent. */
@@ -251,6 +288,8 @@ export interface MakeTransportInput<Body, Prepared, Frame, Event, State> {
   readonly providerMetadataKey?: string;
   /** Route-level opt-in for native per-message effort updates (see `applyEffortUpdates`). */
   readonly supportsEffortUpdates?: (request: LLMRequest) => boolean;
+  /** Default tool-schema rule family for this route (see `Route.sanitizer`). */
+  readonly sanitizer?: ModelToolSchemaCompatibility;
   /** Semantic API contract — owns body construction, body schema, and parsing. */
   readonly protocol: Protocol<Body, Frame, Event, State>;
   /** Where the request is sent. */
@@ -341,6 +380,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
         routeInput.provider === undefined ? undefined : ProviderID.make(routeInput.provider),
       providerMetadataKey: routeInput.providerMetadataKey,
       supportsEffortUpdates: routeInput.supportsEffortUpdates,
+      sanitizer: routeInput.sanitizer,
       protocol: protocol.id,
       endpoint: routeInput.endpoint,
       auth: routeInput.auth ?? Auth.none,
@@ -353,6 +393,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
           provider,
           providerMetadataKey,
           supportsEffortUpdates,
+          sanitizer,
           auth,
           transport,
           endpoint,
@@ -372,6 +413,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
             routeInput.providerMetadataKey ??
             (effectiveProvider === undefined ? undefined : String(effectiveProvider)),
           supportsEffortUpdates: supportsEffortUpdates ?? routeInput.supportsEffortUpdates,
+          sanitizer: sanitizer ?? routeInput.sanitizer,
           auth: auth ?? routeInput.auth,
           endpoint: endpoint ? Endpoint.merge(routeInput.endpoint, endpoint) : routeInput.endpoint,
           transport:
@@ -380,7 +422,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
         });
       },
       model: (input) => makeRouteModel(route, input),
-      prepareTransport: (body, request) =>
+      prepareTransport: (body, request, middleware) =>
         routeInput.transport.prepare({
           body,
           request,
@@ -388,6 +430,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
           auth: routeInput.auth ?? Auth.none,
           encodeBody,
           headers: routeInput.headers,
+          middleware,
         }),
       streamPrepared: (prepared: Prepared, request: LLMRequest, runtime: TransportRuntime) => {
         const route = `${request.model.provider}/${request.model.route.id}`;
@@ -484,6 +527,8 @@ export function make<Body, Prepared, Frame, Event, State>(
     provider: input.provider,
     providerMetadataKey: input.providerMetadataKey,
     supportsEffortUpdates: input.supportsEffortUpdates,
+    // 路由显式声明的规则族优先，否则用协议默认（对齐上游 `Protocol.sanitizer`）。
+    sanitizer: input.sanitizer ?? input.protocol.sanitizer,
     protocol,
     endpoint: input.endpoint,
     auth: input.auth,
@@ -496,27 +541,46 @@ export function make<Body, Prepared, Frame, Event, State>(
 // `compile` is the important boundary: it turns a common `LLMRequest` into a
 // validated provider body plus transport-private prepared data, but does not
 // execute transport.
-const compile = Effect.fn('LLM.compile')(function* (request: LLMRequest) {
-  const resolved = applyEffortUpdates(applyCachePolicy(resolveRequestOptions(request)));
+const compile = Effect.fn('LLM.compile')(function* (request: LLMRequest, options?: StreamOptions) {
+  // 请求体里未配对的 UTF-16 代理（被截断的 emoji、模型生成的畸形工具入参）会被
+  // `JSON.stringify` 序列化成裸 `\uD800` 转义，严格上游直接 400 拒绝整个请求。
+  // 在进入任何协议 lowering 之前统一清洗；`model` 显式排除，避免递归模型实例。
+  const sanitized = LLMRequest.update(
+    request,
+    sanitizeSurrogates({ ...LLMRequest.input(request), model: undefined }),
+  );
+  const resolved = applyEffortUpdates(applyCachePolicy(resolveRequestOptions(sanitized)));
   const route = resolved.model.route;
+  // 请求级工具投影（对齐上游 `ToolSchemaProjection.tools`）：在协议构造 body
+  // **之前**统一应用一次。模型级 compatibility > 路由 sanitizer > 模型名启发式，
+  // 逐协议各自投影会重复转换（Gemini 规则不是幂等的）。
+  const projected =
+    resolved.tools.length === 0
+      ? resolved
+      : LLMRequest.update(resolved, {
+          tools: ToolSchemaProjection.tools(resolved.tools, resolved.model),
+        });
 
   const body = yield* route.body
-    .from(resolved)
+    .from(projected)
     .pipe(
       Effect.flatMap(ProviderShared.validateWith(Schema.decodeUnknownEffect(route.body.schema))),
     );
-  const prepared = yield* route.prepareTransport(body, resolved);
+  const prepared = yield* route.prepareTransport(body, projected, options?.http);
 
   return {
-    request: resolved,
+    request: projected,
     route,
     body,
     prepared,
   };
 });
 
-const prepareWith = Effect.fn('LLMClient.prepare')(function* (request: LLMRequest) {
-  const compiled = yield* compile(request);
+const prepareWith = Effect.fn('LLMClient.prepare')(function* (
+  request: LLMRequest,
+  options?: StreamOptions,
+) {
+  const compiled = yield* compile(request, options);
 
   return new PreparedRequest({
     id: compiled.request.id ?? 'request',
@@ -528,17 +592,18 @@ const prepareWith = Effect.fn('LLMClient.prepare')(function* (request: LLMReques
   });
 });
 
-const streamRequestWith = (runtime: TransportRuntime) => (request: LLMRequest) =>
-  Stream.unwrap(
-    Effect.gen(function* () {
-      const compiled = yield* compile(request);
-      return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime);
-    }),
-  );
+const streamRequestWith =
+  (runtime: TransportRuntime) => (request: LLMRequest, options?: StreamOptions) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const compiled = yield* compile(request, options);
+        return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime);
+      }),
+    );
 
 const generateWith = (stream: Interface['stream']) =>
-  Effect.fn('LLM.generate')(function* (request: LLMRequest) {
-    const state = yield* stream(request).pipe(
+  Effect.fn('LLM.generate')(function* (request: LLMRequest, options?: StreamOptions) {
+    const state = yield* stream(request, options).pipe(
       Stream.runFold(LLMResponse.empty, LLMResponse.reduce),
     );
     const response = LLMResponse.complete(state);
@@ -548,27 +613,33 @@ const generateWith = (stream: Interface['stream']) =>
     );
   });
 
-export const prepare = <Body = unknown>(request: LLMRequest) =>
-  prepareWith(request) as Effect.Effect<PreparedRequestOf<Body>, LLMError>;
+export const prepare = <Body = unknown>(request: LLMRequest, options?: StreamOptions) =>
+  prepareWith(request, options) as Effect.Effect<PreparedRequestOf<Body>, LLMError>;
 
-export function stream(request: LLMRequest): Stream.Stream<LLMEvent, LLMError> {
+export function stream(
+  request: LLMRequest,
+  options?: StreamOptions,
+): Stream.Stream<LLMEvent, LLMError> {
   return Stream.unwrap(
     Effect.gen(function* () {
-      return (yield* Service).stream(request);
+      return (yield* Service).stream(request, options);
     }),
   ) as Stream.Stream<LLMEvent, LLMError>;
 }
 
-export function generate(request: LLMRequest): Effect.Effect<LLMResponse, LLMError> {
+export function generate(
+  request: LLMRequest,
+  options?: StreamOptions,
+): Effect.Effect<LLMResponse, LLMError> {
   return Effect.gen(function* () {
-    return yield* (yield* Service).generate(request);
+    return yield* (yield* Service).generate(request, options);
   }) as Effect.Effect<LLMResponse, LLMError>;
 }
 
-export const streamRequest = (request: LLMRequest) =>
+export const streamRequest = (request: LLMRequest, options?: StreamOptions) =>
   Stream.unwrap(
     Effect.gen(function* () {
-      return (yield* Service).stream(request);
+      return (yield* Service).stream(request, options);
     }),
   );
 

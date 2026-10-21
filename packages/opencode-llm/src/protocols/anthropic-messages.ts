@@ -21,17 +21,19 @@ import {
   type ToolResultPart,
 } from '../schema/index.js';
 import { JsonObject, optionalArray, optionalNull, ProviderShared } from './shared.js';
-import { isContextOverflow } from '../provider-error.js';
+import { providerFailureClassification } from '../provider-error.js';
 import { effortUpdate, resolveEffortUpdates } from '../effort-updates.js';
 import * as Cache from './utils/cache.js';
+import * as ClaudeModel from './utils/claude-model.js';
 import { Lifecycle } from './utils/lifecycle.js';
-import { ToolSchemaProjection } from './utils/tool-schema.js';
 import { ToolStream } from './utils/tool-stream.js';
 
 const ADAPTER = 'anthropic-messages';
 export const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
 export const PATH = '/messages';
 // 对齐参考库：`Message.effort()` 标记未给出目标强度时的默认值。
+// Anthropic 要求思考预算至少 1024，且必须小于 max_tokens。
+const MIN_THINKING_BUDGET = 1_024;
 const DEFAULT_EFFORT = 'high';
 
 // =============================================================================
@@ -284,7 +286,8 @@ const AnthropicThinking = Schema.Union([
     display: Schema.optional(AnthropicThinkingDisplay),
     block_binding: Schema.optional(AnthropicThinkingBlockBinding),
   }),
-  Schema.Struct({ type: Schema.tag('disabled') }),
+  // 对齐参考库：`between_tools` 让思考块在工具调用之间继续（而非整轮一次）。
+  Schema.Struct({ type: Schema.Literals(['disabled', 'between_tools']) }),
 ]);
 
 const AnthropicBodyFields = {
@@ -321,52 +324,81 @@ const AnthropicUsage = Schema.Struct({
 });
 type AnthropicUsage = Schema.Schema.Type<typeof AnthropicUsage>;
 
-const AnthropicStreamBlock = Schema.Struct({
-  type: Schema.String,
-  id: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-  text: Schema.optional(Schema.String),
-  thinking: Schema.optional(Schema.String),
-  signature: Schema.optional(Schema.String),
-  input: Schema.optional(Schema.Unknown),
-  // *_tool_result blocks arrive whole as content_block_start (no streaming
-  // delta) with the structured payload in `content` and the originating
-  // server_tool_use id in `tool_use_id`.
-  tool_use_id: Schema.optional(Schema.String),
-  content: Schema.optional(Schema.Unknown),
-  // `redacted_thinking` blocks arrive whole with the opaque safety-filtered
-  // payload in `data`.
-  data: Schema.optional(Schema.String),
-});
+// `StructWithRest`：上游会往 block 里加字段（citations、cache_control…），
+// 严格 Struct 会让整帧解码失败；容错后未知字段只是被忽略。
+const AnthropicStreamBlock = Schema.StructWithRest(
+  Schema.Struct({
+    type: Schema.String,
+    id: Schema.optional(Schema.String),
+    name: Schema.optional(Schema.String),
+    text: Schema.optional(Schema.String),
+    thinking: Schema.optional(Schema.String),
+    signature: Schema.optional(Schema.String),
+    input: Schema.optional(Schema.Unknown),
+    // *_tool_result blocks arrive whole as content_block_start (no streaming
+    // delta) with the structured payload in `content` and the originating
+    // server_tool_use id in `tool_use_id`.
+    tool_use_id: Schema.optional(Schema.String),
+    content: Schema.optional(Schema.Unknown),
+    // `redacted_thinking` blocks arrive whole with the opaque safety-filtered
+    // payload in `data`.
+    data: Schema.optional(Schema.String),
+  }),
+  [JsonObject],
+);
 
-const AnthropicStreamDelta = Schema.Struct({
-  type: Schema.optional(Schema.String),
-  text: Schema.optional(Schema.String),
-  thinking: Schema.optional(Schema.String),
-  partial_json: Schema.optional(Schema.String),
-  signature: Schema.optional(Schema.String),
-  stop_reason: optionalNull(Schema.String),
-  stop_sequence: optionalNull(Schema.String),
-});
+const AnthropicStreamDelta = Schema.StructWithRest(
+  Schema.Struct({
+    type: Schema.optional(Schema.String),
+    text: Schema.optional(Schema.String),
+    thinking: Schema.optional(Schema.String),
+    partial_json: Schema.optional(Schema.String),
+    signature: Schema.optional(Schema.String),
+    stop_reason: optionalNull(Schema.String),
+    stop_sequence: optionalNull(Schema.String),
+    // 内容过滤类结束原因的上游策略域与说明（对齐参考库），由 onMessageDelta
+    // 写进 `FinishReasonDetails.category` / `.explanation`。
+    stop_details: optionalNull(
+      Schema.StructWithRest(
+        Schema.Struct({
+          category: optionalNull(Schema.String),
+          explanation: optionalNull(Schema.String),
+        }),
+        [JsonObject],
+      ),
+    ),
+  }),
+  [JsonObject],
+);
 
-const AnthropicEvent = Schema.Struct({
-  type: Schema.String,
-  index: Schema.optional(Schema.Number),
-  message: Schema.optional(Schema.Struct({ usage: Schema.optional(AnthropicUsage) })),
-  content_block: Schema.optional(AnthropicStreamBlock),
-  delta: Schema.optional(AnthropicStreamDelta),
-  usage: Schema.optional(AnthropicUsage),
-  // `type` and `message` are both required per Anthropic's spec, but
-  // OpenAI-compatible proxies and gateway translations occasionally drop one
-  // or the other; mark them optional so a partial payload still parses and
-  // the parser can fall back to whichever field is populated.
-  error: Schema.optional(
-    Schema.Struct({
-      type: Schema.optional(Schema.String),
-      message: Schema.optional(Schema.String),
-    }),
-  ),
-});
+const AnthropicEvent = Schema.StructWithRest(
+  Schema.Struct({
+    type: Schema.String,
+    index: Schema.optional(Schema.Number),
+    message: Schema.optional(
+      Schema.StructWithRest(Schema.Struct({ usage: Schema.optional(AnthropicUsage) }), [
+        JsonObject,
+      ]),
+    ),
+    content_block: Schema.optional(AnthropicStreamBlock),
+    delta: Schema.optional(AnthropicStreamDelta),
+    usage: Schema.optional(AnthropicUsage),
+    // `type` and `message` are both required per Anthropic's spec, but
+    // OpenAI-compatible proxies and gateway translations occasionally drop one
+    // or the other; mark them optional so a partial payload still parses and
+    // the parser can fall back to whichever field is populated.
+    error: Schema.optional(
+      Schema.StructWithRest(
+        Schema.Struct({
+          type: Schema.optional(Schema.String),
+          message: Schema.optional(Schema.String),
+        }),
+        [JsonObject],
+      ),
+    ),
+  }),
+  [JsonObject],
+);
 type AnthropicEvent = Schema.Schema.Type<typeof AnthropicEvent>;
 
 interface ParserState {
@@ -379,7 +411,15 @@ interface ParserState {
   // `finish`, and flush any tool call whose `content_block_stop` was lost when
   // the turn was truncated.
   readonly pendingFinish:
-    | { readonly reason: FinishReason; readonly raw?: string; readonly stopSequence?: string }
+    | {
+        readonly reason: FinishReason;
+        readonly raw?: string;
+        readonly stopSequence?: string;
+        /** 内容过滤类结束原因的上游策略域（来自 `delta.stop_details.category`）。 */
+        readonly category?: string;
+        /** 内容过滤类结束原因的说明（来自 `delta.stop_details.explanation`）。 */
+        readonly explanation?: string;
+      }
     | undefined;
   // Thinking signatures keyed by content-block index, so a signature delivered
   // on `content_block_start` (or a `signature_delta`) is attached when the
@@ -439,6 +479,10 @@ const requireThinkingSignature = (request: LLMRequest) => {
   const baseURL = (request.model.route.endpoint.baseURL ?? '').toLowerCase();
   if (
     provider === 'kimi-for-coding' ||
+    // `moonshot` 是上游 provider id（`providers/moonshot.ts`），catalog 另用
+    // `moonshotai` / `moonshotai-cn`；三种写法都必须命中。
+    provider === 'moonshot' ||
+    provider === 'moonshot-cn' ||
     provider === 'moonshotai' ||
     provider === 'moonshotai-cn' ||
     model.startsWith('kimi-') ||
@@ -1016,6 +1060,8 @@ const lowerThinking = Effect.fn('AnthropicMessages.lowerThinking')(function* (re
   // adaptive；此前只认 enabled，导致 adaptive 被静默丢弃）。
   if (thinking['type'] === 'adaptive') return { type: 'adaptive' as const, ...thinkingFields };
   if (thinking['type'] === 'disabled') return { type: 'disabled' as const };
+  // 对齐参考库：`between_tools` 原样下发（工具调用之间继续思考）。
+  if (thinking['type'] === 'between_tools') return { type: 'between_tools' as const };
   if (thinking['type'] !== 'enabled') return undefined;
   const budget =
     typeof thinking['budgetTokens'] === 'number'
@@ -1028,38 +1074,24 @@ const lowerThinking = Effect.fn('AnthropicMessages.lowerThinking')(function* (re
   return { type: 'enabled' as const, budget_tokens: budget, ...thinkingFields };
 });
 
-// 对齐参考库：接受网关命名空间与 Vertex 后缀，不把快照日期当 minor 版本。
-const claudeVersion = (id: string) => {
-  const match =
-    /(?:^|[./])claude-(?<family>[a-z]+)-(?<major>\d+)(?:[.-](?<minor>\d{1,2}))?(?:$|[-:@])/.exec(
-      id.toLowerCase(),
-    )?.groups;
-  if (!match) return undefined;
-  return {
-    family: match['family'] ?? '',
-    major: Number(match['major']),
-    minor: Number(match['minor'] ?? 0),
-  };
-};
-
-const supportsThinkingBlockBinding = (model: LLMRequest['model']) => {
-  const override = model.compatibility?.supportsThinkingBlockBinding;
-  if (override !== undefined) return override;
-  const version = claudeVersion(model.id);
-  return (
-    version !== undefined && (version.major > 5 || (version.major === 5 && version.minor >= 1))
-  );
-};
-
-const supportsEffortUpdates = (model: LLMRequest['model']) => {
-  const override = model.compatibility?.supportsEffortUpdates;
-  if (override !== undefined) return override;
-  const version = claudeVersion(model.id);
-  if (version === undefined) return false;
-  if (version.family === 'opus') return version.major >= 5;
-  if (version.family !== 'fable' && version.family !== 'mythos') return false;
-  return version.major > 5 || (version.major === 5 && version.minor >= 1);
-};
+/**
+ * 对齐参考库：思考预算必须小于 `max_tokens` 且不低于最小值。思考计入输出上限，
+ * 预算贴着上限时正文/工具调用就没有余量，因此在装配 body 时按上限压到一半。
+ */
+const fitThinking = (
+  thinking: Schema.Schema.Type<typeof AnthropicThinking> | undefined,
+  maxTokens: number | undefined,
+) =>
+  thinking?.type === 'enabled'
+    ? {
+        ...thinking,
+        budget_tokens: ProviderShared.fitThinkingBudget(
+          thinking.budget_tokens,
+          maxTokens,
+          MIN_THINKING_BUDGET,
+        ),
+      }
+    : thinking;
 
 /**
  * 对齐参考库：支持的模型默认下发 `block_binding.prefix_mismatch_behavior =
@@ -1070,13 +1102,16 @@ const applyThinkingBindingDefault = (
   model: LLMRequest['model'],
   thinking: Schema.Schema.Type<typeof AnthropicThinking> | undefined,
 ): Schema.Schema.Type<typeof AnthropicThinking> | undefined => {
-  if (thinking?.type === 'disabled') return thinking;
-  if (!supportsThinkingBlockBinding(model)) return thinking;
+  // `disabled` / `between_tools` 不声明 `block_binding`，原样返回。
+  if (thinking !== undefined && !('block_binding' in thinking)) return thinking;
+  if (!ClaudeModel.supportsThinkingBlockBinding(model)) return thinking;
+  const existing =
+    thinking !== undefined && 'block_binding' in thinking ? thinking.block_binding : undefined;
   return {
     ...(thinking ?? { type: 'adaptive' as const }),
     block_binding: {
       prefix_mismatch_behavior: 'drop_block' as const,
-      ...thinking?.block_binding,
+      ...existing,
     },
   };
 };
@@ -1084,7 +1119,6 @@ const applyThinkingBindingDefault = (
 const fromRequest = Effect.fn('AnthropicMessages.fromRequest')(function* (request: LLMRequest) {
   const toolChoice = request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined;
   const generation = request.generation;
-  const toolSchemaCompatibility = request.model.compatibility?.toolSchema;
   const outputLimit =
     request.model.defaults?.limits?.output ?? request.model.route.defaults.limits?.output ?? 4096;
   // Allocate the 4-breakpoint budget in invalidation order: tools → system →
@@ -1094,13 +1128,7 @@ const fromRequest = Effect.fn('AnthropicMessages.fromRequest')(function* (reques
   const tools =
     request.tools.length === 0 || request.toolChoice?.type === 'none'
       ? undefined
-      : request.tools.map((tool) =>
-          lowerTool(
-            breakpoints,
-            tool,
-            ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
-          ),
-        );
+      : request.tools.map((tool) => lowerTool(breakpoints, tool, tool.inputSchema));
   const system =
     request.system.length === 0
       ? undefined
@@ -1130,6 +1158,7 @@ const fromRequest = Effect.fn('AnthropicMessages.fromRequest')(function* (reques
       `Anthropic Messages: dropped ${breakpoints.dropped} cache breakpoint(s); the API allows at most ${ANTHROPIC_BREAKPOINT_CAP} per request.`,
     );
   }
+  const maxTokens = generation?.maxTokens ?? outputLimit;
   return {
     model: request.model.id,
     system,
@@ -1137,12 +1166,16 @@ const fromRequest = Effect.fn('AnthropicMessages.fromRequest')(function* (reques
     tools,
     tool_choice: toolChoice,
     stream: true as const,
-    max_tokens: generation?.maxTokens ?? outputLimit,
+    max_tokens: maxTokens,
     temperature: generation?.temperature,
     top_p: generation?.topP,
     top_k: generation?.topK,
     stop_sequences: generation?.stop,
-    thinking: applyThinkingBindingDefault(request.model, yield* lowerThinking(request)),
+    // 思考预算按同一个 max_tokens 压制：思考计入输出上限。
+    thinking: applyThinkingBindingDefault(
+      request.model,
+      fitThinking(yield* lowerThinking(request), maxTokens),
+    ),
     ...(outputConfig === undefined ? {} : { output_config: outputConfig }),
     ...(contextManagement === undefined ? {} : { context_management: contextManagement }),
     ...passthrough,
@@ -1358,7 +1391,7 @@ const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepRes
   ];
 };
 
-const onContentBlockDelta = Effect.fn('AnthropicMessages.onContentBlockDelta')(function* (
+const onContentBlockDelta = Effect.fnUntraced(function* (
   state: ParserState,
   event: AnthropicEvent,
 ) {
@@ -1438,10 +1471,7 @@ const onContentBlockDelta = Effect.fn('AnthropicMessages.onContentBlockDelta')(f
   return [state, NO_EVENTS] satisfies StepResult;
 });
 
-const onContentBlockStop = Effect.fn('AnthropicMessages.onContentBlockStop')(function* (
-  state: ParserState,
-  event: AnthropicEvent,
-) {
+const onContentBlockStop = Effect.fnUntraced(function* (state: ParserState, event: AnthropicEvent) {
   if (event.index === undefined) return [state, NO_EVENTS] satisfies StepResult;
   const result = yield* ToolStream.finish(ADAPTER, state.tools, event.index);
   const events: LLMEvent[] = [];
@@ -1481,6 +1511,13 @@ const onMessageDelta = (state: ParserState, event: AnthropicEvent): StepResult =
           ...(typeof event.delta?.stop_sequence === 'string' && event.delta.stop_sequence.length > 0
             ? { stopSequence: event.delta.stop_sequence }
             : {}),
+          // 内容过滤类结束原因带上策略域与说明（对齐参考库）。
+          ...(event.delta?.stop_details?.category
+            ? { category: event.delta.stop_details.category }
+            : {}),
+          ...(event.delta?.stop_details?.explanation
+            ? { explanation: event.delta.stop_details.explanation }
+            : {}),
         }
       : state.pendingFinish;
   return [{ ...state, usage, pendingFinish }, NO_EVENTS];
@@ -1496,7 +1533,7 @@ const stopMetadata = (state: ParserState): ProviderMetadata | undefined =>
     ? anthropicMetadata({ stopSequence: state.pendingFinish.stopSequence })
     : undefined;
 
-const onMessageStop = Effect.fn('AnthropicMessages.onMessageStop')(function* (state: ParserState) {
+const onMessageStop = Effect.fnUntraced(function* (state: ParserState) {
   if (state.finished) return [state, NO_EVENTS] satisfies StepResult;
   const finished = yield* ToolStream.finishAll(ADAPTER, state.tools);
   const events: LLMEvent[] = [];
@@ -1507,8 +1544,12 @@ const onMessageStop = Effect.fn('AnthropicMessages.onMessageStop')(function* (st
   }
   const hasToolCalls = finished.events.some(LLMEvent.is.toolCall);
   lifecycle = Lifecycle.finish(lifecycle, events, {
-    reason: finishReasonFor(state, hasToolCalls),
-    reasonRaw: state.pendingFinish?.raw,
+    reason: {
+      normalized: finishReasonFor(state, hasToolCalls),
+      raw: state.pendingFinish?.raw,
+      category: state.pendingFinish?.category,
+      explanation: state.pendingFinish?.explanation,
+    },
     usage: state.usage,
     providerMetadata: stopMetadata(state),
   });
@@ -1523,8 +1564,12 @@ const onHalt = (state: ParserState): Effect.Effect<ReadonlyArray<LLMEvent>, LLME
     if (state.finished || !state.pendingFinish) return [];
     const events: LLMEvent[] = [];
     Lifecycle.finish(state.lifecycle, events, {
-      reason: finishReasonFor(state, false),
-      reasonRaw: state.pendingFinish.raw,
+      reason: {
+        normalized: finishReasonFor(state, false),
+        raw: state.pendingFinish.raw,
+        category: state.pendingFinish.category,
+        explanation: state.pendingFinish.explanation,
+      },
       usage: state.usage,
       providerMetadata: stopMetadata(state),
     });
@@ -1550,9 +1595,7 @@ const onError = (state: ParserState, event: AnthropicEvent): StepResult => [
   [
     LLMEvent.providerError({
       message: providerErrorMessage(event),
-      classification: isContextOverflow(event.error?.message ?? '')
-        ? 'context-overflow'
-        : undefined,
+      classification: providerFailureClassification(event.error?.message ?? ''),
       retryable:
         event.error?.type !== undefined && ANTHROPIC_RETRYABLE_ERRORS.has(event.error.type),
     }),
@@ -1614,7 +1657,7 @@ export const route = Route.make({
   framing: Framing.sse,
   // 对齐参考库：支持原生逐消息 effort 更新的模型保留 `Message.effort` 标记；
   // 其余模型由 `applyEffortUpdates` 在编译期剥离标记。
-  supportsEffortUpdates: (request) => supportsEffortUpdates(request.model),
+  supportsEffortUpdates: (request) => ClaudeModel.supportsEffortUpdates(request.model),
   headers: ({ request, body }) => {
     // 对齐参考库 `requiredBetaHeaders`：beta 由请求体决定。
     // 官方端点始终请求 interleaved thinking（API 对不支持的模型会忽略）；
@@ -1632,13 +1675,14 @@ export const route = Route.make({
       )
     )
       betas.push('mid-conversation-output-config-2026-07-01');
-    // 对齐参考库：block binding 需要对应 beta；disabled 不请求。
+    // 对齐参考库：block binding 需要对应 beta；disabled / between_tools 不声明该字段。
+    const thinking = body.thinking;
     if (
-      body.thinking !== undefined &&
-      body.thinking.type !== 'disabled' &&
-      body.thinking.block_binding !== undefined
+      thinking !== undefined &&
+      'block_binding' in thinking &&
+      thinking.block_binding !== undefined
     )
-      betas.push('thinking-binding-controls-2026-08-01');
+      betas.push(ClaudeModel.THINKING_BINDING_BETA);
     return {
       'anthropic-version': '2023-06-01',
       ...(betas.length === 0 ? {} : { 'anthropic-beta': betas.join(',') }),

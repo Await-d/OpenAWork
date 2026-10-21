@@ -60,7 +60,7 @@ describe('Bedrock Converse 流式恢复', () => {
 
     const events = await haltEvents(state);
     const finish = events.find(LLMEvent.is.finish);
-    expect(finish?.reason).toBe('stop');
+    expect(finish?.reason.normalized).toBe('stop');
     expect(finish?.usage?.totalTokens).toBe(3);
   });
 
@@ -153,8 +153,8 @@ describe('Bedrock Converse 流式恢复', () => {
 
     const finished = await haltEvents(state);
     const terminal = finished.find(LLMEvent.is.finish);
-    expect(terminal?.reason).toBe('length');
-    expect(terminal?.reasonRaw).toBe('model_context_window_exceeded');
+    expect(terminal?.reason.normalized).toBe('length');
+    expect(terminal?.reason.raw).toBe('model_context_window_exceeded');
   });
 
   it('末尾残留半帧会被判为 incomplete-stream', async () => {

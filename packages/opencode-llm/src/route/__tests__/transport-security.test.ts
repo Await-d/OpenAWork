@@ -1,4 +1,4 @@
-import { FetchHttpClient, Headers, HttpClientRequest } from 'effect/unstable/http';
+import { FetchHttpClient, Headers, HttpClientRequest } from 'effect/http';
 import { Effect } from 'effect';
 import { once } from 'node:events';
 import { createServer } from 'node:http';

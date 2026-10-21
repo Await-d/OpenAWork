@@ -7,6 +7,7 @@ import type {
   ToolOutput as ToolOutputType,
 } from './schema/index.js';
 import { ToolDefinition, ToolFailure, ToolOutput } from './schema/index.js';
+import { isRecord } from './utils/record.js';
 
 /**
  * Schema constraint for tool parameters / success values: no decoding or
@@ -219,7 +220,7 @@ export function make(config: TypedToolConfig | DynamicToolConfig): AnyTool {
     _definition: new ToolDefinition({
       name: '',
       description: config.description,
-      inputSchema: toJsonSchema(config.parameters),
+      inputSchema: emptyInputJsonSchema(config.parameters) ?? toJsonSchema(config.parameters),
       outputSchema: toJsonSchema(config.success),
     }),
   };
@@ -249,8 +250,34 @@ export const toDefinitions = (tools: Tools): ReadonlyArray<ToolDefinitionClass> 
       }),
   );
 
+/**
+ * 把「无参数 Effect 工具」的输入描述为空对象；输入本身带参数时返回 `undefined`。
+ *
+ * Effect 只会为「没有属性、也没有索引签名的已编码 struct」产出
+ * `{ not: { type: "null" } }`，而上游要求工具的 `parameters` 必须描述一个对象。
+ * 注解会被保留；出现其他关键字（例如 check 产生的 `minProperties`）时，
+ * 保持 Effect 原样产出，不做改写。
+ */
+export const emptyInputJsonSchema = (schema: Schema.Top): JsonSchema.JsonSchema | undefined => {
+  const { not, ...rest } = Schema.toJsonSchemaDocument(schema, {
+    referencePolicy: () => undefined,
+  }).schema;
+  if (!isRecord(not) || not.type !== 'null' || Object.keys(not).length !== 1) return undefined;
+  if (!Object.keys(rest).every((key) => annotationKeywords.has(key))) return undefined;
+  return { ...rest, type: 'object', properties: {}, additionalProperties: false };
+};
+
+const annotationKeywords = new Set([
+  'title',
+  'description',
+  'default',
+  'examples',
+  'readOnly',
+  'writeOnly',
+]);
+
 const toJsonSchema = (schema: Schema.Top): JsonSchema.JsonSchema => {
-  const document = Schema.toJsonSchemaDocument(schema);
+  const document = Schema.toJsonSchemaDocument(schema, { onExcessProperty: 'error' });
   if (Object.keys(document.definitions).length === 0) return document.schema;
   return { ...document.schema, $defs: document.definitions };
 };

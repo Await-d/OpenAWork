@@ -4,6 +4,7 @@ export * as Gemini from './gemini.js';
 export * as OpenAIChat from './openai-chat.js';
 export * as OpenAICompatibleChat from './openai-compatible-chat.js';
 export * as OpenAIResponses from './openai-responses.js';
+export * as VeniceChat from './venice-chat.js';
 
 export {
   AUDIO_MIMES,

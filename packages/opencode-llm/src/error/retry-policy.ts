@@ -72,18 +72,16 @@ export const DEFAULT_RETRY_POLICY: RetryPolicyConfig = {
 };
 
 /**
- * 计算重试延迟时间（带抖动）
+ * 对延迟应用封顶与抖动（computeRetryDelay 与 createRetrySchedule 共用的唯一公式，
+ * 保证「推算的统计值」与「Schedule 实际等待」来自同一策略）
  *
- * @param attempt 当前重试次数（从 1 开始）
+ * @param delayMs 指数退避的原始延迟（毫秒）
  * @param config 重试策略配置
- * @returns 延迟时间（毫秒）
+ * @returns 封顶并抖动后的延迟（毫秒，非负整数）
  */
-export function computeRetryDelay(attempt: number, config: RetryPolicyConfig): number {
-  // 指数退避：initialDelay * (backoffMultiplier ^ (attempt - 1))
-  const exponentialDelay = config.initialDelayMs * Math.pow(config.backoffMultiplier, attempt - 1);
-
+function applyCapAndJitter(delayMs: number, config: RetryPolicyConfig): number {
   // 限制最大延迟
-  const cappedDelay = Math.min(exponentialDelay, config.maxDelayMs);
+  const cappedDelay = Math.min(delayMs, config.maxDelayMs);
 
   // 添加抖动：±jitterFactor * delay
   const jitterRange = cappedDelay * config.jitterFactor;
@@ -94,19 +92,41 @@ export function computeRetryDelay(attempt: number, config: RetryPolicyConfig): n
 }
 
 /**
+ * 计算重试延迟时间（带抖动）
+ *
+ * @param attempt 当前重试次数（从 1 开始）
+ * @param config 重试策略配置
+ * @returns 延迟时间（毫秒）
+ */
+export function computeRetryDelay(attempt: number, config: RetryPolicyConfig): number {
+  // 指数退避：initialDelay * (backoffMultiplier ^ (attempt - 1))
+  const exponentialDelay = config.initialDelayMs * Math.pow(config.backoffMultiplier, attempt - 1);
+  return applyCapAndJitter(exponentialDelay, config);
+}
+
+/**
  * 创建基于 Effect 的重试 Schedule
  *
+ * 与 `computeRetryDelay` 使用同一套退避策略：
+ * - `backoffMultiplier` → `Schedule.exponential` 的倍增因子
+ * - `maxDelayMs` / `jitterFactor` → `Schedule.modifyDelay` 封顶与抖动
+ *
  * @param config 重试策略配置
- * @returns Effect Schedule
+ * @returns Effect Schedule（每次重试输出等待时长）
  */
 export function createRetrySchedule(
   config: Partial<RetryPolicyConfig> = {},
 ): Schedule.Schedule<Duration.Duration, unknown> {
   const fullConfig = { ...DEFAULT_RETRY_POLICY, ...config };
 
-  // 使用 Effect.retry 的 while 和 times 选项
-  // Effect 4.x 的 Schedule API 不同，我们改用简化版本
-  return Schedule.exponential(Duration.millis(fullConfig.initialDelayMs));
+  return Schedule.exponential(
+    Duration.millis(fullConfig.initialDelayMs),
+    fullConfig.backoffMultiplier,
+  ).pipe(
+    Schedule.modifyDelay(({ duration }) =>
+      Effect.succeed(Duration.millis(applyCapAndJitter(Duration.toMillis(duration), fullConfig))),
+    ),
+  );
 }
 
 /**
@@ -124,7 +144,7 @@ export function withRetry<A, E, R>(
 
   return Effect.retry(effect, {
     times: fullConfig.maxAttempts - 1,
-    schedule: Schedule.exponential(Duration.millis(fullConfig.initialDelayMs)),
+    schedule: createRetrySchedule(fullConfig),
     while: fullConfig.shouldRetry,
   });
 }
@@ -155,6 +175,12 @@ export interface RetryStats {
 /**
  * 带统计信息的重试执行
  *
+ * 统计口径：
+ * - `attempts`：总尝试次数（首次执行 + 所有重试）
+ * - `totalDelayMs`：按同一重试策略推算的累计等待（与 `createRetrySchedule` 同一公式，
+ *   抖动为独立随机采样，`jitterFactor = 0` 时与实际等待逐毫秒一致）
+ * - `lastError`：最后一次失败原因（全部成功时为 `null`）
+ *
  * @param effect 要执行的 Effect
  * @param config 重试策略配置
  * @returns 包含结果和统计信息的 Effect
@@ -164,38 +190,34 @@ export function withRetryStats<A, E, R>(
   config: Partial<RetryPolicyConfig> = {},
 ): Effect.Effect<{ result: A; stats: RetryStats }, E, R> {
   const fullConfig = { ...DEFAULT_RETRY_POLICY, ...config };
-  let attempts = 0;
-  let totalDelayMs = 0;
-  let lastError: unknown = null;
 
-  const tracked = Effect.gen(function* () {
-    attempts = 0;
-    totalDelayMs = 0;
+  return Effect.gen(function* () {
+    // 统计状态放在每次运行内部：同一 Effect 实例被多次 / 并发运行时互不污染
+    let retries = 0;
+    let totalDelayMs = 0;
+    let lastError: unknown = null;
 
     const result = yield* Effect.retry(effect, {
       times: fullConfig.maxAttempts - 1,
-      schedule: Schedule.exponential(Duration.millis(fullConfig.initialDelayMs)),
+      schedule: createRetrySchedule(fullConfig),
       while: (error) => {
-        attempts++;
         lastError = error;
-        const shouldRetry = fullConfig.shouldRetry(error);
-        if (shouldRetry && attempts < fullConfig.maxAttempts) {
-          const delay = computeRetryDelay(attempts, fullConfig);
-          totalDelayMs += delay;
-        }
-        return shouldRetry;
+        // 重试额度用尽或错误不可重试 → 停止（与 times 上限判定保持一致）
+        if (retries >= fullConfig.maxAttempts - 1) return false;
+        if (!fullConfig.shouldRetry(error)) return false;
+        retries += 1;
+        totalDelayMs += computeRetryDelay(retries, fullConfig);
+        return true;
       },
     });
 
     return {
       result,
       stats: {
-        attempts: attempts + 1,
+        attempts: retries + 1,
         totalDelayMs,
         lastError,
       },
     };
   });
-
-  return tracked;
 }

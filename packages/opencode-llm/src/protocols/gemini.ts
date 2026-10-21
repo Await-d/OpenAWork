@@ -19,10 +19,8 @@ import {
   type ToolContent,
 } from '../schema/index.js';
 import { JsonObject, optionalArray, optionalNull, ProviderShared } from './shared.js';
-import { isContextOverflow } from '../provider-error.js';
-import { GeminiToolSchema } from './utils/gemini-tool-schema.js';
+import { providerFailureClassification } from '../provider-error.js';
 import { Lifecycle } from './utils/lifecycle.js';
-import { ToolSchemaProjection } from './utils/tool-schema.js';
 
 const ADAPTER = 'gemini';
 const MEDIA_MIMES = new Set<string>(ProviderShared.MEDIA_MIMES);
@@ -217,10 +215,12 @@ interface ParserState {
 // =============================================================================
 // Request Lowering
 // =============================================================================
+// 工具 schema 已在请求级按规则族投影（`ToolSchemaProjection.tools`），这里不再
+// 二次转换——重复转换对 Gemini 规则不是幂等的。
 const lowerTool = (tool: ToolDefinition, inputSchema: JsonSchema) => ({
   name: tool.name,
   description: tool.description,
-  parameters: GeminiToolSchema.convert(inputSchema),
+  parameters: inputSchema,
 });
 
 const lowerToolConfig = (toolChoice: NonNullable<LLMRequest['toolChoice']>) =>
@@ -233,7 +233,7 @@ const lowerToolConfig = (toolChoice: NonNullable<LLMRequest['toolChoice']>) =>
     }),
   });
 
-const lowerUserPart = Effect.fn('Gemini.lowerUserPart')(function* (part: TextPart | MediaPart) {
+const lowerUserPart = Effect.fnUntraced(function* (part: TextPart | MediaPart) {
   if (part.type === 'text') return { text: part.text };
   const media = yield* ProviderShared.validateMedia('Gemini', part, MEDIA_MIMES);
   return { inlineData: { mimeType: media.mime, data: media.base64 } };
@@ -255,7 +255,7 @@ const lowerToolCall = (part: ToolCallPart) => ({
   thoughtSignature: thoughtSignature(part.providerMetadata),
 });
 
-const lowerMessages = Effect.fn('Gemini.lowerMessages')(function* (request: LLMRequest) {
+const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest) {
   const contents: GeminiContent[] = [];
 
   for (const message of request.messages) {
@@ -361,14 +361,26 @@ const lowerMessages = Effect.fn('Gemini.lowerMessages')(function* (request: LLMR
 
 const geminiOptions = (request: LLMRequest) => request.providerOptions?.gemini;
 
+// Gemini 2.5 会拒绝低于模型最小值的预算：Flash-Lite 最高（512），Pro 为 128。
+// 取两者中较保守的一个，避免「预算合法但被上游拒掉」。
+const MIN_THINKING_BUDGET = 512;
+
 const thinkingConfig = (request: LLMRequest) => {
   const value = geminiOptions(request)?.thinkingConfig;
   if (!ProviderShared.isRecord(value)) return undefined;
   // Requesting a thinking budget implicitly asks for thoughts unless the caller
   // explicitly opts out; an empty thinkingConfig still enables thoughts.
   return {
+    // 对齐参考库：Gemini 接受大于 maxOutputTokens 的预算，但那时思考会挤掉正文，
+    // 因此按输出上限压到一半（下限 512）。
     thinkingBudget:
-      typeof value['thinkingBudget'] === 'number' ? value['thinkingBudget'] : undefined,
+      typeof value['thinkingBudget'] === 'number'
+        ? ProviderShared.fitThinkingBudget(
+            value['thinkingBudget'],
+            request.generation?.maxTokens,
+            MIN_THINKING_BUDGET,
+          )
+        : undefined,
     includeThoughts:
       typeof value['includeThoughts'] === 'boolean' ? value['includeThoughts'] : true,
     // 对齐参考库：thinkingLevel 透传（与 budget 二选一，由调用方决定）。
@@ -399,7 +411,6 @@ const lowerSafetySettings = Effect.fn('Gemini.lowerSafetySettings')(function* (
 const fromRequest = Effect.fn('Gemini.fromRequest')(function* (request: LLMRequest) {
   const toolsEnabled = request.tools.length > 0 && request.toolChoice?.type !== 'none';
   const generation = request.generation;
-  const toolSchemaCompatibility = request.model.compatibility?.toolSchema;
   const generationConfig = {
     maxOutputTokens: generation?.maxTokens,
     temperature: generation?.temperature,
@@ -414,19 +425,16 @@ const fromRequest = Effect.fn('Gemini.fromRequest')(function* (request: LLMReque
 
   return {
     contents: yield* lowerMessages(request),
+    // 对齐参考库：system 分段保留（而不是 join 成一段）——调用方的分段往往
+    // 对应不同的缓存/优先级意图。
     systemInstruction:
       request.system.length === 0
         ? undefined
-        : { parts: [{ text: ProviderShared.joinText(request.system) }] },
+        : { parts: request.system.map((part) => ({ text: part.text })) },
     tools: toolsEnabled
       ? [
           {
-            functionDeclarations: request.tools.map((tool) =>
-              lowerTool(
-                tool,
-                ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
-              ),
-            ),
+            functionDeclarations: request.tools.map((tool) => lowerTool(tool, tool.inputSchema)),
           },
         ]
       : undefined,
@@ -535,11 +543,13 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> =>
             ? (state.promptFeedback?.blockReason ?? undefined)
             : undefined;
         Lifecycle.finish(lifecycle, events, {
-          reason:
-            promptBlockReason === undefined
-              ? mapFinishReason(state.finishReason, state.hasToolCalls)
-              : 'content-filter',
-          reasonRaw: state.finishReason ?? promptBlockReason,
+          reason: {
+            normalized:
+              promptBlockReason === undefined
+                ? mapFinishReason(state.finishReason, state.hasToolCalls)
+                : 'content-filter',
+            raw: state.finishReason ?? promptBlockReason,
+          },
           usage: state.usage,
           providerMetadata:
             state.promptFeedback === undefined
@@ -569,7 +579,7 @@ const step = (state: ParserState, event: GeminiEvent) => {
       [
         LLMEvent.providerError({
           message,
-          classification: isContextOverflow(message) ? 'context-overflow' : undefined,
+          classification: providerFailureClassification(message, code),
           retryable:
             code === 429 ||
             code === 500 ||
@@ -770,6 +780,9 @@ const step = (state: ParserState, event: GeminiEvent) => {
  */
 export const protocol = Protocol.make({
   id: ADAPTER,
+  // 协议默认规则族（对齐上游 `Protocol.sanitizer`）：本协议的模型即使 id 不含
+  // `gemini`（自定义部署名 / 网关别名），也按 Gemini 规则投影工具 schema。
+  sanitizer: 'gemini',
   body: {
     schema: GeminiBody,
     from: fromRequest,

@@ -35,8 +35,17 @@ export const ReasoningEfforts = [
   'xhigh',
   'max',
 ] as const;
-export const ReasoningEffort = Schema.Literals(ReasoningEfforts);
-export type ReasoningEffort = Schema.Schema.Type<typeof ReasoningEffort>;
+/**
+ * 供应商自定义的字符串枚举：已知值只用于补全，运行期接受任意字符串
+ * （对齐上游 `ReasoningEffort = OpenString<...>` + `Schema.declare`）。
+ *
+ * 收紧成白名单会让新供应商的 effort 档位在解码期被拒，而调用方无法自救。
+ */
+export type ReasoningEffort = (typeof ReasoningEfforts)[number] | (string & {});
+export const ReasoningEffort = Schema.declare<ReasoningEffort>(
+  (value): value is ReasoningEffort => typeof value === 'string',
+  { title: 'ReasoningEffort' },
+);
 
 export const TextVerbosity = Schema.Literals(['low', 'medium', 'high']);
 export type TextVerbosity = Schema.Schema.Type<typeof TextVerbosity>;

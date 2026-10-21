@@ -144,8 +144,8 @@ describe('Gemini 流式恢复', () => {
 
     const finished = await haltEvents(state);
     const terminal = finished.find(LLMEvent.is.finish);
-    expect(terminal?.reason).toBe('content-filter');
-    expect(terminal?.reasonRaw).toBe('SAFETY');
+    expect(terminal?.reason.normalized).toBe('content-filter');
+    expect(terminal?.reason.raw).toBe('SAFETY');
   });
 
   it('有 finishReason 时以模型自身原因为准，不被 promptFeedback 覆盖', async () => {
@@ -156,7 +156,7 @@ describe('Gemini 流式恢复', () => {
 
     const finished = await haltEvents(state);
     const terminal = finished.find(LLMEvent.is.finish);
-    expect(terminal?.reason).toBe('stop');
-    expect(terminal?.reasonRaw).toBe('STOP');
+    expect(terminal?.reason.normalized).toBe('stop');
+    expect(terminal?.reason.raw).toBe('STOP');
   });
 });

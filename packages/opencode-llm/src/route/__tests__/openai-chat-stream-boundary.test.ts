@@ -1,5 +1,5 @@
 import { Effect, Layer, Stream } from 'effect';
-import { HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http';
+import { HttpClientResponse, type HttpClientRequest } from 'effect/http';
 import { describe, expect, it } from 'vitest';
 import { LLMClient, LLMRequest, Message, RequestExecutor } from '../../index.js';
 import * as OpenAIChat from '../../protocols/openai-chat.js';
@@ -131,6 +131,6 @@ describe('OpenAI Chat 流边界（对齐参考库）', () => {
     );
 
     const finishEvent = events.find((event) => event.type === 'finish');
-    expect(finishEvent?.reason).toBe('stop');
+    expect(finishEvent?.reason.normalized).toBe('stop');
   });
 });
