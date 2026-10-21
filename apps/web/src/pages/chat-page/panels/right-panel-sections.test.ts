@@ -190,7 +190,13 @@ describe('groupUpstreamSummariesByRequest', () => {
     expect(buildUpstreamSummaryGroupContextText(groups[0]!)).toContain(
       '2. 上游错误 · 文本 0 / 思考 0 / 工具 1 · stalled',
     );
-    expect(buildUpstreamSummaryGroupContextText(groups[0]!)).toContain('10:20:30');
-    expect(buildUpstreamSummaryGroupContextText(groups[0]!)).toContain('10:21:00');
+    // 时间按运行环境时区渲染（实现用 `toLocaleTimeString('zh-CN')`），
+    // 因此期望值必须同样走本地时区派生：CI 是 UTC，硬编码 +08:00 的字面量必挂。
+    expect(buildUpstreamSummaryGroupContextText(groups[0]!)).toContain(
+      new Date('2026-06-14T10:20:30+08:00').toLocaleTimeString('zh-CN', { hour12: false }),
+    );
+    expect(buildUpstreamSummaryGroupContextText(groups[0]!)).toContain(
+      new Date('2026-06-14T10:21:00+08:00').toLocaleTimeString('zh-CN', { hour12: false }),
+    );
   });
 });
