@@ -1,119 +1,62 @@
-在持久化的 shell 会话中执行给定的 bash 命令，可选超时，并保证安全机制到位。
+在独立子进程中执行给定的 shell 命令，可选超时。每次调用都是新进程：`cd`、环境变量、shell 变量都不会保留到下一次调用，需要换目录请用 `workdir` 参数。
 
 请注意：操作系统：${os}，Shell：${shell}
 
-默认所有命令都在当前工作目录运行。如果需要在其他目录执行，请使用 `workdir` 参数。**不要**使用 `cd <directory> && <command>` 这种写法，改用 `workdir`。
+默认在会话工作目录执行。需要在其他目录执行时用 `workdir`，**不要**写 `cd <dir> && <command>`。
 
-重要：本工具用于终端操作（git、npm、docker 等）。**不要**用它做文件操作（读、写、编辑、搜索、查找文件）——这些操作请使用对应的专用工具。
+执行前：
+- 创建目录 / 文件前，先用 `glob` 确认父目录存在（不要用 `ls` 探测）
+- 含空格的路径必须加双引号：`mkdir "My Documents"` 正确 / `mkdir My Documents` 错误
+- `timeout` 可选（毫秒），默认 120000ms；预计超过 2 分钟的命令请改用 `run_bash_in_background`，再用 `bash_output` / `bash_kill` 跟进
+- `description` 用 5–10 个字说明这条命令做什么
 
-执行命令前，请遵循以下步骤：
+输出超过 ${maxLines} 行或 ${maxBytes} 字节时**只保留末尾部分**，完整输出落盘并在返回的 `outputPath` 里给出；用 `read` 配合 offset/limit 或 `grep` 检索全文，**不要**用 `head` / `tail` 自行截断。
 
-1. 目录校验：
-   - 如果命令会创建新目录或文件，先用 Glob 工具确认父目录存在且位置正确
-   - 例如，运行 `mkdir foo/bar` 之前，先用 Glob 查看 `foo` 是否是预期的父目录
-   - **不要**用 `ls` 做这件事：Windows 上 ls 可能是 PowerShell 别名或干脆不存在，而本工具已明确禁止用 shell 做文件查找（见下方「使用须知」）
+文件操作一律用专用工具，不要走 shell：
+- 找文件：`glob`（不要用 find / ls）
+- 搜内容：`grep`（不要用 grep / rg）
+- 读文件：`read`（不要用 cat / head / tail）
+- 改文件：`edit`（不要用 sed / awk）
+- 写文件：`write`（不要用 echo > / cat <<EOF）
+- 回话：直接输出文本（不要用 echo / printf）
+- Windows PowerShell 下 grep / find / sed / awk 通常不在 PATH，`ls` 只是 Get-ChildItem 的别名，照 bash 习惯写会直接报“术语不会被识别”；只有装了 Git Bash 并加进 PATH 才可用
 
-2. 命令执行：
-   - 包含空格的文件路径必须用双引号包裹（例如 `rm "path with spaces/file.txt"`）
-   - 引号示例：
-     - `mkdir "/Users/name/My Documents"` ✅
-     - `mkdir /Users/name/My Documents` ❌（会失败）
-     - `python "/path/with spaces/script.py"` ✅
-     - `python /path/with spaces/script.py` ❌（会失败）
-   - 确认引号正确后再执行命令
-   - 捕获命令输出
-
-使用须知：
-  - command 参数必填
-  - 可选 `timeout`（毫秒）。未指定时默认 120000ms（2 分钟）超时
-  - 强烈建议在 `description` 里用 5–10 个字清楚说明这条命令做什么
-  - 输出超过 ${maxLines} 行或 ${maxBytes} 字节会被截断，完整输出会被写入文件。可用 Read 配合 offset/limit 读取指定段，或用 Grep 在完整内容中检索。**不要**用 `head` / `tail` 等命令自行截断——完整输出已落盘，便于精确检索。
-
-  - 除非任务确实需要或被明确要求，否则避免用 Bash 调 `find` / `grep` / `cat` / `head` / `tail` / `sed` / `awk` / `echo` / `ls`，请始终优先使用专用工具：
-    - 文件查找：用 Glob（不要用 find / ls）
-    - 内容搜索：用 Grep（不要用 grep / rg）
-    - 读文件：用 Read（不要用 cat / head / tail）
-    - 编辑文件：用 Edit（不要用 sed / awk）
-    - 写文件：用 Write（不要用 echo > / cat <<EOF）
-    - 通信：直接输出文本（不要用 echo / printf）
-    - 以上命令在 Windows PowerShell 下大多**不存在**（`ls` 只是 `Get-ChildItem` 的别名，grep / find / sed / awk 完全没有），照着 bash 习惯写会直接报"术语不会被识别"
-  - 同时执行多个命令时：
-    - 命令之间相互独立可并行时，请在**同一条消息**里发起多次 Bash 工具调用。例如同时跑 `git status` 与 `git diff`，请用一条消息发两次并行的 Bash 调用
-    - ${chaining}
-    - 仅当你需要按序执行但**不在意前面命令是否失败**时，使用 `;`
-    - **不要**用换行分隔命令，也不要用多行脚本 / heredoc：bash 下命令里出现任何换行（含引号与 heredoc 内部）都会被守卫直接拒绝
-    - **不要**使用命令替换：bash 下 `$(...)` 与反引号会被守卫直接拒绝（权限审批按字面命令串匹配，替换出来的内容无法被覆盖）。PowerShell 的反引号是转义符、`$()` 是子表达式，规则不同，见上方说明
-  - **不要**用 `cd <directory> && <command>`，改用 `workdir` 参数：
-    <good-example>
-    workdir="/foo/bar"，command: pytest tests
-    </good-example>
-    <bad-example>
-    cd /foo/bar && pytest tests
-    </bad-example>
+并行与串行：
+- 相互独立的命令，请在**同一条消息**里发起多次 bash 调用（如同时跑 `git status` 与 `git diff`）
+- ${chaining}
+- 只在意顺序、不在意前一条是否失败时用 `;`
+- **不要**用换行分隔命令或多行脚本 / heredoc：bash 下任何换行都会被守卫直接拒绝
+- **不要**用命令替换：bash 下 `$(...)` 与反引号会被守卫拒绝（权限审批按字面命令串匹配）。PowerShell 的反引号是转义符、`$()` 是子表达式，规则不同
 
 # 用 git 提交改动
 
-仅在用户明确要求时才创建 commit。不确定时先问。当用户要求新建 git commit 时，严格按以下步骤：
+仅在用户明确要求时才创建 commit。不确定时先问。
 
 Git 安全协议：
 - **绝不**修改 git 配置
 - 除非用户明确要求，**绝不**执行破坏性 / 不可逆的 git 命令（如 push --force、hard reset 等）
 - 除非用户明确要求，**绝不**跳过 hooks（--no-verify、--no-gpg-sign 等）
 - **绝不**对 main / master 强推；用户要求时先警告
+- 关键：**绝不**用 `-i` 标志（如 `git rebase -i`、`git add -i`）——需要交互输入，不被支持
 - 避免 `git commit --amend`。**仅当**以下条件**全部**满足才允许 amend：
   (1) 用户明确要求 amend，或 commit 已成功且 pre-commit hook 自动改了文件需要补进去——通过 `git log` 确认 HEAD 是新 commit 后再 amend
   (2) HEAD 的 commit 是本对话中由你创建的（验证：`git log -1 --format='%an %ae'`）
   (3) Commit **尚未**推送到远端（验证：`git status` 显示 "Your branch is ahead"）
 - 关键：commit **失败**或被 hook **拒绝**时，**绝不** amend——修复问题后创建**新的** commit
 - 关键：已推送到远端后**绝不** amend，除非用户明确要求（需要 force push）
-- 除非用户明确要求，**绝不**自行提交。仅在用户明确要求时提交是非常重要的，否则用户会觉得你过度主动
+- 除非用户明确要求，**绝不**自行提交，否则用户会觉得你过度主动
 
-1. 多个独立信息可以一次请求并预期都会成功时，可在同一条消息里并行调用多次 Bash 工具：
-  - `git status` 查看所有未跟踪文件
-  - `git diff` 查看已暂存和未暂存的改动
-  - `git log` 查看近期的 commit message 风格
-2. 综合所有 staged 改动（包含已 stage 的与新加进来的）起草 commit message：
-  - 概括改动性质（新功能 / 增强 / bug fix / 重构 / 测试 / 文档 等）。Message 必须准确反映改动与意图（"add" 表示全新功能，"update" 表示对已有功能的增强，"fix" 表示修复缺陷，等等）
-  - 不要把可能含密钥的文件纳入 commit（.env、credentials.json 等）。如用户特别要求提交这些文件，请先警告
-  - 起草简洁的 commit message（1–2 句），聚焦"为什么"而非"做了什么"
-  - 必须准确反映改动与意图
-3. 多个独立操作可并行时同样并行调用 Bash：
-   - 把相关未跟踪文件加入暂存区
-   - 创建带 message 的 commit
-   - commit 完成后跑 `git status` 验证成功
-   注：`git status` 依赖 commit 完成，请在 commit 之后顺序执行
-4. 若 commit 因 pre-commit hook 失败，修问题后创建**新的** commit（参见上方 amend 规则）
-
-重要事项：
-- 除 git 相关 bash 命令外，**绝不**额外跑命令读取或探索代码
-- **绝不**使用 TodoWrite 或 Task 工具
-- 用户没有明确要求时**不要** push 到远端
-- 关键：**绝不**用 `-i` 标志（如 `git rebase -i` 或 `git add -i`）——这些需要交互输入，不被支持
-- 若没有可提交的内容（既无未跟踪文件也无修改），不要创建空 commit
+步骤：并行取 `git status` / `git diff` / `git log` → 起草 message（1–2 句，说明"为什么"而不是"做了什么"；不要把 .env、credentials.json 等含密钥文件纳入，用户坚持时先警告）→ `git add` 后 commit → `git status` 验证。因 pre-commit hook 失败时修问题后创建**新的** commit。没有可提交内容时不要建空 commit。
 
 # 创建 Pull Request
-所有 GitHub 相关任务（issue、pull request、checks、release）都通过 Bash 调 `gh` 命令完成。给到 GitHub URL 时，用 `gh` 获取所需信息。
+所有 GitHub 相关任务（issue、pull request、checks、release）都通过 bash 调 `gh` 完成；`gh` 不可用或未登录时直接告知用户，不要反复重试。
 
-重要：用户要求创建 PR 时，严格按以下步骤：
-
-1. 多个独立信息一次请求时并行调用 Bash，理解当前分支自从分叉出来以后的状态：
-   - `git status` 查看所有未跟踪文件
-   - `git diff` 查看已暂存和未暂存的改动
-   - 查看当前分支是否有跟踪的远端分支以及是否同步——用以判断是否需要 push
-   - `git log` 与 `git diff [base-branch]...HEAD` 了解当前分支自分叉以来的完整提交历史
-2. 综合所有进入 PR 的改动（**所有** commit，不仅是最新一个）起草 PR summary
-3. 多个独立操作并行调 Bash：
-   - 必要时新建分支
-   - 必要时带 -u 推到远端
-   - 用 `gh pr create` 创建 PR；body 先用 Write 工具写入临时文件，再用 `--body-file` 传入（**不要**用 HEREDOC / `$(...)`，守卫会直接拒绝）
+1. 并行取状态：`git status`、`git diff`、`git log` 与 `git diff [base-branch]...HEAD`，并确认当前分支是否有跟踪的远端、是否同步（据此判断要不要 push）
+2. 综合**所有** commit（不只最新一个）起草 PR summary
+3. 需要时新建分支、`git push -u`；用 `gh pr create` 创建 PR。body 先用 `write` 写进临时文件，再用 `--body-file` 传入（**不要**用 HEREDOC / `$(...)`，守卫会直接拒绝）
 <example>
-# 先用 Write 工具把 PR 正文写到临时文件，再引用它
-gh pr create --title "the pr title" --body-file /tmp/pr-body.md
+gh pr create --title "the pr title" --body-file pr-body.md
 </example>
 
-重要事项：
-- **不要**使用 TodoWrite 或 Task 工具
-- 完成后返回 PR URL，方便用户查看
-
-# 其他常用操作
-- 查看 GitHub PR 评论：`gh api repos/foo/bar/pulls/123/comments`
+- 完成后返回 PR URL；PR 正文的临时文件用完删除
+- 查看 PR 评论：`gh api repos/<owner>/<repo>/pulls/<number>/comments`

@@ -265,7 +265,7 @@ describe('bash-tools', () => {
       // 校验 bash.txt 模板已被正确加载（OpenAWork 已统一为中文模板，见
       // services/agent-gateway/src/bash.txt）。同时确保占位符已被替换，没有
       // 残留 `${...}` 标记。
-      expect(description).toMatch(/在持久化的 shell 会话中执行给定的 bash 命令/);
+      expect(description).toMatch(/在独立子进程中执行给定的 shell 命令/);
       expect(description).toMatch(/workdir/);
       expect(description).not.toMatch(/\$\{os\}/);
       expect(description).not.toMatch(/\$\{shell\}/);
@@ -440,6 +440,103 @@ describe('bash-tools', () => {
       expect(hint).toMatch(/作业表/);
     });
 
+    it('识别 MSYS 盘符路径 cd /e/... 被曲解成 E:\\e\\...', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        command: 'cd /e/01.Projects/EasyAI/frontend/src && grep -rn foo .',
+        output:
+          'Set-Location: 找不到路径“E:\\e\\01.Projects\\EasyAI\\frontend\\src”，因为该路径不存在。',
+        exitCode: 1,
+        shellChoice: pwsh,
+      });
+      expect(hint).toContain('MSYS');
+      expect(hint).toContain('E:\\e\\01.Projects\\EasyAI\\frontend\\src');
+      expect(hint).toMatch(/workdir/);
+    });
+
+    it('Unix 短选项被当成 PowerShell 参数（ls -la）时给出命名参数对照', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        command: 'ls -la frontend/src/components/PageTransition/',
+        output: "Get-ChildItem: 找不到与参数名称 'la' 匹配的参数。",
+        exitCode: 1,
+        shellChoice: powershell51,
+      });
+      expect(hint).toMatch(/-la/);
+      expect(hint).toMatch(/Get-ChildItem -Force/);
+      expect(hint).toMatch(/Copy-Item -Recurse/);
+    });
+
+    it('识别 Measure-Object 参数集冲突', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\work',
+        command: 'Get-ChildItem -Recurse *.ts | Select-String x | Measure-Object -Line -Sum',
+        output: 'Measure-Object: 无法使用指定的命名参数解析参数集。',
+        exitCode: 1,
+        shellChoice: powershell51,
+      });
+      expect(hint).toMatch(/参数集/);
+      expect(hint).toMatch(/Measure-Object -Line -Sum/);
+    });
+
+    it('识别 PS 5.1 精简 ParserError（无 CategoryInfo / FullyQualifiedErrorId）', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        command: 'Select-String -Path frontend/src -Pattern "from \'x\'|from \\"y\\""',
+        output: [
+          'ParserError: ',
+          'Line |',
+          '   1 |  Select-String -Path frontend/src -Pattern "from \'x\'|from \\"y\\""',
+          '     |    ~',
+          '引用运算符后缺少属性名称。',
+        ].join('\r\n'),
+        exitCode: 1,
+        shellChoice: powershell51,
+      });
+      expect(hint).toMatch(/语法错误/);
+      expect(hint).toMatch(/反引号/);
+    });
+
+    it('非零退出但零输出时给出引号 / 转义排查方向', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        command:
+          'Select-String -Path frontend/package.json -Pattern "zustand|react\\"|framer-motion"',
+        output: '',
+        exitCode: 1,
+        shellChoice: powershell51,
+      });
+      expect(hint).toMatch(/没有任何 stdout/);
+      expect(hint).toMatch(/单引号/);
+    });
+
+    it('同一次调用踩多个坑时逐条给出（路径 + 命令不存在）', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        command: 'cd /e/01.Projects/EasyAI/frontend/src && grep -rn foo .',
+        output: [
+          'Set-Location: 找不到路径“E:\\e\\01.Projects\\EasyAI\\frontend\\src”，因为该路径不存在。',
+          "grep: 术语 'grep' 不会被识别为 cmdlet、函数、脚本文件或可执行程序的名称。",
+        ].join('\r\n'),
+        exitCode: 1,
+        shellChoice: pwsh,
+      });
+      expect(hint).toContain('MSYS');
+      expect(hint).toContain('找不到命令 grep');
+    });
+
+    it('Unix 选项被当成命令名时（find -name）指向真正的命令缺失', () => {
+      const hint = buildShellCompatibilityHint({
+        cwd: 'E:\\01.Projects\\EasyAI',
+        command: 'find . -type f -name "*.ts"',
+        output: "-name: 术语 '-name' 不会被识别为 cmdlet、函数、脚本文件或可执行程序的名称。",
+        exitCode: 1,
+        shellChoice: powershell51,
+      });
+      expect(hint).toMatch(/Unix 风格的选项/);
+      expect(hint).toMatch(/Glob/);
+    });
+
     it('非 PowerShell 环境不做任何 shell 兼容提示', () => {
       expect(
         buildShellCompatibilityHint({
@@ -555,6 +652,17 @@ describe('bash-tools', () => {
       ).toBeNull();
       expect(
         buildBenignExitHint({ command: 'grep foo file', exitCode: 2, kind: 'exit' }),
+      ).toBeNull();
+    });
+
+    it('PowerShell 下不把“命令不存在”的退出码 1 误报成“未匹配”', () => {
+      expect(
+        buildBenignExitHint({
+          command: 'grep -rn foo .',
+          exitCode: 1,
+          kind: 'exit',
+          isPowerShell: true,
+        }),
       ).toBeNull();
     });
 

@@ -206,18 +206,22 @@ const bashInputSchema = z.object({
     .positive()
     .max(MAX_BASH_TIMEOUT_MS)
     .optional()
-    .describe('可选超时时间（毫秒）'),
+    .describe(
+      `可选超时（毫秒），默认 ${DEFAULT_BASH_TIMEOUT_MS}，最大 ${MAX_BASH_TIMEOUT_MS / 60_000} 分钟`,
+    ),
   workdir: z
     .string()
     .min(1)
     .optional()
-    .describe("命令执行的工作目录，默认为工作区根目录。请使用该参数而不是 'cd' 命令。"),
+    .describe(
+      "命令执行的工作目录，默认为当前会话的工作目录。请使用该参数而不是 'cd'——每次调用都是独立进程，cd 不会保留到下一次。",
+    ),
   description: z
     .string()
     .min(1)
     .optional()
     .describe(
-      "可选：用 5-10 个词清晰描述这条命令的作用。强烈建议提供，便于审计和回放；省略时 OpenAWork 会用 command 的前缀自动生成一个简短描述。示例：\n输入：ls\n输出：列出当前目录的文件\n\n输入：git status\n输出：查看工作树状态\n\n输入：npm install\n输出：安装 npm 依赖\n\n输入：mkdir foo\n输出：创建目录 'foo'",
+      '可选：用 5–10 个字说明这条命令做什么，便于审计和回放；省略时会用 command 前缀自动生成。示例：`git status` → 查看工作树状态；`npm install` → 安装 npm 依赖。',
     ),
 });
 
@@ -316,6 +320,10 @@ function renderDescription(): string {
     .basename(shellChoice.shell)
     .toLowerCase()
     .replace(/\.exe$/, '');
+  // 只在渲染时注入：bash.txt 是跨平台模板，讲不了 Windows 盘符写法。
+  // Unix 工具不存在的事 bash.txt 已写过，这里不重复。
+  const powerShellPathRule =
+    'Windows 路径写 `E:\\Projects\\x`，**不要**写 `/e/Projects/x`（会被解析成 `E:\\e\\Projects\\x`）；优先用 `workdir` 而不是 `cd`。';
   // powershell.exe (5.1) 与 pwsh.exe (7+) 都是 isPowerShell，但只有 5.1 缺 &&。
   const chaining = shellChoice.isPowerShell
     ? shellName === 'pwsh'
@@ -324,9 +332,10 @@ function renderDescription(): string {
           '1) 有依赖的串行命令可用 `&&`，或拆成多次 bash 调用。',
           '2) 反引号 `` ` `` 是转义符（如 `` `n `` / `` `t `` / `` `" ``），不是 bash 命令替换。',
           '3) 多行内容优先用 here-string：`@\'...\'@ | Set-Content ...`；也可用 `python -c "..."` 单行脚本。',
-          '4) bash.txt 里“不要用换行分隔命令”对 bash 生效；PowerShell here-string 需要换行时允许。',
+          '4) “不要用换行分隔命令”只约束 bash；PowerShell 下换行不会被守卫拒绝。',
           '5) 串行命令之间只写 `;`，**不要**写裸 `&`——那是后台 Job 运算符，会把命令丢进后台并立刻返回一张作业表。',
-          '6) 没有 `/dev/null`：丢弃 stderr 用 `2>$null`（写 `2>/dev/null` 会尝试去建 `\\dev\\null` 文件）。',
+          '6) 没有 `/dev/null`：丢弃 stderr 用 `2>$null`（写 `2>/dev/null` 会尝试去建 `<盘符>\\dev\\null` 文件）。',
+          `7) ${powerShellPathRule}`,
         ].join(' ')
       : [
           '当前是 Windows PowerShell 5.1：',
@@ -334,12 +343,15 @@ function renderDescription(): string {
           '2) 反引号 `` ` `` 是转义符（如 `` `n `` / `` `t `` / `` `" ``），不是 bash 命令替换。',
           '3) 多行内容优先用 here-string：`@\'...\'@ | Set-Content ...`；也可用 `python -c "..."` 单行脚本。',
           '4) 可设 OPENAWORK_WINDOWS_SHELL=pwsh.exe 切到 PowerShell 7（支持 &&）。',
-          '5) bash.txt 里“不要用换行分隔命令”对 bash 生效；PowerShell here-string 需要换行时允许。',
+          '5) “不要用换行分隔命令”只约束 bash；PowerShell 下换行不会被守卫拒绝。',
           '6) 串行命令之间只写 `;`，**不要**写裸 `&`——那是后台 Job 运算符，会把命令丢进后台并立刻返回一张作业表。',
-          '7) 没有 `/dev/null`：丢弃 stderr 用 `2>$null`（写 `2>/dev/null` 会尝试去建 `\\dev\\null` 文件）。',
+          '7) 没有 `/dev/null`：丢弃 stderr 用 `2>$null`（写 `2>/dev/null` 会尝试去建 `<盘符>\\dev\\null` 文件）。',
+          `8) ${powerShellPathRule}`,
         ].join(' ')
-    : '命令之间有依赖、必须串行时，请在同一次 Bash 调用中用 \'&&\' 连接（例如 `git add . && git commit -m "message" && git push`）。例如某一步必须在另一步之前完成（如 cp 之前先 mkdir、git 操作之前先 Write、git commit 之前先 git add），应该串行运行。';
-  return RAW_DESCRIPTION_TEMPLATE.replaceAll('${os}', process.platform)
+    : '命令之间有依赖、必须串行时，请在同一次 bash 调用中用 \'&&\' 连接（例如 `git add . && git commit -m "message" && git push`）。例如某一步必须在另一步之前完成（如 cp 之前先 mkdir、git 操作之前先 write、git commit 之前先 git add），应该串行运行。';
+  const osLabel =
+    process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux';
+  return RAW_DESCRIPTION_TEMPLATE.replaceAll('${os}', `${osLabel}（${process.platform}）`)
     .replaceAll('${shell}', shellName)
     .replaceAll('${chaining}', chaining)
     .replaceAll('${maxLines}', String(MAX_OUTPUT_LINES))
@@ -929,7 +941,9 @@ export async function runBashCommand(
   }
   const shellCompatibilityHint = buildShellCompatibilityHint({
     cwd,
+    command: input.command,
     output: outcome.rawOutput,
+    exitCode: outcome.kind === 'exit' ? outcome.code : undefined,
     shellChoice,
   });
   if (shellCompatibilityHint) {
@@ -946,6 +960,7 @@ export async function runBashCommand(
     command: input.command,
     exitCode: outcome.code,
     kind: outcome.kind,
+    isPowerShell: shellChoice.isPowerShell,
   });
   if (benignExitHint) {
     metadataLines.push(benignExitHint);
@@ -1009,54 +1024,40 @@ export async function runBashCommand(
 /** Exported for unit tests; used by runBashCommand metadata footer. */
 export function buildShellCompatibilityHint(input: {
   cwd: string;
+  /** 原始命令；用于识别 PowerShell 会曲解的写法（如 `cd /e/...`）。 */
+  command?: string;
   output: string;
+  /** 正常退出时的退出码；缺失表示超时 / 中止 / 启动失败。 */
+  exitCode?: number;
   shellChoice: ShellChoice;
 }): string | null {
   if (!input.shellChoice.isPowerShell) {
     return null;
   }
 
-  if (input.output.includes("The token '&&' is not a valid statement separator in this version.")) {
-    return `当前 shell 为 Windows PowerShell 5.1（cwd: ${input.cwd}），不支持 '&&'。请拆成多次 bash 调用、改用 \`; if ($?) { ... }\`，或通过 OPENAWORK_WINDOWS_SHELL 切到 pwsh.exe。`;
-  }
-
-  const unixToolHint = detectMissingUnixTool(input.output);
-  if (unixToolHint) {
-    return unixToolHint;
-  }
-
-  const nullRedirectHint = detectDevNullRedirect(input.output);
-  if (nullRedirectHint) {
-    return nullRedirectHint;
-  }
-
-  const backgroundJobHint = detectBackgroundJobLeak(input.output);
-  if (backgroundJobHint) {
-    return backgroundJobHint;
-  }
-
-  // 仅在明确是PowerShell 解析器错误时提示，避免把业务脚本 stderr 里的
-  // "Unexpected token" / 通用 ParserError 误判成 shell 语法问题。
-  const looksLikePowerShellParserError =
-    /CategoryInfo\s*:\s*ParserError/i.test(input.output) ||
-    /FullyQualifiedErrorId\s*:\s*(?:UnexpectedToken|MissingEndParenthesis|TerminatorExpectedAtEndOfString|InvalidEndOfLine|MissingFileSpecification)/i.test(
+  // PS 5.1 没有 &&：这一条会掩盖后续所有报错，命中即返回。
+  // 解析器报错是本地化的，中文 Windows 上是「“&&”不是此版本中的有效语句分隔符」。
+  if (
+    /The token '&&' is not a valid statement separator|不是此版本中的有效语句分隔符/.test(
       input.output,
-    ) ||
-    (/At line:\d+ char:\d+/i.test(input.output) &&
-      /(?:Unexpected token|The string is missing the terminator|Missing closing)/i.test(
-        input.output,
-      ));
-
-  if (looksLikePowerShellParserError) {
-    const shellLabel = input.shellChoice.name.replace(/\.exe$/i, '');
-    const chainHint =
-      shellLabel === 'pwsh'
-        ? '串行依赖可用 `&&`，或拆成多次 bash 调用。'
-        : '串行依赖用 `; if ($?) { ... }`（PS 5.1）或安装 pwsh 后用 &&。';
-    return `当前 shell 为 ${input.shellChoice.name}（cwd: ${input.cwd}）。这是 PowerShell 语法错误，不是业务命令失败：多行内容用 here-string（@'...'@）或多次 bash 调用；反引号是转义不是命令替换；${chainHint}`;
+    )
+  ) {
+    return "PowerShell 5.1 不支持 '&&'：拆成多次 bash 调用，或用 `cmd1; if ($?) { cmd2 }`；也可设 OPENAWORK_WINDOWS_SHELL=pwsh.exe 切到 PowerShell 7。";
   }
 
-  return null;
+  // 一次调用经常同时踩多个坑（`cd /e/... && grep ...` = 路径被曲解 + 命令不存在）。
+  // 只报第一条会让模型修好一个、下一轮再撞另一个，所以全部收集后逐行输出。
+  const hints = [
+    detectMsysStylePath({ cwd: input.cwd, command: input.command, exitCode: input.exitCode }),
+    detectMissingUnixTool(input.output),
+    detectPowerShellParameterError(input.output),
+    detectDevNullRedirect(input.output),
+    detectBackgroundJobLeak(input.output),
+    detectSilentFailure({ output: input.output, exitCode: input.exitCode }),
+    buildPowerShellParserHint(input),
+  ].filter((hint): hint is string => hint !== null);
+
+  return hints.length > 0 ? hints.join('\n') : null;
 }
 
 const POWERSHELL_COMMAND_NOT_FOUND =
@@ -1072,14 +1073,13 @@ function detectMissingUnixTool(output: string): string | null {
   if (!match) {
     return null;
   }
-  const command = match.groups?.['cmd'] ?? match.groups?.['cmd2'] ?? '';
-  return [
-    `当前 shell 是 PowerShell，找不到命令 ${command.trim()}——Windows 没有内置 Unix CLI 工具。`,
-    '请改用专用工具：内容搜索用 Grep（不要用 grep / rg），文件查找用 Glob（不要用 find / ls），',
-    '读文件用 Read（不要用 cat / head / tail），编辑文件用 Edit（不要用 sed / awk）。',
-    `若确实需要 Unix 工具，请改用 PowerShell 原生命令（如 Select-String / Get-ChildItem / Get-Content），`,
-    '或安装 Git Bash /  busybox 后显式调用其完整路径。',
-  ].join(' ');
+  const command = (match.groups?.['cmd'] ?? match.groups?.['cmd2'] ?? '').trim();
+  // `find . -type f \( -name "*.ts" \)` 里 PowerShell 把 `-name` 当成了命令名。
+  // 真实原因仍是「整条 Unix 命令都不存在」，别再教模型「找不到 -name 命令」。
+  if (command.startsWith('-')) {
+    return `PowerShell 把 \`${command}\` 当成了命令名——它是 Unix 风格的选项，不是命令，说明整条 Unix 命令在 Windows 上不存在。内容搜索用 Grep、找文件用 Glob、读文件用 Read。`;
+  }
+  return `PowerShell 找不到命令 ${command}：Windows 不带 Unix CLI 工具。优先用工具（内容搜索 Grep、找文件 Glob、读文件 Read），或 PowerShell 原生命令（Select-String / Get-ChildItem / Get-Content）。`;
 }
 
 /** `2>/dev/null` 在 PowerShell 里被解析成 `2> /dev/null`（向 E:\dev\null 写文件）。 */
@@ -1087,11 +1087,7 @@ function detectDevNullRedirect(output: string): string | null {
   if (!/(?:Out-File|Could not find a (?:part of the )?path)[^\r\n]*dev[\\/]null/i.test(output)) {
     return null;
   }
-  return [
-    '当前 shell 是 PowerShell，不存在 /dev/null：`cmd 2>/dev/null` 被解析成 `2> /dev/null`，',
-    '即向 <盘符>\\dev\\null 写文件。请改用 `2>$null` 丢弃错误输出，',
-    '或直接省略重定向——本工具已单独收集 stdout 与 stderr。',
-  ].join(' ');
+  return 'PowerShell 没有 /dev/null：`2>/dev/null` 会被解析成向 <盘符>\\dev\\null 写文件。丢弃 stderr 用 `2>$null`，或直接省略——工具已单独收集 stderr。';
 }
 
 /**
@@ -1102,11 +1098,135 @@ function detectBackgroundJobLeak(output: string): string | null {
   if (!/(?:PSJobTypeName\s*:?\s*BackgroundJob|\bJob\d+\s+BackgroundJob\b)/i.test(output)) {
     return null;
   }
+  return 'PowerShell 里裸 `&` 是后台 Job 运算符：`cmd1 & cmd2` 会把 cmd2 丢进后台并立刻返回作业表，看起来像"什么都没执行"。串行请用 `;`，有依赖用 `; if ($?) { ... }`（PS 5.1）或 `&&`（pwsh）。';
+}
+
+/**
+ * MSYS / WSL 风格路径：`cd /e/01.Projects/x`、`cd /mnt/c/Users/x`。
+ *
+ * PowerShell 不认盘符别名，`/e/01.Projects/x` 会被解析成「当前驱动器根 + e\」，
+ * 即 `E:\e\01.Projects\x`（多一层 `e\`），于是报“找不到路径”。模型只会看到
+ * 一个自己没写过的路径，通常想不到是斜杠形式导致的（2026-10-21 排障里 22 条
+ * 诊断有 8 条栽在这里）。
+ */
+const MSYS_DRIVE_PATH =
+  /(?:^|[;&|]\s*)(?:cd|chdir|set-location|sl|pushd)\s+["'`]?\/(?:mnt\/)?(?<drive>[A-Za-z])\/(?<rest>[^"'`;&|\r\n]*)/u;
+
+function detectMsysStylePath(input: {
+  cwd: string;
+  command?: string;
+  exitCode?: number;
+}): string | null {
+  // 只在真的失败时提示：极少数机器上 `E:\e\...` 确实存在，那时不该打扰。
+  if (!input.command || input.exitCode === undefined || input.exitCode === 0) {
+    return null;
+  }
+  const match = MSYS_DRIVE_PATH.exec(input.command);
+  if (!match) {
+    return null;
+  }
+  const drive = match.groups?.['drive']?.toUpperCase() ?? 'C';
+  const rest = (match.groups?.['rest'] ?? '').replace(/[/\\]+$/, '');
+  const cwdDrive = /^([A-Za-z]):[\\/]/.exec(input.cwd)?.[1]?.toUpperCase() ?? drive;
+  const windowsPath = rest.length > 0 ? `${drive}:\\${rest.split('/').join('\\')}` : `${drive}:\\`;
+  const misresolved =
+    rest.length > 0
+      ? `${cwdDrive}:\\${drive.toLowerCase()}\\${rest.split('/').join('\\')}`
+      : `${cwdDrive}:\\${drive.toLowerCase()}`;
   return [
-    '当前 shell 是 PowerShell：命令里的裸 `&` 是后台 Job 运算符，`cmd1 & cmd2` 会把 cmd2 ',
-    '丢进后台作业并立刻返回作业表（所以看起来"什么都没执行"）。',
-    '请串行执行：忽略前一条是否失败用 `;`，有依赖用 `; if ($?) { ... }`（PS 5.1）或 `&&`（pwsh / cmd）。',
-  ].join(' ');
+    `路径用了 MSYS 写法：\`/${drive.toLowerCase()}/${rest}\` 被 PowerShell 解析成 \`${misresolved}\`，所以报“找不到路径”。`,
+    `Windows 下写成 \`${windowsPath}\`，或直接把该目录放进 \`workdir\`。`,
+  ].join('');
+}
+
+/**
+ * PowerShell cmdlet 只吃命名参数（`-Force` / `-Recurse` / `-Name`），模型却常把
+ * bash 短选项整条搬过来（`ls -la`、`rm -rf`）。这时报的是“找不到与参数名称 'la'
+ * 匹配的参数”，与 Unix 的语义完全对不上，需要点名替换写法。
+ */
+const PS_UNKNOWN_PARAMETER =
+  /找不到与参数名称\s*['"`]?(?<zh>[^'"`\r\n:]+?)['"`]?\s*匹配的参数|A parameter cannot be found that matches parameter name\s*['"`](?<en>[^'"`\r\n]+)['"`]/i;
+const PS_PARAMETER_SET_ERROR = /无法使用指定的命名参数解析参数集|Parameter set cannot be resolved/i;
+
+function detectPowerShellParameterError(output: string): string | null {
+  const unknown = PS_UNKNOWN_PARAMETER.exec(output);
+  if (unknown) {
+    const raw = (unknown.groups?.['zh'] ?? unknown.groups?.['en'] ?? '').trim();
+    const param = raw.startsWith('-') ? raw : `-${raw}`;
+    return [
+      `PowerShell cmdlet 只认命名参数：\`${param}\` 是 Unix 短选项，不是有效参数。`,
+      '对照：`ls -la`→`Get-ChildItem -Force`；`rm -rf x`→`Remove-Item -Recurse -Force x`；`cp -r a b`→`Copy-Item -Recurse a b`。',
+      '只列目录用 Glob 更稳。',
+    ].join('');
+  }
+  if (PS_PARAMETER_SET_ERROR.test(output)) {
+    return '这是参数集冲突（`Measure-Object -Line -Sum` 不能同时用）：拆成两次调用，或改用 Select-String / Read 统计。';
+  }
+  return null;
+}
+
+/**
+ * 非零退出且输出为空：唯一线索被剥走了，模型只能瞎猜。
+ *
+ * 首要成因**不是**报错，而是 PowerShell 的退出码语义：`-Command` 的进程退出码
+ * 取自最后一条语句的 `$?`，`Select-String` / `Where-Object` 没有匹配时 `$?` 为
+ * false，于是「零输出 + 退出码 1」。把它说成"引号写错"会让模型去改根本不存在的
+ * 语法问题（2026-10-21 第 3 条正是这种）。
+ */
+function detectSilentFailure(input: { output: string; exitCode?: number }): string | null {
+  if (input.exitCode === undefined || input.exitCode === 0) {
+    return null;
+  }
+  if (input.output.trim().length > 0) {
+    return null;
+  }
+  return [
+    `命令退出码为 ${input.exitCode}，但没有任何 stdout / stderr 输出。`,
+    'PowerShell 的退出码取自最后一条语句的 $?：筛选类 cmdlet（Select-String / Where-Object）',
+    '没有匹配时就是这个表现，属于正常结果而非失败。',
+    '若命令里嵌套了双引号，注意 `\\` 不是转义符——改用单引号包 pattern，或直接用 Grep 工具。',
+  ].join('');
+}
+
+/**
+ * 仅在明确是 PowerShell 解析器错误时提示，避免把业务脚本 stderr 里的
+ * "Unexpected token" / 通用 ParserError 误判成 shell 语法问题。
+ *
+ * PS 5.1 / pwsh 的 `-Command` 常输出精简格式（`ParserError:` + `Line |` + `~~~`），
+ * 既没有 `CategoryInfo` 也没有 `FullyQualifiedErrorId`，旧规则整条漏检。
+ */
+function buildPowerShellParserHint(input: {
+  cwd: string;
+  output: string;
+  shellChoice: ShellChoice;
+}): string | null {
+  const hasParserLabel = /ParserError\s*:/i.test(input.output);
+  const hasSourceLocation =
+    /At line:\d+ char:\d+/i.test(input.output) ||
+    /^Line\s*\|\s*$/m.test(input.output) ||
+    /^\s*\|\s*[~^]+\s*$/m.test(input.output);
+
+  const looksLikePowerShellParserError =
+    /CategoryInfo\s*:\s*ParserError/i.test(input.output) ||
+    /FullyQualifiedErrorId\s*:\s*(?:UnexpectedToken|MissingEndParenthesis|TerminatorExpectedAtEndOfString|InvalidEndOfLine|MissingFileSpecification)/i.test(
+      input.output,
+    ) ||
+    (hasParserLabel && hasSourceLocation) ||
+    (hasSourceLocation &&
+      /(?:Unexpected token|The string is missing the terminator|Missing closing)/i.test(
+        input.output,
+      ));
+
+  if (!looksLikePowerShellParserError) {
+    return null;
+  }
+
+  const shellLabel = input.shellChoice.name.replace(/\.exe$/i, '');
+  const chainHint =
+    shellLabel === 'pwsh'
+      ? '串行依赖可用 `&&`，或拆成多次 bash 调用。'
+      : '串行依赖用 `; if ($?) { ... }`（PS 5.1）或安装 pwsh 后用 &&。';
+  return `这是 PowerShell 语法错误（${input.shellChoice.name}），不是命令执行失败：多行内容用 here-string，双引号内嵌双引号要转义或改单引号；反引号是转义符不是命令替换。${chainHint}`;
 }
 
 function buildPackageManagerHint(input: { cwd: string; output: string }): string | null {
@@ -1135,13 +1255,23 @@ const GIT_DIFF_EXIT_FLAGS = /(?:^|[;&|]\s*)git\s+diff\b[^;&|]*\s--(?:exit-code|q
  *
  * 这里只补模型可见的 `<bash_metadata>`，不改变 `isError`：把退出码 1
  * 直接判成成功会掩盖真实失败，保守做法是先消除“工具误报”的误导。
+ *
+ * PowerShell 下必须整条跳过：`grep` / `diff` / `cmp` 都不是内置命令，命令
+ * 不存在同样以 1 退出。此时再说“通常表示未匹配，不是执行失败”，会和同一段
+ * metadata 里 `detectMissingUnixTool` 的“找不到命令 grep”直接矛盾，把模型
+ * 推向“grep 跑了但没匹配”的错误结论（2026-10-21 排障里连续踩了 8 次）。
  */
 export function buildBenignExitHint(input: {
   command: string;
   exitCode: number;
   kind: BashExecutionResult['kind'];
+  /** 当前 shell 是否为 PowerShell；为 true 时退出码 1 不具“未匹配”语义。 */
+  isPowerShell?: boolean;
 }): string | null {
   if (input.kind !== 'exit' || input.exitCode !== 1) {
+    return null;
+  }
+  if (input.isPowerShell) {
     return null;
   }
   if (!BENIGN_EXIT_ONE_COMMANDS.test(input.command) && !GIT_DIFF_EXIT_FLAGS.test(input.command)) {
