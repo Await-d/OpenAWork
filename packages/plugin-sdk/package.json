@@ -24,7 +24,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "effect": "4.0.0-rc.117"
+    "effect": "4.0.4"
   },
   "devDependencies": {
     "@types/node": "^20.19.37"

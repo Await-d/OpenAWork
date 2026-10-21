@@ -10,7 +10,8 @@
     "preview:ci": "vite --host 127.0.0.1 --port 4173 --strictPort",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "lint": "node -e \"console.log('跳过 apps/web lint：当前阶段仅收口 desktop/mobile')\"",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
     "clean": "rm -rf dist"
   },
   "dependencies": {
@@ -58,9 +59,13 @@
     "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@typescript-eslint/eslint-plugin": "^8.71.1",
+    "@typescript-eslint/parser": "^8.71.1",
     "@vitejs/plugin-react": "^4.7.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "cross-env": "^7.0.3",
+    "eslint-plugin-react-compiler": "^19.1.0-rc.2",
+    "eslint-plugin-react-hooks": "5.2.0",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",

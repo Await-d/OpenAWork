@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,7 @@ import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import type { Logger, LoggerEvent } from 'babel-plugin-react-compiler';
 import versionPlugin from '../../scripts/build/vite-plugin-version.mjs';
 import fileIconAssetsPlugin from '../../scripts/build/vite-plugin-file-icons.mjs';
 import { assertNoServiceWorkerInDist } from '../../scripts/build/assert-no-service-worker-dist.mjs';
@@ -20,6 +22,14 @@ const isDesktopBuild =
   Boolean(process.env.TAURI_ENV_PLATFORM) || process.env.OPENAWORK_DESKTOP_BUILD === '1';
 
 /**
+ * 路径锚点：报表路径与文件名一律基于这两个常量解析，而不是 `process.cwd()`。
+ * 因为同一份配置会被多种入口调用（`vite`、`tauri build`、CI 直接调 vite），
+ * 工作目录并不稳定。
+ */
+const WEB_ROOT = fileURLToPath(new URL('./', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+
+/**
  * material-icon-theme 在隔离式 node_modules 下只装在 apps/web/node_modules，
  * 必须从 apps/web/package.json 锚定解析，否则根目录解析不到该包。
  */
@@ -27,6 +37,114 @@ const requireFromWeb = createRequire(new URL('./package.json', import.meta.url))
 const materialIconThemeDir = path.dirname(
   requireFromWeb.resolve('material-icon-theme/package.json'),
 );
+
+/**
+ * ─── React Compiler 脱靶可观测性 ────────────────────────────────────────────
+ *
+ * 编译器对无法优化的组件 / 自定义 Hook 是**静默跳过**的：不进产物、不报错、也
+ * 不中断构建。于是「某个文件是否已被编译器接管」在现场无法判断——而它恰恰决定
+ * 了手写 `useMemo` / `useCallback` 能否安全删除：在脱靶文件里删 memo 会造成性能
+ * 回退，若该回调被 `useEffect` 依赖引用还可能触发无限渲染循环。
+ *
+ * 本开关默认**完全关闭**（不设环境变量时零行为变更、零额外开销）：
+ *   OPENAWORK_COMPILER_LOG=1              脱靶逐条打印到 stderr（dev / build 均生效）
+ *   OPENAWORK_COMPILER_LOG=<file.json>    构建结束时额外写 JSON 报表（仅 build）
+ *
+ * 注意：dev 模式按需编译，报表只覆盖你实际访问过的模块，所以路径形式只用于 build。
+ *
+ * 深度分析（按原因分类 / 与基线对比 / CI 门禁）请用：
+ *   bun run check:react-compiler
+ */
+const COMPILER_LOG_TARGET = process.env.OPENAWORK_COMPILER_LOG?.trim() ?? '';
+const COMPILER_LOG_VERBOSE = COMPILER_LOG_TARGET === '1';
+const COMPILER_REPORT_PATH =
+  COMPILER_LOG_TARGET && !COMPILER_LOG_VERBOSE ? COMPILER_LOG_TARGET : null;
+
+type CompilerBailoutRecord = {
+  file: string;
+  line: number | null;
+  kind: string;
+  reason: string;
+};
+
+const compilerBailouts: CompilerBailoutRecord[] = [];
+const compilerStats = { compiledFunctions: 0, bailoutFunctions: 0, memoizedValues: 0 };
+
+/**
+ * 三种脱靶事件的字段位置并不一致，不能一把梭读 `detail`：
+ * `CompileError` 的 reason 在 `detail` 下，`CompileSkip` 的 reason 在顶层，
+ * `PipelineError` 的说明在顶层 `data`。
+ */
+function describeCompilerBailout(event: LoggerEvent): string {
+  switch (event.kind) {
+    case 'CompileError':
+      return event.detail?.reason ?? '未知编译错误';
+    case 'CompileSkip':
+      return event.reason ?? '未知跳过原因';
+    case 'PipelineError':
+      return `PipelineError: ${event.data ?? ''}`;
+    default:
+      return `未知事件类型：${event.kind}`;
+  }
+}
+
+function createCompilerLogger(): Logger | null {
+  if (!COMPILER_LOG_TARGET) return null;
+
+  return {
+    logEvent(filename: string | null, event: LoggerEvent): void {
+      if (event.kind === 'CompileSuccess') {
+        compilerStats.compiledFunctions += 1;
+        compilerStats.memoizedValues += event.memoValues;
+        return;
+      }
+      const isBailout =
+        event.kind === 'CompileError' ||
+        event.kind === 'CompileSkip' ||
+        event.kind === 'PipelineError';
+      if (!isBailout) return;
+
+      const reason = describeCompilerBailout(event);
+      const file = filename ? path.relative(REPO_ROOT, filename) : '(unknown)';
+      const line = event.fnLoc?.start.line ?? null;
+      compilerStats.bailoutFunctions += 1;
+      compilerBailouts.push({ file, line, kind: event.kind, reason });
+
+      if (COMPILER_LOG_VERBOSE) {
+        console.warn(`[react-compiler] 脱靶 ${file}:${line ?? '?'} — ${reason}`);
+      }
+    },
+  };
+}
+
+/** 构建结束时落盘脱靶报表（仅在 OPENAWORK_COMPILER_LOG 指向文件路径时启用）。 */
+function compilerBailoutReportPlugin(): Plugin {
+  return {
+    name: 'openawork:react-compiler-bailout-report',
+    apply: 'build',
+    closeBundle() {
+      if (!COMPILER_REPORT_PATH) return;
+      const out = path.resolve(WEB_ROOT, COMPILER_REPORT_PATH);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      fs.writeFileSync(
+        out,
+        `${JSON.stringify(
+          {
+            generatedAt: new Date().toISOString(),
+            scope: 'vite-build',
+            totals: compilerStats,
+            bailouts: compilerBailouts,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      console.log(
+        `[react-compiler] 脱靶 ${compilerStats.bailoutFunctions} 个函数，报表已写入 ${out}`,
+      );
+    },
+  };
+}
 
 /**
  * 桌面端打包防呆：vite build 写盘结束后立刻断言 dist 里没有 SW 产物，
@@ -75,11 +193,15 @@ export default defineConfig({
       // React Compiler（1.0 stable）：自动插入 useMemo / useCallback / React.memo。
       // 启用后无需再手写大量手动 memoize；保留的手写 memo 不会被移除，编译器会跳过。
       // target: '19' 与项目的 react@^19 对齐，避免 fallback runtime。
+      // logger 默认返回 null（等同不传），仅在 OPENAWORK_COMPILER_LOG 打开时生效。
       babel: {
-        plugins: [['babel-plugin-react-compiler', { target: '19' }]],
+        plugins: [
+          ['babel-plugin-react-compiler', { target: '19', logger: createCompilerLogger() }],
+        ],
       },
     }),
     tailwindcss(),
+    compilerBailoutReportPlugin(),
     desktopNoServiceWorkerGuard(),
     VitePWA({
       // 桌面端（Tauri）构建时禁用 PWA Service Worker：
