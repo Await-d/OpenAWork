@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FileEditorPanel } from './editor/FileEditorPanel.js';
 import { BuiltInBrowser } from '../chat/misc/BuiltInBrowser.js';
-import { normalizeBrowserPreviewInput } from '../chat/misc/browser/browser-url.js';
+import { BrowserPreviewStartPage } from '../chat/misc/browser/BrowserPreviewStartPage.js';
 import { ResizeHandle } from '../layout/shared/resize-handle.js';
 import {
   FILE_TREE_WIDTH_DEFAULT,
@@ -463,67 +463,15 @@ export function EditorBrowserWorkspace({
         )}
 
       {showBrowserEmptyState && onBrowserPreviewUrlChange ? (
-        <BrowserPreviewEmptyState onSubmit={onBrowserPreviewUrlChange} />
+        // 与浏览器新标签页共用同一条开始页：没有预览地址时给输入提示与快捷入口，
+        // 而不是一块只有一行文案的空面板。
+        <div className="editor-browser-workspace__start" data-testid="editor-browser-empty-state">
+          <BrowserPreviewStartPage
+            workspacePath={workspacePath}
+            onSubmit={onBrowserPreviewUrlChange}
+          />
+        </div>
       ) : null}
-    </div>
-  );
-}
-
-function BrowserPreviewEmptyState({ onSubmit }: { onSubmit: (url: string) => void }) {
-  const [draftUrl, setDraftUrl] = useState('');
-  const normalizedDraftUrl = normalizeBrowserPreviewInput(draftUrl);
-
-  return (
-    <div className="editor-browser-workspace__empty" data-testid="editor-browser-empty-state">
-      <span className="editor-browser-workspace__empty-icon" aria-hidden="true">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.75"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <line x1="2" y1="12" x2="22" y2="12" />
-          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-        </svg>
-      </span>
-      <div className="editor-browser-workspace__empty-copy">
-        <strong>还没有预览地址</strong>
-        <span>
-          在对话里执行 /open &lt;url&gt;、让 Agent 启动 dev server 自动检测端口，或直接填入地址。
-        </span>
-      </div>
-      <form
-        className="editor-browser-workspace__empty-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (normalizedDraftUrl === null) {
-            return;
-          }
-          onSubmit(normalizedDraftUrl);
-          setDraftUrl('');
-        }}
-      >
-        <input
-          className="editor-browser-workspace__empty-input"
-          type="text"
-          value={draftUrl}
-          aria-label="预览地址"
-          placeholder="http://localhost:5173"
-          onChange={(event) => setDraftUrl(event.target.value)}
-        />
-        <button
-          className="editor-browser-workspace__empty-submit"
-          type="submit"
-          disabled={normalizedDraftUrl === null}
-        >
-          打开预览
-        </button>
-      </form>
     </div>
   );
 }

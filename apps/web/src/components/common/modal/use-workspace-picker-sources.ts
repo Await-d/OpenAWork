@@ -82,6 +82,27 @@ export interface UseWorkspacePickerSourcesResult {
   readonly sshPickerProps: SshWorkspacePickerModalProps;
 }
 
+/**
+ * SSH 连接列表加载的统一包装：置 loading → try → catch 交给 `onError` → finally 清 loading。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 这处 try
+ * 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runSshConnectionsLoadOnce(ctx: {
+  setLoading: (loading: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setLoading(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setLoading(false);
+  }
+}
+
 export function useWorkspacePickerSources({
   gatewayUrl,
   token,
@@ -115,15 +136,18 @@ export function useWorkspacePickerSources({
       setSshConnections([]);
       return;
     }
-    setSshConnectionsLoading(true);
-    try {
-      setSshConnections(await createSshClient(gatewayUrl).list(token));
-    } catch (error: unknown) {
-      toast(error instanceof Error ? error.message : '加载 SSH 连接失败', 'error');
-      setSshConnections([]);
-    } finally {
-      setSshConnectionsLoading(false);
-    }
+    // 置 loading 与 try/catch/finally 一起下沉到模块级
+    // `runSshConnectionsLoadOnce`（见其注释）。
+    await runSshConnectionsLoadOnce({
+      setLoading: setSshConnectionsLoading,
+      onError: (error) => {
+        toast(error instanceof Error ? error.message : '加载 SSH 连接失败', 'error');
+        setSshConnections([]);
+      },
+      run: async () => {
+        setSshConnections(await createSshClient(gatewayUrl).list(token));
+      },
+    });
   }, [gatewayUrl, token]);
 
   const openLocal = useCallback((mode: 'browse' | 'create' = 'browse'): void => {
@@ -329,6 +353,9 @@ export function useWorkspacePickerSources({
       fetchSshTree,
       initialSshConnectionId,
       isOpen,
+      // onSelectSsh：编译器把它推断为依赖（"Inferred different dependency than source"，
+      // 见 apps/web/AGENTS.md ②）。
+      onSelectSsh,
       source,
       sshConnections,
       sshConnectionsLoading,

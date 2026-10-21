@@ -82,6 +82,33 @@ function SkeletonCard() {
   );
 }
 
+/**
+ * 会话页动作的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`（可选），
+ * finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块，本页 5 处 try 会让整页脱靶（实测）。语义逐字照搬：
+ *   - `onError` 不传 ＝ 异常继续向上抛（不得静默吞掉）；
+ *   - `onError` 的返回值即本函数的返回值（用来保留原 catch 里的 `return true/false`）；
+ *   - `onError` 想「静默跳过」就显式返回 undefined（对应原 `catch { return; }`）。
+ */
+async function runSessionsActionOnce<T>(ctx: {
+  onError?: (error: unknown) => T | Promise<T>;
+  onFinally?: () => void;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    return await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      throw error;
+    }
+    return await ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
 export default function SessionsPage() {
   const navigate = useNavigate();
   const preloadChatRoute = useCallback((sessionId?: string | null) => {
@@ -205,25 +232,29 @@ export default function SessionsPage() {
         setLoading(true);
       }
 
-      try {
-        const list = await createSessionsClient(gatewayUrl).list(token);
-        if (loadSessionsRequestIdRef.current !== requestId) {
-          return;
-        }
-        const nextSessions = (list as SessionRow[]).filter(
-          // 排除 team 层级角色派生的子会话（pm1/pm2/executor/reviewer 等），
-          // 只保留用户创建的根会话（包括 team 根会话和个人会话）。
-          (session) => !session.team_parent_session_id,
-        );
-        mergeSavedWorkspaces(listWorkspaceIdentitiesFromSessions(nextSessions));
-        setSessions(nextSessions);
-      } catch {
-        return;
-      } finally {
-        if (!keepCurrentLoadingState && loadSessionsRequestIdRef.current === requestId) {
-          setLoading(false);
-        }
-      }
+      // try/catch/finally 下沉到模块级 `runSessionsActionOnce`（见其注释）。
+      await runSessionsActionOnce<void>({
+        // 原 catch 是静默 return（加载失败不打扰用户，列表保持旧值）。
+        onError: () => undefined,
+        onFinally: () => {
+          if (!keepCurrentLoadingState && loadSessionsRequestIdRef.current === requestId) {
+            setLoading(false);
+          }
+        },
+        run: async () => {
+          const list = await createSessionsClient(gatewayUrl).list(token);
+          if (loadSessionsRequestIdRef.current !== requestId) {
+            return;
+          }
+          const nextSessions = (list as SessionRow[]).filter(
+            // 排除 team 层级角色派生的子会话（pm1/pm2/executor/reviewer 等），
+            // 只保留用户创建的根会话（包括 team 根会话和个人会话）。
+            (session) => !session.team_parent_session_id,
+          );
+          mergeSavedWorkspaces(listWorkspaceIdentitiesFromSessions(nextSessions));
+          setSessions(nextSessions);
+        },
+      });
     },
     [gatewayUrl, token, mergeSavedWorkspaces],
   );
@@ -297,6 +328,23 @@ export default function SessionsPage() {
     void navigate('/chat');
   }
 
+  // `createSession` 是普通函数声明（每次渲染换身份），下游 `handleCreateInWorkspace`
+  // 刻意没把它列进依赖（否则会随 sessions 变化反复重建）。但写死依赖会让 React Compiler
+  // 报 "Existing memoization could not be preserved"（推断依赖 createSession ≠ 源码依赖）
+  // 并放弃优化整个页面。按仓库既有惯例（use-page-readiness.ts 的 `onReadyRef`）改为
+  // 「ref 持有最新实现 + effect 同步」：下游依赖只剩这个稳定 ref，两侧诉求都满足。
+  const createSessionRef = useRef<
+    | ((
+        inheritWorkspacePath?: string | null,
+        inheritSshConnectionId?: string | null,
+      ) => Promise<void>)
+    | null
+  >(null);
+
+  useEffect(() => {
+    createSessionRef.current = createSession;
+  });
+
   const deleteSession = useCallback(
     async (id: string, options?: { suppressToast?: boolean }): Promise<boolean> => {
       if (!token) return false;
@@ -311,51 +359,56 @@ export default function SessionsPage() {
         return next;
       });
 
-      try {
-        const result = await withTokenRefresh(gatewayUrl, tokenStore, (activeToken) =>
-          createSessionsClient(gatewayUrl).delete(activeToken, id),
-        );
-        const deletedSessionIds = new Set(resolveDeletedSessionIds(result, id));
-        logger.info('session deleted', id);
-        // 顶部会话标签（融合布局）与列表联动：删除后同步关闭对应标签页。
-        useUIStateStore.getState().closeSessionTabs(Array.from(deletedSessionIds));
-        setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
-        if (selectedId && deletedSessionIds.has(selectedId)) {
-          setSelectedId(null);
-        }
-        if (!options?.suppressToast) {
-          toast('会话已删除', 'success');
-        }
-        return true;
-      } catch (err) {
-        if (isSessionAlreadyDeletedError(err)) {
-          useUIStateStore.getState().closeSessionTabs([id]);
-          setSessions((prev) => prev.filter((s) => s.id !== id));
-          if (selectedId === id) setSelectedId(null);
-          void loadSessions(true);
+      // try/catch/finally 下沉到模块级 `runSessionsActionOnce`（见其注释）。
+      return runSessionsActionOnce<boolean>({
+        onError: (err) => {
+          if (isSessionAlreadyDeletedError(err)) {
+            useUIStateStore.getState().closeSessionTabs([id]);
+            setSessions((prev) => prev.filter((s) => s.id !== id));
+            if (selectedId === id) setSelectedId(null);
+            void loadSessions(true);
+            if (!options?.suppressToast) {
+              toast('会话已删除', 'success');
+            }
+            return true;
+          }
+
+          logger.error('session delete failed', err);
+          if (!options?.suppressToast) {
+            toast(getSessionDeleteErrorMessage(err), 'error', 4200);
+          }
+          return false;
+        },
+        onFinally: () => {
+          deletingSessionIdsRef.current.delete(id);
+          setDeletingSessionIds((previous) => {
+            if (!previous.has(id)) {
+              return previous;
+            }
+
+            const next = new Set(previous);
+            next.delete(id);
+            return next;
+          });
+        },
+        run: async () => {
+          const result = await withTokenRefresh(gatewayUrl, tokenStore, (activeToken) =>
+            createSessionsClient(gatewayUrl).delete(activeToken, id),
+          );
+          const deletedSessionIds = new Set(resolveDeletedSessionIds(result, id));
+          logger.info('session deleted', id);
+          // 顶部会话标签（融合布局）与列表联动：删除后同步关闭对应标签页。
+          useUIStateStore.getState().closeSessionTabs(Array.from(deletedSessionIds));
+          setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
+          if (selectedId && deletedSessionIds.has(selectedId)) {
+            setSelectedId(null);
+          }
           if (!options?.suppressToast) {
             toast('会话已删除', 'success');
           }
           return true;
-        }
-
-        logger.error('session delete failed', err);
-        if (!options?.suppressToast) {
-          toast(getSessionDeleteErrorMessage(err), 'error', 4200);
-        }
-        return false;
-      } finally {
-        deletingSessionIdsRef.current.delete(id);
-        setDeletingSessionIds((previous) => {
-          if (!previous.has(id)) {
-            return previous;
-          }
-
-          const next = new Set(previous);
-          next.delete(id);
-          return next;
-        });
-      }
+        },
+      });
     },
     [gatewayUrl, loadSessions, selectedId, token, tokenStore],
   );
@@ -383,54 +436,58 @@ export default function SessionsPage() {
         return next;
       });
 
-      const sessionCount = sessionIds.length;
-      let successCount = 0;
-      let failedCount = 0;
+      // try/finally 下沉到模块级 `runSessionsActionOnce`；原代码此处**没有 catch**
+      // （异常向上抛），故不传 onError。计数器改为 run 回调内的局部量。
+      await runSessionsActionOnce<void>({
+        onFinally: () => {
+          deletingWorkspaceGroupKeysRef.current.delete(groupKey);
+          setDeletingWorkspaceGroupKeys((previous) => {
+            if (!previous.has(groupKey)) {
+              return previous;
+            }
 
-      try {
-        for (const sessionId of sessionIds) {
-          const deleted = await deleteSession(sessionId, { suppressToast: true });
-          if (deleted) {
-            successCount += 1;
-          } else {
-            failedCount += 1;
+            const next = new Set(previous);
+            next.delete(groupKey);
+            return next;
+          });
+        },
+        run: async () => {
+          const sessionCount = sessionIds.length;
+          let successCount = 0;
+          let failedCount = 0;
+          for (const sessionId of sessionIds) {
+            const deleted = await deleteSession(sessionId, { suppressToast: true });
+            if (deleted) {
+              successCount += 1;
+            } else {
+              failedCount += 1;
+            }
           }
-        }
 
-        if (failedCount === 0) {
-          if (workspacePath) {
-            removeSavedWorkspace({ workspacePath, sshConnectionId });
+          if (failedCount === 0) {
+            if (workspacePath) {
+              removeSavedWorkspace({ workspacePath, sshConnectionId });
+            }
+            toast(
+              sessionCount > 0
+                ? workspacePath === null
+                  ? `已删除${UNBOUND_WORKSPACE_LABEL}中的 ${successCount} 个会话`
+                  : `已删除工作区「${workspaceLabel}」及 ${successCount} 个会话`
+                : `已移除工作区「${workspaceLabel}」`,
+              'success',
+            );
+            return;
           }
+
           toast(
-            sessionCount > 0
-              ? workspacePath === null
-                ? `已删除${UNBOUND_WORKSPACE_LABEL}中的 ${successCount} 个会话`
-                : `已删除工作区「${workspaceLabel}」及 ${successCount} 个会话`
-              : `已移除工作区「${workspaceLabel}」`,
-            'success',
+            workspacePath === null
+              ? `${UNBOUND_WORKSPACE_LABEL}删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败。`
+              : `工作区「${workspaceLabel}」删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败，工作区未移除。`,
+            'warning',
+            4200,
           );
-          return;
-        }
-
-        toast(
-          workspacePath === null
-            ? `${UNBOUND_WORKSPACE_LABEL}删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败。`
-            : `工作区「${workspaceLabel}」删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败，工作区未移除。`,
-          'warning',
-          4200,
-        );
-      } finally {
-        deletingWorkspaceGroupKeysRef.current.delete(groupKey);
-        setDeletingWorkspaceGroupKeys((previous) => {
-          if (!previous.has(groupKey)) {
-            return previous;
-          }
-
-          const next = new Set(previous);
-          next.delete(groupKey);
-          return next;
-        });
-      }
+        },
+      });
     },
     [deleteSession, removeSavedWorkspace],
   );
@@ -448,17 +505,22 @@ export default function SessionsPage() {
         setRenamingId(null);
         return;
       }
-      try {
-        await createSessionsClient(gatewayUrl).rename(token, id, trimmed);
-        setSessions((prev) =>
-          prev.map((session) => (session.id === id ? { ...session, title: trimmed } : session)),
-        );
-        toast('已重命名', 'success');
-      } catch {
-        toast('重命名失败', 'error');
-      } finally {
-        setRenamingId(null);
-      }
+      // try/catch/finally 下沉到模块级 `runSessionsActionOnce`（见其注释）。
+      await runSessionsActionOnce<void>({
+        onError: () => {
+          toast('重命名失败', 'error');
+        },
+        onFinally: () => {
+          setRenamingId(null);
+        },
+        run: async () => {
+          await createSessionsClient(gatewayUrl).rename(token, id, trimmed);
+          setSessions((prev) =>
+            prev.map((session) => (session.id === id ? { ...session, title: trimmed } : session)),
+          );
+          toast('已重命名', 'success');
+        },
+      });
     },
     [gatewayUrl, renameValue, token],
   );
@@ -466,12 +528,16 @@ export default function SessionsPage() {
   const handleExport = useCallback(
     async (session: SessionRow) => {
       if (!token) return;
-      try {
-        const full = await createSessionsClient(gatewayUrl).get(token, session.id);
-        exportSession(session.id, (full as { messages?: unknown[] }).messages ?? []);
-      } catch {
-        exportSession(session.id, []);
-      }
+      // 原 catch 是「导出空内容」的兜底，故 onError 正常返回（不 rethrow）。
+      await runSessionsActionOnce<void>({
+        onError: () => {
+          exportSession(session.id, []);
+        },
+        run: async () => {
+          const full = await createSessionsClient(gatewayUrl).get(token, session.id);
+          exportSession(session.id, (full as { messages?: unknown[] }).messages ?? []);
+        },
+      });
     },
     [gatewayUrl, token],
   );
@@ -675,12 +741,12 @@ export default function SessionsPage() {
 
   const handleCreateInWorkspace = useCallback(
     (workspacePath: string | null, sshConnectionId: string | null) => {
-      void createSession(workspacePath, sshConnectionId);
+      // 走 ref 取最新实现（见 createSessionRef 声明处说明）。
+      void createSessionRef.current?.(workspacePath, sshConnectionId);
     },
-    // createSession is stable enough within a render closure; including it
-    // would force this callback to re-create whenever sessions change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [token, gatewayUrl, navigate],
+    // 依赖只有稳定的 ref：保留原「不因 sessions 变化而重建本回调」的取舍，
+    // 同时让编译器推断依赖与源码依赖一致（不再脱靶）。
+    [createSessionRef],
   );
 
   // Team-scope groups intentionally don't expose the per-workspace "新建"

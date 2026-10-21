@@ -63,6 +63,30 @@ function readBrowserNotificationPermission(): BrowserNotificationPermissionState
   return Notification.permission;
 }
 
+/**
+ * 通知偏好加载 / 保存的统一包装：置 busy / 清 error → try → catch 归一文案 → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 2 处
+ * 这类 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runNotificationPreferenceActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  /** catch 的兜底文案（`error.message` 优先）。 */
+  failureMessage: string;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.setError(error instanceof Error ? error.message : ctx.failureMessage);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export function useNotificationPreferences() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
@@ -85,20 +109,21 @@ export function useNotificationPreferences() {
       return;
     }
 
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const records = await createNotificationsClient(gatewayUrl).listPreferences(accessToken, {
-        channel: 'web',
-      });
-      const nextDraft = toDraft(records);
-      setSavedDraft(nextDraft);
-      setDraft(nextDraft);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : '加载通知偏好失败');
-    } finally {
-      setLoading(false);
-    }
+    // 置 loading / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runNotificationPreferenceActionOnce`（见其注释）。
+    await runNotificationPreferenceActionOnce({
+      setBusy: setLoading,
+      setError: setLoadError,
+      failureMessage: '加载通知偏好失败',
+      run: async () => {
+        const records = await createNotificationsClient(gatewayUrl).listPreferences(accessToken, {
+          channel: 'web',
+        });
+        const nextDraft = toDraft(records);
+        setSavedDraft(nextDraft);
+        setDraft(nextDraft);
+      },
+    });
   }, [accessToken, gatewayUrl]);
 
   useEffect(() => {
@@ -135,25 +160,26 @@ export function useNotificationPreferences() {
       return;
     }
 
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const records = await createNotificationsClient(gatewayUrl).updatePreferences(accessToken, {
-        channel: 'web',
-        preferences: NOTIFICATION_PREFERENCE_ITEMS.map((item) => ({
-          eventType: item.eventType,
-          enabled: draft[item.eventType],
-        })),
-      });
-      const nextDraft = toDraft(records);
-      setSavedDraft(nextDraft);
-      setDraft(nextDraft);
-      requestNotificationPreferenceRefresh();
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : '保存通知偏好失败');
-    } finally {
-      setSaving(false);
-    }
+    // 同加载：置 saving / 清 error 与 try/catch/finally 一起下沉到
+    // `runNotificationPreferenceActionOnce`（见其注释）。
+    await runNotificationPreferenceActionOnce({
+      setBusy: setSaving,
+      setError: setSaveError,
+      failureMessage: '保存通知偏好失败',
+      run: async () => {
+        const records = await createNotificationsClient(gatewayUrl).updatePreferences(accessToken, {
+          channel: 'web',
+          preferences: NOTIFICATION_PREFERENCE_ITEMS.map((item) => ({
+            eventType: item.eventType,
+            enabled: draft[item.eventType],
+          })),
+        });
+        const nextDraft = toDraft(records);
+        setSavedDraft(nextDraft);
+        setDraft(nextDraft);
+        requestNotificationPreferenceRefresh();
+      },
+    });
   }, [accessToken, draft, gatewayUrl]);
 
   const requestBrowserPermission = useCallback(async () => {

@@ -68,6 +68,35 @@ function formatTime(iso: string): string {
 
 // ─── 组件 ──────────────────────────────────────────────────────────────
 
+/**
+ * 快照面板动作的统一包装：置 loading → try → catch 归一文案 → finally 清 loading；
+ * 读写都受 `isMounted` 守卫（卸载后不再 setState，与原语义一致）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 3 处
+ * 这类动作会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runSnapshotActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string) => void;
+  isMounted: () => boolean;
+  /** catch 的兜底文案（`err.message` 优先）。 */
+  failureMessage: string;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } catch (err) {
+    if (ctx.isMounted()) {
+      ctx.setError(err instanceof Error ? err.message : ctx.failureMessage);
+    }
+  } finally {
+    if (ctx.isMounted()) {
+      ctx.setBusy(false);
+    }
+  }
+}
+
 export function SnapshotTimelinePanel({ sessionId, gatewayUrl }: SnapshotTimelinePanelProps) {
   const accessToken = useAuthStore((state) => state.accessToken);
   const [trees, setTrees] = useState<SnapshotTreeEntry[]>([]);
@@ -95,16 +124,18 @@ export function SnapshotTimelinePanel({ sessionId, gatewayUrl }: SnapshotTimelin
   // 加载时间线
   const loadTimeline = useCallback(async () => {
     if (!accessToken) return;
-    setLoading(true);
     setError(null);
-    try {
-      const result = await client.list(accessToken, sessionId);
-      if (mountedRef.current) setTrees(result.trees);
-    } catch (err) {
-      if (mountedRef.current) setError(err instanceof Error ? err.message : '加载快照时间线失败');
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
+    // try/catch/finally 下沉到模块级 `runSnapshotActionOnce`（见其注释）。
+    await runSnapshotActionOnce({
+      setBusy: setLoading,
+      setError,
+      isMounted: () => mountedRef.current,
+      failureMessage: '加载快照时间线失败',
+      run: async () => {
+        const result = await client.list(accessToken, sessionId);
+        if (mountedRef.current) setTrees(result.trees);
+      },
+    });
   }, [accessToken, sessionId, client]);
 
   useEffect(() => {
@@ -115,26 +146,28 @@ export function SnapshotTimelinePanel({ sessionId, gatewayUrl }: SnapshotTimelin
   const handlePreview = useCallback(
     async (treeHash: string) => {
       if (!accessToken) return;
-      setLoading(true);
-      try {
-        const result = await client.restoreToTree(accessToken, sessionId, {
-          treeHash,
-          mode: 'preview',
-        });
-        if (!mountedRef.current) return;
-        if (result.mode === 'preview') {
-          setPreview({
+      // try/catch/finally 下沉到模块级 `runSnapshotActionOnce`（见其注释）。
+      await runSnapshotActionOnce({
+        setBusy: setLoading,
+        setError,
+        isMounted: () => mountedRef.current,
+        failureMessage: '预览失败',
+        run: async () => {
+          const result = await client.restoreToTree(accessToken, sessionId, {
             treeHash,
-            files: result.files,
-            summary: result.summary,
+            mode: 'preview',
           });
-          setView('preview');
-        }
-      } catch (err) {
-        if (mountedRef.current) setError(err instanceof Error ? err.message : '预览失败');
-      } finally {
-        if (mountedRef.current) setLoading(false);
-      }
+          if (!mountedRef.current) return;
+          if (result.mode === 'preview') {
+            setPreview({
+              treeHash,
+              files: result.files,
+              summary: result.summary,
+            });
+            setView('preview');
+          }
+        },
+      });
     },
     [accessToken, sessionId, client],
   );
@@ -143,21 +176,23 @@ export function SnapshotTimelinePanel({ sessionId, gatewayUrl }: SnapshotTimelin
   const handleRestore = useCallback(
     async (treeHash: string) => {
       if (!accessToken) return;
-      setRestoring(true);
-      try {
-        await client.restoreToTree(accessToken, sessionId, {
-          treeHash,
-          mode: 'apply',
-        });
-        if (!mountedRef.current) return;
-        setView('timeline');
-        setPreview(null);
-        await loadTimeline();
-      } catch (err) {
-        if (mountedRef.current) setError(err instanceof Error ? err.message : '恢复失败');
-      } finally {
-        if (mountedRef.current) setRestoring(false);
-      }
+      // try/catch/finally 下沉到模块级 `runSnapshotActionOnce`（见其注释）。
+      await runSnapshotActionOnce({
+        setBusy: setRestoring,
+        setError,
+        isMounted: () => mountedRef.current,
+        failureMessage: '恢复失败',
+        run: async () => {
+          await client.restoreToTree(accessToken, sessionId, {
+            treeHash,
+            mode: 'apply',
+          });
+          if (!mountedRef.current) return;
+          setView('timeline');
+          setPreview(null);
+          await loadTimeline();
+        },
+      });
     },
     [accessToken, sessionId, client, loadTimeline],
   );

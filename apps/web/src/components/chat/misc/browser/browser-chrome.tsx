@@ -174,8 +174,12 @@ export function NavButton(props: {
   onClick: () => void;
   disabled?: boolean;
   icon: ReactNode;
+  /** 一次性旋转反馈：刷新这类「画面可能一模一样」的动作需要可见的点击确认。 */
+  spinning?: boolean;
+  /** 开关型按钮的激活态（例如渲染模式）。 */
+  active?: boolean;
 }) {
-  const { title, onClick, disabled, icon } = props;
+  const { title, onClick, disabled, icon, spinning, active } = props;
   return (
     <button
       type="button"
@@ -188,10 +192,10 @@ export function NavButton(props: {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        border: '1px solid var(--border-subtle)',
+        border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
         borderRadius: 6,
-        background: 'transparent',
-        color: disabled ? 'var(--text-4)' : 'var(--fg-default)',
+        background: active ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
+        color: disabled ? 'var(--text-4)' : active ? 'var(--accent)' : 'var(--fg-default)',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.5 : 1,
         flexShrink: 0,
@@ -208,6 +212,7 @@ export function NavButton(props: {
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
+        style={spinning ? { animation: 'spin 0.6s linear' } : undefined}
       >
         {icon}
       </svg>

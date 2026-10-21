@@ -15,6 +15,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { sanitizeRichHtml } from '../../utils/html/sanitize-rich-html.js';
+import { loadXlsxOnce } from '../../utils/lazy/lazy-assets.js';
 
 /**
  * 单表最多读取的行数。用来限制不可信工作簿的解析与渲染规模（配合下方
@@ -44,7 +45,8 @@ export default function XlsxPreview({ buffer }: XlsxPreviewProps) {
     setState({ status: 'loading' });
     void (async () => {
       try {
-        const XLSX = await import('xlsx');
+        // import() 只能在模块级：见 utils/lazy/lazy-assets.ts。
+        const XLSX = await loadXlsxOnce();
         // 依赖当前锁定在 xlsx@0.18.x：该版本对 CVE-2024-22363（ReDoS）与
         // CVE-2023-30533（原型污染）均未修复，而输入是工作区里可能来自第三方
         // 仓库的不可信文件。升级 SheetJS 需要评估破坏性变更，因此先用

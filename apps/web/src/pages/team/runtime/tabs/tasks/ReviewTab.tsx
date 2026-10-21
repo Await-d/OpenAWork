@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, type CSSProperties } from 'react';
 import type { AgentTeamsReviewCard, AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
 import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
@@ -245,16 +245,21 @@ export function ReviewTab({
                 <div
                   key={card.id}
                   className="team-card-tinted"
-                  style={{
-                    ...PANEL_STYLE,
-                    padding: '10px 12px',
-                    borderRadius: 10,
-                    display: 'grid',
-                    gap: 8,
-                    background: 'var(--bg-raised)',
-                    boxShadow: 'var(--shadow-md)',
-                    ['--tint' as string]: typeMeta.color,
-                  }}
+                  style={
+                    {
+                      ...PANEL_STYLE,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      display: 'grid',
+                      gap: 8,
+                      background: 'var(--bg-raised)',
+                      boxShadow: 'var(--shadow-md)',
+                      // CSS 变量不在 CSSProperties 已知属性里，断言必须放在整个对象上：
+                      // key 位置写 `as string` 会让 React Compiler 报
+                      // "TSAsExpression key in ObjectExpression" 并放弃优化本组件。
+                      '--tint': typeMeta.color,
+                    } as CSSProperties
+                  }
                 >
                   <div
                     style={{

@@ -1,6 +1,7 @@
 import {
   dedupePendingPermissionRequests,
   findFirstPendingPermission,
+  normalizePendingQuestionRequest,
   toPendingPermissionRequests,
 } from '@openAwork/web-client';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
@@ -41,7 +42,15 @@ function isPendingQuestionRequest(value: unknown): value is PendingQuestionReque
 }
 
 function toPendingQuestionRequests(value: unknown): PendingQuestionRequest[] {
-  return Array.isArray(value) ? value.filter((item) => isPendingQuestionRequest(item)) : [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  // 必须走 `normalizePendingQuestionRequest`：recovery 快照里的问题列表同样是网关
+  // 原始 JSON 透传，多选标记的字段名是 `multiSelect` 而前端模型读 `multiple`。
+  // 只做类型校验（旧实现）会把它丢掉，于是「刷新页面 / 切会话回来后多选又变回单选」。
+  return value
+    .map((item) => (isPendingQuestionRequest(item) ? normalizePendingQuestionRequest(item) : null))
+    .filter((item): item is PendingQuestionRequest => item !== null);
 }
 
 function getRecoverySessionRecord(

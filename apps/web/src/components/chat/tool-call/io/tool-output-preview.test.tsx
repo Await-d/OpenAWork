@@ -77,6 +77,31 @@ describe('extractQuestionAnswers', () => {
   it('支持 { output } 包裹', () => {
     expect(extractQuestionAnswers({ output: 'Q="A"' })?.[0]?.question).toBe('Q');
   });
+
+  it('多选答案优先按「逗号+空格」切分', () => {
+    // 网关用 `, ` 拼接多选答案。优先按它切分，可以避免「选项本身含逗号」被拆碎
+    // ——那种情况在界面上表现为「选了一项却显示成两三项」。
+    const items = extractQuestionAnswers('地点="北京, 上海, 广州"');
+    expect(items?.[0]?.answers).toEqual(['北京', '上海', '广州']);
+  });
+
+  it('含逗号但无空格时无法判定边界，保持旧行为按裸逗号切分', () => {
+    // 客户端只有这一串扁平文本，拿不到题目选项表，`a,b` 既可能是一个选项、也可能是
+    // 两个。这里刻意不退化成「整体不切」（那会破坏真正的多选），维持旧行为；
+    // 要彻底解决需要网关改为结构化返回。
+    expect(extractQuestionAnswers('命令="git commit -m a,b"')?.[0]?.answers).toEqual([
+      'git commit -m a',
+      'b',
+    ]);
+  });
+
+  it('没有「逗号+空格」时退回按裸逗号切分（兼容旧格式）', () => {
+    expect(extractQuestionAnswers('Q="A,B"')?.[0]?.answers).toEqual(['A', 'B']);
+  });
+
+  it('空白答案不产生空条目', () => {
+    expect(extractQuestionAnswers('Q=""')?.[0]?.answers).toEqual([]);
+  });
 });
 
 describe('ToolOutputPreview 路由', () => {
@@ -116,6 +141,46 @@ describe('ToolOutputPreview 路由', () => {
     const { container } = render(<ToolOutputPreview toolName="mystery_tool" output={[1, 2, 3]} />);
     expect(container.querySelector('.array-output')).not.toBeNull();
     expect(container.querySelector('.json-preview')).toBeNull();
+  });
+});
+
+describe('ToolOutputPreview — recovery 瘦身截断徽标', () => {
+  it('bash 输出里的截断标记被剥离，并渲染「内容已截断」徽标', () => {
+    const truncatedStdout = `构建完成\n…[truncated, 4096 chars omitted]`;
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="bash"
+        output={{ command: 'pnpm build', exitCode: 0, stdout: truncatedStdout, stderr: '' }}
+      />,
+    );
+    const badge = container.querySelector('.tool-output-truncated-badge');
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toContain('内容已截断');
+    expect(badge!.textContent).toContain('4096');
+    // 标记本身不能作为正文出现在终端面板里。
+    expect(container.textContent).not.toContain('chars omitted');
+    // 结构化信息仍需保留。
+    expect(container.textContent).toContain('exit 0');
+  });
+
+  it('未被截断的输出不渲染徽标', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="bash"
+        output={{ command: 'ls', exitCode: 0, stdout: 'file.txt', stderr: '' }}
+      />,
+    );
+    expect(container.querySelector('.tool-output-truncated-badge')).toBeNull();
+    expect(container.textContent).not.toContain('内容已截断');
+  });
+
+  it('裸字符串输出里的截断标记同样被识别', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="some_tool" output={'正文…[truncated, 12 chars omitted]'} />,
+    );
+    expect(container.querySelector('.tool-output-truncated-badge')).not.toBeNull();
+    expect(container.textContent).not.toContain('chars omitted');
+    expect(container.textContent).toContain('正文');
   });
 });
 

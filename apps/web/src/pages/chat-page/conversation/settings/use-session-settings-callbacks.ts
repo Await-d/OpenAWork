@@ -3,6 +3,7 @@ import type { DialogueMode } from '../../mode/dialogue-mode.js';
 import type { ReasoningEffort } from '../../../../components/conversation-runtime/messages/support.js';
 import type { ComposerPermissionMode } from '../../../../components/chat/composer/ComposerPermissionModeSelect.js';
 import type { ModelSelectionSource } from './model-selection-source.js';
+import { writeRefCurrent } from '../../../../utils/ref/ref-current.js';
 
 export interface SessionSettingsState {
   dialogueMode: DialogueMode;
@@ -13,7 +14,15 @@ export interface SessionSettingsState {
   reasoningEffort: ReasoningEffort;
   activeProviderId: string;
   activeModelId: string;
-  modelSelectionSource: ModelSelectionSource | null;
+  /**
+   * 模型选择来源的「最新值 ref」（`'defaults' | 'manual' | ...`）。
+   *
+   * 该 ref 只在 effect / 事件回调里改写；调用方若在渲染期读 `.current` 再传值，
+   * React Compiler 会判定为 "Cannot access refs during render" 并放弃优化整个
+   * ChatPage。改为传 ref、由 `buildSessionMetadata` 在被调用时（事件 / effect 内）
+   * 读取——`useCallback` 体内读 ref 不受该规则约束，读到的仍是最新值。
+   */
+  modelSelectionSourceRef: React.MutableRefObject<ModelSelectionSource | null>;
   manualAgentId: string;
   effectiveWorkingDirectory: string | null;
   sessionMetadataDirty: boolean;
@@ -59,7 +68,7 @@ export function useSessionSettingsCallbacks(
     reasoningEffort,
     activeProviderId,
     activeModelId,
-    modelSelectionSource,
+    modelSelectionSourceRef,
     manualAgentId,
     effectiveWorkingDirectory,
     sessionMetadataDirtyRef,
@@ -87,6 +96,7 @@ export function useSessionSettingsCallbacks(
       };
       if (activeProviderId) metadata['providerId'] = activeProviderId;
       if (activeModelId) metadata['modelId'] = activeModelId;
+      const modelSelectionSource = modelSelectionSourceRef.current;
       if (activeProviderId && activeModelId && modelSelectionSource) {
         metadata['modelSelectionSource'] = modelSelectionSource;
       }
@@ -96,7 +106,7 @@ export function useSessionSettingsCallbacks(
     },
     [
       activeModelId,
-      modelSelectionSource,
+      modelSelectionSourceRef,
       activeProviderId,
       dialogueMode,
       effectiveWorkingDirectory,
@@ -109,12 +119,14 @@ export function useSessionSettingsCallbacks(
   );
 
   const markSessionMetadataDirty = useCallback(() => {
-    sessionMetadataDirtyRef.current = true;
+    // `sessionMetadataDirtyRef` 是 hook 参数：直接写 .current 属「修改 hook 参数」，
+    // 会让本 hook 整体退出 React Compiler 优化（见 utils/ref/ref-current.ts）。
+    writeRefCurrent(sessionMetadataDirtyRef, true);
     setSessionMetadataDirty(true);
   }, [sessionMetadataDirtyRef, setSessionMetadataDirty]);
 
   const clearSessionMetadataDirty = useCallback(() => {
-    sessionMetadataDirtyRef.current = false;
+    writeRefCurrent(sessionMetadataDirtyRef, false);
     setSessionMetadataDirty(false);
   }, [sessionMetadataDirtyRef, setSessionMetadataDirty]);
 

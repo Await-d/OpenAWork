@@ -1,0 +1,336 @@
+/**
+ * 内置浏览器开始页（新标签页）。
+ *
+ * 配色 / 圆角 / 阴影一律走 E · Nebula token（`--accent`、`--bg-*`、`--fg-*`、
+ * `--radius-*`、`--shadow-*`），不引入任何硬编码色值；token 缺失时按 currentColor
+ * 混出兜底，保证在未加载应用级样式的宿主里也不会退化成纯文本。
+ */
+
+/*
+ * 布局中立：自行铺满**紧邻的容器**，不假定自己是一层浮层。
+ * - 内置浏览器内容区把它包在绝对定位的浮层里（见 `browser-content-area.tsx`）；
+ * - 预览宿主（停靠面板 / 编辑器工作区）把它当作普通 flex 子节点填满空态。
+ * 因此这里不能写 `position: absolute`——那些宿主里没有可对齐的定位祖先。
+ */
+.browser-start-page {
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  background-color: var(--bg-base, Canvas);
+  background-image:
+    radial-gradient(
+      circle at 50% -12%,
+      color-mix(in oklch, var(--accent, currentColor) 12%, transparent),
+      transparent 58%
+    ),
+    radial-gradient(
+      circle at 92% 112%,
+      color-mix(in oklch, var(--aux, currentColor) 8%, transparent),
+      transparent 56%
+    );
+}
+
+.browser-start-page__inner {
+  margin: auto;
+  width: 100%;
+  max-width: 560px;
+  padding: 28px 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: browser-start-page-in 180ms ease-out both;
+}
+
+@keyframes browser-start-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-start-page__inner {
+    animation: none;
+  }
+}
+
+/* ── 标题区 ──────────────────────────────────────────────────── */
+
+.browser-start-page__header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.browser-start-page__eyebrow {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--accent, currentColor) 32%, transparent);
+  background: color-mix(in oklch, var(--accent, currentColor) 12%, transparent);
+  color: var(--accent, currentColor);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.browser-start-page__title {
+  margin: 0;
+  color: var(--fg-strong, currentColor);
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.browser-start-page__subtitle {
+  margin: 0;
+  color: var(--fg-muted, color-mix(in oklch, currentColor 70%, transparent));
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+/* ── 搜索框 ──────────────────────────────────────────────────── */
+
+.browser-start-page__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 8px 0 14px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border-default, color-mix(in oklch, currentColor 22%, transparent));
+  background: var(--bg-overlay, transparent);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 20%));
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.browser-start-page__search:focus-within {
+  border-color: var(--accent-border, var(--accent, currentColor));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent, currentColor) 16%, transparent);
+}
+
+.browser-start-page__search-icon {
+  flex-shrink: 0;
+  color: var(--fg-subtle, color-mix(in oklch, currentColor 50%, transparent));
+}
+
+.browser-start-page__search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-strong, currentColor);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.browser-start-page__search input::placeholder {
+  color: var(--fg-subtle, color-mix(in oklch, currentColor 50%, transparent));
+}
+
+.browser-start-page__search button {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid
+    color-mix(in oklch, var(--accent, currentColor) 30%, var(--border-default, transparent));
+  background: color-mix(in oklch, var(--accent, currentColor) 14%, var(--bg-overlay, transparent));
+  color: var(--accent, currentColor);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.browser-start-page__search button:hover:not(:disabled) {
+  border-color: var(--accent-border, var(--accent, currentColor));
+  background: color-mix(in oklch, var(--accent, currentColor) 22%, var(--bg-overlay, transparent));
+}
+
+.browser-start-page__search button:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 2px;
+}
+
+.browser-start-page__search button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── 快速打开 ────────────────────────────────────────────────── */
+
+.browser-start-page__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.browser-start-page__section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.browser-start-page__section-title {
+  margin: 0;
+  color: var(--fg-default, currentColor);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.browser-start-page__section-count {
+  color: var(--fg-subtle, color-mix(in oklch, currentColor 50%, transparent));
+  font-size: 10px;
+}
+
+.browser-start-page__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 8px;
+}
+
+.browser-start-page__card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 11px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border-subtle, color-mix(in oklch, currentColor 14%, transparent));
+  background: var(--bg-overlay, transparent);
+  color: var(--fg-default, currentColor);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.browser-start-page__card:hover {
+  border-color: var(--border-emphasis, color-mix(in oklch, currentColor 32%, transparent));
+  background: color-mix(
+    in oklch,
+    var(--bg-overlay, transparent) 92%,
+    var(--accent, currentColor) 8%
+  );
+  transform: translateY(-1px);
+}
+
+.browser-start-page__card:active {
+  transform: none;
+}
+
+.browser-start-page__card:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 2px;
+}
+
+.browser-start-page__card-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+.browser-start-page__card-letter {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in oklch, var(--accent, currentColor) 26%, transparent);
+  background: color-mix(in oklch, var(--accent, currentColor) 14%, transparent);
+  color: var(--accent, currentColor);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.browser-start-page__card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.browser-start-page__card-title {
+  color: var(--fg-strong, currentColor);
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-start-page__card-url {
+  color: var(--fg-subtle, color-mix(in oklch, currentColor 50%, transparent));
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 空态与提示 ──────────────────────────────────────────────── */
+
+.browser-start-page__empty {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px dashed var(--border-default, color-mix(in oklch, currentColor 22%, transparent));
+  color: var(--fg-muted, color-mix(in oklch, currentColor 70%, transparent));
+  font-size: 11.5px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.browser-start-page__tip {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-subtle, color-mix(in oklch, currentColor 14%, transparent));
+  background: color-mix(
+    in oklch,
+    var(--bg-overlay, transparent) 94%,
+    var(--warning, currentColor) 6%
+  );
+  color: var(--fg-muted, color-mix(in oklch, currentColor 70%, transparent));
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+.browser-start-page__tip-label {
+  flex-shrink: 0;
+  padding-top: 1px;
+  color: var(--warning, currentColor);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}

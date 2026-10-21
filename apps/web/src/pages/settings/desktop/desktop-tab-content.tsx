@@ -135,6 +135,28 @@ const DANGER_BTN: React.CSSProperties = {
 };
 
 /** 仅在 Tauri 运行时渲染——非桌面端时显示一个降级提示。 */
+/**
+ * 桌面端设置动作的统一包装：`onStart` 置忙 → try → catch 交给 `onError` → `onFinally` 清忙。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 5 处
+ * 这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runDesktopSettingsActionOnce(ctx: {
+  onStart?: () => void;
+  onError: (error: unknown) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart?.();
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
 export function DesktopTabContent() {
   const webPort = useAuthStore((state) => state.webPort);
   const webAccessEnabled = useAuthStore((state) => state.webAccessEnabled);
@@ -181,17 +203,24 @@ export function DesktopTabContent() {
       setLoading(false);
       return;
     }
-    try {
-      const next = await tauriInvoke<DesktopSettingsView>('get_desktop_settings');
-      setView(next);
-      setError(null);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      logger.error('get_desktop_settings failed', err);
-    } finally {
-      setLoading(false);
-    }
+    // try/catch/finally 下沉到模块级 `runDesktopSettingsActionOnce`（见其注释）。
+    // 原始代码 try 前无 `setLoading(true)`，故 onStart 留空。
+    await runDesktopSettingsActionOnce({
+      onStart: () => {},
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        logger.error('get_desktop_settings failed', err);
+      },
+      onFinally: () => {
+        setLoading(false);
+      },
+      run: async () => {
+        const next = await tauriInvoke<DesktopSettingsView>('get_desktop_settings');
+        setView(next);
+        setError(null);
+      },
+    });
   }, []);
 
   useEffect(() => {
@@ -205,27 +234,34 @@ export function DesktopTabContent() {
       return;
     }
     const target = !view.autostartEnabled;
-    setBusy('autostart');
     setAutostartMsg(null);
-    try {
-      const updated = await tauriInvoke<DesktopSettingsView>('set_autostart_enabled', {
-        enabled: target,
-      });
-      setView(updated);
-      setError(null);
-      setAutostartMsg({
-        type: 'success',
-        text: target
-          ? '已成功启用开机自启。下次开机时将自动启动 OpenAWork。'
-          : '已关闭开机自启。下次开机不会自动启动。',
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAutostartMsg({ type: 'error', text: `操作失败：${msg}` });
-      logger.error('set_autostart_enabled failed', err);
-    } finally {
-      setBusy(null);
-    }
+    // try/catch/finally 下沉到模块级 `runDesktopSettingsActionOnce`（见其注释）。
+    await runDesktopSettingsActionOnce({
+      onStart: () => {
+        setBusy('autostart');
+      },
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setAutostartMsg({ type: 'error', text: `操作失败：${msg}` });
+        logger.error('set_autostart_enabled failed', err);
+      },
+      onFinally: () => {
+        setBusy(null);
+      },
+      run: async () => {
+        const updated = await tauriInvoke<DesktopSettingsView>('set_autostart_enabled', {
+          enabled: target,
+        });
+        setView(updated);
+        setError(null);
+        setAutostartMsg({
+          type: 'success',
+          text: target
+            ? '已成功启用开机自启。下次开机时将自动启动 OpenAWork。'
+            : '已关闭开机自启。下次开机不会自动启动。',
+        });
+      },
+    });
   }, [view]);
 
   /**
@@ -294,19 +330,24 @@ export function DesktopTabContent() {
       setError('桌面端设置仅支持在 Tauri 桌面端应用内修改。');
       return;
     }
-    try {
-      const picked = await tauriInvoke<string | null>('pick_folder');
-      if (!picked) {
-        return;
-      }
-      await runMigration(picked, 'migrate', '迁移');
-      setError(null);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(`迁移失败：${msg}`);
-      logger.error('migrate_data_root (pick) failed', err);
-      setBusy(null);
-    }
+    // try/catch 下沉到模块级 `runDesktopSettingsActionOnce`（见其注释）；原代码无 finally，
+    // 故不传 onFinally。
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(`迁移失败：${msg}`);
+        logger.error('migrate_data_root (pick) failed', err);
+        setBusy(null);
+      },
+      run: async () => {
+        const picked = await tauriInvoke<string | null>('pick_folder');
+        if (!picked) {
+          return;
+        }
+        await runMigration(picked, 'migrate', '迁移');
+        setError(null);
+      },
+    });
   }, [runMigration, view]);
 
   const resetToDefault = useCallback(async () => {
@@ -315,15 +356,19 @@ export function DesktopTabContent() {
       setError('桌面端设置仅支持在 Tauri 桌面端应用内修改。');
       return;
     }
-    try {
-      await runMigration(view.defaultDataRoot, 'reset', '重置');
-      setError(null);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(`重置失败：${msg}`);
-      logger.error('migrate_data_root (reset) failed', err);
-      setBusy(null);
-    }
+    // 同上：整段下沉到 `runDesktopSettingsActionOnce`（见其注释）。
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(`重置失败：${msg}`);
+        logger.error('migrate_data_root (reset) failed', err);
+        setBusy(null);
+      },
+      run: async () => {
+        await runMigration(view.defaultDataRoot, 'reset', '重置');
+        setError(null);
+      },
+    });
   }, [runMigration, view]);
 
   const openSettingsFile = useCallback(async () => {
@@ -331,11 +376,15 @@ export function DesktopTabContent() {
     if (!isTauri) {
       return;
     }
-    try {
-      await tauriInvoke('open_artifact_path', { path: view.effectiveDataRoot });
-    } catch (err) {
-      logger.error('open_artifact_path failed', err);
-    }
+    // 同上：整段下沉到 `runDesktopSettingsActionOnce`（见其注释）。
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        logger.error('open_artifact_path failed', err);
+      },
+      run: async () => {
+        await tauriInvoke('open_artifact_path', { path: view.effectiveDataRoot });
+      },
+    });
   }, [view]);
 
   /**
@@ -350,18 +399,27 @@ export function DesktopTabContent() {
       setPairingError('尚未配置网关地址');
       return;
     }
-    setPairingLoading(true);
-    setPairingError(null);
-    try {
-      const next = await getPairingQr(gatewayUrl, accessToken ?? undefined);
-      setPairingQr(next);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setPairingError(msg);
-      logger.error('getPairingQr failed', err);
-    } finally {
-      setPairingLoading(false);
-    }
+    // try/catch/finally 下沉到模块级 `runDesktopSettingsActionOnce`（见其注释）；
+    // `accessToken ?? undefined` 是值块，先取局部量再进包装。
+    const tokenOrUndefined = accessToken ?? undefined;
+    await runDesktopSettingsActionOnce({
+      onStart: () => {
+        setPairingLoading(true);
+        setPairingError(null);
+      },
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setPairingError(msg);
+        logger.error('getPairingQr failed', err);
+      },
+      onFinally: () => {
+        setPairingLoading(false);
+      },
+      run: async () => {
+        const next = await getPairingQr(gatewayUrl, tokenOrUndefined);
+        setPairingQr(next);
+      },
+    });
   }, [accessToken, gatewayUrl]);
 
   const togglePairingVisible = useCallback(() => {
@@ -377,11 +435,15 @@ export function DesktopTabContent() {
 
   const copyPairingPayload = useCallback(async () => {
     if (!pairingQr) return;
-    try {
-      await navigator.clipboard.writeText(pairingQr.qrData);
-    } catch (err) {
-      logger.error('copy pairing payload failed', err);
-    }
+    // 同上：整段下沉到 `runDesktopSettingsActionOnce`（见其注释）。
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        logger.error('copy pairing payload failed', err);
+      },
+      run: async () => {
+        await navigator.clipboard.writeText(pairingQr.qrData);
+      },
+    });
   }, [pairingQr]);
 
   // PIN 管理 state。交互设计：
@@ -417,57 +479,76 @@ export function DesktopTabContent() {
     }
     setPinBusy(true);
     setPinError(null);
-    try {
-      const updated = await tauriInvoke<DesktopSettingsView>('set_desktop_pin', {
-        pin: pinNew,
-        currentPin: pinMode === 'change' ? pinCurrent : null,
-      });
-      setView(updated);
-      setPinMode('idle');
-      resetPinForm();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setPinError(msg);
-      logger.error('set_desktop_pin failed', err);
-    } finally {
-      setPinBusy(false);
-    }
-  }, [pinBusy, pinConfirm, pinCurrent, pinMode, pinNew, resetPinForm]);
+    // try/catch/finally 下沉到模块级 `runDesktopSettingsActionOnce`（见其注释）；
+    // `currentPin` 三元是值块，先取局部量。
+    const currentPinValue = pinMode === 'change' ? pinCurrent : null;
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setPinError(msg);
+        logger.error('set_desktop_pin failed', err);
+      },
+      onFinally: () => {
+        setPinBusy(false);
+      },
+      run: async () => {
+        const updated = await tauriInvoke<DesktopSettingsView>('set_desktop_pin', {
+          pin: pinNew,
+          currentPin: currentPinValue,
+        });
+        setView(updated);
+        setPinMode('idle');
+        resetPinForm();
+      },
+    });
+  }, [pinBusy, pinConfirm, pinCurrent, pinMode, pinNew, resetPinForm, view]);
 
   const updateIdleLockMinutes = useCallback(async (next: number | null) => {
     if (!isTauri) return;
-    try {
-      const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
-        patch: { idleLockMinutes: next },
-      });
-      setView(updated);
-    } catch (err) {
-      logger.error('update_desktop_settings(idle_lock_minutes) failed', err);
-    }
+    // 同上：整段下沉到 `runDesktopSettingsActionOnce`（见其注释）。
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        logger.error('update_desktop_settings(idle_lock_minutes) failed', err);
+      },
+      run: async () => {
+        const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
+          patch: { idleLockMinutes: next },
+        });
+        setView(updated);
+      },
+    });
   }, []);
 
   const updateChannel = useCallback(async (next: 'preview' | 'stable') => {
     if (!isTauri) return;
-    try {
-      const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
-        patch: { updateChannel: next },
-      });
-      setView(updated);
-    } catch (err) {
-      logger.error('update_desktop_settings(update_channel) failed', err);
-    }
+    // 同上：整段下沉到 `runDesktopSettingsActionOnce`（见其注释）。
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        logger.error('update_desktop_settings(update_channel) failed', err);
+      },
+      run: async () => {
+        const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
+          patch: { updateChannel: next },
+        });
+        setView(updated);
+      },
+    });
   }, []);
 
   const updateIslandEnabled = useCallback(async (next: boolean) => {
     if (!isTauri) return;
-    try {
-      const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
-        patch: { islandEnabled: next },
-      });
-      setView(updated);
-    } catch (err) {
-      logger.error('update_desktop_settings(island_enabled) failed', err);
-    }
+    // 同上：整段下沉到 `runDesktopSettingsActionOnce`（见其注释）。
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        logger.error('update_desktop_settings(island_enabled) failed', err);
+      },
+      run: async () => {
+        const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
+          patch: { islandEnabled: next },
+        });
+        setView(updated);
+      },
+    });
   }, []);
 
   const handleSetCloseBehavior = useCallback(
@@ -477,17 +558,21 @@ export function DesktopTabContent() {
         setError('桌面端设置仅支持在 Tauri 桌面端应用内修改。');
         return;
       }
-      try {
-        const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
-          patch: { closeBehavior: next },
-        });
-        setView(updated);
-        setError(null);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(`设置关闭行为失败：${msg}`);
-        logger.error('update_desktop_settings(close_behavior) failed', err);
-      }
+      // try/catch 下沉到模块级 `runDesktopSettingsActionOnce`（见其注释）。
+      await runDesktopSettingsActionOnce({
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          setError(`设置关闭行为失败：${msg}`);
+          logger.error('update_desktop_settings(close_behavior) failed', err);
+        },
+        run: async () => {
+          const updated = await tauriInvoke<DesktopSettingsView>('update_desktop_settings', {
+            patch: { closeBehavior: next },
+          });
+          setView(updated);
+          setError(null);
+        },
+      });
     },
     [view],
   );
@@ -504,20 +589,25 @@ export function DesktopTabContent() {
     }
     setPinBusy(true);
     setPinError(null);
-    try {
-      const updated = await tauriInvoke<DesktopSettingsView>('remove_desktop_pin', {
-        currentPin: pinCurrent,
-      });
-      setView(updated);
-      setPinMode('idle');
-      resetPinForm();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setPinError(msg);
-      logger.error('remove_desktop_pin failed', err);
-    } finally {
-      setPinBusy(false);
-    }
+    // 同上：整段下沉到 `runDesktopSettingsActionOnce`（见其注释）。
+    await runDesktopSettingsActionOnce({
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setPinError(msg);
+        logger.error('remove_desktop_pin failed', err);
+      },
+      onFinally: () => {
+        setPinBusy(false);
+      },
+      run: async () => {
+        const updated = await tauriInvoke<DesktopSettingsView>('remove_desktop_pin', {
+          currentPin: pinCurrent,
+        });
+        setView(updated);
+        setPinMode('idle');
+        resetPinForm();
+      },
+    });
   }, [pinBusy, pinCurrent, resetPinForm]);
 
   // 托盘菜单「显示配对二维码」入口：App.tsx 接事件后 navigate '/settings/desktop?show=pairing'。

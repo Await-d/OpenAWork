@@ -95,6 +95,26 @@ function hasPendingPermissionNotification(notifications: readonly NotificationRe
   );
 }
 
+/**
+ * 悬浮权限卡片决策的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`，finally 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内的
+ * 值块（`...(cond ? … : {})`、三元）。语义逐字照搬。
+ */
+async function runFloatingPermissionDecisionOnce(ctx: {
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermissionPromptProps) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -320,47 +340,52 @@ export function FloatingPermissionPrompt({ onPendingChange }: FloatingPermission
       setReplyPendingDecision(decision);
       setReplyError(null);
 
-      try {
-        await replyPermissionRequest({
-          ...(decision !== 'once' && decision !== 'reject'
-            ? { alwaysOverride: scopeLevel ? [scopeLevel.pattern] : alwaysOverride }
-            : {}),
-          decision,
-          requestId,
-          gatewayUrl,
-          sessionId: targetSessionId,
-          token: accessToken,
-        });
-        updatePendingPermission(null);
-        // Refresh sessions
-        if (currentChatSessionId) {
-          requestCurrentSessionRefresh(currentChatSessionId);
-        }
-        requestCurrentSessionRefresh(targetSessionId);
-        requestSessionListRefresh();
-        window.setTimeout(() => {
-          if (currentChatSessionId) {
-            requestCurrentSessionRefresh(currentChatSessionId);
+      // try/catch/finally 下沉到模块级 `runFloatingPermissionDecisionOnce`（见其注释）。
+      await runFloatingPermissionDecisionOnce({
+        onError: (error) => {
+          const resolved = resolvePermissionReplyError(error);
+          if (resolved.dismissPrompt) {
+            updatePendingPermission(null);
+            toast(resolved.toastMessage ?? resolved.inlineMessage, 'warning', 4200);
+            if (currentChatSessionId) {
+              requestCurrentSessionRefresh(currentChatSessionId);
+            }
+            requestCurrentSessionRefresh(targetSessionId);
+            requestSessionListRefresh();
+          } else {
+            setReplyError(resolved.inlineMessage);
           }
-          requestCurrentSessionRefresh(targetSessionId);
-          requestSessionListRefresh();
-        }, 2000);
-      } catch (error) {
-        const resolved = resolvePermissionReplyError(error);
-        if (resolved.dismissPrompt) {
+        },
+        onFinally: () => {
+          setReplyPendingDecision(null);
+        },
+        run: async () => {
+          await replyPermissionRequest({
+            ...(decision !== 'once' && decision !== 'reject'
+              ? { alwaysOverride: scopeLevel ? [scopeLevel.pattern] : alwaysOverride }
+              : {}),
+            decision,
+            requestId,
+            gatewayUrl,
+            sessionId: targetSessionId,
+            token: accessToken,
+          });
           updatePendingPermission(null);
-          toast(resolved.toastMessage ?? resolved.inlineMessage, 'warning', 4200);
+          // Refresh sessions
           if (currentChatSessionId) {
             requestCurrentSessionRefresh(currentChatSessionId);
           }
           requestCurrentSessionRefresh(targetSessionId);
           requestSessionListRefresh();
-        } else {
-          setReplyError(resolved.inlineMessage);
-        }
-      } finally {
-        setReplyPendingDecision(null);
-      }
+          window.setTimeout(() => {
+            if (currentChatSessionId) {
+              requestCurrentSessionRefresh(currentChatSessionId);
+            }
+            requestCurrentSessionRefresh(targetSessionId);
+            requestSessionListRefresh();
+          }, 2000);
+        },
+      });
     },
     [accessToken, currentChatSessionId, gatewayUrl, updatePendingPermission],
   );

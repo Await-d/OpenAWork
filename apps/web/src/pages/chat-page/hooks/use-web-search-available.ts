@@ -35,6 +35,39 @@ type WebsearchPolicyPayload = {
   providers?: unknown[];
 };
 
+/**
+ * MCP 里是否有「搜索托管」服务启用；列表加载失败时保守认为可用（不影响默认行为）。
+ *
+ * 必须留在模块级：try 内的展开 / `??` / `.some(...)` 都是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+async function hasEnabledSearchMcpOnce(
+  client: ReturnType<typeof createSettingsClient>,
+  token: string,
+): Promise<boolean> {
+  try {
+    const mcpData = (await client.listMcpServers(token)) as McpServersPayload;
+    const allServers = [...(mcpData.servers ?? []), ...(mcpData.builtinServers ?? [])];
+    const searchServers = allServers.filter((server) => SEARCH_MANAGED_MCP_IDS.has(server.id));
+    return searchServers.some((server) => server.enabled !== false);
+  } catch {
+    return true;
+  }
+}
+
+/** 是否配置了 websearch provider；policy 加载失败时不改变判定（MCP 可用即可）。 */
+async function hasWebsearchProviderOnce(
+  client: ReturnType<typeof createSettingsClient>,
+  token: string,
+): Promise<boolean> {
+  try {
+    const policy = (await client.getWebsearch(token)) as WebsearchPolicyPayload;
+    return Array.isArray(policy.providers) && policy.providers.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function useWebSearchAvailable(
   input: UseWebSearchAvailableInput,
 ): UseWebSearchAvailableResult {
@@ -51,25 +84,9 @@ export function useWebSearchAvailable(
     const client = createSettingsClient(gatewayUrl);
 
     void (async () => {
-      let hasEnabledMcp = false;
-      let hasProvider = false;
-
-      try {
-        const mcpData = (await client.listMcpServers(token)) as McpServersPayload;
-        const allServers = [...(mcpData.servers ?? []), ...(mcpData.builtinServers ?? [])];
-        const searchServers = allServers.filter((server) => SEARCH_MANAGED_MCP_IDS.has(server.id));
-        hasEnabledMcp = searchServers.some((server) => server.enabled !== false);
-      } catch {
-        // 如果 MCP 列表加载失败，保守地认为可用（不影响默认行为）
-        hasEnabledMcp = true;
-      }
-
-      try {
-        const policy = (await client.getWebsearch(token)) as WebsearchPolicyPayload;
-        hasProvider = Array.isArray(policy.providers) && policy.providers.length > 0;
-      } catch {
-        // policy 加载失败不影响判定——MCP 可用即可
-      }
+      // 两处 try/catch 下沉到模块级助手（见其注释）。
+      const hasEnabledMcp = await hasEnabledSearchMcpOnce(client, token);
+      const hasProvider = await hasWebsearchProviderOnce(client, token);
 
       if (!cancelled) {
         setWebSearchAvailable(hasEnabledMcp || hasProvider);

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { SessionRunStateBar } from './session-run-state-bar.js';
 
@@ -96,5 +96,40 @@ describe('SessionRunStateBar', () => {
     );
 
     expect(screen.getByText('会话等待审批')).toBeTruthy();
+  });
+
+  it('staleRunning 时纯 running 也渲染状态条，并展示可点击的「重新同步」按钮', () => {
+    const onResync = vi.fn();
+    render(<SessionRunStateBar status="running" staleRunning onResync={onResync} />);
+
+    // 纯 running 本会被去重逻辑隐藏；staleRunning 是例外（状态条承载唯一恢复入口）。
+    expect(screen.getByTestId('chat-session-runtime-status')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '重新同步' }));
+    expect(onResync).toHaveBeenCalledTimes(1);
+  });
+
+  it('未 stale 或缺少回调时不展示「重新同步」按钮', () => {
+    const { unmount } = render(
+      <SessionRunStateBar
+        status="running"
+        onResync={() => undefined}
+        latestUpstreamSummary={{
+          stopReason: 'end_turn',
+          textDeltaCount: 1,
+          reasoningDeltaCount: 0,
+          toolCallDeltaCount: 0,
+          sawDone: true,
+          sawError: false,
+          stalled: false,
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '重新同步' })).toBeNull();
+    unmount();
+
+    render(<SessionRunStateBar status="running" staleRunning />);
+    expect(screen.queryByRole('button', { name: '重新同步' })).toBeNull();
   });
 });

@@ -178,6 +178,58 @@ function sortSharedSessions(sessions: SharedSessionSummaryRecord[]): SharedSessi
   );
 }
 
+/**
+ * 团队共享动作的统一包装：「置 busy / 清 error、feedback → try → catch 归一文案
+ * → finally 清 busy」，成功返回 `refreshAndResolveFeedback` 的结果、失败返回 false。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（catch 里的 `reason instanceof Error ? … : …` 同样触发），本 hook 有 5 处
+ * 这类 try，会让整个 hook 脱靶（实测）。语义逐字照搬：`run` 的全流程仍在 try 内，
+ * catch 只做文案归一 + 写 error/feedback，finally 无条件清 busy。
+ */
+async function runTeamSharedActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  setFeedback: (feedback: TeamActionFeedback | null) => void;
+  /** catch 的兜底文案（`reason.message` 优先）。 */
+  fallbackMessage: string;
+  run: () => Promise<boolean>;
+}): Promise<boolean> {
+  ctx.setBusy(true);
+  ctx.setError(null);
+  ctx.setFeedback(null);
+  try {
+    return await ctx.run();
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : ctx.fallbackMessage;
+    ctx.setError(message);
+    ctx.setFeedback({ message, tone: 'error' });
+    return false;
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
+/**
+ * 等待共享的刷新 Promise，并在结束后回收 `refreshPromiseRef`。
+ *
+ * 同 `runTeamSharedActionOnce`：try/finally 必须留在模块级。语义逐字照搬——先登记
+ * Promise，再 await，finally 里仅在「登记的还是这一个」时清空（避免清掉后来者）。
+ */
+async function awaitRefreshPromiseOnce(
+  refreshPromise: Promise<boolean>,
+  refreshPromiseRef: { current: Promise<boolean> | null },
+): Promise<boolean> {
+  refreshPromiseRef.current = refreshPromise;
+  try {
+    return await refreshPromise;
+  } finally {
+    if (refreshPromiseRef.current === refreshPromise) {
+      refreshPromiseRef.current = null;
+    }
+  }
+}
+
 export function useTeamCollaboration(
   teamWorkspaceId?: string,
   options: { enabled?: boolean; autoSelectSharedSession?: boolean } = {},
@@ -217,6 +269,12 @@ export function useTeamCollaboration(
   const selectedSharedSessionRef = useRef<SharedSessionDetailRecord | null>(null);
   const snapshotLoadedRef = useRef(false);
   const refreshPromiseRef = useRef<Promise<boolean> | null>(null);
+  // 「重试时再跑一次刷新」需要 refresh 自引用，而把 `void refresh()` 写在 refresh 自己的
+  // useCallback 体内会触发 React Compiler 的 "Cannot access variable before it is
+  // declared"（会让整个 hook 脱靶——修掉 try 族后暴露出来的真实问题）。按仓库既有惯例
+  // （use-page-readiness.ts 的 `onReadyRef`）改成「ref 持有最新实现 + effect 同步」：
+  // 重试回调读的是最新一次渲染的 refresh，语义等价（重试至少发生在一个宏任务之后）。
+  const refreshRef = useRef<(() => Promise<boolean>) | null>(null);
   const {
     clearRetry: clearRuntimeSnapshotRetry,
     resetRetry: resetRuntimeSnapshotRetry,
@@ -416,7 +474,8 @@ export function useTeamCollaboration(
       const nextRetryAtMs = scheduleRuntimeSnapshotRetry({
         computeDelay: computeTeamRuntimeSnapshotRetryDelay,
         onRetry: () => {
-          void refresh();
+          // 自引用改走 ref（见 refreshRef 声明处说明）。
+          void refreshRef.current?.();
         },
         retryable: result.retryable,
       });
@@ -431,14 +490,8 @@ export function useTeamCollaboration(
       return false;
     })();
 
-    refreshPromiseRef.current = refreshPromise;
-    try {
-      return await refreshPromise;
-    } finally {
-      if (refreshPromiseRef.current === refreshPromise) {
-        refreshPromiseRef.current = null;
-      }
-    }
+    // try/finally 下沉到模块级 `awaitRefreshPromiseOnce`（见其注释）。
+    return awaitRefreshPromiseOnce(refreshPromise, refreshPromiseRef);
   }, [
     accessToken,
     applySnapshot,
@@ -449,6 +502,12 @@ export function useTeamCollaboration(
     scheduleRuntimeSnapshotRetry,
     teamWorkspaceId,
   ]);
+
+  // 把最新实现同步进 refreshRef（刻意放在 effect 里，不在渲染期直接赋值）；
+  // 读取点只有重试回调，见 refreshRef 声明处说明。
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
   useEffect(() => {
     return () => {
@@ -582,20 +641,17 @@ export function useTeamCollaboration(
 
   const runMutation = useCallback(
     async (action: () => Promise<void>, successMessage: string) => {
-      setBusy(true);
-      setError(null);
-      setFeedback(null);
-      try {
-        await action();
-        return await refreshAndResolveFeedback(successMessage);
-      } catch (reason) {
-        const message = reason instanceof Error ? reason.message : '团队协作操作失败';
-        setError(message);
-        setFeedback({ message, tone: 'error' });
-        return false;
-      } finally {
-        setBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runTeamSharedActionOnce`（见其注释）。
+      return runTeamSharedActionOnce({
+        setBusy,
+        setError,
+        setFeedback,
+        fallbackMessage: '团队协作操作失败',
+        run: async () => {
+          await action();
+          return refreshAndResolveFeedback(successMessage);
+        },
+      });
     },
     [refreshAndResolveFeedback],
   );
@@ -831,26 +887,23 @@ export function useTeamCollaboration(
         return false;
       }
 
-      setSharedCommentBusy(true);
-      setSharedActionError(null);
-      setFeedback(null);
-      try {
-        const result = await client.createSharedSessionComment(accessToken, sessionId, input);
-        patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
-          appendSharedSessionCommentPreview(current, { comment: result.comment, sessionId }),
-        );
-        if (result.detail) {
-          commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
-        }
-        return await refreshAndResolveFeedback('已发送共享评论');
-      } catch (reason) {
-        const message = reason instanceof Error ? reason.message : '发送共享评论失败';
-        setSharedActionError(message);
-        setFeedback({ message, tone: 'error' });
-        return false;
-      } finally {
-        setSharedCommentBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runTeamSharedActionOnce`（见其注释）。
+      return runTeamSharedActionOnce({
+        setBusy: setSharedCommentBusy,
+        setError: setSharedActionError,
+        setFeedback,
+        fallbackMessage: '发送共享评论失败',
+        run: async () => {
+          const result = await client.createSharedSessionComment(accessToken, sessionId, input);
+          patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
+            appendSharedSessionCommentPreview(current, { comment: result.comment, sessionId }),
+          );
+          if (result.detail) {
+            commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
+          }
+          return refreshAndResolveFeedback('已发送共享评论');
+        },
+      });
     },
     [
       accessToken,
@@ -874,29 +927,26 @@ export function useTeamCollaboration(
         return false;
       }
 
-      setSharedOperateBusy(true);
-      setSharedActionError(null);
-      setFeedback(null);
-      try {
-        const result = await client.replySharedSessionPermission(accessToken, sessionId, input);
-        patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
-          applySharedSessionPermissionReplyPreview(current, {
-            requestId: input.requestId,
-            sessionId,
-          }),
-        );
-        if (result.detail) {
-          commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
-        }
-        return await refreshAndResolveFeedback('已处理共享权限请求');
-      } catch (reason) {
-        const message = reason instanceof Error ? reason.message : '处理共享权限请求失败';
-        setSharedActionError(message);
-        setFeedback({ message, tone: 'error' });
-        return false;
-      } finally {
-        setSharedOperateBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runTeamSharedActionOnce`（见其注释）。
+      return runTeamSharedActionOnce({
+        setBusy: setSharedOperateBusy,
+        setError: setSharedActionError,
+        setFeedback,
+        fallbackMessage: '处理共享权限请求失败',
+        run: async () => {
+          const result = await client.replySharedSessionPermission(accessToken, sessionId, input);
+          patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
+            applySharedSessionPermissionReplyPreview(current, {
+              requestId: input.requestId,
+              sessionId,
+            }),
+          );
+          if (result.detail) {
+            commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
+          }
+          return refreshAndResolveFeedback('已处理共享权限请求');
+        },
+      });
     },
     [
       accessToken,
@@ -916,29 +966,26 @@ export function useTeamCollaboration(
         return false;
       }
 
-      setSharedOperateBusy(true);
-      setSharedActionError(null);
-      setFeedback(null);
-      try {
-        const result = await client.replySharedSessionQuestion(accessToken, sessionId, input);
-        patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
-          applySharedSessionQuestionReplyPreview(current, {
-            requestId: input.requestId,
-            sessionId,
-          }),
-        );
-        if (result.detail) {
-          commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
-        }
-        return await refreshAndResolveFeedback('已处理共享提问');
-      } catch (reason) {
-        const message = reason instanceof Error ? reason.message : '处理共享提问失败';
-        setSharedActionError(message);
-        setFeedback({ message, tone: 'error' });
-        return false;
-      } finally {
-        setSharedOperateBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runTeamSharedActionOnce`（见其注释）。
+      return runTeamSharedActionOnce({
+        setBusy: setSharedOperateBusy,
+        setError: setSharedActionError,
+        setFeedback,
+        fallbackMessage: '处理共享提问失败',
+        run: async () => {
+          const result = await client.replySharedSessionQuestion(accessToken, sessionId, input);
+          patchSelectedSharedSessionIfCurrent(sessionId, (current) =>
+            applySharedSessionQuestionReplyPreview(current, {
+              requestId: input.requestId,
+              sessionId,
+            }),
+          );
+          if (result.detail) {
+            commitSelectedSharedSessionIfCurrent(sessionId, result.detail);
+          }
+          return refreshAndResolveFeedback('已处理共享提问');
+        },
+      });
     },
     [
       accessToken,

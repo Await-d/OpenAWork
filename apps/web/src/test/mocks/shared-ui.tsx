@@ -44,3 +44,20 @@ export {
   REASONING_EFFORT_RANK,
   sortSupportedReasoningEfforts,
 } from '../../../../../packages/shared-ui/src/models/model-reasoning-support.js';
+
+// 模型选择器的过滤 / 分组 / 排序是纯函数（只依赖 fuzzysort，无副作用）：转发真实实现，
+// 让模型弹层的接线测试覆盖真实的过滤与排序口径，而不是替身行为。
+export {
+  buildFilteredModelGroups,
+  compareModelsByName,
+} from '../../../../../packages/shared-ui/src/models/model-picker-search.js';
+export type {
+  ModelPickerGroup,
+  ModelPickerModel,
+  ModelPickerProvider,
+  SearchableModelOption,
+} from '../../../../../packages/shared-ui/src/models/model-picker-search.js';
+
+// 动态导入失败判定是纯函数（无副作用、无依赖）：转发真实实现，
+// 保证路由懒加载自愈与错误边界使用同一套判定口径。
+export { isDynamicImportFailure } from '../../../../../packages/shared-ui/src/feedback/dynamic-import-failure.js';

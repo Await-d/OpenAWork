@@ -18,11 +18,18 @@ export interface ApplyStreamToolProgressInput {
 export function applyStreamToolProgress(input: ApplyStreamToolProgressInput): void {
   const { event, liveToolCalls } = input;
   const previous = liveToolCalls.get(event.toolCallId);
+  // 迟到的 progress 不能把已结算的工具重新标回 streaming（断线重连 / 事件乱序）。
+  // paused 是待审批态，批准后的 progress 仍应恢复为 streaming。
+  if (previous?.status === 'completed' || previous?.status === 'error') {
+    return;
+  }
   liveToolCalls.set(event.toolCallId, {
     createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
     inputText: previous?.inputText ?? '',
     output: previous?.output,
     isError: previous?.isError,
+    ...(previous?.attachments ? { attachments: previous.attachments } : {}),
+    ...(previous?.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
     toolCallId: event.toolCallId,
     status: 'streaming',
     toolName: event.toolName,

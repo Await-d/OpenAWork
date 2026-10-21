@@ -1,16 +1,21 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
 import { useMemo, useState } from 'react';
-import { ImageLightbox } from '../../image/image-lightbox.js';
+import { ImageLightbox, type ImageLightboxItem } from '../../image/image-lightbox.js';
 import { ToolIcon } from '../display/tool-icon.js';
 import {
   GenerateImageFetchErrorCard,
   GenerateImageToolErrorCard,
 } from '../generate-image/error-cards.js';
 import { GenerateImageDisplay } from '../generate-image/image-display.js';
-import { parseGenerateImageOutput, parseImageAspectRatio } from '../generate-image/parse.js';
+import {
+  parseGenerateImageOutput,
+  parseImageAspectRatio,
+  resolveGenerateImageArtifactIds,
+} from '../generate-image/parse.js';
 import { GenerateImageResultMeta } from '../generate-image/result-meta.js';
 import { GenerateImageRunningPlaceholder } from '../generate-image/running-placeholder.js';
 import { useGenerateImageArtifact } from '../generate-image/use-artifact.js';
+import { useGenerateImageArtifactThumbnails } from '../generate-image/use-artifact-thumbnails.js';
 import { formatElapsed } from '../shared/format.js';
 
 /* ── GenerateImageToolCard ──
@@ -54,7 +59,33 @@ export function GenerateImageToolCard({
     result?.artifactId,
   );
 
+  // `n>1` 时首张仍走上面的 hook（保留既有加载 / 错误 / 重试语义），
+  // 其余几张单独取源，供缩略图条与图集灯箱使用。
+  const artifactIds = useMemo(() => resolveGenerateImageArtifactIds(result), [result]);
+  const extraArtifactIds = useMemo(() => artifactIds.slice(1), [artifactIds]);
+  const { thumbnails } = useGenerateImageArtifactThumbnails(extraArtifactIds);
+
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const totalCount = result?.count ?? artifactIds.length;
+
+  // 图集顺序：首张在前，其余按生成顺序；缩略图点击用它换算灯箱索引。
+  const lightboxItems = useMemo<ImageLightboxItem[]>(() => {
+    const alt = result?.title ?? '生成的图片';
+    return [
+      ...(imageSrc ? [{ src: imageSrc, alt, fileName }] : []),
+      ...thumbnails.map((thumbnail) => ({
+        src: thumbnail.imageSrc,
+        alt,
+        fileName: thumbnail.fileName,
+      })),
+    ];
+  }, [fileName, imageSrc, result?.title, thumbnails]);
+
+  const openLightbox = (index: number) => {
+    setLightboxIndex(index);
+    setLightboxOpen(true);
+  };
 
   return (
     <div
@@ -74,7 +105,9 @@ export function GenerateImageToolCard({
             ? '正在生成图片…'
             : visualState === 'failed'
               ? '图片生成失败'
-              : `生成图片 ${promptShort}`}
+              : totalCount > 1
+                ? `生成图片 ${promptShort}（${totalCount} 张）`
+                : `生成图片 ${promptShort}`}
         </span>
 
         {/* Param pills */}
@@ -147,14 +180,46 @@ export function GenerateImageToolCard({
               imageSrc={imageSrc}
               alt={result?.title ?? '生成的图片'}
               fileName={fileName}
-              onOpenLightbox={() => setLightboxOpen(true)}
+              onOpenLightbox={() => openLightbox(0)}
             />
           )}
 
-          {/* Lightbox */}
-          {imageSrc && (
+          {/* 多张产出的其余几张：缩略图条（点击进入图集对应位置） */}
+          {thumbnails.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxWidth: 480 }}>
+              {thumbnails.map((thumbnail, index) => (
+                <button
+                  key={thumbnail.artifactId}
+                  type="button"
+                  title={thumbnail.fileName}
+                  onClick={() => openLightbox(index + 1)}
+                  style={{
+                    padding: 0,
+                    width: 64,
+                    height: 64,
+                    borderRadius: 8,
+                    overflow: 'hidden',
+                    cursor: 'pointer',
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-overlay)',
+                  }}
+                >
+                  <img
+                    src={thumbnail.imageSrc}
+                    alt={thumbnail.fileName}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Lightbox（图集模式：首张 + 缩略图，键盘 ← / → 可切换） */}
+          {lightboxItems.length > 0 && (
             <ImageLightbox
-              src={imageSrc}
+              items={lightboxItems}
+              index={lightboxIndex}
+              onIndexChange={setLightboxIndex}
               open={lightboxOpen}
               onClose={() => setLightboxOpen(false)}
               alt={result?.title ?? '生成的图片'}

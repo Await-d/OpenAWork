@@ -100,9 +100,11 @@ export function ArtifactMarkers({
   let cursor = 0;
   let key = 0;
 
-  COMBINED_RE.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = COMBINED_RE.exec(text)) !== null) {
+  // 用 matchAll 而不是 `COMBINED_RE.lastIndex = 0; while (RE.exec(...))`：
+  // exec 会在渲染期改写模块级 regex 的 lastIndex，多个实例 / 并发渲染会互相覆盖，
+  // 导致漏匹配或死循环。matchAll 内部克隆 regex，不污染原对象（也顺带满足
+  // React Compiler 对渲染期副作用的要求）。
+  for (const match of text.matchAll(COMBINED_RE)) {
     const info = parseMarker(match);
     if (!info) continue;
     if (match.index > cursor) {

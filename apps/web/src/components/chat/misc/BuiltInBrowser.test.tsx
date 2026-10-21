@@ -100,11 +100,176 @@ afterEach(() => {
   useAuthStore.setState({ accessToken: null });
 });
 
+describe('BuiltInBrowser · 标签持久化', () => {
+  const WS = 'E:\\01.Projects\\OpenAWork';
+  const KEY = `openawork:builtin-browser:tabs:v1:${WS}`;
+
+  it('同步挂载时能恢复上次的标签与地址', () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        activeTabId: 'tab-keep',
+        tabs: [
+          {
+            id: 'tab-keep',
+            url: 'https://example.test/kept',
+            title: 'Kept',
+            history: ['https://example.test/kept'],
+            historyIndex: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<BuiltInBrowser workspacePath={WS} />);
+
+    expect(screen.getByDisplayValue('https://example.test/kept')).toBeTruthy();
+  });
+
+  /**
+   * 冷启动的关键回归：`workspacePath` 先是 `null`（工作目录尚未解析），随后才有值。
+   *
+   * 旧实现在 `null` 阶段按 `__default__` 读（读不到），于是新建一个空白标签，并在
+   * 真实路径到位后把这个占位标签**写进了真实 workspace 的 key**，把历史覆盖掉
+   * ——用户看到的就是「重启后什么都没有了」。
+   */
+  it('workspace 晚就绪时不会覆盖已有历史', () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        activeTabId: 'tab-a',
+        tabs: [
+          {
+            id: 'tab-a',
+            url: 'https://example.test/important',
+            title: 'Important',
+            history: ['https://example.test/important'],
+            historyIndex: 0,
+          },
+        ],
+      }),
+    );
+
+    const view = render(<BuiltInBrowser workspacePath={null} />);
+    // 就绪前不做任何落盘：真实 key 必须原封不动。
+    expect(JSON.parse(localStorage.getItem(KEY) ?? '{}').tabs?.[0]?.url).toBe(
+      'https://example.test/important',
+    );
+
+    view.rerender(<BuiltInBrowser workspacePath={WS} />);
+
+    // 就绪后读回真实历史，而不是占位空白标签。
+    expect(screen.getByDisplayValue('https://example.test/important')).toBeTruthy();
+    // 关键断言：历史没有被占位标签覆盖（覆盖发生在写盘，不在渲染）。
+    const persisted = JSON.parse(localStorage.getItem(KEY) ?? '{}') as {
+      tabs?: Array<{ url: string }>;
+    };
+    expect(persisted.tabs?.map((tab) => tab.url)).toEqual(['https://example.test/important']);
+  });
+
+  /**
+   * 早期版本把标签误写进 `__default__` 桶：就绪时迁移回来，避免历史彻底消失。
+   */
+  it('把误写进 __default__ 桶的历史迁移到真实 workspace', () => {
+    localStorage.setItem(
+      'openawork:builtin-browser:tabs:v1:__default__',
+      JSON.stringify({
+        version: 1,
+        activeTabId: 'tab-lost',
+        tabs: [
+          {
+            id: 'tab-lost',
+            url: 'https://example.test/lost',
+            title: 'Lost',
+            history: ['https://example.test/lost'],
+            historyIndex: 0,
+          },
+        ],
+      }),
+    );
+
+    render(<BuiltInBrowser workspacePath={WS} />);
+
+    expect(screen.getByDisplayValue('https://example.test/lost')).toBeTruthy();
+    // 迁移后临时桶被清掉，真实桶拿到数据。
+    expect(localStorage.getItem('openawork:builtin-browser:tabs:v1:__default__')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(KEY) ?? '{}').tabs?.[0]?.url).toBe(
+      'https://example.test/lost',
+    );
+  });
+
+  it('标签图标会被持久化', () => {
+    render(<BuiltInBrowser workspacePath={WS} previewUrl="http://localhost:5173" />);
+
+    const raw = localStorage.getItem(KEY);
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw ?? '{}') as { tabs?: Array<{ faviconUrl?: string }> };
+    expect(persisted.tabs?.[0]?.faviconUrl).toBe('http://localhost:5173/favicon.ico');
+  });
+});
+
 describe('BuiltInBrowser', () => {
-  it('以空白页作为新标签页，避免请求只提供 API 的网关根路径', () => {
+  it('新标签页展示开始页而不是白板，地址栏不再显示 about:blank', () => {
     render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
 
+    // 开始页铺在占位 iframe 之上；iframe 本身仍停在占位页，避免请求网关根路径。
+    expect(screen.getByTestId('browser-start-page')).toBeTruthy();
     expect(screen.getByTitle('内置浏览器').getAttribute('src')).toBe('about:blank');
+
+    const addressInput = screen.getByPlaceholderText('输入网址或搜索…') as HTMLInputElement;
+    expect(addressInput.value).toBe('');
+  });
+
+  /**
+   * 回归：关掉最后一个标签必须重建内容区。
+   *
+   * 旧实现只重置 `tabs`、没有同步 `activeTabId`，iframe 的 key（含 `activeTabId`）
+   * 不变 → 旧文档不会被卸载，页面里的音视频继续播——用户看到的就是
+   * 「标签都关了，内容还在放」。
+   */
+  it('关闭最后一个标签会重建内容区，旧页面被卸载', () => {
+    render(
+      <BuiltInBrowser
+        workspacePath="E:\\01.Projects\\OpenAWork"
+        previewUrl="http://localhost:5173"
+      />,
+    );
+
+    const before = screen.getByTitle('内置浏览器');
+    expect(before.getAttribute('src')).toBe('http://localhost:5173');
+
+    fireEvent.click(screen.getByLabelText('关闭标签'));
+
+    const after = screen.getByTitle('内置浏览器');
+    // key 变化 → 旧 iframe 节点销毁，页面里的播放随之停止。
+    expect(after).not.toBe(before);
+    expect(after.getAttribute('src')).toBe('about:blank');
+  });
+
+  it('页面内部导航写回地址栏（oaw-navigate）', () => {
+    render(
+      <BuiltInBrowser
+        workspacePath="E:\\01.Projects\\OpenAWork"
+        previewUrl="http://localhost:5173"
+      />,
+    );
+    expect(screen.getByDisplayValue('http://localhost:5173')).toBeTruthy();
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'oaw-navigate',
+            url: 'http://localhost:5173/about',
+            title: 'About',
+          },
+        }),
+      );
+    });
+
+    expect(screen.getByDisplayValue('http://localhost:5173/about')).toBeTruthy();
   });
 
   it('将已持久化的旧网关默认页迁移为空白页', () => {
@@ -129,7 +294,10 @@ describe('BuiltInBrowser', () => {
     render(<BuiltInBrowser workspacePath={workspacePath} />);
 
     expect(screen.getByTitle('内置浏览器').getAttribute('src')).toBe('about:blank');
-    expect(screen.getByDisplayValue('about:blank')).toBeTruthy();
+    expect(screen.getByTestId('browser-start-page')).toBeTruthy();
+
+    const addressInput = screen.getByPlaceholderText('输入网址或搜索…') as HTMLInputElement;
+    expect(addressInput.value).toBe('');
   });
 
   /**
@@ -228,6 +396,37 @@ describe('BuiltInBrowser', () => {
     } finally {
       window.removeEventListener(COMPOSER_INSERT_EVENT, listener);
     }
+  });
+
+  /**
+   * 回归：控制台关闭时的日志只在缓冲里累积，不参与渲染；打开面板后必须一次回填。
+   *
+   * 旧实现每批（80ms）都把日志写进 React 状态，页面加载时的 console/network 风暴
+   * 会持续重渲染整个浏览器 UI，与实时画面绘制、点击反馈抢主线程。
+   */
+  it('控制台关闭期间的日志仍会累积，打开后一次回填且不影响徽章计数', async () => {
+    render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
+
+    expect(screen.queryAllByTestId('console-entry')).toHaveLength(0);
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'oaw-console', level: 'error', message: 'closed-period-error' },
+        }),
+      );
+    });
+
+    // 关闭状态下只有轻量计数参与渲染：工具栏徽章仍要立刻反映出来。
+    await waitFor(() => {
+      expect(screen.getByTitle('发送 1 条错误/失败请求到输入框')).toBeTruthy();
+    });
+    expect(screen.queryAllByTestId('console-entry')).toHaveLength(0);
+
+    fireEvent.click(screen.getByTitle(consoleTitleOpen));
+
+    await waitFor(() => expect(screen.getAllByTestId('console-entry').length).toBe(1));
+    expect(screen.getByText(/closed-period-error/)).toBeTruthy();
   });
 
   it('实时预览不可用（browser-missing）时保持 iframe 路径并给出安装提示', async () => {
@@ -459,6 +658,114 @@ function installFakeLiveConnections(): FakeLiveConnectionEntry[] {
   );
   return connections;
 }
+
+/**
+ * 导航回报的标签归属。
+ *
+ * 真实缺陷：新建空白标签 → 切到前面已打开的标签（它已有地址）→ 再切回空白标签，
+ * 空白标签的地址被替换成前一个标签的。原因是网关的 `nav` 回报是延迟的（要等主文档
+ * 提交 + settle + 读 title），用户切标签之后才到达，而宿主无条件写回「当前激活标签」。
+ */
+describe('BuiltInBrowser · 导航回报归属', () => {
+  function liveReadyStatus(): BrowserLiveStatus {
+    return {
+      available: true,
+      engine: 'chromium',
+      screencast: true,
+      reason: 'ready',
+      installable: false,
+      source: 'managed',
+      expectedRevision: '1208',
+      executablePath: '/usr/bin/chromium',
+    };
+  }
+
+  async function mountLiveBrowser(): Promise<FakeLiveConnectionEntry> {
+    liveMocks.getStatus.mockResolvedValue(liveReadyStatus());
+    useAuthStore.setState({ accessToken: 'live-token', gatewayUrl: 'http://gateway.test' });
+    const connections = installFakeLiveConnections();
+
+    render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
+
+    await waitFor(() => expect(connections.length).toBe(1));
+    const entry = connections[0];
+    if (!entry) throw new Error('未建立实时连接');
+    act(() => {
+      entry.callbacks.onOpen?.();
+      entry.callbacks.onEnvelope({
+        ch: 'hello',
+        seq: 0,
+        ts: 1,
+        payload: { available: true, engine: 'chromium', screencast: true },
+      });
+    });
+    return entry;
+  }
+
+  /**
+   * 打开第二个标签并导航到给定地址（模拟「前面已打开的标签」）。
+   *
+   * 地址栏用 placeholder 定位：预览里还有一个承载 IME 的隐藏 textarea，
+   * 两者都是 `textbox` 角色，按角色查询会命中多个。
+   */
+  function openTabWithUrl(url: string): void {
+    fireEvent.click(screen.getByTitle('新建标签页'));
+    const input = screen.getByPlaceholderText('输入网址或搜索…');
+    fireEvent.change(input, { target: { value: url } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+  }
+
+  it('切回空白标签后，上个标签迟到的 nav 不会覆盖它', async () => {
+    const entry = await mountLiveBrowser();
+
+    // 1) 新建标签 → 导航到 app 并让远端确认。
+    openTabWithUrl('https://example.test/app');
+    act(() => {
+      entry.callbacks.onEnvelope({
+        ch: 'nav',
+        seq: 1,
+        ts: 2,
+        payload: { url: 'https://example.test/app', title: 'App', generation: 1 },
+      });
+    });
+    expect(screen.getByDisplayValue('https://example.test/app')).toBeTruthy();
+
+    // 2) 切回第一个（空白）标签：地址栏留空，开始页重新出现。
+    const tabs = screen.getAllByRole('tab');
+    act(() => {
+      fireEvent.click(tabs[0] as HTMLElement);
+    });
+    expect(screen.getByTestId('browser-start-page')).toBeTruthy();
+
+    // 3) 上个标签的 nav 迟到：地址是 app，但当前标签是空白页 —— 必须丢弃。
+    act(() => {
+      entry.callbacks.onEnvelope({
+        ch: 'nav',
+        seq: 2,
+        ts: 3,
+        payload: { url: 'https://example.test/app', title: 'App', generation: 1 },
+      });
+    });
+
+    expect(screen.getByTestId('browser-start-page')).toBeTruthy();
+  });
+
+  it('空白标签自己的回报仍然会写回（不能过度过滤）', async () => {
+    const entry = await mountLiveBrowser();
+
+    act(() => {
+      entry.callbacks.onEnvelope({
+        ch: 'nav',
+        seq: 1,
+        ts: 2,
+        payload: { url: 'about:blank', title: '空白页标题', generation: 1 },
+      });
+    });
+
+    // 地址没变时写回只更新标题：标签栏出现新标题即证明这条回报被接受。
+    expect(screen.getByText('空白页标题')).toBeTruthy();
+  });
+});
 
 /**
  * Tauri 原生窗口的采集链路。

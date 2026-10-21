@@ -186,6 +186,33 @@ describe('BlockToolCall 展开行为', () => {
     expect(terminal?.textContent).toContain('PASS  1 test');
   });
 
+  it('审批恢复后 status=running 时实时输出覆盖 paused 阶段的占位 output', () => {
+    const { container } = render(
+      <BlockToolCall
+        toolName="bash"
+        input={{
+          command: 'bun test',
+          _batchProgress: {
+            completedCount: 0,
+            totalCount: 1,
+            subTools: [
+              { index: 0, tool: 'bash', status: 'running', partialOutput: 'RESUMED OUTPUT' },
+            ],
+          },
+        }}
+        output={{ command: 'bun test', output: '等待审批' }}
+        status="running"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const terminal = container.querySelector('[data-testid="bash-terminal"]');
+    expect(terminal?.getAttribute('data-running')).toBe('true');
+    expect(terminal?.textContent).toContain('RESUMED OUTPUT');
+    expect(terminal?.textContent).not.toContain('等待审批');
+  });
+
   it('bash 结算后忽略残留 _batchProgress，渲染最终 output', () => {
     const { container } = render(
       <BlockToolCall

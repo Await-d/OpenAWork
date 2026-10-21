@@ -33,6 +33,7 @@ import {
 } from '../../../stores/team/team-events.js';
 import { nextTeamEventWatermark, shouldReloadForTeamEvents } from './team-event-reload-policy.js';
 import { clearRollbackScope } from '../../../stores/team/rollback-tombstones.js';
+import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 import {
   computeTeamConversationRecoveryRetryDelay,
   formatTeamConversationRecoveryLoadError,
@@ -100,6 +101,55 @@ export interface UseTeamConversationSnapshotResult {
   loadEarlierMessagesWithAnchor: () => Promise<void>;
 }
 
+/**
+ * 解析会话 `metadata_json`；失败或非对象时返回 null（原语义：catch 分支与「无
+ * metadataJson」分支都会把 metadata 置 null）。
+ *
+ * 必须留在模块级：try 内的 `&&` / 三元是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+function parseSessionMetadataOnce(metadataJson: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(metadataJson) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从子会话的 `metadata_json` 解析 teamRoleInstance 的展示名与 personaKey；解析失败返回双 null。
+ *
+ * 必须留在模块级：try 内的 `&&` / `!Array.isArray(...)` / `typeof` 都是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+function parseChildRoleInstance(metadataJson: string | null | undefined): {
+  displayName: string | null;
+  personaKey: string | null;
+} {
+  if (!metadataJson) {
+    return { displayName: null, personaKey: null };
+  }
+  try {
+    const parsed = JSON.parse(metadataJson) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const metadata = parsed as Record<string, unknown>;
+      const roleInstance = metadata['teamRoleInstance'] as Record<string, unknown> | undefined;
+      if (roleInstance) {
+        return {
+          displayName:
+            typeof roleInstance['displayName'] === 'string' ? roleInstance['displayName'] : null,
+          personaKey:
+            typeof roleInstance['personaKey'] === 'string' ? roleInstance['personaKey'] : null,
+        };
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return { displayName: null, personaKey: null };
+}
+
 export function useTeamConversationSnapshot(
   options: UseTeamConversationSnapshotOptions,
 ): UseTeamConversationSnapshotResult {
@@ -156,7 +206,11 @@ export function useTeamConversationSnapshot(
   );
   const latestSessionIdRef = useRef<string | null>(sessionId);
   const previousSessionIdRef = useRef<string | null>(sessionId);
-  latestSessionIdRef.current = sessionId;
+  // 渲染期直接写 ref 会被编译器判为 "Cannot update ref during render" 并放弃优化整个 hook，
+  // 故改为 effect 同步；读取点都在事件 / 异步回调里（晚于提交）。
+  useEffect(() => {
+    latestSessionIdRef.current = sessionId;
+  }, [sessionId]);
   const teamEventsRecoveredAt = useTeamEventsConnectionStore((state) => state.lastRecoveredAt);
   const { clearRetry, resetRetry, scheduleRetry } = useRecoverableRetryController();
 
@@ -207,6 +261,11 @@ export function useTeamConversationSnapshot(
     requestedTurnLimitRef.current = TEAM_CONVERSATION_INITIAL_TURN_LIMIT;
     setServerTotalTurnCount(null);
   }, [sessionId]);
+
+  // `reload` 内部会递归触发自己；直接写 `void reload()` 会被编译器判为
+  // "Cannot access variable before it is declared" 并放弃优化整个 hook，故走 ref 间接调用
+  // （ref 在下面的 effect 里同步）。
+  const reloadRef = useRef<(() => Promise<void>) | null>(null);
 
   const reload = useCallback(async (): Promise<void> => {
     if (reloadPromiseRef.current?.sessionId === sessionId) {
@@ -271,7 +330,8 @@ export function useTeamConversationSnapshot(
         const nextRetryAtMs = scheduleRetry({
           computeDelay: computeTeamConversationRecoveryRetryDelay,
           onRetry: () => {
-            void reload();
+            // 经 ref 间接调用：`reload` 不能在自己的函数体内引用自己（见上方声明处注释）。
+            void reloadRef.current?.();
           },
           retryable: result.retryable,
         });
@@ -300,28 +360,8 @@ export function useTeamConversationSnapshot(
       setChildSessions(
         recovery.children.map((child) => {
           // 从 child.metadata_json 中解析 teamRoleInstance 信息
-          let displayName: string | null = null;
-          let personaKey: string | null = null;
-          if (child.metadata_json) {
-            try {
-              const parsed = JSON.parse(child.metadata_json) as unknown;
-              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                const metadata = parsed as Record<string, unknown>;
-                const roleInstance = metadata['teamRoleInstance'] as
-                  Record<string, unknown> | undefined;
-                if (roleInstance) {
-                  if (typeof roleInstance['displayName'] === 'string') {
-                    displayName = roleInstance['displayName'];
-                  }
-                  if (typeof roleInstance['personaKey'] === 'string') {
-                    personaKey = roleInstance['personaKey'];
-                  }
-                }
-              }
-            } catch {
-              // ignore parse errors
-            }
-          }
+          // 解析（含 try/catch 与值块）下沉到模块级 `parseChildRoleInstance`。
+          const { displayName, personaKey } = parseChildRoleInstance(child.metadata_json);
           return {
             id: child.id,
             role_layer: typeof child.role_layer === 'string' ? child.role_layer : null,
@@ -363,35 +403,24 @@ export function useTeamConversationSnapshot(
         typeof sessionRow?.['metadata_json'] === 'string'
           ? (sessionRow['metadata_json'] as string)
           : null;
-      if (metadataJson) {
-        try {
-          const parsed = JSON.parse(metadataJson) as unknown;
-          const parsedMetadata =
-            parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
-          setSessionMetadata(parsedMetadata);
-          if (parsedMetadata) {
-            const metadataProviderId =
-              typeof parsedMetadata['providerId'] === 'string' ? parsedMetadata['providerId'] : '';
-            const metadataModelId =
-              typeof parsedMetadata['modelId'] === 'string' ? parsedMetadata['modelId'] : '';
-            if (metadataProviderId && metadataModelId) {
-              setActiveProviderId(metadataProviderId);
-              setActiveModelId(metadataModelId);
-            }
-            const metadataParentSessionId =
-              typeof parsedMetadata['parentSessionId'] === 'string'
-                ? (parsedMetadata['parentSessionId'] as string)
-                : null;
-            setResolvedParentSessionId(recoveryParentSessionId ?? metadataParentSessionId);
-          } else {
-            setResolvedParentSessionId(recoveryParentSessionId);
-          }
-        } catch {
-          setSessionMetadata(null);
-          setResolvedParentSessionId(recoveryParentSessionId);
+      // 解析（含 try/catch 与值块）下沉到模块级 `parseSessionMetadataOnce`。
+      const parsedMetadata = metadataJson ? parseSessionMetadataOnce(metadataJson) : null;
+      setSessionMetadata(parsedMetadata);
+      if (parsedMetadata) {
+        const metadataProviderId =
+          typeof parsedMetadata['providerId'] === 'string' ? parsedMetadata['providerId'] : '';
+        const metadataModelId =
+          typeof parsedMetadata['modelId'] === 'string' ? parsedMetadata['modelId'] : '';
+        if (metadataProviderId && metadataModelId) {
+          setActiveProviderId(metadataProviderId);
+          setActiveModelId(metadataModelId);
         }
+        const metadataParentSessionId =
+          typeof parsedMetadata['parentSessionId'] === 'string'
+            ? (parsedMetadata['parentSessionId'] as string)
+            : null;
+        setResolvedParentSessionId(recoveryParentSessionId ?? metadataParentSessionId);
       } else {
-        setSessionMetadata(null);
         setResolvedParentSessionId(recoveryParentSessionId);
       }
 
@@ -406,19 +435,33 @@ export function useTeamConversationSnapshot(
     })();
 
     reloadPromiseRef.current = { promise: reloadPromise, sessionId: reloadSessionId };
-    try {
-      await reloadPromise;
-    } finally {
+    // 用 `promise.finally()` 取代 try/finally：编译器不支持 finally 子句（会让整个 hook
+    // 脱靶）。语义一致——无论成功 / 失败都在结算后清引用，异常照旧向上抛。
+    await reloadPromise.finally(() => {
       if (reloadPromiseRef.current?.promise === reloadPromise) {
         reloadPromiseRef.current = null;
       }
-    }
-  }, [clearRetry, enabled, gatewayUrl, resetRetry, scheduleRetry, sessionId, token]);
+    });
+    // 补齐编译器推断出的依赖（setter / ref，见 apps/web/AGENTS.md ②）。
+  }, [
+    clearRetry,
+    enabled,
+    gatewayUrl,
+    resetRetry,
+    scheduleRetry,
+    sessionId,
+    setActiveModelId,
+    setActiveProviderId,
+    streamingRef,
+    token,
+  ]);
 
   // Keep a ref to reload for use in effects that need to trigger a refresh
   // without adding it to their dependency array (avoids re-registration churn).
-  const reloadRef = useRef(reload);
-  reloadRef.current = reload;
+  // 渲染期直接写 ref 会被编译器判为 "Cannot update ref during render"，故改为 effect 同步。
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
 
   // ─── 加载更早消息（滚动到顶部触发 + 手动按钮） ───────────────────
   // 加载前记录滚动位置，加载后恢复 —— 防止新消息插入顶部后视口跳到底部
@@ -478,7 +521,9 @@ export function useTeamConversationSnapshot(
     setSnapshotError(null);
     // 重置流式状态：session 切换时旧 attach/stream 连接已由 useGatewayClient
     // 内部 closeExistingTransports 关闭，这里同步清理本地 streaming 标记。
-    streamingRef.current = false;
+    // streamingRef 由调用方创建后作为参数传入（跨 hook 边界的共享 ref 池），直接写 .current
+    // 会被编译器判为「修改函数返回值」；写入统一走收敛函数（见 utils/ref/ref-current.ts）。
+    writeRefCurrent(streamingRef, false);
     setStreaming(false);
     setStoppingStream(false);
     setStreamBuffer('');

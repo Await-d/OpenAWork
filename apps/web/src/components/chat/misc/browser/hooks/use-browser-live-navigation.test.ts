@@ -88,20 +88,41 @@ describe('useBrowserLiveNavigation', () => {
     });
   });
 
-  it('about:blank 等非 http(s) 地址不下发导航', () => {
+  it('占位页同样下发导航（否则远端停在旧文档上）', () => {
     const session = makeSession();
-    const view = renderNavigation({
+    renderNavigation({
       session,
       enabled: true,
       url: 'about:blank',
       refreshKey: 0,
     });
 
-    expect(session.send).not.toHaveBeenCalled();
+    expect(session.send).toHaveBeenCalledWith({
+      ch: 'control',
+      action: 'navigate',
+      url: 'about:blank',
+    });
+  });
 
-    // 占位页不导航，但地址一旦变成可导航值必须补发。
-    view.rerender({ session, enabled: true, url: 'http://localhost:5173', refreshKey: 0 });
+  it('从真实页面回落到占位页时显式导航到空白页', () => {
+    const session = makeSession();
+    const view = renderNavigation({
+      session,
+      enabled: true,
+      url: 'https://example.test/app',
+      refreshKey: 0,
+    });
     expect(session.send).toHaveBeenCalledTimes(1);
+
+    // 关掉最后一个标签：远端必须离开旧页面，不能留在那里继续被采集。
+    view.rerender({ session, enabled: true, url: 'about:blank', refreshKey: 0 });
+
+    expect(session.send).toHaveBeenCalledTimes(2);
+    expect(session.send).toHaveBeenLastCalledWith({
+      ch: 'control',
+      action: 'navigate',
+      url: 'about:blank',
+    });
   });
 
   it('刷新信号变化触发 reload，未变化不重复下发', () => {

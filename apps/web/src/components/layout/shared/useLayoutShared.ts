@@ -158,6 +158,26 @@ export interface LayoutSharedState {
   readonly layoutModeKey: string;
 }
 
+/**
+ * 待处理问题回复的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`，finally 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内的
+ * 值块（`...(cond ? … : {})`、三元）。语义逐字照搬。
+ */
+async function runPendingQuestionReplyOnce(ctx: {
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useLayoutShared(
   theme: 'dark' | 'light',
   onToggleTheme?: () => void,
@@ -388,32 +408,41 @@ export function useLayoutShared(
       const currentSessionId = currentChatSessionId;
       const targetSessionId = pendingQuestion.sessionId;
 
-      try {
-        setPendingQuestionReplyStatus(status);
-        setPendingQuestionReplyError(null);
-        const replyResult = await createQuestionsClient(gatewayUrl).reply(
-          accessToken,
-          pendingQuestion.sessionId,
-          payload,
-        );
-        // 澄清模式共识确认 / 计划批准会触发服务端自动切换对话模式。
-        publishDialogueModeSwitchFromReply({
-          ...(replyResult.dialogueMode ? { dialogueMode: replyResult.dialogueMode } : {}),
-          sessionId: pendingQuestion.sessionId,
-        });
-        applyPendingQuestion(null);
-        if (currentSessionId) {
-          requestCurrentSessionRefresh(currentSessionId);
-        }
-        if (targetSessionId !== currentSessionId) {
-          requestCurrentSessionRefresh(targetSessionId);
-        }
-        requestSessionListRefresh();
-      } catch (error) {
-        const resolved = resolveQuestionReplyError(error);
-        if (resolved.dismissPrompt) {
+      // try/catch/finally 下沉到模块级 `runPendingQuestionReplyOnce`（见其注释）。
+      await runPendingQuestionReplyOnce({
+        onError: (error) => {
+          const resolved = resolveQuestionReplyError(error);
+          if (resolved.dismissPrompt) {
+            applyPendingQuestion(null);
+            toast(resolved.toastMessage ?? resolved.inlineMessage, 'warning', 4200);
+            if (currentSessionId) {
+              requestCurrentSessionRefresh(currentSessionId);
+            }
+            if (targetSessionId !== currentSessionId) {
+              requestCurrentSessionRefresh(targetSessionId);
+            }
+            requestSessionListRefresh();
+          } else {
+            setPendingQuestionReplyError(resolved.inlineMessage);
+          }
+        },
+        onFinally: () => {
+          setPendingQuestionReplyStatus(null);
+        },
+        run: async () => {
+          setPendingQuestionReplyStatus(status);
+          setPendingQuestionReplyError(null);
+          const replyResult = await createQuestionsClient(gatewayUrl).reply(
+            accessToken,
+            pendingQuestion.sessionId,
+            payload,
+          );
+          // 澄清模式共识确认 / 计划批准会触发服务端自动切换对话模式。
+          publishDialogueModeSwitchFromReply({
+            ...(replyResult.dialogueMode ? { dialogueMode: replyResult.dialogueMode } : {}),
+            sessionId: pendingQuestion.sessionId,
+          });
           applyPendingQuestion(null);
-          toast(resolved.toastMessage ?? resolved.inlineMessage, 'warning', 4200);
           if (currentSessionId) {
             requestCurrentSessionRefresh(currentSessionId);
           }
@@ -421,12 +450,8 @@ export function useLayoutShared(
             requestCurrentSessionRefresh(targetSessionId);
           }
           requestSessionListRefresh();
-        } else {
-          setPendingQuestionReplyError(resolved.inlineMessage);
-        }
-      } finally {
-        setPendingQuestionReplyStatus(null);
-      }
+        },
+      });
     },
     [
       accessToken,

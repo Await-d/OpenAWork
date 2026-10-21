@@ -159,6 +159,8 @@ export function ModelPicker({
   activeModelId,
   onSelect,
   onClose,
+  onRefresh,
+  refreshing = false,
 }: {
   anchorRef: React.RefObject<HTMLButtonElement | null>;
   providers: ModelPickerProvider[];
@@ -166,6 +168,16 @@ export function ModelPicker({
   activeModelId: string;
   onSelect: (providerId: string, modelId: string) => Promise<void> | void;
   onClose: () => void;
+  /**
+   * 重新拉取 Provider / 模型目录。
+   *
+   * 弹层拿到的 `providers` 是宿主页面进页面时抓取的快照：用户在设置页增删模型、
+   * 启停 Provider 或切换模型开关后，如果不重载整页，这里始终显示旧目录。提供该
+   * 回调后弹层会渲染一个「刷新」按钮，让用户当场把目录拉成最新。
+   */
+  onRefresh?: () => void | Promise<void>;
+  /** 目录刷新进行中：按钮转为旋转态并禁止重复触发。 */
+  refreshing?: boolean;
 }) {
   const [search, setSearch] = React.useState('');
   const groups = React.useMemo(
@@ -397,6 +409,47 @@ export function ModelPicker({
           .chat-model-picker-scroll::-webkit-scrollbar-thumb:hover {
             background: var(--scrollbar-thumb-hover);
           }
+          .chat-model-picker-refresh {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border-radius: 6px;
+            border: 1px solid var(--border-subtle);
+            background: transparent;
+            color: var(--fg-muted);
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+          }
+          .chat-model-picker-refresh:hover:not(:disabled) {
+            color: var(--accent);
+            background: color-mix(in oklch, var(--accent) 10%, transparent);
+            border-color: color-mix(in oklch, var(--accent) 35%, var(--border-subtle));
+          }
+          .chat-model-picker-refresh:active:not(:disabled) {
+            background: color-mix(in oklch, var(--accent) 18%, transparent);
+          }
+          .chat-model-picker-refresh:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+          }
+          .chat-model-picker-refresh:disabled {
+            cursor: default;
+            opacity: 0.7;
+          }
+          .chat-model-picker-refresh[data-refreshing='true'] svg {
+            animation: chat-model-picker-refresh-spin 700ms linear infinite;
+          }
+          @keyframes chat-model-picker-refresh-spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .chat-model-picker-refresh[data-refreshing='true'] svg { animation: none; }
+          }
         `}</style>
         {/* Header */}
         <div
@@ -439,15 +492,42 @@ export function ModelPicker({
             </svg>
             选择模型
           </div>
-          <span
+          <div
             style={{
-              fontSize: 10,
-              color: 'var(--fg-muted)',
-              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexShrink: 0,
             }}
           >
-            {groups.reduce((sum, g) => sum + g.models.length, 0)} 个可用
-          </span>
+            {onRefresh ? (
+              <button
+                type="button"
+                className="chat-model-picker-refresh"
+                aria-label={refreshing ? '正在刷新模型列表' : '刷新模型列表'}
+                title={refreshing ? '正在刷新…' : '刷新模型列表'}
+                disabled={refreshing}
+                data-refreshing={refreshing ? 'true' : 'false'}
+                onClick={() => {
+                  void onRefresh();
+                }}
+              >
+                <RefreshIcon />
+              </button>
+            ) : null}
+            <span
+              style={{
+                fontSize: 10,
+                color: 'var(--fg-muted)',
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {refreshing
+                ? '刷新中…'
+                : `${groups.reduce((sum, g) => sum + g.models.length, 0)} 个可用`}
+            </span>
+          </div>
         </div>
         {/* Search */}
         <div style={{ padding: '8px 14px 8px' }}>
@@ -765,6 +845,51 @@ export function ModelPicker({
   );
 }
 
+/** 刷新图标：`data-refreshing` 为真时由外层 CSS 驱动旋转。 */
+function RefreshIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <polyline points="21 3 21 9 15 9" />
+    </svg>
+  );
+}
+
+/**
+ * 模型设置弹层动作的统一包装：清 error / 置 busy → try → catch 归一文案 → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 2 处
+ * 这类动作会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runModelSettingsActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  /** catch 的兜底文案（`error.message` 优先）。 */
+  failureMessage: string;
+  /** 允许上游 prop 是「同步或异步」两种签名。 */
+  run: () => void | Promise<void>;
+}): Promise<void> {
+  ctx.setError(null);
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.setError(error instanceof Error ? error.message : ctx.failureMessage);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export function ModelSettingsPopover({
   anchorRef,
   open,
@@ -932,15 +1057,14 @@ export function ModelSettingsPopover({
 
   const handleContextWindowChange = async (value: number | undefined) => {
     if (!onChangeContextWindowOverride || contextWindowSaving) return;
-    setContextWindowError(null);
-    setContextWindowSaving(true);
-    try {
-      await onChangeContextWindowOverride(value);
-    } catch (error) {
-      setContextWindowError(error instanceof Error ? error.message : '保存上下文挡位失败。');
-    } finally {
-      setContextWindowSaving(false);
-    }
+    // 清 error / 置 busy 与 try/catch/finally 一起下沉到模块级
+    // `runModelSettingsActionOnce`（见其注释）。
+    await runModelSettingsActionOnce({
+      setBusy: setContextWindowSaving,
+      setError: setContextWindowError,
+      failureMessage: '保存上下文挡位失败。',
+      run: () => onChangeContextWindowOverride(value),
+    });
   };
 
   const handleCustomContextWindowSave = async () => {
@@ -955,15 +1079,13 @@ export function ModelSettingsPopover({
 
   const handleFastToggle = async () => {
     if (!onFastToggle || fastSaving) return;
-    setFastError(null);
-    setFastSaving(true);
-    try {
-      await onFastToggle(!fastEnabled);
-    } catch (error) {
-      setFastError(error instanceof Error ? error.message : '保存 OpenAI Fast 模式失败。');
-    } finally {
-      setFastSaving(false);
-    }
+    // 同 handleContextWindowChange：整段下沉到 `runModelSettingsActionOnce`（见其注释）。
+    await runModelSettingsActionOnce({
+      setBusy: setFastSaving,
+      setError: setFastError,
+      failureMessage: '保存 OpenAI Fast 模式失败。',
+      run: () => onFastToggle(!fastEnabled),
+    });
   };
 
   // 思考滑块:「关闭」+ 从低到高的支持档位,统一用一个带刻度点的滑条表达,

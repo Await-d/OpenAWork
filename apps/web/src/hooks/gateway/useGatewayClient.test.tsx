@@ -4,9 +4,11 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   attachActiveStreamSession,
+  classifyAttachStreamError,
   useGatewayClient,
   connectAttachEventSource,
   formatGatewayStreamErrorMessage,
+  isNonTerminalStreamErrorCode,
   readGatewayDeliveryIdentity,
   resolveChatWsLivenessAction,
   safeParseGatewayEventData,
@@ -111,6 +113,16 @@ describe('safeParseGatewayEventData', () => {
 
     expect(result).toBeNull();
     expect(onError).toHaveBeenCalledWith('WS_INVALID_PAYLOAD', 'WebSocket 数据解析失败。');
+  });
+});
+
+describe('isNonTerminalStreamErrorCode', () => {
+  it('只把「流内可恢复」的错误码判为非终态', () => {
+    expect(isNonTerminalStreamErrorCode('TOOL_ERROR')).toBe(true);
+    expect(isNonTerminalStreamErrorCode(' TOOL_ERROR ')).toBe(true);
+    expect(isNonTerminalStreamErrorCode('MODEL_ERROR')).toBe(false);
+    expect(isNonTerminalStreamErrorCode('STREAM_ERROR')).toBe(false);
+    expect(isNonTerminalStreamErrorCode('ABORTED')).toBe(false);
   });
 });
 
@@ -224,6 +236,108 @@ describe('connectAttachEventSource', () => {
     expect(eventSource.closed).toBe(true);
   });
 
+  it('attach SSE 收到 TOOL_ERROR（流内非终态）时不断连、不结算，后续事件照常到达', async () => {
+    let currentEventSource: MockEventSource | null = null;
+    let currentActiveRequest: TestActiveStreamSnapshot | null = {
+      clientRequestId: 'req-attach-tool-error',
+      lastSeq: 0,
+      sessionId: 'session-1',
+      startedAt: 1,
+      transport: 'attach-sse' as const,
+    };
+
+    const callbacks = {
+      onDelta: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+      onEvent: vi.fn(),
+    };
+
+    const eventSource = new MockEventSource('https://gw.test/sessions/session-1/stream/attach');
+    const connectPromise = connectAttachEventSource({
+      activeStream: {
+        clientRequestId: 'req-attach-tool-error',
+        lastSeq: 0,
+        sessionId: 'session-1',
+        startedAtMs: 1,
+      },
+      callbacks,
+      createEventSource: () => eventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => currentActiveRequest,
+      getCurrentEventSource: () => currentEventSource,
+      isStopRequested: () => false,
+      requestedAfterSeq: 0,
+      sessionId: 'session-1',
+      setCurrentEventSource: (next) => {
+        currentEventSource = next as MockEventSource | null;
+      },
+      syncActiveRequest: (next) => {
+        currentActiveRequest = next;
+      },
+      token: 'token-test',
+      clearCallbacks: vi.fn(),
+      resetStopRequested: vi.fn(),
+    });
+
+    act(() => {
+      eventSource.onopen?.();
+    });
+
+    await expect(connectPromise).resolves.toBe(true);
+
+    act(() => {
+      eventSource.onmessage?.({
+        data: JSON.stringify({
+          aggregateType: 'run',
+          seq: 1,
+          payload: {
+            cursor: { seq: 1 },
+            event: {
+              type: 'error',
+              code: 'TOOL_ERROR',
+              message: 'Tool bash 的入参不是合法 JSON，已放弃本次调用',
+            },
+          },
+        }),
+      } as MessageEvent);
+    });
+
+    // 非终态：只透传提示，不结算、不掐断传输。
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    expect(callbacks.onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', code: 'TOOL_ERROR' }),
+    );
+    expect(eventSource.closed).toBe(false);
+
+    act(() => {
+      eventSource.onmessage?.({
+        data: JSON.stringify({
+          aggregateType: 'run',
+          seq: 2,
+          payload: {
+            cursor: { seq: 2 },
+            event: { type: 'text_delta', delta: '继续生成', eventId: 'run-1:evt:2' },
+          },
+        }),
+      } as MessageEvent);
+      eventSource.onmessage?.({
+        data: JSON.stringify({
+          aggregateType: 'run',
+          seq: 3,
+          payload: {
+            cursor: { seq: 3 },
+            event: { type: 'done', stopReason: 'end_turn', eventId: 'run-1:evt:3' },
+          },
+        }),
+      } as MessageEvent);
+    });
+
+    expect(callbacks.onDelta).toHaveBeenCalledWith('继续生成');
+    expect(callbacks.onDone).toHaveBeenCalledWith('end_turn', undefined, undefined, undefined);
+    expect(eventSource.closed).toBe(true);
+  });
+
   it('attach SSE 传输中断并进入自动重连时保留连接诊断详情', async () => {
     let currentEventSource: MockEventSource | null = null;
     let currentActiveRequest: TestActiveStreamSnapshot | null = {
@@ -268,6 +382,17 @@ describe('connectAttachEventSource', () => {
 
     act(() => {
       eventSource.onopen?.();
+      // 必须先收到过有效事件，才会被判为「流式传输过程中中断」而不是静默结束。
+      eventSource.onmessage?.({
+        data: JSON.stringify({
+          aggregateType: 'run',
+          seq: 4,
+          payload: {
+            cursor: { seq: 4 },
+            event: { type: 'text_delta', delta: '中断前的输出', eventId: 'run-1:evt:4' },
+          },
+        }),
+      } as MessageEvent);
       eventSource.onerror?.();
     });
 
@@ -276,6 +401,154 @@ describe('connectAttachEventSource', () => {
       'attach_stream_disconnected',
       '连接在流式传输过程中中断。Gateway：https://gw.test；会话：session-1。浏览器没有提供底层失败原因。',
     );
+  });
+
+  it('attach SSE 打开后未收到任何事件就结束时按静默关闭处理（不报连接中断）', async () => {
+    let currentEventSource: MockEventSource | null = null;
+    const onReconnectRequired = vi.fn();
+    const onError = vi.fn();
+    const eventSource = new MockEventSource('https://gw.test/sessions/session-1/stream/attach');
+    const connectPromise = connectAttachEventSource({
+      activeStream: {
+        clientRequestId: 'req-attach-silent',
+        lastSeq: 7,
+        sessionId: 'session-1',
+        startedAtMs: 1,
+      },
+      callbacks: {
+        onDelta: vi.fn(),
+        onDone: vi.fn(),
+        onError,
+        onReconnectRequired,
+      },
+      createEventSource: () => eventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => ({
+        clientRequestId: 'req-attach-silent',
+        lastSeq: 7,
+        sessionId: 'session-1',
+        startedAt: 1,
+        transport: 'attach-sse',
+      }),
+      getCurrentEventSource: () => currentEventSource,
+      isStopRequested: () => false,
+      requestedAfterSeq: 7,
+      sessionId: 'session-1',
+      setCurrentEventSource: (next) => {
+        currentEventSource = next as MockEventSource | null;
+      },
+      syncActiveRequest: vi.fn(),
+      token: 'token-test',
+      clearCallbacks: vi.fn(),
+      resetStopRequested: vi.fn(),
+    });
+
+    act(() => {
+      eventSource.onopen?.();
+      eventSource.onerror?.();
+    });
+
+    await expect(connectPromise).resolves.toBe(true);
+    // 静默关闭：不产生「连接中断」错误，也不带诊断详情，由上层确认活跃流后决定。
+    expect(onError).not.toHaveBeenCalled();
+    expect(onReconnectRequired).toHaveBeenCalledWith('attach_stream_silent_close');
+    expect(eventSource.closed).toBe(true);
+  });
+
+  it('服务端声明重放完毕时，即便重放出了事件也按正常结束处理（不进入断线退避）', () => {
+    // 「流已终止 → 重放历史 → 立即 EOF」是最常见的正常路径。此时客户端会收到若干
+    // 条重放事件（receivedEventCount > 0），若仅凭此判断线，就会进入 800ms 起、
+    // 封顶 30s 的指数退避重连——用户看到「自动重连中 · 约 25.6s 后重试」，而连接正常。
+    expect(
+      classifyAttachStreamError({
+        opened: true,
+        receivedEventCount: 5,
+        serverEndedCleanly: true,
+        stopRequested: false,
+      }),
+    ).toBe('silent_close');
+
+    // 对照：没有该声明时仍按真实断线处理，不能把真断线吞掉。
+    expect(
+      classifyAttachStreamError({
+        opened: true,
+        receivedEventCount: 5,
+        stopRequested: false,
+      }),
+    ).toBe('reconnect_required');
+  });
+
+  it('只重放了已被消费的游标边界行时按静默关闭处理，不误报连接中断', async () => {
+    // 回归测试：游标已到末尾时，网关会把「订阅建立瞬间的那一行边界事件」也重放一次
+    // （afterSeq 是排他游标，但边界行可能重复送达）。客户端按 afterSeq 把它丢弃 ——
+    // 于是「实际投递事件数」为 0。
+    //
+    // 若把「收到的行数」当成「投递数」，这个最常见的正常结束就会被 classifyAttachStreamError
+    // 判成真实断线，前端弹「自动重连中 · 约 Xs 后重试」并进入退避重连循环，而连接本身
+    // 完全正常（表现为执行命令时反复提示重连）。
+    let currentEventSource: MockEventSource | null = null;
+    const onReconnectRequired = vi.fn();
+    const onError = vi.fn();
+    const callbacks = {
+      onDelta: vi.fn(),
+      onDone: vi.fn(),
+      onError,
+      onReconnectRequired,
+    };
+
+    const eventSource = new MockEventSource('https://gw.test/sessions/session-1/stream/attach');
+    const connectPromise = connectAttachEventSource({
+      activeStream: {
+        clientRequestId: 'req-attach-boundary',
+        lastSeq: 12,
+        sessionId: 'session-1',
+        startedAtMs: 1,
+      },
+      callbacks,
+      createEventSource: () => eventSource,
+      gatewayUrl: 'https://gw.test',
+      getCurrentActiveRequest: () => ({
+        clientRequestId: 'req-attach-boundary',
+        lastSeq: 12,
+        sessionId: 'session-1',
+        startedAt: 1,
+        transport: 'attach-sse',
+      }),
+      getCurrentEventSource: () => currentEventSource,
+      isStopRequested: () => false,
+      requestedAfterSeq: 12,
+      sessionId: 'session-1',
+      setCurrentEventSource: (next) => {
+        currentEventSource = next as MockEventSource | null;
+      },
+      syncActiveRequest: vi.fn(),
+      token: 'token-test',
+      clearCallbacks: vi.fn(),
+      resetStopRequested: vi.fn(),
+    });
+
+    act(() => {
+      eventSource.onopen?.();
+      // seq 与游标相等 → 被 afterSeq 过滤丢弃，不构成「收到过有效事件」。
+      eventSource.onmessage?.({
+        data: JSON.stringify({
+          aggregateType: 'run',
+          seq: 12,
+          payload: {
+            cursor: { seq: 12 },
+            event: { type: 'text_delta', delta: '已消费过的边界行', eventId: 'run-1:evt:12' },
+          },
+        }),
+      } as MessageEvent);
+      eventSource.onerror?.();
+    });
+
+    await expect(connectPromise).resolves.toBe(true);
+    expect(onError).not.toHaveBeenCalled();
+    expect(onReconnectRequired).toHaveBeenCalledWith('attach_stream_silent_close');
+    // 边界行不得被二次投递给上层。
+    expect(callbacks.onDelta).not.toHaveBeenCalled();
+    expect(callbacks.onDone).not.toHaveBeenCalled();
   });
 
   it('attach SSE 收到 run envelope 时会推进 lastSeq，重复 eventId 不重复分发', async () => {
@@ -819,6 +1092,130 @@ describe('useGatewayClient', () => {
     expect(onEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'done', stopReason: 'cancelled' }),
     );
+  });
+
+  it('WS 收到 TOOL_ERROR（流内非终态）时不断连，后续 delta 与 done 照常分发', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('EventSource', MockEventSource);
+    useAuthStore.setState({
+      accessToken: 'token-test',
+      clearAuth: () => undefined,
+      email: 'qa@example.com',
+      gatewayUrl: 'https://gw.test',
+      refreshAccessToken: async () => undefined,
+      refreshToken: null,
+      setAuth: () => undefined,
+      setGatewayUrl: () => undefined,
+      setWebAccess: () => undefined,
+      tokenExpiresAt: null,
+      webAccessEnabled: false,
+      webExposeLan: false,
+      webPort: 3000,
+    });
+
+    const onDelta = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const onEvent = vi.fn();
+    const { result } = renderHook(() => useGatewayClient('token-test'));
+
+    act(() => {
+      result.current.stream('session-tool-error', 'hello', {
+        onDelta,
+        onDone,
+        onError,
+        onEvent,
+      });
+    });
+
+    const ws = MockWebSocket.instances[0];
+    act(() => {
+      ws?.onopen?.();
+      ws?.onmessage?.({
+        data: JSON.stringify({
+          type: 'error',
+          code: 'TOOL_ERROR',
+          message: 'Tool webfetch 的入参不是合法 JSON，已放弃本次调用',
+        }),
+      } as MessageEvent);
+    });
+
+    // 非终态：不得走 onError 终态通道、不得关闭传输，只把提示透传给 onEvent。
+    expect(onError).not.toHaveBeenCalled();
+    expect(ws?.readyState).toBe(MockWebSocket.OPEN);
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', code: 'TOOL_ERROR' }),
+    );
+
+    act(() => {
+      ws?.onmessage?.({
+        data: JSON.stringify({
+          type: 'text_delta',
+          delta: '继续生成',
+          eventId: 'evt-after-tool-error',
+        }),
+      } as MessageEvent);
+      ws?.onmessage?.({
+        data: JSON.stringify({
+          type: 'done',
+          stopReason: 'end_turn',
+          eventId: 'evt-tool-error-done',
+        }),
+      } as MessageEvent);
+    });
+
+    expect(onDelta).toHaveBeenCalledWith('继续生成');
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone.mock.calls[0]?.[0]).toBe('end_turn');
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('WS 收到终态 error（MODEL_ERROR）时仍走 onError 并断连', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('EventSource', MockEventSource);
+    useAuthStore.setState({
+      accessToken: 'token-test',
+      clearAuth: () => undefined,
+      email: 'qa@example.com',
+      gatewayUrl: 'https://gw.test',
+      refreshAccessToken: async () => undefined,
+      refreshToken: null,
+      setAuth: () => undefined,
+      setGatewayUrl: () => undefined,
+      setWebAccess: () => undefined,
+      tokenExpiresAt: null,
+      webAccessEnabled: false,
+      webExposeLan: false,
+      webPort: 3000,
+    });
+
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useGatewayClient('token-test'));
+
+    act(() => {
+      result.current.stream('session-model-error', 'hello', {
+        onDelta: vi.fn(),
+        onDone,
+        onError,
+      });
+    });
+
+    const ws = MockWebSocket.instances[0];
+    act(() => {
+      ws?.onopen?.();
+      ws?.onmessage?.({
+        data: JSON.stringify({
+          type: 'error',
+          code: 'MODEL_ERROR',
+          message: '上游 500',
+        }),
+      } as MessageEvent);
+    });
+
+    expect(onError).toHaveBeenCalledWith('MODEL_ERROR', '上游 500', undefined);
+    expect(onDone).not.toHaveBeenCalled();
+    expect(ws?.readyState).toBe(MockWebSocket.CLOSED);
   });
 
   it('WS 已消费部分事件后回退 SSE 会携带当前 afterSeq 游标', async () => {

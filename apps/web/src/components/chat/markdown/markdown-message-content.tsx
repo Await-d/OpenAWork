@@ -3,6 +3,7 @@ import {
   createContext,
   Fragment,
   memo,
+  type ComponentProps,
   type CSSProperties,
   type ReactNode,
   useCallback,
@@ -69,6 +70,30 @@ const REHYPE_KATEX_OPTIONS = {
   strict: (errorCode: string) => (errorCode === 'unicodeTextInMathMode' ? 'ignore' : 'warn'),
 } as const;
 
+type MarkdownRehypePlugins = NonNullable<ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
+type MarkdownRemarkPlugins = NonNullable<ComponentProps<typeof ReactMarkdown>['remarkPlugins']>;
+
+const REMARK_PLUGINS: MarkdownRemarkPlugins = [remarkGfm, remarkMath];
+
+/**
+ * 插件列表提为模块常量：`react-markdown` 每次渲染都会消费这两个数组，内联字面量会让
+ * 每次渲染都创建新数组（进而让下游基于插件身份的缓存全部失效）。
+ */
+const REHYPE_PLUGINS: MarkdownRehypePlugins = [
+  [rehypeKatex, REHYPE_KATEX_OPTIONS],
+  rehypeHighlight,
+];
+/**
+ * 流式超长尾块专用：跳过语法高亮。
+ *
+ * 高亮是单次 Markdown 解析里最贵的一段（实测 27KB 未闭合围栏：纯解析 5ms →
+ * 带高亮 25ms）。只由 `StreamingMarkdownContent` 在尾块超过阈值时传入，落定后的
+ * 静态渲染仍然高亮；稳定块与普通消息不受影响。
+ */
+const REHYPE_PLUGINS_WITHOUT_HIGHLIGHT: MarkdownRehypePlugins = [
+  [rehypeKatex, REHYPE_KATEX_OPTIONS],
+];
+
 /**
  * 标记「当前 `code` 位于 `pre` 之内」，即它是围栏代码块而不是行内代码。
  *
@@ -113,7 +138,14 @@ type StaticPreviewKind = 'html' | 'css' | 'javascript' | 'svg';
  * 高亮开关导致的视觉跳变。内容归一化统一由调用方走
  * `normalizeAssistantMarkdown`。
  */
-export function MarkdownCore({ content }: { content: string }) {
+export function MarkdownCore({
+  content,
+  disableHighlight = false,
+}: {
+  content: string;
+  /** 流式超长尾块专用：跳过语法高亮以压低单次解析峰值，落定后自动恢复。 */
+  disableHighlight?: boolean;
+}) {
   const isBareHtmlDocument = useMemo(() => isFullHtmlDocument(content), [content]);
   if (isBareHtmlDocument) {
     // 裸 HTML 文档走沙箱预览；外层 `.chat-markdown` 由调用方提供，这里不重复包裹。
@@ -131,8 +163,8 @@ export function MarkdownCore({ content }: { content: string }) {
     <NestedMarkdownScope>
       <MarkdownImageProvider urls={extractMarkdownImageUrls(content)}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[[rehypeKatex, REHYPE_KATEX_OPTIONS], rehypeHighlight]}
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={disableHighlight ? REHYPE_PLUGINS_WITHOUT_HIGHLIGHT : REHYPE_PLUGINS}
           components={markdownComponents}
         >
           {content}

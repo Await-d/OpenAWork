@@ -265,6 +265,27 @@ export interface ChatRightPanelProps {
   ensureMessageVisible?: (messageId: string) => Promise<void> | void;
 }
 
+/**
+ * 右面板批量操作（终止 / 清理）的统一包装：置 batchBusy → try → finally 清 batchBusy
+ * （可附带一次刷新）。原代码**没有 catch**（异常向上抛），保持同一语义。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，本组件
+ * 2 处这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runRightPanelBatchActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setBusy(false);
+    ctx.onFinally?.();
+  }
+}
+
 export function ChatRightPanel(props: ChatRightPanelProps) {
   const {
     rightOpen,
@@ -866,29 +887,33 @@ function RightPanelTerminalsContent({
 
   const handleKillAllActive = async (): Promise<void> => {
     if (!onKill) return;
-    setBatchBusy(true);
-    try {
-      await Promise.all(visibleActive.map((t) => onKill(t.terminalId)));
-    } finally {
-      setBatchBusy(false);
-    }
+    // try/finally 下沉到模块级 `runRightPanelBatchActionOnce`（见其注释）。
+    await runRightPanelBatchActionOnce({
+      setBusy: setBatchBusy,
+      run: async () => {
+        await Promise.all(visibleActive.map((t) => onKill(t.terminalId)));
+      },
+    });
   };
 
   const handleDeleteAllClosed = async (): Promise<void> => {
     if (!sessionId || !token) return;
-    setBatchBusy(true);
-    try {
-      await Promise.all(
-        visibleClosed.map((t) =>
-          deleteSessionTerminal({ gatewayUrl, sessionId, terminalId: t.terminalId, token }).catch(
-            () => undefined,
+    // 同上；清理完成后额外触发一次刷新（与原 finally 顺序一致：先清 busy 再刷新）。
+    await runRightPanelBatchActionOnce({
+      setBusy: setBatchBusy,
+      onFinally: () => {
+        onReload?.();
+      },
+      run: async () => {
+        await Promise.all(
+          visibleClosed.map((t) =>
+            deleteSessionTerminal({ gatewayUrl, sessionId, terminalId: t.terminalId, token }).catch(
+              () => undefined,
+            ),
           ),
-        ),
-      );
-    } finally {
-      setBatchBusy(false);
-      onReload?.();
-    }
+        );
+      },
+    });
   };
 
   return (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createWorkspaceClient,
   type FileTreeNode,
@@ -176,14 +176,13 @@ export function useTeamSidebarFileTreeState(
     (state) => state.expandedDirsBySession[treeExpandedSessionKey] ?? EMPTY_EXPANDED_DIRS,
   );
   const setExpandedDirsForSession = useUIStateStore((state) => state.setExpandedDirsForSession);
-  const expandedDirs = useMemo(() => new Set(expandedDirsArr), [expandedDirsArr]);
-  const setExpandedDirs = useCallback(
-    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-      const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
-      setExpandedDirsForSession(treeExpandedSessionKey, Array.from(next));
-    },
-    [expandedDirsArr, setExpandedDirsForSession, treeExpandedSessionKey],
-  );
+  // 解封编译器：单表达式 Set 构造，去掉手写 useMemo（消费方 FileTreeView 非 memo 组件）。
+  const expandedDirs = new Set(expandedDirsArr);
+  // 解封编译器：回调改普通函数常量（编译器自动 memoize）。
+  const setExpandedDirs = (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
+    setExpandedDirsForSession(treeExpandedSessionKey, Array.from(next));
+  };
   const previousExpandedSessionKeyRef = useRef(treeExpandedSessionKey);
   /**
    * SSH 读取身份的 ref。
@@ -202,10 +201,12 @@ export function useTeamSidebarFileTreeState(
     treeNodesRef.current = treeNodes;
   }, [treeNodes]);
 
-  const handleRefresh = useCallback(() => {
+  // 解封编译器：回调改普通函数常量。注意下方 online/offline effect deps 里有它，
+  // 身份不再固定 → 该 effect 会重挂两个 window 监听器（回调内不写 state，不会成环）。
+  const handleRefresh = () => {
     resetRetry();
     setRefreshTick((current) => current + 1);
-  }, [resetRetry]);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -374,77 +375,73 @@ export function useTeamSidebarFileTreeState(
     };
   }, [handleRefresh, options.active, options.workspacePath, resetRetry]);
 
-  const handleToggleDir = useCallback(
-    (path: string) => {
-      setExpandedDirs((prev) => {
-        const next = new Set(prev);
-        if (next.has(path)) {
-          next.delete(path);
-          return next;
-        }
-        next.add(path);
+  // 解封编译器：回调改普通函数常量（编译器自动 memoize）。
+  const handleToggleDir = (path: string) => {
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
         return next;
-      });
-      if (!options.token) {
-        return;
       }
-      setTreeError(null);
-      void workspaceClient
-        .fetchTreeResult(options.token, path, {
-          depth: 1,
-          ...(readIdentityRef.current ?? {}),
-        })
-        .then((result) => {
-          if (!result.ok) {
-            const nextRetryAtMs = scheduleRetry({
-              computeDelay: computeTeamSidebarFileTreeRetryDelay,
-              onRetry: () => {
-                setRefreshTick((current) => current + 1);
-              },
-              retryable: result.retryable,
-            });
-            setTreeError(
-              formatTeamSidebarFileTreeLoadError({
-                hasCachedTree: treeNodesRef.current.length > 0,
-                nextRetryAtMs,
-                result,
-              }),
-            );
-            return;
-          }
-          resetRetry();
-          setTreeNodes((current) => injectChildren(current, path, result.nodes));
-          setTreeError(null);
-        });
-    },
-    [options.token, resetRetry, scheduleRetry, workspaceClient],
-  );
-
-  const refreshDirectory = useCallback(
-    async (directoryPath: string): Promise<boolean> => {
-      if (!options.token || !options.workspacePath) {
-        return false;
-      }
-
-      const result = await workspaceClient.fetchTreeResult(options.token, directoryPath, {
-        ...(readIdentityRef.current ?? {}),
+      next.add(path);
+      return next;
+    });
+    if (!options.token) {
+      return;
+    }
+    setTreeError(null);
+    void workspaceClient
+      .fetchTreeResult(options.token, path, {
         depth: 1,
+        ...(readIdentityRef.current ?? {}),
+      })
+      .then((result) => {
+        if (!result.ok) {
+          const nextRetryAtMs = scheduleRetry({
+            computeDelay: computeTeamSidebarFileTreeRetryDelay,
+            onRetry: () => {
+              setRefreshTick((current) => current + 1);
+            },
+            retryable: result.retryable,
+          });
+          setTreeError(
+            formatTeamSidebarFileTreeLoadError({
+              hasCachedTree: treeNodesRef.current.length > 0,
+              nextRetryAtMs,
+              result,
+            }),
+          );
+          return;
+        }
+        resetRetry();
+        setTreeNodes((current) => injectChildren(current, path, result.nodes));
+        setTreeError(null);
       });
-      if (!result.ok) {
-        setTreeError(result.errorMessage ?? '刷新目录失败。');
-        return false;
-      }
+  };
 
-      if (directoryPath === options.workspacePath) {
-        setTreeNodes(result.nodes);
-      } else {
-        setTreeNodes((current) => injectChildren(current, directoryPath, result.nodes));
-      }
-      setTreeError(null);
-      return true;
-    },
-    [options.token, options.workspacePath, workspaceClient],
-  );
+  // 解封编译器：回调改普通函数常量（编译器自动 memoize）。
+  const refreshDirectory = async (directoryPath: string): Promise<boolean> => {
+    if (!options.token || !options.workspacePath) {
+      return false;
+    }
+
+    const result = await workspaceClient.fetchTreeResult(options.token, directoryPath, {
+      ...(readIdentityRef.current ?? {}),
+      depth: 1,
+    });
+    if (!result.ok) {
+      setTreeError(result.errorMessage ?? '刷新目录失败。');
+      return false;
+    }
+
+    if (directoryPath === options.workspacePath) {
+      setTreeNodes(result.nodes);
+    } else {
+      setTreeNodes((current) => injectChildren(current, directoryPath, result.nodes));
+    }
+    setTreeError(null);
+    return true;
+  };
 
   return {
     applyCreatedEntry: ({ directoryPath, entry }) => {

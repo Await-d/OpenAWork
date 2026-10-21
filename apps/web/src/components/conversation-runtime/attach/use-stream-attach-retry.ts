@@ -10,6 +10,14 @@ export interface ScheduleStreamAttachRetryInput {
    * derived from delayMs.
    */
   progressLabel?: string;
+  /**
+   * 静默重试：不展示任何进度横幅。
+   *
+   * 用于「服务端暂时没有新事件可推」的场景（工具执行 / 长思考）。此时连接本身是
+   * 健康的，只是没有数据可收——而 `retryProgress` 是渲染在**错误条**里的（warning
+   * 边框 + 循环箭头），挂上去等于把正常等待显示成故障提示。
+   */
+  silent?: boolean;
   /** 本次重试归属的会话；定时器触发时若会话已切换则由 beforeRetry 裁决放弃。 */
   sessionId: string;
 }
@@ -82,18 +90,33 @@ export function useStreamAttachRetry(): StreamAttachRetryReturn {
   const scheduleAttachRetry = useCallback(
     (input: ScheduleStreamAttachRetryInput) => {
       clearPendingRetry();
-      if (retryAttemptRef.current >= MAX_ATTACH_RETRY_ATTEMPTS) {
-        setAttachRetryScheduledSessionId(null);
-        setAttachRetryExhausted(true);
-        return;
+      // 「静默重试」是工具执行 / 长思考期间的**正常等待**（服务端暂时没有新事件可推），
+      // 不是失败。它必须既不受 8 次上限约束，也不参与退避递增——否则一次跑得比较久的
+      // bash（输出全部在子进程里累积、执行期间不产生任何 run event）会把计数耗尽，
+      // 最终置 `attachRetryExhausted` 并向用户弹出「实时流长时间没有新输出」这类故障提示，
+      // 而底层连接其实一直是健康的。
+      //
+      // 耗尽与退避都只针对**非静默**重试，也就是真正的传输中断。
+      if (!input.silent) {
+        if (retryAttemptRef.current >= MAX_ATTACH_RETRY_ATTEMPTS) {
+          setAttachRetryScheduledSessionId(null);
+          setAttachRetryExhausted(true);
+          return;
+        }
+        retryAttemptRef.current += 1;
       }
-
-      retryAttemptRef.current += 1;
       deferCountRef.current = 0;
-      const delayMs = Math.min(
-        MAX_ATTACH_RETRY_DELAY_MS,
-        Math.max(0, input.delayMs) * 2 ** (retryAttemptRef.current - 1),
-      );
+      // 退避**只做一次指数**：调用方（如 `run-session-attach-effect`）传入的 delayMs
+      // 已经是「按连续失败次数递增」的序列（silent 1s→10s、disconnect 800ms→30s）。
+      //
+      // 此前这里又乘了一层 `2 ** (retryAttemptRef.current - 1)`，于是实际延迟是
+      // `base(n) × 2^k` 的双指数：断线序列第 6 档 25.6ms 恰好配 `2⁰`，正是用户看到的
+      // 「自动重连中 · 约 25.6s 后重试」；再往后直接顶到 30s 封顶而失去区分度。
+      // 双指数让「工具执行期间 attach 反复 EOF」这种高频良性抖动在几次之内就顶到上限，
+      // 提示条反复挂在界面上。
+      //
+      // 调用方已按自己的计数给出该退多少，这里只做封顶钳制即可。
+      const delayMs = Math.min(MAX_ATTACH_RETRY_DELAY_MS, Math.max(0, input.delayMs));
 
       const armTimer = () => {
         timeoutRef.current = window.setTimeout(() => {
@@ -119,7 +142,9 @@ export function useStreamAttachRetry(): StreamAttachRetryReturn {
       };
 
       setAttachRetryScheduledSessionId(input.sessionId);
-      setAttachRetryProgress(input.progressLabel ?? defaultProgressLabel(delayMs));
+      if (!input.silent) {
+        setAttachRetryProgress(input.progressLabel ?? defaultProgressLabel(delayMs));
+      }
       armTimer();
     },
     [cancelAttachRetry, clearPendingRetry],

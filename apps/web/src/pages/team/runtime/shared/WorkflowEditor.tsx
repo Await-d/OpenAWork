@@ -44,6 +44,27 @@ export interface WorkflowSelectorProps {
   selectedId: string | null;
 }
 
+/**
+ * 工作流列表加载的统一包装：置 loading → try → catch 交给 `onError` → finally 清 loading。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runWorkflowsLoadOnce(ctx: {
+  setLoading: (loading: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setLoading(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setLoading(false);
+  }
+}
+
 export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps) {
   const { accessToken, gatewayUrl } = useAuthStore();
   const [workflows, setWorkflows] = useState<TeamWorkflowWithDbId[]>([]);
@@ -52,17 +73,19 @@ export function WorkflowSelector({ onSelect, selectedId }: WorkflowSelectorProps
 
   const loadWorkflows = useCallback(async () => {
     if (!accessToken || !gatewayUrl) return;
-    setLoading(true);
-    try {
-      setWorkflows(await client.list(accessToken));
-    } catch (_err) {
-      console.warn(
-        '[WorkflowSelector] 加载失败:',
-        _err instanceof Error ? _err.message : String(_err),
-      );
-    } finally {
-      setLoading(false);
-    }
+    // 置 loading 与 try/catch/finally 一起下沉到模块级 `runWorkflowsLoadOnce`（见其注释）。
+    await runWorkflowsLoadOnce({
+      setLoading,
+      onError: (_err) => {
+        console.warn(
+          '[WorkflowSelector] 加载失败:',
+          _err instanceof Error ? _err.message : String(_err),
+        );
+      },
+      run: async () => {
+        setWorkflows(await client.list(accessToken));
+      },
+    });
   }, [accessToken, client, gatewayUrl]);
 
   useEffect(() => {

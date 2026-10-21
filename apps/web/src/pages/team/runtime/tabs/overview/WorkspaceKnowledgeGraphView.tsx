@@ -63,6 +63,28 @@ export interface WorkspaceKnowledgeGraphViewProps {
   teamWorkspaceId?: string | null;
 }
 
+/**
+ * 知识入库的统一包装：置 saving / 清提示 → try → catch 交给 `onError` → finally 清 saving。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`...(cond ? … : {})`）。语义逐字照搬。
+ */
+async function runSaveKnowledgeOnce(ctx: {
+  onStart: () => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart();
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function WorkspaceKnowledgeGraphView({
   activeWorkspaceName,
   teamWorkspaceId,
@@ -370,31 +392,38 @@ export function WorkspaceKnowledgeGraphView({
       setOperationMessage(null);
       return;
     }
-    setSavingNodeId(selectedNode.id);
-    setOperationError(null);
-    setOperationMessage(null);
-    try {
-      const knowledgeInput = {
-        key: selectedNode.sourceRef,
-        roleLayers: selectedRoleLayers,
-        type: selectedNode.memoryType,
-        value,
-        ...(selectedNode.persistedMemoryId
-          ? {}
-          : {
-              confidence: 1,
-              priority: priorityForMemoryType(selectedNode.memoryType),
-              source: 'manual' as const,
-            }),
-      };
-      const result = await saveKnowledge(knowledgeInput);
-      setOperationMessage(result.created ? '已入库知识。' : '已更新已入库知识。');
-      setSelectedNodeId(selectedNode.id);
-    } catch (error) {
-      setOperationError(error instanceof Error ? error.message : '知识入库失败。');
-    } finally {
-      setSavingNodeId(null);
-    }
+    // 置 saving / 清提示 与 try/catch/finally 一起下沉到模块级 `runSaveKnowledgeOnce`。
+    await runSaveKnowledgeOnce({
+      onStart: () => {
+        setSavingNodeId(selectedNode.id);
+        setOperationError(null);
+        setOperationMessage(null);
+      },
+      onError: (error) => {
+        setOperationError(error instanceof Error ? error.message : '知识入库失败。');
+      },
+      onFinally: () => {
+        setSavingNodeId(null);
+      },
+      run: async () => {
+        const knowledgeInput = {
+          key: selectedNode.sourceRef,
+          roleLayers: selectedRoleLayers,
+          type: selectedNode.memoryType,
+          value,
+          ...(selectedNode.persistedMemoryId
+            ? {}
+            : {
+                confidence: 1,
+                priority: priorityForMemoryType(selectedNode.memoryType),
+                source: 'manual' as const,
+              }),
+        };
+        const result = await saveKnowledge(knowledgeInput);
+        setOperationMessage(result.created ? '已入库知识。' : '已更新已入库知识。');
+        setSelectedNodeId(selectedNode.id);
+      },
+    });
   }, [saveKnowledge, selectedNode, selectedRoleLayers]);
 
   const visiblePersistedNodeCount = visibleGraph.nodes.filter(

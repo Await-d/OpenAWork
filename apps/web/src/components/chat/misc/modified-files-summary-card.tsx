@@ -32,15 +32,19 @@ function formatSourceLabel(sourceKind: FileDiffContent['sourceKind']): string | 
  * 无 `FileEditorContext`（产物查看器等非聊天页）时降级为纯文本 span。
  */
 function SummaryFilePath({ path }: { path: string }) {
-  const fileEditorRef = useFileEditorContext();
-  // `!= null`：context 为 null 时 `fileEditorRef?.current` 求值为 undefined，
-  // 而 `undefined !== null` 为 true，会渲染出点不动的死按钮。
-  const canOpen = fileEditorRef?.current != null && path.trim().length > 0;
+  const { openRef, isAvailable } = useFileEditorContext();
+  // 可用性走响应式布尔，不在渲染期读 ref —— 渲染期读 `.current` 会让 React Compiler
+  // 放弃优化本组件（"Cannot access refs during render"）。
+  const canOpen = isAvailable && path.trim().length > 0;
   const hover = usePathHoverPreview({ enabled: canOpen });
+  // 刻意先解构再用：把 `hover.setAnchorEl` 这种**成员访问**直接塞进 `ref=`
+  // 会被 React Compiler 判成渲染期访问 ref（实测与命名无关——换成中性名字同样脱靶，
+  // 解构成本地变量则正常编译）。它传的其实是个 state setter，不是 ref。
+  const { setAnchorEl } = hover;
 
   const handleClick = useCallback(() => {
-    fileEditorRef?.current?.(path);
-  }, [fileEditorRef, path]);
+    openRef.current?.(path);
+  }, [openRef, path]);
 
   if (!canOpen) {
     return (
@@ -53,7 +57,7 @@ function SummaryFilePath({ path }: { path: string }) {
   return (
     <>
       <button
-        ref={hover.anchorRef}
+        ref={setAnchorEl}
         type="button"
         className="chat-modified-summary-path"
         data-interactive="true"
@@ -66,15 +70,15 @@ function SummaryFilePath({ path }: { path: string }) {
       >
         {path}
       </button>
-      {hover.open && hover.anchorRef.current && (
+      {hover.open && hover.anchorEl ? (
         <PathPreviewPopover
-          anchorEl={hover.anchorRef.current}
+          anchorEl={hover.anchorEl}
           path={path}
           line={null}
           onMouseEnter={hover.panelHandlers.onMouseEnter}
           onMouseLeave={hover.panelHandlers.onMouseLeave}
         />
-      )}
+      ) : null}
     </>
   );
 }

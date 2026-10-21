@@ -178,6 +178,31 @@ function nextUniquePaneId(layout: TerminalLayout, terminalId: string): string {
   return candidate;
 }
 
+/**
+ * 终端面板动作的统一包装：置 busyPaneId / 清 createError → try → catch 归一文案
+ * → finally 清 busyPaneId。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（`...(cond ? … : {})`、if/else），本组件多处这类 try 会让整个组件脱靶
+ * （实测）。语义逐字照搬。
+ */
+async function runQuickTerminalActionOnce(ctx: {
+  setBusy: (busy: string | null) => void;
+  busyValue: string;
+  setError: (message: string | null) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(ctx.busyValue);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.setError(error instanceof Error ? error.message : String(error));
+  } finally {
+    ctx.setBusy(null);
+  }
+}
+
 export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
   const {
     open,
@@ -401,7 +426,11 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     setTerminalTitles((previous) => {
       if (next.length === 0) {
         if (!(terminalId in previous)) return previous;
-        const { [terminalId]: _removed, ...rest } = previous;
+        // 编译器不支持 computed key 解构（"Handle computed properties in
+        // ObjectPattern"）会让本组件整体脱靶；改成「浅拷贝 + delete」语义等价：
+        // 都不动 `previous`，返回的也是不含该键的新对象。
+        const rest = { ...previous };
+        delete rest[terminalId];
         return rest;
       }
       if (previous[terminalId] === next) return previous;
@@ -423,36 +452,37 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
 
   const createTerminalInPane = async (paneId: string, shellProfileId?: string): Promise<void> => {
     if (!sessionId || !token || busyPaneId !== null) return;
-    setBusyPaneId(paneId);
-    setCreateError(null);
-    try {
-      const result = await createSessionTerminal({
-        gatewayUrl,
-        sessionId,
-        token,
-        ...(workspacePath ? { cwd: workspacePath } : {}),
-        ...(shellProfileId !== undefined ? { shellProfileId } : {}),
-      });
-      const newTerminalId = result.terminal.terminalId;
-      if (layout === null) {
-        // 隐式 pane 还没有树节点：新终端天然是它的 tab（上游按 startedAtMs 升序
-        // 渲染，新终端在末尾），只需把激活位切过去。
-        setPendingActive(newTerminalId);
-        setActiveIdForWs(workspacePath, newTerminalId);
-      } else {
-        // 目标组可能托管着树外终端（渲染在条末尾）：先按可见顺序物化，新终端才能
-        // 落到**可见末尾**，而不是插在托管终端前面。
-        const materialized = materializeHostedTerminals(layout, paneId);
-        const next = insertTerminalIntoPane(materialized, paneId, newTerminalId);
-        if (next !== layout) commitLayout(next, [newTerminalId]);
-      }
-      setActivePaneId(paneId);
-      onReload();
-    } catch (error) {
-      setCreateError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusyPaneId(null);
-    }
+    // 置 busy / 清错误 与 try/catch/finally 一起下沉到模块级
+    // `runQuickTerminalActionOnce`（见其注释）。
+    await runQuickTerminalActionOnce({
+      busyValue: paneId,
+      setBusy: setBusyPaneId,
+      setError: setCreateError,
+      run: async () => {
+        const result = await createSessionTerminal({
+          gatewayUrl,
+          sessionId,
+          token,
+          ...(workspacePath ? { cwd: workspacePath } : {}),
+          ...(shellProfileId !== undefined ? { shellProfileId } : {}),
+        });
+        const newTerminalId = result.terminal.terminalId;
+        if (layout === null) {
+          // 隐式 pane 还没有树节点：新终端天然是它的 tab（上游按 startedAtMs 升序
+          // 渲染，新终端在末尾），只需把激活位切过去。
+          setPendingActive(newTerminalId);
+          setActiveIdForWs(workspacePath, newTerminalId);
+        } else {
+          // 目标组可能托管着树外终端（渲染在条末尾）：先按可见顺序物化，新终端才能
+          // 落到**可见末尾**，而不是插在托管终端前面。
+          const materialized = materializeHostedTerminals(layout, paneId);
+          const next = insertTerminalIntoPane(materialized, paneId, newTerminalId);
+          if (next !== layout) commitLayout(next, [newTerminalId]);
+        }
+        setActivePaneId(paneId);
+        onReload();
+      },
+    });
   };
 
   const splitPaneById = async (
@@ -463,42 +493,43 @@ export function QuickTerminalPanel(props: QuickTerminalPanelProps) {
     if (paneCount >= MAX_PANES) return;
     // 显式方向（⋯ → 向右 / 向下拆分）优先；缺省沿用 ⊟ 的视口默认方向。
     const resolvedDirection = direction ?? preferredSplitDirection;
-    setBusyPaneId(paneId);
-    setCreateError(null);
-    try {
-      const result = await createSessionTerminal({
-        gatewayUrl,
-        sessionId,
-        token,
-        ...(workspacePath ? { cwd: workspacePath } : {}),
-      });
-      // 种子终端是「禁止空 pane」不变量的关键：必须原样传给 splitPane，
-      // 否则新 pane 会先以空态落盘、随后被归一化摘掉。
-      const seedTerminalId = result.terminal.terminalId;
-      const newPaneId = `pane-${seedTerminalId}`;
-      if (layout === null) {
-        if (liveTerminalIds.size === 0) return;
-        // 隐式 pane 尚未物化：按当前全部终端建组（保留原 active），再在纯函数层拆分。
-        const base = createPane([...liveTerminalIds], IMPLICIT_PANE_ID);
-        const oriented =
-          implicitActiveId !== null
-            ? setPaneActiveTerminal(base, IMPLICIT_PANE_ID, implicitActiveId)
-            : base;
-        const next = applySplitPane(oriented, IMPLICIT_PANE_ID, resolvedDirection, newPaneId, {
-          seedTerminalId,
-          maxPanes: MAX_PANES,
+    // 置 busy / 清错误 与 try/catch/finally 一起下沉到模块级
+    // `runQuickTerminalActionOnce`（见其注释）。
+    await runQuickTerminalActionOnce({
+      busyValue: paneId,
+      setBusy: setBusyPaneId,
+      setError: setCreateError,
+      run: async () => {
+        const result = await createSessionTerminal({
+          gatewayUrl,
+          sessionId,
+          token,
+          ...(workspacePath ? { cwd: workspacePath } : {}),
         });
-        if (next !== oriented) commitLayout(next, [seedTerminalId]);
-      } else {
-        layoutState.splitPane(paneId, resolvedDirection, newPaneId, seedTerminalId);
-      }
-      setActivePaneId(newPaneId);
-      onReload();
-    } catch (error) {
-      setCreateError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusyPaneId(null);
-    }
+        // 种子终端是「禁止空 pane」不变量的关键：必须原样传给 splitPane，
+        // 否则新 pane 会先以空态落盘、随后被归一化摘掉。
+        const seedTerminalId = result.terminal.terminalId;
+        const newPaneId = `pane-${seedTerminalId}`;
+        if (layout === null) {
+          if (liveTerminalIds.size === 0) return;
+          // 隐式 pane 尚未物化：按当前全部终端建组（保留原 active），再在纯函数层拆分。
+          const base = createPane([...liveTerminalIds], IMPLICIT_PANE_ID);
+          const oriented =
+            implicitActiveId !== null
+              ? setPaneActiveTerminal(base, IMPLICIT_PANE_ID, implicitActiveId)
+              : base;
+          const next = applySplitPane(oriented, IMPLICIT_PANE_ID, resolvedDirection, newPaneId, {
+            seedTerminalId,
+            maxPanes: MAX_PANES,
+          });
+          if (next !== oriented) commitLayout(next, [seedTerminalId]);
+        } else {
+          layoutState.splitPane(paneId, resolvedDirection, newPaneId, seedTerminalId);
+        }
+        setActivePaneId(newPaneId);
+        onReload();
+      },
+    });
   };
 
   const selectTerminalInPane = (paneId: string, terminalId: string, index?: number): void => {

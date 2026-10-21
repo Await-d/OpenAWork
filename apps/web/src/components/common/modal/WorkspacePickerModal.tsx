@@ -49,6 +49,29 @@ function validateDirectoryName(name: string): string | null {
   return null;
 }
 
+/**
+ * 统一的「busy + try/catch/finally」动作包装（工作区目录选择器）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（条件 / 逻辑 / 三元），本组件 5 处 try/catch/finally 会让它整体脱靶
+ * （实测）。语义逐字照搬：`run` 的全流程仍在 try 内（含提前 return），catch 只做错误
+ * 文案映射，finally 无条件清 busy。
+ */
+async function runWorkspaceActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export default function WorkspacePickerModal({
   isOpen,
   onClose,
@@ -81,55 +104,59 @@ export default function WorkspacePickerModal({
 
   const openDirectory = useCallback(
     async (path: string) => {
-      setBrowsing(true);
       setError(null);
-      try {
-        const nodes = fetchTree ? await fetchTree(path, 1) : [];
-        setCurrentPath(path);
-        setPathInput(path);
-        setDirectories(nodes.filter((node) => node.type === 'directory'));
-        lastActionRef.current = { kind: 'open', path };
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '无法读取文件夹');
-      } finally {
-        setBrowsing(false);
-      }
+      await runWorkspaceActionOnce({
+        setBusy: setBrowsing,
+        onError: (err) => {
+          setError(err instanceof Error ? err.message : '无法读取文件夹');
+        },
+        run: async () => {
+          const nodes = fetchTree ? await fetchTree(path, 1) : [];
+          setCurrentPath(path);
+          setPathInput(path);
+          setDirectories(nodes.filter((node) => node.type === 'directory'));
+          lastActionRef.current = { kind: 'open', path };
+        },
+      });
     },
     [fetchTree],
   );
 
   const initialize = useCallback(async () => {
-    setBrowsing(true);
     setError(null);
-    try {
-      const roots = fetchWorkspaceRoots
-        ? await fetchWorkspaceRoots()
-        : fetchRootPath
-          ? [await fetchRootPath()]
-          : ['/'];
-      const normalizedRoots = roots.filter((root) => root.trim().length > 0);
-      const fallbackRoot = normalizedRoots[0] ?? '/';
-      const resolvedRoots = normalizedRoots.length > 0 ? normalizedRoots : [fallbackRoot];
-      const startPath =
-        initialPath && findContainingRoot(initialPath, resolvedRoots) ? initialPath : fallbackRoot;
-      setAvailableRoots(resolvedRoots);
-      setCurrentPath(startPath);
-      setPathInput(startPath);
+    await runWorkspaceActionOnce({
+      setBusy: setBrowsing,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '无法读取工作区目录');
+      },
+      run: async () => {
+        const roots = fetchWorkspaceRoots
+          ? await fetchWorkspaceRoots()
+          : fetchRootPath
+            ? [await fetchRootPath()]
+            : ['/'];
+        const normalizedRoots = roots.filter((root) => root.trim().length > 0);
+        const fallbackRoot = normalizedRoots[0] ?? '/';
+        const resolvedRoots = normalizedRoots.length > 0 ? normalizedRoots : [fallbackRoot];
+        const startPath =
+          initialPath && findContainingRoot(initialPath, resolvedRoots)
+            ? initialPath
+            : fallbackRoot;
+        setAvailableRoots(resolvedRoots);
+        setCurrentPath(startPath);
+        setPathInput(startPath);
 
-      if (supportsNativePicker && !initialPath) {
-        setDirectories([]);
+        if (supportsNativePicker && !initialPath) {
+          setDirectories([]);
+          lastActionRef.current = { kind: 'initialize' };
+          return;
+        }
+
+        const nodes = fetchTree ? await fetchTree(startPath, 1) : [];
+        setDirectories(nodes.filter((node) => node.type === 'directory'));
         lastActionRef.current = { kind: 'initialize' };
-        return;
-      }
-
-      const nodes = fetchTree ? await fetchTree(startPath, 1) : [];
-      setDirectories(nodes.filter((node) => node.type === 'directory'));
-      lastActionRef.current = { kind: 'initialize' };
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '无法读取工作区目录');
-    } finally {
-      setBrowsing(false);
-    }
+      },
+    });
   }, [fetchRootPath, fetchTree, fetchWorkspaceRoots, initialPath, supportsNativePicker]);
 
   const retryLastAction = useCallback(async () => {
@@ -213,22 +240,22 @@ export default function WorkspacePickerModal({
   }
 
   async function handlePickNativeFolder() {
-    setNativePicking(true);
     setError(null);
+    await runWorkspaceActionOnce({
+      setBusy: setNativePicking,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '打开系统文件夹选择器失败');
+      },
+      run: async () => {
+        const pickedPath = await pickDesktopFolder();
+        if (!pickedPath) {
+          return;
+        }
 
-    try {
-      const pickedPath = await pickDesktopFolder();
-      if (!pickedPath) {
-        return;
-      }
-
-      await onSelect(pickedPath);
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '打开系统文件夹选择器失败');
-    } finally {
-      setNativePicking(false);
-    }
+        await onSelect(pickedPath);
+        onClose();
+      },
+    });
   }
 
   async function handleOpenPathInput() {
@@ -274,19 +301,19 @@ export default function WorkspacePickerModal({
 
     const nextPath = joinDirectoryPath(currentPath, newDirectoryName);
     setError(null);
-    setCreatingDirectory(true);
-
-    try {
-      await createDirectory(nextPath);
-      // 创建后直接进入新目录：它随即成为「当前目录」，可被一键选为工作区。
-      await openDirectory(nextPath);
-      setShowCreateDirectoryForm(false);
-      setNewDirectoryName('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '创建文件夹失败');
-    } finally {
-      setCreatingDirectory(false);
-    }
+    await runWorkspaceActionOnce({
+      setBusy: setCreatingDirectory,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '创建文件夹失败');
+      },
+      run: async () => {
+        await createDirectory(nextPath);
+        // 创建后直接进入新目录：它随即成为「当前目录」，可被一键选为工作区。
+        await openDirectory(nextPath);
+        setShowCreateDirectoryForm(false);
+        setNewDirectoryName('');
+      },
+    });
   }
 
   async function handleSelectCurrent() {
@@ -295,22 +322,23 @@ export default function WorkspacePickerModal({
       return;
     }
     setError(null);
-    setConfirming(true);
-    try {
-      if (validatePath) {
-        const result = await validatePath(currentPath);
-        if (!result.valid) {
-          setError(result.error ?? '路径无效');
-          return;
+    await runWorkspaceActionOnce({
+      setBusy: setConfirming,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '操作失败');
+      },
+      run: async () => {
+        if (validatePath) {
+          const result = await validatePath(currentPath);
+          if (!result.valid) {
+            setError(result.error ?? '路径无效');
+            return;
+          }
         }
-      }
-      await onSelect(currentPath);
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '操作失败');
-    } finally {
-      setConfirming(false);
-    }
+        await onSelect(currentPath);
+        onClose();
+      },
+    });
   }
 
   return (

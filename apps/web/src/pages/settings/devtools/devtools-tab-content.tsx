@@ -39,7 +39,10 @@ import {
   buildErrorReportHtml,
   triggerDownload,
 } from './devtools-error-command.js';
-import { buildTroubleshootBundleMarkdown } from './devtools-troubleshoot-bundle.js';
+import {
+  buildTroubleshootBundleMarkdown,
+  summarizeIssues,
+} from './devtools-troubleshoot-bundle.js';
 
 declare const __APP_VERSION__: string;
 declare const __APP_BUILD_VERSION__: string;
@@ -162,8 +165,14 @@ export function DevtoolsTabContent({
     sourceStates.workers.status,
   ].some((status) => status === 'loading');
   const errorSources = sourceList.filter((source) => source.status === 'error' && source.error);
-  const logErrors = devLogs.filter((log) => log.level === 'error').length;
+  // 固定引用：下面「复制全部错误日志」与「复制排障上下文」两个 useCallback 都以它
+  // 为依赖，若每次渲染新建数组，两个回调会每帧换身份、失去缓存意义。
+  const errorLogs = React.useMemo(() => devLogs.filter((log) => log.level === 'error'), [devLogs]);
+  const logErrors = errorLogs.length;
   const workerErrors = workers.filter((worker) => worker.status === 'error').length;
+  // 导航角标与排障包概览共用 summarizeIssues：诊断记录与错误日志在网关侧同源于
+  // audit_logs，直接相加会把每条工具错误算两遍（排障包曾把 20 项报成 27 项）。
+  const issueSummary = summarizeIssues({ diagnostics, errorLogs, workers });
   const filteredDiagnostics = React.useMemo(
     () => diagnostics.filter((diagnostic) => matchesDiagnosticQuery(diagnostic, diagnosticQuery)),
     [diagnostics, diagnosticQuery],
@@ -351,6 +360,23 @@ export function DevtoolsTabContent({
     [],
   );
 
+  /**
+   * 「刷新全部」的统一入口：Nav 的手动按钮与自动刷新 interval 共用，
+   * 避免两处各写一遍「记时间 + 触发刷新」后逐渐漂移。
+   */
+  const handleRefreshAllSources = React.useCallback(() => {
+    setLastGlobalRefreshAt(Date.now());
+    onRefreshAllSources();
+  }, [onRefreshAllSources]);
+
+  // latest-ref：自动刷新的 interval 只依赖「开关 + 空闲」两个真正相关的状态。
+  // 若把刷新回调直接列进 effect 依赖，父组件每次渲染传新的内联箭头都会让
+  // effect 销毁重建，30 秒计时器被无限重置、永远打不满——自动刷新静默失效。
+  const handleRefreshAllSourcesRef = React.useRef(handleRefreshAllSources);
+  React.useEffect(() => {
+    handleRefreshAllSourcesRef.current = handleRefreshAllSources;
+  }, [handleRefreshAllSources]);
+
   React.useEffect(() => {
     if (!autoRefreshEnabled) {
       return;
@@ -358,15 +384,14 @@ export function DevtoolsTabContent({
 
     const intervalId = window.setInterval(() => {
       if (!anyRefreshableSourceLoading) {
-        setLastGlobalRefreshAt(Date.now());
-        onRefreshAllSources();
+        handleRefreshAllSourcesRef.current();
       }
     }, 30000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [anyRefreshableSourceLoading, autoRefreshEnabled, onRefreshAllSources]);
+  }, [anyRefreshableSourceLoading, autoRefreshEnabled]);
 
   const copySelectedDiagnostic = React.useCallback(async () => {
     if (!selectedDiagnostic) {
@@ -481,7 +506,6 @@ export function DevtoolsTabContent({
   }, [filteredLogs, updateCopiedLogAction]);
 
   const copyErrorLogs = React.useCallback(async () => {
-    const errorLogs = devLogs.filter((log) => log.level === 'error');
     if (errorLogs.length === 0) {
       return;
     }
@@ -498,7 +522,7 @@ export function DevtoolsTabContent({
     } else {
       updateCopiedLogAction('复制失败：浏览器拒绝了剪贴板写入');
     }
-  }, [devLogs, updateCopiedLogAction]);
+  }, [errorLogs, updateCopiedLogAction]);
 
   const copyLogField = React.useCallback(
     async (label: string, value: unknown) => {
@@ -559,12 +583,12 @@ export function DevtoolsTabContent({
       gatewayUrl,
       sourceStates,
       diagnostics,
-      errorLogs: devLogs.filter((log) => log.level === 'error'),
+      errorLogs,
       workers,
     });
 
     return copyToClipboard(markdown);
-  }, [devLogs, diagnostics, gatewayUrl, sourceStates, workers]);
+  }, [errorLogs, diagnostics, gatewayUrl, sourceStates, workers]);
 
   /** 诊断区「查看日志」：切到日志分区，并尽量选中与当前诊断关联的那条日志。 */
   const goToRelatedLogs = React.useCallback(() => {
@@ -799,12 +823,9 @@ export function DevtoolsTabContent({
         anyRefreshableSourceLoading={anyRefreshableSourceLoading}
         autoRefreshEnabled={autoRefreshEnabled}
         lastGlobalRefreshAt={lastGlobalRefreshAt}
-        issueCount={diagnostics.length + logErrors + workerErrors}
+        issueCount={issueSummary.total}
         onSelectSection={setActiveSection}
-        onRefreshAllSources={() => {
-          setLastGlobalRefreshAt(Date.now());
-          onRefreshAllSources();
-        }}
+        onRefreshAllSources={handleRefreshAllSources}
         onToggleAutoRefresh={setAutoRefreshEnabled}
         onCopyTroubleshootBundle={copyTroubleshootBundle}
         onExportErrorReport={() => {

@@ -121,6 +121,10 @@ export function useBrowserInspector({
     });
   }, [enabled, subscribe]);
 
+  // 四个回调不手写 memo：本文件被 React Compiler 接管（`check:react-compiler` 实测
+  // compiled 1 / bailout 0，自动注入 7 个 memo 值），函数表达式已被自动缓存，
+  // 引用稳定性由编译器保证，手写 useCallback 只会重复一层。
+
   const requestDom = (depth: number): void => {
     setDomStatus('loading');
     setErrorMessage(null);

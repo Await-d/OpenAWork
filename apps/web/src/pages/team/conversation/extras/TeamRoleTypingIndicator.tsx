@@ -60,15 +60,22 @@ export function TeamRoleTypingIndicator({ roleLayer, visible }: TeamRoleTypingIn
     >
       <span
         aria-hidden
-        style={{
-          ...DOT_STYLE,
-          background: `color-mix(in srgb, ${id.color} 20%, var(--bg-overlay))`,
-          border: `1px solid color-mix(in srgb, ${id.color} 45%, transparent)`,
-          animation: 'team-flow-node-pulse 1.8s ease-in-out infinite',
-          // team-flow-node-pulse 读这两个 CSS 变量（见 team-runtime.css）。
-          ['--team-flow-glow' as string]: `color-mix(in srgb, ${id.color} 45%, transparent)`,
-          ['--team-flow-glow-mid' as string]: id.color,
-        }}
+        style={
+          {
+            ...DOT_STYLE,
+            background: `color-mix(in srgb, ${id.color} 20%, var(--bg-overlay))`,
+            border: `1px solid color-mix(in srgb, ${id.color} 45%, transparent)`,
+            animation: 'team-flow-node-pulse 1.8s ease-in-out infinite',
+            // team-flow-node-pulse 读这两个 CSS 变量（见 team-runtime.css）。
+            //
+            // CSS 变量不在 `CSSProperties` 的已知属性里，需要类型断言。断言必须放在
+            // **整个对象**上：写成 `['--team-flow-glow' as string]: v` 会让 key 位置
+            // 出现 TSAsExpression，React Compiler 报 "Expected Identifier, got
+            // TSAsExpression key in ObjectExpression" 并放弃优化本组件。
+            '--team-flow-glow': `color-mix(in srgb, ${id.color} 45%, transparent)`,
+            '--team-flow-glow-mid': id.color,
+          } as CSSProperties
+        }
       >
         {id.icon}
       </span>

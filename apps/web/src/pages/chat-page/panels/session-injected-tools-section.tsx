@@ -74,6 +74,29 @@ export interface SessionInjectedToolsSectionProps {
   readonly sessionId: string | null;
 }
 
+/**
+ * 重试注入工具连接的统一包装：`onStart` 置忙 / 清 error → try → catch 交给 `onError`
+ * → `onFinally` 清忙。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runInjectedToolRetryOnce(ctx: {
+  onStart: () => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart();
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function SessionInjectedToolsSection({ sessionId }: SessionInjectedToolsSectionProps) {
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const token = useAuthStore((state) => state.accessToken);
@@ -143,16 +166,23 @@ export function SessionInjectedToolsSection({ sessionId }: SessionInjectedToolsS
   const handleRetry = useCallback(
     async (serverId: string): Promise<void> => {
       if (!token) return;
-      setRetryingId(serverId);
-      setActionError(null);
-      try {
-        await createSettingsClient(gatewayUrl).retryMcpServer(token, serverId);
-        await load();
-      } catch (error) {
-        setActionError(error instanceof Error ? error.message : '重试连接失败。');
-      } finally {
-        setRetryingId(null);
-      }
+      // try/catch/finally 下沉到模块级 `runInjectedToolRetryOnce`（见其注释）。
+      await runInjectedToolRetryOnce({
+        onStart: () => {
+          setRetryingId(serverId);
+          setActionError(null);
+        },
+        onError: (error) => {
+          setActionError(error instanceof Error ? error.message : '重试连接失败。');
+        },
+        onFinally: () => {
+          setRetryingId(null);
+        },
+        run: async () => {
+          await createSettingsClient(gatewayUrl).retryMcpServer(token, serverId);
+          await load();
+        },
+      });
     },
     [gatewayUrl, load, token],
   );

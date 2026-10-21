@@ -6,7 +6,12 @@
 
 export interface GenerateImageResult {
   success: boolean;
+  /** 首张产物——单张语义，历史输出里只有这一个字段。 */
   artifactId: string;
+  /** 多张产出（`n>1`）时的全量产物 id，含首张；旧输出缺省。 */
+  artifactIds?: string[];
+  /** 实际产出的张数；旧输出缺省。 */
+  count?: number;
   title: string;
   fileName?: string;
   modelId: string;
@@ -38,6 +43,30 @@ export function parseGenerateImageOutput(output: unknown): GenerateImageResult |
     // not JSON — older format or error
   }
   return null;
+}
+
+/**
+ * 解析该工具调用实际产出的**全部**产物 id（顺序即生成顺序）。
+ *
+ * 单张与多张共用一条读取路径：优先取 `artifactIds`（`n>1` 时网关会下发全量，
+ * 含首张），缺省时退回单张 `artifactId`。返回空数组表示「还没有可用产物」，
+ * 调用方据此走 running / error 分支，不必区分 null 与 []。
+ *
+ * 去重是必要的：历史输出里 `artifactIds` 与 `artifactId` 都可能存在，
+ * 若二者被拼接，首张会在图集里出现两次。
+ */
+export function resolveGenerateImageArtifactIds(result: GenerateImageResult | null): string[] {
+  if (!result) return [];
+
+  const raw = Array.isArray(result.artifactIds) ? result.artifactIds : [];
+  const ids: string[] = [];
+  for (const candidate of [...raw, result.artifactId]) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (trimmed.length === 0 || ids.includes(trimmed)) continue;
+    ids.push(trimmed);
+  }
+  return ids;
 }
 
 /**

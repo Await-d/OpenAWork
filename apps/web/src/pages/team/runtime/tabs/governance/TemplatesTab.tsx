@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState } from 'react';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
 import { PANEL_STYLE } from '../../shared/team-runtime-shared.js';
 import { ChevronDownIcon, PlusIcon, TemplateIcon, SyncIcon } from '../../shared/TeamIcons.js';
@@ -297,16 +297,16 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
   // collapsedSections 按会话持久化的是分类 id 数组（Set 不可持久化），渲染时派生 Set 供 O(1) 查找
   const collapsedSectionSet = new Set(collapsedSections);
 
-  const toggleSection = useCallback(
-    (id: string) => {
-      setCollapsedSections(
-        collapsedSections.includes(id)
-          ? collapsedSections.filter((sectionId) => sectionId !== id)
-          : [...collapsedSections, id],
-      );
-    },
-    [collapsedSections, setCollapsedSections],
-  );
+  // 去 useCallback：只被分类标题按钮的内联 onClick 调用，无需稳定身份。
+  // 保留手写 memo 会让编译器报「Existing memoization could not be preserved」而
+  // 放弃优化整个组件。
+  const toggleSection = (id: string) => {
+    setCollapsedSections(
+      collapsedSections.includes(id)
+        ? collapsedSections.filter((sectionId) => sectionId !== id)
+        : [...collapsedSections, id],
+    );
+  };
 
   // Group templates by category
   const sections = new Map<string, typeof templates>();
@@ -327,15 +327,14 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
     0,
   );
 
-  const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
-    [selectedTemplateId, templates],
-  );
+  // 去 useMemo：O(n) find，返回的是 templates 数组里的同一对象引用——身份天然稳定，
+  // 编译器接管后按 (selectedTemplateId, templates) 自动 memo。保留手写 memo 会让编译器
+  // 报「Existing memoization could not be preserved」而放弃优化整个组件。
+  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? null;
 
-  const selectedTemplateEditorState = useMemo(() => {
-    if (!selectedTemplate) {
-      return null;
-    }
+  // 归一化派生改为顺序语句，结果由编译器按 selectedTemplate 自动 memo。
+  let selectedTemplateEditorState: ReturnType<typeof templateDataToEditorState> | null = null;
+  if (selectedTemplate) {
     const teamTemplate = selectedTemplate.metadata?.teamTemplate;
     const defaultBindings = teamTemplate?.defaultBindings ?? {};
     const normalizedBindings = Object.fromEntries(
@@ -351,7 +350,7 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
             },
       ]),
     );
-    return templateDataToEditorState({
+    selectedTemplateEditorState = templateDataToEditorState({
       name: selectedTemplate.name,
       description: selectedTemplate.description,
       metadata: {
@@ -366,27 +365,26 @@ export function TemplatesTab({ onUseTemplate }: { onUseTemplate: (templateId: st
         },
       },
     });
-  }, [selectedTemplate]);
+  }
 
-  const handleSaveTemplate = useCallback(
-    async (state: ReturnType<typeof templateDataToEditorState>) => {
-      if (!selectedTemplate) {
-        return false;
-      }
-      const templateData = editorStateToTemplateData(state);
-      const input: UpdateWorkflowTemplateInput = {
-        name: templateData.name,
-        description: templateData.description,
-        metadata: templateData.metadata,
-      };
-      const ok = await updateTemplate(selectedTemplate.id, input);
-      if (ok) {
-        setEditorMode('idle');
-      }
-      return ok;
-    },
-    [selectedTemplate, updateTemplate],
-  );
+  // 去 useCallback：只作为 TemplateEditor 的 onSave 在提交按钮 onClick 里调用，
+  // 下游不是 memo 组件、也不进任何 effect deps。
+  const handleSaveTemplate = async (state: ReturnType<typeof templateDataToEditorState>) => {
+    if (!selectedTemplate) {
+      return false;
+    }
+    const templateData = editorStateToTemplateData(state);
+    const input: UpdateWorkflowTemplateInput = {
+      name: templateData.name,
+      description: templateData.description,
+      metadata: templateData.metadata,
+    };
+    const ok = await updateTemplate(selectedTemplate.id, input);
+    if (ok) {
+      setEditorMode('idle');
+    }
+    return ok;
+  };
 
   return (
     <TabContainer

@@ -87,6 +87,47 @@ import {
  */
 const WORKSPACE_MAX_WIDTH = 1080;
 
+/**
+ * 把当前模板导出为 JSON 文件并触发下载；失败时抛出（由调用方提示）。
+ *
+ * 必须留在模块级：原 try 内的 `||` / `.replace(...)` / 字符串模板都是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个组件（实测）。
+ */
+function downloadTemplateJsonOnce(draft: TemplateEditorState): void {
+  const json = exportTemplateState(draft);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeName = (draft.name.trim() || 'team-template').replace(/[^\w\u4e00-\u9fa5-]+/g, '_');
+  a.download = `${safeName}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * 智能分配模型的统一包装：置 assigning → try → catch 交给 `onError` → finally 清 assigning。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`...(cond ? … : {})`、三元）。语义逐字照搬。
+ */
+async function runAssignModelsOnce(ctx: {
+  setAssigning: (assigning: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setAssigning(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setAssigning(false);
+  }
+}
+
 export default function TeamTemplatesPage() {
   const navigate = useNavigate();
   const {
@@ -171,7 +212,8 @@ export default function TeamTemplatesPage() {
     }
     // Only re-hydrate when the *identity* of the selected template changes,
     // so editing a selected template won't be clobbered by this effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 依赖省略是刻意取舍。不要在此处加回 lint 抑制指令——编译器按文本匹配
+    // 识别它，会放弃优化整个组件。
   }, [selectedId, creating]);
 
   // Auto-select first template when list loads
@@ -234,17 +276,8 @@ export default function TeamTemplatesPage() {
   /** 导出当前模板为 JSON 文件下载。 */
   const handleExport = useCallback(() => {
     try {
-      const json = exportTemplateState(draft);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const safeName = (draft.name.trim() || 'team-template').replace(/[^\w\u4e00-\u9fa5-]+/g, '_');
-      a.download = `${safeName}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // 导出（含值块）下沉到模块级 `downloadTemplateJsonOnce`（见其注释）。
+      downloadTemplateJsonOnce(draft);
       setFeedback({ kind: 'success', message: '模板已导出为 JSON' });
     } catch (err) {
       setFeedback({
@@ -372,80 +405,82 @@ export default function TeamTemplatesPage() {
       setFeedback({ kind: 'error', message: '请先在模型池里勾选候选模型' });
       return;
     }
-    setAssigningModels(true);
-    try {
-      const grouped = groupRosterByLayer(draft.memberSlots);
-      const layers = Array.from(grouped.entries())
-        .filter(([, slots]) => slots.length > 0)
-        .map(([layer, slots]) => ({
-          layer,
-          memberLabels: slots.map((s) => s.displayName || SPECIALTY_LABEL[s.specialty]),
-        }));
-      if (layers.length === 0) {
-        setFeedback({ kind: 'error', message: '花名册为空，无法分配模型' });
-        return;
-      }
-      const result = await workflowsClient.assignTeamModels(accessToken, {
-        strategy: draft.modelAssignStrategy,
-        pool: poolCandidates.map((m) => ({
-          providerId: m.providerId,
-          providerName: m.providerName,
-          modelId: m.modelId,
-          label: m.label,
-          ...(typeof m.contextWindow === 'number' ? { contextWindow: m.contextWindow } : {}),
-          ...(typeof m.supportsTools === 'boolean' ? { supportsTools: m.supportsTools } : {}),
-          ...(typeof m.supportsThinking === 'boolean'
-            ? { supportsThinking: m.supportsThinking }
-            : {}),
-          ...(typeof m.supportsVision === 'boolean' ? { supportsVision: m.supportsVision } : {}),
-          ...(typeof m.inputPricePerMillion === 'number'
-            ? { inputPricePerMillion: m.inputPricePerMillion }
-            : {}),
-          ...(typeof m.outputPricePerMillion === 'number'
-            ? { outputPricePerMillion: m.outputPricePerMillion }
-            : {}),
-        })),
-        layers,
-      });
-      // 把每层分配结果应用到 roster（整层统一）。
-      let nextRoster = draft.memberSlots;
-      const validLayers = new Set<string>(TEAM_RUNTIME_LAYER_ORDER);
-      const reasons: Record<string, string> = {};
-      for (const a of result.assignments) {
-        if (!validLayers.has(a.layer)) continue;
-        nextRoster = setLayerModel(nextRoster, a.layer as TeamRuntimeLayer, {
-          providerId: a.providerId,
-          modelId: a.modelId,
-        });
-        if (a.reason) reasons[a.layer] = a.reason;
-      }
-      setDraft((prev) => ({ ...prev, memberSlots: nextRoster }));
-      setAssignReasons(reasons);
-      if (result.source === 'llm') {
-        setFeedback({
-          kind: 'success',
-          message: `已由 AI 推荐分配 ${result.assignments.length} 层模型`,
-        });
-      } else {
-        const why =
-          result.fallbackReasonCode === 'llm-error'
-            ? `AI 调用失败（${result.fallbackMessage ?? '上游错误'}）`
-            : result.fallbackReasonCode === 'llm-empty'
-              ? `AI 返回无法解析${result.llmRawSnippet ? `（${result.llmRawSnippet.slice(0, 60)}…）` : ''}`
-              : '上游不可用';
+    // 置 assigning 与 try/catch/finally 一起下沉到模块级 `runAssignModelsOnce`（见其注释）。
+    await runAssignModelsOnce({
+      setAssigning: setAssigningModels,
+      onError: (reason) => {
         setFeedback({
           kind: 'error',
-          message: `${why}，已用规则引擎分配 ${result.assignments.length} 层模型`,
+          message: reason instanceof Error ? reason.message : '智能分配模型失败',
         });
-      }
-    } catch (reason) {
-      setFeedback({
-        kind: 'error',
-        message: reason instanceof Error ? reason.message : '智能分配模型失败',
-      });
-    } finally {
-      setAssigningModels(false);
-    }
+      },
+      run: async () => {
+        const grouped = groupRosterByLayer(draft.memberSlots);
+        const layers = Array.from(grouped.entries())
+          .filter(([, slots]) => slots.length > 0)
+          .map(([layer, slots]) => ({
+            layer,
+            memberLabels: slots.map((s) => s.displayName || SPECIALTY_LABEL[s.specialty]),
+          }));
+        if (layers.length === 0) {
+          setFeedback({ kind: 'error', message: '花名册为空，无法分配模型' });
+          return;
+        }
+        const result = await workflowsClient.assignTeamModels(accessToken, {
+          strategy: draft.modelAssignStrategy,
+          pool: poolCandidates.map((m) => ({
+            providerId: m.providerId,
+            providerName: m.providerName,
+            modelId: m.modelId,
+            label: m.label,
+            ...(typeof m.contextWindow === 'number' ? { contextWindow: m.contextWindow } : {}),
+            ...(typeof m.supportsTools === 'boolean' ? { supportsTools: m.supportsTools } : {}),
+            ...(typeof m.supportsThinking === 'boolean'
+              ? { supportsThinking: m.supportsThinking }
+              : {}),
+            ...(typeof m.supportsVision === 'boolean' ? { supportsVision: m.supportsVision } : {}),
+            ...(typeof m.inputPricePerMillion === 'number'
+              ? { inputPricePerMillion: m.inputPricePerMillion }
+              : {}),
+            ...(typeof m.outputPricePerMillion === 'number'
+              ? { outputPricePerMillion: m.outputPricePerMillion }
+              : {}),
+          })),
+          layers,
+        });
+        // 把每层分配结果应用到 roster（整层统一）。
+        let nextRoster = draft.memberSlots;
+        const validLayers = new Set<string>(TEAM_RUNTIME_LAYER_ORDER);
+        const reasons: Record<string, string> = {};
+        for (const a of result.assignments) {
+          if (!validLayers.has(a.layer)) continue;
+          nextRoster = setLayerModel(nextRoster, a.layer as TeamRuntimeLayer, {
+            providerId: a.providerId,
+            modelId: a.modelId,
+          });
+          if (a.reason) reasons[a.layer] = a.reason;
+        }
+        setDraft((prev) => ({ ...prev, memberSlots: nextRoster }));
+        setAssignReasons(reasons);
+        if (result.source === 'llm') {
+          setFeedback({
+            kind: 'success',
+            message: `已由 AI 推荐分配 ${result.assignments.length} 层模型`,
+          });
+        } else {
+          const why =
+            result.fallbackReasonCode === 'llm-error'
+              ? `AI 调用失败（${result.fallbackMessage ?? '上游错误'}）`
+              : result.fallbackReasonCode === 'llm-empty'
+                ? `AI 返回无法解析${result.llmRawSnippet ? `（${result.llmRawSnippet.slice(0, 60)}…）` : ''}`
+                : '上游不可用';
+          setFeedback({
+            kind: 'error',
+            message: `${why}，已用规则引擎分配 ${result.assignments.length} 层模型`,
+          });
+        }
+      },
+    });
   }, [accessToken, draft.memberSlots, draft.modelAssignStrategy, poolCandidates, workflowsClient]);
 
   const guardSwitch = useCallback(() => {

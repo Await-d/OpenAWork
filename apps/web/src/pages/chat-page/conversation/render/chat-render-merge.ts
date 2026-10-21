@@ -217,16 +217,29 @@ export function mergeStreamingEntryIntoHistoricalEntries(
   // the exact creation order; timestamps are only a fallback because the live
   // entry's `createdAt` is the request start (see `compareOrderedMessageIds`).
   const streamingTimestamp = toComparableTimestamp(streamingMessage.createdAt);
-  const laterEntryIndex = historicalRenderedMessageEntries.findIndex((entry) => {
+  // 位置判定**只用一种基准**，绝不混用：
+  // 旧实现在一个 `findIndex` 里既用有序 id 比较、又对非有序 id 的条目退回时间戳，
+  // 于是 UUID 形态的条目（例如权限事件卡片）会用时间戳提前截断扫描，而它的时间戳
+  // 与相邻条目的 id 时间基准互相矛盾，插入位置变得不可预测。这里拆成两轮：
+  // 先只看「双方都有序 id」的条目；一轮都没命中才用时间戳，且只作用于非有序 id 条目。
+  const laterByOrderedIdIndex = historicalRenderedMessageEntries.findIndex((entry) => {
     const orderedComparison = compareOrderedMessageIds(entry.message.id, streamingMessage.id);
-    if (orderedComparison !== null) {
-      return orderedComparison > 0;
-    }
-    const entryTimestamp = toComparableTimestamp(entry.message.createdAt);
-    return (
-      streamingTimestamp !== null && entryTimestamp !== null && entryTimestamp > streamingTimestamp
-    );
+    return orderedComparison !== null && orderedComparison > 0;
   });
+  const laterEntryIndex =
+    laterByOrderedIdIndex !== -1
+      ? laterByOrderedIdIndex
+      : historicalRenderedMessageEntries.findIndex((entry) => {
+          if (compareOrderedMessageIds(entry.message.id, streamingMessage.id) !== null) {
+            return false;
+          }
+          const entryTimestamp = toComparableTimestamp(entry.message.createdAt);
+          return (
+            streamingTimestamp !== null &&
+            entryTimestamp !== null &&
+            entryTimestamp > streamingTimestamp
+          );
+        });
   const insertionIndex =
     laterEntryIndex === -1 ? historicalRenderedMessageEntries.length : laterEntryIndex;
   // The live bubble answers the latest user turn, so it can never be ordered

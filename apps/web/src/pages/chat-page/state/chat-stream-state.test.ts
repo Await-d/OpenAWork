@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildChatRightPanelStateFromRunEvents, getToolCallCards } from './chat-stream-state.js';
+import {
+  applyChatRightPanelChunk,
+  buildChatRightPanelStateFromRunEvents,
+  createInitialChatRightPanelState,
+  getToolCallCards,
+  startChatRightPanelRun,
+} from './chat-stream-state.js';
 
 const GUI_SNAPSHOT = {
   type: 'input_image' as const,
@@ -153,6 +159,69 @@ describe('buildChatRightPanelStateFromRunEvents', () => {
     expect(state.toolCalls[0]?.attachments).toEqual([GUI_SNAPSHOT]);
   });
 
+  it('tool_result 后迟到的 tool_progress 不把已完成工具改回 running', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '迟到的进度事件',
+      events: [
+        {
+          type: 'tool_result',
+          toolCallId: 'call-late-1',
+          toolName: 'bash',
+          output: { exitCode: 0 },
+          isError: false,
+        },
+        {
+          type: 'tool_progress',
+          toolCallId: 'call-late-1',
+          toolName: 'bash',
+          subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'late output' }],
+          completedCount: 0,
+          totalCount: 1,
+        },
+      ],
+    });
+
+    expect(state.toolCalls[0]?.status).toBe('completed');
+    expect(state.toolCalls[0]?.batchProgress).toBeUndefined();
+  });
+
+  it('paused 工具收到批准后的 progress 会恢复 running，并清掉审批占位', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '审批恢复后的实时输出',
+      events: [
+        {
+          type: 'tool_call_delta',
+          toolCallId: 'call-paused-1',
+          toolName: 'bash',
+          inputDelta: '{"command":"bun test"}',
+        },
+        {
+          type: 'tool_result',
+          toolCallId: 'call-paused-1',
+          toolName: 'bash',
+          output: '等待审批',
+          isError: false,
+          pendingPermissionRequestId: 'perm-1',
+        },
+        {
+          type: 'tool_progress',
+          toolCallId: 'call-paused-1',
+          toolName: 'bash',
+          subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'RESUMED' }],
+          completedCount: 0,
+          totalCount: 1,
+        },
+      ],
+    });
+
+    const toolCall = state.toolCalls[0];
+    expect(toolCall?.status).toBe('running');
+    expect(toolCall?.pendingPermissionRequestId).toBeUndefined();
+    expect(toolCall?.batchProgress?.subTools[0]?.partialOutput).toBe('RESUMED');
+    expect(state.planTasks[0]?.status).toBe('in_progress');
+    expect(state.dagNodes.find((node) => node.id === 'call-paused-1')?.status).toBe('running');
+  });
+
   it('tool_call_delta 在工具尚未完成时也会携带 requestId', () => {
     const state = buildChatRightPanelStateFromRunEvents({
       goal: '工具调用即时聚焦',
@@ -242,5 +311,77 @@ describe('buildChatRightPanelStateFromRunEvents', () => {
       compactedMessages: 12,
       representedMessages: 12,
     });
+  });
+});
+
+describe('applyChatRightPanelChunk — 流内非终态错误', () => {
+  it('TOOL_ERROR 不结算面板：状态原地返回，不产生失败事件', () => {
+    const running = startChatRightPanelRun(createInitialChatRightPanelState(), '继续跑');
+    const next = applyChatRightPanelChunk(running, {
+      type: 'error',
+      code: 'TOOL_ERROR',
+      message: 'Tool webfetch 的入参不是合法 JSON，已放弃本次调用',
+    });
+
+    expect(next).toBe(running);
+  });
+
+  it('终态 error 仍把面板结算为失败', () => {
+    const running = startChatRightPanelRun(createInitialChatRightPanelState(), '继续跑');
+    const next = applyChatRightPanelChunk(running, {
+      type: 'error',
+      code: 'MODEL_ERROR',
+      message: '上游 500',
+    });
+
+    expect(next).not.toBe(running);
+    expect(next.agentEvents.at(-1)?.label).toBe('流式响应失败');
+    expect(next.dagNodes[0]?.status).toBe('failed');
+  });
+
+  it('TOOL_ERROR 携带上游摘要时只记录摘要，不结算为失败', () => {
+    const running = startChatRightPanelRun(createInitialChatRightPanelState(), '继续跑');
+    const next = applyChatRightPanelChunk(running, {
+      type: 'error',
+      code: 'TOOL_ERROR',
+      message: 'Tool webfetch 的入参不是合法 JSON，已放弃本次调用',
+      upstreamSummary: {
+        stopReason: 'error',
+        textDeltaCount: 1,
+        reasoningDeltaCount: 0,
+        toolCallDeltaCount: 1,
+        sawDone: false,
+        sawError: true,
+        stalled: false,
+      },
+    });
+
+    expect(next).not.toBe(running);
+    expect(next.upstreamSummaries).toHaveLength(1);
+    expect(next.agentEvents.some((event) => event.type === 'agent_error')).toBe(false);
+  });
+
+  it('历史重建（刷新路径）遇到 TOOL_ERROR 不污染面板终态', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '畸形工具入参后继续',
+      events: [
+        {
+          type: 'tool_call_delta',
+          toolCallId: 'call-webfetch-1',
+          toolName: 'webfetch',
+          inputDelta: '{"url"',
+        },
+        {
+          type: 'error',
+          code: 'TOOL_ERROR',
+          message: 'Tool webfetch 的入参不是合法 JSON，已放弃本次调用',
+        },
+        { type: 'done', stopReason: 'end_turn' },
+      ],
+    });
+
+    expect(state.agentEvents.some((event) => event.type === 'agent_error')).toBe(false);
+    expect(state.agentEvents.at(-1)?.label).toBe('流式响应完成');
+    expect(state.dagNodes[0]?.status).toBe('completed');
   });
 });

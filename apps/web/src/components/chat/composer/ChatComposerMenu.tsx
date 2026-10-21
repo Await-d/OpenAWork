@@ -11,6 +11,7 @@ import type {
   SlashCommandItem,
 } from '../../conversation-runtime/messages/support.js';
 import { FileIcon, FolderIcon } from '../../file-editor/preview/FileIcon.js';
+import { writeRefItem } from '../../../utils/ref/ref-current.js';
 import {
   ComposerHintChip,
   composerHeaderTitleStyle,
@@ -187,7 +188,9 @@ export function ChatComposerMenu({
             return (
               <button
                 ref={(node) => {
-                  composerItemRefs.current[index] = node;
+                  // 元素表归父组件所有（键盘导航要按 index 聚焦），写它的 current 属
+                  // 「修改 props」，按 React Compiler 要求收进模块函数。
+                  writeRefItem(composerItemRefs, index, node);
                 }}
                 key={item.id}
                 type="button"

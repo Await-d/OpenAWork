@@ -199,6 +199,28 @@ async function resolveSessionWorkspaceWithParentFallback(input: {
   };
 }
 
+/**
+ * 工作区绑定的统一包装：置 loading → try → catch 写 error 后**原样抛出** → finally 清 loading。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 2 处
+ * 这类 try 会让整个 hook 脱靶（实测）。语义逐字照搬（含 catch 里的 `throw err`）。
+ */
+async function runWorkspaceBindingOnce(ctx: {
+  setLoading: (loading: boolean) => void;
+  setError: (message: string) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setLoading(true);
+  try {
+    await ctx.run();
+  } catch (err: unknown) {
+    ctx.setError(err instanceof Error ? err.message : String(err));
+    throw err;
+  } finally {
+    ctx.setLoading(false);
+  }
+}
+
 export function useWorkspace(sessionId: string | null) {
   const [workspaceState, setWorkspaceState] = useState<SessionWorkspaceState>({
     path: null,
@@ -261,15 +283,18 @@ export function useWorkspace(sessionId: string | null) {
    */
   const loadFallbackWorkspacePath = useCallback(
     async (targetSessionId: string, signal?: AbortSignal): Promise<string | null> => {
-      try {
-        const fallback = await workspaceClient.getFileIndexVersion(accessToken ?? '', undefined, {
-          sessionId: targetSessionId,
-          ...(signal ? { signal } : {}),
-        });
-        return fallback.root || null;
-      } catch {
+      // 整个 try/catch 改成 `.catch(() => null)`：try 内的 `??` / `...(cond ? … : {})` /
+      // `a || b` 都是值块，会让编译器报 "Support value blocks … within a try/catch statement"
+      // 并放弃优化整个 hook。语义等价——请求失败时同样静默返回 null。
+      const token = accessToken ?? '';
+      const requestOptions = { sessionId: targetSessionId, ...(signal ? { signal } : {}) };
+      const fallback = await workspaceClient
+        .getFileIndexVersion(token, undefined, requestOptions)
+        .catch(() => null);
+      if (!fallback) {
         return null;
       }
+      return fallback.root || null;
     },
     [accessToken, workspaceClient],
   );
@@ -372,55 +397,53 @@ export function useWorkspace(sessionId: string | null) {
     async (path: string): Promise<void> => {
       if (!sessionId) throw new Error('当前没有激活的会话，无法绑定工作区。');
       const normalizedPath = path.trim();
-      setLoading(true);
-      try {
-        await workspaceClient.setSessionWorkspace(accessToken ?? '', sessionId, normalizedPath);
-        setWorkspaceState((previous) => ({
-          path: normalizedPath || null,
-          sessionId,
-          // 改工作区路径不改会话的 SSH 绑定：同一会话保留已解析的远端连接 id。
-          sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
-        }));
-        setActiveSessionWorkspace(sessionId, normalizedPath || null, null);
-        // 绑定生效后默认工作区不再参与文件浏览。
-        setFallbackWorkspaceState(null);
-        setError(null);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
-        throw err;
-      } finally {
-        setLoading(false);
-      }
+      // 置 loading 与 try/catch/finally 一起下沉到模块级 `runWorkspaceBindingOnce`
+      // （见其注释：catch 会写 error 并原样抛出）。
+      await runWorkspaceBindingOnce({
+        setLoading,
+        setError,
+        run: async () => {
+          await workspaceClient.setSessionWorkspace(accessToken ?? '', sessionId, normalizedPath);
+          setWorkspaceState((previous) => ({
+            path: normalizedPath || null,
+            sessionId,
+            // 改工作区路径不改会话的 SSH 绑定：同一会话保留已解析的远端连接 id。
+            sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
+          }));
+          setActiveSessionWorkspace(sessionId, normalizedPath || null, null);
+          // 绑定生效后默认工作区不再参与文件浏览。
+          setFallbackWorkspaceState(null);
+          setError(null);
+        },
+      });
     },
     [sessionId, accessToken, workspaceClient, setActiveSessionWorkspace],
   );
 
   const clearWorkspace = useCallback(async (): Promise<void> => {
     if (!sessionId) throw new Error('当前没有激活的会话，无法清空工作区。');
-    setLoading(true);
-    try {
-      await workspaceClient.setSessionWorkspace(accessToken ?? '', sessionId, null);
-      setWorkspaceState((previous) => ({
-        path: null,
-        sessionId,
-        sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
-      }));
-      setActiveSessionWorkspace(sessionId, null, null);
-      setError(null);
-      // 解除绑定后回到未绑定默认工作区（仅文件浏览用途），失败静默为 null。
-      void loadFallbackWorkspacePath(sessionId).then((fallbackPath) => {
-        if (fallbackPath) {
-          setFallbackWorkspaceState({ sessionId, path: fallbackPath });
-        }
-      });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
+    // 同 setWorkspace：置 loading 与 try/catch/finally 一起下沉到模块级
+    // `runWorkspaceBindingOnce`（见其注释：catch 会写 error 并原样抛出）。
+    await runWorkspaceBindingOnce({
+      setLoading,
+      setError,
+      run: async () => {
+        await workspaceClient.setSessionWorkspace(accessToken ?? '', sessionId, null);
+        setWorkspaceState((previous) => ({
+          path: null,
+          sessionId,
+          sshConnectionId: previous.sessionId === sessionId ? previous.sshConnectionId : null,
+        }));
+        setActiveSessionWorkspace(sessionId, null, null);
+        setError(null);
+        // 解除绑定后回到未绑定默认工作区（仅文件浏览用途），失败静默为 null。
+        void loadFallbackWorkspacePath(sessionId).then((fallbackPath) => {
+          if (fallbackPath) {
+            setFallbackWorkspaceState({ sessionId, path: fallbackPath });
+          }
+        });
+      },
+    });
   }, [
     sessionId,
     accessToken,

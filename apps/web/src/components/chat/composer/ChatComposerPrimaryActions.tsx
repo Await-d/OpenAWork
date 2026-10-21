@@ -114,9 +114,16 @@ function SendStopButton(props: ChatComposerPrimaryActionsProps) {
   );
 }
 
+/**
+ * 只有 `running` 才是「执行权被占用」，因此只有它禁用发送键。
+ *
+ * `paused` 表示会话里有一条待用户处理的交互（权限申请 / 提问），但网关在那时**不持有**
+ * 单飞锁（暂停流已收尾并释放），用户完全可以继续发消息；因此暂停不再禁用输入。
+ * 待办状态由 `SessionRunStateBar` 展示，不靠禁用按钮表达。
+ */
 function getPrimaryButtonDisabled(props: ChatComposerPrimaryActionsProps): boolean {
   if (props.showStopAction) return props.stoppingStream;
-  if (props.sessionBusyState) return true;
+  if (props.sessionBusyState === 'running') return true;
   return props.imageGenerationBusy || !props.canSubmit;
 }
 
@@ -126,7 +133,6 @@ function getPrimaryButtonTone(props: ChatComposerPrimaryActionsProps): string {
     return props.effectiveStopCapability === 'best_effort' ? 'warning' : 'danger';
   }
   if (props.sessionBusyState === 'running') return 'running';
-  if (props.sessionBusyState === 'paused') return 'warning';
   return 'accent';
 }
 
@@ -137,7 +143,6 @@ function getPrimaryButtonLabel(props: ChatComposerPrimaryActionsProps): string {
     return props.effectiveStopCapability === 'best_effort' ? '尝试停止' : '停止';
   }
   if (props.sessionBusyState === 'running') return '运行中';
-  if (props.sessionBusyState === 'paused') return '待处理';
   return props.imageGenerationMode ? '生成' : '发送';
 }
 
@@ -157,7 +162,7 @@ function getComposerStatusLabel(props: ChatComposerPrimaryActionsProps): string 
   }
   if (props.imageGenerationBusy) return '图片生成中 · 请等待结果返回';
   if (props.sessionBusyState === 'running') return '会话持续运行中 · 正在同步最新结果';
-  if (props.sessionBusyState === 'paused') return '会话等待处理 · 处理后继续同步';
+  if (props.sessionBusyState === 'paused') return '会话等待处理 · 仍可直接发送消息';
   return props.imageGenerationMode ? 'Enter 生成 · Shift+Enter 换行' : 'Enter 发送';
 }
 

@@ -81,6 +81,14 @@ export interface UseChatPendingActionsOptions {
    * 它显示"当前未登录,无法处理权限审批"。
    */
   setStreamError: React.Dispatch<React.SetStateAction<string | null>>;
+  /**
+   * 回复问题 / 权限后，后台续跑会立刻占用会话执行权。
+   * 在网关状态刷新到前端之前先乐观标记 running，避免用户在竞态窗口
+   * 里发送第二条消息，抢占续跑请求。
+   */
+  setSessionStateStatus: React.Dispatch<
+    React.SetStateAction<'idle' | 'running' | 'paused' | null | undefined>
+  >;
 }
 
 export interface ChatPendingActions {
@@ -144,9 +152,41 @@ export interface ChatPendingActions {
     | undefined;
 }
 
+/**
+ * 内联问题 / 权限回复的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`
+ * （不传＝异常继续向上抛，不得静默吞掉），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（`...(cond ? … : {})`、三元），本 hook 2 处这类 try 会让整个 hook 脱靶
+ * （实测）。语义逐字照搬。
+ */
+async function runPendingActionOnce(ctx: {
+  onError?: (error: unknown) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      throw error;
+    }
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
 export function useChatPendingActions(options: UseChatPendingActionsOptions): ChatPendingActions {
-  const { gatewayUrl, token, currentSessionId, setMessages, setRightPanelState, setStreamError } =
-    options;
+  const {
+    gatewayUrl,
+    token,
+    currentSessionId,
+    setMessages,
+    setRightPanelState,
+    setSessionStateStatus,
+    setStreamError,
+  } = options;
 
   // ── 队列状态 ──────────────────────────────────────────────────────────
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionRequest[]>([]);
@@ -268,58 +308,64 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
             }
           : { requestId: activePendingQuestion.requestId, status };
 
-      try {
-        setInlineQuestionReplyStatus(status);
-        setInlineQuestionReplyError(null);
-        const replyResult = await createQuestionsClient(gatewayUrl).reply(
-          token,
-          activePendingQuestion.sessionId,
-          payload,
-        );
-        // 澄清模式共识确认 / 计划批准会让服务端把会话自动切换到编程模式，
-        // 这里把新模式广播给持有 dialogueMode 状态的会话页面。
-        publishDialogueModeSwitchFromReply({
-          ...(replyResult.dialogueMode ? { dialogueMode: replyResult.dialogueMode } : {}),
-          sessionId: activePendingQuestion.sessionId,
-        });
-        setPendingQuestions((prev) =>
-          prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
-        );
-        if (currentSessionId) {
-          requestCurrentSessionRefresh(currentSessionId);
-        }
-        requestSessionListRefresh();
-      } catch (error) {
-        const isHttp =
-          typeof error === 'object' &&
-          error !== null &&
-          typeof Reflect.get(error, 'status') === 'number';
-        if (isHttp) {
-          const httpStatus = Reflect.get(error, 'status') as number;
-          const data = Reflect.get(error, 'data') as { error?: string } | undefined;
-          if (
-            (httpStatus === 409 || httpStatus === 404) &&
-            (data?.error === 'Question request expired' ||
-              data?.error === 'Question request already resolved' ||
-              httpStatus === 404)
-          ) {
-            setPendingQuestions((prev) =>
-              prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
-            );
-            toast('问题已过期或已处理，已重新同步。', 'warning', 3000);
-            if (currentSessionId) {
-              requestCurrentSessionRefresh(currentSessionId);
+      // try/catch/finally 下沉到模块级 `runPendingActionOnce`（见其注释）。
+      await runPendingActionOnce({
+        onError: (error) => {
+          const isHttp =
+            typeof error === 'object' &&
+            error !== null &&
+            typeof Reflect.get(error, 'status') === 'number';
+          if (isHttp) {
+            const httpStatus = Reflect.get(error, 'status') as number;
+            const data = Reflect.get(error, 'data') as { error?: string } | undefined;
+            if (
+              (httpStatus === 409 || httpStatus === 404) &&
+              (data?.error === 'Question request expired' ||
+                data?.error === 'Question request already resolved' ||
+                httpStatus === 404)
+            ) {
+              setPendingQuestions((prev) =>
+                prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
+              );
+              toast('问题已过期或已处理，已重新同步。', 'warning', 3000);
+              if (currentSessionId) {
+                requestCurrentSessionRefresh(currentSessionId);
+              }
+              requestSessionListRefresh();
+              return;
             }
-            requestSessionListRefresh();
-            return;
           }
-        }
-        setInlineQuestionReplyError(
-          error instanceof Error ? error.message : '提交回答失败，请重试。',
-        );
-      } finally {
-        setInlineQuestionReplyStatus(null);
-      }
+          setInlineQuestionReplyError(
+            error instanceof Error ? error.message : '提交回答失败，请重试。',
+          );
+        },
+        onFinally: () => {
+          setInlineQuestionReplyStatus(null);
+        },
+        run: async () => {
+          setInlineQuestionReplyStatus(status);
+          setInlineQuestionReplyError(null);
+          const replyResult = await createQuestionsClient(gatewayUrl).reply(
+            token,
+            activePendingQuestion.sessionId,
+            payload,
+          );
+          // 澄清模式共识确认 / 计划批准会让服务端把会话自动切换到编程模式，
+          // 这里把新模式广播给持有 dialogueMode 状态的会话页面。
+          publishDialogueModeSwitchFromReply({
+            ...(replyResult.dialogueMode ? { dialogueMode: replyResult.dialogueMode } : {}),
+            sessionId: activePendingQuestion.sessionId,
+          });
+          setPendingQuestions((prev) =>
+            prev.filter((q) => q.requestId !== activePendingQuestion.requestId),
+          );
+          setSessionStateStatus(status === 'answered' ? 'running' : 'idle');
+          if (currentSessionId) {
+            requestCurrentSessionRefresh(currentSessionId);
+          }
+          requestSessionListRefresh();
+        },
+      });
     },
     [
       token,
@@ -328,6 +374,7 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
       currentSessionId,
       inlineQuestionAnswers,
       inlineQuestionCustomInputs,
+      setSessionStateStatus,
     ],
   );
 
@@ -381,58 +428,66 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
           .selectedLevel;
       const alwaysOverride = selectedScopeLevel ? [selectedScopeLevel.pattern] : [];
 
-      try {
-        await replyPermissionRequest({
-          ...(decision !== 'once' && decision !== 'reject' && alwaysOverride.length > 0
-            ? { alwaysOverride }
-            : {}),
-          decision,
-          feedback,
-          gatewayUrl,
-          requestId: request.requestId,
-          sessionId: request.sessionId,
-          token,
-        });
-        const successMessage = getPermissionReplySuccessMessage(decision);
-        setMessages((previous) =>
-          dismissPermissionEventMessage(
-            applyPermissionDecisionToLocalAssistantMessages(
-              previous,
-              request.requestId,
-              decision,
-              feedback,
-            ),
-            request.requestId,
-          ),
-        );
-        setPendingPermissions((previous) =>
-          previous.filter((permission) => permission.requestId !== request.requestId),
-        );
-        setRightPanelState((previous) =>
-          clearResolvedPendingPermissionToolCalls(previous, request.requestId, decision),
-        );
-        toast(successMessage, decision === 'reject' ? 'warning' : 'success', 2200);
-        refreshSessionsAfterInlinePermissionReply(request.sessionId);
-      } catch (error) {
-        const status = getPermissionReplyStatusCode(error);
-        const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
+      // 同问题回复：整段下沉到模块级 `runPendingActionOnce`（见其注释）。
+      await runPendingActionOnce({
+        onError: (error) => {
+          const status = getPermissionReplyStatusCode(error);
+          const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
 
-        if (status === 404 || status === 409) {
+          if (status === 404 || status === 409) {
+            setPendingPermissions((previous) =>
+              previous.filter((permission) => permission.requestId !== request.requestId),
+            );
+            refreshSessionsAfterInlinePermissionReply(request.sessionId);
+          } else {
+            setInlinePermissionErrors((previous) => ({
+              ...previous,
+              [request.requestId]: errorMessage,
+            }));
+          }
+        },
+        onFinally: () => {
+          setInlinePermissionPendingDecision((current) =>
+            current?.requestId === request.requestId ? null : current,
+          );
+        },
+        run: async () => {
+          await replyPermissionRequest({
+            ...(decision !== 'once' && decision !== 'reject' && alwaysOverride.length > 0
+              ? { alwaysOverride }
+              : {}),
+            decision,
+            feedback,
+            gatewayUrl,
+            requestId: request.requestId,
+            sessionId: request.sessionId,
+            token,
+          });
+          const successMessage = getPermissionReplySuccessMessage(decision);
+          setMessages((previous) =>
+            dismissPermissionEventMessage(
+              applyPermissionDecisionToLocalAssistantMessages(
+                previous,
+                request.requestId,
+                decision,
+                feedback,
+              ),
+              request.requestId,
+            ),
+          );
           setPendingPermissions((previous) =>
             previous.filter((permission) => permission.requestId !== request.requestId),
           );
+          setRightPanelState((previous) =>
+            clearResolvedPendingPermissionToolCalls(previous, request.requestId, decision),
+          );
+          // 先按 running 保护回复后的竞态窗口；普通拒绝会由紧随其后的会话刷新
+          // 收敛到 idle，continue-on-deny 则会保持 running 并继续后台续跑。
+          setSessionStateStatus('running');
+          toast(successMessage, decision === 'reject' ? 'warning' : 'success', 2200);
           refreshSessionsAfterInlinePermissionReply(request.sessionId);
-        } else {
-          setInlinePermissionErrors((previous) => ({
-            ...previous,
-            [request.requestId]: errorMessage,
-          }));
-        }
-      } finally {
-        setInlinePermissionPendingDecision((current) =>
-          current?.requestId === request.requestId ? null : current,
-        );
-      }
+        },
+      });
     },
     [
       gatewayUrl,
@@ -441,6 +496,7 @@ export function useChatPendingActions(options: UseChatPendingActionsOptions): Ch
       setRightPanelState,
       setStreamError,
       selectedPermissionScopeLevels,
+      setSessionStateStatus,
       token,
     ],
   );

@@ -7,9 +7,14 @@
  * 数据由宿主（`BuiltInBrowser`）收集后传入——iframe 注入脚本的 postMessage 与
  * 网关侧实时引擎（`/browser-live`）两条来源共用同一套 `ConsoleEntry` 模型；
  * 本面板不订阅任何来源，便于单独测试。
+ *
+ * `memo`：列表最多 200 行，宿主（`BuiltInBrowser`）每次重渲染（地址栏输入、标签切换、
+ * 预览刷新等）都不该把它整片重刷。本文件自身被编译器接管（`check:react-compiler` 实测
+ * compiled 6 / bailout 0），但**宿主文件未被接管**（compiled 0 / bailout 1，compiler-limit），
+ * 跨组件的跳过只能靠 `memo`；宿主负责稳定 `logs` 与 `inspector` 两个大 props 的引用。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ConsoleEntry, ConsoleLevel, NetworkExchange } from './browser-console-types.js';
 import {
   buildCurlCommand,
@@ -55,7 +60,7 @@ const LEVEL_ICONS: Record<ConsoleLevel, string> = {
 
 const FEEDBACK_CLEAR_MS = 1_600;
 
-export function BrowserConsolePanel({
+export const BrowserConsolePanel = memo(function BrowserConsolePanel({
   logs,
   endRef,
   onClear,
@@ -351,7 +356,7 @@ export function BrowserConsolePanel({
       )}
     </div>
   );
-}
+});
 
 /**
  * 列表视图空态文案。

@@ -1,18 +1,54 @@
 // @vitest-environment jsdom
 
 import React, { useRef, useState } from 'react';
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useComposerInputHistory } from './use-composer-input-history.js';
 import { useComposerInputHistoryStore } from '../../../stores/chat/composer-input-history.js';
 
+/**
+ * 假网关输入历史。语义与服务端一致：旧 → 新、相邻去重、最多 50 条。
+ */
+const { fakeHistory } = vi.hoisted(() => ({
+  fakeHistory: {
+    appendCalls: [] as Array<{ entries: readonly string[]; sessionId: string; token: string }>,
+    appendShouldFail: false,
+    entriesBySession: new Map<string, string[]>(),
+  },
+}));
+
+vi.mock('@openAwork/web-client', () => ({
+  createComposerInputHistoryClient: () => ({
+    append: async (token: string, sessionId: string, entries: readonly string[]) => {
+      fakeHistory.appendCalls.push({ entries: [...entries], sessionId, token });
+      if (fakeHistory.appendShouldFail) {
+        throw new Error('网关不可用');
+      }
+      let current = fakeHistory.entriesBySession.get(sessionId) ?? [];
+      for (const text of entries) {
+        if (current.at(-1) === text) {
+          continue;
+        }
+        current = [...current, text].slice(-50);
+      }
+      fakeHistory.entriesBySession.set(sessionId, current);
+      return [...current];
+    },
+    list: async (_token: string, sessionId: string) => {
+      return [...(fakeHistory.entriesBySession.get(sessionId) ?? [])];
+    },
+  }),
+}));
+
 interface HistoryHarnessProps {
   readonly historyScope: string | null;
   readonly initialInput?: string;
+  readonly sessionId?: string | null;
+  readonly withPersistence?: boolean;
 }
 
 function useHistoryHarness(props: HistoryHarnessProps) {
-  const { historyScope, initialInput = '' } = props;
+  const { historyScope, initialInput = '', sessionId = null, withPersistence = false } = props;
   const [input, setInput] = useState(initialInput);
   const textareaRef = useRef<HTMLTextAreaElement | null>(document.createElement('textarea'));
   const history = useComposerInputHistory({
@@ -20,6 +56,9 @@ function useHistoryHarness(props: HistoryHarnessProps) {
     setInput,
     historyScope,
     textareaRef,
+    persistence: withPersistence
+      ? { gatewayUrl: 'http://gateway.test', sessionId, token: 'token-1' }
+      : null,
   });
 
   return {
@@ -39,6 +78,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useComposerInputHistoryStore.setState((state) => ({ ...state, historyByScope: {} }));
+  fakeHistory.appendCalls.length = 0;
+  fakeHistory.appendShouldFail = false;
+  fakeHistory.entriesBySession.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -158,5 +200,94 @@ describe('useComposerInputHistory', () => {
     act(() => {
       expect(result.current.restoreInputFromHistory()).toBe(false);
     });
+  });
+
+  it('进入会话时从网关水合历史', async () => {
+    fakeHistory.entriesBySession.set('session-1', ['服务端历史一', '服务端历史二']);
+
+    const { result } = renderHook(() =>
+      useHistoryHarness({
+        historyScope: 'scope-session-1',
+        sessionId: 'session-1',
+        withPersistence: true,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.input).toBe('');
+      expect(useComposerInputHistoryStore.getState().historyByScope['scope-session-1']).toEqual([
+        '服务端历史一',
+        '服务端历史二',
+      ]);
+    });
+
+    act(() => {
+      expect(result.current.navigateInputHistory('older')).toBe(true);
+    });
+    expect(result.current.input).toBe('服务端历史二');
+  });
+
+  it('提交记录写入网关，并以服务端全量结果覆盖本地', async () => {
+    const { result } = renderHook(() =>
+      useHistoryHarness({
+        historyScope: 'scope-session-1',
+        sessionId: 'session-1',
+        withPersistence: true,
+      }),
+    );
+
+    act(() => {
+      result.current.recordSubmittedInputHistory('第一条');
+    });
+
+    await waitFor(() => {
+      expect(fakeHistory.appendCalls).toEqual([
+        { entries: ['第一条'], sessionId: 'session-1', token: 'token-1' },
+      ]);
+      expect(useComposerInputHistoryStore.getState().historyByScope['scope-session-1']).toEqual([
+        '第一条',
+      ]);
+    });
+  });
+
+  it('persistHistoryEntries 会把迁移过来的 pending 历史批量写入网关', async () => {
+    const { result } = renderHook(() =>
+      useHistoryHarness({
+        historyScope: 'scope-session-1',
+        sessionId: 'session-1',
+        withPersistence: true,
+      }),
+    );
+
+    act(() => {
+      result.current.persistHistoryEntries(['迁移一', '迁移二']);
+    });
+
+    await waitFor(() => {
+      expect(fakeHistory.entriesBySession.get('session-1')).toEqual(['迁移一', '迁移二']);
+    });
+  });
+
+  it('网关写入失败时保留本地乐观记录，下一次水合再对齐', async () => {
+    fakeHistory.appendShouldFail = true;
+
+    const { result } = renderHook(() =>
+      useHistoryHarness({
+        historyScope: 'scope-session-1',
+        sessionId: 'session-1',
+        withPersistence: true,
+      }),
+    );
+
+    act(() => {
+      result.current.recordSubmittedInputHistory('离线记录');
+    });
+
+    await waitFor(() => {
+      expect(fakeHistory.appendCalls).toHaveLength(1);
+    });
+    expect(useComposerInputHistoryStore.getState().historyByScope['scope-session-1']).toEqual([
+      '离线记录',
+    ]);
   });
 });

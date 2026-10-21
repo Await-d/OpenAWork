@@ -15,7 +15,7 @@
  *   - phase 变为 completed / skipped 后不再弹。
  */
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { isTeamInitFinished } from '@openAwork/shared';
 import { useTeamInitChecklist } from './use-team-init-checklist.js';
@@ -130,20 +130,27 @@ export function TeamInitModal({ sessionId, sessionMetadata }: TeamInitModalProps
   const hasPlan = Boolean(teamInit) && !finished;
 
   const [open, setOpen] = useState(false);
-  const autoOpenedRef = useRef(false);
-  const lastSessionRef = useRef<string | null>(null);
+  /** 本条会话是否已经自动弹过一次（按 session 记忆，见下方自动弹出 effect）。 */
+  const [autoOpened, setAutoOpened] = useState(false);
 
-  // 切换会话时重置自动弹出标记（让另一条会话也能自动弹）。
-  // 注意：用 ref 比对而非 useEffect([sessionId])，避免与下方自动弹出 effect 在
-  // 首次挂载时竞争执行顺序（reset effect 会把刚 setOpen(true) 清回 false）。
-  if (lastSessionRef.current !== sessionId) {
-    lastSessionRef.current = sessionId;
-    autoOpenedRef.current = false;
+  /**
+   * 「记住上一次 props」用 React 官方 render-phase 调整 state 的写法：
+   * 渲染期直接 setState，React 会用新值把本次渲染立刻重跑一遍（中间态不提交），
+   * 所以既不需要在渲染期读写 ref（React Compiler 会因此让整个组件脱靶），也不会
+   * 与自动弹出 effect 竞争顺序——effect 跑的时候看到的一定是已重置的值。
+   * setState 必须放在条件分支里（相等时完全不调用），首挂载路径与原来逐字等价。
+   */
+  const [lastSessionId, setLastSessionId] = useState(sessionId);
+  if (lastSessionId !== sessionId) {
+    setLastSessionId(sessionId);
+    setAutoOpened(false);
+    // 切换会话时关闭上一条会话残留的弹窗。
+    setOpen(false);
   }
 
   // 首次检测到「有未完成清单」时自动弹一次（按 session 记忆，避免反复打扰）。
   useEffect(() => {
-    if (!hasPlan || autoOpenedRef.current) return;
+    if (!hasPlan || autoOpened) return;
     let alreadyAutoOpened = false;
     try {
       alreadyAutoOpened = sessionStorage.getItem(autoOpenKey(sessionId)) === '1';
@@ -152,23 +159,16 @@ export function TeamInitModal({ sessionId, sessionMetadata }: TeamInitModalProps
     }
     if (!alreadyAutoOpened) {
       setOpen(true);
-      autoOpenedRef.current = true;
+      setAutoOpened(true);
       try {
         sessionStorage.setItem(autoOpenKey(sessionId), '1');
       } catch {
         // sessionStorage 不可用时忽略——大不了下次进会话再弹。
       }
     }
-  }, [hasPlan, sessionId]);
+  }, [autoOpened, hasPlan, sessionId]);
 
-  // 切换会话时关闭上一条会话残留的弹窗。
-  const prevSessionForCloseRef = useRef(sessionId);
-  useEffect(() => {
-    if (prevSessionForCloseRef.current !== sessionId) {
-      prevSessionForCloseRef.current = sessionId;
-      setOpen(false);
-    }
-  }, [sessionId]);
+  // 切换会话时关闭残留弹窗已由上方 render-phase 重置完成，不再需要额外 effect。
 
   // ESC 关闭。
   useEffect(() => {

@@ -80,6 +80,34 @@ function sortAgents(agents: ManagedAgentRecord[]): ManagedAgentRecord[] {
   });
 }
 
+/**
+ * 统一的「saving + try/catch/finally」Agent 管理动作包装。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（条件 / 逻辑 / 三元），本页 6 处 try/catch/finally 会让它整体脱靶
+ * （实测）。语义逐字照搬：`run` 的全流程仍在 try 内，catch 只做错误文案映射，
+ * finally 无条件清 saving；入口的「清空 error / saveMessage」也一并收在这里。
+ */
+async function runAgentActionOnce(ctx: {
+  setSaving: (saving: boolean) => void;
+  setError: (message: string | null) => void;
+  setSaveMessage: (message: string | null) => void;
+  /** catch 的兜底文案（`reason.message` 优先）。 */
+  failureMessage: string;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSaving(true);
+  ctx.setError(null);
+  ctx.setSaveMessage(null);
+  try {
+    await ctx.run();
+  } catch (reason) {
+    ctx.setError(reason instanceof Error ? reason.message : ctx.failureMessage);
+  } finally {
+    ctx.setSaving(false);
+  }
+}
+
 export default function AgentsPage() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
@@ -229,129 +257,123 @@ export default function AgentsPage() {
     if (!accessToken) {
       return;
     }
-    setSaving(true);
-    setError(null);
-    setSaveMessage(null);
-    try {
-      const client = createAgentsClient(gatewayUrl);
-      const created = await client.create(accessToken, toCreateInput(editorState));
-      setAgents((current) => sortAgents([...current, created]));
-      setSelectedAgentId(created.id);
-      setEditorMode('edit');
-      setSaveMessage('已新增自定义 Agent');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '新增 Agent 失败');
-    } finally {
-      setSaving(false);
-    }
+    await runAgentActionOnce({
+      setSaving,
+      setError,
+      setSaveMessage,
+      failureMessage: '新增 Agent 失败',
+      run: async () => {
+        const client = createAgentsClient(gatewayUrl);
+        const created = await client.create(accessToken, toCreateInput(editorState));
+        setAgents((current) => sortAgents([...current, created]));
+        setSelectedAgentId(created.id);
+        setEditorMode('edit');
+        setSaveMessage('已新增自定义 Agent');
+      },
+    });
   }
 
   async function handleSave() {
     if (!accessToken || !selectedAgent) {
       return;
     }
-    setSaving(true);
-    setError(null);
-    setSaveMessage(null);
-    try {
-      const client = createAgentsClient(gatewayUrl);
-      const updated = await client.update(
-        accessToken,
-        selectedAgent.id,
-        selectedAgent.origin === 'builtin'
-          ? toBuiltinUpdateInput(editorState)
-          : toUpdateInput(editorState),
-      );
-      updateLocalAgent(updated);
-      setSaveMessage('已保存 Agent 实体');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '保存 Agent 失败');
-    } finally {
-      setSaving(false);
-    }
+    await runAgentActionOnce({
+      setSaving,
+      setError,
+      setSaveMessage,
+      failureMessage: '保存 Agent 失败',
+      run: async () => {
+        const client = createAgentsClient(gatewayUrl);
+        const updated = await client.update(
+          accessToken,
+          selectedAgent.id,
+          selectedAgent.origin === 'builtin'
+            ? toBuiltinUpdateInput(editorState)
+            : toUpdateInput(editorState),
+        );
+        updateLocalAgent(updated);
+        setSaveMessage('已保存 Agent 实体');
+      },
+    });
   }
 
   async function handleToggleEnabled() {
     if (!accessToken || !selectedAgent) {
       return;
     }
-    setSaving(true);
-    setError(null);
-    setSaveMessage(null);
-    try {
-      const client = createAgentsClient(gatewayUrl);
-      const updated = await client.update(accessToken, selectedAgent.id, {
-        enabled: !selectedAgent.enabled,
-      });
-      updateLocalAgent(updated);
-      setSaveMessage(updated.enabled ? '已启用 Agent' : '已禁用 Agent');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '切换启用状态失败');
-    } finally {
-      setSaving(false);
-    }
+    await runAgentActionOnce({
+      setSaving,
+      setError,
+      setSaveMessage,
+      failureMessage: '切换启用状态失败',
+      run: async () => {
+        const client = createAgentsClient(gatewayUrl);
+        const updated = await client.update(accessToken, selectedAgent.id, {
+          enabled: !selectedAgent.enabled,
+        });
+        updateLocalAgent(updated);
+        setSaveMessage(updated.enabled ? '已启用 Agent' : '已禁用 Agent');
+      },
+    });
   }
 
   async function handleResetOne() {
     if (!accessToken || !selectedAgent) {
       return;
     }
-    setSaving(true);
-    setError(null);
-    setSaveMessage(null);
-    try {
-      const client = createAgentsClient(gatewayUrl);
-      const reset = await client.reset(accessToken, selectedAgent.id);
-      updateLocalAgent(reset);
-      setSaveMessage('已恢复该 Agent 默认配置');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '恢复默认失败');
-    } finally {
-      setSaving(false);
-    }
+    await runAgentActionOnce({
+      setSaving,
+      setError,
+      setSaveMessage,
+      failureMessage: '恢复默认失败',
+      run: async () => {
+        const client = createAgentsClient(gatewayUrl);
+        const reset = await client.reset(accessToken, selectedAgent.id);
+        updateLocalAgent(reset);
+        setSaveMessage('已恢复该 Agent 默认配置');
+      },
+    });
   }
 
   async function handleResetAll() {
     if (!accessToken) {
       return;
     }
-    setSaving(true);
-    setError(null);
-    setSaveMessage(null);
-    try {
-      const client = createAgentsClient(gatewayUrl);
-      const reset = await client.resetAll(accessToken);
-      const sorted = sortAgents(reset);
-      setAgents(sorted);
-      setSelectedAgentId(sorted[0]?.id ?? null);
-      setEditorMode('edit');
-      setSaveMessage('已恢复全部 Agent 默认配置');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '恢复全部默认失败');
-    } finally {
-      setSaving(false);
-    }
+    await runAgentActionOnce({
+      setSaving,
+      setError,
+      setSaveMessage,
+      failureMessage: '恢复全部默认失败',
+      run: async () => {
+        const client = createAgentsClient(gatewayUrl);
+        const reset = await client.resetAll(accessToken);
+        const sorted = sortAgents(reset);
+        setAgents(sorted);
+        setSelectedAgentId(sorted[0]?.id ?? null);
+        setEditorMode('edit');
+        setSaveMessage('已恢复全部 Agent 默认配置');
+      },
+    });
   }
 
   async function handleRemove() {
     if (!accessToken || !selectedAgent || !selectedAgent.removable) {
       return;
     }
-    setSaving(true);
-    setError(null);
-    setSaveMessage(null);
-    try {
-      const client = createAgentsClient(gatewayUrl);
-      await client.remove(accessToken, selectedAgent.id);
-      setAgents((current) => current.filter((agent) => agent.id !== selectedAgent.id));
-      setSelectedAgentId(null);
-      setEditorMode('edit');
-      setSaveMessage('已移除自定义 Agent');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '移除 Agent 失败');
-    } finally {
-      setSaving(false);
-    }
+    await runAgentActionOnce({
+      setSaving,
+      setError,
+      setSaveMessage,
+      failureMessage: '移除 Agent 失败',
+      run: async () => {
+        const client = createAgentsClient(gatewayUrl);
+        await client.remove(accessToken, selectedAgent.id);
+        setAgents((current) => current.filter((agent) => agent.id !== selectedAgent.id));
+        setSelectedAgentId(null);
+        setEditorMode('edit');
+        setSaveMessage('已移除自定义 Agent');
+      },
+    });
   }
 
   const canSave =

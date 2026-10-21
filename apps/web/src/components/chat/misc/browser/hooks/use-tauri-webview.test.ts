@@ -141,6 +141,7 @@ function setup() {
   const generationRef = { current: 0 };
   const baseParams = {
     isTauri: true,
+    enabled: true,
     activeUrl: 'https://example.test/',
     refreshKey: 0,
     hidden: false,
@@ -294,5 +295,27 @@ describe('useTauriWebview', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  /**
+   * 占位页（新标签页）由 DOM 开始页顶替：创建原生表面只会得到一块盖在开始页上的
+   * 白色 webview，既看不到内容又挡住交互。
+   */
+  it('g. enabled=false 不创建原生表面，且关闭已有表面；恢复后重新创建', async () => {
+    const { rerender, baseParams } = setup();
+    await flushAsync();
+
+    const first = lastWebview();
+
+    rerender({ ...baseParams, enabled: false, activeUrl: 'about:blank' });
+    await flushAsync();
+
+    expect(first.close).toHaveBeenCalledTimes(1);
+    expect(mocks.FakeWebview.instances.length).toBe(1);
+
+    rerender({ ...baseParams, enabled: true, activeUrl: 'https://example.test/next' });
+    await flushAsync();
+
+    expect(mocks.FakeWebview.instances.length).toBe(2);
   });
 });

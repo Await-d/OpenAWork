@@ -17,6 +17,48 @@ export interface NewTeamWorkspaceModalProps {
   onCreated?: (newWorkspaceId?: string) => void;
 }
 
+/**
+ * 新建团队工作区提交的统一包装：置 submitting / 清 error → try → catch 交给 `onError`
+ * → finally 清 submitting。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`...(cond ? … : {})`、三元）。语义逐字照搬。
+ */
+async function runNewTeamWorkspaceSubmitOnce(ctx: {
+  setSubmitting: (submitting: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSubmitting(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSubmitting(false);
+  }
+}
+
+/**
+ * 模板知识初始化的统一包装：try → catch 交给 `onError` 后返回 false（由调用方决定是否中止）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try 内的 `await` 循环 + 三元值块（实测）。
+ */
+async function runTemplateKnowledgeInitOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<boolean> {
+  try {
+    await ctx.run();
+    return true;
+  } catch (error) {
+    ctx.onError(error);
+    return false;
+  }
+}
+
 export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceModalProps) {
   const data = useTeamRuntimeReferenceViewData();
   const accessToken = useAuthStore((state) => state.accessToken);
@@ -71,49 +113,58 @@ export function NewTeamWorkspaceModal({ onClose, onCreated }: NewTeamWorkspaceMo
       return;
     }
 
-    setSubmitting(true);
-    setError(null);
-    try {
-      const newWorkspaceId = await data.createWorkspace({
-        name: trimmedName,
-        ...(description.trim() ? { description: description.trim() } : {}),
-        ...(defaultWorkingRoot.trim() ? { defaultWorkingRoot: defaultWorkingRoot.trim() } : {}),
-      });
-      if (!newWorkspaceId) {
-        setError('创建失败，请重试或检查权限');
-        return;
-      }
-
-      if (templates.selectedTemplates.length > 0) {
-        if (!accessToken) {
-          setError('工作区已创建，但当前登录状态不可用，无法初始化模板');
+    // 置 submitting / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runNewTeamWorkspaceSubmitOnce`（见其注释）。
+    await runNewTeamWorkspaceSubmitOnce({
+      setSubmitting,
+      setError,
+      onError: (reason) => {
+        setError(reason instanceof Error ? reason.message : '创建失败');
+      },
+      run: async () => {
+        const newWorkspaceId = await data.createWorkspace({
+          name: trimmedName,
+          ...(description.trim() ? { description: description.trim() } : {}),
+          ...(defaultWorkingRoot.trim() ? { defaultWorkingRoot: defaultWorkingRoot.trim() } : {}),
+        });
+        if (!newWorkspaceId) {
+          setError('创建失败，请重试或检查权限');
           return;
         }
-        try {
-          for (const template of templates.selectedTemplates) {
-            await teamPhaseAClient.upsertWorkspaceKnowledge(
-              accessToken,
-              newWorkspaceId,
-              buildWorkspaceTemplateKnowledgeInput(template),
-            );
+
+        if (templates.selectedTemplates.length > 0) {
+          if (!accessToken) {
+            setError('工作区已创建，但当前登录状态不可用，无法初始化模板');
+            return;
           }
-        } catch (reason) {
-          setError(
-            reason instanceof Error
-              ? `工作区已创建，但模板初始化失败：${reason.message}`
-              : '工作区已创建，但模板初始化失败',
-          );
-          return;
+          // 嵌套 try/catch 同样下沉（见 `runTemplateKnowledgeInitOnce` 注释）。
+          const initialized = await runTemplateKnowledgeInitOnce({
+            onError: (reason) => {
+              setError(
+                reason instanceof Error
+                  ? `工作区已创建，但模板初始化失败：${reason.message}`
+                  : '工作区已创建，但模板初始化失败',
+              );
+            },
+            run: async () => {
+              for (const template of templates.selectedTemplates) {
+                await teamPhaseAClient.upsertWorkspaceKnowledge(
+                  accessToken,
+                  newWorkspaceId,
+                  buildWorkspaceTemplateKnowledgeInput(template),
+                );
+              }
+            },
+          });
+          if (!initialized) {
+            return;
+          }
         }
-      }
 
-      onCreated?.(newWorkspaceId);
-      onClose();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '创建失败');
-    } finally {
-      setSubmitting(false);
-    }
+        onCreated?.(newWorkspaceId);
+        onClose();
+      },
+    });
   };
 
   const handlePathSelect = async (path: string) => {

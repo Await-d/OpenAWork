@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { sanitizeRichHtml } from '../../utils/html/sanitize-rich-html.js';
+import { loadMammothOnce } from '../../utils/lazy/lazy-assets.js';
 
 interface DocxPreviewProps {
   buffer: ArrayBuffer;
@@ -29,7 +30,8 @@ export default function DocxPreview({ buffer }: DocxPreviewProps) {
     setState({ status: 'loading' });
     void (async () => {
       try {
-        const mammoth = await import('mammoth');
+        // import() 只能在模块级：见 utils/lazy/lazy-assets.ts。
+        const mammoth = await loadMammothOnce();
         // mammoth ships both browser and node entries; the browser
         // build is exposed as the package default.
         const result = await mammoth.convertToHtml(

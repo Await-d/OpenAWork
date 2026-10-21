@@ -201,12 +201,91 @@ async function switchToSession(router: ReturnType<typeof createMemoryRouter>, pa
   });
 }
 
+interface ScrollGeometryHandle {
+  readScrollToCalls: () => number[];
+  readScrollTop: () => number;
+  setScrollTop: (top: number) => void;
+}
+
+/**
+ * jsdom 不做布局：把滚动区装配成「可控几何 + 可观测滚动原语」。
+ * 三个只读几何量必须显式定义才能被滚动决策代码读到，`scrollTo` 也必须替身化
+ * ——真实的 `Element.scrollTo` 在 jsdom 里是 no-op，位置永远不会变化。
+ */
+function installScrollGeometry(
+  region: HTMLDivElement,
+  geometry: { clientHeight: number; scrollHeight: number; scrollTop: number },
+): ScrollGeometryHandle {
+  let currentScrollTop = geometry.scrollTop;
+  const scrollToCalls: number[] = [];
+  Object.defineProperty(region, 'clientHeight', {
+    configurable: true,
+    value: geometry.clientHeight,
+  });
+  Object.defineProperty(region, 'scrollHeight', {
+    configurable: true,
+    value: geometry.scrollHeight,
+  });
+  Object.defineProperty(region, 'scrollTop', {
+    configurable: true,
+    get: () => currentScrollTop,
+    set: (value: number) => {
+      currentScrollTop = value;
+    },
+  });
+  Object.defineProperty(region, 'scrollTo', {
+    configurable: true,
+    value: (options?: ScrollToOptions | number) => {
+      const top = typeof options === 'number' ? options : options?.top;
+      if (typeof top !== 'number') return;
+      scrollToCalls.push(top);
+      currentScrollTop = top;
+    },
+  });
+  return {
+    readScrollToCalls: () => [...scrollToCalls],
+    readScrollTop: () => currentScrollTop,
+    setScrollTop: (top: number) => {
+      currentScrollTop = top;
+    },
+  };
+}
+
+/** 装配滚动几何；缺失即抛错，避免断言在无滚动区的页面上静默通过。 */
+async function installScrollRegion(geometry: {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop: number;
+}): Promise<ScrollGeometryHandle> {
+  const region = await waitFor(() => {
+    const found = document.querySelector<HTMLDivElement>('[data-testid="chat-scroll-region"]');
+    if (!found) throw new Error('chat-scroll-region 未挂载');
+    return found;
+  });
+  return installScrollGeometry(region, geometry);
+}
+
+/**
+ * 等待滚动结算完成（两层 rAF + ResizeObserver 回调）再断言。
+ *
+ * 不能用 `waitFor` 包住「期望值」断言：结算前的中间值可能恰好等于期望值，
+ * 抢跑通过会让护栏失去判别力（实测旧实现会在第一次 poll 时假通过）。
+ */
+async function settleScroll(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+}
+
 beforeEach(() => {
   useUIStateStore.setState({
     chatView: 'home',
     editorFullScreen: false,
+    lastChatPath: null,
     reviewPanelOpened: false,
     rightOpen: false,
+    sidePanelActiveTab: 'review',
+    sidePanelActiveTabBySession: {},
     terminalPanelOpened: false,
     workbenchLayoutMode: 'classic',
   });
@@ -350,6 +429,7 @@ describe('ChatPage — 会话切换', () => {
     );
 
     // 模拟「A 会话里打开过预览」：视图状态停在 browser，一级 tab 停在预览。
+    // tab 走 action 写入（与真实点击同路径），保证会话桶与镜像同步。
     useUIStateStore.setState({
       browserActive: true,
       editorMode: true,
@@ -357,8 +437,8 @@ describe('ChatPage — 会话切换', () => {
       browserPreviewUrlByWorkspace: {
         '/home/await/project/OpenAWork': 'http://localhost:5173',
       },
-      sidePanelActiveTab: 'preview',
     });
+    useUIStateStore.getState().setSidePanelActiveTab('preview');
 
     await switchToSession(router, '/chat/session-b');
 
@@ -381,13 +461,49 @@ describe('ChatPage — 会话切换', () => {
     );
   });
 
+  it('会话面板一级 tab 按会话记忆：A 停在代码 → 切 B 回落审查 → 切回 A 仍是代码', async () => {
+    const router = renderChatPageAt('/chat/session-a');
+
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_A_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    // 等同用户在停靠面板点「代码」：action 同时写当前会话桶。
+    act(() => {
+      useUIStateStore.getState().setSidePanelActiveTab('code');
+    });
+
+    await switchToSession(router, '/chat/session-b');
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_B_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('review');
+
+    await switchToSession(router, '/chat/session-a');
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_A_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('code');
+  });
+
   it('首屏挂载不回收预览视图（刷新后仍停在上次预览）', async () => {
+    // 刷新场景：lastChatPath 与当前路由一致（持久化恢复），因此不会触发会话换镜。
     useUIStateStore.setState({
       editorMode: true,
       editorPaneTabByWorkspace: { '/home/await/project/OpenAWork': 'browser' },
       browserPreviewUrlByWorkspace: {
         '/home/await/project/OpenAWork': 'http://localhost:5173',
       },
+      lastChatPath: '/chat/session-a',
       sidePanelActiveTab: 'preview',
     });
 
@@ -404,5 +520,77 @@ describe('ChatPage — 会话切换', () => {
     expect(state.editorMode).toBe(true);
     expect(state.editorPaneTabByWorkspace['/home/await/project/OpenAWork']).toBe('browser');
     expect(state.sidePanelActiveTab).toBe('preview');
+  });
+
+  it('切回「上次停在最新处」的会话时贴底，而不是按旧布局的绝对位置恢复', async () => {
+    const router = renderChatPageAt('/chat/session-a');
+
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_A_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    // 长列表 + 用户停在最新处：总高 2000 − 视口 600 − 位置 1320 = 距底 80px
+    // （末条消息贴视口底，只剩底部 spacer）。
+    const scroll = await installScrollRegion({
+      clientHeight: 600,
+      scrollHeight: 2000,
+      scrollTop: 1320,
+    });
+
+    await switchToSession(router, '/chat/session-b');
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_B_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    // 切回 A：缓存命中，且离开时距底 80px ⇒ 必须判定为「停在最新处」。
+    scroll.setScrollTop(1320);
+    await switchToSession(router, '/chat/session-a');
+    await settleScroll();
+
+    // 贴底落点 = 2000 − 600 = 1400。旧实现按缓存的绝对位置恢复到 1320，并且
+    // 因为该落点不在真正底部而挂起跟随，此后内容增长也不会再自动贴底——
+    // 这正是「切换会话后停在第一条消息处」的成因，本断言是其回归护栏。
+    expect(scroll.readScrollToCalls().at(-1)).toBe(1400);
+    expect(scroll.readScrollTop()).toBe(1400);
+  });
+
+  it('切回「上次停在历史中部」的会话时保留阅读位置，不强行贴底', async () => {
+    const router = renderChatPageAt('/chat/session-a');
+
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_A_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    // 总高 2000 − 视口 600 − 位置 400 = 距底 1000px：用户明确翻到了历史里。
+    const scroll = await installScrollRegion({
+      clientHeight: 600,
+      scrollHeight: 2000,
+      scrollTop: 400,
+    });
+
+    await switchToSession(router, '/chat/session-b');
+    await waitFor(
+      () => {
+        expect(readRenderedMessageGroupTexts().join('\n')).toContain(SESSION_B_MESSAGE);
+      },
+      { timeout: 5000 },
+    );
+
+    scroll.setScrollTop(400);
+    await switchToSession(router, '/chat/session-a');
+    await settleScroll();
+
+    // 反向护栏：贴底修复不得把「刻意停在历史里阅读」的用户也一并弹到底部。
+    // 该落点不在真正底部 ⇒ 跟随被挂起，后续内容增长也不得把视口拉走。
+    expect(scroll.readScrollTop()).toBe(400);
   });
 });

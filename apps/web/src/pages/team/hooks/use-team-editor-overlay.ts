@@ -62,6 +62,24 @@ export interface TeamEditorOverlayControls {
   openBrowserPreview: (url?: string | null) => void;
 }
 
+/**
+ * 保存文件的统一包装：置 saving → try → finally 清 saving（**无 catch**：异常上抛）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，本 hook
+ * 这处 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runSaveFileOnce(ctx: {
+  setSaving: (saving: boolean) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSaving(true);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setSaving(false);
+  }
+}
+
 export function useTeamEditorOverlay(input: {
   readonly workspacePath: string | null;
   readonly isMobile: boolean;
@@ -113,12 +131,13 @@ export function useTeamEditorOverlay(input: {
 
   const saveFile = useCallback(
     async (path: string) => {
-      setSavingFile(true);
-      try {
-        await fileEditor.saveFile(path);
-      } finally {
-        setSavingFile(false);
-      }
+      // 置 saving 与 try/finally 一起下沉到模块级 `runSaveFileOnce`（见其注释）。
+      await runSaveFileOnce({
+        setSaving: setSavingFile,
+        run: async () => {
+          await fileEditor.saveFile(path);
+        },
+      });
     },
     [fileEditor],
   );

@@ -181,6 +181,24 @@ const RENAME_INPUT_STYLE: CSSProperties = {
   outline: 'none',
 };
 
+/**
+ * 工作区重命名提交的统一包装：置忙 → try → finally 清忙（**无 catch**：异常上抛）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，本组件
+ * 这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runWorkspaceRenameOnce(ctx: {
+  setSubmitting: (submitting: boolean) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSubmitting(true);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setSubmitting(false);
+  }
+}
+
 export function WorkspaceSwitcher({
   workspaces,
   activeWorkspaceId,
@@ -266,17 +284,18 @@ export function WorkspaceSwitcher({
         setRenameError(`名称「${next}」已存在`);
         return;
       }
-      setRenameSubmitting(true);
-      try {
-        const ok = await onRename(workspace.id, next);
-        if (!ok) {
-          setRenameError('重命名失败，请重试');
-          return;
-        }
-        cancelRename();
-      } finally {
-        setRenameSubmitting(false);
-      }
+      // try/finally 下沉到模块级 `runWorkspaceRenameOnce`（见其注释）。
+      await runWorkspaceRenameOnce({
+        setSubmitting: setRenameSubmitting,
+        run: async () => {
+          const ok = await onRename(workspace.id, next);
+          if (!ok) {
+            setRenameError('重命名失败，请重试');
+            return;
+          }
+          cancelRename();
+        },
+      });
     },
     [cancelRename, onRename, renameValue, workspaces],
   );

@@ -25,12 +25,23 @@ vi.mock('../../../pages/chat-page/conversation/composer/queued-composer-file-sto
 }));
 
 interface FakeQueueItem {
-  attachmentItems: never[];
+  attachmentItems: unknown[];
   enqueuedAt: number;
   id: string;
   requiresAttachmentRebind: boolean;
   text: string;
 }
+
+/** 附件跨端副本的假网关：上传返回递进的 artifactId，下载按预置内容还原。 */
+const { fakeArtifacts } = vi.hoisted(() => ({
+  fakeArtifacts: {
+    downloadContentByArtifactId: new Map<string, string>(),
+    downloadCalls: [] as string[],
+    removeCalls: [] as string[],
+    uploadCalls: [] as Array<{ artifactId: string; name: string }>,
+    uploadCount: 0,
+  },
+}));
 
 /**
  * 假网关队列。
@@ -39,7 +50,15 @@ interface FakeQueueItem {
  * 而不是「浏览器快照里有什么」。用 `vi.hoisted` 提前实例化，保证 mock 工厂执行时
  * 该对象已可用（`vi.mock` 会被提升到 import 之前）。
  */
-const { fakeQueue } = vi.hoisted(() => ({
+const { fakeInputHistory, fakeQueue } = vi.hoisted(() => ({
+  /**
+   * 假网关输入历史。语义与服务端对齐：旧 → 新、相邻去重、最多 50 条。
+   * 记录 append 调用供「pending 历史迁移后必须落库」断言使用。
+   */
+  fakeInputHistory: {
+    appendCalls: [] as Array<{ entries: string[]; sessionId: string }>,
+    entriesBySession: new Map<string, string[]>(),
+  },
   fakeQueue: {
     /** 置 true 后 enqueue 一律失败，用于验证「入队落库失败」的回滚路径。 */
     enqueueShouldFail: false,
@@ -54,6 +73,8 @@ const { fakeQueue } = vi.hoisted(() => ({
     claimShouldThrow: false,
     releaseCalls: [] as Array<{ clientId: string; itemId: string; sessionId: string }>,
     removeCalls: [] as Array<{ itemId: string; sessionId: string }>,
+    /** 附件引用回填（PATCH）的调用记录。 */
+    updateAttachmentsCalls: [] as Array<{ itemId: string; sessionId: string }>,
     /** 置 true 后 claim 返回 session_running:模拟「会话仍被单飞锁占用」。 */
     claimSessionRunning: false,
   },
@@ -63,6 +84,43 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@openAwork/web-client')>();
   return {
     ...actual,
+    createComposerInputHistoryClient: () => ({
+      append: async (_token: string, sessionId: string, entries: readonly string[]) => {
+        fakeInputHistory.appendCalls.push({ entries: [...entries], sessionId });
+        let current = fakeInputHistory.entriesBySession.get(sessionId) ?? [];
+        for (const text of entries) {
+          if (current.at(-1) === text) {
+            continue;
+          }
+          current = [...current, text].slice(-50);
+        }
+        fakeInputHistory.entriesBySession.set(sessionId, current);
+        return [...current];
+      },
+      list: async (_token: string, sessionId: string) => {
+        return [...(fakeInputHistory.entriesBySession.get(sessionId) ?? [])];
+      },
+    }),
+    createArtifactsClient: () => ({
+      downloadFromSession: async (_token: string, _sessionId: string, artifactId: string) => {
+        fakeArtifacts.downloadCalls.push(artifactId);
+        const content = fakeArtifacts.downloadContentByArtifactId.get(artifactId);
+        if (!content) {
+          throw new Error('产物不存在');
+        }
+        return new Blob([content]);
+      },
+      removeFromSession: async (_token: string, _sessionId: string, artifactId: string) => {
+        fakeArtifacts.removeCalls.push(artifactId);
+        return true;
+      },
+      uploadToSession: async (_token: string, _sessionId: string, input: { name: string }) => {
+        fakeArtifacts.uploadCount += 1;
+        const artifactId = `artifact-${fakeArtifacts.uploadCount}`;
+        fakeArtifacts.uploadCalls.push({ artifactId, name: input.name });
+        return { artifact: { id: artifactId } };
+      },
+    }),
     createComposerQueueClient: () => ({
       claim: async (
         _token: string,
@@ -161,6 +219,30 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
         fakeQueue.itemsBySession.set(sessionId, next);
         return next.length !== items.length;
       },
+      updateAttachments: async (
+        _token: string,
+        sessionId: string,
+        itemId: string,
+        input: { attachmentItems: unknown[]; requiresAttachmentRebind?: boolean },
+      ) => {
+        fakeQueue.updateAttachmentsCalls.push({ itemId, sessionId });
+        const items = fakeQueue.itemsBySession.get(sessionId) ?? [];
+        const existing = items.find((item) => item.id === itemId);
+        if (!existing) {
+          return null;
+        }
+        const updated: FakeQueueItem = {
+          ...existing,
+          attachmentItems: input.attachmentItems,
+          requiresAttachmentRebind:
+            input.requiresAttachmentRebind ?? existing.requiresAttachmentRebind,
+        };
+        fakeQueue.itemsBySession.set(
+          sessionId,
+          items.map((item) => (item.id === itemId ? updated : item)),
+        );
+        return { ...updated };
+      },
     }),
   };
 });
@@ -197,7 +279,8 @@ interface HarnessProps {
   readonly sessionId: string | null;
   readonly sessionBusyState?: 'running' | 'paused' | null;
   readonly streaming?: boolean;
-  readonly onSubmit?: () => boolean | Promise<boolean>;
+  /** 参数可选：多数用例不关心 payload，但队列附件恢复用例需要断言 files。 */
+  readonly onSubmit?: (payload?: { files?: File[]; text?: string }) => boolean | Promise<boolean>;
 }
 
 function createDeferred<T>() {
@@ -314,6 +397,8 @@ afterEach(() => {
   hydrationGate = null;
   useComposerInputHistoryStore.setState((state) => ({ ...state, historyByScope: {} }));
   useChatQueueStore.setState({ queuesByScope: {} });
+  fakeInputHistory.appendCalls.length = 0;
+  fakeInputHistory.entriesBySession.clear();
   fakeQueue.itemsBySession.clear();
   fakeQueue.enqueueCalls.length = 0;
   fakeQueue.removeCalls.length = 0;
@@ -324,7 +409,13 @@ afterEach(() => {
   fakeQueue.claimShouldThrow = false;
   fakeQueue.listCalls = 0;
   fakeQueue.releaseCalls.length = 0;
+  fakeQueue.updateAttachmentsCalls.length = 0;
   fakeQueue.claimSessionRunning = false;
+  fakeArtifacts.downloadContentByArtifactId.clear();
+  fakeArtifacts.downloadCalls.length = 0;
+  fakeArtifacts.removeCalls.length = 0;
+  fakeArtifacts.uploadCalls.length = 0;
+  fakeArtifacts.uploadCount = 0;
   vi.restoreAllMocks();
 });
 
@@ -358,6 +449,49 @@ describe('useUnifiedComposerState', () => {
 
     fireEvent.keyDown(getComposer(view), { key: 'ArrowUp' });
     expect(getComposer(view).value).toBe('首条输入');
+  });
+
+  it('pending 历史迁移到真实会话后会写入网关，刷新后仍可调出', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="需要跨刷新保留"
+        sessionId={null}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('send'));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    view.rerender(
+      <UnifiedComposerStateHarness initialInput="" sessionId="session-1" onSubmit={onSubmit} />,
+    );
+
+    await waitFor(() => {
+      expect(fakeInputHistory.entriesBySession.get('session-1')).toEqual(['需要跨刷新保留']);
+    });
+    expect(fakeInputHistory.appendCalls).toEqual([
+      { entries: ['需要跨刷新保留'], sessionId: 'session-1' },
+    ]);
+  });
+
+  it('进入会话时从网关水合输入历史', async () => {
+    fakeInputHistory.entriesBySession.set('session-1', ['历史一', '历史二']);
+    const view = render(<UnifiedComposerStateHarness initialInput="" sessionId="session-1" />);
+
+    const sessionScope = 'http://gateway.test::user@example.com::session:session-1';
+    await waitFor(() => {
+      expect(useComposerInputHistoryStore.getState().historyByScope[sessionScope]).toEqual([
+        '历史一',
+        '历史二',
+      ]);
+    });
+
+    fireEvent.keyDown(getComposer(view), { key: 'ArrowUp' });
+    expect(getComposer(view).value).toBe('历史二');
   });
 
   it('session 在提交完成前切换时也会把 pending 历史迁移到真实 session scope', async () => {
@@ -1046,5 +1180,81 @@ describe('useUnifiedComposerState', () => {
       { timeout: 5_000 },
     );
     expect(view.getByTestId('queue-count').textContent).toBe('0');
+  });
+
+  it('入队后附件副本在后台自动上传并回填条目', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput="带附件的跨端消息"
+        sessionId="session-1"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(view.getByText('attach'));
+    await waitFor(() => {
+      expect(view.getByTestId('attachment-count').textContent).toBe('1');
+    });
+    fireEvent.click(view.getByText('queue'));
+
+    // 入队响应不等上传：条目先落库，副本在后台补传后经 PATCH 回填 artifactId。
+    await waitFor(() => {
+      expect(fakeArtifacts.uploadCalls).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(fakeQueue.updateAttachmentsCalls).toHaveLength(1);
+    });
+    const [item] = backendQueue('session-1');
+    expect(item?.attachmentItems).toMatchObject([
+      { artifactId: 'artifact-1', name: 'screenshot.png' },
+    ]);
+    // 副本就绪后「需重新选择附件」不再成立（本地 IndexedDB 写失败曾被标记）。
+    expect(item?.requiresAttachmentRebind).toBe(false);
+    // 流式中不得被自动 flush 出去。
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('换端水合时本地无 Blob，凭 artifactId 从网关拉回附件并自动发送', async () => {
+    seedBackendQueue('session-1', [
+      {
+        attachmentItems: [
+          {
+            artifactId: 'artifact-remote-1',
+            id: 'att-remote-1',
+            name: '远端图片.png',
+            sizeBytes: 3,
+            type: 'image',
+          },
+        ],
+        enqueuedAt: 1,
+        id: 'queued-cross-device',
+        requiresAttachmentRebind: false,
+        text: '跨端恢复的消息',
+      },
+    ]);
+    fakeArtifacts.downloadContentByArtifactId.set('artifact-remote-1', '123');
+
+    const onSubmit = vi.fn(async (_payload?: { files?: File[]; text?: string }) => true);
+    render(
+      <UnifiedComposerStateHarness
+        initialInput=""
+        sessionId="session-1"
+        streaming={false}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fakeArtifacts.downloadCalls).toEqual(['artifact-remote-1']);
+    });
+    // 附件恢复成功 → 条目不再被「需重新选择附件」挡住，队列自动 flush 且带着文件。
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    const payload = onSubmit.mock.calls[0]?.[0];
+    expect(payload?.text).toBe('跨端恢复的消息');
+    expect(payload?.files?.map((file) => file.name)).toEqual(['远端图片.png']);
   });
 });

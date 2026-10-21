@@ -437,7 +437,7 @@ function usePermissionModeHarness() {
       reasoningEffort: conversation.reasoningEffort,
       activeProviderId: conversation.activeProviderId,
       activeModelId: conversation.activeModelId,
-      modelSelectionSource: null,
+      modelSelectionSourceRef: { current: null },
       manualAgentId: conversation.manualAgentId,
       effectiveWorkingDirectory: null,
       sessionMetadataDirty,

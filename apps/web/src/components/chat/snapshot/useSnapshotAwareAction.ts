@@ -407,16 +407,19 @@ export function useSnapshotAwareAction(
 
       void (async () => {
         let context: AffectedChangeContext | null = null;
+        // 请求参数里的 `...(cond ? … : {})` 是值块：留在 try 内会让编译器报
+        // "Support value blocks … within a try/catch statement"，故先在 try 外构造好。
+        const contextInput = {
+          accessToken,
+          gatewayUrl: input.gatewayUrl,
+          messages: input.messages,
+          sessionId,
+          ...(execInput.sourceMessageId !== undefined
+            ? { sourceMessageId: execInput.sourceMessageId }
+            : {}),
+        };
         try {
-          context = await loadAffectedChangeContext({
-            accessToken,
-            gatewayUrl: input.gatewayUrl,
-            messages: input.messages,
-            sessionId,
-            ...(execInput.sourceMessageId !== undefined
-              ? { sourceMessageId: execInput.sourceMessageId }
-              : {}),
-          });
+          context = await loadAffectedChangeContext(contextInput);
         } catch {
           // 编排整体异常（非单个信号，正常不可达）：按「检测不完整」处理——
           // 不得把异常当成「没有变更」而静默放行。
@@ -493,6 +496,10 @@ export function useSnapshotAwareAction(
     setRestoreErrorMessage(null);
 
     void (async () => {
+      // `proceed?.()` 是值块（可选调用）：留在 try 内会让编译器报
+      // "Support value blocks … within a try/catch statement"，故把调用移到 try 之后
+      // （异常路径下 proceed 仍为 null，不会执行，语义不变）。
+      let proceed: (() => void) | null = null;
       try {
         await client.restoreToTree(accessToken, sessionId, {
           treeHash: targetTreeHash,
@@ -514,14 +521,14 @@ export function useSnapshotAwareAction(
         } else {
           toast('已恢复受影响文件，继续执行操作。', 'success');
         }
-        const proceed = pendingProceedRef.current;
+        proceed = pendingProceedRef.current;
         pendingProceedRef.current = null;
         resetDialogState();
-        proceed?.();
       } catch (error) {
         setRestoring(false);
         setRestoreErrorMessage(error instanceof Error ? error.message : '恢复失败，请稍后重试。');
       }
+      proceed?.();
     })();
   }, [
     accessToken,

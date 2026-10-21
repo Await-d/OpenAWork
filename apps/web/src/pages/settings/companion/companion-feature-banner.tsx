@@ -31,6 +31,25 @@ const BANNER_BASE = {
  *
  * 两种横幅互不抢位：都满足时按 off → error 顺序竖排显示。
  */
+/**
+ * 重试同步的统一包装：`onStart` 置忙 → try → finally 清忙（**无 catch**：异常上抛）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，本组件
+ * 这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runRetrySyncOnce(ctx: {
+  onStart: () => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart();
+  try {
+    await ctx.run();
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function CompanionFeatureBanner({ buddy }: CompanionFeatureBannerProps) {
   const { companionFeatureMode, retrySync, syncStatus } = buddy;
   const [retrying, setRetrying] = useState(false);
@@ -43,12 +62,18 @@ export function CompanionFeatureBanner({ buddy }: CompanionFeatureBannerProps) {
 
   const handleRetry = async () => {
     if (retrying) return;
-    setRetrying(true);
-    try {
-      await retrySync();
-    } finally {
-      setRetrying(false);
-    }
+    // try/finally 下沉到模块级 `runRetrySyncOnce`（见其注释）。
+    await runRetrySyncOnce({
+      onStart: () => {
+        setRetrying(true);
+      },
+      onFinally: () => {
+        setRetrying(false);
+      },
+      run: async () => {
+        await retrySync();
+      },
+    });
   };
 
   return (

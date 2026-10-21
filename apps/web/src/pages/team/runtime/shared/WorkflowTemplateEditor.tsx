@@ -35,35 +35,70 @@ export interface WorkflowTemplateEditorProps {
   onSave: (json: string) => Promise<void>;
 }
 
+/**
+ * 校验模板 JSON；成功返回 null，失败返回错误信息。
+ *
+ * 必须留在模块级：try 内的 `JSON.parse` + 三元判定是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个组件（实测）。
+ */
+function parseTemplateJsonOnce(json: string): string | null {
+  try {
+    JSON.parse(json);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : 'JSON 格式错误';
+  }
+}
+
+/**
+ * 模板保存的统一包装：置 saving / 清 saved → try → catch 交给 `onError` → finally 清 saving。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句（实测）。
+ */
+async function runTemplateSaveOnce(ctx: {
+  setSaving: (saving: boolean) => void;
+  setSaved: (saved: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSaving(true);
+  ctx.setSaved(false);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSaving(false);
+  }
+}
+
 export function WorkflowTemplateEditor({ initialJson, onSave }: WorkflowTemplateEditorProps) {
   const [draft, setDraft] = useState(initialJson);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // 解析（含 try/catch 与值块）下沉到模块级 `parseTemplateJsonOnce`。
   const validate = useCallback((json: string): boolean => {
-    try {
-      JSON.parse(json);
-      setError(null);
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'JSON 格式错误');
-      return false;
-    }
+    const parseError = parseTemplateJsonOnce(json);
+    setError(parseError);
+    return parseError === null;
   }, []);
 
   const handleSave = async () => {
     if (!validate(draft)) return;
-    setSaving(true);
-    setSaved(false);
-    try {
-      await onSave(draft);
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败');
-    } finally {
-      setSaving(false);
-    }
+    // 置 saving / 清 saved 与 try/catch/finally 一起下沉到模块级 `runTemplateSaveOnce`。
+    await runTemplateSaveOnce({
+      setSaving,
+      setSaved,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '保存失败');
+      },
+      run: async () => {
+        await onSave(draft);
+        setSaved(true);
+      },
+    });
   };
 
   return (

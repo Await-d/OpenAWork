@@ -148,6 +148,28 @@ export function renameSessionSidebarFileTreeNode(
   });
 }
 
+/**
+ * 文件树加载 / 刷新的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`（其返回值
+ * 即本函数返回值，保留原 catch 的 `return false`），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 2 处
+ * 这类 try（各含一个「恢复/刷新子目录」的嵌套循环）会让整个 hook 脱靶（实测）。
+ * 语义逐字照搬。
+ */
+async function runFileTreeActionOnce<T>(ctx: {
+  onError: (error: unknown) => T;
+  onFinally: () => void;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    return await ctx.run();
+  } catch (error) {
+    return ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useSessionSidebarFileTreeState(
   options: UseSessionSidebarFileTreeStateOptions,
 ): UseSessionSidebarFileTreeStateResult {
@@ -170,11 +192,14 @@ export function useSessionSidebarFileTreeState(
   // re-run effects that themselves call `setExpandedDirs`, producing an
   // infinite update loop ("Maximum update depth exceeded").
   const optionsRef = useRef(options);
-  optionsRef.current = options;
 
+  // optionsRef / fileTreeRef 的同步刻意放在 effect 里：渲染期直接写 `.current` 会被
+  // React Compiler 判为 "Cannot access refs during render" 并放弃优化整个 hook。
+  // 读取点全在异步回调里（至少晚于提交），语义等价。
   useEffect(() => {
+    optionsRef.current = options;
     fileTreeRef.current = fileTree;
-  }, [fileTree]);
+  }, [fileTree, options]);
 
   const nextFileTreeRequest = useCallback(() => {
     const requestId = fileTreeRequestIdRef.current + 1;
@@ -334,68 +359,74 @@ export function useSessionSidebarFileTreeState(
       setFileTreeLoading(!hasCachedTree || !preserveExpandedDirectories);
       setFileTreeError(null);
 
-      try {
-        const rootNodes = await optionsRef.current.fetchTree(requestedRootPath, 1);
-
-        if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
+      // try/catch/finally（含恢复子目录的嵌套循环）下沉到模块级
+      // `runFileTreeActionOnce`（见其注释）。
+      return runFileTreeActionOnce<boolean>({
+        onError: (error) => {
+          if (!preserveExpandedDirectories) {
+            setFileTree((current) => current);
+          }
+          setFileTreeError(error instanceof Error ? error.message : '读取文件树失败');
+          if (!isPathIncompatibleError(error)) {
+            scheduleRetry({ kind: 'root', preserveExpandedDirectories });
+          }
           return false;
-        }
+        },
+        onFinally: () => {
+          if (isActiveFileTreeRequest(requestId, requestedRootPath)) {
+            setFileTreeLoading(false);
+          }
+        },
+        run: async () => {
+          const rootNodes = await optionsRef.current.fetchTree(requestedRootPath, 1);
 
-        if (!preserveExpandedDirectories || fileTreeRef.current.length === 0) {
-          const restoredTree = await restoreExpandedDirectoryChildren(
-            requestId,
-            requestedRootPath,
-            rootNodes,
-          );
-          if (restoredTree === null) {
+          if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
             return false;
           }
-          setFileTree(restoredTree);
-          clearRetry();
-          return true;
-        }
 
-        let nextTree = rootNodes;
-        let failedRefreshCount = 0;
-
-        for (const directoryPath of collectLoadedExpandedDirectories(fileTreeRef.current)) {
-          try {
-            const children = await optionsRef.current.fetchTree(directoryPath, 1);
-
-            if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
+          if (!preserveExpandedDirectories || fileTreeRef.current.length === 0) {
+            const restoredTree = await restoreExpandedDirectoryChildren(
+              requestId,
+              requestedRootPath,
+              rootNodes,
+            );
+            if (restoredTree === null) {
               return false;
             }
-
-            nextTree = patchTreeChildren(nextTree, directoryPath, children);
-          } catch {
-            failedRefreshCount += 1;
+            setFileTree(restoredTree);
+            clearRetry();
+            return true;
           }
-        }
 
-        if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          return false;
-        }
+          let nextTree = rootNodes;
+          let failedRefreshCount = 0;
 
-        setFileTree(nextTree);
-        clearRetry();
-        if (failedRefreshCount > 0) {
-          setFileTreeError(`已有 ${failedRefreshCount} 个已展开目录未能刷新完成`);
-        }
-        return true;
-      } catch (error) {
-        if (!preserveExpandedDirectories) {
-          setFileTree((current) => current);
-        }
-        setFileTreeError(error instanceof Error ? error.message : '读取文件树失败');
-        if (!isPathIncompatibleError(error)) {
-          scheduleRetry({ kind: 'root', preserveExpandedDirectories });
-        }
-        return false;
-      } finally {
-        if (isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          setFileTreeLoading(false);
-        }
-      }
+          for (const directoryPath of collectLoadedExpandedDirectories(fileTreeRef.current)) {
+            try {
+              const children = await optionsRef.current.fetchTree(directoryPath, 1);
+
+              if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
+                return false;
+              }
+
+              nextTree = patchTreeChildren(nextTree, directoryPath, children);
+            } catch {
+              failedRefreshCount += 1;
+            }
+          }
+
+          if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
+            return false;
+          }
+
+          setFileTree(nextTree);
+          clearRetry();
+          if (failedRefreshCount > 0) {
+            setFileTreeError(`已有 ${failedRefreshCount} 个已展开目录未能刷新完成`);
+          }
+          return true;
+        },
+      });
     },
     [
       clearRetry,
@@ -407,7 +438,11 @@ export function useSessionSidebarFileTreeState(
     ],
   );
 
-  loadFileTreeRef.current = loadFileTree;
+  // 渲染期直接写 ref 会被 React Compiler 判为 "Cannot access refs during render" 并放弃
+  // 优化整个 hook；读取点只在 retry effect 里（晚于提交），故改为 effect 同步。
+  useEffect(() => {
+    loadFileTreeRef.current = loadFileTree;
+  }, [loadFileTree]);
 
   const refreshDirectory = useCallback(
     async (directoryPath: string): Promise<boolean> => {
@@ -430,49 +465,54 @@ export function useSessionSidebarFileTreeState(
 
       setFileTreeLoading(true);
       setFileTreeError(null);
-      try {
-        let nextChildren = await optionsRef.current.fetchTree(directoryPath, 1);
-
-        if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          return false;
-        }
-
-        let failedRefreshCount = 0;
-        for (const nestedDirectoryPath of collectNestedLoadedExpandedDirectories(directoryPath)) {
-          try {
-            const nestedChildren = await optionsRef.current.fetchTree(nestedDirectoryPath, 1);
-
-            if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
-              return false;
-            }
-
-            nextChildren = patchTreeChildren(nextChildren, nestedDirectoryPath, nestedChildren);
-          } catch {
-            failedRefreshCount += 1;
+      // 同 loadFileTree：整段下沉到模块级 `runFileTreeActionOnce`（见其注释）。
+      return runFileTreeActionOnce<boolean>({
+        onError: (error) => {
+          setFileTreeError(error instanceof Error ? error.message : '刷新目录失败');
+          if (!isPathIncompatibleError(error)) {
+            scheduleRetry({ kind: 'refresh-directory', path: directoryPath });
           }
-        }
-
-        if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
           return false;
-        }
+        },
+        onFinally: () => {
+          if (isActiveFileTreeRequest(requestId, requestedRootPath)) {
+            setFileTreeLoading(false);
+          }
+        },
+        run: async () => {
+          let nextChildren = await optionsRef.current.fetchTree(directoryPath, 1);
 
-        setFileTree((prev) => patchTreeChildren(prev, directoryPath, nextChildren));
-        clearRetry();
-        if (failedRefreshCount > 0) {
-          setFileTreeError(`已有 ${failedRefreshCount} 个已展开子目录未能刷新完成`);
-        }
-        return true;
-      } catch (error) {
-        setFileTreeError(error instanceof Error ? error.message : '刷新目录失败');
-        if (!isPathIncompatibleError(error)) {
-          scheduleRetry({ kind: 'refresh-directory', path: directoryPath });
-        }
-        return false;
-      } finally {
-        if (isActiveFileTreeRequest(requestId, requestedRootPath)) {
-          setFileTreeLoading(false);
-        }
-      }
+          if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
+            return false;
+          }
+
+          let failedRefreshCount = 0;
+          for (const nestedDirectoryPath of collectNestedLoadedExpandedDirectories(directoryPath)) {
+            try {
+              const nestedChildren = await optionsRef.current.fetchTree(nestedDirectoryPath, 1);
+
+              if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
+                return false;
+              }
+
+              nextChildren = patchTreeChildren(nextChildren, nestedDirectoryPath, nestedChildren);
+            } catch {
+              failedRefreshCount += 1;
+            }
+          }
+
+          if (!isActiveFileTreeRequest(requestId, requestedRootPath)) {
+            return false;
+          }
+
+          setFileTree((prev) => patchTreeChildren(prev, directoryPath, nextChildren));
+          clearRetry();
+          if (failedRefreshCount > 0) {
+            setFileTreeError(`已有 ${failedRefreshCount} 个已展开子目录未能刷新完成`);
+          }
+          return true;
+        },
+      });
     },
     [
       clearRetry,
@@ -485,7 +525,10 @@ export function useSessionSidebarFileTreeState(
     ],
   );
 
-  refreshDirectoryRef.current = refreshDirectory;
+  // 同上：同步进 effect，避免渲染期写 ref（读取点都在异步回调里，晚于提交）。
+  useEffect(() => {
+    refreshDirectoryRef.current = refreshDirectory;
+  }, [refreshDirectory]);
 
   const handleRefreshFileTree = useCallback(() => {
     void (async () => {
@@ -540,9 +583,13 @@ export function useSessionSidebarFileTreeState(
     [clearRetry, isActiveFileTreeRequest, nextFileTreeRequest, scheduleRetry],
   );
 
-  toggleDirRef.current = (path) => {
-    void handleToggleDirWithLoad(path);
-  };
+  // 渲染期直接写 ref 会被 React Compiler 判为 "Cannot access refs during render" 并放弃
+  // 优化整个 hook；外部读取点（toggleDirRef.current）晚于提交，故改为 effect 同步。
+  useEffect(() => {
+    toggleDirRef.current = (path) => {
+      void handleToggleDirWithLoad(path);
+    };
+  }, [handleToggleDirWithLoad]);
 
   useEffect(() => {
     const previousRootPath = previousFileTreeRootPathRef.current;

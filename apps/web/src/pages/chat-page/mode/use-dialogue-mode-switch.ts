@@ -36,6 +36,29 @@ export interface DialogueModeSwitchController {
   pending: boolean;
 }
 
+/**
+ * 确认切换到编程模式的统一包装：置 pending → try → catch 交给 onError → finally 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try/catch 的 finally 子句，本 hook 这处 try
+ * 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runConfirmSwitchOnce(ctx: {
+  setPending: (pending: boolean) => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setPending(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setPending(false);
+    ctx.onFinally();
+  }
+}
+
 export function useDialogueModeSwitch(
   options: UseDialogueModeSwitchOptions,
 ): DialogueModeSwitchController {
@@ -49,28 +72,32 @@ export function useDialogueModeSwitch(
     }
 
     pendingRef.current = true;
-    setPending(true);
-    try {
-      const result = await createDialogueModeClient(gatewayUrl).confirmClarifySwitch(
-        token,
-        sessionId,
-      );
-      if (result.dialogueMode) {
-        publishSessionDialogueModeSwitch({
-          dialogueMode: result.dialogueMode,
+    // try/catch/finally 下沉到模块级 `runConfirmSwitchOnce`（见其注释）。
+    await runConfirmSwitchOnce({
+      setPending,
+      onError: (error) => {
+        toast(error instanceof Error ? error.message : '确认切换失败，请重试。', 'error', 4200);
+      },
+      onFinally: () => {
+        pendingRef.current = false;
+      },
+      run: async () => {
+        const result = await createDialogueModeClient(gatewayUrl).confirmClarifySwitch(
+          token,
           sessionId,
-          source: 'user',
-        });
-      }
-      if (!result.switched) {
-        toast('当前会话已不在澄清模式，无需重复确认。', 'info', 2600);
-      }
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '确认切换失败，请重试。', 'error', 4200);
-    } finally {
-      pendingRef.current = false;
-      setPending(false);
-    }
+        );
+        if (result.dialogueMode) {
+          publishSessionDialogueModeSwitch({
+            dialogueMode: result.dialogueMode,
+            sessionId,
+            source: 'user',
+          });
+        }
+        if (!result.switched) {
+          toast('当前会话已不在澄清模式，无需重复确认。', 'info', 2600);
+        }
+      },
+    });
   }, [enabled, gatewayUrl, sessionId, token]);
 
   return { confirmSwitchToCoding, pending };

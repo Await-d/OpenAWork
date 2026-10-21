@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ChatMessagePart } from '../messages/support.js';
 import type { StreamingThinkingBlock } from './streaming-thinking.js';
@@ -81,34 +81,42 @@ export function useCoalescedStreamSetters(
     const pending = pendingRef.current;
     const committed = committedRef.current;
 
-    if (pending.thinkingBuffer.resolve !== null) {
-      const resolve = pending.thinkingBuffer.resolve;
-      pending.thinkingBuffer.resolve = null;
-      const next = resolve(committed.thinkingBuffer);
-      committed.thinkingBuffer = next;
-      setStreamThinkingBuffer(next);
-    }
-    if (pending.thinkingBlocks.resolve !== null) {
-      const resolve = pending.thinkingBlocks.resolve;
-      pending.thinkingBlocks.resolve = null;
-      const next = resolve(committed.thinkingBlocks);
-      committed.thinkingBlocks = next;
-      setStreamThinkingBlocks(next);
-    }
-    if (pending.segments.resolve !== null) {
-      const resolve = pending.segments.resolve;
-      pending.segments.resolve = null;
-      const next = resolve(committed.segments);
-      committed.segments = next;
-      setStreamingSegments(next);
-    }
-    if (pending.buffer.resolve !== null) {
-      const resolve = pending.buffer.resolve;
-      pending.buffer.resolve = null;
-      const next = resolve(committed.buffer);
-      committed.buffer = next;
-      setStreamBuffer(next);
-    }
+    // 流式视图属于「可让路」的工作：用户输入、点击审批按钮必须能插队。
+    // 放进 `startTransition` 后，React 会把这些整树重渲染按可中断优先级调度，
+    // 而不是阻塞在当前帧里把输入 / 点击一起拖慢。
+    //
+    // 安全性：这里写入的都是**完整最新值**（累计文本 / 完整 segments），
+    // last-write-wins 与更新队列顺序一致，不存在「延迟提交的旧值覆盖新值」。
+    startTransition(() => {
+      if (pending.thinkingBuffer.resolve !== null) {
+        const resolve = pending.thinkingBuffer.resolve;
+        pending.thinkingBuffer.resolve = null;
+        const next = resolve(committed.thinkingBuffer);
+        committed.thinkingBuffer = next;
+        setStreamThinkingBuffer(next);
+      }
+      if (pending.thinkingBlocks.resolve !== null) {
+        const resolve = pending.thinkingBlocks.resolve;
+        pending.thinkingBlocks.resolve = null;
+        const next = resolve(committed.thinkingBlocks);
+        committed.thinkingBlocks = next;
+        setStreamThinkingBlocks(next);
+      }
+      if (pending.segments.resolve !== null) {
+        const resolve = pending.segments.resolve;
+        pending.segments.resolve = null;
+        const next = resolve(committed.segments);
+        committed.segments = next;
+        setStreamingSegments(next);
+      }
+      if (pending.buffer.resolve !== null) {
+        const resolve = pending.buffer.resolve;
+        pending.buffer.resolve = null;
+        const next = resolve(committed.buffer);
+        committed.buffer = next;
+        setStreamBuffer(next);
+      }
+    });
   }, [setStreamBuffer, setStreamThinkingBlocks, setStreamThinkingBuffer, setStreamingSegments]);
 
   const schedule = useCallback(() => {

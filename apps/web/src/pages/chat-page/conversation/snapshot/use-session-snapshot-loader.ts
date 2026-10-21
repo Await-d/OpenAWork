@@ -4,6 +4,7 @@ import type {
   Session,
   SessionActiveStream,
   SessionMessageRatingRecord,
+  SessionStatusReadModel,
   SessionTask,
   PendingPermissionRequest,
   PendingQuestionRequest,
@@ -163,14 +164,42 @@ export function useSessionSnapshotLoader(
    */
   const runEventBufferRef = useRef<RunEventPrefixBuffer | null>(null);
 
+  /**
+   * 最近一次 `/status` 失败的时刻，仅供排障观测。
+   *
+   * 刻意放 ref 而非 state：它每次渲染都无人消费，进 state 会平白多触发一轮重渲染；
+   * 日志侧走外层 `startSequentialPolling` 的 `recordClientError`，这里只留个时间戳
+   * 供「会话状态多久没刷新成功」这类问题对齐时序。
+   */
+  const lastSessionStatusFailureRef = useRef<number | null>(null);
+
   const loadSessionRuntimeSnapshot = useCallback(
     async (targetSessionId: string, signal?: AbortSignal, expectedSessionViewEpoch?: number) => {
       if (!token) return;
       const sessionViewEpoch = expectedSessionViewEpoch ?? currentSessionViewRef.current.epoch;
-      const status = await createSessionsClient(gatewayUrl).getStatus(token, targetSessionId, {
-        signal,
-      });
+      let status: SessionStatusReadModel;
+      try {
+        status = await createSessionsClient(gatewayUrl).getStatus(token, targetSessionId, {
+          signal,
+        });
+      } catch (error) {
+        // 「读不到」与「读到空」必须严格区分。此前这里没有 catch：一个接口失败会
+        // 让下面 7 个 setter 全部不执行——待审批、待回答、子会话、任务、活跃流快照
+        // 一起停在旧值。其中 `recoveryActiveStream` 是 attach 决策的依赖，陈旧值会让
+        // attach 在「已结束」与「仍在跑」之间误判，表现为反复 attach / 反复重连。
+        //
+        // 失败时**整体不更新**：宁可让状态停在上一拍的真实值，也不要用空值覆盖成
+        // 「没有待办、没有活跃流」——那会把用户正待处理的审批/提问从界面上抹掉。
+        //
+        // 此处刻意不打印日志：外层 `startSequentialPolling` 已经捕获异常、写
+        // `recordClientError` 并按指数退避重试，再打一条只会每 3 秒重复刷屏。
+        if (!signal?.aborted && isCurrentSessionView(targetSessionId, sessionViewEpoch)) {
+          lastSessionStatusFailureRef.current = Date.now();
+        }
+        return;
+      }
       if (signal?.aborted || !isCurrentSessionView(targetSessionId, sessionViewEpoch)) return;
+      lastSessionStatusFailureRef.current = null;
       // 该会话已无活跃流：增量前缀随之释放。run 结束后 1s 快照轮询会停（前台条件
       // `remoteSessionBusyState` 转 false），这条 3s 轻量轮询是兜住「最后一次前缀」的
       // 地方——不清的话，一份完整事件序列会一直挂到下一次快照加载。只在会话对齐时清，

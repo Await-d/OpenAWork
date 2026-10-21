@@ -165,6 +165,30 @@ function deltaSectionLabel(origin: RowDecision['origin']): string {
   return '保留 (双方一致)';
 }
 
+/**
+ * 技能推荐动作（生成 / 应用）的统一包装：置 busy / 清 error → try → catch 交给 `onError`
+ * → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`a || b`、嵌套三元）。语义逐字照搬。
+ */
+async function runSkillRecommendationActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export default function SkillRecommendationDrawer(
   props: SkillRecommendationDrawerProps,
 ): React.ReactElement | null {
@@ -192,26 +216,29 @@ export default function SkillRecommendationDrawer(
 
   const generate = useCallback(
     async (force: boolean): Promise<void> => {
-      setLoading(true);
-      setError(null);
-      try {
-        const next = (await skillsClient.recommend(token, {
-          workspacePath: workspacePath.trim() || null,
-          force,
-        })) as RecommendationResponse;
-        setRecommendation(next);
-        setDecisions(buildSkillRecommendationDecisions(currentSelection, next.recommendations));
-      } catch (err) {
-        const message =
-          err instanceof HttpError
-            ? `${err.message}`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        setError(message);
-      } finally {
-        setLoading(false);
-      }
+      // 置 loading / 清 error 与 try/catch/finally 一起下沉到模块级
+      // `runSkillRecommendationActionOnce`（见其注释）。
+      await runSkillRecommendationActionOnce({
+        setBusy: setLoading,
+        setError,
+        onError: (err) => {
+          const message =
+            err instanceof HttpError
+              ? `${err.message}`
+              : err instanceof Error
+                ? err.message
+                : String(err);
+          setError(message);
+        },
+        run: async () => {
+          const next = (await skillsClient.recommend(token, {
+            workspacePath: workspacePath.trim() || null,
+            force,
+          })) as RecommendationResponse;
+          setRecommendation(next);
+          setDecisions(buildSkillRecommendationDecisions(currentSelection, next.recommendations));
+        },
+      });
     },
     [currentSelection, skillsClient, token, workspacePath],
   );
@@ -262,21 +289,25 @@ export default function SkillRecommendationDrawer(
 
   const apply = useCallback(async (): Promise<void> => {
     if (!recommendation) return;
-    setApplying(true);
-    setError(null);
-    try {
-      const overrides: Record<string, { enabled: boolean; pinned: boolean }> = {};
-      for (const [skillId, row] of decisions.entries()) {
-        overrides[skillId] = { enabled: row.enabled, pinned: row.pinned };
-      }
-      await skillsClient.applyRecommendation(token, recommendation.recommendationId, { overrides });
-      await onApplied();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setApplying(false);
-    }
+    // 同生成：整段下沉到 `runSkillRecommendationActionOnce`（见其注释）。
+    await runSkillRecommendationActionOnce({
+      setBusy: setApplying,
+      setError,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : String(err));
+      },
+      run: async () => {
+        const overrides: Record<string, { enabled: boolean; pinned: boolean }> = {};
+        for (const [skillId, row] of decisions.entries()) {
+          overrides[skillId] = { enabled: row.enabled, pinned: row.pinned };
+        }
+        await skillsClient.applyRecommendation(token, recommendation.recommendationId, {
+          overrides,
+        });
+        await onApplied();
+        onClose();
+      },
+    });
   }, [decisions, skillsClient, token, onApplied, onClose, recommendation]);
 
   if (!open) return null;

@@ -9,9 +9,7 @@
  */
 
 import {
-  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -292,29 +290,22 @@ export function FusionSidebar({
   // 当前会话 id：SSH 绑定与头部工作区口径都要用它，必须早于相关回调声明。
   const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
 
-  const handleSelectWorkspace = useCallback(
-    async (path: string) => {
-      // 本地目录：连接维度恒为 null。
-      addSavedWorkspace({ workspacePath: path, sshConnectionId: null });
-      setSelectedWorkspacePath(path);
-      setFileTreeRootPath(path);
-      // 选中本地目录即清理 SSH 草稿连接，避免头部继续标注「远端」。
-      setSelectedSshConnectionId(null);
-      // 切换工作区时桌面端保持 Panel 展开，让用户看到新工作区的会话列表；
-      // 移动端才收起，避免遮挡内容区。
-      if (compactViewport) {
-        setLeftSidebarOpen(false);
-      }
-    },
-    [
-      addSavedWorkspace,
-      compactViewport,
-      setFileTreeRootPath,
-      setLeftSidebarOpen,
-      setSelectedSshConnectionId,
-      setSelectedWorkspacePath,
-    ],
-  );
+  // 去 useCallback / useMemo 的手写包装：编译器会对函数表达式与派生值自动 memo
+  // （引用稳定性与手写等价）。保留手写 memo 会让编译器报
+  // 「Existing memoization could not be preserved」而放弃优化整个组件。
+  const handleSelectWorkspace = async (path: string) => {
+    // 本地目录：连接维度恒为 null。
+    addSavedWorkspace({ workspacePath: path, sshConnectionId: null });
+    setSelectedWorkspacePath(path);
+    setFileTreeRootPath(path);
+    // 选中本地目录即清理 SSH 草稿连接，避免头部继续标注「远端」。
+    setSelectedSshConnectionId(null);
+    // 切换工作区时桌面端保持 Panel 展开，让用户看到新工作区的会话列表；
+    // 移动端才收起，避免遮挡内容区。
+    if (compactViewport) {
+      setLeftSidebarOpen(false);
+    }
+  };
 
   /**
    * SSH 远端工作区的落地：远端目录不写入本地文件树根（否则会对`/workspace/*`
@@ -324,51 +315,34 @@ export function FusionSidebar({
    * `selectedWorkspacePath` 只是全局选中值，会话实际绑定由
    * `activeSessionWorkspace` 承载。
    */
-  const handleSelectSshWorkspace = useCallback(
-    async (selection: SshWorkspaceSelection): Promise<void> => {
-      const path = selection.path.trim();
-      if (!path) {
-        return;
-      }
+  const handleSelectSshWorkspace = async (selection: SshWorkspaceSelection): Promise<void> => {
+    const path = selection.path.trim();
+    if (!path) {
+      return;
+    }
 
-      if (currentSessionId) {
-        if (!accessToken) {
-          throw new Error('未登录，无法绑定远端工作区。');
-        }
-        await createSshClient(gatewayUrl).bind(
-          accessToken,
-          selection.connectionId,
-          currentSessionId,
-        );
-        await createSessionsClient(gatewayUrl).updateMetadata(accessToken, currentSessionId, {
-          workingDirectory: path,
-          sshConnectionId: selection.connectionId,
-        });
-        setActiveSessionWorkspace(currentSessionId, path, selection.connectionId);
+    if (currentSessionId) {
+      if (!accessToken) {
+        throw new Error('未登录，无法绑定远端工作区。');
       }
+      await createSshClient(gatewayUrl).bind(accessToken, selection.connectionId, currentSessionId);
+      await createSessionsClient(gatewayUrl).updateMetadata(accessToken, currentSessionId, {
+        workingDirectory: path,
+        sshConnectionId: selection.connectionId,
+      });
+      setActiveSessionWorkspace(currentSessionId, path, selection.connectionId);
+    }
 
-      // 远端目录必须连同连接 id 登记：同名远端目录在其它主机上是另一个工作区，
-      // 只按路径登记会让两者的会话在侧栏合并成一组。
-      addSavedWorkspace({ workspacePath: path, sshConnectionId: selection.connectionId });
-      setSelectedWorkspacePath(path);
-      setSelectedSshConnectionId(selection.connectionId);
-      setFileTreeRootPath(null);
-      if (compactViewport) {
-        setLeftSidebarOpen(false);
-      }
-    },
-    [
-      accessToken,
-      addSavedWorkspace,
-      compactViewport,
-      currentSessionId,
-      gatewayUrl,
-      setActiveSessionWorkspace,
-      setFileTreeRootPath,
-      setSelectedSshConnectionId,
-      setSelectedWorkspacePath,
-    ],
-  );
+    // 远端目录必须连同连接 id 登记：同名远端目录在其它主机上是另一个工作区，
+    // 只按路径登记会让两者的会话在侧栏合并成一组。
+    addSavedWorkspace({ workspacePath: path, sshConnectionId: selection.connectionId });
+    setSelectedWorkspacePath(path);
+    setSelectedSshConnectionId(selection.connectionId);
+    setFileTreeRootPath(null);
+    if (compactViewport) {
+      setLeftSidebarOpen(false);
+    }
+  };
 
   /**
    * 工作区选择弹窗：本地 + SSH 双来源，与 ChatPage 的绑定入口能力一致。
@@ -388,9 +362,9 @@ export function FusionSidebar({
     onSelectSsh: handleSelectSshWorkspace,
   });
 
-  const preloadRoute = useCallback((path: string) => {
+  const preloadRoute = (path: string) => {
     void preloadRouteModuleByPath(path);
-  }, []);
+  };
 
   const {
     sessions,
@@ -480,28 +454,21 @@ export function FusionSidebar({
   const workspaceDisplayName = resolveDisplayName(headerWorkspacePath);
   const hasWorkspace = Boolean(headerWorkspacePath);
 
-  const handleWorkspaceAliasChange = useCallback(
-    (newAlias: string): void => {
-      // 写空串即清除别名，展示名回落到路径末段；path 为空时写入是 no-op。
-      // 落点是「头部正在展示的那个工作区」，否则改的是另一个工作区的别名。
-      renameWorkspaceDisplay(headerWorkspacePath, newAlias);
-    },
-    [headerWorkspacePath],
-  );
+  const handleWorkspaceAliasChange = (newAlias: string): void => {
+    // 写空串即清除别名，展示名回落到路径末段；path 为空时写入是 no-op。
+    // 落点是「头部正在展示的那个工作区」，否则改的是另一个工作区的别名。
+    renameWorkspaceDisplay(headerWorkspacePath, newAlias);
+  };
 
   // 头部两行的分工：标题行给人看的名字（别名优先），第二行给机器路径。
   // 未设置别名时标题本身就是路径末段，第二行只保留父级链，避免两行重复同一段文字；
   // 设了别名才需要把末段补回路径里，保证「名字 ↔ 位置」仍可对照。
   const hasCustomWorkspaceName = readWorkspaceAlias(headerWorkspacePath) !== '';
-  const workspacePathLabel = useMemo(
-    () =>
-      headerWorkspacePath
-        ? formatWorkspacePathLabel(headerWorkspacePath, {
-            includeBasename: hasCustomWorkspaceName,
-          })
-        : '',
-    [headerWorkspacePath, hasCustomWorkspaceName],
-  );
+  const workspacePathLabel = headerWorkspacePath
+    ? formatWorkspacePathLabel(headerWorkspacePath, {
+        includeBasename: hasCustomWorkspaceName,
+      })
+    : '';
 
   const workspaceTitleText = isWorkspaceHeaderPending
     ? '正在解析工作区…'
@@ -521,111 +488,79 @@ export function FusionSidebar({
   const contentSearch = useSessionContentSearch(isTeamRoute ? '' : sessionSearch);
   const contentMatchedSessionIds = contentSearch.matchedSessionIds;
   // 搜索态：标题命中 ∪ 消息内容命中；非搜索态直接使用全量会话树。
-  const searchedSessionTreeGroups = useMemo(() => {
-    if (!isSearchingSessions) {
-      return sessionTreeGroups;
-    }
-
-    const normalizedQuery = sessionSearch.trim().toLowerCase();
-    return filterSessionTreeGroupsByMatcher(
-      sessionTreeGroups,
-      (session) =>
-        (session.title ?? session.id).toLowerCase().includes(normalizedQuery) ||
-        contentMatchedSessionIds.has(session.id),
-    ).filter((group) => group.sessions.length > 0);
-  }, [contentMatchedSessionIds, isSearchingSessions, sessionSearch, sessionTreeGroups]);
-  const chatGroups = useMemo(
-    () =>
-      buildFusionChatGroups({
-        groupedSessions,
-        groupedSessionTrees: searchedSessionTreeGroups,
-        sessionCountByWorkspace,
-        isSearching: isSearchingSessions,
-        isPinned,
-      }),
-    [
-      groupedSessions,
-      isPinned,
-      isSearchingSessions,
-      searchedSessionTreeGroups,
-      sessionCountByWorkspace,
-    ],
+  const normalizedQuery = sessionSearch.trim().toLowerCase();
+  const searchedSessionTreeGroups = isSearchingSessions
+    ? filterSessionTreeGroupsByMatcher(
+        sessionTreeGroups,
+        (session) =>
+          (session.title ?? session.id).toLowerCase().includes(normalizedQuery) ||
+          contentMatchedSessionIds.has(session.id),
+      ).filter((group) => group.sessions.length > 0)
+    : sessionTreeGroups;
+  const chatGroups = buildFusionChatGroups({
+    groupedSessions,
+    groupedSessionTrees: searchedSessionTreeGroups,
+    sessionCountByWorkspace,
+    isSearching: isSearchingSessions,
+    isPinned,
+  });
+  const chatSessionNodes = chatGroups.flatMap((group) => group.roots);
+  const peekGroupKey = getWorkspaceGroupKey(peekWorkspacePath);
+  const peekTreeGroup = searchedSessionTreeGroups.find(
+    (group) => getWorkspaceGroupKey(group.workspacePath) === peekGroupKey,
   );
-  const chatSessionNodes = useMemo(() => chatGroups.flatMap((group) => group.roots), [chatGroups]);
-  const peekSessionNodes = useMemo(() => {
-    const peekGroupKey = getWorkspaceGroupKey(peekWorkspacePath);
-    const treeGroup = searchedSessionTreeGroups.find(
-      (group) => getWorkspaceGroupKey(group.workspacePath) === peekGroupKey,
-    );
-    return treeGroup?.roots ?? chatSessionNodes;
-  }, [chatSessionNodes, searchedSessionTreeGroups, peekWorkspacePath]);
+  const peekSessionNodes = peekTreeGroup?.roots ?? chatSessionNodes;
 
-  const filteredTeamGroups = useMemo(() => {
-    if (!teamSearch.trim()) return teamWorkspaceGroups;
-    const lower = teamSearch.toLowerCase();
-    return teamWorkspaceGroups
-      .map((wg) => ({
-        ...wg,
-        sessions: wg.sessions.filter((s) => s.title.toLowerCase().includes(lower)),
-      }))
-      .filter((wg) => wg.label.toLowerCase().includes(lower) || wg.sessions.length > 0);
-  }, [teamSearch, teamWorkspaceGroups]);
+  // 团队搜索沿用原口径：`trim` 只用于判空，匹配串保留未 trim 的小写原值。
+  const isTeamSearchActive = teamSearch.trim().length > 0;
+  const teamSearchQuery = teamSearch.toLowerCase();
+  const filteredTeamGroups = isTeamSearchActive
+    ? teamWorkspaceGroups
+        .map((wg) => ({
+          ...wg,
+          sessions: wg.sessions.filter((s) => s.title.toLowerCase().includes(teamSearchQuery)),
+        }))
+        .filter((wg) => wg.label.toLowerCase().includes(teamSearchQuery) || wg.sessions.length > 0)
+    : teamWorkspaceGroups;
 
-  const preloadChatRoute = useCallback((sessionIdToPreload: string) => {
+  const preloadChatRoute = (sessionIdToPreload: string) => {
     void preloadRouteModuleByPath(`/chat/${sessionIdToPreload}`);
-  }, []);
+  };
 
-  const openChatSession = useCallback(
-    (sessionIdToOpen: string) => {
-      preloadChatRoute(sessionIdToOpen);
-      void navigate(`/chat/${sessionIdToOpen}`);
-    },
-    [navigate, preloadChatRoute],
-  );
+  const openChatSession = (sessionIdToOpen: string) => {
+    preloadChatRoute(sessionIdToOpen);
+    void navigate(`/chat/${sessionIdToOpen}`);
+  };
 
-  const handleNewTask = useCallback(() => {
+  const handleNewTask = () => {
     preloadRoute('/chat');
     // 统一走 newSession：工作区按「点击来源」解析（当前会话 → 全局选中值），
     // 并保证草稿标签 / 路由落点与其它新建入口一致。
     void newSession();
-  }, [newSession, preloadRoute]);
+  };
 
-  const handleNewTeamWorkspace = useCallback(() => {
+  const handleNewTeamWorkspace = () => {
     preloadRoute('/team');
     triggerTeamNewWorkspace();
     void navigate('/team?action=newWorkspace');
-  }, [navigate, preloadRoute, triggerTeamNewWorkspace]);
-  const clearPeekCloseTimer = useCallback(() => {
+  };
+  const clearPeekCloseTimer = () => {
     if (peekCloseTimerRef.current) {
       clearTimeout(peekCloseTimerRef.current);
       peekCloseTimerRef.current = null;
     }
-  }, []);
-  const openProjectPeek = useCallback(
-    (path: string) => {
-      if (expanded || compactViewport) {
-        return;
-      }
-
-      clearPeekCloseTimer();
-      setPeekWorkspacePath(path);
-    },
-    [clearPeekCloseTimer, compactViewport, expanded],
-  );
-  const scheduleCloseProjectPeek = useCallback(() => {
+  };
+  const scheduleCloseProjectPeek = () => {
     clearPeekCloseTimer();
     peekCloseTimerRef.current = setTimeout(() => {
       setPeekWorkspacePath(null);
       peekCloseTimerRef.current = null;
     }, PEEK_CLOSE_DELAY_MS);
-  }, [clearPeekCloseTimer]);
-  const handlePeekSelectSession = useCallback(
-    (sessionId: string) => {
-      setPeekWorkspacePath(null);
-      openChatSession(sessionId);
-    },
-    [openChatSession],
-  );
+  };
+  const handlePeekSelectSession = (sessionId: string) => {
+    setPeekWorkspacePath(null);
+    openChatSession(sessionId);
+  };
   // ─── Chat 会话右键菜单状态 ───
   const [chatContextMenu, setChatContextMenu] = useState<{
     sessionId: string;
@@ -633,47 +568,35 @@ export function FusionSidebar({
     y: number;
   } | null>(null);
 
-  const handleSessionContextMenu = useCallback((sessionId: string, x: number, y: number) => {
+  const handleSessionContextMenu = (sessionId: string, x: number, y: number) => {
     setChatContextMenu({ sessionId, x, y });
-  }, []);
+  };
 
-  const handleNewTeamSession = useCallback(
-    (workspaceId: string) => {
-      preloadRoute('/team');
-      triggerTeamNewSession(workspaceId);
-      void navigate(`/team/${workspaceId}`);
-    },
-    [navigate, preloadRoute, triggerTeamNewSession],
-  );
+  const handleNewTeamSession = (workspaceId: string) => {
+    preloadRoute('/team');
+    triggerTeamNewSession(workspaceId);
+    void navigate(`/team/${workspaceId}`);
+  };
 
-  const handleTeamSelectSession = useCallback(
-    (workspaceId: string, sessionId: string) => {
-      preloadRoute('/team');
-      triggerTeamSelectSession(workspaceId, sessionId);
-      void navigate(buildTeamSessionRoute(workspaceId, sessionId));
-    },
-    [navigate, preloadRoute, triggerTeamSelectSession],
-  );
+  const handleTeamSelectSession = (workspaceId: string, sessionId: string) => {
+    preloadRoute('/team');
+    triggerTeamSelectSession(workspaceId, sessionId);
+    void navigate(buildTeamSessionRoute(workspaceId, sessionId));
+  };
 
-  const handlePointerPositionChange = useCallback(
-    (_position: { x: number; y: number } | null) => undefined,
-    [],
-  );
+  const handlePointerPositionChange = (_position: { x: number; y: number } | null) => undefined;
 
-  const handlePanelWidthChange = useCallback((width: number) => {
+  const handlePanelWidthChange = (width: number) => {
     setResizingPanelWidth(width);
-  }, []);
+  };
 
-  const handlePanelWidthCommit = useCallback(
-    (width: number) => {
-      setResizingPanelWidth(null);
-      setSidebarPanelWidth(width);
-    },
-    [setSidebarPanelWidth],
-  );
+  const handlePanelWidthCommit = (width: number) => {
+    setResizingPanelWidth(null);
+    setSidebarPanelWidth(width);
+  };
 
   // 会话列表键盘导航：↑ / ↓ 在会话行之间移动焦点，Enter 由行自身处理打开。
-  const handleSessionListKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+  const handleSessionListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
       return;
     }
@@ -706,53 +629,39 @@ export function FusionSidebar({
 
     event.preventDefault();
     nextRow.focus();
+  };
+
+  const chatRowHandlers: FusionChatSessionRowHandlers = {
+    activeSessionId: currentSessionId,
+    commitRename,
+    contentMatchedSessionIds,
+    hoveredSessionId,
+    isDeletingSession,
+    isPinned,
+    onHoveredSessionChange: setHoveredSessionId,
+    onOpenContextMenu: handleSessionContextMenu,
+    onPointerPositionChange: handlePointerPositionChange,
+    openChatSession,
+    preloadChatRoute,
+    quickDeleteSession,
+    quickExportSession,
+    renameValue,
+    renamingSessionId,
+    searchQuery: isSearchingSessions ? sessionSearch : '',
+    setRenameValue,
+    startRename,
+  };
+
+  // 清理定时器不依赖回调身份：把清理逻辑内联，避免「去包装后回调每帧换身份 →
+  // 该 effect 每次重渲染都重跑 cleanup → 顺带清掉刚设的 peek 关闭计时器」。
+  useEffect(() => {
+    return () => {
+      if (peekCloseTimerRef.current) {
+        clearTimeout(peekCloseTimerRef.current);
+        peekCloseTimerRef.current = null;
+      }
+    };
   }, []);
-
-  const chatRowHandlers = useMemo<FusionChatSessionRowHandlers>(
-    () => ({
-      activeSessionId: currentSessionId,
-      commitRename,
-      contentMatchedSessionIds,
-      hoveredSessionId,
-      isDeletingSession,
-      isPinned,
-      onHoveredSessionChange: setHoveredSessionId,
-      onOpenContextMenu: handleSessionContextMenu,
-      onPointerPositionChange: handlePointerPositionChange,
-      openChatSession,
-      preloadChatRoute,
-      quickDeleteSession,
-      quickExportSession,
-      renameValue,
-      renamingSessionId,
-      searchQuery: isSearchingSessions ? sessionSearch : '',
-      setRenameValue,
-      startRename,
-    }),
-    [
-      commitRename,
-      contentMatchedSessionIds,
-      currentSessionId,
-      handlePointerPositionChange,
-      handleSessionContextMenu,
-      hoveredSessionId,
-      isDeletingSession,
-      isPinned,
-      isSearchingSessions,
-      openChatSession,
-      preloadChatRoute,
-      quickDeleteSession,
-      quickExportSession,
-      renameValue,
-      renamingSessionId,
-      sessionSearch,
-      setHoveredSessionId,
-      setRenameValue,
-      startRename,
-    ],
-  );
-
-  useEffect(() => clearPeekCloseTimer, [clearPeekCloseTimer]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -795,11 +704,11 @@ export function FusionSidebar({
   }, [expanded, compactViewport]);
 
   // 仅在移动端/紧凑视口下收起 Panel（桌面端点击 section 标题或工作区头像时面板应保持展开）
-  const closeCompactSidebar = useCallback(() => {
+  const closeCompactSidebar = () => {
     if (compactViewport) {
       setLeftSidebarOpen(false);
     }
-  }, [compactViewport, setLeftSidebarOpen]);
+  };
 
   const mobileDrawerOpen = compactViewport && leftSidebarOpen;
   const panelContent = (

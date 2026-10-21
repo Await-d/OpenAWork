@@ -15,12 +15,24 @@ interface ArtifactUploadResponse {
   textContent?: string;
 }
 
+/**
+ * 单个附件上传的墙钟上限。
+ *
+ * 裸 `fetch` 在网关半开连接 / 网关重启 / 上游卡死时会永久 pending：上传不 settle
+ * 会把调用方的「发送中」闩（ChatPage 的 sendingRef、待发队列的 flush in-flight
+ * 标记）焊死——之后每条发送 / 队列条目都被静默丢弃，只能靠刷新页面恢复。
+ * 120s 与 web-client 的产物传输预算（`ARTIFACT_TRANSFER_TIMEOUT_MS`）对齐。
+ */
+export const ATTACHMENT_UPLOAD_TIMEOUT_MS = 120_000;
+
 export interface UploadChatAttachmentsOptions {
   files: File[];
   gatewayUrl: string;
   sessionId: string;
   token: string | null;
   fetchImpl?: typeof fetch;
+  /** 单文件上传墙钟上限（ms）；<= 0 表示不设上限（仅测试用）。 */
+  timeoutMs?: number;
 }
 
 export interface UploadedChatAttachment {
@@ -194,6 +206,7 @@ export async function uploadChatAttachments({
   sessionId,
   token,
   fetchImpl = fetch,
+  timeoutMs = ATTACHMENT_UPLOAD_TIMEOUT_MS,
 }: UploadChatAttachmentsOptions): Promise<UploadedChatAttachment[]> {
   if (!token) {
     return [];
@@ -201,6 +214,13 @@ export async function uploadChatAttachments({
 
   const uploaded = await Promise.all(
     files.map(async (file) => {
+      const abortController = new AbortController();
+      const timer =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              abortController.abort(new Error(`附件上传超时（${timeoutMs}ms）`));
+            }, timeoutMs)
+          : null;
       try {
         const contentBase64 = await fileToBase64(file);
         const response = await fetchImpl(`${gatewayUrl}/sessions/${sessionId}/artifacts`, {
@@ -215,6 +235,7 @@ export async function uploadChatAttachments({
             sizeBytes: file.size,
             contentBase64,
           }),
+          signal: abortController.signal,
         });
         if (!response.ok) {
           return null;
@@ -228,6 +249,10 @@ export async function uploadChatAttachments({
         return toUploadedChatAttachment(file, payload.artifact, contentBase64, payload.textContent);
       } catch {
         return null;
+      } finally {
+        if (timer !== null) {
+          clearTimeout(timer);
+        }
       }
     }),
   );

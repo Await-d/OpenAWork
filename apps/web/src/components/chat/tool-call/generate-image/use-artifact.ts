@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createArtifactsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../../stores/auth/auth.js';
 
@@ -12,6 +12,29 @@ import { useAuthStore } from '../../../../stores/auth/auth.js';
  * button could not actually retry because the previous version's effect
  * dependency list didn't include the nonce.
  */
+/**
+ * 生成图 artifact 加载的统一包装：置 loading → try → catch 交给 `onError` → finally 收尾
+ * （取消时不再 setState）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`?.`、`??`、三元）。语义逐字照搬。
+ */
+async function runGenerateImageArtifactLoadOnce(ctx: {
+  setLoading: (loading: boolean) => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setLoading(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useGenerateImageArtifact(artifactId: string | undefined): {
   imageSrc: string | null;
   imageLoading: boolean;
@@ -27,7 +50,9 @@ export function useGenerateImageArtifact(artifactId: string | undefined): {
   const [retryNonce, setRetryNonce] = useState(0);
   // Latest filename: filled from the artifact metadata when the response
   // arrives, falling back to a sane default until then.
-  const fileNameRef = useRef<string>('generated-image.png');
+  // 走 state 而非 ref：渲染期读 `ref.current` 会被 React Compiler 判为 "Cannot access
+  // refs during render" 并放弃优化整个 hook（实测）。
+  const [fileName, setFileName] = useState<string>('generated-image.png');
 
   const retry = useCallback(() => {
     setRetryNonce((n) => n + 1);
@@ -40,40 +65,46 @@ export function useGenerateImageArtifact(artifactId: string | undefined): {
     setFetchError(null);
     setImageSrc(null);
     void (async () => {
-      try {
-        const data = (await createArtifactsClient(gatewayUrl).get(token, artifactId)) as {
-          artifact?: { content?: string; metadata?: Record<string, unknown> };
-        };
-        if (cancelled) return;
-        const content = data.artifact?.content;
-        const meta = data.artifact?.metadata;
-        if (meta?.fileName && typeof meta.fileName === 'string') {
-          fileNameRef.current = meta.fileName;
-        }
-        if (!content) {
-          console.error('[generate_image] artifact content empty', {
+      // try/catch/finally 下沉到模块级 `runGenerateImageArtifactLoadOnce`（见其注释）。
+      await runGenerateImageArtifactLoadOnce({
+        setLoading: setImageLoading,
+        onError: (err) => {
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('[generate_image] artifact fetch threw', {
             artifactId,
-            artifact: data.artifact,
+            error: err,
           });
-          setFetchError('图片 artifact 内容为空');
-          return;
-        }
-        setImageSrc(
-          content.startsWith('data:')
-            ? content
-            : `data:${(meta?.mimeType as string) ?? 'image/png'};base64,${content}`,
-        );
-      } catch (err) {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('[generate_image] artifact fetch threw', {
-          artifactId,
-          error: err,
-        });
-        setFetchError(message || '加载失败');
-      } finally {
-        if (!cancelled) setImageLoading(false);
-      }
+          setFetchError(message || '加载失败');
+        },
+        onFinally: () => {
+          if (!cancelled) setImageLoading(false);
+        },
+        run: async () => {
+          const data = (await createArtifactsClient(gatewayUrl).get(token, artifactId)) as {
+            artifact?: { content?: string; metadata?: Record<string, unknown> };
+          };
+          if (cancelled) return;
+          const content = data.artifact?.content;
+          const meta = data.artifact?.metadata;
+          if (meta?.fileName && typeof meta.fileName === 'string') {
+            setFileName(meta.fileName);
+          }
+          if (!content) {
+            console.error('[generate_image] artifact content empty', {
+              artifactId,
+              artifact: data.artifact,
+            });
+            setFetchError('图片 artifact 内容为空');
+            return;
+          }
+          setImageSrc(
+            content.startsWith('data:')
+              ? content
+              : `data:${(meta?.mimeType as string) ?? 'image/png'};base64,${content}`,
+          );
+        },
+      });
     })();
     return () => {
       cancelled = true;
@@ -84,7 +115,7 @@ export function useGenerateImageArtifact(artifactId: string | undefined): {
     imageSrc,
     imageLoading,
     fetchError,
-    fileName: fileNameRef.current,
+    fileName,
     retry,
   };
 }

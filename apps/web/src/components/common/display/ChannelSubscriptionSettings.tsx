@@ -354,6 +354,36 @@ function buildAutoStartFailureMessage(channel: ChannelSettingsEntry): string {
   }`;
 }
 
+/**
+ * 统一的「pending + try/catch/finally」通道动作包装。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（条件 / 逻辑），本组件 7 处 try/catch/finally 会让它整体脱靶（实测）。
+ * 语义逐字照搬：`run` 的全流程仍在 try 内，catch 只做错误文案映射，finally 无条件
+ * 清 pending。
+ */
+async function runPendingChannelAction(ctx: {
+  pending: PendingAction;
+  fallbackMessage: string;
+  setActionError: (message: string | null) => void;
+  setPendingAction: (action: PendingAction) => void;
+  /** catch 的附加动作（如微信绑定失败还要同步更新登录提示文案）。 */
+  onError?: (message: string) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setPendingAction(ctx.pending);
+  ctx.setActionError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ctx.fallbackMessage;
+    ctx.setActionError(message);
+    ctx.onError?.(message);
+  } finally {
+    ctx.setPendingAction(null);
+  }
+}
+
 export function ChannelSubscriptionSettings({
   channels,
   descriptors,
@@ -656,28 +686,28 @@ export function ChannelSubscriptionSettings({
       return;
     }
 
-    setPendingAction('save');
-    setActionError(null);
-    try {
-      const normalizedDraft = normalizeDraft({
-        ...draft,
-        name: draft.name.trim() || activeDescriptor.displayName,
-      });
-      const savedChannel = await onSave(selectedChannel?.id ?? null, normalizedDraft);
-      setCreatingType(null);
-      setSelectedKey(savedChannel.id);
-      if (
-        normalizedDraft.enabled &&
-        normalizedDraft.features.autoStart &&
-        savedChannel.status === 'error'
-      ) {
-        setActionError(buildAutoStartFailureMessage(savedChannel));
-      }
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '保存通道配置失败');
-    } finally {
-      setPendingAction(null);
-    }
+    await runPendingChannelAction({
+      pending: 'save',
+      fallbackMessage: '保存通道配置失败',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        const normalizedDraft = normalizeDraft({
+          ...draft,
+          name: draft.name.trim() || activeDescriptor.displayName,
+        });
+        const savedChannel = await onSave(selectedChannel?.id ?? null, normalizedDraft);
+        setCreatingType(null);
+        setSelectedKey(savedChannel.id);
+        if (
+          normalizedDraft.enabled &&
+          normalizedDraft.features.autoStart &&
+          savedChannel.status === 'error'
+        ) {
+          setActionError(buildAutoStartFailureMessage(savedChannel));
+        }
+      },
+    });
   }
 
   async function handleConnect(): Promise<void> {
@@ -685,15 +715,15 @@ export function ChannelSubscriptionSettings({
       return;
     }
 
-    setPendingAction('connect');
-    setActionError(null);
-    try {
-      await onConnect(selectedChannel.id);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '连接通道失败');
-    } finally {
-      setPendingAction(null);
-    }
+    await runPendingChannelAction({
+      pending: 'connect',
+      fallbackMessage: '连接通道失败',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await onConnect(selectedChannel.id);
+      },
+    });
   }
 
   async function handleDisconnect(): Promise<void> {
@@ -701,15 +731,15 @@ export function ChannelSubscriptionSettings({
       return;
     }
 
-    setPendingAction('disconnect');
-    setActionError(null);
-    try {
-      await onDisconnect(selectedChannel.id);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '断开通道失败');
-    } finally {
-      setPendingAction(null);
-    }
+    await runPendingChannelAction({
+      pending: 'disconnect',
+      fallbackMessage: '断开通道失败',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await onDisconnect(selectedChannel.id);
+      },
+    });
   }
 
   async function handleDelete(): Promise<void> {
@@ -717,16 +747,16 @@ export function ChannelSubscriptionSettings({
       return;
     }
 
-    setPendingAction('delete');
-    setActionError(null);
-    try {
-      await onDelete(selectedChannel.id);
-      setSelectedKey('');
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '删除通道失败');
-    } finally {
-      setPendingAction(null);
-    }
+    await runPendingChannelAction({
+      pending: 'delete',
+      fallbackMessage: '删除通道失败',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await onDelete(selectedChannel.id);
+        setSelectedKey('');
+      },
+    });
   }
 
   async function handleRefreshTargets(): Promise<void> {
@@ -734,15 +764,15 @@ export function ChannelSubscriptionSettings({
       return;
     }
 
-    setPendingAction('refresh');
-    setActionError(null);
-    try {
-      await onRefreshTargets(selectedChannel.id);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '刷新订阅目标失败');
-    } finally {
-      setPendingAction(null);
-    }
+    await runPendingChannelAction({
+      pending: 'refresh',
+      fallbackMessage: '刷新订阅目标失败',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await onRefreshTargets(selectedChannel.id);
+      },
+    });
   }
 
   async function handleRefreshDiagnostics(): Promise<void> {
@@ -750,15 +780,15 @@ export function ChannelSubscriptionSettings({
       return;
     }
 
-    setPendingAction('diagnostics');
-    setActionError(null);
-    try {
-      await onRefreshDiagnostics(selectedChannel.id);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '刷新通道诊断失败');
-    } finally {
-      setPendingAction(null);
-    }
+    await runPendingChannelAction({
+      pending: 'diagnostics',
+      fallbackMessage: '刷新通道诊断失败',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await onRefreshDiagnostics(selectedChannel.id);
+      },
+    });
   }
 
   async function handleWeixinBind(force = false): Promise<void> {
@@ -767,50 +797,50 @@ export function ChannelSubscriptionSettings({
     }
 
     setPendingAction('weixin');
-    setActionError(null);
     setWeixinQrCodeUrl('');
     setWeixinLoginMessage('正在生成微信绑定二维码…');
-    try {
-      const baseUrl = draft.config['baseUrl'] || undefined;
-      const routeTag = draft.config['routeTag'] || undefined;
-      const startResult = await onStartWeixinLogin({
-        accountId: draft.config['accountId'] || undefined,
-        baseUrl,
-        routeTag,
-        force,
-      });
-      setWeixinQrCodeUrl(startResult.qrCodeUrl ?? '');
-      setWeixinLoginMessage(startResult.message);
-      const waitResult = await onWaitWeixinLogin({
-        sessionKey: startResult.sessionKey,
-        baseUrl,
-        routeTag,
-        timeoutMs: 480_000,
-      });
-      setWeixinLoginMessage(waitResult.message);
-      if (!waitResult.connected) {
-        setActionError(waitResult.message || '微信绑定未完成');
-        return;
-      }
+    await runPendingChannelAction({
+      pending: 'weixin',
+      fallbackMessage: '微信绑定失败',
+      setActionError,
+      setPendingAction,
+      onError: setWeixinLoginMessage,
+      run: async () => {
+        const baseUrl = draft.config['baseUrl'] || undefined;
+        const routeTag = draft.config['routeTag'] || undefined;
+        const startResult = await onStartWeixinLogin({
+          accountId: draft.config['accountId'] || undefined,
+          baseUrl,
+          routeTag,
+          force,
+        });
+        setWeixinQrCodeUrl(startResult.qrCodeUrl ?? '');
+        setWeixinLoginMessage(startResult.message);
+        const waitResult = await onWaitWeixinLogin({
+          sessionKey: startResult.sessionKey,
+          baseUrl,
+          routeTag,
+          timeoutMs: 480_000,
+        });
+        setWeixinLoginMessage(waitResult.message);
+        if (!waitResult.connected) {
+          setActionError(waitResult.message || '微信绑定未完成');
+          return;
+        }
 
-      setDraft((current) => ({
-        ...current,
-        config: {
-          ...current.config,
-          ...(waitResult.token ? { token: waitResult.token } : {}),
-          ...(waitResult.accountId ? { accountId: waitResult.accountId } : {}),
-          ...(waitResult.baseUrl ? { baseUrl: waitResult.baseUrl } : {}),
-          ...(waitResult.userId ? { userId: waitResult.userId } : {}),
-        },
-      }));
-      setVisibleSecrets((current) => ({ ...current, token: true }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '微信绑定失败';
-      setActionError(message);
-      setWeixinLoginMessage(message);
-    } finally {
-      setPendingAction(null);
-    }
+        setDraft((current) => ({
+          ...current,
+          config: {
+            ...current.config,
+            ...(waitResult.token ? { token: waitResult.token } : {}),
+            ...(waitResult.accountId ? { accountId: waitResult.accountId } : {}),
+            ...(waitResult.baseUrl ? { baseUrl: waitResult.baseUrl } : {}),
+            ...(waitResult.userId ? { userId: waitResult.userId } : {}),
+          },
+        }));
+        setVisibleSecrets((current) => ({ ...current, token: true }));
+      },
+    });
   }
 
   return (

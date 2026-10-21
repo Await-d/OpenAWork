@@ -58,6 +58,30 @@ function isTerminalRunEvent(event: RunEvent): boolean {
   return event.type === 'done' || event.type === 'error';
 }
 
+/**
+ * 快照里是否有**可见的进行中内容**。
+ *
+ * `recoverActiveAssistantStream` 在「最后一轮已落库、下一轮还没开始」时会返回一个
+ * 只带 `usage` / `upstreamSummary` 的空快照（见该函数内 `pendingRoundBoundary`）。
+ * 这种快照不能撑起「流式中」：
+ *
+ * - 渲染层会据此构造一条 `status: 'streaming'` 的实时气泡；
+ * - `mergeStreamingEntryIntoHistoricalEntries` 又会按 `clientRequestId` 精确匹配到
+ *   历史上刚结束的那一轮，用这条**空 entry** 把它替换掉 —— 用户看到的是内容消失。
+ *
+ * 因此「是否在流式中」必须以内容为准，而不是「快照是否存在」。
+ */
+export function recoveredStreamHasVisibleContent(
+  snapshot: RecoveredActiveAssistantStream,
+): boolean {
+  return (
+    snapshot.text.length > 0 ||
+    snapshot.thinkingBlocks.length > 0 ||
+    snapshot.parts.length > 0 ||
+    snapshot.toolCalls.length > 0
+  );
+}
+
 function hasTextOverlap(left: string, right: string): boolean {
   const normalizedLeft = left.trim();
   const normalizedRight = right.trim();
@@ -189,12 +213,46 @@ export function recoverActiveAssistantStream(
   let parts: ChatMessagePart[] = [];
   const recoveryMessageId = '__recovery__';
 
+  /**
+   * 网关**每轮**落一条 assistant 消息、每轮发一次 `usage`，而 `runEvents` 是整个
+   * run 的完整事件流（多轮全混在一起）。恢复快照只能代表**最后一个 `usage` 之后
+   * 的进行中轮**：
+   *
+   * - 不切分时，恢复快照会把同一 run 里已落库的若干轮正文拼进一条虚拟消息。
+   *   attach 随后把它当作「本轮已有片段」提交，于是同样的内容在历史上出现两次
+   *   （一条来自落库消息、一条来自本地提交），`deduplicateOverlappingMessages`
+   *   按 `clientRequestId` / `partId` 判重时会把后到者顶进旧槽位 —— 表现为同一批
+   *   消息 id 的相对顺序发生变化。
+   * - `usage` 只登记轮次、**不立刻切分**：本轮的工具结果在 `usage` 之后才到达，
+   *   强行在 `usage` 处清空会把工具输出丢掉。
+   * - 真正切分发生在**新一轮内容**到达时（文本 / 思考 / 工具调用），与实时链路
+   *   `shouldStartNewRound` 的语义一致。
+   */
+  let pendingRoundBoundary = false;
+  let highestCompletedRound: number | null = null;
+
+  const startNewRoundIfAdvanced = (occurredAt: number | undefined): void => {
+    if (!pendingRoundBoundary) {
+      return;
+    }
+    pendingRoundBoundary = false;
+    text = '';
+    thinkingBlocks = [];
+    parts = [];
+    activeToolCallIds.clear();
+    toolInputTextByCallId.clear();
+    reasoningSegmentMeta.clear();
+    hasRenderableContent = false;
+    startedAt = typeof occurredAt === 'number' ? occurredAt : null;
+  };
+
   for (const event of activeRunEvents) {
     if (startedAt === null && typeof event.occurredAt === 'number') {
       startedAt = event.occurredAt;
     }
 
     if (event.type === 'text_delta') {
+      startNewRoundIfAdvanced(event.occurredAt);
       text += event.delta;
       parts = appendStreamingTextDelta(parts, event.delta, recoveryMessageId);
       hasRenderableContent = true;
@@ -202,6 +260,7 @@ export function recoverActiveAssistantStream(
     }
 
     if (event.type === 'thinking_delta') {
+      startNewRoundIfAdvanced(event.occurredAt);
       thinkingBlocks = appendStreamingThinkingChunk(thinkingBlocks, event, {
         forceNewBlock: parts[parts.length - 1]?.type !== 'reasoning',
       });
@@ -218,6 +277,11 @@ export function recoverActiveAssistantStream(
 
     if (event.type === 'usage') {
       usage = mergeChatBackendUsageSnapshot(usage, event);
+      // 迟到的重复 usage 不能把已经切过去的轮次再切一次。
+      if (highestCompletedRound === null || event.round > highestCompletedRound) {
+        highestCompletedRound = event.round;
+        pendingRoundBoundary = true;
+      }
       continue;
     }
 
@@ -235,6 +299,7 @@ export function recoverActiveAssistantStream(
     }
 
     if (event.type === 'tool_call_delta') {
+      startNewRoundIfAdvanced(event.occurredAt);
       activeToolCallIds.add(event.toolCallId);
       const inputText = `${toolInputTextByCallId.get(event.toolCallId) ?? ''}${event.inputDelta}`;
       toolInputTextByCallId.set(event.toolCallId, inputText);
@@ -266,6 +331,29 @@ export function recoverActiveAssistantStream(
       });
       hasRenderableContent = true;
     }
+  }
+
+  if (pendingRoundBoundary) {
+    // 最后一条 `usage` 之后没有任何新一轮内容：**当前没有进行中的轮**。
+    //
+    // 此刻留在缓冲区里的 `text` / `parts` 属于刚刚结束、并且已经由
+    // `finalizeAssistant` 落库的那一轮（`usage` 是轮结束信号，先落库后发出）。
+    // 把它当成「本轮已有片段」返回，attach 就会用 `usage.round + 1` 的键把同一批
+    // 内容再提交一条，本地副本随即在判重里顶掉历史槽位 —— 正是要修的错位。
+    //
+    // 返回**空内容快照**而不是 null：null 会被上层当成「这一拍问不出结果」并继续
+    // 沿用它自己的旧快照，旧内容照样会被播种。
+    return {
+      messageId: null,
+      parts: [],
+      startedAt: null,
+      text: '',
+      thinkingBlocks: [],
+      toolCalls: [],
+      ...(upstreamRoute ? { upstreamRoute } : {}),
+      usage,
+      ...(upstreamSummary ? { upstreamSummary } : {}),
+    };
   }
 
   if (!hasRenderableContent) {

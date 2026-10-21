@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
+import { setElementScrollTop } from '../../../utils/dom/scroll.js';
 
 export interface UseHistoryInfiniteOptions {
   /** 消息列表滚动容器 */
@@ -77,8 +78,9 @@ export function useHistoryInfinite({
       rafRef.current = null;
       const el = scrollRegionRef.current;
       if (!el || anchorRef.current === null) return;
-      // 恢复到"距底部相同距离"的位置
-      el.scrollTop = el.scrollHeight - anchor;
+      // 恢复到"距底部相同距离"的位置。`el` 取自 hook 参数的 ref，写入须走收敛
+      // 函数，否则本 hook 会整整体退出 React Compiler 优化（见 utils/dom/scroll.ts）。
+      setElementScrollTop(el, el.scrollHeight - anchor);
       anchorRef.current = null;
     });
   }, [scrollRegionRef]);

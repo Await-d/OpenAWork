@@ -151,6 +151,7 @@ export default function SettingsPage() {
     sshConnections,
     setSshConnections,
     sshDialogs,
+    setSshDialogs,
     sshDialogsReady,
     loadDevLogs,
     clearDevLogs,
@@ -199,6 +200,7 @@ export default function SettingsPage() {
     loadDevLogs,
     loadWorkers,
     loadDiagnostics,
+    loadChannelTroubleshooting,
     loadDesktopAutomationStatus,
     loadDesktopControlStatus,
     loadSshConnections,
@@ -310,6 +312,7 @@ export default function SettingsPage() {
     addSshConnection,
     connectSsh,
     disconnectSsh,
+    deleteSshConnection,
     browseSshPath,
     uploadSshFile,
   } = useSettingsSsh({
@@ -318,6 +321,7 @@ export default function SettingsPage() {
     sshConnections,
     setSshConnections,
     sshDialogs,
+    setSshDialogs,
     sshDialogsReady,
   });
 
@@ -504,6 +508,7 @@ export default function SettingsPage() {
                     onAddSshConnection={addSshConnection}
                     onConnectSsh={connectSsh}
                     onDisconnectSsh={disconnectSsh}
+                    onDeleteSshConnection={deleteSshConnection}
                     onBrowseSshPath={browseSshPath}
                     onUploadSshFile={uploadSshFile}
                     githubTriggers={githubTriggers}

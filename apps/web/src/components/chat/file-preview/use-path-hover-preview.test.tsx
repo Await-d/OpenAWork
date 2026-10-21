@@ -8,7 +8,7 @@ function Probe({ enabled = true }: { enabled?: boolean }) {
   const hover = usePathHoverPreview({ enabled });
   return (
     <div>
-      <button type="button" ref={hover.anchorRef} {...hover.triggerHandlers}>
+      <button type="button" ref={hover.setAnchorEl} {...hover.triggerHandlers}>
         trigger
       </button>
       {hover.open && (

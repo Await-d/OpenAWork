@@ -101,7 +101,7 @@ describe('FusionWorkspaceTab', () => {
     expect(screen.getAllByTestId('built-in-browser-mock')).toHaveLength(1);
   });
 
-  it('无地址时预览（activeTab=browser）显示空态地址输入，提交后挂载唯一浏览器', () => {
+  it('无地址时预览（activeTab=browser）显示开始页，提交后挂载唯一浏览器', () => {
     function StoreDrivenWorkspace() {
       const [tab, setTab] = useState<EditorPaneTab>('browser');
       const previewUrl =
@@ -125,11 +125,11 @@ describe('FusionWorkspaceTab', () => {
     expect(screen.getByTestId('fusion-workspace-tab-host')).not.toBeNull();
     expect(screen.getByTestId('dock-file-tree')).not.toBeNull();
     expect(screen.getByTestId('editor-browser-empty-state')).not.toBeNull();
-    expect(screen.getByText('还没有预览地址')).not.toBeNull();
+    expect(screen.getByTestId('browser-start-page')).not.toBeNull();
     expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('预览地址'), { target: { value: 'localhost:5173' } });
-    fireEvent.click(screen.getByRole('button', { name: '打开预览' }));
+    fireEvent.click(screen.getByRole('button', { name: '前往' }));
 
     expect(useUIStateStore.getState().browserPreviewUrlByWorkspace[WORKSPACE_PATH]).toBe(
       'http://localhost:5173',

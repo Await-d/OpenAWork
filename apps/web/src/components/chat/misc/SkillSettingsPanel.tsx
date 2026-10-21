@@ -269,6 +269,32 @@ function buildRows(installed: InstalledSkillDto[], effective: EffectiveSkillDto[
   return rows;
 }
 
+/**
+ * 技能设置面板动作的统一包装：置 busy / 清 error（可附带一次性清理，如清 hint）→ try
+ * → catch 归一文案 → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 2 处
+ * 这类动作会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runSkillSettingsActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  /** 进入 try 之前的一次性清理（如清掉上一次的成功提示）。 */
+  onStart?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  ctx.setError(null);
+  ctx.onStart?.();
+  try {
+    await ctx.run();
+  } catch (err) {
+    ctx.setError(err instanceof Error ? err.message : String(err));
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export default function SkillSettingsPanel(
   props: SkillSettingsPanelProps,
 ): React.ReactElement | null {
@@ -294,25 +320,25 @@ export default function SkillSettingsPanel(
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!accessToken) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [selection, installed] = await Promise.all([
-        skillsClient.getSelection(accessToken, {
-          ...(workspacePath && workspacePath.trim().length > 0
-            ? { workspacePath: workspacePath.trim() }
-            : {}),
-          ...(sessionId ? { sessionId } : {}),
-        }) as Promise<SelectionGetResponse>,
-        skillsClient.listInstalled(accessToken) as Promise<{ skills: InstalledSkillDto[] }>,
-      ]);
-      setServerData(selection);
-      setRows(buildRows(installed.skills, selection.effective));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
+    // 置 loading / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runSkillSettingsActionOnce`（见其注释）。
+    await runSkillSettingsActionOnce({
+      setBusy: setLoading,
+      setError,
+      run: async () => {
+        const [selection, installed] = await Promise.all([
+          skillsClient.getSelection(accessToken, {
+            ...(workspacePath && workspacePath.trim().length > 0
+              ? { workspacePath: workspacePath.trim() }
+              : {}),
+            ...(sessionId ? { sessionId } : {}),
+          }) as Promise<SelectionGetResponse>,
+          skillsClient.listInstalled(accessToken) as Promise<{ skills: InstalledSkillDto[] }>,
+        ]);
+        setServerData(selection);
+        setRows(buildRows(installed.skills, selection.effective));
+      },
+    });
   }, [accessToken, skillsClient, sessionId, workspacePath]);
 
   // Refresh on initial mount and whenever the workspace / session changes.
@@ -335,29 +361,31 @@ export default function SkillSettingsPanel(
   }, []);
 
   const saveWorkspace = useCallback(async (): Promise<void> => {
-    setSaving(true);
-    setError(null);
-    setHint(null);
-    try {
-      const items = rows
-        .filter((row) => !row.isBuiltin && row.isInstalled)
-        .map((row) => ({
-          skillId: row.skillId,
-          enabled: row.enabled,
-          pinned: row.pinned,
-          reason: row.reason,
-        }));
-      await skillsClient.putSelection(accessToken ?? '', {
-        workspacePath: workspacePath?.trim() || null,
-        items,
-      });
-      setHint('已保存。下次新建会话生效。');
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
+    // 置 saving / 清 error / 清 hint 与 try/catch/finally 一起下沉到模块级
+    // `runSkillSettingsActionOnce`（见其注释）。
+    await runSkillSettingsActionOnce({
+      setBusy: setSaving,
+      setError,
+      onStart: () => {
+        setHint(null);
+      },
+      run: async () => {
+        const items = rows
+          .filter((row) => !row.isBuiltin && row.isInstalled)
+          .map((row) => ({
+            skillId: row.skillId,
+            enabled: row.enabled,
+            pinned: row.pinned,
+            reason: row.reason,
+          }));
+        await skillsClient.putSelection(accessToken ?? '', {
+          workspacePath: workspacePath?.trim() || null,
+          items,
+        });
+        setHint('已保存。下次新建会话生效。');
+        await refresh();
+      },
+    });
   }, [skillsClient, accessToken, refresh, rows, workspacePath]);
 
   const tokenEstimate = useMemo<PinnedTokenEstimate>(
@@ -478,8 +506,12 @@ export default function SkillSettingsPanel(
 
   const handleSessionToggleEnabled = useCallback(
     async (skillId: string, enabled: boolean): Promise<void> => {
+      // `enabled ? undefined : false` 是三元（值块）：留在 try 内会让编译器报
+      // "Support value blocks … within a try/catch statement" 并放弃优化本组件，
+      // 故先算好再进 try（语义不变）。
+      const pinnedOverride = enabled ? undefined : false;
       try {
-        await writeSessionOverride(skillId, { enabled, pinned: enabled ? undefined : false });
+        await writeSessionOverride(skillId, { enabled, pinned: pinnedOverride });
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -503,8 +535,11 @@ export default function SkillSettingsPanel(
 
   const handleResetSessionOverride = useCallback(async (): Promise<void> => {
     if (!sessionId) return;
+    // `accessToken ?? ''` 是值块（空值合并）：留在 try 内会让编译器报
+    // "Support value blocks … within a try/catch statement"，故先算好再进 try。
+    const token = accessToken ?? '';
     try {
-      await skillsClient.removeSessionSelection(accessToken ?? '', sessionId);
+      await skillsClient.removeSessionSelection(token, sessionId);
       setHint('已恢复 workspace 默认。');
       await refresh();
     } catch (err) {

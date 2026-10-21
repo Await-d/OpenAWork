@@ -30,6 +30,30 @@ function getConversationTitle(conversation: ChannelConversationSummary): string 
   return conversation.chatName ?? conversation.chatId;
 }
 
+/**
+ * 渠道对话历史加载的统一包装：置 loading / 清 error → try → catch 交给 `onError`
+ * → finally 清 loading。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runChannelConversationsLoadOnce(ctx: {
+  setLoading: (loading: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setLoading(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setLoading(false);
+  }
+}
+
 export function ChannelConversationHistoryPanel({
   channels,
   gatewayUrl,
@@ -64,21 +88,24 @@ export function ChannelConversationHistoryPanel({
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    try {
-      const client = createChannelsClient<ChannelSettingsEntry>(gatewayUrl);
-      const nextConversations = await client.listConversations(token, selectedChannel.id, {
-        limit: 50,
-      });
-      setConversations(nextConversations);
-    } catch (loadError) {
-      logger.error('failed to load channel conversations', loadError);
-      setConversations([]);
-      setError(loadError instanceof Error ? loadError.message : '无法读取渠道对话历史');
-    } finally {
-      setLoading(false);
-    }
+    // 置 loading / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runChannelConversationsLoadOnce`（见其注释）。
+    await runChannelConversationsLoadOnce({
+      setLoading,
+      setError,
+      onError: (loadError) => {
+        logger.error('failed to load channel conversations', loadError);
+        setConversations([]);
+        setError(loadError instanceof Error ? loadError.message : '无法读取渠道对话历史');
+      },
+      run: async () => {
+        const client = createChannelsClient<ChannelSettingsEntry>(gatewayUrl);
+        const nextConversations = await client.listConversations(token, selectedChannel.id, {
+          limit: 50,
+        });
+        setConversations(nextConversations);
+      },
+    });
   }, [gatewayUrl, selectedChannel, token]);
 
   React.useEffect(() => {

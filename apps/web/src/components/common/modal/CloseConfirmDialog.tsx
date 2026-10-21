@@ -140,6 +140,28 @@ function RememberChoice({
  *
  * 仅在 Tauri 桌面端渲染，浏览器环境直接返回 null。
  */
+/**
+ * 关闭请求回执的统一包装：`onStart` → try → catch 交给 `onError` → `onFinally` 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runCloseRequestResolveOnce(ctx: {
+  onStart?: () => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart?.();
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function CloseConfirmDialog() {
   const desktopRuntime = isTauriRuntime();
   const [open, setOpen] = useState(false);
@@ -194,15 +216,20 @@ export function CloseConfirmDialog() {
       // 乐观收起：退出会直接终止进程、最小化会隐藏窗口，都不必等 Rust 回执；
       // 只有调用失败时才带错误信息把弹窗重新拉起来。
       setOpen(false);
-      try {
-        await tauriInvoke('resolve_close_request', { action, remember });
-      } catch (err) {
-        logger.error('resolve_close_request failed', err);
-        setError(err instanceof Error ? err.message : String(err));
-        setOpen(true);
-      } finally {
-        setBusy(null);
-      }
+      // try/catch/finally 下沉到模块级 `runCloseRequestResolveOnce`（见其注释）。
+      await runCloseRequestResolveOnce({
+        onError: (err) => {
+          logger.error('resolve_close_request failed', err);
+          setError(err instanceof Error ? err.message : String(err));
+          setOpen(true);
+        },
+        onFinally: () => {
+          setBusy(null);
+        },
+        run: async () => {
+          await tauriInvoke('resolve_close_request', { action, remember });
+        },
+      });
     },
     [busy, remember],
   );

@@ -6,6 +6,7 @@ import { normalizeChatMessages } from '../../../components/conversation-runtime/
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
 import { filterTranscriptMessages } from '../../../components/conversation-runtime/messages/transcript-visibility.js';
 import { createSessionMetadataSnapshot } from '../conversation/render/chat-page-utils.js';
+import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 import { reuploadOversizedInlineImages } from './reupload-oversized-input-images.js';
 
 export interface UseChatBranchSessionOptions {
@@ -57,10 +58,17 @@ export function useChatBranchSession(options: UseChatBranchSessionOptions) {
       if (!token) return;
       const originSessionId = activeSessionRef.current;
       const sessionsClient = createSessionsClient(gatewayUrl);
-      const baseRecovery = currentSessionId
-        ? await sessionsClient.getRecovery(token, currentSessionId)
+      // 用 `get()`（`GET /sessions/:id`）取**完整转录**，而不是 `getRecovery`。
+      //
+      // 这些消息会被 `importSession` 持久化成新会话的权威历史，必须与存储一致：
+      // `/recovery` 会对 tool 输出做瘦身（单字段截断 + 64KB 字节上限），拿它建分支
+      // 等于把截断副本写回库，且不可逆。`/sessions/:id` 是完整转录的正规通道。
+      //
+      // 注意 `get()` 不返回 recovery 才有的 `activeStream` / `runEvents` / `todos`；
+      // 这里只消费 `.messages`，故无影响。若将来要取这些字段，需另走 recovery。
+      const baseSession = currentSessionId
+        ? await sessionsClient.get(token, currentSessionId)
         : null;
-      const baseSession = baseRecovery?.session ?? null;
       const baseMessages = Array.isArray(baseSession?.messages) ? baseSession.messages : [];
       const sourceIndex = baseMessages.findIndex((message) => message.id === sourceMessageId);
       const truncatedMessages = (sourceIndex >= 0 ? baseMessages.slice(0, sourceIndex) : []).map(
@@ -78,15 +86,19 @@ export function useChatBranchSession(options: UseChatBranchSessionOptions) {
         ...(currentSessionId ? { parentSessionId: currentSessionId } : {}),
       });
       await sessionsClient.updateMetadata(token, imported.sessionId, branchMetadata);
-      lastPersistedSessionMetadataSnapshotRef.current =
-        createSessionMetadataSnapshot(buildSessionMetadata());
+      // 下面三个 ref 都是 hook 参数（共享 ref 池）：直接写 .current 属「修改 hook
+      // 参数」，会让本 hook 退出 React Compiler 优化（见 utils/ref/ref-current.ts）。
+      writeRefCurrent(
+        lastPersistedSessionMetadataSnapshotRef,
+        createSessionMetadataSnapshot(buildSessionMetadata()),
+      );
 
       if (activeSessionRef.current !== originSessionId) {
         return;
       }
 
-      activeSessionRef.current = imported.sessionId;
-      pendingBootstrapSessionRef.current = imported.sessionId;
+      writeRefCurrent(activeSessionRef, imported.sessionId);
+      writeRefCurrent(pendingBootstrapSessionRef, imported.sessionId);
       setCurrentSessionId(imported.sessionId);
       setMessages(filterTranscriptMessages(normalizeChatMessages(truncatedMessages)));
       clearSessionMetadataDirty();

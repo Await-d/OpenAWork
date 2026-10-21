@@ -90,6 +90,23 @@ function buildComposerWorkspaceCatalog(
   return { installedSkills, agentTools, agents, mcpServers };
 }
 
+/**
+ * 组合器工作区能力目录拉取的统一包装：try → catch 交给 `onError`（**无 finally**）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try 内的值块（`??`、三元、链式调用），本 hook
+ * 这处 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runComposerCatalogLoadOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  }
+}
+
 export function useComposerWorkspaceCatalog(input: {
   enabled: boolean;
   gatewayUrl: string;
@@ -132,55 +149,59 @@ export function useComposerWorkspaceCatalog(input: {
     }
 
     const loadCatalog = async (): Promise<void> => {
-      try {
-        const result = await client.listResult(token, sessionId);
-        if (cancelled) {
-          return;
-        }
-
-        if (result.ok) {
+      // try/catch 下沉到模块级 `runComposerCatalogLoadOnce`（见其注释）。
+      await runComposerCatalogLoadOnce({
+        onError: (error) => {
+          if (cancelled) {
+            return;
+          }
           clearRetry();
           retryAttemptRef.current = 0;
-          retainedScopeKeyRef.current = requestScopeKey;
-          setCatalog(buildComposerWorkspaceCatalog(result.capabilities));
-          return;
-        }
+          logger.error('failed to load composer workspace catalog', error);
+          setCatalog(EMPTY_CATALOG);
+        },
+        run: async () => {
+          const result = await client.listResult(token, sessionId);
+          if (cancelled) {
+            return;
+          }
 
-        const error = new Error(result.errorMessage ?? '加载能力列表失败');
-        if (result.retryable) {
-          const attempt = retryAttemptRef.current + 1;
-          const delayMs = computeComposerWorkspaceCatalogRetryDelay(retryAttemptRef.current);
-          retryAttemptRef.current = attempt;
-          logger.warn('failed to load composer workspace catalog, will retry', {
-            attempt,
-            delayMs,
-            error,
-            gatewayUrl,
-            sessionId,
-          });
+          if (result.ok) {
+            clearRetry();
+            retryAttemptRef.current = 0;
+            retainedScopeKeyRef.current = requestScopeKey;
+            setCatalog(buildComposerWorkspaceCatalog(result.capabilities));
+            return;
+          }
+
+          const error = new Error(result.errorMessage ?? '加载能力列表失败');
+          if (result.retryable) {
+            const attempt = retryAttemptRef.current + 1;
+            const delayMs = computeComposerWorkspaceCatalogRetryDelay(retryAttemptRef.current);
+            retryAttemptRef.current = attempt;
+            logger.warn('failed to load composer workspace catalog, will retry', {
+              attempt,
+              delayMs,
+              error,
+              gatewayUrl,
+              sessionId,
+            });
+            clearRetry();
+            retryTimerRef.current = globalThis.setTimeout(() => {
+              retryTimerRef.current = null;
+              if (!cancelled) {
+                void loadCatalog();
+              }
+            }, delayMs);
+            return;
+          }
+
           clearRetry();
-          retryTimerRef.current = globalThis.setTimeout(() => {
-            retryTimerRef.current = null;
-            if (!cancelled) {
-              void loadCatalog();
-            }
-          }, delayMs);
-          return;
-        }
-
-        clearRetry();
-        retryAttemptRef.current = 0;
-        logger.error('failed to load composer workspace catalog', error);
-        setCatalog(EMPTY_CATALOG);
-      } catch (error: unknown) {
-        if (cancelled) {
-          return;
-        }
-        clearRetry();
-        retryAttemptRef.current = 0;
-        logger.error('failed to load composer workspace catalog', error);
-        setCatalog(EMPTY_CATALOG);
-      }
+          retryAttemptRef.current = 0;
+          logger.error('failed to load composer workspace catalog', error);
+          setCatalog(EMPTY_CATALOG);
+        },
+      });
     };
 
     void loadCatalog();

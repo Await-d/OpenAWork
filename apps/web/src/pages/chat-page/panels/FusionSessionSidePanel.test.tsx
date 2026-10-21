@@ -558,7 +558,7 @@ describe('FusionSessionSidePanel', () => {
     expect(screen.getByTestId('built-in-browser-mock').getAttribute('data-hidden')).toBe('false');
   });
 
-  it('预览一级 tab 无地址时展示地址空态，提交后挂载唯一浏览器并停留在预览', () => {
+  it('预览一级 tab 无地址时展示开始页，提交后挂载唯一浏览器并停留在预览', () => {
     getFileChangesMock.mockResolvedValue(makeReviewPanelProjection([]));
     const onTabChange = vi.fn();
 
@@ -571,11 +571,11 @@ describe('FusionSessionSidePanel', () => {
     );
 
     expect(screen.getByTestId('editor-browser-empty-state')).not.toBeNull();
-    expect(screen.getByText('还没有预览地址')).not.toBeNull();
+    expect(screen.getByTestId('browser-start-page')).not.toBeNull();
     expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('预览地址'), { target: { value: 'localhost:4173' } });
-    fireEvent.click(screen.getByRole('button', { name: '打开预览' }));
+    fireEvent.click(screen.getByRole('button', { name: '前往' }));
 
     expect(useUIStateStore.getState().browserPreviewUrlByWorkspace[WORKSPACE_PATH]).toBe(
       'http://localhost:4173',

@@ -584,7 +584,8 @@ export function TeamMultiLayerFeed({
     historyExpansionRef.current = false;
     const newStart = Math.max(rawList.length - INITIAL_VISIBLE_MESSAGE_COUNT, 0);
     setVisibleStartIndex(newStart);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 依赖刻意只含 selectedTab：分页重置仅发生在切 tab 时，消息流增长不重置。
+    // 不要在此处加回 lint 抑制指令——编译器按文本匹配识别它，会放弃优化整个组件。
   }, [selectedTab]);
 
   // 分页后的 raw list → 转 entries（仅对要渲染的消息创建闭包）

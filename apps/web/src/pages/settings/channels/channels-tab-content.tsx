@@ -77,6 +77,113 @@ function computeCapabilityCatalogRetryDelay(attempt: number): number {
   );
 }
 
+/**
+ * 拉取能力目录计数（含失败重试调度）；失败一律落到 `onFailed`。
+ *
+ * 必须留在模块级：`try/catch` 内的值块（条件 / 逻辑）会让 React Compiler 报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化调用方组件
+ * （实测 `ChannelsTabContent` 因此脱靶；同类改法见 `ChatPageSections.tsx` 的
+ * `tryCreateCompactionCard`）。模块级普通函数不在编译器检查范围内，语义逐字不变——
+ * 同一段解析、同样的重试与兜底，「try 覆盖到哪」也完全照搬（结果处理仍在 try 内）。
+ */
+async function loadCapabilityCatalogCountsOnce(ctx: {
+  capabilitiesClient: ReturnType<typeof createCapabilitiesClient>;
+  token: string;
+  isCancelled: () => boolean;
+  attemptRef: React.MutableRefObject<number>;
+  clearRetry: () => void;
+  scheduleNext: (delayMs: number) => void;
+  onCounts: (counts: ChannelCapabilityCatalogCounts) => void;
+  onFailed: () => void;
+}): Promise<void> {
+  try {
+    const result = await ctx.capabilitiesClient.listResult(ctx.token);
+    if (ctx.isCancelled()) {
+      return;
+    }
+    if (result.ok) {
+      ctx.clearRetry();
+      ctx.attemptRef.current = 0;
+      ctx.onCounts(buildCapabilityCatalogCounts(result.capabilities));
+      return;
+    }
+
+    const catalogError = new Error(result.errorMessage ?? '加载能力列表失败');
+    if (result.retryable) {
+      const attempt = ctx.attemptRef.current + 1;
+      const delayMs = computeCapabilityCatalogRetryDelay(ctx.attemptRef.current);
+      ctx.attemptRef.current = attempt;
+      logger.warn('failed to load channel capability catalog counts, will retry', {
+        attempt,
+        delayMs,
+        error: catalogError,
+      });
+      ctx.clearRetry();
+      ctx.scheduleNext(delayMs);
+      return;
+    }
+
+    ctx.clearRetry();
+    ctx.attemptRef.current = 0;
+    logger.error('failed to load channel capability catalog counts', catalogError);
+    ctx.onFailed();
+  } catch (catalogCatchError: unknown) {
+    if (ctx.isCancelled()) {
+      return;
+    }
+    ctx.clearRetry();
+    ctx.attemptRef.current = 0;
+    logger.error('failed to load channel capability catalog counts', catalogCatchError);
+    ctx.onFailed();
+  }
+}
+
+/**
+ * 保存（新建 / 更新）一个通道并合并进列表。
+ *
+ * 同样留在模块级（理由见 `loadCapabilityCatalogCountsOnce`）：这段 try/catch 里既有
+ * 「三元 await」，catch 里又有三元，都会被判为 try/catch 内的值块。语义逐字不变——
+ * 调用方把「选哪个请求」提前算好传进来，网络异常仍由本函数的 catch 兜住。
+ */
+async function saveChannelOnce(ctx: {
+  request: () => Promise<ChannelSettingsEntry>;
+  channelId: string | null;
+  applyChannelError: (channelId: string, errorMessage?: string) => void;
+  setChannels: (updater: (prev: ChannelSettingsEntry[]) => ChannelSettingsEntry[]) => void;
+}): Promise<ChannelSettingsEntry> {
+  try {
+    const savedChannel = await ctx.request();
+    ctx.setChannels((prev) => {
+      const exists = prev.some((channel) => channel.id === savedChannel.id);
+      if (exists) {
+        return prev.map((channel) =>
+          channel.id === savedChannel.id
+            ? {
+                ...savedChannel,
+                availableTargets: channel.availableTargets,
+                loadingTargets: channel.loadingTargets,
+                diagnostics: savedChannel.diagnostics ?? channel.diagnostics,
+              }
+            : channel,
+        );
+      }
+
+      return [...prev, savedChannel];
+    });
+
+    return savedChannel;
+  } catch (saveChannelError) {
+    logger.error('failed to save channel', saveChannelError);
+    if (ctx.channelId) {
+      ctx.applyChannelError(
+        ctx.channelId,
+        saveChannelError instanceof Error ? saveChannelError.message : '保存通道配置失败',
+      );
+    }
+    throw saveChannelError;
+  }
+}
+
 export function ChannelsTabContent({
   channels,
   setChannels,
@@ -108,10 +215,13 @@ export function ChannelsTabContent({
   const capabilityCatalogRetryTimerRef = React.useRef<ReturnType<
     typeof globalThis.setTimeout
   > | null>(null);
-  const ensureToken = (): string => {
+  // 用 useCallback 稳定身份：它被多个 useCallback 引用，编译器要求 memo 体内用到的
+  // 自定义函数必须列入依赖（"Existing memoization could not be preserved"）。写成
+  // 普通箭头函数的话身份每次渲染都变，加进依赖就会把下游 memo 全部击穿。
+  const ensureToken = React.useCallback((): string => {
     if (!token) throw new Error('未登录');
     return token;
-  };
+  }, [token]);
   const clearCapabilityCatalogRetry = React.useCallback(() => {
     if (capabilityCatalogRetryTimerRef.current === null) {
       return;
@@ -150,12 +260,17 @@ export function ChannelsTabContent({
         );
         setPersonaError(null);
       })
-      .catch((error: unknown) => {
+      // 参数名刻意不与下方各 `catch (error)` 同名（同 channels-tab-content 的
+      // `catalogError` 注释）：同一标识符在一处是回调内的局部量、另一处是 catch 参数
+      // 时，编译器会合并成同一个 SSA 变量并放弃优化整个组件。
+      .catch((personasError: unknown) => {
         if (abortController.signal.aborted) {
           return;
         }
-        logger.error('failed to load channel personas', error);
-        setPersonaError(error instanceof Error ? error.message : '通道人设资源加载失败');
+        logger.error('failed to load channel personas', personasError);
+        setPersonaError(
+          personasError instanceof Error ? personasError.message : '通道人设资源加载失败',
+        );
       });
 
     return () => abortController.abort();
@@ -174,53 +289,24 @@ export function ChannelsTabContent({
     capabilityCatalogRetryAttemptRef.current = 0;
     clearCapabilityCatalogRetry();
     const loadCapabilityCatalogCounts = async (): Promise<void> => {
-      try {
-        const result = await capabilitiesClient.listResult(token);
-        if (cancelled) {
-          return;
-        }
-        if (result.ok) {
-          clearCapabilityCatalogRetry();
-          capabilityCatalogRetryAttemptRef.current = 0;
-          setCapabilityCatalogCounts(buildCapabilityCatalogCounts(result.capabilities));
-          return;
-        }
-
-        const error = new Error(result.errorMessage ?? '加载能力列表失败');
-        if (result.retryable) {
-          const attempt = capabilityCatalogRetryAttemptRef.current + 1;
-          const delayMs = computeCapabilityCatalogRetryDelay(
-            capabilityCatalogRetryAttemptRef.current,
-          );
-          capabilityCatalogRetryAttemptRef.current = attempt;
-          logger.warn('failed to load channel capability catalog counts, will retry', {
-            attempt,
-            delayMs,
-            error,
-          });
-          clearCapabilityCatalogRetry();
+      // 含 try/catch 的拉取逻辑在模块级 `loadCapabilityCatalogCountsOnce`（见其注释）。
+      await loadCapabilityCatalogCountsOnce({
+        capabilitiesClient,
+        token,
+        isCancelled: () => cancelled,
+        attemptRef: capabilityCatalogRetryAttemptRef,
+        clearRetry: clearCapabilityCatalogRetry,
+        scheduleNext: (delayMs) => {
           capabilityCatalogRetryTimerRef.current = globalThis.setTimeout(() => {
             capabilityCatalogRetryTimerRef.current = null;
             if (!cancelled) {
               void loadCapabilityCatalogCounts();
             }
           }, delayMs);
-          return;
-        }
-
-        clearCapabilityCatalogRetry();
-        capabilityCatalogRetryAttemptRef.current = 0;
-        logger.error('failed to load channel capability catalog counts', error);
-        setCapabilityCatalogCounts(null);
-      } catch (error: unknown) {
-        if (cancelled) {
-          return;
-        }
-        clearCapabilityCatalogRetry();
-        capabilityCatalogRetryAttemptRef.current = 0;
-        logger.error('failed to load channel capability catalog counts', error);
-        setCapabilityCatalogCounts(null);
-      }
+        },
+        onCounts: setCapabilityCatalogCounts,
+        onFailed: () => setCapabilityCatalogCounts(null),
+      });
     };
 
     void loadCapabilityCatalogCounts();
@@ -253,43 +339,19 @@ export function ChannelsTabContent({
         permissions: draft.permissions,
       });
     },
-    [capabilitiesClient, token],
+    [capabilitiesClient, ensureToken],
   );
 
   const saveChannel = async (
     channelId: string | null,
     draft: ChannelDraft,
   ): Promise<ChannelSettingsEntry> => {
-    try {
-      const savedChannel = channelId
-        ? await channelsClient.update(ensureToken(), channelId, draft)
-        : await channelsClient.create(ensureToken(), draft);
-      setChannels((prev) => {
-        const exists = prev.some((channel) => channel.id === savedChannel.id);
-        if (exists) {
-          return prev.map((channel) =>
-            channel.id === savedChannel.id
-              ? {
-                  ...savedChannel,
-                  availableTargets: channel.availableTargets,
-                  loadingTargets: channel.loadingTargets,
-                  diagnostics: savedChannel.diagnostics ?? channel.diagnostics,
-                }
-              : channel,
-          );
-        }
-
-        return [...prev, savedChannel];
-      });
-
-      return savedChannel;
-    } catch (error) {
-      logger.error('failed to save channel', error);
-      if (channelId) {
-        applyChannelError(channelId, error instanceof Error ? error.message : '保存通道配置失败');
-      }
-      throw error;
-    }
+    // 「选哪个请求」的三元放进 try 外（它不抛异常），网络异常仍由模块级函数的
+    // catch 兜住——见 `saveChannelOnce` 注释。
+    const request = channelId
+      ? () => channelsClient.update(ensureToken(), channelId, draft)
+      : () => channelsClient.create(ensureToken(), draft);
+    return saveChannelOnce({ request, channelId, applyChannelError, setChannels });
   };
 
   const refreshTargets = async (channelId: string): Promise<void> => {
@@ -315,19 +377,19 @@ export function ChannelsTabContent({
             : channel,
         ),
       );
-    } catch (error) {
+    } catch (targetsError) {
+      // 错误文案在回调**外**算好：catch 参数若在 `setChannels` 的嵌套回调里被捕获，
+      // 它就是 context 变量，而下面的 `throw` 又按 local 引用它——编译器要求同一变量
+      // 的引用方式必须一致，否则报 "consistently local or context references" 并放弃
+      // 优化整个组件。这里让回调只捕获一个字符串常量。
+      const errorMessage =
+        targetsError instanceof Error ? targetsError.message : '无法拉取订阅目标';
       setChannels((prev) =>
         prev.map((channel) =>
-          channel.id === channelId
-            ? {
-                ...channel,
-                loadingTargets: false,
-                errorMessage: error instanceof Error ? error.message : '无法拉取订阅目标',
-              }
-            : channel,
+          channel.id === channelId ? { ...channel, loadingTargets: false, errorMessage } : channel,
         ),
       );
-      throw error;
+      throw targetsError;
     }
   };
 
@@ -345,10 +407,10 @@ export function ChannelsTabContent({
             : channel,
         ),
       );
-    } catch (error) {
-      logger.error('failed to connect channel', error);
-      applyChannelError(id, error instanceof Error ? error.message : '连接通道失败');
-      throw error;
+    } catch (connectError) {
+      logger.error('failed to connect channel', connectError);
+      applyChannelError(id, connectError instanceof Error ? connectError.message : '连接通道失败');
+      throw connectError;
     }
   };
 
@@ -366,10 +428,13 @@ export function ChannelsTabContent({
             : channel,
         ),
       );
-    } catch (error) {
-      logger.error('failed to disconnect channel', error);
-      applyChannelError(id, error instanceof Error ? error.message : '断开通道失败');
-      throw error;
+    } catch (disconnectError) {
+      logger.error('failed to disconnect channel', disconnectError);
+      applyChannelError(
+        id,
+        disconnectError instanceof Error ? disconnectError.message : '断开通道失败',
+      );
+      throw disconnectError;
     }
   };
 
@@ -387,10 +452,13 @@ export function ChannelsTabContent({
             : channel,
         ),
       );
-    } catch (error) {
-      logger.error('failed to load channel diagnostics', error);
-      applyChannelError(channelId, error instanceof Error ? error.message : '无法读取通道诊断');
-      throw error;
+    } catch (diagnosticsError) {
+      logger.error('failed to load channel diagnostics', diagnosticsError);
+      applyChannelError(
+        channelId,
+        diagnosticsError instanceof Error ? diagnosticsError.message : '无法读取通道诊断',
+      );
+      throw diagnosticsError;
     }
   };
 
@@ -398,10 +466,10 @@ export function ChannelsTabContent({
     try {
       await channelsClient.remove(ensureToken(), id);
       setChannels((prev) => prev.filter((channel) => channel.id !== id));
-    } catch (error) {
-      logger.error('failed to delete channel', error);
-      applyChannelError(id, error instanceof Error ? error.message : '删除通道失败');
-      throw error;
+    } catch (deleteError) {
+      logger.error('failed to delete channel', deleteError);
+      applyChannelError(id, deleteError instanceof Error ? deleteError.message : '删除通道失败');
+      throw deleteError;
     }
   };
 

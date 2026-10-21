@@ -61,18 +61,19 @@ afterEach(() => {
 });
 
 describe('FusionBrowserTab', () => {
-  it('没有预览地址时展示空状态，提交地址后写入当前 workspace 桶并挂载浏览器', () => {
+  it('没有预览地址时展示开始页，提交地址后写入当前 workspace 桶并挂载浏览器', () => {
     render(
       <FusionBrowserTab currentSessionId="session-1" effectiveWorkingDirectory={WORKSPACE_PATH} />,
     );
 
-    expect(screen.getByText('还没有预览地址')).not.toBeNull();
+    // 空态与浏览器新标签页共用同一份开始页（而不是一行「还没有预览地址」）。
+    expect(screen.getByTestId('browser-start-page')).not.toBeNull();
     expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('预览地址'), {
       target: { value: 'localhost:5173' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '打开预览' }));
+    fireEvent.click(screen.getByRole('button', { name: '前往' }));
 
     expect(useUIStateStore.getState().browserPreviewUrlByWorkspace[WORKSPACE_PATH]).toBe(
       'http://localhost:5173',
@@ -106,7 +107,7 @@ describe('FusionBrowserTab', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
 
     expect(useUIStateStore.getState().browserPreviewUrlByWorkspace[WORKSPACE_PATH]).toBeUndefined();
-    expect(screen.getByText('还没有预览地址')).not.toBeNull();
+    expect(screen.getByTestId('browser-start-page')).not.toBeNull();
     expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
   });
 

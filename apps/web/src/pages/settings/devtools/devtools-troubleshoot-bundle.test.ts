@@ -133,6 +133,68 @@ describe('buildTroubleshootBundleMarkdown', () => {
     expect(markdown).toContain('"ok": false');
   });
 
+  it('同一事件同时出现在诊断与错误日志时只计一次，并标注重复条数', () => {
+    const markdown = buildTroubleshootBundleMarkdown(
+      baseInput({
+        diagnostics: [
+          {
+            filePath: 'read',
+            message: 'Tool error: read',
+            severity: 'error',
+            requestId: 'call_00_jellyfin',
+            createdAt: '2026-10-15T07:44:30.000Z',
+            input: { path: '/volume1/docker/1panel/apps/jellyfin/jellyfin/docker-compose.yml' },
+            output: 'SSH remote server did not start the sftp subsystem',
+          },
+        ],
+        errorLogs: [
+          {
+            level: 'error',
+            message: 'Tool error: read',
+            source: 'tool',
+            timestamp: Date.parse('2026-10-15T07:44:30.000Z'),
+            createdAt: '2026-10-15T07:44:30.000Z',
+            requestId: 'call_00_jellyfin',
+            isError: true,
+          },
+          {
+            level: 'error',
+            message: 'GET /ssh/files → 501',
+            source: 'workflow',
+            timestamp: Date.parse('2026-10-15T07:45:00.000Z'),
+            createdAt: '2026-10-15T07:45:00.000Z',
+            requestId: 'req-sftp-501',
+            isError: true,
+          },
+        ],
+      }),
+    );
+
+    expect(markdown).toContain('- 诊断记录：1 条');
+    expect(markdown).toContain('- 错误日志：2 条（其中 1 条与诊断记录指向同一事件）');
+    // 1 条诊断 + 1 条独立的 workflow 错误 = 2 项，而不是直接相加的 3 项。
+    expect(markdown).toContain('**待排查问题合计：2 项**');
+    expect(markdown).toContain('（已按 requestId 跨数据源去重）');
+  });
+
+  it('缺少 requestId 与 id 的记录按各自独立一条计数，不被去重吞掉', () => {
+    const markdown = buildTroubleshootBundleMarkdown(
+      baseInput({
+        diagnostics: [
+          { filePath: 'read', message: '诊断 A', severity: 'error' },
+          { filePath: 'read', message: '诊断 B', severity: 'error' },
+        ],
+        errorLogs: [
+          { level: 'error', message: '日志 C', source: 'gateway', timestamp: 0 },
+          { level: 'error', message: '日志 D', source: 'gateway', timestamp: 0 },
+        ],
+      }),
+    );
+
+    expect(markdown).toContain('**待排查问题合计：4 项**');
+    expect(markdown).toContain('- 错误日志：2 条\n');
+  });
+
   it('数据源状态表转义竖线，避免破坏表格结构', () => {
     const sourceStates = createInitialDevtoolsSourceStates();
     const markdown = buildTroubleshootBundleMarkdown(

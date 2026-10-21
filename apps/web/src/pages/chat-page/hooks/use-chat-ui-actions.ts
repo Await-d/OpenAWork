@@ -6,6 +6,7 @@ import {
 } from '../../../components/conversation-runtime/messages/support.js';
 import { executeServerCommand } from '../conversation/composer/server-command-item.js';
 import { requestSessionListRefresh } from '../../../utils/session/session-list-events.js';
+import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 import { applyChatRightPanelEvent, type ChatRightPanelState } from '../state/chat-stream-state.js';
 
 import type { RightPanelTabId } from '../panels/right-panel-tabs.js';
@@ -33,6 +34,13 @@ export interface ChatUiActionsDeps {
     openFile: (path: string, options?: OpenFileOptions) => Promise<void>;
   };
   openFileRef: React.MutableRefObject<((path: string, options?: OpenFileOptions) => void) | null>;
+  /**
+   * 向 FileEditorContext 发布「是否已注册可用的打开文件能力」。
+   *
+   * 消费方在渲染期用这个布尔决定路径能否点击，从而不必去读 `openFileRef.current`
+   * （渲染期读 ref 会让 React Compiler 放弃优化那些组件）。引用稳定，可安全进依赖数组。
+   */
+  setFileEditorAvailable: (value: boolean) => void;
   setEditorMode: (value: boolean) => void;
   /**
    * Force the editor pane onto the code tab when a file is opened
@@ -75,11 +83,16 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
     setRightTab,
     fileEditor,
     openFileRef,
+    setFileEditorAvailable,
     openFileInDockPanel,
     setEditorMode,
     setEditorPaneTab,
     setSaving,
-    splitDragging,
+    // 改名成以 Ref 结尾的局部绑定：`splitDragging.current = …` 是对参数派生值的
+    // 成员访问，编译器判不出它是 ref（类型来自 ChatUiActionsDeps 接口）→
+    // "This value cannot be modified"，整个 hook 退出优化。名字带 Ref 后缀即按
+    // ref 处理（见 apps/web/AGENTS.md「ref 按名字推断」）。
+    splitDragging: splitDraggingRef,
     splitContainerRef,
     setSplitPos,
   } = deps;
@@ -170,7 +183,9 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
   const handleSplitMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      splitDragging.current = true;
+      // splitDraggingRef / openFileRef 都是 hook 参数：直接写 .current 属「修改 hook
+      // 参数」，会让本 hook 退出 React Compiler 优化（见 utils/ref/ref-current.ts）。
+      writeRefCurrent(splitDraggingRef, true);
       const container = splitContainerRef.current;
       if (!container) return;
 
@@ -204,7 +219,7 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
       };
 
       const onMove = (ev: MouseEvent) => {
-        if (!splitDragging.current) return;
+        if (!splitDraggingRef.current) return;
         const rect = container.getBoundingClientRect();
         const pct = Math.min(80, Math.max(20, ((ev.clientX - rect.left) / rect.width) * 100));
         applyPct(pct);
@@ -212,7 +227,7 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
       // mouseup 与 blur 共用收尾：失焦时那一帧 mouseup 永远不会到达 window，
       // 若只监听 mouseup，遮罩会永久残留（预览整块点不动）。
       const onEndDrag = (commit: boolean) => {
-        splitDragging.current = false;
+        writeRefCurrent(splitDraggingRef, false);
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onMouseUp);
         window.removeEventListener('blur', onBlur);
@@ -232,11 +247,14 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
       window.addEventListener('mouseup', onMouseUp);
       window.addEventListener('blur', onBlur);
     },
-    [clearSplitOverlay, setSplitPos, splitContainerRef, splitDragging],
+    [clearSplitOverlay, setSplitPos, splitContainerRef, splitDraggingRef],
   );
 
   useEffect(() => {
-    openFileRef.current = (path: string, options?: OpenFileOptions) => {
+    // 与 openFileRef 同步发布可用性：两者在同一 effect 内成对翻转，
+    // 不会出现「ref 已注册但布尔还是 false」的窗口。
+    setFileEditorAvailable(true);
+    writeRefCurrent(openFileRef, (path: string, options?: OpenFileOptions) => {
       // Always force the editor pane open on the code tab so a click
       // from chat / tool-call / hover popover lands in a visible
       // panel, even if the pane was previously on the browser tab
@@ -248,11 +266,19 @@ export function useChatUiActions(deps: ChatUiActionsDeps): ChatUiActionsReturn {
         setEditorPaneTab('code');
       }
       void fileEditor.openFile(path, options);
-    };
+    });
     return () => {
-      openFileRef.current = null;
+      writeRefCurrent(openFileRef, null);
+      setFileEditorAvailable(false);
     };
-  }, [openFileRef, fileEditor, openFileInDockPanel, setEditorMode, setEditorPaneTab]);
+  }, [
+    openFileRef,
+    setFileEditorAvailable,
+    fileEditor,
+    openFileInDockPanel,
+    setEditorMode,
+    setEditorPaneTab,
+  ]);
 
   return {
     appendCommandCard,

@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AttachmentItem, ModelReasoningOption } from '@openAwork/shared-ui';
 import { inferSupportsThinking } from '@openAwork/shared-ui';
 import type { CommandDescriptor } from '@openAwork/shared';
-import type { PromptEvaluationResponse, PromptOptimizerResult } from '@openAwork/web-client';
+import type {
+  ImageGenerationPartialImage,
+  PromptEvaluationResponse,
+  PromptOptimizerResult,
+} from '@openAwork/web-client';
 import { createWorkflowsClient } from '@openAwork/web-client';
 import { ChatComposer } from './ChatComposer.js';
 import { ComposerPermissionModeSelect } from './ComposerPermissionModeSelect.js';
@@ -122,6 +126,15 @@ export interface UnifiedComposerProps {
   onSubmit: (payload: UnifiedComposerSubmitPayload) => boolean | void | Promise<boolean | void>;
   onStop: () => void | Promise<void>;
   onModelSelect?: (providerId: string, modelId: string) => Promise<void>;
+  /**
+   * 重新拉取 Provider / 模型目录，供模型弹层里的「刷新」按钮使用。
+   *
+   * 弹层里的列表是宿主页面进页面时抓取的快照，用户在设置页改完模型后不重载整页
+   * 就一直是旧数据；提供该回调即在该弹层内提供就地刷新入口。不传则不渲染按钮。
+   */
+  onRefreshProviders?: () => void | Promise<void>;
+  /** 模型目录刷新进行中：弹层按钮转旋转态并禁用重复触发。 */
+  providersRefreshing?: boolean;
   onFastModeToggle?: (enabled: boolean) => Promise<void>;
   onContextWindowOverrideChange?: (value: number | undefined) => Promise<void>;
   onToggleWebSearch: () => void;
@@ -159,6 +172,8 @@ export interface UnifiedComposerProps {
   imageGenerationMode?: boolean;
   hasConfiguredImageModel?: boolean;
   imageGenerationBusy?: boolean;
+  /** 流式生图的中间稿预览（官方 `partial_image`）；仅 chat 会话链路会传。 */
+  imageGenerationPreview?: ImageGenerationPartialImage | null;
   imageGenerationDefaults?: SavedChatImageDefaults;
   imageModelLabel?: string;
   imagePluginEnabled?: boolean;
@@ -235,6 +250,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     onSubmit,
     onStop,
     onModelSelect,
+    onRefreshProviders,
+    providersRefreshing,
     onFastModeToggle,
     onContextWindowOverrideChange,
     onToggleWebSearch,
@@ -255,6 +272,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     imageGenerationMode: imageGenerationModeProp,
     hasConfiguredImageModel: hasConfiguredImageModelProp,
     imageGenerationBusy: imageGenerationBusyProp,
+    imageGenerationPreview: imageGenerationPreviewProp,
     imageGenerationDefaults: imageGenerationDefaultsProp,
     imageModelLabel: imageModelLabelProp,
     imagePluginEnabled: imagePluginEnabledProp,
@@ -372,6 +390,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     imageGenerationMode: imageGenerationModeProp,
     hasConfiguredImageModel: hasConfiguredImageModelProp,
     imageGenerationBusy: imageGenerationBusyProp,
+    imageGenerationPreview: imageGenerationPreviewProp,
     imageGenerationDefaults: imageGenerationDefaultsProp,
     imageModelLabel: imageModelLabelProp,
     imagePluginEnabled: imagePluginEnabledProp,
@@ -567,6 +586,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         )}
         hasConfiguredImageModel={hasConfiguredImageModel}
         imageGenerationBusy={imageGenerationBusy}
+        imageGenerationPreview={imageGenerationPreviewProp}
         imageGenerationDefaults={imageGenerationDefaults}
         imageGenerationMode={imageGenerationMode}
         imageModelLabel={imageModelLabel}
@@ -691,6 +711,8 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
               await onModelSelect(pid, mid);
             }
           }}
+          onRefresh={onRefreshProviders}
+          refreshing={providersRefreshing}
           onClose={() => setShowModelPicker(false)}
         />
       )}

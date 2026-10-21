@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { scrollElementToBottom } from '../../../../utils/dom/scroll.js';
 
 /** 距底部多少像素以内视为「用户仍在底部」。 */
 const DEFAULT_BOTTOM_THRESHOLD_PX = 48;
@@ -39,7 +40,9 @@ export function useStickToBottom<T extends HTMLElement>(
   const pinToBottom = useCallback(() => {
     const element = ref.current;
     if (!element) return;
-    element.scrollTop = element.scrollHeight;
+    // `ref` 是 hook 参数：直接写 element.scrollTop 会被 React Compiler 判为
+    // 「修改 hook 参数」并放弃优化本 hook（见 utils/dom/scroll.ts）。
+    scrollElementToBottom(element);
     pinnedRef.current = true;
     setPinned(true);
   }, [ref]);

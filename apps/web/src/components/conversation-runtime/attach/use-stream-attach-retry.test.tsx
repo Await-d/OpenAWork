@@ -13,10 +13,31 @@ afterEach(() => {
 });
 
 describe('useStreamAttachRetry', () => {
-  it('doubles the delay across consecutive attach failures', async () => {
+  it('silent 重试不展示进度横幅，但仍然排期并放行重试', async () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useStreamAttachRetry());
 
+    act(() => {
+      result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 100, silent: true });
+    });
+    // 工具执行期间的等待必须完全无 UI 反馈：retryProgress 会渲染成错误条横幅。
+    expect(result.current.attachRetryProgress).toBeNull();
+    // 但重试本身照常排期。
+    expect(result.current.attachRetryScheduledSessionId).toBe('session-1');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(result.current.attachRetryNonce).toBe(1);
+  });
+
+  it('退避只做一次指数：由调用方给出的 delayMs 决定，本层不再翻倍', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useStreamAttachRetry());
+
+    // 调用方（run-session-attach-effect）传入的 delayMs 本身已按连续失败次数递增。
+    // 旧实现在此处又乘 `2 ** (attempt - 1)`，得到 `base(n) × 2^k` 的双指数——
+    // 第 6 档 25.6ms 恰好配 `2⁰`，正是用户看到的「约 25.6s 后重试」。
     act(() => {
       result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 100 });
     });
@@ -27,8 +48,9 @@ describe('useStreamAttachRetry', () => {
     expect(result.current.attachRetryNonce).toBe(1);
 
     act(() => {
-      result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 100 });
+      result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 200 });
     });
+    // 200ms 原样使用，而不是再翻倍成 400ms。
     expect(result.current.attachRetryProgress).toContain('0.2s');
     await act(async () => {
       await vi.advanceTimersByTimeAsync(199);
@@ -38,6 +60,58 @@ describe('useStreamAttachRetry', () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(result.current.attachRetryNonce).toBe(2);
+  });
+
+  it('静默重试不计入耗尽次数：工具执行期间的等待不受 8 次上限约束', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useStreamAttachRetry());
+
+    // bash 执行期间服务端不产生任何 run event，attach 会反复「打开 → 0 事件 → EOF」。
+    // 这是正常等待，不能消耗失败预算，否则一次跑得久的命令就会把重试计数耗尽并弹出
+    // 「实时流长时间没有新输出」这类故障提示——而连接其实一直是健康的。
+    act(() => {
+      for (let attempt = 0; attempt < MAX_ATTACH_RETRY_ATTEMPTS * 3; attempt += 1) {
+        result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 100, silent: true });
+      }
+    });
+
+    expect(result.current.attachRetryExhausted).toBe(false);
+    expect(result.current.attachRetryScheduledSessionId).toBe('session-1');
+  });
+
+  it('静默重试不占用失败预算，随后真正的断线仍从起步延迟开始', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useStreamAttachRetry());
+
+    act(() => {
+      for (let attempt = 0; attempt < MAX_ATTACH_RETRY_ATTEMPTS; attempt += 1) {
+        result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 100, silent: true });
+      }
+    });
+
+    // 真正的传输中断：应按「第一次失败」的起步延迟处理，而不是接着往上数。
+    act(() => {
+      result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 100 });
+    });
+    expect(result.current.attachRetryProgress).toContain('0.1s');
+    expect(result.current.attachRetryExhausted).toBe(false);
+  });
+
+  it('非静默重试仍然受 8 次上限约束', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useStreamAttachRetry());
+
+    act(() => {
+      for (let attempt = 0; attempt < MAX_ATTACH_RETRY_ATTEMPTS; attempt += 1) {
+        result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 100 });
+      }
+    });
+    expect(result.current.attachRetryExhausted).toBe(false);
+
+    act(() => {
+      result.current.scheduleAttachRetry({ sessionId: 'session-1', delayMs: 100 });
+    });
+    expect(result.current.attachRetryExhausted).toBe(true);
   });
 
   it('resets the backoff after a successful attach cancels the retry', () => {

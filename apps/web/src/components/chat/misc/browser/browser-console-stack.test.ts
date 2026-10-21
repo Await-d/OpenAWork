@@ -30,7 +30,6 @@ function resolvedFrame(
     line: 0,
     column: 8,
     functionName: 'boom',
-    source: 'console.error',
     sourceLine: 0,
     sourceColumn: 8,
     sourceName: 'original.ts',

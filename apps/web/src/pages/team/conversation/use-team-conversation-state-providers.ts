@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   loadSavedChatSessionDefaultsResult,
   type ChatSettingsProvider,
@@ -62,7 +62,14 @@ export function useTeamConversationProviders(
     providersRef.current = providers;
   }, [providers]);
 
-  const loadProviders = useCallback(async (): Promise<void> => {
+  // loadProviders 的重试回调需要再次调度自己；在自身初始化器内自引用会被编译器
+  // 判为「声明前访问」而放弃优化整个 hook。用 ref 持有最新实现打断自引用。
+  const loadProvidersRef = useRef<() => Promise<void>>(async () => {});
+
+  // 去 useCallback 包装：编译器会对函数表达式自动 memoize（引用稳定性与手写等价），
+  // 而保留手写 memo 恰恰会让编译器报「Existing memoization could not be preserved」
+  // 放弃优化整个 hook。上面的 loadProvidersRef 仍负责打断自引用。
+  const loadProviders = async (): Promise<void> => {
     if (!token) return;
     clearProvidersRetry();
     const hasCachedProviders = providersRef.current.length > 0;
@@ -83,7 +90,7 @@ export function useTeamConversationProviders(
       const nextRetryAtMs = scheduleProvidersRetry({
         computeDelay: computeTeamConversationProvidersRetryDelay,
         onRetry: () => {
-          void loadProviders();
+          void loadProvidersRef.current();
         },
         retryable: result.retryable,
       });
@@ -114,18 +121,13 @@ export function useTeamConversationProviders(
     if (defaults?.reasoningEffort === undefined) {
       setReasoningEffort(result.data.defaults.reasoningEffort);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    activeModelId,
-    activeProviderId,
-    defaults?.reasoningEffort,
-    defaults?.thinkingEnabled,
-    clearProvidersRetry,
-    gatewayUrl,
-    resetProvidersRetry,
-    scheduleProvidersRetry,
-    token,
-  ]);
+  };
+
+  // 与 loadProvidersRef 配对：声明后立即（首个 commit 内）同步，重试回调触发时
+  // 读到的必是最新实现。
+  useEffect(() => {
+    loadProvidersRef.current = loadProviders;
+  }, [loadProviders]);
 
   useEffect(() => {
     if (!enableWriters || providersLoadedRef.current) return;

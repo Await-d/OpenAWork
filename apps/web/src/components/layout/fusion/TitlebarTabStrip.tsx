@@ -29,6 +29,7 @@ import { useTitlebarKeyboardShortcuts } from './useTitlebarKeyboardShortcuts.js'
 import { useTitlebarResponsiveState } from './useTitlebarResponsiveState.js';
 import { useHorizontalWheelScroll } from '../../../hooks/use-horizontal-wheel-scroll.js';
 import './TitlebarTabStrip.css';
+import { loadTauriWindowOnce } from '../../../utils/lazy/lazy-assets.js';
 
 export interface TitlebarTabStripProps {
   readonly theme?: 'dark' | 'light';
@@ -302,7 +303,8 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
       return;
     }
 
-    void import('@tauri-apps/api/window')
+    // import() 只能在模块级：见 utils/lazy/lazy-assets.ts。
+    void loadTauriWindowOnce()
       .then(async ({ getCurrentWindow }) => {
         const currentWindow = getCurrentWindow();
 

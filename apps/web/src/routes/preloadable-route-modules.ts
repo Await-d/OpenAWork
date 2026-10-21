@@ -1,5 +1,10 @@
 import { lazy } from 'react';
 import type { ComponentType, LazyExoticComponent } from 'react';
+import {
+  clearRouteImportFailureFlag,
+  isDynamicImportFailure,
+  reloadOnceForRouteImportFailure,
+} from './route-import-recovery.js';
 
 type RoutePageModule = {
   default: ComponentType;
@@ -26,7 +31,28 @@ function createPreloadableRouteModule(
       return cachedPromise;
     }
 
-    const nextPromise = importer();
+    const nextPromise = importer().then(
+      (module) => {
+        clearRouteImportFailureFlag(cacheKey);
+        return module;
+      },
+      (error: unknown) => {
+        // 失败的 promise 绝不能留在缓存里：否则本会话内该路由再也加载不出来。
+        routeImportPromises.delete(cacheKey);
+        if (isDynamicImportFailure(error) && reloadOnceForRouteImportFailure(cacheKey)) {
+          // 页面正在刷新：保持挂起，别让错误边界抢在刷新前闪一屏错误页。
+          // 兜底：刷新可能被 beforeunload 拦截，3 秒后仍未卸载就把原始错误交出去，
+          // 否则用户会永久停在加载页。
+          return new Promise<RoutePageModule>((_resolve, reject) => {
+            window.setTimeout(() => {
+              routeImportPromises.delete(cacheKey);
+              reject(error);
+            }, 3_000);
+          });
+        }
+        throw error;
+      },
+    );
     routeImportPromises.set(cacheKey, nextPromise);
     return nextPromise;
   };

@@ -60,6 +60,58 @@ interface UseSettingsEnvironmentResult {
   versionInfo: SettingsVersionInfo;
 }
 
+/**
+ * 设置页环境动作的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`
+ * （不传＝异常继续向上抛，不得静默吞掉），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（catch 里的 `error instanceof Error ? … : …` 同样触发），本 hook 4 处
+ * try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runEnvironmentActionOnce(ctx: {
+  onError?: (error: unknown) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      throw error;
+    }
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
+/**
+ * 尽力停止本地 sidecar：失败只记日志、不打断上层流程。
+ *
+ * 原代码把它写成嵌套 try/catch，而嵌套 try 同样会让所在 hook 脱靶，故抽到模块级
+ * （warnMessage 由调用点给出，保持各自的日志文案不变）。
+ */
+async function stopGatewayIgnoringFailure(warnMessage: string): Promise<void> {
+  try {
+    await tauriInvoke('stop_gateway');
+  } catch (error: unknown) {
+    logger.warn(warnMessage, error);
+  }
+}
+
+/** 读取桌面端当前更新通道；非 Tauri 运行或读取失败都回落 `preview`。 */
+async function resolveDesktopUpdateChannel(): Promise<'preview' | 'stable'> {
+  if (!isTauriRuntime()) {
+    return 'preview';
+  }
+  try {
+    const resolved = await tauriInvoke<string>('current_update_channel');
+    return resolved === 'stable' ? 'stable' : 'preview';
+  } catch {
+    return 'preview';
+  }
+}
+
 export function useSettingsEnvironment(
   input: UseSettingsEnvironmentInput,
 ): UseSettingsEnvironmentResult {
@@ -89,7 +141,8 @@ export function useSettingsEnvironment(
   }, [input.gatewayUrl, input.webAccessEnabled]);
 
   const checkVersionUpdate = React.useCallback(async () => {
-    if (!input.token) {
+    const token = input.token;
+    if (!token) {
       return;
     }
 
@@ -99,34 +152,31 @@ export function useSettingsEnvironment(
       checkError: null,
     }));
 
-    try {
-      let channel: 'preview' | 'stable' = 'preview';
-      if (isTauriRuntime()) {
-        try {
-          const resolved = await tauriInvoke<string>('current_update_channel');
-          channel = resolved === 'stable' ? 'stable' : 'preview';
-        } catch {
-          channel = 'preview';
-        }
-      }
-      const data = (await createSettingsClient(input.gatewayUrl).getVersion(input.token, {
-        channel,
-      })) as SettingsVersionInfo;
-      setVersionInfo({
-        currentVersion: data.currentVersion,
-        latestVersion: data.latestVersion,
-        updateAvailable: data.updateAvailable,
-        checkError: data.checkError,
-        checkedAt: data.checkedAt,
-        checking: false,
-      });
-    } catch (_error) {
-      setVersionInfo((previous: SettingsVersionInfo) => ({
-        ...previous,
-        checking: false,
-        checkError: '检查失败，请稍后重试',
-      }));
-    }
+    // 外层 try/catch 下沉到 `runEnvironmentActionOnce`，内层「通道探测」下沉到
+    // `resolveDesktopUpdateChannel`（见各自注释）。
+    await runEnvironmentActionOnce({
+      onError: () => {
+        setVersionInfo((previous: SettingsVersionInfo) => ({
+          ...previous,
+          checking: false,
+          checkError: '检查失败，请稍后重试',
+        }));
+      },
+      run: async () => {
+        const channel = await resolveDesktopUpdateChannel();
+        const data = (await createSettingsClient(input.gatewayUrl).getVersion(token, {
+          channel,
+        })) as SettingsVersionInfo;
+        setVersionInfo({
+          currentVersion: data.currentVersion,
+          latestVersion: data.latestVersion,
+          updateAvailable: data.updateAvailable,
+          checkError: data.checkError,
+          checkedAt: data.checkedAt,
+          checking: false,
+        });
+      },
+    });
   }, [input.gatewayUrl, input.token]);
 
   const refreshLocalDesktopAuth = React.useCallback(
@@ -185,40 +235,44 @@ export function useSettingsEnvironment(
 
     setDesktopGatewayBusy(true);
     setDesktopGatewayError(null);
-    try {
-      const nextMode = desktopGatewayModeForUrl(nextUrl);
-      if (nextMode === 'local') {
-        const fallbackPort = parseGatewayPort(portInput, input.webPort);
-        const port = readGatewayPortFromUrl(nextUrl, fallbackPort);
-        const nextGatewayUrl = localGatewayUrl(port);
-        await tauriInvoke('start_gateway', {
-          port,
-          host: hostForExposeLan(input.webExposeLan),
-        });
-        await refreshLocalDesktopAuth(nextGatewayUrl);
-        writeDesktopGatewayMode('local');
-        input.setGatewayUrl(nextGatewayUrl);
-        input.setWebAccess(true, port);
-        setUrlInput(nextGatewayUrl);
-      } else {
-        try {
-          await tauriInvoke('stop_gateway');
-        } catch (error: unknown) {
-          logger.warn('Failed to stop local desktop gateway while saving remote URL', error);
+    // 外层 try/catch/finally 下沉到 `runEnvironmentActionOnce`；内层「停止失败只记日志」
+    // 走模块级 `stopGatewayIgnoringFailure`（见各自注释）。
+    await runEnvironmentActionOnce({
+      onError: (error) => {
+        setDesktopGatewayError(error instanceof Error ? error.message : '桌面网关切换失败');
+        logger.error('Desktop gateway URL save failed:', error);
+      },
+      onFinally: () => {
+        setDesktopGatewayBusy(false);
+      },
+      run: async () => {
+        const nextMode = desktopGatewayModeForUrl(nextUrl);
+        if (nextMode === 'local') {
+          const fallbackPort = parseGatewayPort(portInput, input.webPort);
+          const port = readGatewayPortFromUrl(nextUrl, fallbackPort);
+          const nextGatewayUrl = localGatewayUrl(port);
+          await tauriInvoke('start_gateway', {
+            port,
+            host: hostForExposeLan(input.webExposeLan),
+          });
+          await refreshLocalDesktopAuth(nextGatewayUrl);
+          writeDesktopGatewayMode('local');
+          input.setGatewayUrl(nextGatewayUrl);
+          input.setWebAccess(true, port);
+          setUrlInput(nextGatewayUrl);
+        } else {
+          await stopGatewayIgnoringFailure(
+            'Failed to stop local desktop gateway while saving remote URL',
+          );
+          writeDesktopGatewayMode('remote');
+          input.setWebAccess(false, parseGatewayPort(portInput, input.webPort));
+          await refreshRemoteDesktopAuth(nextUrl);
+          input.setGatewayUrl(nextUrl);
         }
-        writeDesktopGatewayMode('remote');
-        input.setWebAccess(false, parseGatewayPort(portInput, input.webPort));
-        await refreshRemoteDesktopAuth(nextUrl);
-        input.setGatewayUrl(nextUrl);
-      }
-      setUrlSaved(true);
-      setTimeout(() => setUrlSaved(false), 2000);
-    } catch (error: unknown) {
-      setDesktopGatewayError(error instanceof Error ? error.message : '桌面网关切换失败');
-      logger.error('Desktop gateway URL save failed:', error);
-    } finally {
-      setDesktopGatewayBusy(false);
-    }
+        setUrlSaved(true);
+        setTimeout(() => setUrlSaved(false), 2000);
+      },
+    });
   }, [input, portInput, refreshLocalDesktopAuth, refreshRemoteDesktopAuth, urlInput]);
 
   const toggleWebAccess = React.useCallback(async () => {
@@ -226,37 +280,42 @@ export function useSettingsEnvironment(
 
     setDesktopGatewayBusy(true);
     setDesktopGatewayError(null);
-    try {
-      if (input.webAccessEnabled) {
-        const nextGatewayUrl = normalizeGatewayUrl(urlInput);
-        if (!nextGatewayUrl || isLocalGatewayUrl(nextGatewayUrl)) {
-          throw new Error('请先在上方填写远程网关地址，再切换到远程网关。');
+    // try/catch/finally 下沉到模块级 `runEnvironmentActionOnce`（见其注释）。
+    await runEnvironmentActionOnce({
+      onError: (error) => {
+        setDesktopGatewayError(error instanceof Error ? error.message : '桌面网关切换失败');
+        logger.error('Gateway toggle failed:', error);
+      },
+      onFinally: () => {
+        setDesktopGatewayBusy(false);
+      },
+      run: async () => {
+        if (input.webAccessEnabled) {
+          const nextGatewayUrl = normalizeGatewayUrl(urlInput);
+          if (!nextGatewayUrl || isLocalGatewayUrl(nextGatewayUrl)) {
+            throw new Error('请先在上方填写远程网关地址，再切换到远程网关。');
+          }
+
+          await tauriInvoke('stop_gateway');
+          writeDesktopGatewayMode('remote');
+          await refreshRemoteDesktopAuth(nextGatewayUrl);
+          input.setGatewayUrl(nextGatewayUrl);
+          input.setWebAccess(false, validPort);
+          return;
         }
 
-        await tauriInvoke('stop_gateway');
-        writeDesktopGatewayMode('remote');
-        await refreshRemoteDesktopAuth(nextGatewayUrl);
-        input.setGatewayUrl(nextGatewayUrl);
-        input.setWebAccess(false, validPort);
-        return;
-      }
-
-      await tauriInvoke('start_gateway', {
-        port: validPort,
-        host: hostForExposeLan(input.webExposeLan),
-      });
-      const gatewayUrl = localGatewayUrl(validPort);
-      await refreshLocalDesktopAuth(gatewayUrl);
-      writeDesktopGatewayMode('local');
-      input.setGatewayUrl(gatewayUrl);
-      input.setWebAccess(true, validPort);
-      setUrlInput(gatewayUrl);
-    } catch (error: unknown) {
-      setDesktopGatewayError(error instanceof Error ? error.message : '桌面网关切换失败');
-      logger.error('Gateway toggle failed:', error);
-    } finally {
-      setDesktopGatewayBusy(false);
-    }
+        await tauriInvoke('start_gateway', {
+          port: validPort,
+          host: hostForExposeLan(input.webExposeLan),
+        });
+        const gatewayUrl = localGatewayUrl(validPort);
+        await refreshLocalDesktopAuth(gatewayUrl);
+        writeDesktopGatewayMode('local');
+        input.setGatewayUrl(gatewayUrl);
+        input.setWebAccess(true, validPort);
+        setUrlInput(gatewayUrl);
+      },
+    });
   }, [input, portInput, refreshLocalDesktopAuth, refreshRemoteDesktopAuth, urlInput]);
 
   const saveWebPort = React.useCallback(async () => {
@@ -286,28 +345,30 @@ export function useSettingsEnvironment(
     const nextGatewayUrl = localGatewayUrl(port);
     setDesktopGatewayBusy(true);
     setDesktopGatewayError(null);
-    try {
-      try {
-        await tauriInvoke('stop_gateway');
-      } catch (error: unknown) {
+    // 外层 try/catch/finally 下沉到 `runEnvironmentActionOnce`；内层「停止失败不致命」
+    // 走模块级 `stopGatewayIgnoringFailure`（见各自注释）。
+    await runEnvironmentActionOnce({
+      onError: (error) => {
+        setDesktopGatewayError(error instanceof Error ? error.message : '切换端口失败');
+        logger.error('saveWebPort failed', error);
+      },
+      onFinally: () => {
+        setDesktopGatewayBusy(false);
+      },
+      run: async () => {
         // 停止失败不致命——可能原进程已不在；继续尝试 start 新端口。
-        logger.warn('stop_gateway failed while switching port', error);
-      }
-      await tauriInvoke('start_gateway', {
-        port,
-        host: hostForExposeLan(input.webExposeLan),
-      });
-      await refreshLocalDesktopAuth(nextGatewayUrl);
-      writeDesktopGatewayMode('local');
-      input.setGatewayUrl(nextGatewayUrl);
-      input.setWebAccess(true, port);
-      setUrlInput(nextGatewayUrl);
-    } catch (error: unknown) {
-      setDesktopGatewayError(error instanceof Error ? error.message : '切换端口失败');
-      logger.error('saveWebPort failed', error);
-    } finally {
-      setDesktopGatewayBusy(false);
-    }
+        await stopGatewayIgnoringFailure('stop_gateway failed while switching port');
+        await tauriInvoke('start_gateway', {
+          port,
+          host: hostForExposeLan(input.webExposeLan),
+        });
+        await refreshLocalDesktopAuth(nextGatewayUrl);
+        writeDesktopGatewayMode('local');
+        input.setGatewayUrl(nextGatewayUrl);
+        input.setWebAccess(true, port);
+        setUrlInput(nextGatewayUrl);
+      },
+    });
   }, [input, portInput, refreshLocalDesktopAuth]);
 
   const copyAddress = React.useCallback(() => {

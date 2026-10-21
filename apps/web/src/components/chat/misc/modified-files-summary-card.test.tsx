@@ -8,7 +8,11 @@ import { ModifiedFilesSummaryCard } from './modified-files-summary-card.js';
 const openFile = vi.fn();
 
 vi.mock('../../../App.js', () => ({
-  useFileEditorContext: () => ({ current: openFile }),
+  useFileEditorContext: () => ({
+    openRef: { current: openFile },
+    isAvailable: true,
+    setAvailable: () => undefined,
+  }),
 }));
 
 const FILE_PATH = 'packages/web-client/src/infra/plugins.ts';

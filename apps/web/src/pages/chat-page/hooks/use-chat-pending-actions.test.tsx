@@ -85,6 +85,7 @@ function makeOptions(overrides?: Partial<Parameters<typeof useChatPendingActions
     currentSessionId: SESSION_ID,
     setMessages: vi.fn() as never,
     setRightPanelState: vi.fn() as never,
+    setSessionStateStatus: vi.fn() as never,
     setStreamError: vi.fn() as never,
     ...(overrides ?? {}),
   };
@@ -249,6 +250,25 @@ describe('useChatPendingActions — replyInlineQuestion', () => {
     expect(result.current.inlineQuestionReplyError).toBeNull();
   });
 
+  it('回答问题后立即把会话乐观切到 running，避免续跑竞态期间抢发消息', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const setSessionStateStatus = vi.fn();
+    const { result } = renderHook(() =>
+      useChatPendingActions(makeOptions({ setSessionStateStatus: setSessionStateStatus as never })),
+    );
+
+    act(() => {
+      result.current.setPendingQuestions([makeQuestion('q-running')]);
+    });
+
+    await act(async () => {
+      await result.current.replyInlineQuestion('answered');
+    });
+
+    expect(setSessionStateStatus).toHaveBeenCalledWith('running');
+  });
+
   it('409/404 时也清掉该 question (后端已过期)', async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -315,6 +335,24 @@ describe('useChatPendingActions — handleInlinePermissionDecision', () => {
     expect(result.current.pendingPermissions).toEqual([]);
     expect(setMessages).toHaveBeenCalled();
     expect(setRightPanelState).toHaveBeenCalled();
+  });
+
+  it('批准权限后立即把会话乐观切到 running', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const setSessionStateStatus = vi.fn();
+    const { result } = renderHook(() =>
+      useChatPendingActions(makeOptions({ setSessionStateStatus: setSessionStateStatus as never })),
+    );
+
+    await act(async () => {
+      await result.current.handleInlinePermissionDecision(
+        makePermissionRequest('p-running'),
+        'once',
+      );
+    });
+
+    expect(setSessionStateStatus).toHaveBeenCalledWith('running');
   });
 
   it('本会话允许默认把共享分类的同类指令范围作为 alwaysOverride 提交', async () => {

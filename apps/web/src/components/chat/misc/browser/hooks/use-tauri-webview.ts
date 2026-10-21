@@ -17,13 +17,25 @@
  * 显隐切换都重建原生表面、丢掉页面状态。
  */
 
+import { readRefCurrent, writeRefCurrent } from '../../../../../utils/ref/ref-current.js';
 import { invoke } from '@tauri-apps/api/core';
 import type { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi';
 import type { Webview } from '@tauri-apps/api/webview';
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import {
+  loadTauriDpiOnce,
+  loadTauriWebviewOnce,
+  loadTauriWindowOnce,
+} from '../../../../../utils/lazy/lazy-assets.js';
 
 interface UseTauriWebviewParams {
   isTauri: boolean;
+  /**
+   * 是否允许创建原生表面。占位页（`about:blank`）由 DOM 开始页顶替：创建原生
+   * webview 只会得到一块盖住开始页的空白表面，既看不到内容又挡住交互。
+   * 关闭时 effect 仍是「有依赖变化就重跑」的，旧的表面会被正常 close。
+   */
+  enabled: boolean;
   activeUrl: string;
   refreshKey: number;
   hidden: boolean;
@@ -77,8 +89,38 @@ async function closeWebviewReliably(webview: Webview | null, label: string | nul
   }
 }
 
+/**
+ * webview 初始化动作的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try 内的值块
+ * （`?.` / `||` / `in` / 三元），本 hook 这处 try 会让整个 hook 脱靶（实测）。
+ * 语义逐字照搬（含 `disposed` / generation 的并发守卫）。
+ */
+async function runWebviewInitOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  }
+}
+
+/** 把任意抛出物归一成可展示的文案（Error / 带 message 的对象 / 其它）。 */
+function readThrownMessageOnce(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    return String((err as Record<string, unknown>).message);
+  }
+  return String(err);
+}
+
 export function useTauriWebview({
   isTauri,
+  enabled,
   activeUrl,
   refreshKey,
   hidden,
@@ -93,14 +135,18 @@ export function useTauriWebview({
   // label 由我们生成、Rust 可寻址：即使 JS 句柄丢失，也能按它收掉孤儿表面。
   const activeLabelRef = useRef<string | null>(null);
   const tauriDpiRef = useRef<TauriDpi | null>(null);
-  // 每次渲染都同步「此刻该不该隐藏」。隐藏意图可能先于 `tauri://created` 到达，
-  // created 回调据此决定创建完成瞬间的可见性——这是唯一事实来源。
+  // 同步「此刻该不该隐藏」。隐藏意图可能先于 `tauri://created` 到达，created 回调据此
+  // 决定创建完成瞬间的可见性——这是唯一事实来源。
+  // 走 effect 而非渲染期直接写 ref：编译器会判为 "Cannot access refs during render"
+  // 并放弃优化整个 hook（实测）。
   const latestHiddenRef = useRef(hidden);
-  latestHiddenRef.current = hidden;
+  useEffect(() => {
+    latestHiddenRef.current = hidden;
+  }, [hidden]);
 
   // ── Tauri native webview lifecycle ──────────────────────────────────
   useEffect(() => {
-    if (!isTauri || !containerRef.current || !activeUrl) return;
+    if (!isTauri || !enabled || !containerRef.current || !activeUrl) return;
 
     // 内部 navigate 同步：iframe/webview 已经在新 url，只是 React state 落后。
     // 这种情况不要重建 webview（否则页面状态丢失）。
@@ -110,11 +156,14 @@ export function useTauriWebview({
       internalNav.tabId === activeTabIdRef.current &&
       internalNav.url === activeUrl
     ) {
-      internalNavRef.current = null;
+      // internalNavRef 由调用方创建后作为参数传入，直接写 .current 会被判为「修改函数
+      // 返回值」；写入统一走收敛函数（见 utils/ref/ref-current.ts）。
+      writeRefCurrent(internalNavRef, null);
       return;
     }
 
-    const gen = ++generationRef.current;
+    const gen = readRefCurrent(generationRef) + 1;
+    writeRefCurrent(generationRef, gen);
     let webview: Webview | null = null;
     let observer: ResizeObserver | null = null;
     let rafId = 0;
@@ -125,155 +174,156 @@ export function useTauriWebview({
     setWebviewError(null);
 
     async function create() {
-      try {
-        const [{ Webview }, { getCurrentWindow }, dpi] = await Promise.all([
-          import('@tauri-apps/api/webview'),
-          import('@tauri-apps/api/window'),
-          import('@tauri-apps/api/dpi'),
-        ]);
+      // try/catch 下沉到模块级 `runWebviewInitOnce`（见其注释）。
+      await runWebviewInitOnce({
+        onError: (err) => {
+          // 守卫与原 catch 内逐字一致（`!disposed && gen === generationRef.current`）。
+          if (!disposed && gen === generationRef.current) {
+            const msg = readThrownMessageOnce(err);
+            console.error('[BuiltInBrowser] init error:', msg);
+            setWebviewError(msg);
+          }
+        },
+        run: async () => {
+          // import() 只能在模块级：见 utils/lazy/lazy-assets.ts。
+          const [{ Webview }, { getCurrentWindow }, dpi] = await Promise.all([
+            loadTauriWebviewOnce(),
+            loadTauriWindowOnce(),
+            loadTauriDpiOnce(),
+          ]);
 
-        const { LogicalPosition, LogicalSize } = dpi;
-        if (disposed || gen !== generationRef.current) return;
-        tauriDpiRef.current = { LogicalPosition, LogicalSize };
+          const { LogicalPosition, LogicalSize } = dpi;
+          if (disposed || gen !== generationRef.current) return;
+          tauriDpiRef.current = { LogicalPosition, LogicalSize };
 
-        const container = containerRef.current;
-        if (!container) return;
+          const container = containerRef.current;
+          if (!container) return;
 
-        const appWindow = getCurrentWindow();
-        let rect = container.getBoundingClientRect();
+          const appWindow = getCurrentWindow();
+          let rect = container.getBoundingClientRect();
 
-        // 容器尚未完成布局（display:none 或零尺寸）时，用 ResizeObserver 等待
-        // 它变为可见且有尺寸后再创建 webview，避免 Tauri 原生 webview 初始化失败。
-        if (rect.width < 1 || rect.height < 1) {
-          await new Promise<void>((resolve) => {
-            const wait = new ResizeObserver(() => {
-              const r = container.getBoundingClientRect();
-              if (r.width >= 1 && r.height >= 1) {
+          // 容器尚未完成布局（display:none 或零尺寸）时，用 ResizeObserver 等待
+          // 它变为可见且有尺寸后再创建 webview，避免 Tauri 原生 webview 初始化失败。
+          if (rect.width < 1 || rect.height < 1) {
+            await new Promise<void>((resolve) => {
+              const wait = new ResizeObserver(() => {
+                const r = container.getBoundingClientRect();
+                if (r.width >= 1 && r.height >= 1) {
+                  wait.disconnect();
+                  resolve();
+                }
+              });
+              wait.observe(container);
+              // 安全超时：5s 后即使容器仍零尺寸也继续（用 Math.max 兜底）。
+              const timer = setTimeout(() => {
                 wait.disconnect();
                 resolve();
-              }
+              }, 5000);
+              // 清理：组件卸载或 generation 变化时中止等待。
+              const check = setInterval(() => {
+                if (disposed || gen !== generationRef.current) {
+                  clearInterval(check);
+                  clearTimeout(timer);
+                  wait.disconnect();
+                  resolve();
+                }
+              }, 200);
             });
-            wait.observe(container);
-            // 安全超时：5s 后即使容器仍零尺寸也继续（用 Math.max 兜底）。
-            const timer = setTimeout(() => {
-              wait.disconnect();
-              resolve();
-            }, 5000);
-            // 清理：组件卸载或 generation 变化时中止等待。
-            const check = setInterval(() => {
-              if (disposed || gen !== generationRef.current) {
-                clearInterval(check);
-                clearTimeout(timer);
-                wait.disconnect();
-                resolve();
-              }
-            }, 200);
+            if (disposed || gen !== generationRef.current) return;
+            rect = container.getBoundingClientRect();
+          }
+
+          webviewSequence += 1;
+          const generatedLabel = `browser-${Date.now().toString(36)}-${webviewSequence.toString(36)}`;
+          label = generatedLabel;
+
+          const instance = new Webview(appWindow, generatedLabel, {
+            url: activeUrl,
+            x: rect.x,
+            y: rect.y,
+            width: Math.max(rect.width, 100),
+            height: Math.max(rect.height, 100),
+            focus: false,
           });
-          if (disposed || gen !== generationRef.current) return;
-          rect = container.getBoundingClientRect();
-        }
+          webview = instance;
 
-        webviewSequence += 1;
-        const generatedLabel = `browser-${Date.now().toString(36)}-${webviewSequence.toString(36)}`;
-        label = generatedLabel;
-
-        const instance = new Webview(appWindow, generatedLabel, {
-          url: activeUrl,
-          x: rect.x,
-          y: rect.y,
-          width: Math.max(rect.width, 100),
-          height: Math.max(rect.height, 100),
-          focus: false,
-        });
-        webview = instance;
-
-        const syncPosition = (target: Webview): void => {
-          // 隐藏期间必须持续离屏：原生表面永远盖在 HTML 之上，任何时刻都不能把它
-          // 移回容器矩形，否则会在 UI 之上闪现。
-          if (latestHiddenRef.current) {
+          const syncPosition = (target: Webview): void => {
+            // 隐藏期间必须持续离屏：原生表面永远盖在 HTML 之上，任何时刻都不能把它
+            // 移回容器矩形，否则会在 UI 之上闪现。
+            if (latestHiddenRef.current) {
+              target
+                .setPosition(new LogicalPosition(OFFSCREEN_POSITION, OFFSCREEN_POSITION))
+                .catch(logVisibilityError);
+              return;
+            }
+            const r = container.getBoundingClientRect();
+            if (r.width === 0 && r.height === 0) {
+              target
+                .setPosition(new LogicalPosition(OFFSCREEN_POSITION, OFFSCREEN_POSITION))
+                .catch(logVisibilityError);
+              return;
+            }
+            target.setPosition(new LogicalPosition(r.x, r.y)).catch(logVisibilityError);
             target
-              .setPosition(new LogicalPosition(OFFSCREEN_POSITION, OFFSCREEN_POSITION))
+              .setSize(new LogicalSize(Math.max(r.width, 1), Math.max(r.height, 1)))
               .catch(logVisibilityError);
-            return;
-          }
-          const r = container.getBoundingClientRect();
-          if (r.width === 0 && r.height === 0) {
-            target
-              .setPosition(new LogicalPosition(OFFSCREEN_POSITION, OFFSCREEN_POSITION))
-              .catch(logVisibilityError);
-            return;
-          }
-          target.setPosition(new LogicalPosition(r.x, r.y)).catch(logVisibilityError);
-          target
-            .setSize(new LogicalSize(Math.max(r.width, 1), Math.max(r.height, 1)))
-            .catch(logVisibilityError);
-        };
+          };
 
-        instance.once('tauri://created', () => {
-          // 创建完成前组件已卸载 / 已被新 generation 取代：这次创建是废的，句柄
-          // 此刻仍可重试，必须再关一次——否则它会变成无引用的孤儿表面。
-          if (disposed || gen !== generationRef.current) {
+          instance.once('tauri://created', () => {
+            // 创建完成前组件已卸载 / 已被新 generation 取代：这次创建是废的，句柄
+            // 此刻仍可重试，必须再关一次——否则它会变成无引用的孤儿表面。
+            if (disposed || gen !== generationRef.current) {
+              void closeWebviewReliably(instance, generatedLabel);
+              return;
+            }
+
+            activeWebviewRef.current = instance;
+            activeLabelRef.current = generatedLabel;
+            setWebviewReady(true);
+
+            // 创建完成前 hidden 已翻成 true 的话，那次 hide 因句柄为空而丢失：这里按
+            // 最新意图补上，否则这个表面会永远盖在 UI 上。
+            if (latestHiddenRef.current) {
+              instance
+                .setPosition(new LogicalPosition(OFFSCREEN_POSITION, OFFSCREEN_POSITION))
+                .catch(logVisibilityError);
+            } else {
+              syncPosition(instance);
+            }
+
+            observer = new ResizeObserver(() => {
+              if (disposed) return;
+              cancelAnimationFrame(rafId);
+              rafId = requestAnimationFrame(() => syncPosition(instance));
+            });
+            observer.observe(container);
+          });
+
+          instance.once('tauri://error', (e: unknown) => {
+            if (disposed || gen !== generationRef.current) return;
+            const raw =
+              typeof e === 'object' && e !== null && 'payload' in e
+                ? (e as Record<string, unknown>).payload
+                : e;
+            const msg =
+              raw instanceof Error
+                ? raw.message
+                : typeof raw === 'object' && raw !== null && 'message' in raw
+                  ? String((raw as Record<string, unknown>).message)
+                  : typeof raw === 'string'
+                    ? raw
+                    : String(raw);
+            console.error('[BuiltInBrowser] webview error:', msg);
+            // error 之后 Rust 侧可能仍持有这个表面：只置空 JS ref 会留下孤儿，
+            // 必须显式关闭（close 失败再由 label 兜底）。
             void closeWebviewReliably(instance, generatedLabel);
-            return;
-          }
-
-          activeWebviewRef.current = instance;
-          activeLabelRef.current = generatedLabel;
-          setWebviewReady(true);
-
-          // 创建完成前 hidden 已翻成 true 的话，那次 hide 因句柄为空而丢失：这里按
-          // 最新意图补上，否则这个表面会永远盖在 UI 上。
-          if (latestHiddenRef.current) {
-            instance
-              .setPosition(new LogicalPosition(OFFSCREEN_POSITION, OFFSCREEN_POSITION))
-              .catch(logVisibilityError);
-          } else {
-            syncPosition(instance);
-          }
-
-          observer = new ResizeObserver(() => {
-            if (disposed) return;
-            cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(() => syncPosition(instance));
+            webview = null;
+            activeWebviewRef.current = null;
+            activeLabelRef.current = null;
+            setWebviewError(msg);
           });
-          observer.observe(container);
-        });
-
-        instance.once('tauri://error', (e: unknown) => {
-          if (disposed || gen !== generationRef.current) return;
-          const raw =
-            typeof e === 'object' && e !== null && 'payload' in e
-              ? (e as Record<string, unknown>).payload
-              : e;
-          const msg =
-            raw instanceof Error
-              ? raw.message
-              : typeof raw === 'object' && raw !== null && 'message' in raw
-                ? String((raw as Record<string, unknown>).message)
-                : typeof raw === 'string'
-                  ? raw
-                  : String(raw);
-          console.error('[BuiltInBrowser] webview error:', msg);
-          // error 之后 Rust 侧可能仍持有这个表面：只置空 JS ref 会留下孤儿，
-          // 必须显式关闭（close 失败再由 label 兜底）。
-          void closeWebviewReliably(instance, generatedLabel);
-          webview = null;
-          activeWebviewRef.current = null;
-          activeLabelRef.current = null;
-          setWebviewError(msg);
-        });
-      } catch (err) {
-        if (!disposed && gen === generationRef.current) {
-          const msg =
-            err instanceof Error
-              ? err.message
-              : typeof err === 'object' && err !== null && 'message' in err
-                ? String((err as Record<string, unknown>).message)
-                : String(err);
-          console.error('[BuiltInBrowser] init error:', msg);
-          setWebviewError(msg);
-        }
-      }
+        },
+      });
     }
 
     void create();
@@ -294,7 +344,7 @@ export function useTauriWebview({
       activeWebviewRef.current = null;
       activeLabelRef.current = null;
     };
-  }, [isTauri, activeUrl, refreshKey]);
+  }, [isTauri, enabled, activeUrl, refreshKey]);
 
   // ── 切 tab 不重建 webview 的优化：Tauri webview 仍然要重建，因为它绑定 url。
   // 已通过 activeUrl 依赖驱动。

@@ -678,27 +678,40 @@ function ImagePreviewPane({ path, content }: { path: string; content: string }) 
 // ---------------------------------------------------------------------------
 // JSON Preview
 // ---------------------------------------------------------------------------
-function JsonPreview({ content }: { content: string }) {
-  const formatted = useMemo(() => {
-    try {
-      const parsed = JSON.parse(content);
-      return JSON.stringify(parsed, null, 2);
-    } catch {
-      return content;
-    }
-  }, [content]);
+/**
+ * 尝试把 JSON 美化输出；解析失败时原样返回。
+ *
+ * 必须留在模块级：`useMemo` 里带 try/catch 的工厂会被编译器判为不可复现
+ * （"Existing memoization could not be preserved"），而把值块搬进 try 又会报
+ * "Support value blocks … within a try/catch statement"（实测）。语义逐字照搬。
+ */
+function formatJsonPreview(content: string): string {
+  try {
+    const parsed = JSON.parse(content);
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return content;
+  }
+}
 
-  const stats = useMemo(() => {
-    try {
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) return `数组 · ${parsed.length} 项`;
-      if (typeof parsed === 'object' && parsed !== null)
-        return `对象 · ${Object.keys(parsed).length} 个键`;
-      return typeof parsed;
-    } catch {
-      return '解析失败';
+/** JSON 结构摘要；解析失败时返回固定文案。理由同上（try 内含值块）。 */
+function summarizeJsonPreview(content: string): string {
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed)) return `数组 · ${parsed.length} 项`;
+    if (typeof parsed === 'object' && parsed !== null) {
+      return `对象 · ${Object.keys(parsed).length} 个键`;
     }
-  }, [content]);
+    return typeof parsed;
+  } catch {
+    return '解析失败';
+  }
+}
+
+function JsonPreview({ content }: { content: string }) {
+  // 解析逻辑（含 try/catch 与值块）下沉到模块级 `formatJsonPreview` / `summarizeJsonPreview`。
+  const formatted = useMemo(() => formatJsonPreview(content), [content]);
+  const stats = useMemo(() => summarizeJsonPreview(content), [content]);
 
   return (
     <div

@@ -19,6 +19,44 @@ import {
 } from '../../../utils/permission/permission-reply.js';
 import type { TeamConversationState } from './use-team-conversation-state.js';
 
+/**
+ * 行内权限回复的统一包装：run 全流程留在 try 内，catch 交给 onError，finally 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try/catch 的 finally 子句，也不支持 try 内的
+ * 值块（`...(cond ? … : {})`、三元）。语义逐字照搬。
+ */
+async function runInlinePermissionReplyOnce(ctx: {
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
+/**
+ * 把自定义输入并入各题答案（仅 answered 且该题有自定义输入时追加）。
+ *
+ * 必须留在模块级：`?.` / 三元在 try 内属于值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+function mergeInlineQuestionAnswers(
+  answers: readonly string[][],
+  customInputs: readonly string[],
+  status: 'answered' | 'dismissed',
+): string[][] {
+  return answers.map((row, idx) => {
+    const custom = customInputs[idx]?.trim();
+    if (status === 'answered' && custom) return [...row, custom];
+    return row;
+  });
+}
+
 export function useTeamConversationViewInlineInteractions(input: { state: TeamConversationState }) {
   const { state } = input;
 
@@ -89,19 +127,19 @@ export function useTeamConversationViewInlineInteractions(input: { state: TeamCo
     async (status: 'answered' | 'dismissed') => {
       if (!activePendingQuestion) return;
       setInlineQuestionReplyError(null);
+      // Merge custom inputs into answers when present.
+      // 合并逻辑（含 `?.` / 三元）下沉到模块级 `mergeInlineQuestionAnswers`；三元取值也
+      // 移到 try 之外（值块会让编译器脱靶）。
+      const mergedAnswers = mergeInlineQuestionAnswers(
+        inlineQuestionAnswers,
+        inlineQuestionCustomInputs,
+        status,
+      );
+      const answersToSend = status === 'answered' ? mergedAnswers : undefined;
       try {
-        // Merge custom inputs into answers when present.
-        const mergedAnswers = inlineQuestionAnswers.map((answers, idx) => {
-          const custom = inlineQuestionCustomInputs[idx]?.trim();
-          if (status === 'answered' && custom) return [...answers, custom];
-          return answers;
+        await state.replyQuestion(activePendingQuestion.requestId, status, answersToSend, {
+          targetSessionId: activePendingQuestion.sessionId,
         });
-        await state.replyQuestion(
-          activePendingQuestion.requestId,
-          status,
-          status === 'answered' ? mergedAnswers : undefined,
-          { targetSessionId: activePendingQuestion.sessionId },
-        );
         setInlineQuestionReplyStatus(status);
       } catch (err) {
         setInlineQuestionReplyError(err instanceof Error ? err.message : '回复失败');
@@ -131,46 +169,55 @@ export function useTeamConversationViewInlineInteractions(input: { state: TeamCo
           ? [selectedScopeLevel.pattern]
           : undefined;
 
-      try {
-        await state.replyPermission(request.requestId, decision, {
-          ...(alwaysOverride ? { alwaysOverride } : {}),
-          targetSessionId: request.sessionId,
-        });
-        setInlinePermissionErrors((previous) => {
-          const next = { ...previous };
-          delete next[request.requestId];
-          return next;
-        });
-        state.setMessages((previous) =>
-          dismissPermissionEventMessage(
-            applyPermissionDecisionToLocalAssistantMessages(previous, request.requestId, decision),
-            request.requestId,
-          ),
-        );
-        toast(
-          getPermissionReplySuccessMessage(decision),
-          decision === 'reject' ? 'warning' : 'success',
-          2200,
-        );
-      } catch (error) {
-        const status = getPermissionReplyStatusCode(error);
-        const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
-        if (status === 404 || status === 409) {
-          state.setPendingPermissions((previous) =>
-            previous.filter((permission) => permission.requestId !== request.requestId),
+      // try/catch/finally 下沉到模块级 `runInlinePermissionReplyOnce`（见其注释）。
+      await runInlinePermissionReplyOnce({
+        onError: (error) => {
+          const status = getPermissionReplyStatusCode(error);
+          const errorMessage = error instanceof Error ? error.message : '权限处理失败，请重试。';
+          if (status === 404 || status === 409) {
+            state.setPendingPermissions((previous) =>
+              previous.filter((permission) => permission.requestId !== request.requestId),
+            );
+            toast('该权限请求已被处理或已过期，已重新同步。', 'warning', 3000);
+            return;
+          }
+          setInlinePermissionErrors((previous) => ({
+            ...previous,
+            [request.requestId]: errorMessage,
+          }));
+        },
+        onFinally: () => {
+          setInlinePermissionPendingDecision((current) =>
+            current?.requestId === request.requestId ? null : current,
           );
-          toast('该权限请求已被处理或已过期，已重新同步。', 'warning', 3000);
-          return;
-        }
-        setInlinePermissionErrors((previous) => ({
-          ...previous,
-          [request.requestId]: errorMessage,
-        }));
-      } finally {
-        setInlinePermissionPendingDecision((current) =>
-          current?.requestId === request.requestId ? null : current,
-        );
-      }
+        },
+        run: async () => {
+          await state.replyPermission(request.requestId, decision, {
+            ...(alwaysOverride ? { alwaysOverride } : {}),
+            targetSessionId: request.sessionId,
+          });
+          setInlinePermissionErrors((previous) => {
+            const next = { ...previous };
+            delete next[request.requestId];
+            return next;
+          });
+          state.setMessages((previous) =>
+            dismissPermissionEventMessage(
+              applyPermissionDecisionToLocalAssistantMessages(
+                previous,
+                request.requestId,
+                decision,
+              ),
+              request.requestId,
+            ),
+          );
+          toast(
+            getPermissionReplySuccessMessage(decision),
+            decision === 'reject' ? 'warning' : 'success',
+            2200,
+          );
+        },
+      });
     },
     [selectedPermissionScopeLevels, state],
   );

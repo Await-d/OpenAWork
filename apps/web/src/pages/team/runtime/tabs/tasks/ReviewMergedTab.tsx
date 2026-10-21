@@ -120,6 +120,25 @@ function mergeHandoffRecords(groups: HandoffRecord[][]): HandoffRecord[] {
   return Array.from(records.values());
 }
 
+/**
+ * 重试 handoff 的统一包装：置 busy → try → finally 清 busy（**无 catch**：异常上抛）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，本组件
+ * 这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runRetryHandoffOnce(ctx: {
+  setBusy: (handoffId: string | null) => void;
+  handoffId: string;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(ctx.handoffId);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setBusy(null);
+  }
+}
+
 export function ReviewMergedTab({
   focusHandoffId = null,
   onClearFocus,
@@ -275,15 +294,17 @@ export function ReviewMergedTab({
     focusedHandoff.id === disposition.pm2HandoffId,
   );
   const retryFocusedHandoff = async (handoffId: string) => {
-    setRetryBusyHandoffId(handoffId);
-    try {
-      await runRuntimeAlertRemediation('handoff-failure', {
-        handoffId,
-        ...(reviewSessionId ? { sessionId: reviewSessionId } : {}),
-      });
-    } finally {
-      setRetryBusyHandoffId(null);
-    }
+    // try/finally 下沉到模块级 `runRetryHandoffOnce`（见其注释）。
+    await runRetryHandoffOnce({
+      setBusy: setRetryBusyHandoffId,
+      handoffId,
+      run: async () => {
+        await runRuntimeAlertRemediation('handoff-failure', {
+          handoffId,
+          ...(reviewSessionId ? { sessionId: reviewSessionId } : {}),
+        });
+      },
+    });
   };
 
   return (

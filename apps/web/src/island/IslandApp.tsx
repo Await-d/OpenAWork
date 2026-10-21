@@ -59,6 +59,40 @@ function readFiniteNumber(value: unknown, fallback: number): number {
  * - 驱动展开 / 折叠(窗口尺寸补间在 Rust 侧,这里只切 `is-expanded` 类);
  * - 沿顶部拖动改锚点(`island_set_anchor`)、双击复位居中、打开会话。
  */
+/** 回读浮岛展开状态；失败时只记日志并返回 null（与原 try/catch 语义一致）。 */
+async function readIslandExpandedOnce(): Promise<boolean | null> {
+  try {
+    const snapshot = await islandInvoke<IslandStateResponse>('island_get_state');
+    return snapshot.expanded === true;
+  } catch (error: unknown) {
+    console.warn('[island] 回读状态失败', error);
+    return null;
+  }
+}
+
+/** 回读浮岛锚点；失败时只记日志并返回 null。 */
+async function readIslandAnchorOnce(): Promise<{ ratio: number; travelPx: number } | null> {
+  try {
+    const info = await islandInvoke<IslandAnchorInfo>('island_get_anchor');
+    return {
+      ratio: clampAnchorRatio(info.ratio),
+      travelPx: readFiniteNumber(info.travelPx, 0),
+    };
+  } catch (error: unknown) {
+    console.warn('[island] 回读锚点失败', error);
+    return null;
+  }
+}
+
+/** 上报浮岛 host ready；失败只记日志。 */
+async function markIslandHostReadyOnce(): Promise<void> {
+  try {
+    await islandInvoke('mark_island_host_ready');
+  } catch (error: unknown) {
+    console.warn('[island] 上报就绪失败', error);
+  }
+}
+
 export function IslandApp() {
   const agentState = useIslandStore((state) => state.agentState);
   const gatewayHealth = useIslandStore((state) => state.gatewayHealth);
@@ -104,30 +138,16 @@ export function IslandApp() {
     };
 
     const bootstrap = async (): Promise<void> => {
-      try {
-        const snapshot = await islandInvoke<IslandStateResponse>('island_get_state');
-        if (!disposed && snapshot.expanded === true) {
-          setExpanded(true);
-        }
-      } catch (error: unknown) {
-        console.warn('[island] 回读状态失败', error);
+      // 三处 try/catch 下沉到模块级助手（见其注释）。
+      const expandedState = await readIslandExpandedOnce();
+      if (!disposed && expandedState === true) {
+        setExpanded(true);
       }
-      try {
-        const info = await islandInvoke<IslandAnchorInfo>('island_get_anchor');
-        if (!disposed) {
-          anchorInfo.current = {
-            ratio: clampAnchorRatio(info.ratio),
-            travelPx: readFiniteNumber(info.travelPx, 0),
-          };
-        }
-      } catch (error: unknown) {
-        console.warn('[island] 回读锚点失败', error);
+      const anchor = await readIslandAnchorOnce();
+      if (!disposed && anchor) {
+        anchorInfo.current = anchor;
       }
-      try {
-        await islandInvoke('mark_island_host_ready');
-      } catch (error: unknown) {
-        console.warn('[island] 上报就绪失败', error);
-      }
+      await markIslandHostReadyOnce();
     };
 
     void bootstrap();

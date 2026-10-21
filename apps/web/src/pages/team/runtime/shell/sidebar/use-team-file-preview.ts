@@ -122,10 +122,14 @@ export function useTeamFilePreview(workspacePath?: string | null): TeamFilePrevi
   }, []);
 
   // workspace 切换时清空预览，避免跨工作区串内容。
+  //
+  // 这里把 close 一并列入依赖，而**不是**加 eslint-disable 注释：close 的引用链
+  // （resetContent 是 deps 为 [] 的 useCallback）全稳定，列进来语义不变；
+  // 而 disable 注释会被 React Compiler 按文本识别为「抑制 memoization」，
+  // 导致整个 hook 放弃优化（实测本文件因此 1 个函数脱靶）。
   useEffect(() => {
     close();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspacePath]);
+  }, [close, workspacePath]);
 
   return { path, content, loading, error, preview, close };
 }

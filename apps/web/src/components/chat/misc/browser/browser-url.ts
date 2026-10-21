@@ -4,8 +4,11 @@
 
 /**
  * 可交给网关侧实时引擎导航的地址：只接受显式 http(s)。
- * `about:blank` 之类的占位页无需下发 `navigate`——引擎画面与 Tauri 采集
- * 导航同步（`useBrowserLiveNavigation`）共用这一份判定，避免两处漂移。
+ *
+ * 占位页（`about:blank`）不需要「主动导航」；但从真实页面回落到占位页时（关掉
+ * 最后一个标签 / 清空预览），调用方仍要显式下发一次空白页导航，让远端卸载旧页面
+ * ——否则 Chromium 会留在旧页面持续产帧。引擎画面与 Tauri 采集导航同步
+ * （`useBrowserLiveNavigation`）共用这一份判定，避免两处漂移。
  */
 export const NAVIGABLE_URL_PATTERN = /^https?:\/\//i;
 

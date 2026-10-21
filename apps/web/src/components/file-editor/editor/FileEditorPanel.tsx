@@ -142,6 +142,41 @@ function writePanelModeFor(path: string, mode: PanelMode): void {
   }
 }
 
+/**
+ * 尝试用 Clipboard API 复制；API 不可用或调用失败返回 false（回退到 execCommand 路径）。
+ *
+ * 必须留在模块级：try 内的 `navigator.clipboard?.writeText` 是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个组件（实测）。
+ */
+async function tryClipboardApiWriteOnce(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    return false;
+  } catch {
+    // Fall through to the legacy path below.
+    return false;
+  }
+}
+
+/** 非安全上下文的兜底复制（隐藏 textarea + execCommand）；失败静默忽略。理由同上。 */
+function copyViaExecCommandOnce(text: string): void {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  } catch {
+    // Best effort — silently ignore.
+  }
+}
+
 export function FileEditorPanel({
   files,
   activeFile,
@@ -472,27 +507,12 @@ export function FileEditorPanel({
   }, []);
 
   const copyToClipboard = useCallback(async (text: string) => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-      }
-    } catch {
-      // Fall through to the legacy path below.
+    // 两段复制（含 try/catch 与 `?.` 值块）下沉到模块级助手（见其注释）。
+    if (await tryClipboardApiWriteOnce(text)) {
+      return;
     }
     // Fallback for non-secure contexts: a hidden textarea + execCommand.
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    } catch {
-      // Best effort — silently ignore.
-    }
+    copyViaExecCommandOnce(text);
   }, []);
 
   const closeOthers = useCallback(

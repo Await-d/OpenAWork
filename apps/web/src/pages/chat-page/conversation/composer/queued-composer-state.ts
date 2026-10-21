@@ -1,7 +1,18 @@
 import type { AttachmentItem } from '@openAwork/shared-ui';
 
+/**
+ * 待发队列条目的附件条目。
+ *
+ * 就是输入框的 `AttachmentItem` 加上一个可选的 `artifactId`：入队后附件会被上传到
+ * 网关（磁盘型产物）作为**跨端副本**，id 回填到条目里；换设备水合时凭它把二进制
+ * 拉回来，而不是只能提示「请重新选择附件」。字段可选——上传失败、旧条目没有它。
+ */
+export interface QueuedComposerAttachment extends AttachmentItem {
+  artifactId?: string;
+}
+
 export interface PersistedQueuedComposerMessage {
-  attachmentItems: AttachmentItem[];
+  attachmentItems: QueuedComposerAttachment[];
   enqueuedAt: number;
   id: string;
   requiresAttachmentRebind: boolean;
@@ -9,7 +20,7 @@ export interface PersistedQueuedComposerMessage {
 }
 
 export interface QueuedComposerMessage {
-  attachmentItems: AttachmentItem[];
+  attachmentItems: QueuedComposerAttachment[];
   files: File[];
   id: string;
   requiresAttachmentRebind: boolean;

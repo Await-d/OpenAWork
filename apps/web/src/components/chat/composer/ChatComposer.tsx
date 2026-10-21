@@ -14,6 +14,7 @@ import type {
 } from '@openAwork/web-client';
 import { detectThinkKeyword } from '../../conversation-runtime/reveal/think-keyword-detector.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
+import type { ImageGenerationPartialImage } from '@openAwork/web-client';
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
 import { ChatComposerMenu } from './ChatComposerMenu.js';
 import { ChatComposerOptimize } from './ChatComposerOptimize.js';
@@ -74,6 +75,8 @@ interface ChatComposerProps {
   activeModelSupportsThinking: boolean;
   hasConfiguredImageModel: boolean;
   imageGenerationBusy: boolean;
+  /** 流式生图的中间稿预览；非流式链路不传。 */
+  imageGenerationPreview?: ImageGenerationPartialImage | null;
   imageGenerationDefaults: SavedChatImageDefaults;
   imageGenerationMode: boolean;
   imageModelLabel: string;
@@ -207,6 +210,7 @@ export function ChatComposer({
   activeModelSupportsThinking,
   hasConfiguredImageModel,
   imageGenerationBusy,
+  imageGenerationPreview,
   imageGenerationDefaults,
   imageGenerationMode,
   imageModelLabel,
@@ -331,17 +335,21 @@ export function ChatComposer({
     effectiveStopCapability === 'precise' ||
     effectiveStopCapability === 'best_effort' ||
     effectiveStopCapability === 'observe_only';
-  const hasRemoteSessionBusyState = !showStopAction && sessionBusyState !== null;
+  // 只有 running 才算「执行权被占用」：paused 表示有待用户处理的交互，但网关此刻并不
+  // 持有单飞锁，用户仍可直接发送。因此 paused 不再把 Enter 降级成「排队」，也不禁用发送键。
+  const hasRemoteSessionBusyState = !showStopAction && sessionBusyState === 'running';
   const showQueueAction =
     !imageGenerationMode &&
     Boolean(onQueueMessage) &&
     (showStopAction || hasRemoteSessionBusyState) &&
     canSubmit;
-  const composerKeyboardShortcuts =
-    [
-      ...(showQueueAction ? ['Control+Enter', 'Meta+Enter'] : []),
-      ...(showStopAction ? ['Escape'] : []),
-    ].join(' ') || undefined;
+  // 数组字面量里的「展开 + 三元」会被编译器判为
+  // "Unexpected terminal kind `ternary` for logical test block" 并放弃优化本组件。
+  // 改成顺序 push：拼出来的字符串与原来逐字一致（无快捷键时同样为 undefined）。
+  const composerShortcutParts: string[] = [];
+  if (showQueueAction) composerShortcutParts.push('Control+Enter', 'Meta+Enter');
+  if (showStopAction) composerShortcutParts.push('Escape');
+  const composerKeyboardShortcuts = composerShortcutParts.join(' ') || undefined;
 
   const advanceAgentSelection = useCallback(
     (direction: 'next' | 'previous' = 'next') => {
@@ -610,7 +618,10 @@ export function ChatComposer({
         textareaRef.current.setSelectionRange(appliedText.length, appliedText.length);
       });
     },
-    [closeEvaluate, onReplaceInput],
+    // `textareaRef` 必须列入：memo 体内引用了 ref 对象，漏列会让编译器报
+    // "Existing memoization could not be preserved" 并放弃优化整个组件
+    // （AGENTS.md 的 ②）。ref 身份稳定，补上不改变触发节奏。
+    [closeEvaluate, onReplaceInput, textareaRef],
   );
 
   useEffect(() => {
@@ -716,6 +727,7 @@ export function ChatComposer({
 
             <ChatComposerImagePanel
               imageGenerationBusy={imageGenerationBusy}
+              imageGenerationPreview={imageGenerationPreview}
               streaming={streaming}
               hasConfiguredImageModel={hasConfiguredImageModel}
               imageGenerationDefaults={imageGenerationDefaults}

@@ -1,5 +1,5 @@
 import type { PendingPermissionRequest } from '@openAwork/web-client';
-import { useMemo, useRef } from 'react';
+import { useMemo, useState } from 'react';
 import {
   renderChatMessageContentWithOptions,
   renderStreamingChatMessageContentWithOptions,
@@ -55,24 +55,266 @@ import {
   shouldShowMessageInTranscript,
 } from '../../../../components/conversation-runtime/messages/transcript-visibility.js';
 
-function areSameHistoricalAssistantMessage(left: ChatMessage, right: ChatMessage): boolean {
-  if (left.id === right.id) return true;
-  if (left.role !== 'assistant' || right.role !== 'assistant') return false;
-  if (
-    left.clientRequestId &&
-    right.clientRequestId &&
-    left.clientRequestId === right.clientRequestId
-  ) {
+/**
+ * 这条消息是否可能渲染「内联审批按钮」。
+ *
+ * 只有带 `pendingPermissionRequestId` 的工具分段才会在渲染期调用
+ * `resolveInlinePermissionActions`；其余消息对审批回调的引用即便过期也不会被使用，
+ * 因此可以在回调变化时继续复用旧 entry。
+ *
+ * 无 `parts` 的旧格式消息（正文即 trace JSON）无法低成本判断，按「可能」处理——
+ * 保守重建，行为与优化前一致。
+ */
+function messageCarriesLivePermissionRequest(message: ChatMessage): boolean {
+  if (message.role !== 'assistant') {
+    return false;
+  }
+  const parts = message.parts;
+  if (!parts || parts.length === 0) {
     return true;
   }
-  const rightPartIds = new Set((right.parts ?? []).map((part) => part.id));
-  if ((left.parts ?? []).some((part) => rightPartIds.has(part.id))) return true;
-  const rightToolIds = new Set(
-    (right.parts ?? []).filter((part) => part.type === 'tool').map((part) => part.toolCallId),
+  return parts.some(
+    (part) => part.type === 'tool' && typeof part.pendingPermissionRequestId === 'string',
   );
-  return (left.parts ?? []).some(
-    (part) => part.type === 'tool' && rightToolIds.has(part.toolCallId),
+}
+
+/**
+ * 合并「同一条助手回复在本地与快照中各有一份」的重叠消息。
+ *
+ * 判据与原实现逐条一致：id / clientRequestId / 任一 part id / 任一 toolCallId 相交
+ * 即视为同一条；命中时保留「已落定」或「parts 更完整」的那一份，并保持首次出现的
+ * 位置（transcript 顺序不得因合并而跳动）。
+ *
+ * 性能：用四张倒排表把「每条消息都与已输出的每条比较」的 O(n²) 降为 O(n)。400 条
+ * 消息上原实现约 5.8ms，而 `messages` 每次变化（权限申请插入事件卡片、工具结果
+ * 落库、快照合并）都会整段重算，长会话下这是一次可感知的长任务。
+ */
+export function deduplicateOverlappingMessages(messages: ChatMessage[]): ChatMessage[] {
+  const output: ChatMessage[] = [];
+  const indexById = new Map<string, number>();
+  const indexByClientRequestId = new Map<string, number>();
+  const indexByPartId = new Map<string, number>();
+  const indexByToolCallId = new Map<string, number>();
+
+  const registerKeys = (index: number, message: ChatMessage): void => {
+    indexById.set(message.id, index);
+    if (message.role !== 'assistant') {
+      return;
+    }
+    if (message.clientRequestId) {
+      indexByClientRequestId.set(message.clientRequestId, index);
+    }
+    for (const part of message.parts ?? []) {
+      indexByPartId.set(part.id, index);
+      if (part.type === 'tool') {
+        indexByToolCallId.set(part.toolCallId, index);
+      }
+    }
+  };
+
+  /**
+   * 撤销某个位置旧消息登记过的键。
+   *
+   * 替换（更完整的快照顶掉本地版本）时必须调用：否则旧消息的 id / part id /
+   * toolCallId 仍指向该位置，后续消息只要命中**已被丢弃**的那份键，就会被错误地
+   * 合并到新消息上（表现为消息被吞掉、顺序错乱）。原 O(n²) 实现每轮都拿最新的
+   * output 重新比较，天然没有这个问题。
+   *
+   * 只删除「确实指向本位置」的键：同一个键可能已被后来的消息登记到别的位置。
+   */
+  const unregisterKeys = (index: number, message: ChatMessage): void => {
+    const dropKey = (map: Map<string, number>, key: string | undefined): void => {
+      if (key !== undefined && map.get(key) === index) {
+        map.delete(key);
+      }
+    };
+
+    dropKey(indexById, message.id);
+    if (message.role !== 'assistant') {
+      return;
+    }
+    dropKey(indexByClientRequestId, message.clientRequestId);
+    for (const part of message.parts ?? []) {
+      dropKey(indexByPartId, part.id);
+      if (part.type === 'tool') {
+        dropKey(indexByToolCallId, part.toolCallId);
+      }
+    }
+  };
+
+  const findExistingIndex = (message: ChatMessage): number => {
+    const sameId = indexById.get(message.id);
+    if (sameId !== undefined) {
+      return sameId;
+    }
+    if (message.role !== 'assistant') {
+      return -1;
+    }
+    if (message.clientRequestId) {
+      const sameRequest = indexByClientRequestId.get(message.clientRequestId);
+      if (sameRequest !== undefined) {
+        return sameRequest;
+      }
+    }
+    for (const part of message.parts ?? []) {
+      const samePart = indexByPartId.get(part.id);
+      if (samePart !== undefined) {
+        return samePart;
+      }
+    }
+    for (const part of message.parts ?? []) {
+      if (part.type !== 'tool') {
+        continue;
+      }
+      const sameToolCall = indexByToolCallId.get(part.toolCallId);
+      if (sameToolCall !== undefined) {
+        return sameToolCall;
+      }
+    }
+    return -1;
+  };
+
+  for (const message of messages) {
+    const duplicateIndex = findExistingIndex(message);
+    if (duplicateIndex < 0) {
+      const nextIndex = output.length;
+      output.push(message);
+      registerKeys(nextIndex, message);
+      continue;
+    }
+    const existing = output[duplicateIndex]!;
+    // Preserve transcript position while accepting the more complete
+    // snapshot (final status, longer parts, tool output).
+    if (
+      (message.status !== 'streaming' && existing.status === 'streaming') ||
+      (message.parts?.length ?? 0) > (existing.parts?.length ?? 0)
+    ) {
+      unregisterKeys(duplicateIndex, existing);
+      output[duplicateIndex] = message;
+      registerKeys(duplicateIndex, message);
+    }
+  }
+
+  return output;
+}
+
+interface SanitizedTranscriptCacheEntry {
+  pendingKey: string;
+  output: ChatMessage | null;
+}
+
+/**
+ * 单条消息的「transcript 可见性 + stale 权限清理」结果缓存。
+ *
+ * `sanitizedHistoricalMessages` 依赖整个 `messages` 数组：工具完成一次（`tool_result`）、
+ * 权限事件落一条、快照合并一次，都会让这个 useMemo 对**全部历史**重跑。而每条消息的
+ * 判定都要 `readAssistantTracePayload`（parts 重建 / content 解析）与
+ * `shouldShowMessageInTranscript`（内部还会解析压缩状态，可能是整段 `JSON.parse`）。
+ *
+ * 消息对象不可变（更新走新对象），stale 清理的唯一外部输入是「待审批 requestId 集合」，
+ * 其内容签名不同才需重算。按 (message 引用, pendingKey) 缓存后，一次 `tool_result`
+ * 的全表成本从「重解析每条」降为「n 次 WeakMap 查找 + 重算那一条」。
+ */
+const sanitizedTranscriptCache = new WeakMap<ChatMessage, SanitizedTranscriptCacheEntry>();
+
+function sanitizeTranscriptMessage(
+  message: ChatMessage,
+  activePendingPermissionIds: ReadonlySet<string>,
+  pendingKey: string,
+): ChatMessage | null {
+  if (message.role !== 'assistant') {
+    return message;
+  }
+
+  const cached = sanitizedTranscriptCache.get(message);
+  if (cached !== undefined && cached.pendingKey === pendingKey) {
+    return cached.output;
+  }
+
+  let nextMessage: ChatMessage | null = message;
+  const assistantTrace = readAssistantTracePayload(message);
+  if (!assistantTrace) {
+    const output = shouldShowMessageInTranscript(message) ? message : null;
+    sanitizedTranscriptCache.set(message, { pendingKey, output });
+    return output;
+  }
+
+  const stalePendingPermissionIds = assistantTrace.toolCalls.flatMap((toolCall) =>
+    toolCall.pendingPermissionRequestId &&
+    !activePendingPermissionIds.has(toolCall.pendingPermissionRequestId)
+      ? [toolCall.pendingPermissionRequestId]
+      : [],
   );
+
+  for (const requestId of stalePendingPermissionIds) {
+    if (!nextMessage) {
+      break;
+    }
+    nextMessage = clearResolvedPendingPermissionFromMessage(nextMessage, requestId);
+  }
+
+  const output = nextMessage && shouldShowMessageInTranscript(nextMessage) ? nextMessage : null;
+  sanitizedTranscriptCache.set(message, { pendingKey, output });
+  return output;
+}
+
+/**
+ * 开发期「渲染顺序漂移」诊断。
+ *
+ * 历史 entries 不排序，顺序就是 `messages` 数组顺序，因此「消息顺序错乱」一定
+ * 表现为：**同一批消息 id 的相对位置发生了变化**（纯新增/删除只会改变长度，不会触发）。
+ * 这里在检测到位置变化时打印前后序列，以及当时的权限态 / 流式态，用来区分
+ * 「数据层写错顺序」与「合并层把流式气泡插错位置」两类原因。
+ *
+ * 只在 dev 生效。限流按**会话**计（`lastReportedSessionKey`），而不是页面终身——
+ * 否则连续排查几个会话后计数耗尽，后续全部静默，恰好在最需要它的时候失灵。
+ */
+const ORDER_DRIFT_REPORT_LIMIT = 20;
+let lastReportedEntryIds: string[] | null = null;
+let lastReportedSessionKey: string | null = null;
+let orderDriftReportCount = 0;
+
+function hasRelativeOrderChange(previousIds: string[], currentIds: string[]): boolean {
+  const currentIndexById = new Map<string, number>();
+  for (let index = 0; index < currentIds.length; index += 1) {
+    currentIndexById.set(currentIds[index]!, index);
+  }
+  let previousIndex = -1;
+  for (let index = 0; index < previousIds.length; index += 1) {
+    const currentIndex = currentIndexById.get(previousIds[index]!);
+    // 已被移除的 id 不参与判定：删除本身不会造成错位。
+    if (currentIndex === undefined) continue;
+    if (currentIndex < previousIndex) return true;
+    previousIndex = currentIndex;
+  }
+  return false;
+}
+
+function reportEntryOrderDrift(
+  entries: ChatRenderEntry[],
+  pendingPermissions: PendingPermissionRequest[],
+  visibleStreaming: boolean,
+  sessionKey: string,
+): void {
+  const currentIds = entries.map((entry) => entry.message.id);
+  if (lastReportedSessionKey !== sessionKey) {
+    // 换会话：重置基线与限流计数。
+    lastReportedSessionKey = sessionKey;
+    orderDriftReportCount = 0;
+  }
+  const previousIds = lastReportedEntryIds;
+  lastReportedEntryIds = currentIds;
+  if (previousIds === null || orderDriftReportCount >= ORDER_DRIFT_REPORT_LIMIT) return;
+  if (!hasRelativeOrderChange(previousIds, currentIds)) return;
+
+  orderDriftReportCount += 1;
+  console.warn('[ChatRender] 历史消息相对顺序发生变化', {
+    hasPendingPermission: pendingPermissions.some((permission) => permission.status === 'pending'),
+    pendingRequestIds: pendingPermissions.map((permission) => permission.requestId),
+    previous: previousIds,
+    current: currentIds,
+    visibleStreaming,
+  });
 }
 
 export interface ChatRenderDataInput {
@@ -169,6 +411,108 @@ export interface ChatRenderDataReturn {
   groupedMessageEntries: ChatRenderGroup[];
 }
 
+/** 流式路径的帧分组缓存槽（键为上一帧的 `mergedEntries`）。 */
+interface ChatRenderFrameStreamingGroupCache {
+  decorateKey: ChatRenderDataInput['handleCopyMessageGroup'];
+  mergedEntries: ChatRenderEntry[];
+  messageGroups: ChatRenderGroup[];
+}
+
+/** 历史路径的帧分组缓存槽（键为上一帧的 `historicalRenderedMessageEntries`）。 */
+interface ChatRenderFrameHistoricalGroupCache {
+  decorateKey: ChatRenderDataInput['handleCopyMessageGroup'];
+  entries: ChatRenderEntry[];
+  messageGroups: ChatRenderGroup[];
+}
+
+/** 历史 entry 引用回收缓存槽（键为上一帧的 entry 与其闭包依赖）。 */
+interface ChatRenderFrameEntryCache {
+  closureDeps: readonly unknown[];
+  entries: ChatRenderEntry[];
+  /**
+   * 上一帧的「内联审批按钮」回调。
+   *
+   * 它与 `closureDeps` 分开记录：其余依赖（消息操作、选中态等）变化时整表必须重建，
+   * 但这一项随「待审批请求出现 / 消失」频繁变化——若一并计入全表依赖，每次权限
+   * 弹窗都会把整段历史消息的 entry 全部换新，进而让所有分组重渲染（叠加每条消息的
+   * trace 解析）。权限变化只会影响「确实带待审批工具」的那些消息，因此按消息粒度
+   * 精确失效即可。
+   */
+  permissionResolve: ChatRenderDataInput['resolveInlinePermissionActions'];
+}
+
+/** 每个 hook 实例的渲染帧缓存集合（成对更新，见下）。 */
+interface ChatRenderFrameCaches {
+  streamingGroup: ChatRenderFrameStreamingGroupCache | null;
+  historicalEntry: ChatRenderFrameEntryCache | null;
+  historicalGroup: ChatRenderFrameHistoricalGroupCache | null;
+}
+
+/**
+ * 渲染帧缓存的载体：**模块级 `WeakMap` + 每个 hook 实例一份的 token**。
+ *
+ * 这三个缓存此前由 `useRef` 承载，但读写在 `useMemo` 回调里（即渲染期），
+ * React Compiler 会判定为 `Cannot access refs during render` 并放弃优化整个
+ * `useChatRenderData`（本文件此前 49 处脱靶、`useChatRenderData` 整函数未编译）。
+ *
+ * 换成「实例 token 作键的 `WeakMap`」后，读写的仍是**同一个**可变单元格，缓存
+ * 语义逐字不变：
+ * - token 来自 `useState` 惰性初始化，每个组件实例只创建一次且跨渲染恒定，
+ *   其生命周期严格等价于原来的 `useRef` 对象（挂载时创建、卸载后回收）；
+ * - 不同实例（另一次挂载 / 另一个会话页）拿到的 token 不同，因此缓存槽天然
+ *   隔离，不存在跨实例读到陈旧帧的可能；`WeakMap` 弱持有 token，卸载后自动释放；
+ * - 键与值一一对应：每个实例永远只命中自己那份槽，槽内数据仍由原有身份比较
+ *   守卫（`message` 引用 / `decorateKey` / `reconcileChatRenderGroups` 的
+ *   entry 前缀比较），跨会话或跨消息变更时与改前一样直接失效。
+ *
+ * 首渲染行为一致：槽初始化为 `null`，与改前 `useRef(null)` 完全相同（无 effect，
+ * 也就没有「effect 内读取到旧值」的时序差异）。
+ */
+const chatRenderFrameCaches = new WeakMap<object, ChatRenderFrameCaches>();
+
+/**
+ * 缓存槽写入：把「写」收敛到模块函数内完成。
+ *
+ * React Compiler 会把它派生自 `useState` 的值视为不可改写（`This value cannot
+ * be modified`），因此渲染期不能直接对 `renderFrameCaches.xxx` 赋值。写入收进
+ * 模块函数后语义完全不变：仍是同一个单元格、同一时机（`useMemo` 回调末尾）、
+ * 同一个值，只是「谁执行这条赋值」换了地方。
+ */
+function writeHistoricalEntryCache(
+  caches: ChatRenderFrameCaches,
+  value: ChatRenderFrameEntryCache,
+): void {
+  caches.historicalEntry = value;
+}
+
+function writeHistoricalGroupCache(
+  caches: ChatRenderFrameCaches,
+  value: ChatRenderFrameHistoricalGroupCache,
+): void {
+  caches.historicalGroup = value;
+}
+
+function writeStreamingGroupCache(
+  caches: ChatRenderFrameCaches,
+  value: ChatRenderFrameStreamingGroupCache,
+): void {
+  caches.streamingGroup = value;
+}
+
+function resolveChatRenderFrameCaches(instanceKey: object): ChatRenderFrameCaches {
+  const existing = chatRenderFrameCaches.get(instanceKey);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const created: ChatRenderFrameCaches = {
+    streamingGroup: null,
+    historicalEntry: null,
+    historicalGroup: null,
+  };
+  chatRenderFrameCaches.set(instanceKey, created);
+  return created;
+}
+
 export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataReturn {
   const {
     messages,
@@ -204,29 +548,20 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     serverTotalTurnCount,
   } = input;
 
+  // 渲染帧缓存槽：每个 hook 实例一份（实例 token 作 `WeakMap` 键，见上方注释），
+  // 生命周期与改前的 `useRef` 完全一致。
+  const [renderFrameCacheKey] = useState<object>(() => ({}));
+  const renderFrameCaches = resolveChatRenderFrameCaches(renderFrameCacheKey);
+
   // 流式帧分组缓存：`mergedEntries` 与「已装饰、未并入通知」的消息组成对保存，
   // 供 `reconcileChatRenderGroups` 复用未变化前缀的组对象引用 —— 这是
   // `ChatGroupBlock`（React.memo）在流式期间跳过重渲染的前提。
-  const streamingGroupCacheRef = useRef<{
-    decorateKey: ChatRenderDataInput['handleCopyMessageGroup'];
-    mergedEntries: ChatRenderEntry[];
-    messageGroups: ChatRenderGroup[];
-  } | null>(null);
-
-  // 非流式路径的同构缓存。历史消息 entry 每次都重造 `actions` / `renderContent`
+  // 非流式路径的同构缓存：历史消息 entry 每次都重造 `actions` / `renderContent`
   // 闭包，因此「仅 1 条消息更新」也会让整表 entry 换新、连带击穿所有
   // `ChatGroupBlock` 的 memo。这里记录上一帧的 entry 与其闭包依赖，未变项直接
   // 复用旧 entry 对象，让下游的分组增量重组能真正跳过历史分组。
-  const historicalEntryCacheRef = useRef<{
-    closureDeps: readonly unknown[];
-    entries: ChatRenderEntry[];
-  } | null>(null);
-  // 历史分组缓存：与 entry 缓存成对更新，供 `reconcileChatRenderGroups` 复用前缀组。
-  const historicalGroupCacheRef = useRef<{
-    decorateKey: ChatRenderDataInput['handleCopyMessageGroup'];
-    entries: ChatRenderEntry[];
-    messageGroups: ChatRenderGroup[];
-  } | null>(null);
+  // 三者都放在 `renderFrameCaches` 上；`historicalGroup` 与 `historicalEntry`
+  // 成对更新，供 `reconcileChatRenderGroups` 复用前缀组。
 
   const effectiveContextMessages = useMemo(
     () => filterChatMessagesForContext(messages),
@@ -288,7 +623,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     }
 
     return usageByMessageId;
-  }, [activeModelId, activeModelOption?.label, messages, modelPrices]);
+  }, [activeModelId, activeModelOption?.label, activeProviderId, messages, modelPrices]);
 
   const messageInputTokens = useMemo(() => {
     return effectiveContextMessages.reduce((sum, message) => {
@@ -398,6 +733,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   }, [
     activeModelId,
     activeModelOption?.label,
+    activeProviderId,
     activeStreamFirstTokenLatencyMs,
     assistantUsageDetails.size,
     effectiveReportedStreamUsage,
@@ -443,58 +779,18 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         .filter((permission) => permission.status === 'pending')
         .map((permission) => permission.requestId),
     );
+    // 待审批集合的内容签名：只有它变化才需要重算「stale 权限清理」的结果。
+    const pendingKey = Array.from(activePendingPermissionIds).sort().join('\u0000');
 
-    const visible = messages.flatMap((message) => {
-      if (message.role !== 'assistant') {
-        return [message];
-      }
-
-      let nextMessage: ChatMessage | null = message;
-      const assistantTrace = readAssistantTracePayload(message);
-      if (!assistantTrace) {
-        return shouldShowMessageInTranscript(message) ? [message] : [];
-      }
-
-      const stalePendingPermissionIds = assistantTrace.toolCalls.flatMap((toolCall) =>
-        toolCall.pendingPermissionRequestId &&
-        !activePendingPermissionIds.has(toolCall.pendingPermissionRequestId)
-          ? [toolCall.pendingPermissionRequestId]
-          : [],
-      );
-
-      for (const requestId of stalePendingPermissionIds) {
-        if (!nextMessage) {
-          break;
-        }
-        nextMessage = clearResolvedPendingPermissionFromMessage(nextMessage, requestId);
-      }
-
-      if (!nextMessage || !shouldShowMessageInTranscript(nextMessage)) {
-        return [];
-      }
-
-      return [nextMessage];
-    });
-    const deduplicated = deduplicateCompactionMessages(visible);
-    const output: ChatMessage[] = [];
-    for (const message of deduplicated) {
-      const duplicateIndex = output.findIndex((existing) =>
-        areSameHistoricalAssistantMessage(existing, message),
-      );
-      if (duplicateIndex < 0) {
-        output.push(message);
-        continue;
-      }
-      const existing = output[duplicateIndex]!;
-      // Preserve transcript position while accepting the more complete
-      // snapshot (final status, longer parts, tool output).
-      if (message.status !== 'streaming' && existing.status === 'streaming') {
-        output[duplicateIndex] = message;
-      } else if ((message.parts?.length ?? 0) > (existing.parts?.length ?? 0)) {
-        output[duplicateIndex] = message;
+    const visible: ChatMessage[] = [];
+    for (const message of messages) {
+      const output = sanitizeTranscriptMessage(message, activePendingPermissionIds, pendingKey);
+      if (output !== null) {
+        visible.push(output);
       }
     }
-    return output;
+
+    return deduplicateOverlappingMessages(deduplicateCompactionMessages(visible));
   }, [messages, pendingPermissions]);
 
   const visibleMessages = useMemo(() => {
@@ -545,10 +841,11 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         );
 
     // `renderContent` 闭包捕获的全部依赖。签名不变才允许复用上一帧的 entry 对象。
+    // `resolveInlinePermissionActions` 单独记录（见 `ChatRenderFrameEntryCache`）：
+    // 它随待审批请求的出现 / 消失高频变化，按消息粒度精确失效即可。
     const closureDeps: readonly unknown[] = [
       buildMessageActions,
       openChildSessionInspector,
-      resolveInlinePermissionActions,
       selectedChildSessionId,
       visibleStreaming,
       assistantUsageDetails,
@@ -586,7 +883,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     // (message, closureDeps, index) 的纯函数——`actions` 每次调用都返回新闭包，所以不能
     // 按引用比较。改为沿用同一位置（index）的旧 entry：message 引用未变且闭包依赖
     // 未变时，该 entry 必然逐字段等价。
-    const previousCache = historicalEntryCacheRef.current;
+    const previousCache = renderFrameCaches.historicalEntry;
     let canReuse =
       previousCache !== null && previousCache.closureDeps.length === closureDeps.length;
     if (canReuse && previousCache !== null) {
@@ -599,12 +896,27 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     }
 
     let entries = nextEntries;
-    if (canReuse && previousCache !== null) {
+    if (previousCache !== null) {
+      const permissionResolveChanged =
+        previousCache.permissionResolve !== resolveInlinePermissionActions;
       const recycled = nextEntries.map((entry, index) => {
         const previousEntry = previousCache.entries[index];
-        return previousEntry !== undefined && previousEntry.message === entry.message
-          ? previousEntry
-          : entry;
+        if (previousEntry === undefined || previousEntry.message !== entry.message) {
+          return entry;
+        }
+        // 审批回调没变：走原来的「全量复用 / 全量重建」语义（不额外遍历 parts）。
+        if (!permissionResolveChanged) {
+          return canReuse ? previousEntry : entry;
+        }
+        // 其它闭包依赖也变了：旧 entry 的 `renderContent` 捕获的是过期的
+        // `buildMessageActions` / `openChildSessionInspector` / `visibleStreaming` 等，
+        // 不能复用，必须按原语义全量重建。
+        if (!canReuse) {
+          return entry;
+        }
+        // 只有审批回调变了：仅「确实会渲染审批按钮」的消息需要换新闭包，其余沿用，
+        // 让一次权限弹窗不至于把整段历史消息组件全部重渲染。
+        return messageCarriesLivePermissionRequest(entry.message) ? entry : previousEntry;
       });
       // 全部命中时直接沿用旧数组，让下游 `useMemo` 整体短路。
       let fullyReused = true;
@@ -617,13 +929,29 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       entries = fullyReused ? previousCache.entries : recycled;
     }
 
-    historicalEntryCacheRef.current = { closureDeps, entries };
+    writeHistoricalEntryCache(renderFrameCaches, {
+      closureDeps,
+      entries,
+      permissionResolve: resolveInlinePermissionActions,
+    });
+
+    if (import.meta.env.DEV) {
+      // 会话标识取首条 entry 的 id：切会话时它必然不同（两条会话不可能共享首条
+      // 消息），而同一会话内加载更早历史导致首条变化时重置基线也正好合适。
+      reportEntryOrderDrift(
+        entries,
+        pendingPermissions,
+        visibleStreaming,
+        entries[0]?.message.id ?? 'empty',
+      );
+    }
 
     return entries;
   }, [
     assistantUsageDetails,
     buildMessageActions,
     openChildSessionInspector,
+    renderFrameCaches,
     resolveInlinePermissionActions,
     selectedChildSessionId,
     visibleMessages,
@@ -636,40 +964,54 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       return null;
     }
 
+    /**
+     * 这条虚拟消息**每帧**都会重建。两处收敛：
+     *
+     * 1. 有序 parts 可用时不再序列化 trace JSON。渲染侧对带工具 / 思考分段的消息一律
+     *    走 parts-first，`content` 只是纯文本兜底；而工具输出动辄几十 KB～数 MB，
+     *    逐帧 `JSON.stringify` 产生的分配与 GC 是流式卡顿的放大器（多工具并行时
+     *    尤其明显）。
+     * 2. `toolCallCards.map` 与 `trim()` 只做一次（原实现 content / parts 各做一遍）。
+     */
+    const hasOrderedParts = Boolean(streamingOrderedParts && streamingOrderedParts.length > 0);
+    const hasThinking = visibleStreamThinkingBuffer.trim().length > 0;
+    const legacyTracePayload =
+      !hasOrderedParts && (toolCallCards.length > 0 || hasThinking)
+        ? {
+            ...(visibleStreamThinkingBlocks.length > 0
+              ? { reasoningBlocks: visibleStreamThinkingBlocks }
+              : {}),
+            text: visibleStreamBuffer,
+            toolCalls: toolCallCards.map((toolCall) => ({
+              kind: resolveAssistantCapabilityKind(toolCall.toolName) as
+                'tool' | 'agent' | 'skill' | 'mcp' | undefined,
+              toolCallId: toolCall.toolCallId,
+              toolName: toolCall.toolName,
+              input: toolCall.input as Record<string, unknown>,
+              output: toolCall.output,
+              isError: toolCall.isError,
+              pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
+              resumedAfterApproval: toolCall.resumedAfterApproval,
+              status: toolCall.status,
+            })),
+          }
+        : null;
+
     return {
       message: {
         id: activeStreamMessageId ?? '__streaming__',
         role: 'assistant',
         ...(activeStreamClientRequestId ? { clientRequestId: activeStreamClientRequestId } : {}),
-        content:
-          toolCallCards.length > 0 || visibleStreamThinkingBuffer.trim().length > 0
-            ? createAssistantTraceContent({
-                ...(visibleStreamThinkingBlocks.length > 0
-                  ? { reasoningBlocks: visibleStreamThinkingBlocks }
-                  : {}),
-                text: visibleStreamBuffer,
-                toolCalls: toolCallCards.map((toolCall) => ({
-                  kind: resolveAssistantCapabilityKind(toolCall.toolName) as
-                    'tool' | 'agent' | 'skill' | 'mcp' | undefined,
-                  toolCallId: toolCall.toolCallId,
-                  toolName: toolCall.toolName,
-                  input: toolCall.input as Record<string, unknown>,
-                  output: toolCall.output,
-                  isError: toolCall.isError,
-                  pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
-                  resumedAfterApproval: toolCall.resumedAfterApproval,
-                  status: toolCall.status,
-                })),
-              })
-            : visibleStreamBuffer,
+        content: legacyTracePayload
+          ? createAssistantTraceContent(legacyTracePayload)
+          : visibleStreamBuffer,
         model: (activeModelOption?.label ?? activeModelId) || undefined,
         providerId: activeProviderId || undefined,
         createdAt: activeStreamRoundStartedAt ?? visibleStreamStartedAt ?? Date.now(),
-        tokenEstimate: estimateTokenCount(
-          [visibleStreamThinkingBuffer, visibleStreamBuffer]
-            .filter((item) => item.trim().length > 0)
-            .join('\n\n'),
-        ),
+        // 分段估算，避免每帧把两段大文本 `join` 成新字符串再 trim。
+        tokenEstimate:
+          estimateTokenCount(visibleStreamBuffer) +
+          (hasThinking ? estimateTokenCount(visibleStreamThinkingBuffer) : 0),
         toolCallCount: toolCallCards.length > 0 ? toolCallCards.length : undefined,
         // Prefer the wire-faithful ordered segments when ChatPage has been
         // accumulating them. This makes the live render preserve the true
@@ -678,29 +1020,11 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         // flattening produced by `partsFromAssistantTrace`. The legacy
         // reorder is kept as a fallback so attach paths that haven't yet
         // populated segments still render something.
-        parts:
-          streamingOrderedParts && streamingOrderedParts.length > 0
-            ? streamingOrderedParts
-            : toolCallCards.length > 0 || visibleStreamThinkingBuffer.trim().length > 0
-              ? partsFromAssistantTrace(activeStreamMessageId ?? '__streaming__', {
-                  ...(visibleStreamThinkingBlocks.length > 0
-                    ? { reasoningBlocks: visibleStreamThinkingBlocks }
-                    : {}),
-                  text: visibleStreamBuffer,
-                  toolCalls: toolCallCards.map((toolCall) => ({
-                    kind: resolveAssistantCapabilityKind(toolCall.toolName) as
-                      'tool' | 'agent' | 'skill' | 'mcp' | undefined,
-                    toolCallId: toolCall.toolCallId,
-                    toolName: toolCall.toolName,
-                    input: toolCall.input as Record<string, unknown>,
-                    output: toolCall.output,
-                    isError: toolCall.isError,
-                    pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
-                    resumedAfterApproval: toolCall.resumedAfterApproval,
-                    status: toolCall.status,
-                  })),
-                })
-              : undefined,
+        parts: hasOrderedParts
+          ? streamingOrderedParts
+          : legacyTracePayload
+            ? partsFromAssistantTrace(activeStreamMessageId ?? '__streaming__', legacyTracePayload)
+            : undefined,
         status: 'streaming',
       },
       renderContent: (message: ChatMessage) =>
@@ -739,6 +1063,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     activeModelId,
     activeModelOption?.label,
     activeProviderId,
+    activeStreamRoundStartedAt,
     openChildSessionInspector,
     onStopActiveMessage,
     resolveInlinePermissionActions,
@@ -759,7 +1084,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   ]);
 
   const historicalGroupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
-    const cache = historicalGroupCacheRef.current;
+    const cache = renderFrameCaches.historicalGroup;
     let messageGroups: ChatRenderGroup[];
     if (cache !== null && cache.decorateKey === handleCopyMessageGroup) {
       // 与流式路径同构：未变化的前缀组直接复用旧引用，只对首个差异之后的组重新装饰，
@@ -780,17 +1105,22 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         decorateAssistantGroupActions(group, handleCopyMessageGroup),
       );
     }
-    historicalGroupCacheRef.current = {
+    writeHistoricalGroupCache(renderFrameCaches, {
       decorateKey: handleCopyMessageGroup,
       entries: historicalRenderedMessageEntries,
       messageGroups,
-    };
+    });
 
     return mergeNoticeGroupsIntoRenderGroups({
       messageGroups,
       noticeGroups: buildSubagentNoticeGroups(subagentNotices ?? []),
     });
-  }, [handleCopyMessageGroup, historicalRenderedMessageEntries, subagentNotices]);
+  }, [
+    handleCopyMessageGroup,
+    historicalRenderedMessageEntries,
+    renderFrameCaches,
+    subagentNotices,
+  ]);
 
   const groupedMessageEntries = useMemo<ChatRenderGroup[]>(() => {
     const mergedEntries = mergeStreamingEntryIntoHistoricalEntries(
@@ -804,7 +1134,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       return historicalGroupedMessageEntries;
     }
 
-    const cache = streamingGroupCacheRef.current;
+    const cache = renderFrameCaches.streamingGroup;
     let messageGroups: ChatRenderGroup[];
     if (cache !== null && cache.decorateKey === handleCopyMessageGroup) {
       // 流式帧通常只有尾部 entry 变化：复用未变前缀的组对象引用，只对重算出的
@@ -825,11 +1155,11 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
         decorateAssistantGroupActions(group, handleCopyMessageGroup),
       );
     }
-    streamingGroupCacheRef.current = {
+    writeStreamingGroupCache(renderFrameCaches, {
       decorateKey: handleCopyMessageGroup,
       mergedEntries,
       messageGroups,
-    };
+    });
 
     return mergeNoticeGroupsIntoRenderGroups({
       messageGroups,
@@ -841,6 +1171,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     handleCopyMessageGroup,
     historicalGroupedMessageEntries,
     historicalRenderedMessageEntries,
+    renderFrameCaches,
     streamingRenderedMessageEntry,
     subagentNotices,
   ]);

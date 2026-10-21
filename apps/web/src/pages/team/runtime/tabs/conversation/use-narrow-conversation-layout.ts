@@ -19,7 +19,17 @@ export function useNarrowConversationLayout(
   containerRef?: RefObject<HTMLElement | null>,
   thresholdPx = DEFAULT_THRESHOLD_PX,
 ): boolean {
-  const [isNarrow, setIsNarrow] = useState(() => readIsNarrow(thresholdPx, containerRef));
+  // 首帧容器尚未挂载，`containerRef.current` 必然是 null，读不到宽度，
+  // 原实现此时也会退化成 `window.innerWidth`。所以这里直接用窗口宽度做首帧估计，
+  // 不再走 ref —— 渲染期读 ref 会被 React Compiler 判定为
+  // "Cannot access refs during render" 并放弃优化本 hook。
+  // 挂载后由下方 effect 补测容器真实宽度，行为与原写法等价。
+  const [isNarrow, setIsNarrow] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return window.innerWidth < thresholdPx;
+  });
 
   useEffect(() => {
     const update = () => setIsNarrow(readIsNarrow(thresholdPx, containerRef));

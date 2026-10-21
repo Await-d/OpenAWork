@@ -16,6 +16,7 @@ import {
 } from './device-presets.js';
 import type { BrowserEngineCapability } from './hooks/use-engine-capability.js';
 import { browserPreviewShortcutTitle } from './hooks/use-browser-preview-shortcuts.js';
+import { BROWSER_QUALITY_PRESETS, resolveQualityPreset } from './quality-presets.js';
 
 interface BrowserToolbarProps {
   tabs: BrowserTab[];
@@ -31,12 +32,19 @@ interface BrowserToolbarProps {
   onBack: () => void;
   onForward: () => void;
   onRefresh: () => void;
+  /** 刷新点击后的一次性旋转反馈（静态页重载后画面无变化，需要可见确认）。 */
+  refreshing?: boolean;
+  /** 原生渲染（iframe）开关：实时画面帧率不足时的流畅备选。 */
+  nativeRender?: boolean;
+  onToggleNativeRender?: () => void;
 
   addressInput: string;
   onAddressChange: (value: string) => void;
   onAddressKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
 
   isCurrentBookmarked: boolean;
+  /** 占位页（新标签页）没有可收藏的地址：按钮置灰，避免收藏出一个 `about:blank`。 */
+  bookmarkDisabled?: boolean;
   onToggleBookmark: () => void;
 
   bookmarks: Bookmark[];
@@ -67,6 +75,9 @@ interface BrowserToolbarProps {
   /** 设备预设 id（CDP 实时与 iframe 回退共用）。 */
   devicePresetId: string;
   onDevicePresetChange: (id: string) => void;
+  /** 实时画面画质档位（流畅 / 均衡 / 清晰）：决定帧盒倍数与起流质量。 */
+  qualityPresetId: string;
+  onQualityPresetChange: (id: string) => void;
   /** 纯前端缩放档位（1 = 100%）。 */
   zoom: number;
   onZoomChange: (zoom: number) => void;
@@ -103,10 +114,14 @@ export function BrowserToolbar({
   onBack,
   onForward,
   onRefresh,
+  refreshing = false,
+  nativeRender = false,
+  onToggleNativeRender,
   addressInput,
   onAddressChange,
   onAddressKeyDown,
   isCurrentBookmarked,
+  bookmarkDisabled = false,
   onToggleBookmark,
   bookmarks,
   bookmarksOpen,
@@ -129,6 +144,8 @@ export function BrowserToolbar({
   onTogglePick,
   devicePresetId,
   onDevicePresetChange,
+  qualityPresetId,
+  onQualityPresetChange,
   zoom,
   onZoomChange,
   devicePreviewEnabled = true,
@@ -184,6 +201,7 @@ export function BrowserToolbar({
         <NavButton
           title={browserPreviewShortcutTitle('刷新', 'reload')}
           onClick={onRefresh}
+          spinning={refreshing}
           icon={
             <>
               <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.8 1 6.5 2.6" />
@@ -191,6 +209,24 @@ export function BrowserToolbar({
             </>
           }
         />
+        {onToggleNativeRender !== undefined && (
+          <NavButton
+            title={
+              nativeRender
+                ? '原生渲染（流畅）：点击切回实时画面'
+                : '实时画面（调试）：点击切到原生渲染，操作更流畅'
+            }
+            active={nativeRender}
+            onClick={onToggleNativeRender}
+            icon={
+              <>
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </>
+            }
+          />
+        )}
         <input
           type="text"
           value={addressInput}
@@ -222,7 +258,14 @@ export function BrowserToolbar({
         />
         <button
           type="button"
-          title={isCurrentBookmarked ? '取消收藏' : '收藏当前页'}
+          title={
+            bookmarkDisabled
+              ? '新标签页没有可收藏的地址'
+              : isCurrentBookmarked
+                ? '取消收藏'
+                : '收藏当前页'
+          }
+          disabled={bookmarkDisabled}
           onClick={onToggleBookmark}
           style={{
             width: 26,
@@ -238,9 +281,10 @@ export function BrowserToolbar({
               ? 'color-mix(in oklch, var(--warning) 12%, transparent)'
               : 'transparent',
             color: isCurrentBookmarked ? 'var(--warning)' : 'var(--fg-default)',
-            cursor: 'pointer',
+            cursor: bookmarkDisabled ? 'not-allowed' : 'pointer',
             flexShrink: 0,
             fontSize: 0,
+            opacity: bookmarkDisabled ? 0.5 : 1,
           }}
         >
           <svg
@@ -521,6 +565,10 @@ export function BrowserToolbar({
         <DevicePreviewBar
           devicePresetId={devicePresetId}
           onDevicePresetChange={onDevicePresetChange}
+          qualityPresetId={qualityPresetId}
+          onQualityPresetChange={onQualityPresetChange}
+          // 画质只对 CDP 实时画面有效：没有实时引擎时（纯 iframe）不给出无效控件。
+          qualityPresetEnabled={capability.liveView}
           zoom={zoom}
           onZoomChange={onZoomChange}
         />
@@ -623,8 +671,59 @@ function DeviceBarButton({ title, disabled = false, onClick, children }: DeviceB
 interface DevicePreviewBarProps {
   devicePresetId: string;
   onDevicePresetChange: (id: string) => void;
+  qualityPresetId: string;
+  onQualityPresetChange: (id: string) => void;
+  /** 画质是否接线（只有 CDP 实时画面消费它）。 */
+  qualityPresetEnabled?: boolean;
   zoom: number;
   onZoomChange: (zoom: number) => void;
+}
+
+interface DeviceBarSelectProps {
+  ariaLabel: string;
+  title: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly { readonly id: string; readonly label: string }[];
+}
+
+/** 设备条上的下拉：设备预设与画质档位共用同一套 hover / focus 反馈。 */
+function DeviceBarSelect({ ariaLabel, title, value, onChange, options }: DeviceBarSelectProps) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <select
+      aria-label={ariaLabel}
+      title={title}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        height: 22,
+        padding: '0 4px',
+        borderRadius: 'var(--radius-xs)',
+        border:
+          hovered || focused
+            ? '1px solid var(--border-emphasis)'
+            : '1px solid var(--border-subtle)',
+        background: 'var(--bg-base)',
+        color: 'var(--fg-default)',
+        fontSize: 10.5,
+        cursor: 'pointer',
+        flexShrink: 0,
+      }}
+    >
+      {options.map((item) => (
+        <option key={item.id} value={item.id}>
+          {item.label}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 /**
@@ -634,13 +733,14 @@ interface DevicePreviewBarProps {
 function DevicePreviewBar({
   devicePresetId,
   onDevicePresetChange,
+  qualityPresetId,
+  onQualityPresetChange,
+  qualityPresetEnabled = true,
   zoom,
   onZoomChange,
 }: DevicePreviewBarProps) {
-  const [presetHovered, setPresetHovered] = useState(false);
-  const [presetFocused, setPresetFocused] = useState(false);
-
   const preset = resolveDevicePreset(devicePresetId);
+  const qualityPreset = resolveQualityPreset(qualityPresetId);
   const viewport = preset !== null && preset.width > 0 && preset.height > 0 ? preset : null;
   const zoomed = zoom !== 1;
 
@@ -660,39 +760,29 @@ function DevicePreviewBar({
       }}
     >
       <span style={DEVICE_BAR_LABEL_STYLE}>设备</span>
-      <select
-        aria-label="设备预设"
+      <DeviceBarSelect
+        ariaLabel="设备预设"
         title={browserPreviewShortcutTitle('设备预设：模拟目标设备的视口尺寸', 'cycleDevicePreset')}
         value={preset?.id ?? DEFAULT_DEVICE_PRESET_ID}
-        onChange={(event) => onDevicePresetChange(event.target.value)}
-        onMouseEnter={() => setPresetHovered(true)}
-        onMouseLeave={() => setPresetHovered(false)}
-        onFocus={() => setPresetFocused(true)}
-        onBlur={() => setPresetFocused(false)}
-        style={{
-          height: 22,
-          padding: '0 4px',
-          borderRadius: 'var(--radius-xs)',
-          border:
-            presetHovered || presetFocused
-              ? '1px solid var(--border-emphasis)'
-              : '1px solid var(--border-subtle)',
-          background: 'var(--bg-base)',
-          color: 'var(--fg-default)',
-          fontSize: 10.5,
-          cursor: 'pointer',
-          flexShrink: 0,
-        }}
-      >
-        {BROWSER_DEVICE_PRESETS.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.label}
-          </option>
-        ))}
-      </select>
+        onChange={onDevicePresetChange}
+        options={BROWSER_DEVICE_PRESETS}
+      />
       <span data-testid="browser-device-size" style={DEVICE_BAR_READOUT_STYLE}>
         {viewport !== null ? `${viewport.width}×${viewport.height}` : '填充面板'}
       </span>
+
+      {qualityPresetEnabled && (
+        <>
+          <span style={DEVICE_BAR_LABEL_STYLE}>画质</span>
+          <DeviceBarSelect
+            ariaLabel="画质档位"
+            title={qualityPreset.hint}
+            value={qualityPreset.id}
+            onChange={onQualityPresetChange}
+            options={BROWSER_QUALITY_PRESETS}
+          />
+        </>
+      )}
 
       <div style={{ flex: 1 }} />
 

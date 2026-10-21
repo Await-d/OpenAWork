@@ -31,6 +31,13 @@ export interface ChatComposerModelControlsProps {
  * 思考处于什么等级。
  */
 export function ChatComposerModelControls(props: ChatComposerModelControlsProps) {
+  // 两个 ref 刻意先解构再用，不要「简化」回 `ref={props.modelPickerRef}`。
+  //
+  // React Compiler 默认开启 `enableTreatRefLikeIdentifiersAsRefs`，会把名字以
+  // `Ref` 结尾的成员访问一律当作「渲染期访问 ref」，进而放弃优化整个组件
+  // （报 Cannot access refs during render）。解构后按普通局部变量传递即可正常编译，
+  // 行为完全等价——本组件只把 ref 对象交给 `ref=`，从不读取 `.current`。
+  const { modelPickerRef, modelSettingsRef } = props;
   const showGroup = props.showModelPickerButton || props.showModelSettingsButton;
   if (!showGroup) return null;
 
@@ -38,7 +45,7 @@ export function ChatComposerModelControls(props: ChatComposerModelControlsProps)
     <div className="composer-model-group">
       {props.showModelPickerButton && (
         <button
-          ref={props.modelPickerRef}
+          ref={modelPickerRef}
           type="button"
           onClick={props.onToggleModelPicker}
           title={props.activeModelTooltip ?? '当前使用模型'}
@@ -66,7 +73,7 @@ export function ChatComposerModelControls(props: ChatComposerModelControlsProps)
       )}
       {props.showModelSettingsButton && (
         <button
-          ref={props.modelSettingsRef}
+          ref={modelSettingsRef}
           type="button"
           onClick={props.onToggleModelSettings}
           title={describeSettingsTooltip(props)}

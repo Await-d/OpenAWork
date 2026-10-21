@@ -6,9 +6,8 @@
  *   `/browser-live/status` 判断引擎可用性；
  * - 可用时建立 WS 通道，把网关下行的 `hello / frame / console / network / node /
  *   error` 信封扇出给所有订阅者（帧渲染、控制台桥接、元素拾取各自订阅）；
- * - 掉线后按 500ms → 1s → 2s → 4s 退避重连（最多 5 次），重连成功必须重发
- *   `control.screencast.start`——hub 只为「新 controller」恢复产帧，否则预览会
- *   停在最后一帧。
+ * - 掉线后按 500ms → 1s → 2s → 4s 退避重连（最多 5 次）；具体 screencast 定档由
+ *   `cdp-live-engine` 在 `connected` 状态下统一发送，避免 hello 与引擎 effect 重复起流。
  *
  * 注意：本 hook 只做传输与生命周期，不做任何 UI 决策。
  */
@@ -276,11 +275,9 @@ export function useBrowserLiveSession({
               active?.close();
               return;
             }
-            // hello 每个连接一次：重连后在这里重新请求 screencast，hub 才会为新的
-            // controller 恢复产帧；不支持 screencast 的引擎则安静降级。
-            if (hello.screencast === true) {
-              active?.send({ ch: 'control', action: 'screencast.start' });
-            }
+            // screencast 由 cdp-live-engine 按显示尺寸 / 质量 / binary 能力统一定档。
+            // 这里不再发送无参数的 start：hello 到达时引擎 effect 可能已经把带参数的
+            // start 放进待发队列，重复调用会让 Chromium 额外重编码一帧并抢占交互 CPU。
           }
 
           if (envelope.ch === 'screenshot') {

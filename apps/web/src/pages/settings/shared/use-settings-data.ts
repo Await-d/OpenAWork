@@ -24,6 +24,7 @@ import type {
   ChannelTypeDescriptor,
 } from '../../../components/common/display/ChannelSubscriptionSettings.js';
 import { logger } from '../../../utils/log/logger.js';
+import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 import { normalizeSettingsModelPrices } from '../usage/usage-data.js';
 import { createInitialDevtoolsSourceStates } from '../state/settings-derived.js';
 import type {
@@ -55,6 +56,7 @@ interface UseSettingsDataOptions {
   loadDevLogs: () => Promise<void>;
   loadWorkers: () => Promise<void>;
   loadDiagnostics: () => Promise<void>;
+  loadChannelTroubleshooting: () => Promise<void>;
   loadDesktopAutomationStatus: () => Promise<void>;
   loadDesktopControlStatus: () => Promise<void>;
   loadSshConnections: () => Promise<void>;
@@ -77,6 +79,7 @@ export function useSettingsData({
   loadDevLogs,
   loadWorkers,
   loadDiagnostics,
+  loadChannelTroubleshooting,
   loadDesktopAutomationStatus,
   loadDesktopControlStatus,
   loadSshConnections,
@@ -157,7 +160,9 @@ export function useSettingsData({
           subagentLimits?: SubagentLimitsRef | null;
         };
         if (typed.providers) {
-          providersRef.current = typed.providers;
+          // `providersRef` 是 hook 参数，直接写 .current 属「修改 hook 参数」，
+          // 会让本 hook 整体退出 React Compiler 优化（见 utils/ref/ref-current.ts）。
+          writeRefCurrent(providersRef, typed.providers);
           setProviders(typed.providers);
         }
         applyServerDefaults(
@@ -230,6 +235,7 @@ export function useSettingsData({
     void loadDevLogs();
     void loadWorkers();
     void loadDiagnostics();
+    void loadChannelTroubleshooting();
     void settingsClient
       .getModelPrices(token)
       .then((d) => {
@@ -288,6 +294,7 @@ export function useSettingsData({
     loadDesktopControlStatus,
     loadDevLogs,
     loadDiagnostics,
+    loadChannelTroubleshooting,
     loadUpstreamRetrySettings,
     loadSshConnections,
     loadWorkers,

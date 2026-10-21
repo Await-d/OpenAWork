@@ -4,17 +4,17 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { useRef, useState } from 'react';
 import { useChatBranchSession } from './use-chat-branch-session.js';
 
-const getRecovery = vi.fn<(...args: unknown[]) => Promise<unknown>>();
+const get = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 const importSession = vi.fn<(...args: unknown[]) => Promise<{ sessionId: string }>>();
 const updateMetadata = vi.fn<(...args: unknown[]) => Promise<void>>();
 
 vi.mock('@openAwork/web-client', () => ({
-  createSessionsClient: vi.fn(() => ({ getRecovery, importSession, updateMetadata })),
+  createSessionsClient: vi.fn(() => ({ get, importSession, updateMetadata })),
 }));
 
 afterEach(() => {
   cleanup();
-  getRecovery.mockReset();
+  get.mockReset();
   importSession.mockReset();
   updateMetadata.mockReset();
 });
@@ -71,13 +71,12 @@ function renderBranchHook() {
 
 describe('useChatBranchSession', () => {
   it('无 inputParts 时切到分支会话并回填输入框', async () => {
-    getRecovery.mockResolvedValue({
-      session: {
-        messages: [
-          { id: 'm1', role: 'user', content: 'hello' },
-          { id: 'm2', role: 'assistant', content: 'world' },
-        ],
-      },
+    // 改走 `get()`（GET /sessions/:id）取完整转录：直接返回 session 本体。
+    get.mockResolvedValue({
+      messages: [
+        { id: 'm1', role: 'user', content: 'hello' },
+        { id: 'm2', role: 'assistant', content: 'world' },
+      ],
     });
     importSession.mockResolvedValue({ sessionId: 'branch-1' });
     updateMetadata.mockResolvedValue();
@@ -101,8 +100,8 @@ describe('useChatBranchSession', () => {
   });
 
   it('有 inputParts 时创建分支后立即发送', async () => {
-    getRecovery.mockResolvedValue({
-      session: { messages: [{ id: 'm1', role: 'user', content: 'hello' }] },
+    get.mockResolvedValue({
+      messages: [{ id: 'm1', role: 'user', content: 'hello' }],
     });
     importSession.mockResolvedValue({ sessionId: 'branch-2' });
     updateMetadata.mockResolvedValue();

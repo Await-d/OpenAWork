@@ -468,25 +468,48 @@ function formatUsdCost(value: number): string {
   }).format(value);
 }
 
-function MetaLine({ items }: { items: readonly MessageMetaItem[] }) {
+interface MetaLineEntry {
+  readonly fragmentKey: string;
+  readonly shouldPrefixSeparator: boolean;
+  readonly item: MessageMetaItem;
+}
+
+/**
+ * 元信息项 → (分隔符前缀判定, 稳定 key)。
+ *
+ * 偏移量原本写成 `MetaLine` 渲染作用域里的 `let offset` + `items.map` 回调里的
+ * `offset += …`：React Compiler 把「渲染作用域变量被嵌套回调改写」判为
+ * "Cannot reassign variable after render completes"，整个 `MetaLine` 退出优化。
+ * 计算挪到模块级纯函数（普通函数不进编译器，局部 `let` 累加合法），
+ * 渲染期只消费不变的 entries。
+ */
+function buildMetaLineEntries(items: readonly MessageMetaItem[]): MetaLineEntry[] {
+  const entries: MetaLineEntry[] = [];
   let offset = 0;
+  for (const item of items) {
+    entries.push({
+      fragmentKey: `${item.tone ?? 'default'}-${offset}-${item.label}`,
+      shouldPrefixSeparator: offset > 0,
+      item,
+    });
+    offset += item.label.length + 1;
+  }
+  return entries;
+}
+
+function MetaLine({ items }: { items: readonly MessageMetaItem[] }) {
+  const entries = buildMetaLineEntries(items);
 
   return (
     <div className="chat-message-meta-row" data-message-meta-row="true">
-      {items.map((item) => {
-        const fragmentKey = `${item.tone ?? 'default'}-${offset}-${item.label}`;
-        const shouldPrefixSeparator = offset > 0;
-        offset += item.label.length + 1;
-
-        return (
-          <React.Fragment key={fragmentKey}>
-            {shouldPrefixSeparator && <span className="chat-message-meta-separator">·</span>}
-            <span className={`chat-message-meta-item${item.tone ? ` is-${item.tone}` : ''}`}>
-              {item.label}
-            </span>
-          </React.Fragment>
-        );
-      })}
+      {entries.map(({ fragmentKey, shouldPrefixSeparator, item }) => (
+        <React.Fragment key={fragmentKey}>
+          {shouldPrefixSeparator && <span className="chat-message-meta-separator">·</span>}
+          <span className={`chat-message-meta-item${item.tone ? ` is-${item.tone}` : ''}`}>
+            {item.label}
+          </span>
+        </React.Fragment>
+      ))}
     </div>
   );
 }

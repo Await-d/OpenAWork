@@ -312,6 +312,10 @@ export interface TeamConversationLayoutProps {
   ) => Promise<boolean | void> | boolean | void;
   onStopComposer: () => void | Promise<void>;
   onComposerModelSelect?: (providerId: string, modelId: string) => Promise<void>;
+  /** 模型弹层里的「刷新模型列表」入口；不提供时弹层不渲染刷新按钮。 */
+  onRefreshProviders?: () => void | Promise<void>;
+  /** 模型目录刷新进行中（弹层按钮转旋转态）。 */
+  providersRefreshing?: boolean;
   onContextWindowOverrideChange?: (value: number | undefined) => Promise<void>;
   onToggleWebSearch: () => void;
   onThinkingEnabledChange: (enabled: boolean) => void;
@@ -538,6 +542,8 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
     onComposerSubmit,
     onStopComposer,
     onComposerModelSelect,
+    onRefreshProviders,
+    providersRefreshing,
     onContextWindowOverrideChange,
     onToggleWebSearch,
     onThinkingEnabledChange,
@@ -890,6 +896,8 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
           onSubmit={composerDisabled ? () => undefined : onComposerSubmit}
           onStop={onStopComposer}
           onModelSelect={onComposerModelSelect}
+          onRefreshProviders={onRefreshProviders}
+          providersRefreshing={providersRefreshing}
           onContextWindowOverrideChange={onContextWindowOverrideChange}
           onToggleWebSearch={onToggleWebSearch}
           onThinkingEnabledChange={onThinkingEnabledChange}

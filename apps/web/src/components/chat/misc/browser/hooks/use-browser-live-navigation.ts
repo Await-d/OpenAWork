@@ -4,8 +4,9 @@
  * 原生窗口的画面由系统 webview 渲染，网关侧 CDP 页面不会被 `CdpLiveEngine`
  * 挂载——没有这段接线，实时引擎采集到的永远是空白页。本 hook 把当前标签页的
  * URL / 刷新信号下发给远端页面，语义与 `CdpLiveEngine` 的导航 effect 完全一致
- * （同一 URL 只导航一次、`about:blank` 等非 http(s) 地址跳过、未建连时进待发
- * 队列由通道就绪后补发）。
+ * （同一 URL 只导航一次、`about:blank` 等非 http(s) 地址不做主动导航，但从真实
+ * 页面回落到占位页时会显式导航到空白页以停止旧页面、未建连时进待发队列由通道
+ * 就绪后补发）。
  *
  * 为什么单独成 hook 而不是复用引擎组件：引擎组件同时负责 screencast 渲染与
  * 输入回传，Tauri 下这两项都不需要（画面是原生 webview，输入走系统 webview），
@@ -14,7 +15,6 @@
 
 import { useEffect, useRef } from 'react';
 
-import { NAVIGABLE_URL_PATTERN } from '../browser-url.js';
 import type { BrowserLiveSession } from './use-browser-live-session.js';
 
 export interface UseBrowserLiveNavigationOptions {
@@ -45,11 +45,14 @@ export function useBrowserLiveNavigation({
   const lastRefreshKeyRef = useRef(refreshKey);
 
   // 首次进入 / 地址变更：让远端跟随当前标签页的 URL。
+  //
+  // 占位页（`about:blank`）**同样下发**：它是合法的 CDP 导航，能把网关侧主文档真的
+  // 切到空白页。以前用 `NAVIGABLE_URL_PATTERN` 挡掉它，结果是切到新建的空白标签
+  // 后远端仍停在旧页面——既继续推旧帧，也让控制台 / 网络采集错位。
   useEffect(() => {
     if (!enabled) return;
     if (navigatedUrlRef.current === url) return;
     navigatedUrlRef.current = url;
-    if (!NAVIGABLE_URL_PATTERN.test(url)) return;
     send({ ch: 'control', action: 'navigate', url });
   }, [enabled, url, send]);
 

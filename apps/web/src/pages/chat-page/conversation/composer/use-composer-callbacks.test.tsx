@@ -99,6 +99,19 @@ describe('useComposerCallbacks', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it('暂停态（等待审批 / 等待回答）按 Enter 直接发送，不降级为排队', () => {
+    // paused 时网关并不持有单飞锁（暂停流已收尾并释放），若把 Enter 降级为排队，
+    // 用户在等待交互期间敲 Enter 只会静默入队，观感就是「发不出去」。
+    const { enqueueComposerMessage, sendMessage, textarea } = renderHarness('先做这件事', {
+      remoteSessionBusyState: 'paused',
+    });
+
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(enqueueComposerMessage).not.toHaveBeenCalled();
+  });
+
   it('完整 slash 命令在菜单打开时按 Enter 会直接发送，而不是再次补全', () => {
     const setComposerMenu = vi.fn();
     const { sendMessage, textarea } = renderHarness('/compact', {

@@ -128,9 +128,19 @@ export function matchBrowserPreviewShortcut(
   return matched?.id ?? null;
 }
 
+/**
+ * 预览自己那个透明 IME 输入框的标记属性。
+ *
+ * 它虽然是个 textarea，但承担的是「预览页面内的输入通道」：焦点在它上面时，
+ * `Ctrl+R` / `Ctrl+=` 等仍然应该由预览快捷键接管。不排除它的话，一聚焦预览，
+ * 所有快捷键都会被当成「用户正在别处打字」而静默失效。
+ */
+export const PREVIEW_IME_ATTRIBUTE = 'data-preview-ime';
+
 /** 按键目标是否正在输入：`input` / `textarea` / `select` / `contenteditable`。 */
 export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
+  if (target.getAttribute(PREVIEW_IME_ATTRIBUTE) === 'true') return false;
   if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
     return true;
   }

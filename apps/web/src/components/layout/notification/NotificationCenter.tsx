@@ -82,6 +82,41 @@ interface NotificationCenterProps {
 
 // ── Component ──────────────────────────────────────────────────
 
+/**
+ * 通知中心动作的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`
+ * （不传＝异常继续向上抛，不得静默吞掉），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * 「无 catch 的 try」，本组件 2 处这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runNotificationActionOnce(ctx: {
+  onError?: (error: unknown) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      throw error;
+    }
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
+/**
+ * 记录已广播的通知 id（去重缓存）。
+ *
+ * 必须留在模块级：`seenIds` 来自 `useMemo`，编译器把 memo 值视为不可变，直接
+ * `.add()` 会被判为 "This mutates a variable that React considers immutable"
+ * 并让整个组件退出优化（eslint 直接报 error，实测）。收进模块函数后语义不变。
+ */
+function addSeenNotificationId(seenIds: Set<string>, id: string): void {
+  seenIds.add(id);
+}
+
 export default function NotificationCenter({
   accessToken,
   gatewayUrl,
@@ -253,7 +288,7 @@ export default function NotificationCenter({
       ) {
         [...visible, ...(result.browserBroadcasts ?? [])].forEach((item) => {
           if (seenIdsRef.has(item.id)) return;
-          seenIdsRef.add(item.id);
+          addSeenNotificationId(seenIdsRef, item.id);
           if (!isBrowserNotificationEnabled(item.eventType, effectivePreferences)) return;
           new Notification(item.title, {
             body: (() => {
@@ -269,7 +304,7 @@ export default function NotificationCenter({
         });
       } else {
         [...visible, ...(result.browserBroadcasts ?? [])].forEach((item) =>
-          seenIdsRef.add(item.id),
+          addSeenNotificationId(seenIdsRef, item.id),
         );
       }
     },
@@ -291,18 +326,23 @@ export default function NotificationCenter({
       setLoading(true);
       const effectivePreferences = options?.preferences ?? preferencesRef.current;
       const effectiveView = options?.view ?? 'pending';
-      try {
-        const result = await createNotificationsClient(gatewayUrl).list(accessToken, {
-          limit: 30,
-          signal: controller.signal,
-          view: effectiveView,
-        });
-        if (controller.signal.aborted) return;
-        applyNotificationsResult(result, effectivePreferences);
-      } finally {
-        if (abortRef.current === controller) abortRef.current = null;
-        setLoading(false);
-      }
+      // try/finally 下沉到模块级 `runNotificationActionOnce`（见其注释）；
+      // 原代码此处**没有 catch**（异常向上抛），故不传 onError。
+      await runNotificationActionOnce({
+        onFinally: () => {
+          if (abortRef.current === controller) abortRef.current = null;
+          setLoading(false);
+        },
+        run: async () => {
+          const result = await createNotificationsClient(gatewayUrl).list(accessToken, {
+            limit: 30,
+            signal: controller.signal,
+            view: effectiveView,
+          });
+          if (controller.signal.aborted) return;
+          applyNotificationsResult(result, effectivePreferences);
+        },
+      });
     },
     [accessToken, gatewayUrl, seenIdsRef, applyNotificationsResult],
   );
@@ -561,66 +601,74 @@ export default function NotificationCenter({
   const handleQuickPermissionReply = useCallback(
     async (notification: NotificationRecord, decision: PermissionDecision) => {
       if (!accessToken || !notification.sessionId) return;
+      // 收窄成局部常量：`notification.sessionId` 的属性收窄不会延续进下面的闭包，
+      // 而闭包里需要的是 `string`（收窄前的类型是 `string | null`）。
+      const replySessionId = notification.sessionId;
       setReplyingIds((prev) => new Set(prev).add(notification.id));
-      try {
-        const permClient = createPermissionsClient(gatewayUrl);
-        const cachedDetails = permissionDetails[notification.id];
-        let details = cachedDetails;
-        let requestId = cachedDetails?.requestId;
-        if (!requestId) {
-          const pending = await permClient.listPending(accessToken, notification.sessionId);
-          const matched = matchPendingPermissionForNotification(notification, pending);
-          if (!matched) {
+      // try/catch/finally 下沉到模块级 `runNotificationActionOnce`（见其注释）。
+      await runNotificationActionOnce({
+        onError: (error) => {
+          if (isPermissionReplyAlreadyHandled(error)) {
             toast('该权限请求已被处理或已过期', 'info');
             void handleDismissNotification(notification);
-            return;
+          } else {
+            toast('审批操作失败，请稍后重试', 'error');
           }
-          details = matched;
-          requestId = matched.requestId;
-          setPermissionDetails((prev) => ({ ...prev, [notification.id]: matched }));
-        }
-        let alwaysOverride: string[] | undefined;
-        if (decision !== 'once' && decision !== 'reject' && details) {
-          const { selectedLevel } = resolveAlwaysScopeSelection(
-            details.previewAction,
-            details.scope,
-            details.always,
-            selectedScopes[notification.id] ?? 'base',
-          );
-          if (selectedLevel) {
-            alwaysOverride = [selectedLevel.pattern];
+        },
+        onFinally: () => {
+          setReplyingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(notification.id);
+            return next;
+          });
+        },
+        run: async () => {
+          const permClient = createPermissionsClient(gatewayUrl);
+          const cachedDetails = permissionDetails[notification.id];
+          let details = cachedDetails;
+          let requestId = cachedDetails?.requestId;
+          if (!requestId) {
+            const pending = await permClient.listPending(accessToken, replySessionId);
+            const matched = matchPendingPermissionForNotification(notification, pending);
+            if (!matched) {
+              toast('该权限请求已被处理或已过期', 'info');
+              void handleDismissNotification(notification);
+              return;
+            }
+            details = matched;
+            requestId = matched.requestId;
+            setPermissionDetails((prev) => ({ ...prev, [notification.id]: matched }));
           }
-        }
-        await permClient.reply(accessToken, notification.sessionId, {
-          requestId,
-          decision,
-          ...(alwaysOverride ? { alwaysOverride } : {}),
-        });
-        if (decision !== 'reject') {
-          requestSessionStreamResumeAttach(notification.sessionId);
-        }
-        const labels: Record<PermissionDecision, string> = {
-          once: '允许一次',
-          session: '本会话允许',
-          permanent: '永久允许',
-          reject: '已拒绝',
-        };
-        toast(`已提交：${labels[decision]}`, 'success');
-        void handleDismissNotification(notification);
-      } catch (error) {
-        if (isPermissionReplyAlreadyHandled(error)) {
-          toast('该权限请求已被处理或已过期', 'info');
+          let alwaysOverride: string[] | undefined;
+          if (decision !== 'once' && decision !== 'reject' && details) {
+            const { selectedLevel } = resolveAlwaysScopeSelection(
+              details.previewAction,
+              details.scope,
+              details.always,
+              selectedScopes[notification.id] ?? 'base',
+            );
+            if (selectedLevel) {
+              alwaysOverride = [selectedLevel.pattern];
+            }
+          }
+          await permClient.reply(accessToken, replySessionId, {
+            requestId,
+            decision,
+            ...(alwaysOverride ? { alwaysOverride } : {}),
+          });
+          if (decision !== 'reject') {
+            requestSessionStreamResumeAttach(replySessionId);
+          }
+          const labels: Record<PermissionDecision, string> = {
+            once: '允许一次',
+            session: '本会话允许',
+            permanent: '永久允许',
+            reject: '已拒绝',
+          };
+          toast(`已提交：${labels[decision]}`, 'success');
           void handleDismissNotification(notification);
-        } else {
-          toast('审批操作失败，请稍后重试', 'error');
-        }
-      } finally {
-        setReplyingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(notification.id);
-          return next;
-        });
-      }
+        },
+      });
     },
     [accessToken, gatewayUrl, handleDismissNotification, permissionDetails, selectedScopes],
   );

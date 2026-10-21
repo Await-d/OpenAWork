@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, type CSSProperties } from 'react';
-import type { SidePanelActiveTab } from '../../../stores/ui/uiState.js';
 import {
   resolveFusionConversationLayoutState,
   type ConversationLayoutState,
@@ -16,9 +15,7 @@ export interface UseFusionChatLayoutOptions {
   readonly setEditorFullScreen: (value: boolean) => void;
   readonly setEditorMode: (value: boolean) => void;
   readonly setReviewPanelOpened: (open: boolean) => void;
-  readonly setSidePanelActiveTab: (tab: SidePanelActiveTab) => void;
   readonly setTerminalPanelOpened: (open: boolean) => void;
-  readonly sidePanelActiveTab: SidePanelActiveTab;
   readonly terminalPanelOpened: boolean;
   readonly terminalRunningCount: number;
 }
@@ -44,9 +41,7 @@ export function useFusionChatLayout({
   setEditorFullScreen,
   setEditorMode,
   setReviewPanelOpened,
-  setSidePanelActiveTab,
   setTerminalPanelOpened,
-  sidePanelActiveTab,
   terminalPanelOpened,
   terminalRunningCount,
 }: UseFusionChatLayoutOptions): FusionChatLayoutState {
@@ -85,13 +80,12 @@ export function useFusionChatLayout({
   ]);
 
   const toggleReviewPanel = useCallback(() => {
-    // 放大态（editorMode + editorFullScreen）下面板被隐藏：顶栏「审查」按钮的
-    // 语义是「收起到面板并回到审查」——退出全屏、收起主区分屏并把面板切回审查，
-    // 避免出现点了没反应的死按钮。
+    // 放大态（editorMode + editorFullScreen）下面板被隐藏：顶栏按钮的语义是
+    // 「收起到会话面板」——退出全屏、收起主区分屏并展开面板。一级 tab 保持
+    // 会话记忆值，不要把用户刚选好的代码 / 预览强行换成审查。
     if (editorMode && editorFullScreen) {
       setEditorFullScreen(false);
       setEditorMode(false);
-      setSidePanelActiveTab('review');
       setReviewPanelOpened(true);
       return;
     }
@@ -104,7 +98,8 @@ export function useFusionChatLayout({
       return;
     }
 
-    setSidePanelActiveTab('review');
+    // 展开时保留该会话记忆的一级 tab：按钮文案是「展开会话面板」而非「打开审查」，
+    // 需要直达审查的入口（文件变更通知 / openFileChangesPanel）会自己把 tab 切过去。
     setReviewPanelOpened(true);
   }, [
     editorFullScreen,
@@ -113,7 +108,6 @@ export function useFusionChatLayout({
     setEditorFullScreen,
     setEditorMode,
     setReviewPanelOpened,
-    setSidePanelActiveTab,
   ]);
 
   const showDockedSidePanel =

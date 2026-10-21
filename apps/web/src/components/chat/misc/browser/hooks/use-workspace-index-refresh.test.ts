@@ -175,6 +175,71 @@ describe('useWorkspaceIndexRefresh', () => {
     }
   });
 
+  it('冷却期内的多次变化合并成一次尾随刷新（Agent 连续写盘不会逐轮 reload）', async () => {
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 1 });
+    const onChange = vi.fn();
+    renderHook(() =>
+      useWorkspaceIndexRefresh({
+        enabled: true,
+        workspacePath: '/ws',
+        onChange,
+        minIntervalMs: 8_000,
+      }),
+    );
+
+    await flush(); // t=0 建立基线
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 2 });
+    await advance(2_500); // t=2500 首次变化 → 立即刷新
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 3 });
+    await advance(2_500); // t=5000 冷却中 → 不刷新
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    // t=10500 尾随刷新补齐（最后一次写盘不会被吞掉）。
+    await advance(5_500);
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('默认就带冷却间隔（不传 minIntervalMs 也生效）', async () => {
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 1 });
+    const onChange = vi.fn();
+    renderHook(() => useWorkspaceIndexRefresh({ enabled: true, workspacePath: '/ws', onChange }));
+
+    await flush();
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 2 });
+    await advance(2_500);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 3 });
+    await advance(2_500);
+    // 没有冷却的话这里会立刻再刷一次。
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    await advance(5_500);
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('冷却中的尾随刷新在卸载时被清理', async () => {
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 1 });
+    const onChange = vi.fn();
+    const { unmount } = renderHook(() =>
+      useWorkspaceIndexRefresh({ enabled: true, workspacePath: '/ws', onChange }),
+    );
+
+    await flush();
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 2 });
+    await advance(2_500);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 3 });
+    await advance(2_500);
+
+    unmount();
+    await advance(10_000);
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
   it('卸载后清理定时器，不再发起请求', async () => {
     mocks.getFileIndexVersion.mockResolvedValue({ root: '/ws', version: 1 });
     const onChange = vi.fn();

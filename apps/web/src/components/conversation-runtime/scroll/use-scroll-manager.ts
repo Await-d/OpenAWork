@@ -13,6 +13,7 @@ import {
   SCROLL_PROGRAMMATIC_POSITION_TOLERANCE_PX,
 } from './scroll-follow-state.js';
 import { useScrollIntent } from './use-scroll-intent.js';
+import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 
 /**
  * 自动跟随的最终不变量（**never a time window**）：
@@ -204,6 +205,23 @@ export function useScrollManager(
   /** `reconcileFollowState` 的有界布局重试帧与其帧计数（成功测量后归零）。 */
   const reconcileRetryFrameRef = useRef<number | null>(null);
   const reconcileRetryCountRef = useRef(0);
+  /**
+   * `seek-latest` 意图的落点裁决实现桥（`handleSeekLatest`）。用途见
+   * `useScrollIntent` 调用处的说明：单向 ref 桥用于打破
+   * `handleSeekLatest` ↔ `useScrollIntent` 的声明环，事件回调里才取值。
+   */
+  const handleSeekLatestRef = useRef<() => void>(() => undefined);
+  /**
+   * `reconcileFollowState` 的自我调度桥（trampoline）。
+   *
+   * `clientHeight === 0` 的有界重试要在 rAF 回调里再次调用它自己，直接写
+   * `reconcileFollowState(...)` 是「`const` 回调在自身初始化器内自引用」，
+   * React Compiler 判为 "Cannot access variable before it is declared"（TDZ）
+   * 并放弃优化整个 hook。ref 只在 rAF 回调里取值，由下方 effect 同步最新实现。
+   */
+  const reconcileFollowStateRef = useRef<
+    (scrollRegion: HTMLDivElement, reconcileOptions?: { layoutOnly?: boolean }) => void
+  >(() => undefined);
 
   const syncFollowFlags = useCallback(
     (interrupted: boolean): void => {
@@ -228,7 +246,13 @@ export function useScrollManager(
   const { userInterruptedRef, markUserReturned } = useScrollIntent({
     scrollRegionRef,
     onIntentApplied: applyFollowState,
-    onSeekLatest: handleSeekLatest,
+    // `handleSeekLatest` 依赖 `autoFollowLatest`，后者又依赖这里的
+    // `userInterruptedRef`：直接传函数会形成「引用更晚声明的 const」的 TDZ，
+    // React Compiler 报 "Cannot access variable before it is declared" 后整个
+    // hook 退出优化。改为单向 ref 桥——箭头函数只做延迟取值（渲染期不读 ref，
+    // 不会触发 "Cannot access refs during render"），`useScrollIntent` 内部同样
+    // 以 ref 持有该回调（见 use-scroll-intent.ts），替换成本与直接传函数一致。
+    onSeekLatest: () => handleSeekLatestRef.current(),
   });
 
   const measureScroll = useCallback(
@@ -285,7 +309,7 @@ export function useScrollManager(
               scheduleRetry();
               return;
             }
-            reconcileFollowState(region, reconcileOptions);
+            reconcileFollowStateRef.current(region, reconcileOptions);
           });
         };
         scheduleRetry();
@@ -322,7 +346,11 @@ export function useScrollManager(
         interrupted: userInterruptedRef.current,
         position: { atLatestEdge, atTrueBottom, programmatic, positionMoved },
       });
-      userInterruptedRef.current = interrupted;
+      // `userInterruptedRef` 由 useScrollIntent 创建后返回、`pendingScrollFrameRef`
+      // 由调用方作为参数传入：写它们的 .current 都会被 React Compiler 判为
+      // 「修改函数返回值 / hook 参数」并放弃优化整个 hook，故统一走收敛函数
+      // （见 utils/ref/ref-current.ts）。
+      writeRefCurrent(userInterruptedRef, interrupted);
       // 未挂起 + 位置不是本模块记录的程序化落点 ⇒ 这是**浏览器钳位**（内容瞬时
       // 缩短 / 视口高度变化把 `scrollTop` 移到当时的 `maxScrollTop`）或用户自己回到
       // 真正底部：两种情况下当前位置都是「在最新处」的合法基线，必须把它记为新的
@@ -344,13 +372,19 @@ export function useScrollManager(
     ],
   );
 
+  // 与 reconcileFollowStateRef 配对的同步 effect：rAF 重试最早也在下一帧，
+  // 挂载提交阶段的同步 effect 必先写入。
+  useEffect(() => {
+    reconcileFollowStateRef.current = reconcileFollowState;
+  }, [reconcileFollowState]);
+
   const autoFollowLatest = useCallback((): void => {
     // 用户已明确离开 → 任何自动跟随路径都必须立即让路。
     if (userInterruptedRef.current) return;
     if (pendingScrollFrameRef.current !== null) cancelAnimationFrame(pendingScrollFrameRef.current);
     let framesUsed = 0;
     const attempt = (): void => {
-      pendingScrollFrameRef.current = null;
+      writeRefCurrent(pendingScrollFrameRef, null);
       // 帧内再次确认：wheel/touch 可能在调度与执行之间到达。
       if (userInterruptedRef.current) return;
       const sr = scrollRegionRef.current;
@@ -364,7 +398,7 @@ export function useScrollManager(
       if (sr.clientHeight === 0) {
         framesUsed += 1;
         if (framesUsed < CHAT_LAYOUT_WAIT_MAX_FRAMES) {
-          pendingScrollFrameRef.current = requestAnimationFrame(attempt);
+          writeRefCurrent(pendingScrollFrameRef, requestAnimationFrame(attempt));
         }
         return;
       }
@@ -376,7 +410,7 @@ export function useScrollManager(
         sr.scrollTo({ top: maxTop, behavior: 'auto' });
       }
     };
-    pendingScrollFrameRef.current = requestAnimationFrame(attempt);
+    writeRefCurrent(pendingScrollFrameRef, requestAnimationFrame(attempt));
   }, [
     bottomRef,
     pendingScrollFrameRef,
@@ -394,10 +428,13 @@ export function useScrollManager(
    * 用户是在追最新内容，此时允许用宽松的 `resolveAtLatestEdge` 恢复；「翻历史」的
    * `leave-latest` 不会走这里，所以单一上滑刻度被误恢复的历史回归不会复活。
    *
-   * 声明为函数声明（提升）而非 useCallback：它依赖 `autoFollowLatest`，而后者又依赖
-   * `useScrollIntent` 返回的 `userInterruptedRef`，按使用顺序书写会形成声明环。
+   * 这里声明在 `autoFollowLatest` 之后并用 `handleSeekLatestRef` 暴露给
+   * `useScrollIntent`：它依赖 `autoFollowLatest`，而后者又依赖
+   * `useScrollIntent` 返回的 `userInterruptedRef`，按使用顺序直传会形成声明环。
+   * 旧的「函数声明提升 + 提前引用」写法会被 React Compiler 判为
+   * "Cannot access variable before it is declared" 而放弃优化整个 hook。
    */
-  function handleSeekLatest(): void {
+  const handleSeekLatest = useCallback((): void => {
     const sr = scrollRegionRef.current;
     if (!sr || sr.clientHeight === 0) return;
     const measurement = measureScroll(sr);
@@ -412,7 +449,11 @@ export function useScrollManager(
     // 向下意图 + 视口已回到最新边缘 ⇒ 用户是在追最新内容，不是翻历史
     markUserReturned();
     autoFollowLatest();
-  }
+  }, [autoFollowLatest, markUserReturned, measureScroll, scrollRegionRef]);
+
+  useEffect(() => {
+    handleSeekLatestRef.current = handleSeekLatest;
+  }, [handleSeekLatest]);
 
   /**
    * 显式「回到最新」（回底按钮 / 强制跳转）：清除中断并立即贴底。
@@ -428,39 +469,42 @@ export function useScrollManager(
       applyFollowState(false);
       if (pendingScrollFrameRef.current !== null)
         cancelAnimationFrame(pendingScrollFrameRef.current);
-      pendingScrollFrameRef.current = requestAnimationFrame(() => {
-        pendingScrollFrameRef.current = null;
-        const sr = scrollRegionRef.current;
-        if (!sr) {
-          bottomRef.current?.scrollIntoView({
-            behavior: 'auto',
-            block: align === 'center' ? 'center' : 'end',
-          });
-          return;
-        }
-        if (sr.clientHeight === 0) return;
-        const measurement = measureScroll(sr);
-        const nextTop =
-          align === 'center' && measurement.anchor.anchorBottom !== null
-            ? resolveLatestScrollTop({
-                align,
-                anchorHeight: measurement.anchor.anchorHeight,
-                anchorTop: measurement.anchor.anchorTop,
-                centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
-                clientHeight: measurement.clientHeight,
-                maxScrollTop: measurement.maxScrollTop,
-              })
-            : measurement.maxScrollTop;
-        const scrollDelta = Math.abs(sr.scrollTop - nextTop);
-        const shouldScrollForAlign =
-          align === 'latest-edge'
-            ? scrollDelta > 0.5
-            : scrollDelta > CHAT_LATEST_FOCUS_THRESHOLD_PX;
-        // 无论是否真的发出 scrollTo，都记录目标落点：内容随后增长时它仍是
-        // 「我们自己的位置」，不会被 reconcile 当作外部滚动。
-        programmaticScrollTopRef.current = nextTop;
-        if (shouldScrollForAlign) sr.scrollTo({ top: nextTop, behavior: 'auto' });
-      });
+      writeRefCurrent(
+        pendingScrollFrameRef,
+        requestAnimationFrame(() => {
+          writeRefCurrent(pendingScrollFrameRef, null);
+          const sr = scrollRegionRef.current;
+          if (!sr) {
+            bottomRef.current?.scrollIntoView({
+              behavior: 'auto',
+              block: align === 'center' ? 'center' : 'end',
+            });
+            return;
+          }
+          if (sr.clientHeight === 0) return;
+          const measurement = measureScroll(sr);
+          const nextTop =
+            align === 'center' && measurement.anchor.anchorBottom !== null
+              ? resolveLatestScrollTop({
+                  align,
+                  anchorHeight: measurement.anchor.anchorHeight,
+                  anchorTop: measurement.anchor.anchorTop,
+                  centerMarginPx: CHAT_LATEST_FOCUS_THRESHOLD_PX,
+                  clientHeight: measurement.clientHeight,
+                  maxScrollTop: measurement.maxScrollTop,
+                })
+              : measurement.maxScrollTop;
+          const scrollDelta = Math.abs(sr.scrollTop - nextTop);
+          const shouldScrollForAlign =
+            align === 'latest-edge'
+              ? scrollDelta > 0.5
+              : scrollDelta > CHAT_LATEST_FOCUS_THRESHOLD_PX;
+          // 无论是否真的发出 scrollTo，都记录目标落点：内容随后增长时它仍是
+          // 「我们自己的位置」，不会被 reconcile 当作外部滚动。
+          programmaticScrollTopRef.current = nextTop;
+          if (shouldScrollForAlign) sr.scrollTo({ top: nextTop, behavior: 'auto' });
+        }),
+      );
     },
     [
       bottomRef,
@@ -564,21 +608,24 @@ export function useScrollManager(
       lastObservedScrollTopRef.current = null;
       if (pendingScrollFrameRef.current !== null)
         cancelAnimationFrame(pendingScrollFrameRef.current);
-      pendingScrollFrameRef.current = requestAnimationFrame(() => {
-        pendingScrollFrameRef.current = null;
-        const region = scrollRegionRef.current;
-        // 元素已卸载 / 被替换：恢复落点已无意义，直接放弃。
-        if (!region || region !== sr || !region.isConnected) return;
-        region.scrollTo({ top, behavior: 'auto' });
-        // 复用同一裁决入口（含 clientHeight === 0 的有界重试），不再内联一份判定。
-        reconcileFollowState(region);
-        // 恢复确实落在真正底部（裁决结果为「未中断」）时，把当前位置记为程序化
-        // 落点，让后续内容增长沿用「程序化落点 + 宽松边缘」的保持逻辑，避免
-        // 一次 >32px 的增长把跟随误挂起。
-        if (!userInterruptedRef.current) {
-          programmaticScrollTopRef.current = region.scrollTop;
-        }
-      });
+      writeRefCurrent(
+        pendingScrollFrameRef,
+        requestAnimationFrame(() => {
+          writeRefCurrent(pendingScrollFrameRef, null);
+          const region = scrollRegionRef.current;
+          // 元素已卸载 / 被替换：恢复落点已无意义，直接放弃。
+          if (!region || region !== sr || !region.isConnected) return;
+          region.scrollTo({ top, behavior: 'auto' });
+          // 复用同一裁决入口（含 clientHeight === 0 的有界重试），不再内联一份判定。
+          reconcileFollowState(region);
+          // 恢复确实落在真正底部（裁决结果为「未中断」）时，把当前位置记为程序化
+          // 落点，让后续内容增长沿用「程序化落点 + 宽松边缘」的保持逻辑，避免
+          // 一次 >32px 的增长把跟随误挂起。
+          if (!userInterruptedRef.current) {
+            programmaticScrollTopRef.current = region.scrollTop;
+          }
+        }),
+      );
     },
     [
       applyFollowState,
@@ -586,6 +633,10 @@ export function useScrollManager(
       measureScroll,
       pendingScrollFrameRef,
       programmaticScrollTopRef,
+      // 函数体在 rAF 回调里调用了它（L610）；原 deps 漏列，编译器因此报
+      // "Existing memoization could not be preserved"。它的引用本身稳定，
+      // 补上不改变触发节奏。
+      reconcileFollowState,
       scrollRegionRef,
       userInterruptedRef,
     ],
@@ -640,7 +691,7 @@ export function useScrollManager(
     previousSessionKeyRef.current = sessionKey;
     // 会话切换：整体重置。旧会话的「用户离开」不能在会话 A→B 不经过空列表时
     // 泄漏到新会话（否则新会话永不跟随）；旧会话的程序化落点也必须清除。
-    userInterruptedRef.current = false;
+    writeRefCurrent(userInterruptedRef, false);
     programmaticScrollTopRef.current = null;
     // 位移基线一并清空（未知 = 保守按已位移），新会话的首次对账不会被旧会话的
     // 位置污染。

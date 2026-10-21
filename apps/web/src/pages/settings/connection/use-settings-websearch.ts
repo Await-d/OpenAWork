@@ -73,6 +73,30 @@ function clonePolicy(p: WebsearchPolicy): WebsearchPolicy {
   };
 }
 
+/**
+ * 保存 Web 搜索策略的统一包装：置 saving / 清 error → try → catch 交给 `onError`
+ * → finally 清 saving。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`...(cond ? … : {})`、三元）。语义逐字照搬。
+ */
+async function runWebsearchPolicySaveOnce(ctx: {
+  setSaving: (saving: boolean) => void;
+  setSaveError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSaving(true);
+  ctx.setSaveError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSaving(false);
+  }
+}
+
 export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSettingsWebsearchResult {
   const [policy, setPolicy] = React.useState<WebsearchPolicy>(DEFAULT_POLICY);
   const [savedPolicy, setSavedPolicy] = React.useState<WebsearchPolicy>(DEFAULT_POLICY);
@@ -82,64 +106,75 @@ export function useSettingsWebsearch(input: UseSettingsWebsearchInput): UseSetti
 
   const loadWebsearchPolicy = React.useCallback(async () => {
     if (!input.token) return;
+    // try 只留请求本身；下面的判定（`Array.isArray(...) ? ... : []` / `??` / 展开）都是值块，
+    // 留在 try 内会让编译器报 "Support value blocks ... within a try/catch statement"。
+    let payload: WebsearchPolicy;
     try {
-      const payload = (await createSettingsClient(input.gatewayUrl).getWebsearch(
+      payload = (await createSettingsClient(input.gatewayUrl).getWebsearch(
         input.token,
       )) as WebsearchPolicy;
-      // Trust the gateway-side schema; if it is shaped wrong we fall
-      // back to the documented defaults rather than throwing in the UI.
-      const next: WebsearchPolicy = {
-        providers: Array.isArray(payload.providers) ? payload.providers : [],
-        rolloutMode: payload.rolloutMode ?? 'sequential',
-        ...(typeof payload.timeoutMs === 'number' ? { timeoutMs: payload.timeoutMs } : {}),
-      };
-      setPolicy(clonePolicy(next));
-      setSavedPolicy(clonePolicy(next));
-      setLoadError(null);
     } catch (err: unknown) {
       logger.error('failed to load websearch policy', err);
       setPolicy(DEFAULT_POLICY);
       setSavedPolicy(DEFAULT_POLICY);
       setLoadError(err instanceof Error ? err.message : '加载 Web 搜索策略失败');
+      return;
     }
+    // Trust the gateway-side schema; if it is shaped wrong we fall
+    // back to the documented defaults rather than throwing in the UI.
+    const next: WebsearchPolicy = {
+      providers: Array.isArray(payload.providers) ? payload.providers : [],
+      rolloutMode: payload.rolloutMode ?? 'sequential',
+      ...(typeof payload.timeoutMs === 'number' ? { timeoutMs: payload.timeoutMs } : {}),
+    };
+    setPolicy(clonePolicy(next));
+    setSavedPolicy(clonePolicy(next));
+    setLoadError(null);
   }, [input.gatewayUrl, input.token]);
 
   const saveWebsearchPolicy = React.useCallback(async () => {
-    if (!input.token || saving) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      // Strip empty optional strings so the gateway's strict schema
-      // does not reject them — `apiKey: ''` would fail `min(1)`.
-      const sanitized: WebsearchPolicy = {
-        providers: policy.providers.map((entry) => {
-          const next: WebsearchProviderEntry = { provider: entry.provider };
-          if (entry.apiKey && entry.apiKey.trim().length > 0) next.apiKey = entry.apiKey.trim();
-          if (entry.baseUrl && entry.baseUrl.trim().length > 0) next.baseUrl = entry.baseUrl.trim();
-          if (typeof entry.weight === 'number') next.weight = entry.weight;
-          return next;
-        }),
-        rolloutMode: policy.rolloutMode,
-        ...(typeof policy.timeoutMs === 'number' ? { timeoutMs: policy.timeoutMs } : {}),
-      };
-      const payload = (await createSettingsClient(input.gatewayUrl).putWebsearch(
-        input.token,
-        sanitized,
-      )) as WebsearchPolicy;
-      const next: WebsearchPolicy = {
-        providers: Array.isArray(payload.providers) ? payload.providers : [],
-        rolloutMode: payload.rolloutMode ?? 'sequential',
-        ...(typeof payload.timeoutMs === 'number' ? { timeoutMs: payload.timeoutMs } : {}),
-      };
-      setPolicy(clonePolicy(next));
-      setSavedPolicy(clonePolicy(next));
-      setSaveError(null);
-    } catch (err: unknown) {
-      logger.error('failed to save websearch policy', err);
-      setSaveError(err instanceof Error ? err.message : '保存 Web 搜索策略失败');
-    } finally {
-      setSaving(false);
-    }
+    // 取局部常量：嵌套的 run 回调里 TS 会重置对 `input.token` 的非空收窄。
+    const token = input.token;
+    if (!token || saving) return;
+    // 置 saving / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runWebsearchPolicySaveOnce`（见其注释）。
+    await runWebsearchPolicySaveOnce({
+      setSaving,
+      setSaveError,
+      onError: (err) => {
+        logger.error('failed to save websearch policy', err);
+        setSaveError(err instanceof Error ? err.message : '保存 Web 搜索策略失败');
+      },
+      run: async () => {
+        // Strip empty optional strings so the gateway's strict schema
+        // does not reject them — `apiKey: ''` would fail `min(1)`.
+        const sanitized: WebsearchPolicy = {
+          providers: policy.providers.map((entry) => {
+            const next: WebsearchProviderEntry = { provider: entry.provider };
+            if (entry.apiKey && entry.apiKey.trim().length > 0) next.apiKey = entry.apiKey.trim();
+            if (entry.baseUrl && entry.baseUrl.trim().length > 0) {
+              next.baseUrl = entry.baseUrl.trim();
+            }
+            if (typeof entry.weight === 'number') next.weight = entry.weight;
+            return next;
+          }),
+          rolloutMode: policy.rolloutMode,
+          ...(typeof policy.timeoutMs === 'number' ? { timeoutMs: policy.timeoutMs } : {}),
+        };
+        const payload = (await createSettingsClient(input.gatewayUrl).putWebsearch(
+          token,
+          sanitized,
+        )) as WebsearchPolicy;
+        const next: WebsearchPolicy = {
+          providers: Array.isArray(payload.providers) ? payload.providers : [],
+          rolloutMode: payload.rolloutMode ?? 'sequential',
+          ...(typeof payload.timeoutMs === 'number' ? { timeoutMs: payload.timeoutMs } : {}),
+        };
+        setPolicy(clonePolicy(next));
+        setSavedPolicy(clonePolicy(next));
+        setSaveError(null);
+      },
+    });
   }, [input.gatewayUrl, input.token, policy, saving]);
 
   return {

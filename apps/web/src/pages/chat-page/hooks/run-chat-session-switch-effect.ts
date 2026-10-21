@@ -14,6 +14,7 @@ import type {
   ChatMessagePart,
   ReasoningEffort,
 } from '../../../components/conversation-runtime/messages/support.js';
+import { CHAT_LATEST_RESTORE_TOLERANCE_PX } from '../../../components/conversation-runtime/scroll/scroll-constants.js';
 import type { RecoveredActiveAssistantStream } from '../../../components/conversation-runtime/stream/stream-recovery.js';
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
@@ -29,7 +30,10 @@ import {
 } from '.././conversation/render/chat-page-utils.js';
 import { resolveModelSelectionSourceFromMetadata } from '.././conversation/settings/model-selection-source.js';
 import type { ModelSelectionSource } from '.././conversation/settings/model-selection-source.js';
-import { shouldPreserveActiveLocalStream } from '.././conversation/snapshot/session-reload-transition.js';
+import {
+  shouldPreserveActiveLocalStream,
+  shouldPreserveFreshBootstrapStream,
+} from '.././conversation/snapshot/session-reload-transition.js';
 import type { SessionViewStreamingSnapshot } from '../conversation/snapshot/use-session-view-cache.js';
 import type { DialogueMode } from '.././mode/dialogue-mode.js';
 import {
@@ -73,6 +77,11 @@ export interface ChatSessionSwitchDeps {
   readonly clearSessionMetadataDirty: () => void;
   readonly currentAssistantStreamMessageIdRef: MutableRefObject<string | null>;
   readonly currentLoadedSessionIdRef: MutableRefObject<string | null>;
+  /**
+   * 强制贴底（返回取消函数）。缓存恢复分支在用「上次停在最新处」时直接调它，
+   * 而不是按绝对值恢复位置——见该分支内的说明。
+   */
+  readonly forceFollowToLatest: (behavior?: ScrollBehavior) => () => void;
   readonly gatewayUrl: string;
   readonly isCurrentSessionView: (targetSessionId: string, expectedEpoch: number) => boolean;
   readonly lastPersistedSessionMetadataSnapshotRef: RefObject<string | null>;
@@ -156,6 +165,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     clearSessionMetadataDirty,
     currentAssistantStreamMessageIdRef,
     currentLoadedSessionIdRef,
+    forceFollowToLatest,
     gatewayUrl,
     isCurrentSessionView,
     lastPersistedSessionMetadataSnapshotRef,
@@ -235,8 +245,37 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     requestedSessionId === currentLoadedSessionIdRef.current;
   void sessionReloadNonce;
 
+  /**
+   * 新会话的「第一条消息」：`ensureSession` 刚建好会话、`startStandardChatStream`
+   * 已乐观追加用户消息并置 `streaming`，但 `currentLoadedSessionIdRef` 还没跟上
+   * （它由 lifecycle effect 在提交后镜像）。
+   *
+   * 这段窗口必须与 bootstrap 同等对待：**不递增 epoch**（否则同一会话内已建立的
+   * 流式回调守卫全部作废，delta 被丢弃，表现为「流式断流」），并且整段跳过下面的
+   * `setMessages([])` / `setSessionStateStatus(null)` / `resetStreamState()`——
+   * 它们会把正在进行的首轮对话直接打断。
+   */
+  const isFreshBootstrapStream =
+    shouldPreserveBootstrapState ||
+    shouldPreserveFreshBootstrapStream({
+      isStreaming: streamingRef.current,
+      loadedSessionId: currentLoadedSessionIdRef.current,
+    });
+
+  // 「保留本地流」只在**确实还是同一个会话**时成立。
+  //
+  // `shouldPreserveActiveLocalStream` 在 `loadedSessionId` 缺失时会用
+  // `activeSessionRef` 兜底，而该 ref 会在下面被 `activateSessionView` 改成目标
+  // 会话，兜底值恒等于目标 → 判据退化为「只要在流式中就保留」。真切到另一个
+  // 已加载会话时，这会让页面继续显示旧会话内容（串会话），且 epoch 不递增、
+  // 旧回调不会被作废。这里用「已加载会话」再校一次。
+  const isSameSessionLocalStream =
+    shouldPreserveActiveStream &&
+    (currentLoadedSessionIdRef.current === null ||
+      requestedSessionId === currentLoadedSessionIdRef.current);
+
   const sessionViewEpoch =
-    shouldPreserveBootstrapState || shouldPreserveActiveStream || shouldSoftReloadCurrentSession
+    isFreshBootstrapStream || isSameSessionLocalStream || shouldSoftReloadCurrentSession
       ? activateSessionView(requestedSessionId, { incrementEpoch: false })
       : activateSessionView(requestedSessionId);
 
@@ -274,7 +313,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     return;
   }
 
-  if (shouldPreserveActiveStream) {
+  if (isSameSessionLocalStream) {
     if (chatView !== 'session') {
       navigateToSession();
     }
@@ -338,7 +377,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
   setRecoveryActiveStream(null);
   setCurrentSessionId(requestedSessionId);
 
-  if (shouldPreserveBootstrapState) {
+  if (isFreshBootstrapStream) {
     setSelectedChildSessionId(null);
     pendingBootstrapSessionRef.current = null;
     setIsSessionLoading(false);
@@ -417,7 +456,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     // `[Violation] 'message' handler took XYZms`.
     sessionRestoredFromCacheRef.current = true;
     const cachedMessages = cachedView.messages;
-    const cachedScrollTop = cachedView.scrollTop;
+    const wasAtLatest = cachedView.distanceFromBottom <= CHAT_LATEST_RESTORE_TOLERANCE_PX;
     startSessionSwitchTransition(() => {
       setMessages(cachedMessages);
       // 缓存视图不携带通知：先清掉上一个会话的通知，避免串会话；随后
@@ -433,9 +472,20 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     // 用户手势：恢复在历史中部会挂起跟随，恢复在真正底部继续跟随；
     // 全程不武装任何忽略窗口。
     requestAnimationFrame(() => {
-      if (!cancelled) {
-        restoreScrollTop(cachedScrollTop);
+      if (cancelled) return;
+      // 上次离开时视口就在最新处（含「拿不到滚动区」）⇒ 强制贴底，而不是按
+      // 绝对值恢复位置。缓存里的 `scrollTop` 是**旧布局**下的绝对量，而列表
+      // 是「尾部窗口 + 虚拟化估算高度」：恢复时 `visibleMessageCount` 被重置为
+      // 默认值、未挂载的组只有估算高度，两次进入的总高度并不相等，绝对值会
+      // 落在中部。而一旦恢复落点不在真正底部，位置裁决就会挂起跟随，此后内容
+      // 增长也不再自动贴底——表现为「切回会话后停在旧记录处，必须手动滚到底」。
+      // 贴底走 `forceFollowToLatest`：同步首帧落地 + 有界帧复检，且保持跟随启用。
+      if (wasAtLatest) {
+        forceFollowToLatest('auto');
+        return;
       }
+      // 用户上次确实停在历史中部：恢复其阅读位置（挂起跟随，不打扰阅读）。
+      restoreScrollTop(cachedView.scrollTop);
     });
   } else {
     sessionRestoredFromCacheRef.current = false;

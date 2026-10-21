@@ -16,10 +16,11 @@
  *   1. 本 hook 只提供"状态容器 + 视图守卫 + 派生回调"。
  *      跨域协调（snapshot loader、session-switch 大 effect、
  *      attach-stream 大 effect）继续留在父组件 ChatPage。
- *   2. `messagesRef.current = messages` 的"渲染期同步赋值"是性能必备：
- *      让流式回调可以在不订阅 messages 的前提下读到最新值。这里
- *      显式保留 — React Compiler 会跳过该 hook 的 memoization,
- *      代价是接受这条公认的反模式（参考拆分计划风险 1）。
+ *   2. `messagesRef` 采用 effect 期镜像（在 effect 内写入 `messagesRef.current`）：
+ *      让流式回调能在不订阅 messages 的前提下读到最新值，同时避免"渲染期写
+ *      ref"导致 React Compiler 跳过整个 hook 的 memoization。唯一读取点
+ *      （会话切换 effect）注册在本 hook 的 effect 之后，故读到的仍是同一次
+ *      提交的 messages，语义不变。
  *   3. `previousRouteSessionIdRef` 这一个 ref 虽属于会话生命周期,
  *      但唯一消费方是父组件清空 `manualAgentId` 的 effect（属设置域）,
  *      因此对应 effect 留在父组件,这里只暴露 ref。
@@ -76,7 +77,7 @@ export interface ChatSessionLifecycle {
   setServerTotalTurnCount: React.Dispatch<React.SetStateAction<number | null>>;
 
   // ─── refs (会话视图簿记) ─────────────────────────────────────────────
-  /** 渲染期同步镜像 messages,供流式回调零订阅读取最新值。 */
+  /** effect 期同步镜像 messages,供流式回调零订阅读取最新值。 */
   messagesRef: React.MutableRefObject<ChatMessage[]>;
   /** 当前活跃会话 id 的 ref 镜像（被流式回调用作"是否是我的请求"判断）。 */
   activeSessionRef: React.MutableRefObject<string | null>;
@@ -136,10 +137,6 @@ export function useChatSessionLifecycle(
 
   // ── refs ──────────────────────────────────────────────────────────────
   const messagesRef = useRef<ChatMessage[]>([]);
-  // 渲染期同步镜像 — 流式回调通过 messagesRef.current 读最新值,
-  // 不触发依赖订阅。此处的"渲染期赋值"是 ChatPage 流式架构的明确依赖,
-  // 详见拆分计划风险 1。
-  messagesRef.current = messages;
 
   const activeSessionRef = useRef<string | null>(routeSessionId ?? null);
   const currentLoadedSessionIdRef = useRef<string | null>(currentSessionId);
@@ -166,6 +163,15 @@ export function useChatSessionLifecycle(
     });
 
   // ── 同步 ref 镜像 ─────────────────────────────────────────────────────
+  // `messages` 的 ref 镜像下沉到 effect 期：原先的渲染期同步赋值属于
+  // "渲染期写 ref"，会让 React Compiler 放弃本 hook 的全部 memoization。
+  // 唯一读取点是父组件的会话切换 effect（`run-chat-session-switch-effect.ts`
+  // 的 `messagesRef.current`）——它同样是 effect，且注册顺序在本 hook 之后，
+  // 因此本 effect 先于它执行，两者读到的是同一次提交的 `messages`，行为等价。
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   // 路由 / 当前 sessionId 变化时把 active/loaded ref 重新指向。
   // 父组件的会话切换大 effect 也会写这两个 ref,但那是切换流程的中间态;
   // 这里负责"提交后"的稳态镜像。`lastParentTaskSyncMarkerRef` 不在

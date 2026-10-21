@@ -23,14 +23,18 @@
  *    可观测性 / 埋点；不参与业务分支（team 接入应由父级控制 props）。
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type {
   CommandDescriptor,
   InputImageContent,
   UpstreamStreamSummary,
 } from '@openAwork/shared';
-import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
+import type {
+  ImageGenerationPartialImage,
+  PendingPermissionRequest,
+  PendingQuestionRequest,
+} from '@openAwork/web-client';
 import type { ModelReasoningOption } from '@openAwork/shared-ui';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import './ChatConversationView.css';
@@ -158,8 +162,23 @@ export interface ChatConversationViewProps {
   visibleStreaming: boolean;
   showSessionSwitchSkeleton: boolean;
   remoteSessionBusyState: 'running' | 'paused' | null;
+  /**
+   * composer 专用的占用态（缺省 = `remoteSessionBusyState`）。
+   *
+   * 只在「能不能发消息」这一件事上与展示态分歧：有待办交互但会话仍在真正运行时，
+   * 展示态要报「等待审批」，而发送必须按 `running` 拦下（否则硬发会被网关拒成
+   * SESSION_ALREADY_RUNNING，消息不落库）。
+   */
+  composerBusyState?: 'running' | 'paused' | null;
   /** 客户端是否正在重新接入（attach 重试待触发）；透传给 SessionRunStateBar。 */
   reconnecting?: boolean;
+  /**
+   * running 且持续拿不到活跃流（网关侧 resume 早期失败把会话卡住）时为 true，
+   * SessionRunStateBar 会展示「重新同步」按钮，避免发送键被无限禁用。
+   */
+  staleRunningResync?: boolean;
+  /** 「重新同步」点击回调（网关 stop-active 权威收敛 + 刷新本地快照）。 */
+  onStaleRunningResync?: () => void;
   pendingPermissions: PendingPermissionRequest[];
   resolveInlinePermissionActions?: (requestId: string) =>
     | {
@@ -325,6 +344,8 @@ export interface ChatConversationViewProps {
   imageGenerationMode?: boolean;
   hasConfiguredImageModel?: boolean;
   imageGenerationBusy?: boolean;
+  /** 流式生图的中间稿预览；非流式端点 / 未接入方不传。 */
+  imageGenerationPreview?: ImageGenerationPartialImage | null;
   imageGenerationDefaults?: SavedChatImageDefaults;
   imageModelLabel?: string;
   imagePluginEnabled?: boolean;
@@ -343,6 +364,10 @@ export interface ChatConversationViewProps {
   ) => Promise<boolean | void> | boolean | void;
   onStopComposer: () => void | Promise<void>;
   onComposerModelSelect?: (providerId: string, modelId: string) => Promise<void>;
+  /** 模型弹层里的「刷新模型列表」入口；不提供时弹层不渲染刷新按钮。 */
+  onRefreshProviders?: () => void | Promise<void>;
+  /** 模型目录刷新进行中（弹层按钮转旋转态）。 */
+  providersRefreshing?: boolean;
   onFastModeToggle?: (enabled: boolean) => Promise<void>;
   onContextWindowOverrideChange?: (value: number | undefined) => Promise<void>;
   onToggleWebSearch: () => void;
@@ -474,7 +499,10 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     visibleStreaming,
     showSessionSwitchSkeleton,
     remoteSessionBusyState,
+    composerBusyState,
     reconnecting,
+    staleRunningResync,
+    onStaleRunningResync,
     pendingPermissions,
     resolveInlinePermissionActions,
     providerCatalog,
@@ -557,6 +585,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     imageGenerationMode,
     hasConfiguredImageModel,
     imageGenerationBusy,
+    imageGenerationPreview,
     imageGenerationDefaults,
     imageModelLabel,
     imagePluginEnabled,
@@ -575,6 +604,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
     onComposerSubmit,
     onStopComposer,
     onComposerModelSelect,
+    onRefreshProviders,
+    providersRefreshing,
     onFastModeToggle,
     onContextWindowOverrideChange,
     onToggleWebSearch,
@@ -604,6 +635,25 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
   });
 
   const messageLayout = useDisplayPreferencesStore((s) => s.messageLayout);
+
+  // 「骨架 → 真实内容」的交接淡入：只在骨架真实出现过的那次切换上播一次
+  // （下降沿）；缓存命中的瞬时渲染不播——那是本页面的快速路径，不该被
+  // 动画拖慢。动画只做 opacity、零位移，不干扰切换后的滚动恢复。
+  //
+  // 不需要监听动画结束来清理类：CSS animation 只在类从无到有时启动，常驻
+  // 不会重播；「骨架再次出现」的上升沿会复位状态，保证下一次下降沿必定重播。
+  const [handoffFadeActive, setHandoffFadeActive] = useState(false);
+  const prevSkeletonRef = useRef(showSessionSwitchSkeleton);
+  useEffect(() => {
+    const wasSkeleton = prevSkeletonRef.current;
+    prevSkeletonRef.current = showSessionSwitchSkeleton;
+    if (!wasSkeleton && showSessionSwitchSkeleton) {
+      // 新一次骨架出现：复位，保证下一次「骨架 → 内容」必定重播
+      setHandoffFadeActive(false);
+    } else if (wasSkeleton && !showSessionSwitchSkeleton) {
+      setHandoffFadeActive(true);
+    }
+  }, [showSessionSwitchSkeleton]);
 
   const groupsWithHistoryEdit = useMemo(() => {
     if (!historyEditPrompt) return groupedMessageEntries;
@@ -747,6 +797,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
               ref={contentColumnRef}
               data-testid="chat-content-column"
               data-message-layout={messageLayout}
+              className={handoffFadeActive ? 'omo-content-handoff-in' : undefined}
               style={contentColumnStyle}
             >
               {showSessionSwitchSkeleton ? <ChatSessionSkeleton /> : null}
@@ -840,6 +891,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           pendingPermissionsCount={pendingPermissions.length}
           pendingQuestionsCount={pendingQuestionsCount}
           reconnecting={reconnecting}
+          staleRunning={staleRunningResync}
+          onResync={onStaleRunningResync}
           status={remoteSessionBusyState}
           stopCapability={stopCapability}
         />
@@ -911,7 +964,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           stoppingStream={stoppingStream}
           canStopSession={canStopCurrentSessionStream}
           stopCapability={stopCapability}
-          sessionBusyState={remoteSessionBusyState}
+          sessionBusyState={composerBusyState ?? remoteSessionBusyState}
           editorMode={editorMode}
           providers={providers}
           activeProviderId={activeProviderId}
@@ -935,6 +988,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           imageGenerationMode={imageGenerationMode}
           hasConfiguredImageModel={hasConfiguredImageModel}
           imageGenerationBusy={imageGenerationBusy}
+          imageGenerationPreview={imageGenerationPreview}
           imageGenerationDefaults={imageGenerationDefaults}
           imageModelLabel={imageModelLabel}
           imagePluginEnabled={imagePluginEnabled}
@@ -954,6 +1008,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           onSubmit={composerDisabled ? () => undefined : onComposerSubmit}
           onStop={onStopComposer}
           onModelSelect={onComposerModelSelect}
+          onRefreshProviders={onRefreshProviders}
+          providersRefreshing={providersRefreshing}
           onFastModeToggle={onFastModeToggle}
           onContextWindowOverrideChange={onContextWindowOverrideChange}
           onToggleWebSearch={onToggleWebSearch}

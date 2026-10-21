@@ -23,6 +23,37 @@ export interface WorkflowStudioFeedback {
   tone: 'error' | 'success';
 }
 
+/**
+ * 工作流模板动作的统一包装：置 busy / 清 error（可选清反馈）→ try → catch 归一文案
+ * → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（catch 里的 `reason instanceof Error ? … : …` 同样触发），本 hook 3 处
+ * 这类 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runWorkflowActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  /** catch 的兜底文案（`reason.message` 优先）。 */
+  failureMessage: string;
+  /** 可选：同时清空并回填反馈条（保存 / 删除模板会用到）。 */
+  setFeedback?: (feedback: { message: string; tone: 'error' } | null) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  ctx.setFeedback?.(null);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : ctx.failureMessage;
+    ctx.setError(message);
+    ctx.setFeedback?.({ message, tone: 'error' });
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export function useWorkflowStudio() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
@@ -46,19 +77,20 @@ export function useWorkflowStudio() {
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    try {
-      const nextTemplates = await client.listTemplates(accessToken);
-      setTemplates(nextTemplates);
-      if (!selectedTemplateId && nextTemplates[0]) {
-        setSelectedTemplateId(nextTemplates[0].id);
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '加载工作流模板失败');
-    } finally {
-      setLoading(false);
-    }
+    // 置 loading / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runWorkflowActionOnce`（见其注释）。
+    await runWorkflowActionOnce({
+      setBusy: setLoading,
+      setError,
+      failureMessage: '加载工作流模板失败',
+      run: async () => {
+        const nextTemplates = await client.listTemplates(accessToken);
+        setTemplates(nextTemplates);
+        if (!selectedTemplateId && nextTemplates[0]) {
+          setSelectedTemplateId(nextTemplates[0].id);
+        }
+      },
+    });
   }, [accessToken, client, selectedTemplateId]);
 
   useEffect(() => {
@@ -145,28 +177,27 @@ export function useWorkflowStudio() {
       if (!accessToken) {
         return;
       }
-      setBusy(true);
-      setFeedback(null);
-      setError(null);
-      try {
-        const created = await client.createTemplate(accessToken, {
-          name,
-          description,
-          category: 'team-playbook',
-          nodes: draftNodes,
-          edges: draftEdges,
-        });
-        const nextTemplates = [created, ...templates];
-        setTemplates(nextTemplates);
-        setSelectedTemplateId(created.id);
-        setFeedback({ message: '已保存工作流模板', tone: 'success' });
-      } catch (reason) {
-        const message = reason instanceof Error ? reason.message : '保存工作流模板失败';
-        setError(message);
-        setFeedback({ message, tone: 'error' });
-      } finally {
-        setBusy(false);
-      }
+      // 置 busy / 清 error / 清反馈 与 try/catch/finally 一起下沉到模块级
+      // `runWorkflowActionOnce`（见其注释）。
+      await runWorkflowActionOnce({
+        setBusy,
+        setError,
+        setFeedback,
+        failureMessage: '保存工作流模板失败',
+        run: async () => {
+          const created = await client.createTemplate(accessToken, {
+            name,
+            description,
+            category: 'team-playbook',
+            nodes: draftNodes,
+            edges: draftEdges,
+          });
+          const nextTemplates = [created, ...templates];
+          setTemplates(nextTemplates);
+          setSelectedTemplateId(created.id);
+          setFeedback({ message: '已保存工作流模板', tone: 'success' });
+        },
+      });
     },
     [accessToken, client, draftEdges, draftNodes, templates],
   );
@@ -175,28 +206,26 @@ export function useWorkflowStudio() {
     if (!accessToken || !selectedTemplateId) {
       return;
     }
-    setBusy(true);
-    setFeedback(null);
-    setError(null);
-    try {
-      await client.removeTemplate(accessToken, selectedTemplateId);
-      const nextTemplates = templates.filter((template) => template.id !== selectedTemplateId);
-      setTemplates(nextTemplates);
-      setSelectedTemplateId(nextTemplates[0]?.id ?? null);
-      if (nextTemplates.length === 0) {
-        const fallback = createDefaultDraft();
-        setDraftNodes(fallback.nodes);
-        setDraftEdges(fallback.edges);
-        setSelectedNodeId(fallback.selectedNodeId);
-      }
-      setFeedback({ message: '已删除工作流模板', tone: 'success' });
-    } catch (reason) {
-      const message = reason instanceof Error ? reason.message : '删除工作流模板失败';
-      setError(message);
-      setFeedback({ message, tone: 'error' });
-    } finally {
-      setBusy(false);
-    }
+    // 同 saveTemplate：整段下沉到 `runWorkflowActionOnce`（见其注释）。
+    await runWorkflowActionOnce({
+      setBusy,
+      setError,
+      setFeedback,
+      failureMessage: '删除工作流模板失败',
+      run: async () => {
+        await client.removeTemplate(accessToken, selectedTemplateId);
+        const nextTemplates = templates.filter((template) => template.id !== selectedTemplateId);
+        setTemplates(nextTemplates);
+        setSelectedTemplateId(nextTemplates[0]?.id ?? null);
+        if (nextTemplates.length === 0) {
+          const fallback = createDefaultDraft();
+          setDraftNodes(fallback.nodes);
+          setDraftEdges(fallback.edges);
+          setSelectedNodeId(fallback.selectedNodeId);
+        }
+        setFeedback({ message: '已删除工作流模板', tone: 'success' });
+      },
+    });
   }, [accessToken, client, selectedTemplateId, templates]);
 
   return {

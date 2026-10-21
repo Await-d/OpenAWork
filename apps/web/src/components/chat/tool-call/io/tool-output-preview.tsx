@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { type ReactNode, useMemo } from 'react';
 import {
   DiagnosticsPreview,
   extractDiagnosticsFromOutput,
@@ -64,6 +64,7 @@ import { StructuredOutputPreview } from '../previews/structured-output-preview.j
 import { ExpandableOutput } from '../shared/expandable-output.js';
 import { extractTextFromOutput } from '../shared/extract-text.js';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
+import { stripToolOutputTruncationDeep } from '@openAwork/shared';
 
 /**
  * Render a tool's output expansion panel. Tries domain-aware paths in order:
@@ -89,6 +90,23 @@ import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expan
  * Order matters: the shape-matched MCP and skill/question branches must run
  * before the generic text/JSON fallbacks or those envelopes get dumped raw.
  */
+/**
+ * 解析「看起来像 JSON」的工具输出。
+ *
+ * 返回 `{ ok, value }` 而不是 `value | null`：`JSON.parse('null')` 是合法输入，用 null 当
+ * 「解析失败」哨兵会把 `null` 输出误判成纯文本（原实现会渲染 `<JsonPreview data={null}>`）。
+ * 必须留在模块级：try 内的 `&&` / JSX 都是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个组件（实测）。
+ */
+function parseJsonOutputOnce(output: string): { ok: boolean; value: unknown } {
+  try {
+    return { ok: true, value: JSON.parse(output) as unknown };
+  } catch {
+    // Not valid JSON, fall through to text output
+    return { ok: false, value: null };
+  }
+}
+
 export function ToolOutputPreview({
   toolName,
   output: rawOutput,
@@ -101,6 +119,36 @@ export function ToolOutputPreview({
   // 存储层会把超大工具输出序列化成 JSON 字符串（刷新后的历史消息就是这个形态）。
   // 先尝试还原成对象，让各领域预览器按结构化输出渲染；解析失败时保持原字符串。
   const output = useMemo(() => parseStoredJsonOutput(rawOutput), [rawOutput]);
+  // recovery 会对 tool 输出瘦身，被裁剪处会留下 `…[truncated, N chars omitted]` 字样。
+  // 这里统一剥离并按省略量渲染徽标：否则用户会在正文里看到这行英文噪音，误以为是
+  // 输出内容本身；而「内容其实不完整」这个信息又确实需要告知。
+  const truncation = useMemo(() => stripToolOutputTruncationDeep(output), [output]);
+  const previewOutput = truncation ? truncation.value : output;
+  const body = renderToolOutputBody({ normalized, previewOutput, shouldExpandByDefault });
+  if (!truncation) {
+    return body;
+  }
+  return (
+    <div className="tool-output-truncation-host">
+      {body}
+      <div className="tool-output-truncated-badge" title="该内容来自会话快照的瘦身副本，非完整输出">
+        内容已截断{truncation.omittedChars > 0 ? ` · 省略 ${truncation.omittedChars} 字符` : ''}
+      </div>
+    </div>
+  );
+}
+
+/** 把内部先前的 if 链抽成独立函数，便于外层统一追加截断徽标。 */
+function renderToolOutputBody({
+  normalized,
+  previewOutput,
+  shouldExpandByDefault,
+}: {
+  normalized: string;
+  previewOutput: unknown;
+  shouldExpandByDefault: boolean;
+}): ReactNode {
+  const toolName = normalized;
   const isTodoFamily =
     normalized === 'todoread' ||
     normalized === 'subtodoread' ||
@@ -108,7 +156,7 @@ export function ToolOutputPreview({
     normalized === 'subtodowrite';
 
   if (isTodoFamily) {
-    const todos = extractTodosFromOutput(output);
+    const todos = extractTodosFromOutput(previewOutput);
     if (todos !== null) {
       if (todos.length === 0) {
         return <div className="tool-call-inline-empty">（暂无待办项）</div>;
@@ -118,67 +166,67 @@ export function ToolOutputPreview({
   }
 
   if (normalized === 'read') {
-    const data = extractFileContentFromOutput(output);
+    const data = extractFileContentFromOutput(previewOutput);
     if (data) return <FileContentPreview data={data} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'bash' || normalized === 'interactive_bash') {
-    const data = extractBashOutputFromOutput(output);
+    const data = extractBashOutputFromOutput(previewOutput);
     if (data) return <BashOutputPreview data={data} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'grep') {
-    const hits = extractGrepContentHitsFromOutput(output);
+    const hits = extractGrepContentHitsFromOutput(previewOutput);
     if (hits) return <GrepContentHitsPreview hits={hits} />;
-    const counts = extractGrepCountsFromOutput(output);
+    const counts = extractGrepCountsFromOutput(previewOutput);
     if (counts) return <GrepCountsPreview entries={counts} />;
-    const paths = extractFilePathListFromOutput(output);
+    const paths = extractFilePathListFromOutput(previewOutput);
     if (paths) return <FilePathListPreview paths={paths} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'glob') {
-    const paths = extractFilePathListFromOutput(output);
+    const paths = extractFilePathListFromOutput(previewOutput);
     if (paths) return <FilePathListPreview paths={paths} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'list') {
-    const data = extractTreeNodesFromOutput(output);
+    const data = extractTreeNodesFromOutput(previewOutput);
     if (data) return <TreeNodesPreview data={data} defaultExpanded={shouldExpandByDefault} />;
   }
 
   if (normalized === 'workspace_review_status') {
-    const data = extractReviewChangesFromOutput(output);
+    const data = extractReviewChangesFromOutput(previewOutput);
     if (data) return <ReviewStatusPreview data={data} />;
   }
 
   // Task tools
   if (normalized === 'task_list' || normalized === 'task_get') {
-    const tasks = extractTaskListFromOutput(output);
+    const tasks = extractTaskListFromOutput(previewOutput);
     if (tasks) return <TaskListPreview tasks={tasks} />;
   }
 
   // Session tools
   if (normalized === 'session_list' || normalized === 'session_info') {
-    const sessions = extractSessionListFromOutput(output);
+    const sessions = extractSessionListFromOutput(previewOutput);
     if (sessions) return <SessionListPreview sessions={sessions} />;
   }
 
   // P1-SCOUT: structured cards for the repo_clone / repo_overview
   // gateway tools. Both fall through to the generic envelope path
-  // when the output is malformed (e.g. an error envelope), so we do
+  // when the previewOutput is malformed (e.g. an error envelope), so we do
   // not need to special-case errors here.
   if (normalized === 'repo_clone') {
-    const data = extractRepoCloneFromOutput(output);
+    const data = extractRepoCloneFromOutput(previewOutput);
     if (data) return <RepoClonePreview data={data} />;
   }
   if (normalized === 'repo_overview') {
-    const data = extractRepoOverviewFromOutput(output);
+    const data = extractRepoOverviewFromOutput(previewOutput);
     if (data) return <RepoOverviewPreview data={data} />;
   }
 
   if (normalized === 'workspace_create_directory' || normalized === 'workspace_review_revert') {
-    if (output && typeof output === 'object' && !Array.isArray(output)) {
-      const record = output as Record<string, unknown>;
+    if (previewOutput && typeof previewOutput === 'object' && !Array.isArray(previewOutput)) {
+      const record = previewOutput as Record<string, unknown>;
       // 失败信封也带 filePath/path，直接渲染会显示「✓ 成功」。判定口径与
       // repo_clone 预览保持一致：出现 error 文本或 ok/success 为 false 都不算成功。
       const errorText = record['error'];
@@ -193,7 +241,7 @@ export function ToolOutputPreview({
   }
 
   if (normalized === 'mcp_list_tools') {
-    const servers = extractMcpToolList(output);
+    const servers = extractMcpToolList(previewOutput);
     if (servers) return <McpToolListPreview servers={servers} />;
   }
 
@@ -202,44 +250,44 @@ export function ToolOutputPreview({
     normalized === 'bash_output' ||
     normalized === 'bash_kill'
   ) {
-    const terminal = extractBackgroundTerminal(output);
+    const terminal = extractBackgroundTerminal(previewOutput);
     if (terminal) return <BackgroundTerminalPreview view={terminal} />;
   }
 
   if (normalized === 'read_tool_output') {
-    const readView = extractToolOutputRead(output);
+    const readView = extractToolOutputRead(previewOutput);
     if (readView) return <ToolOutputReadPreview view={readView} />;
   }
 
   if (normalized === 'background_output') {
-    const task = extractBackgroundOutput(output);
+    const task = extractBackgroundOutput(previewOutput);
     if (task) return <BackgroundOutputPreview view={task} />;
   }
 
   if (normalized.startsWith('codegraph_')) {
-    const graph = extractCodegraphResult(output);
+    const graph = extractCodegraphResult(previewOutput);
     if (graph) return <CodegraphResultPreview view={graph} />;
   }
 
   if (normalized === 'skill') {
-    const skillContent = extractSkillContent(output);
+    const skillContent = extractSkillContent(previewOutput);
     if (skillContent) return <SkillContentPreview data={skillContent} />;
   }
 
   if (normalized === 'question' || normalized === 'askuserquestion') {
-    const answers = extractQuestionAnswers(output);
+    const answers = extractQuestionAnswers(previewOutput);
     if (answers) return <QuestionAnswerPreview items={answers} />;
   }
 
   // MCP envelope — `skill_mcp` returns this same shape JSON-stringified.
-  const mcpResult = extractMcpResult(output);
+  const mcpResult = extractMcpResult(previewOutput);
   if (mcpResult) return <McpResultPreview result={mcpResult} />;
 
   // Text-envelope path. Even when this matches, we still want to surface a
   // trailing diagnostics list (lsp_rename, post-write tooling) because that
   // lives outside the .output/.result string field.
-  const textPayload = extractTextFromOutput(output);
-  const diagnostics = extractDiagnosticsFromOutput(output);
+  const textPayload = extractTextFromOutput(previewOutput);
+  const diagnostics = extractDiagnosticsFromOutput(previewOutput);
   if (textPayload && textPayload.text.length > 0) {
     const isShortOutput = textPayload.text.length < 200 && textPayload.text.split('\n').length <= 5;
     return (
@@ -255,24 +303,33 @@ export function ToolOutputPreview({
     );
   }
 
-  if (typeof output !== 'string' && output !== null && typeof output === 'object') {
-    if (Array.isArray(output)) {
-      return <ArrayOutputPreview data={output} />;
+  if (
+    typeof previewOutput !== 'string' &&
+    previewOutput !== null &&
+    typeof previewOutput === 'object'
+  ) {
+    if (Array.isArray(previewOutput)) {
+      return <ArrayOutputPreview data={previewOutput} />;
     }
-    return <StructuredOutputPreview data={output as Record<string, unknown>} />;
+    return <StructuredOutputPreview data={previewOutput as Record<string, unknown>} />;
   }
 
   // Plain string fallback
   const fallbackText =
-    typeof output === 'string' ? output : (JSON.stringify(output, null, 2) ?? '');
+    typeof previewOutput === 'string'
+      ? previewOutput
+      : (JSON.stringify(previewOutput, null, 2) ?? '');
   const isShortFallback = fallbackText.length < 200 && fallbackText.split('\n').length <= 5;
 
   if (
-    typeof output === 'string' &&
-    (output.trim().startsWith('{') || output.trim().startsWith('['))
+    typeof previewOutput === 'string' &&
+    (previewOutput.trim().startsWith('{') || previewOutput.trim().startsWith('['))
   ) {
-    try {
-      const parsed = JSON.parse(output) as unknown;
+    // 解析（含 try/catch 与值块）下沉到模块级 `parseJsonOutputOnce`；判定与 JSX 留在
+    // try 之外，避免值块让编译器放弃优化整个组件。
+    const parsedResult = parseJsonOutputOnce(previewOutput);
+    if (parsedResult.ok) {
+      const parsed = parsedResult.value;
       if (Array.isArray(parsed)) {
         return <ArrayOutputPreview data={parsed} />;
       }
@@ -280,8 +337,6 @@ export function ToolOutputPreview({
         return <StructuredOutputPreview data={parsed as Record<string, unknown>} />;
       }
       return <JsonPreview data={parsed} defaultExpanded={shouldExpandByDefault} />;
-    } catch {
-      // Not valid JSON, fall through to text output
     }
   }
 

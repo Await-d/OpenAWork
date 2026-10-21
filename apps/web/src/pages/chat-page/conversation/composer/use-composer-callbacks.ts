@@ -23,7 +23,8 @@ export interface ComposerCallbacksOptions {
   stopCapability: string;
   streaming: boolean;
   canStopCurrentSessionStream: boolean;
-  remoteSessionBusyState: unknown;
+  /** 会话占用态；只有 `running` 会被当作「执行权被占用」而降级 Enter 为排队。 */
+  remoteSessionBusyState: 'running' | 'paused' | null;
   stopActiveMessage: () => void;
   enqueueComposerMessage: () => Promise<boolean>;
   sendMessage: () => Promise<boolean>;
@@ -222,9 +223,12 @@ export function useComposerCallbacks(opts: ComposerCallbacksOptions): ComposerCa
     }
     // 带修饰键的 Enter（如 Cmd/Ctrl+Enter）由输入框层处理为「追加排队」，
     // 这里不拦截，避免被降级成普通发送。
+    //
+    // 只有 `running` 才把 Enter 降级为排队。`paused` 时网关并不持有单飞锁，按普通
+    // 发送处理即可；否则用户在等待审批时敲 Enter 只会静默入队，看起来像「发不出去」。
     const isPlainEnter = e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey;
     if (
-      (streaming || canStopCurrentSessionStream || remoteSessionBusyState !== null) &&
+      (streaming || canStopCurrentSessionStream || remoteSessionBusyState === 'running') &&
       isPlainEnter
     ) {
       e.preventDefault();

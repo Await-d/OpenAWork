@@ -368,6 +368,33 @@ function mapTemplatesToSections(templates: WorkflowTemplateRecord[]): AgentTeams
   }));
 }
 
+/**
+ * 团队模板动作的统一包装：置 busy / 清 error → try → catch 归一文案 → finally 清 busy。
+ * 成功返回 `run` 的返回值（boolean），失败返回 false。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（catch 里的 `reason instanceof Error ? … : …` 同样触发），本 hook 4 处
+ * 这类 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runTemplateActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  /** catch 的兜底文案（`reason.message` 优先）。 */
+  failureMessage: string;
+  run: () => Promise<boolean>;
+}): Promise<boolean> {
+  ctx.setBusy(true);
+  ctx.setError(null);
+  try {
+    return await ctx.run();
+  } catch (reason) {
+    ctx.setError(reason instanceof Error ? reason.message : ctx.failureMessage);
+    return false;
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export function useTeamWorkflowTemplates() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
@@ -545,35 +572,34 @@ export function useTeamWorkflowTemplates() {
         agentTeamsNewTemplateProviders.find((provider) => provider.value === input.provider)
           ?.label ?? input.provider;
 
-      setBusy(true);
-      setError(null);
-      try {
-        const created = await client.createTemplate(accessToken, {
-          category: 'team-playbook',
-          description:
-            input.description?.trim() ||
-            buildTemplateDescription(input.name, providerLabel, roleLabels),
-          edges: buildTemplateEdges(roleLabels),
-          metadata: buildTeamTemplateMetadata(
-            input.provider,
-            input.optionalAgentIds,
-            input.defaultBindings,
-            input.memberSlots,
-            input.templateExtra,
-            input.modelPool,
-            input.modelAssignStrategy,
-          ),
-          name: input.name,
-          nodes: buildTemplateNodes(roleLabels, providerLabel),
-        });
-        setTemplates((current) => [created, ...current]);
-        return true;
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : '创建团队模板失败');
-        return false;
-      } finally {
-        setBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runTemplateActionOnce`（见其注释）。
+      return runTemplateActionOnce({
+        setBusy,
+        setError,
+        failureMessage: '创建团队模板失败',
+        run: async () => {
+          const created = await client.createTemplate(accessToken, {
+            category: 'team-playbook',
+            description:
+              input.description?.trim() ||
+              buildTemplateDescription(input.name, providerLabel, roleLabels),
+            edges: buildTemplateEdges(roleLabels),
+            metadata: buildTeamTemplateMetadata(
+              input.provider,
+              input.optionalAgentIds,
+              input.defaultBindings,
+              input.memberSlots,
+              input.templateExtra,
+              input.modelPool,
+              input.modelAssignStrategy,
+            ),
+            name: input.name,
+            nodes: buildTemplateNodes(roleLabels, providerLabel),
+          });
+          setTemplates((current) => [created, ...current]);
+          return true;
+        },
+      });
     },
     [accessToken, client],
   );
@@ -581,18 +607,17 @@ export function useTeamWorkflowTemplates() {
   const removeTemplate = useCallback(
     async (templateId: string) => {
       if (!accessToken) return false;
-      setBusy(true);
-      setError(null);
-      try {
-        await client.removeTemplate(accessToken, templateId);
-        setTemplates((current) => current.filter((t) => t.id !== templateId));
-        return true;
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : '删除模板失败');
-        return false;
-      } finally {
-        setBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runTemplateActionOnce`（见其注释）。
+      return runTemplateActionOnce({
+        setBusy,
+        setError,
+        failureMessage: '删除模板失败',
+        run: async () => {
+          await client.removeTemplate(accessToken, templateId);
+          setTemplates((current) => current.filter((t) => t.id !== templateId));
+          return true;
+        },
+      });
     },
     [accessToken, client],
   );
@@ -600,25 +625,24 @@ export function useTeamWorkflowTemplates() {
   const duplicateTemplate = useCallback(
     async (source: WorkflowTemplateRecord) => {
       if (!accessToken) return false;
-      setBusy(true);
-      setError(null);
-      try {
-        const created = await client.createTemplate(accessToken, {
-          name: `${source.name} (副本)`,
-          description: source.description ?? undefined,
-          category: source.category,
-          metadata: source.metadata,
-          nodes: source.nodes,
-          edges: source.edges,
-        });
-        setTemplates((current) => [created, ...current]);
-        return true;
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : '复制模板失败');
-        return false;
-      } finally {
-        setBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runTemplateActionOnce`（见其注释）。
+      return runTemplateActionOnce({
+        setBusy,
+        setError,
+        failureMessage: '复制模板失败',
+        run: async () => {
+          const created = await client.createTemplate(accessToken, {
+            name: `${source.name} (副本)`,
+            description: source.description ?? undefined,
+            category: source.category,
+            metadata: source.metadata,
+            nodes: source.nodes,
+            edges: source.edges,
+          });
+          setTemplates((current) => [created, ...current]);
+          return true;
+        },
+      });
     },
     [accessToken, client],
   );
@@ -626,18 +650,17 @@ export function useTeamWorkflowTemplates() {
   const updateTemplate = useCallback(
     async (templateId: string, input: UpdateWorkflowTemplateInput) => {
       if (!accessToken) return false;
-      setBusy(true);
-      setError(null);
-      try {
-        const updated = await client.updateTemplate(accessToken, templateId, input);
-        setTemplates((current) => current.map((t) => (t.id === templateId ? updated : t)));
-        return true;
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : '更新模板失败');
-        return false;
-      } finally {
-        setBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runTemplateActionOnce`（见其注释）。
+      return runTemplateActionOnce({
+        setBusy,
+        setError,
+        failureMessage: '更新模板失败',
+        run: async () => {
+          const updated = await client.updateTemplate(accessToken, templateId, input);
+          setTemplates((current) => current.map((t) => (t.id === templateId ? updated : t)));
+          return true;
+        },
+      });
     },
     [accessToken, client],
   );

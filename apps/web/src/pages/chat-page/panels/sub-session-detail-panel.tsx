@@ -221,6 +221,51 @@ function buildGroupedMessages(
   return groups;
 }
 
+/**
+ * 解析工具调用的 input 文本；失败时退回 raw 形式。
+ *
+ * 必须留在模块级：try 内的 `&&` / 三元都是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个组件（实测）。
+ * 语义逐字照搬。
+ */
+function parseToolCallInput(inputText: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(inputText) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : { raw: inputText };
+  } catch {
+    return inputText.trim() ? { raw: inputText } : {};
+  }
+}
+
+/**
+ * 子会话详情动作（重命名 / 取消任务）的统一包装：置 busy / 清 error → try
+ * → catch 归一文案 → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 2 处
+ * 这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runSubSessionActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  failureMessage: string;
+  /** finally 的附加清理（在清 busy 之后执行，与原 finally 的语句顺序一致）。 */
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.setError(error instanceof Error ? error.message : ctx.failureMessage);
+  } finally {
+    ctx.setBusy(false);
+    ctx.onFinally?.();
+  }
+}
+
 const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   childSessionId,
   currentUserEmail,
@@ -246,10 +291,10 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
   const { error, loading, messages, pendingPermissions, refresh, session, tasks } =
     useSubSessionDetail(childSessionId, gatewayUrl, token);
   const client = useGatewayClient(token);
-  const sessionsClient: CancelableSessionsClient = useMemo(
-    () => createSessionsClient(gatewayUrl) as CancelableSessionsClient,
-    [gatewayUrl],
-  );
+  // 廉价构造（客户端工厂）交给编译器自动 memo：保留手写 useMemo 会被判为
+  // "Existing memoization could not be preserved" 而放弃优化整个组件
+  // （见 apps/web/AGENTS.md「手写 memo 阻挡编译器」一类）。
+  const sessionsClient = createSessionsClient(gatewayUrl) as CancelableSessionsClient;
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [cancellingTask, setCancellingTask] = useState(false);
@@ -297,28 +342,33 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
       return;
     }
 
-    setRenameBusy(true);
-    setSendError(null);
-    try {
-      await sessionsClient.rename(token, childSessionId, trimmed);
-      await refresh();
-      // 子代理标题出现在父会话的运行列表 / 切换器里：同源刷新两处缓存。
-      requestCurrentSessionRefresh(childSessionId);
-      if (childSessionSelection.parentSessionId) {
-        requestCurrentSessionRefresh(childSessionSelection.parentSessionId);
-      }
-      requestSessionListRefresh();
-    } catch (error) {
-      setSendError(error instanceof Error ? error.message : '重命名子代理失败');
-    } finally {
-      setRenameBusy(false);
-    }
+    // 置 busy / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runSubSessionActionOnce`（见其注释）。
+    await runSubSessionActionOnce({
+      setBusy: setRenameBusy,
+      setError: setSendError,
+      failureMessage: '重命名子代理失败',
+      run: async () => {
+        await sessionsClient.rename(token, childSessionId, trimmed);
+        await refresh();
+        // 子代理标题出现在父会话的运行列表 / 切换器里：同源刷新两处缓存。
+        requestCurrentSessionRefresh(childSessionId);
+        if (childSessionSelection.parentSessionId) {
+          requestCurrentSessionRefresh(childSessionSelection.parentSessionId);
+        }
+        requestSessionListRefresh();
+      },
+    });
   }
 
   const renderedMessages = useMemo(() => {
     const baseMessages = mergeOptimisticUserMessage(messages, optimisticUserMessage);
+    // 先拷贝再 push：原写法在 useMemo 里原地改数组，编译器判为
+    // "Existing memoization could not be preserved"（memo 值无法在编译产物里复现）
+    // 并放弃优化整个组件。改成非变更写法后语义完全一致。
+    const withEphemeral = [...baseMessages];
     if (streaming && (streamBuffer.length > 0 || liveToolCalls.length > 0)) {
-      baseMessages.push({
+      withEphemeral.push({
         id: '__child_streaming__',
         role: 'assistant',
         content: createAssistantTraceContent({ text: streamBuffer, toolCalls: liveToolCalls }),
@@ -329,7 +379,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
       });
     }
     if (sendError) {
-      baseMessages.push({
+      withEphemeral.push({
         id: '__child_error__',
         role: 'assistant',
         content: `[错误] ${sendError}`,
@@ -338,7 +388,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
         tokenEstimate: estimateTokenCount(sendError),
       });
     }
-    return buildGroupedMessages(baseMessages, parentTaskRuntimeLookup);
+    return buildGroupedMessages(withEphemeral, parentTaskRuntimeLookup);
   }, [
     liveToolCalls,
     messages,
@@ -365,10 +415,10 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
         .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null,
     [childSessionId, tasks],
   );
-  const childSessionSelection = useMemo(
-    () => parseModelSelectionFromMetadataJson(session?.metadata_json),
-    [session?.metadata_json],
-  );
+  // 廉价解析交给编译器自动 memo：工厂函数 `parseModelSelectionFromMetadataJson` 内含
+  // try/catch，编译器无法内联复现手写 memo，会被判为
+  // "Existing memoization could not be preserved" 并放弃优化整个组件（实测定位到此）。
+  const childSessionSelection = parseModelSelectionFromMetadataJson(session?.metadata_json);
   // 子代理实际使用的模型与思考等级：优先落库的显示名，回退原始 modelId。
   const childModelName =
     childSessionSelection.modelLabel.trim() || childSessionSelection.modelId.trim();
@@ -551,16 +601,8 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             return {
               toolCallId: toolCall.toolCallId,
               toolName: toolCall.toolName,
-              input: (() => {
-                try {
-                  const parsed = JSON.parse(toolCall.inputText) as unknown;
-                  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-                    ? (parsed as Record<string, unknown>)
-                    : { raw: toolCall.inputText };
-                } catch {
-                  return toolCall.inputText.trim() ? { raw: toolCall.inputText } : {};
-                }
-              })(),
+              // 解析（含 try/catch 与值块）已下沉到模块级 `parseToolCallInput`（见其注释）。
+              input: parseToolCallInput(toolCall.inputText),
               output: toolCall.output,
               isError: toolCall.isError,
               ...(hasPendingPermission
@@ -585,21 +627,24 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
       return;
     }
 
-    setCancellingTask(true);
-    setSendError(null);
-    try {
-      await sessionsClient.cancelTask(token, childSessionId, currentTaskSelection.id);
-      await refresh();
-      requestCurrentSessionRefresh(childSessionId);
-      if (childSessionSelection.parentSessionId) {
-        requestCurrentSessionRefresh(childSessionSelection.parentSessionId);
-      }
-    } catch (error) {
-      setSendError(error instanceof Error ? error.message : '取消子任务失败');
-    } finally {
-      setCancellingTask(false);
-      setStreaming(false);
-    }
+    // 同重命名：置 busy / 清 error 与 try/catch/finally 一起下沉到
+    // `runSubSessionActionOnce`（见其注释）。
+    await runSubSessionActionOnce({
+      setBusy: setCancellingTask,
+      setError: setSendError,
+      failureMessage: '取消子任务失败',
+      onFinally: () => {
+        setStreaming(false);
+      },
+      run: async () => {
+        await sessionsClient.cancelTask(token, childSessionId, currentTaskSelection.id);
+        await refresh();
+        requestCurrentSessionRefresh(childSessionId);
+        if (childSessionSelection.parentSessionId) {
+          requestCurrentSessionRefresh(childSessionSelection.parentSessionId);
+        }
+      },
+    });
   }
 
   if (!childSessionId) {

@@ -8,6 +8,7 @@ import {
   type SvgIntrinsicSize,
 } from './mermaid-diagram-meta.js';
 import { useMarkdownThemeTokens } from './use-markdown-theme.js';
+import { loadMermaidOnce } from '../../../utils/lazy/lazy-assets.js';
 
 type MermaidApi = (typeof import('mermaid'))['default'];
 
@@ -55,10 +56,11 @@ export const MermaidPreviewCodeBlock = memo(function MermaidPreviewCodeBlock({
   // 按需加载 mermaid 库（组件首次挂载时才开始拉取）
   useEffect(() => {
     let cancelled = false;
-    void import('mermaid')
-      .then((mod) => {
+    // import() 只能在模块级：编译器不支持 import() 表达式（见 utils/lazy/lazy-assets.ts）。
+    void loadMermaidOnce()
+      .then((api) => {
         if (!cancelled) {
-          setMermaid(mod.default);
+          setMermaid(api);
         }
       })
       .catch(() => {

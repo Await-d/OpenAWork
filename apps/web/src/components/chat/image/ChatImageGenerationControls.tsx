@@ -1,11 +1,18 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  clampImageGenerationQuality,
+  getImageGenerationQualityOptions,
+  IMAGE_GENERATION_COUNT_RANGE,
+  IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE,
+  IMAGE_GENERATION_SIZE_AUTO,
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
   resolveImageGenerationSizePresetId,
   sizeForPreset,
+  validateImageGenerationBackgroundCombination,
   validateImageGenerationSize,
 } from '@openAwork/shared';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
+import type { ImageGenerationPartialImage } from '@openAwork/web-client';
 
 export interface ChatImageGenerationReferenceArtifact {
   artifactId: string;
@@ -17,6 +24,8 @@ export interface ChatImageGenerationControlsProps {
   busy: boolean;
   disabled: boolean;
   hasConfiguredModel: boolean;
+  /** 流式生图的中间稿预览；存在时说明上游正在实时回传。 */
+  imageGenerationPreview?: ImageGenerationPartialImage | null;
   imageDefaults: SavedChatImageDefaults;
   imageMode: boolean;
   imageModelLabel: string;
@@ -53,10 +62,23 @@ const selectStyle: React.CSSProperties = {
   padding: '0 10px',
 };
 
+function buildCountOptions(): number[] {
+  const options: number[] = [];
+  for (
+    let value = IMAGE_GENERATION_COUNT_RANGE.min;
+    value <= IMAGE_GENERATION_COUNT_RANGE.max;
+    value += 1
+  ) {
+    options.push(value);
+  }
+  return options;
+}
+
 export function ChatImageGenerationControls({
   busy,
   disabled,
   hasConfiguredModel,
+  imageGenerationPreview,
   imageDefaults,
   imageMode,
   imageModelLabel,
@@ -74,6 +96,21 @@ export function ChatImageGenerationControls({
   const selectedReference = referenceArtifacts.find(
     (artifact) => artifact.artifactId === selectedReferenceArtifactId,
   );
+
+  // 遮罩是会话内的产物引用：切会话 / 删产物后必须回收，否则下一次编辑会把
+  // 已经失效的 id 送上去，只能拿到 400。
+  //
+  // ⚠️ 这段必须放在下面两个早返回**之前**：`useEffect` 是 Hook，摆在早返回之后就成了
+  // 「条件调用 Hook」——既违反 Rules of Hooks，也会被 react-compiler 规则判为 error。
+  const maskArtifactId = imageDefaults.maskArtifactId ?? null;
+  const maskAvailable =
+    maskArtifactId !== null &&
+    referenceArtifacts.some((artifact) => artifact.artifactId === maskArtifactId);
+  useEffect(() => {
+    if (maskArtifactId !== null && !maskAvailable) {
+      onUpdateImageDefaults({ maskArtifactId: null });
+    }
+  }, [maskArtifactId, maskAvailable, onUpdateImageDefaults]);
 
   if (variant === 'toggle') {
     return (
@@ -125,7 +162,22 @@ export function ChatImageGenerationControls({
 
   const sizePresetId = resolveImageGenerationSizePresetId(imageDefaults.size);
   const sizeValidation = validateImageGenerationSize(imageDefaults.size);
-  const isCustomSize = forceCustomSize || sizePresetId === 'custom';
+  const isAutoSize = imageDefaults.size === IMAGE_GENERATION_SIZE_AUTO;
+  const isCustomSize = (forceCustomSize || sizePresetId === 'custom') && !isAutoSize;
+
+  // 质量档位按模型能力渲染：`xhigh` / `max` 只有 GPT Image 2.5 能接受。
+  const qualityOptions = getImageGenerationQualityOptions(imageDefaults.modelId);
+  const effectiveQuality = clampImageGenerationQuality(
+    imageDefaults.modelId,
+    imageDefaults.quality,
+  );
+  const backgroundNotice = validateImageGenerationBackgroundCombination({
+    background: imageDefaults.background,
+    outputFormat: imageDefaults.outputFormat,
+    modelId: imageDefaults.modelId,
+  });
+  const compressionEnabled = imageDefaults.outputFormat !== 'png';
+  const countOptions = buildCountOptions();
 
   return (
     <div
@@ -218,6 +270,27 @@ export function ChatImageGenerationControls({
         </button>
       </div>
 
+      {imageGenerationPreview && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <img
+            src={`data:${imageGenerationPreview.mimeType};base64,${imageGenerationPreview.partialImageBase64}`}
+            alt="图片生成中间稿"
+            style={{
+              borderRadius: 8,
+              width: 72,
+              height: 72,
+              objectFit: 'cover',
+              border: '1px solid var(--border-subtle)',
+            }}
+          />
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
+            正在生成，已收到第 {imageGenerationPreview.index + 1} 稿中间结果
+            <br />
+            中间稿仅作预览，最终产物仍以上游完成图为准。
+          </span>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gap: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600 }}>参考图</span>
@@ -261,6 +334,40 @@ export function ChatImageGenerationControls({
               ? '可直接选择当前会话中的已有图片作为参考图，或上传一张新图片。'
               : '当前会话暂无可复用的图片产物，仍可上传图片作为参考图。'}
         </span>
+        {selectedReferenceArtifactId && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span
+              style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600 }}
+              title="只能替换遮罩白色区域；遮罩需与参考图同格式同尺寸，且带 alpha 通道"
+            >
+              遮罩
+            </span>
+            <select
+              disabled={busy}
+              value={maskAvailable ? maskArtifactId : ''}
+              onChange={(event) =>
+                onUpdateImageDefaults({ maskArtifactId: event.target.value || null })
+              }
+              style={{
+                ...selectStyle,
+                minHeight: 26,
+                minWidth: 220,
+                padding: '0 8px',
+                fontSize: 11,
+              }}
+            >
+              <option value="">整图编辑（不使用遮罩）</option>
+              {referenceArtifacts.map((artifact) => (
+                <option key={artifact.artifactId} value={artifact.artifactId}>
+                  {artifact.fileName ?? artifact.title}
+                </option>
+              ))}
+            </select>
+            <span style={{ fontSize: 10, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+              遮罩需与参考图同格式同尺寸，且带 alpha 通道。
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Size presets - compact */}
@@ -333,6 +440,30 @@ export function ChatImageGenerationControls({
             type="button"
             disabled={busy}
             onClick={() => {
+              setForceCustomSize(false);
+              onUpdateImageDefaults({ size: IMAGE_GENERATION_SIZE_AUTO });
+            }}
+            title="由模型按 prompt 自动选择尺寸（官方默认）"
+            style={{
+              borderRadius: 999,
+              border: '1px solid var(--border-subtle)',
+              background: isAutoSize
+                ? 'color-mix(in oklch, var(--accent) 16%, transparent)'
+                : 'transparent',
+              color: isAutoSize ? 'var(--accent)' : 'var(--fg-default)',
+              padding: '2px 8px',
+              fontSize: 11,
+              fontWeight: isAutoSize ? 700 : 500,
+              cursor: busy ? 'default' : 'pointer',
+              opacity: busy ? 0.5 : 1,
+            }}
+          >
+            自动
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
               if (!isCustomSize) {
                 setForceCustomSize(true);
               }
@@ -377,15 +508,15 @@ export function ChatImageGenerationControls({
       {/* Quality / Format / Background - compact row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontWeight: 600 }}>质量</span>
-        {(['low', 'medium', 'high'] as const).map((q) => {
-          const qLabel = q === 'low' ? '速度优先' : q === 'medium' ? '平衡' : '细节优先';
-          const active = imageDefaults.quality === q;
+        {qualityOptions.map((option) => {
+          const active = effectiveQuality === option.value;
           return (
             <button
-              key={q}
+              key={option.value}
               type="button"
               disabled={busy}
-              onClick={() => onUpdateImageDefaults({ quality: q })}
+              onClick={() => onUpdateImageDefaults({ quality: option.value })}
+              title={option.description}
               style={{
                 borderRadius: 999,
                 border: '1px solid var(--border-subtle)',
@@ -400,7 +531,7 @@ export function ChatImageGenerationControls({
                 opacity: busy ? 0.5 : 1,
               }}
             >
-              {qLabel}
+              {option.label}
             </button>
           );
         })}
@@ -436,9 +567,82 @@ export function ChatImageGenerationControls({
           >
             <option value="auto">自动</option>
             <option value="opaque">不透明</option>
+            <option value="transparent">透明</option>
           </select>
         </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }} title="单次生成的张数">
+            张数
+          </span>
+          <select
+            disabled={busy}
+            value={imageDefaults.count}
+            onChange={(event) => onUpdateImageDefaults({ count: Number(event.target.value) })}
+            style={{ ...selectStyle, minHeight: 26, padding: '0 6px', fontSize: 11 }}
+          >
+            {countOptions.map((value) => (
+              <option key={value} value={value}>
+                {value} 张
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }} title="内容审核严格度">
+            审核
+          </span>
+          <select
+            disabled={busy}
+            value={imageDefaults.moderation}
+            onChange={(event) =>
+              onUpdateImageDefaults({
+                moderation: event.target.value as SavedChatImageDefaults['moderation'],
+              })
+            }
+            style={{ ...selectStyle, minHeight: 26, padding: '0 6px', fontSize: 11 }}
+          >
+            <option value="auto">标准</option>
+            <option value="low">宽松</option>
+          </select>
+        </label>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            opacity: compressionEnabled ? 1 : 0.45,
+          }}
+          title={compressionEnabled ? 'JPEG / WebP 的输出压缩率' : '仅 JPEG / WebP 支持压缩率'}
+        >
+          <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>压缩</span>
+          <input
+            type="number"
+            disabled={busy || !compressionEnabled}
+            min={IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE.min}
+            max={IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE.max}
+            value={imageDefaults.outputCompression ?? ''}
+            placeholder="默认"
+            onChange={(event) =>
+              onUpdateImageDefaults({
+                outputCompression:
+                  event.target.value === '' ? undefined : Number(event.target.value),
+              })
+            }
+            style={{
+              ...selectStyle,
+              minHeight: 26,
+              padding: '0 6px',
+              fontSize: 11,
+              width: 68,
+            }}
+          />
+        </label>
       </div>
+      {backgroundNotice && (
+        <span style={{ fontSize: 10, color: 'var(--warning)', lineHeight: 1.5 }}>
+          {backgroundNotice}
+        </span>
+      )}
     </div>
   );
 }

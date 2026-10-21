@@ -40,8 +40,10 @@ export function extractGrepContentHitsFromOutput(output: unknown): GrepContentHi
  * `<pre>$path:$line: $text</pre>` flat dump with a scannable per-file list.
  */
 export function GrepContentHitsPreview({ hits }: { hits: GrepContentHit[] }) {
-  const fileEditorRef = useFileEditorContext();
-  const canOpen = fileEditorRef?.current != null;
+  const { openRef, isAvailable } = useFileEditorContext();
+  // 可用性走响应式布尔，不在渲染期读 ref —— 渲染期读 `.current` 会让 React Compiler
+  // 放弃优化本组件（"Cannot access refs during render"）。
+  const canOpen = isAvailable;
   const grouped = useMemo(() => {
     const map = new Map<string, GrepContentHit[]>();
     for (const h of hits) {
@@ -77,7 +79,7 @@ export function GrepContentHitsPreview({ hits }: { hits: GrepContentHit[] }) {
                   title={`打开 ${path}:${h.line}`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    const open = fileEditorRef?.current;
+                    const open = openRef.current;
                     if (open) open(path, { line: h.line });
                   }}
                 >

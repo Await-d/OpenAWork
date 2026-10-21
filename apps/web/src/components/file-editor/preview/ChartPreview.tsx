@@ -11,6 +11,7 @@ import { useMarkdownThemeTokens } from '../../chat/markdown/use-markdown-theme.j
 import { PreviewToolbar, ZoomControls } from './PreviewToolbar.js';
 import { usePreviewZoom } from './use-preview-zoom.js';
 import './preview-surface.css';
+import { loadMermaidOnce } from '../../../utils/lazy/lazy-assets.js';
 
 type MermaidApi = (typeof import('mermaid'))['default'];
 
@@ -59,10 +60,11 @@ export const ChartPreview = memo(function ChartPreview({
 
   useEffect(() => {
     let cancelled = false;
-    void import('mermaid')
-      .then((mod) => {
+    // import() 只能在模块级：见 utils/lazy/lazy-assets.ts。
+    void loadMermaidOnce()
+      .then((api) => {
         if (!cancelled) {
-          setMermaid(mod.default);
+          setMermaid(api);
         }
       })
       .catch(() => {

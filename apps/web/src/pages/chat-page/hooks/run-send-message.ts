@@ -39,6 +39,7 @@ import type { ChatBackendUsageSnapshot } from '../../../components/conversation-
 import {
   appendStreamingTextDelta,
   appendStreamingThinkingDelta,
+  applyToolProgressToStreamingSegment,
   markStreamingReasoningSegmentEnded,
   upsertStreamingToolSegment,
 } from '../../../components/conversation-runtime/stream/streaming-segments.js';
@@ -60,6 +61,7 @@ import type {
   ChatSettingsProvider,
 } from '../../../utils/chat/chat-session-defaults.js';
 import { logger } from '../../../utils/log/logger.js';
+import { resolveStreamTerminalStatus } from '../state/resolve-stream-terminal-status.js';
 import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
 import {
   requestCurrentSessionRefresh,
@@ -137,6 +139,10 @@ import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'reac
  * 两端都要清：本地是附件 Blob（IndexedDB，scope 为空时无附件可清），远端是队列
  * 记录（网关 SQLite）。远端清理失败只记日志——此时消息已进会话历史，队列残留只是
  * 冗余记录，不该反过来影响发送结果。
+ *
+ * 远端删除会**联动回收附件的跨端副本**（磁盘型产物，见网关
+ * `session/composer-queue-artifact-purge.ts`）：发送路径已经把附件重新上传成新副本，
+ * 队列里那份不再有消费者，留着只会占磁盘。
  */
 function cleanupConsumedQueuedMessage(input: {
   gatewayUrl: string;
@@ -426,7 +432,12 @@ export async function runSendMessage(
     (!trimmedSourceInput && (imageGenerationMode || effectiveFiles.length === 0)) ||
     // streamingRef 兜住「流已开、streaming 状态尚未提交」的窗口:只看 state 会漏判,
     // 第二次发送会再起一个流,被网关单飞锁拒成 SESSION_ALREADY_RUNNING。
-    ((streaming || streamingRef.current || remoteSessionBusyState) &&
+    //
+    // 只拦 `running`:那才是网关真的持有单飞锁的形态。`paused`（等待权限审批 / 等待
+    // 回答问题）时暂停流已收尾并释放了锁，用户可以直接继续发消息——这正是本轮
+    // 「等待交互不再阻塞输入」的落点。审批 / 回答随后提交时会排队等待这一轮让出执行权
+    // （见 stream-runtime 的 waitForSessionStreamSlot），不会出现「点了没反应」。
+    ((streaming || streamingRef.current || remoteSessionBusyState === 'running') &&
       !matchedServerCommand &&
       !matchedClientCommand) ||
     imageGenerationBusy
@@ -1019,6 +1030,10 @@ export async function runSendMessage(
 
       if (event.type === 'tool_progress') {
         applyStreamToolProgress({ event, liveToolCalls });
+        // tool_progress 只更新 Map 不会触发渲染；同步写回当前流的分段并调度
+        // RAF，长命令才能持续刷新实时终端。
+        accumulatedSegments = applyToolProgressToStreamingSegment(accumulatedSegments, event);
+        scheduleSegmentsFlush();
       }
 
       if (event.type === 'tool_result') {
@@ -1113,8 +1128,18 @@ export async function runSendMessage(
             );
           },
           onQuestionAsked: (questionEvent) => {
+            // 与 `onPermissionAsked` 保持对称：提问同样是「流暂停等用户输入」，
+            // **不能**清空流式状态。
+            //
+            // 曾经这里调 `resetStreamState()`，它会 `setStreamBuffer('')`、
+            // `setStreamingSegments([])`、`setRecoveredStreamSnapshot(null)`、
+            // `setRecoveryActiveStream(null)` 并把 `currentAssistantStreamMessageIdRef`
+            // 置 null。后果有三个，用户看到的就是「提问一弹出就断流」：
+            //   1. 正在输出的助手内容被整体清空；
+            //   2. `recoveryActiveStreamPresent` 变 false，attach 判定不再成立，
+            //      回答后重启的那部分输出根本不会流回来（要靠刷新 / 切会话）；
+            //   3. 助手消息 id 丢失，回答后的 delta 会重新铸 id，同一轮被拆成两条消息。
             setSessionStateStatus('paused');
-            resetStreamState();
             void loadPendingQuestionForSession(sid, questionEvent.requestId);
           },
           onQuestionReplied: (questionEvent) => {
@@ -1396,7 +1421,16 @@ export async function runSendMessage(
         });
         firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
       }
-      setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
+      // 交互回复与旧流收尾可能交错：回复请求会先乐观置为 running，而暂停中的
+      // 旧流随后才收到 done。此处必须保留已经恢复的 running，不能让迟到的 done
+      // 把续跑窗口降回 idle/paused，导致下一条消息抢先启动并撞上单飞锁。
+      setSessionStateStatus((currentStatus) => {
+        return resolveStreamTerminalStatus({
+          currentStatus,
+          pausedForPermission,
+          pausedForQuestion,
+        });
+      });
       resetStreamState();
       // 流式完成后延迟快照恢复，给服务器足够时间持久化消息。
       // 使用较短的延迟（800ms）避免用户感知到不一致，同时确保服务器已完成持久化。

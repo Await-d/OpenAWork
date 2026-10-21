@@ -175,6 +175,117 @@ interface PanelActionState {
   readonly targetId?: string;
 }
 
+/**
+ * 统一的「pending + try/catch/finally」动作包装。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（条件 / 三元），本组件 10 处 try/catch/finally 会让整个组件脱靶（实测
+ * 10 处同一诊断）。语义逐字照搬：`run` 的全流程仍在 try 内，catch 只做错误文案映射，
+ * finally 无条件清 pending。
+ */
+async function runSnippetActionOnce(ctx: {
+  pending: PanelActionState;
+  /** catch 兜底文案，走 `getUserVisibleErrorMessage` 归一化。 */
+  fallbackMessage?: string;
+  /** 不走归一化的固定错误文案（如剪贴板权限提示）。 */
+  fixedErrorMessage?: string;
+  /** true 时 catch 遇到 abort 类错误静默返回，不提示。 */
+  ignoreAbort?: boolean;
+  setActionError: (message: string | null) => void;
+  setPendingAction: (action: PanelActionState | null) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setActionError(null);
+  ctx.setPendingAction(ctx.pending);
+  try {
+    await ctx.run();
+  } catch (error) {
+    if (ctx.ignoreAbort && isAbortLikeError(error)) {
+      return;
+    }
+    ctx.setActionError(
+      ctx.fixedErrorMessage ?? getUserVisibleErrorMessage(error, ctx.fallbackMessage ?? ''),
+    );
+  } finally {
+    ctx.setPendingAction(null);
+  }
+}
+
+/** 读取版本历史（finally 收的是 `versionsLoading`，与 pending 动作不同，故单独一个）。 */
+async function loadSnippetVersionsOnce(ctx: {
+  client: ReturnType<typeof createPromptSnippetsClient>;
+  token: string;
+  snippetId: string;
+  setVersions: (versions: PromptSnippetVersion[]) => void;
+  setActionError: (message: string | null) => void;
+  setVersionsLoading: (loading: boolean) => void;
+}): Promise<void> {
+  try {
+    const nextVersions = await ctx.client.listSnippetVersions(ctx.token, ctx.snippetId);
+    ctx.setVersions(nextVersions);
+  } catch (error) {
+    if (!isAbortLikeError(error)) {
+      ctx.setActionError(getUserVisibleErrorMessage(error, '读取版本历史失败，请稍后重试。'));
+    }
+  } finally {
+    ctx.setVersionsLoading(false);
+  }
+}
+
+/** 拉取分组 + 提示词（含请求序号 / abort 判定与 finally 清理）。 */
+async function fetchSnippetsDataOnce(ctx: {
+  client: ReturnType<typeof createPromptSnippetsClient>;
+  token: string;
+  requestId: number;
+  controller: AbortController;
+  abortControllerRef: { current: AbortController | null };
+  requestIdRef: { current: number };
+  setGroups: (groups: PromptSnippetGroup[]) => void;
+  setSnippets: (snippets: PromptSnippet[]) => void;
+  setActiveGroupId: (updater: (current: string | null) => string | null) => void;
+  setLoadError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}): Promise<void> {
+  const { client, token, requestId, controller } = ctx;
+  ctx.setLoading(true);
+  ctx.setLoadError(null);
+  try {
+    const [g, s] = await Promise.all([
+      client.listGroups(token, { signal: controller.signal }),
+      client.listSnippets(token, { signal: controller.signal }),
+    ]);
+    if (ctx.requestIdRef.current !== requestId || controller.signal.aborted) {
+      return;
+    }
+    ctx.setGroups(g);
+    ctx.setSnippets(s);
+    ctx.setActiveGroupId((current) => {
+      const currentGroup = current ? g.find((group) => group.id === current) : undefined;
+      if (currentGroup) {
+        return currentGroup.id;
+      }
+      const firstGroup = g[0];
+      return firstGroup ? firstGroup.id : null;
+    });
+  } catch (error) {
+    if (
+      ctx.requestIdRef.current !== requestId ||
+      controller.signal.aborted ||
+      isAbortLikeError(error)
+    ) {
+      return;
+    }
+    ctx.setLoadError(getUserVisibleErrorMessage(error, '读取快捷提示词失败，请稍后重试。'));
+  } finally {
+    if (ctx.abortControllerRef.current === controller) {
+      ctx.abortControllerRef.current = null;
+    }
+    if (ctx.requestIdRef.current === requestId) {
+      ctx.setLoading(false);
+    }
+  }
+}
+
 export function PromptSnippetsPanel({
   open,
   anchorRef,
@@ -265,43 +376,20 @@ export function PromptSnippetsPanel({
 
     const controller = new AbortController();
     fetchAbortControllerRef.current = controller;
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const [g, s] = await Promise.all([
-        client.listGroups(token, { signal: controller.signal }),
-        client.listSnippets(token, { signal: controller.signal }),
-      ]);
-      if (fetchRequestIdRef.current !== requestId || controller.signal.aborted) {
-        return;
-      }
-      setGroups(g);
-      setSnippets(s);
-      setActiveGroupId((current) => {
-        const currentGroup = current ? g.find((group) => group.id === current) : undefined;
-        if (currentGroup) {
-          return currentGroup.id;
-        }
-        const firstGroup = g[0];
-        return firstGroup ? firstGroup.id : null;
-      });
-    } catch (error) {
-      if (
-        fetchRequestIdRef.current !== requestId ||
-        controller.signal.aborted ||
-        isAbortLikeError(error)
-      ) {
-        return;
-      }
-      setLoadError(getUserVisibleErrorMessage(error, '读取快捷提示词失败，请稍后重试。'));
-    } finally {
-      if (fetchAbortControllerRef.current === controller) {
-        fetchAbortControllerRef.current = null;
-      }
-      if (fetchRequestIdRef.current === requestId) {
-        setLoading(false);
-      }
-    }
+    // 含 try/catch/finally 的拉取逻辑在模块级 `fetchSnippetsDataOnce`（见其注释）。
+    await fetchSnippetsDataOnce({
+      client,
+      token,
+      requestId,
+      controller,
+      abortControllerRef: fetchAbortControllerRef,
+      requestIdRef: fetchRequestIdRef,
+      setGroups,
+      setSnippets,
+      setActiveGroupId,
+      setLoadError,
+      setLoading,
+    });
   }, [client, hasAuth, token]);
 
   useEffect(() => {
@@ -345,50 +433,50 @@ export function PromptSnippetsPanel({
 
   const handleCreateGroup = async () => {
     if (!hasAuth || !token || !formName.trim()) return;
-    setActionError(null);
-    setPendingAction({ kind: 'create-group' });
-    try {
-      await client.createGroup(token, { name: formName.trim() });
-      setFormName('');
-      setView('list');
-      await fetchData();
-    } catch (error) {
-      setActionError(getUserVisibleErrorMessage(error, '创建提示词分组失败，请稍后重试。'));
-    } finally {
-      setPendingAction(null);
-    }
+    await runSnippetActionOnce({
+      pending: { kind: 'create-group' },
+      fallbackMessage: '创建提示词分组失败，请稍后重试。',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await client.createGroup(token, { name: formName.trim() });
+        setFormName('');
+        setView('list');
+        await fetchData();
+      },
+    });
   };
 
   const handleUpdateGroup = async () => {
     if (!hasAuth || !token || !editingGroup || !formName.trim()) return;
-    setActionError(null);
-    setPendingAction({ kind: 'update-group', targetId: editingGroup.id });
-    try {
-      await client.updateGroup(token, editingGroup.id, { name: formName.trim() });
-      setFormName('');
-      setEditingGroup(null);
-      setView('list');
-      await fetchData();
-    } catch (error) {
-      setActionError(getUserVisibleErrorMessage(error, '更新提示词分组失败，请稍后重试。'));
-    } finally {
-      setPendingAction(null);
-    }
+    await runSnippetActionOnce({
+      pending: { kind: 'update-group', targetId: editingGroup.id },
+      fallbackMessage: '更新提示词分组失败，请稍后重试。',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await client.updateGroup(token, editingGroup.id, { name: formName.trim() });
+        setFormName('');
+        setEditingGroup(null);
+        setView('list');
+        await fetchData();
+      },
+    });
   };
 
   const handleDeleteGroup = async (groupId: string) => {
     if (!hasAuth || !token) return;
-    setActionError(null);
-    setPendingAction({ kind: 'delete-group', targetId: groupId });
-    try {
-      await client.deleteGroup(token, groupId);
-      if (activeGroupId === groupId) setActiveGroupId(null);
-      await fetchData();
-    } catch (error) {
-      setActionError(getUserVisibleErrorMessage(error, '删除提示词分组失败，请稍后重试。'));
-    } finally {
-      setPendingAction(null);
-    }
+    await runSnippetActionOnce({
+      pending: { kind: 'delete-group', targetId: groupId },
+      fallbackMessage: '删除提示词分组失败，请稍后重试。',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await client.deleteGroup(token, groupId);
+        if (activeGroupId === groupId) setActiveGroupId(null);
+        await fetchData();
+      },
+    });
   };
 
   const handleCreateSnippet = async () => {
@@ -396,65 +484,68 @@ export function PromptSnippetsPanel({
       ? groups.find((group) => group.id === activeGroupId)
       : undefined;
     if (!hasAuth || !token || !formTitle.trim() || !formContent.trim() || !activeGroup) return;
-    setActionError(null);
-    setPendingAction({ kind: 'create-snippet', targetId: activeGroup.id });
-    try {
-      await client.createSnippet(token, {
-        groupId: activeGroup.id,
-        title: formTitle.trim(),
-        content: formContent.trim(),
-      });
-      setFormTitle('');
-      setFormContent('');
-      setView('list');
-      await fetchData();
-    } catch (error) {
-      setActionError(getUserVisibleErrorMessage(error, '创建提示词失败，请稍后重试。'));
-    } finally {
-      setPendingAction(null);
-    }
+    await runSnippetActionOnce({
+      pending: { kind: 'create-snippet', targetId: activeGroup.id },
+      fallbackMessage: '创建提示词失败，请稍后重试。',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await client.createSnippet(token, {
+          groupId: activeGroup.id,
+          title: formTitle.trim(),
+          content: formContent.trim(),
+        });
+        setFormTitle('');
+        setFormContent('');
+        setView('list');
+        await fetchData();
+      },
+    });
   };
 
   const handleUpdateSnippet = async () => {
     if (!hasAuth || !token || !editingSnippet || !formTitle.trim() || !formContent.trim()) return;
-    setActionError(null);
-    setPendingAction({ kind: 'update-snippet', targetId: editingSnippet.id });
-    try {
-      await client.updateSnippet(token, editingSnippet.id, {
-        title: formTitle.trim(),
-        content: formContent.trim(),
-      });
-      setFormTitle('');
-      setFormContent('');
-      setEditingSnippet(null);
-      setView('list');
-      await fetchData();
-    } catch (error) {
-      setActionError(getUserVisibleErrorMessage(error, '更新提示词失败，请稍后重试。'));
-    } finally {
-      setPendingAction(null);
-    }
+    await runSnippetActionOnce({
+      pending: { kind: 'update-snippet', targetId: editingSnippet.id },
+      fallbackMessage: '更新提示词失败，请稍后重试。',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await client.updateSnippet(token, editingSnippet.id, {
+          title: formTitle.trim(),
+          content: formContent.trim(),
+        });
+        setFormTitle('');
+        setFormContent('');
+        setEditingSnippet(null);
+        setView('list');
+        await fetchData();
+      },
+    });
   };
 
   const handleDeleteSnippet = async (snippetId: string) => {
     if (!hasAuth || !token) return;
-    setActionError(null);
-    setPendingAction({ kind: 'delete-snippet', targetId: snippetId });
-    try {
-      await client.deleteSnippet(token, snippetId);
-      await fetchData();
-    } catch (error) {
-      setActionError(getUserVisibleErrorMessage(error, '删除提示词失败，请稍后重试。'));
-    } finally {
-      setPendingAction(null);
-    }
+    await runSnippetActionOnce({
+      pending: { kind: 'delete-snippet', targetId: snippetId },
+      fallbackMessage: '删除提示词失败，请稍后重试。',
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await client.deleteSnippet(token, snippetId);
+        await fetchData();
+      },
+    });
   };
 
   const handleCopy = (text: string, id: string) => {
-    void (async () => {
-      setActionError(null);
-      setPendingAction({ kind: 'copy-snippet', targetId: id });
-      try {
+    void runSnippetActionOnce({
+      pending: { kind: 'copy-snippet', targetId: id },
+      fixedErrorMessage: '复制提示词失败，请检查剪贴板权限后重试。',
+      ignoreAbort: true,
+      setActionError,
+      setPendingAction,
+      run: async () => {
         await navigator.clipboard.writeText(text);
         setCopiedId(id);
         if (copiedResetTimerRef.current !== null) {
@@ -464,15 +555,8 @@ export function PromptSnippetsPanel({
           setCopiedId(null);
           copiedResetTimerRef.current = null;
         }, 1500);
-      } catch (error) {
-        if (isAbortLikeError(error)) {
-          return;
-        }
-        setActionError('复制提示词失败，请检查剪贴板权限后重试。');
-      } finally {
-        setPendingAction(null);
-      }
-    })();
+      },
+    });
   };
 
   const openVersions = async (snippetId: string) => {
@@ -481,36 +565,32 @@ export function PromptSnippetsPanel({
     setVersions([]);
     setView('versions');
     setVersionsLoading(true);
-    setActionError(null);
-    try {
-      const nextVersions = await client.listSnippetVersions(token, snippetId);
-      setVersions(nextVersions);
-    } catch (error) {
-      if (!isAbortLikeError(error)) {
-        setActionError(getUserVisibleErrorMessage(error, '读取版本历史失败，请稍后重试。'));
-      }
-    } finally {
-      setVersionsLoading(false);
-    }
+    await loadSnippetVersionsOnce({
+      client,
+      token,
+      snippetId,
+      setVersions,
+      setActionError,
+      setVersionsLoading,
+    });
   };
 
   const handleRestoreVersion = async (snippetId: string, version: number) => {
     if (!hasAuth || !token) return;
-    setActionError(null);
-    setPendingAction({ kind: 'restore-version', targetId: snippetId });
-    try {
-      await client.restoreSnippetVersion(token, snippetId, version);
-      setVersionsSnippetId(null);
-      setVersions([]);
-      setView('list');
-      await fetchData();
-    } catch (error) {
-      if (!isAbortLikeError(error)) {
-        setActionError(getUserVisibleErrorMessage(error, '回滚版本失败，请稍后重试。'));
-      }
-    } finally {
-      setPendingAction(null);
-    }
+    await runSnippetActionOnce({
+      pending: { kind: 'restore-version', targetId: snippetId },
+      fallbackMessage: '回滚版本失败，请稍后重试。',
+      ignoreAbort: true,
+      setActionError,
+      setPendingAction,
+      run: async () => {
+        await client.restoreSnippetVersion(token, snippetId, version);
+        setVersionsSnippetId(null);
+        setVersions([]);
+        setView('list');
+        await fetchData();
+      },
+    });
   };
 
   const handleInject = (text: string) => {

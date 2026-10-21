@@ -154,9 +154,11 @@ function resetUiState(): void {
   useUIStateStore.setState({
     chatView: 'home',
     editorFullScreen: false,
+    lastChatPath: null,
     reviewPanelOpened: false,
     rightOpen: false,
     sidePanelActiveTab: 'review',
+    sidePanelActiveTabBySession: {},
     terminalPanelOpened: false,
     workbenchLayoutMode: 'fusion',
   });

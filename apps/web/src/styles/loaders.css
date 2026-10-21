@@ -221,6 +221,29 @@
   animation: omo-content-fade-up 280ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
+/* ─── 骨架 → 真实内容的交接淡入 ────────────────────────────────── */
+/*
+ * 仅覆盖「骨架真实出现过」的会话切换路径（见 ChatConversationView 的下降沿
+ * 逻辑）；缓存命中的瞬时渲染不播——那是本页面的快速路径，不该被动画拖慢。
+ *
+ * 只做 opacity（0.6 → 1，不从 0 起，避免闪黑），零位移——切换后的滚动恢复
+ * （贴底判定 / 距底恢复）不能被任何动画干扰。150ms 介于 motion-micro(100)
+ * 与 motion-normal(200) 之间：比 micro 长以承载「整块内容就位」的尺度，
+ * 比 normal 短以免推迟可读时间。
+ */
+@keyframes omo-content-handoff-in {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.omo-content-handoff-in {
+  animation: omo-content-handoff-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* ─── chat 远端流恢复占位（光晕 + 三点闪烁） ───────────────────── */
 @keyframes omo-chat-remote-stream-pulse {
   0%,
@@ -273,7 +296,8 @@
   .omo-skeleton-cool::after,
   .omo-page-enter,
   .omo-page-enter > *,
-  .omo-content-fade-up {
+  .omo-content-fade-up,
+  .omo-content-handoff-in {
     animation: none !important;
   }
 }

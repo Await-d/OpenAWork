@@ -71,6 +71,26 @@ interface TerminalPortsFeedCommands {
   setPaused(value: boolean): void;
 }
 
+/**
+ * 终端端口快照加载的统一包装：try → catch 交给 `onError` → finally 复位在途标记。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 这处 try
+ * 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runPortsFeedLoadOnce(ctx: {
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useTerminalPortsFeed(gatewayUrl: string, token: string | null): TerminalPortsFeed {
   const [state, setState] = useState<TerminalPortsFeedState>({ status: 'loading' });
   const [retryNonce, setRetryNonce] = useState(0);
@@ -119,26 +139,33 @@ export function useTerminalPortsFeed(gatewayUrl: string, token: string | null): 
       if (disposed || inFlight || halted) return;
       inFlight = true;
       controller = new AbortController();
+      // 取局部常量：`controller` 是可变局部量，闭包里用 TS 无法保留非空收窄。
+      const activeController = controller;
       if (mode === 'initial') setState({ status: 'loading' });
-      try {
-        const snapshot = await createListeningPortsClient(gatewayUrl).list(token, {
-          signal: controller.signal,
-        });
-        if (disposed) return;
-        setState({ status: 'ready', snapshot });
-        // 无论谁触发（轮询 / 手动刷新 / 恢复可见），下一拍都从**本次完成后**重新计时。
-        scheduleNext();
-      } catch (error) {
-        // 卸载 / 参数变化触发的 abort 不是失败，不覆盖新请求的状态。
-        if (disposed || controller.signal.aborted) return;
-        halted = true;
-        setState({
-          status: 'error',
-          message: error instanceof Error ? error.message : String(error),
-        });
-      } finally {
-        inFlight = false;
-      }
+      // try/catch/finally 下沉到模块级 `runPortsFeedLoadOnce`（见其注释）。
+      await runPortsFeedLoadOnce({
+        onError: (error) => {
+          // 卸载 / 参数变化触发的 abort 不是失败，不覆盖新请求的状态。
+          if (disposed || activeController.signal.aborted) return;
+          halted = true;
+          setState({
+            status: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        },
+        onFinally: () => {
+          inFlight = false;
+        },
+        run: async () => {
+          const snapshot = await createListeningPortsClient(gatewayUrl).list(token, {
+            signal: activeController.signal,
+          });
+          if (disposed) return;
+          setState({ status: 'ready', snapshot });
+          // 无论谁触发（轮询 / 手动刷新 / 恢复可见），下一拍都从**本次完成后**重新计时。
+          scheduleNext();
+        },
+      });
     };
 
     const onVisibilityChange = (): void => {

@@ -19,12 +19,20 @@ import { TeamOverviewWorkbenchMap } from './TeamOverviewWorkbenchMap.js';
 /** useTeamTabState 只支持原始值与 readonly string[]，Set 类状态统一以字符串数组持久化。 */
 const EMPTY_STRING_LIST: readonly string[] = [];
 
+/**
+ * 运行概览 tab 的入口。
+ *
+ * 这里**只做分支路由，不持有任何 hook**：共享会话分支需要提前 return，
+ * 若把 hook 写在提前返回之后，它们就变成条件调用——违反 Rules of Hooks，
+ * `isSharedSession` 一旦运行时翻转就会 hook 数不匹配直接崩溃；同时该组件也会被
+ * React Compiler 整体放弃优化（实测 4 个函数脱靶）。所有 hook 已下移到
+ * {@link OverviewTabContent}，两个分支从此各自无条件执行。
+ */
 export function OverviewTab({
   selectedTeam = null,
 }: {
   selectedTeam?: AgentTeamsSidebarTeam | null;
 }) {
-  const { activityStats, overviewCards, timelineEvents } = useTeamRuntimeReferenceViewData();
   if (selectedTeam?.isSharedSession) {
     return (
       <TabContainer
@@ -35,6 +43,15 @@ export function OverviewTab({
       </TabContainer>
     );
   }
+  return <OverviewTabContent selectedTeam={selectedTeam} />;
+}
+
+function OverviewTabContent({
+  selectedTeam = null,
+}: {
+  selectedTeam?: AgentTeamsSidebarTeam | null;
+}) {
+  const { activityStats, overviewCards, timelineEvents } = useTeamRuntimeReferenceViewData();
   const [timelineFilter, setTimelineFilter] = useTeamTabState<readonly string[]>(
     'overview.timelineFilter',
     EMPTY_STRING_LIST,
@@ -54,9 +71,13 @@ export function OverviewTab({
   const expandedCardIdsSet = new Set<string>(expandedCardIds);
   const expandedEventIdsSet = new Set<string>(expandedEventIds);
 
+  // 注意：memo 内部刻意用 `timelineFilter.includes` 而不是 `timelineFilterSet.has`。
+  // 后者是每次渲染新建的 Set（见下方注释），若在 memo 内读取它，编译器推断出的依赖
+  // 就与手写依赖数组不一致，会报 "Existing memoization could not be preserved"
+  // 并放弃优化本组件。改用 includes 后 memo 只读 timelineFilter 本身，依赖精确匹配。
   const filteredEvents = useMemo(() => {
     let result = timelineEvents;
-    if (timelineFilter.length > 0) result = result.filter((e) => timelineFilterSet.has(e.type));
+    if (timelineFilter.length > 0) result = result.filter((e) => timelineFilter.includes(e.type));
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(

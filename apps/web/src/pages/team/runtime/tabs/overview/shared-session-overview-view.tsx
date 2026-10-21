@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from 'react';
+import { type CSSProperties } from 'react';
 import type { Message } from '@openAwork/shared';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
@@ -136,42 +136,38 @@ export function SharedSessionOverviewView({
   const assistantMessages =
     sharedSession?.session.messages?.filter((message) => message.role === 'assistant') ?? [];
   const activePresenceCount = sharedSession?.presence.filter((entry) => entry.active).length ?? 0;
-  const sharedAuditLogs = useMemo(
-    () =>
-      auditLogs
-        .filter((log) => log.sessionId === selectedTeam.id)
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 8),
-    [auditLogs, selectedTeam.id],
-  );
-  const timelineItems = useMemo(() => {
-    const assistantItems = assistantMessages.map((message, index) => ({
+  // 去手写 memo，交由编译器自动 memoize：保留 useMemo 会让编译器报
+  // 「Existing memoization could not be preserved」而放弃优化整个组件。
+  const sharedAuditLogs = auditLogs
+    .filter((log) => log.sessionId === selectedTeam.id)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, 8);
+  const timelineItems = [
+    ...assistantMessages.map((message, index) => ({
       detail: summarizeAssistantMessage(message),
       id: `assistant-${message.id}`,
       tag: 'Assistant 输出',
       timestamp: message.createdAt,
       title: `共享输出 #${index + 1}`,
-    }));
-    const commentItems = (sharedSession?.comments ?? []).map((comment) => ({
+    })),
+    ...(sharedSession?.comments ?? []).map((comment) => ({
       detail: comment.content,
       id: `comment-${comment.id}`,
       tag: '共享评论',
       timestamp: Date.parse(comment.createdAt),
       title: comment.authorEmail,
-    }));
-    const auditItems = sharedAuditLogs.map((log) => ({
+    })),
+    ...sharedAuditLogs.map((log) => ({
       detail: formatTimelineDetail(log.detail ?? log.summary, 200),
       id: `audit-${log.id}`,
       tag: ACTION_LABELS[log.action] ?? log.action,
       timestamp: Date.parse(log.createdAt),
       title: log.actorEmail ?? log.actorUserId ?? '系统',
-    }));
-
-    return [...assistantItems, ...commentItems, ...auditItems]
-      .filter((item) => Number.isFinite(item.timestamp))
-      .sort((left, right) => right.timestamp - left.timestamp)
-      .slice(0, 12);
-  }, [assistantMessages, sharedAuditLogs, sharedSession?.comments]);
+    })),
+  ]
+    .filter((item) => Number.isFinite(item.timestamp))
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .slice(0, 12);
   const statusSubtitle = resolveSidebarTeamSubtitle(selectedTeam.status, selectedTeam.subtitle);
 
   if (sharedSessionLoading && !sharedSession) {

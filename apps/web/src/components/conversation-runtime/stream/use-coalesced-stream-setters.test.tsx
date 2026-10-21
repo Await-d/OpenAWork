@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
+import type { ChatMessagePart } from '../messages/support.js';
+import type { StreamingThinkingBlock } from './streaming-thinking.js';
 import { useCoalescedStreamSetters } from './use-coalesced-stream-setters.js';
 
 afterEach(() => {
@@ -35,6 +38,21 @@ function createSetters() {
     setStreamThinkingBlocks: vi.fn(),
     setStreamingSegments: vi.fn(),
   };
+}
+
+/** 真实 React state 版的被测宿主：用于统计「合帧到底省下多少次渲染」。 */
+function useRealStateHarness() {
+  const [buffer, setBuffer] = useState('');
+  const [thinkingBuffer, setThinkingBuffer] = useState('');
+  const [thinkingBlocks, setThinkingBlocks] = useState<StreamingThinkingBlock[]>([]);
+  const [segments, setSegments] = useState<ChatMessagePart[]>([]);
+  const setters = useCoalescedStreamSetters({
+    setStreamBuffer: setBuffer,
+    setStreamThinkingBuffer: setThinkingBuffer,
+    setStreamThinkingBlocks: setThinkingBlocks,
+    setStreamingSegments: setSegments,
+  });
+  return { buffer, setters };
 }
 
 describe('useCoalescedStreamSetters', () => {
@@ -114,5 +132,31 @@ describe('useCoalescedStreamSetters', () => {
       frame.runFrame();
     });
     expect(setters.setStreamBuffer).not.toHaveBeenCalled();
+  });
+
+  it('真实 state 下，同一帧内的多次写入只触发一次重渲染', async () => {
+    const frame = stubFrameQueue();
+    let renders = 0;
+    const { result } = renderHook(() => {
+      renders += 1;
+      return useRealStateHarness();
+    });
+    const baseline = renders;
+
+    act(() => {
+      for (let index = 0; index < 20; index += 1) {
+        result.current.setters.setStreamBuffer(`增量-${index}`);
+      }
+    });
+    // 帧回调未执行前不得触发渲染（否则合帧没有意义）。
+    expect(renders).toBe(baseline);
+
+    await act(async () => {
+      frame.runFrame();
+    });
+
+    expect(result.current.buffer).toBe('增量-19');
+    // transition 可能带来一次额外的低优先级渲染，但绝不该是 20 次。
+    expect(renders - baseline).toBeLessThanOrEqual(2);
   });
 });

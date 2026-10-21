@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, type CSSProperties } from 'react';
 import type {
   AgentTeamsMessageCard,
   AgentTeamsSidebarTeam,
@@ -367,17 +367,22 @@ export function MessagesTab({
               <div
                 key={card.id}
                 className="team-card-tinted team-message-card-enter"
-                style={{
-                  ...PANEL_STYLE,
-                  padding: '10px 12px',
-                  borderRadius: 12,
-                  display: 'grid',
-                  gap: 10,
-                  background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
-                  boxShadow: '0 1px 3px -1px rgba(0,0,0,0.06), 0 2px 6px -2px rgba(0,0,0,0.08)',
-                  transition: 'box-shadow 200ms ease, transform 200ms ease',
-                  ['--tint' as string]: meta.color,
-                }}
+                style={
+                  {
+                    ...PANEL_STYLE,
+                    padding: '10px 12px',
+                    borderRadius: 12,
+                    display: 'grid',
+                    gap: 10,
+                    background: 'color-mix(in srgb, var(--bg-overlay) 90%, var(--bg-base))',
+                    boxShadow: '0 1px 3px -1px rgba(0,0,0,0.06), 0 2px 6px -2px rgba(0,0,0,0.08)',
+                    transition: 'box-shadow 200ms ease, transform 200ms ease',
+                    // CSS 变量不在 CSSProperties 已知属性里，断言必须放在整个对象上：
+                    // key 位置写 `as string` 会让 React Compiler 报
+                    // "TSAsExpression key in ObjectExpression" 并放弃优化本组件。
+                    '--tint': meta.color,
+                  } as CSSProperties
+                }
               >
                 {/* 发送链路行 */}
                 <div

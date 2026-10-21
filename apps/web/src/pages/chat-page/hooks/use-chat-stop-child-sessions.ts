@@ -28,6 +28,28 @@ function reportStopResult(result: StopChildrenResult, reportSuccess: boolean) {
   }
 }
 
+/**
+ * 停止子代理的统一包装：`onStart` 置忙 → try → catch 归一 toast → `onFinally` 清忙。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 2 处
+ * 这类 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runStopChildSessionsActionOnce(ctx: {
+  onStart?: () => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart?.();
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useChatStopChildSessions({
   currentSessionId,
   gatewayUrl,
@@ -47,25 +69,30 @@ export function useChatStopChildSessions({
         next.add(childSessionId);
         return next;
       });
-      try {
-        const result = await createSessionsClient(gatewayUrl).stopChildren(
-          token,
-          currentSessionId,
-          {
-            childSessionIds: [childSessionId],
-          },
-        );
-        reportStopResult(result, false);
-        requestSessionListRefresh();
-      } catch (error) {
-        toast(error instanceof Error ? error.message : '停止子代理失败', 'error');
-      } finally {
-        setStoppingSubAgentIds((previous) => {
-          const next = new Set(previous);
-          next.delete(childSessionId);
-          return next;
-        });
-      }
+      // try/catch/finally 下沉到模块级 `runStopChildSessionsActionOnce`（见其注释）。
+      await runStopChildSessionsActionOnce({
+        onError: (error) => {
+          toast(error instanceof Error ? error.message : '停止子代理失败', 'error');
+        },
+        onFinally: () => {
+          setStoppingSubAgentIds((previous) => {
+            const next = new Set(previous);
+            next.delete(childSessionId);
+            return next;
+          });
+        },
+        run: async () => {
+          const result = await createSessionsClient(gatewayUrl).stopChildren(
+            token,
+            currentSessionId,
+            {
+              childSessionIds: [childSessionId],
+            },
+          );
+          reportStopResult(result, false);
+          requestSessionListRefresh();
+        },
+      });
     },
     [currentSessionId, gatewayUrl, requestSessionListRefresh, token],
   );
@@ -74,18 +101,29 @@ export function useChatStopChildSessions({
     if (!currentSessionId || !token) {
       return;
     }
-    setStoppingAllSubAgents(true);
-    try {
-      const result = await createSessionsClient(gatewayUrl).stopChildren(token, currentSessionId, {
-        all: true,
-      });
-      reportStopResult(result, true);
-      requestSessionListRefresh();
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '停止全部子代理失败', 'error');
-    } finally {
-      setStoppingAllSubAgents(false);
-    }
+    // 同单个停止：整段下沉到模块级 `runStopChildSessionsActionOnce`（见其注释）。
+    await runStopChildSessionsActionOnce({
+      onStart: () => {
+        setStoppingAllSubAgents(true);
+      },
+      onError: (error) => {
+        toast(error instanceof Error ? error.message : '停止全部子代理失败', 'error');
+      },
+      onFinally: () => {
+        setStoppingAllSubAgents(false);
+      },
+      run: async () => {
+        const result = await createSessionsClient(gatewayUrl).stopChildren(
+          token,
+          currentSessionId,
+          {
+            all: true,
+          },
+        );
+        reportStopResult(result, true);
+        requestSessionListRefresh();
+      },
+    });
   }, [currentSessionId, gatewayUrl, requestSessionListRefresh, token]);
 
   return {

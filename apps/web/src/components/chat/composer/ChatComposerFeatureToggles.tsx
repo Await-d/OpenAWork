@@ -2,6 +2,7 @@ import type React from 'react';
 import { ChatImageGenerationControls } from '../image/ChatImageGenerationControls.js';
 import type { ChatImageGenerationReferenceArtifact } from '../image/ChatImageGenerationControls.js';
 import type { SavedChatImageDefaults } from '../../../utils/chat/chat-session-defaults.js';
+import type { ImageGenerationPartialImage } from '@openAwork/web-client';
 
 export interface ChatComposerFeatureTogglesProps {
   readonly showWebSearchButton: boolean;
@@ -86,6 +87,7 @@ export interface ImagePanelProps {
   readonly imagePluginEnabled: boolean;
   readonly imageReferenceArtifacts: readonly ChatImageGenerationReferenceArtifact[];
   readonly selectedImageReferenceArtifactId: string | null;
+  readonly imageGenerationPreview?: ImageGenerationPartialImage | null;
   readonly onToggleImageGenerationMode: () => void;
   readonly onSelectImageReferenceArtifactId?: (artifactId: string | null) => void;
   readonly onUpdateImageGenerationDefaults: (updates: Partial<SavedChatImageDefaults>) => void;
@@ -105,6 +107,7 @@ export function ChatComposerImagePanel(props: ImagePanelProps) {
       imagePluginEnabled={props.imagePluginEnabled}
       referenceArtifacts={[...props.imageReferenceArtifacts]}
       selectedReferenceArtifactId={props.selectedImageReferenceArtifactId}
+      imageGenerationPreview={props.imageGenerationPreview}
       onToggleImageMode={props.onToggleImageGenerationMode}
       onSelectReferenceArtifactId={props.onSelectImageReferenceArtifactId}
       onUpdateImageDefaults={props.onUpdateImageGenerationDefaults}

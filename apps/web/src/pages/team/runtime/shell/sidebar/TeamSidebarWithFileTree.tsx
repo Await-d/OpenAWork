@@ -171,6 +171,49 @@ export interface TeamSidebarWithFileTreeProps extends TeamSessionListSidebarProp
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+/**
+ * 文件树上下文菜单动作的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`
+ * （不传＝异常继续向上抛，不得静默吞掉），finally 跑清理（关闭上下文菜单）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * 「无 catch 的 try」，本组件 3 处这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runFileTreeActionOnce(ctx: {
+  onError?: (error: unknown) => void;
+  onFinally?: () => void;
+  run: () => Promise<unknown>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      throw error;
+    }
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
+/**
+ * 「try → 成功返回 true / catch 交给 onError 并返回 false」的统一包装。
+ *
+ * 必须留在模块级：`run` 回调里带值块（`...(cond ? … : {})`、三元）的 try 会让
+ * React Compiler 报 "Support value blocks … within a try/catch statement" 并放弃优化
+ * 所在组件（实测）。语义逐字照搬（含成功 / 失败两种返回值）。
+ */
+async function runFileTreeEntryActionOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<boolean>;
+}): Promise<boolean> {
+  try {
+    return await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+    return false;
+  }
+}
+
 export function TeamSidebarWithFileTree({
   workspacePath,
   onOpenFile,
@@ -198,6 +241,10 @@ export function TeamSidebarWithFileTree({
   const token = useAuthStore((s) => s.accessToken);
   /** SSH 读取身份：与主文件树同源，供文件树读取与删除/重命名共用。 */
   const readIdentity = useWorkspaceReadIdentity();
+  // 把嵌套字段取成局部量：编译器按「嵌套成员访问」推断依赖（`readIdentity.sshConnectionId`），
+  // 而源码依赖只能写顶层标识符——取成局部量后依赖变成稳定字符串，两侧一致
+  // （见 apps/web/AGENTS.md ①；in-repo 先例：team-runtime-reference-actions.ts 的解构）。
+  const readSshConnectionId = readIdentity.sshConnectionId;
   const showNewSessionModal = controlledShowModal ?? internalShowNewSessionModal;
   const effectiveInitialWorkingDirectory =
     initialWorkingDirectory ?? internalInitialWorkingDirectory;
@@ -328,48 +375,61 @@ export function TeamSidebarWithFileTree({
       }
 
       const nextPath = joinFileTreePath(directoryPath, entryName);
+      // 身份必须下发：缺失时网关按本机路径创建，SSH 远端工作区下会「假成功」——
+      // 远端并没有这个条目，但 UI 仍把它插进了树。
+      const createIdentity = {
+        ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
+        ...(readSshConnectionId ? { sshConnectionId: readSshConnectionId } : {}),
+        ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+      };
 
-      try {
-        // 身份必须下发：缺失时网关按本机路径创建，SSH 远端工作区下会「假成功」——
-        // 远端并没有这个条目，但 UI 仍把它插进了树。
-        const createIdentity = {
-          ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
-          ...(readIdentity.sshConnectionId
-            ? { sshConnectionId: readIdentity.sshConnectionId }
-            : {}),
-          ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
-        };
-        if (entryType === 'file') {
-          await workspaceClient.createFile(token, nextPath, '', createIdentity);
-        } else {
-          await workspaceClient.createDirectory(token, nextPath, createIdentity);
-        }
+      // try/catch 下沉到模块级 `runFileTreeEntryActionOnce`（见其注释）。
+      return runFileTreeEntryActionOnce({
+        onError: (error) => {
+          toast(error instanceof Error ? error.message : '创建失败', 'error');
+        },
+        run: async () => {
+          if (entryType === 'file') {
+            await workspaceClient.createFile(token, nextPath, '', createIdentity);
+          } else {
+            await workspaceClient.createDirectory(token, nextPath, createIdentity);
+          }
 
-        applyCreatedEntry({
-          directoryPath,
-          entry: {
-            path: nextPath,
-            name: entryName,
-            type: entryType === 'file' ? 'file' : 'directory',
-            ...(entryType === 'directory' ? { children: [] } : {}),
-          },
-        });
+          applyCreatedEntry({
+            directoryPath,
+            entry: {
+              path: nextPath,
+              name: entryName,
+              type: entryType === 'file' ? 'file' : 'directory',
+              ...(entryType === 'directory' ? { children: [] } : {}),
+            },
+          });
 
-        void refreshDirectory(directoryPath);
-        if (entryType === 'file') {
-          onOpenFile?.(nextPath);
-        }
-        toast(
-          entryType === 'file' ? `已创建文件：${entryName}` : `已创建文件夹：${entryName}`,
-          'success',
-        );
-        return true;
-      } catch (error) {
-        toast(error instanceof Error ? error.message : '创建失败', 'error');
-        return false;
-      }
+          void refreshDirectory(directoryPath);
+          if (entryType === 'file') {
+            onOpenFile?.(nextPath);
+          }
+          toast(
+            entryType === 'file' ? `已创建文件：${entryName}` : `已创建文件夹：${entryName}`,
+            'success',
+          );
+          return true;
+        },
+      });
     },
-    [applyCreatedEntry, onOpenFile, refreshDirectory, token, workspaceClient],
+    // 补齐编译器推断出的依赖（原先漏了三个）：缺失时编译器报
+    // "Existing memoization could not be preserved" 并放弃优化整个组件
+    // （见 apps/web/AGENTS.md ②）。
+    [
+      applyCreatedEntry,
+      onOpenFile,
+      readSshConnectionId,
+      refreshDirectory,
+      selectedTeamId,
+      token,
+      workspaceClient,
+      workspacePath,
+    ],
   );
 
   const handleCreateEntry = useCallback(
@@ -382,13 +442,18 @@ export function TeamSidebarWithFileTree({
         contextMenu.target.type === 'file'
           ? `${contextMenu.target.name} 所在目录`
           : contextMenu.target.name;
-      try {
-        await createEntryAt(entryType, contextMenu.target.directoryPath, locationLabel);
-      } finally {
-        setContextMenu(null);
-      }
+      // try/finally 下沉到模块级 `runFileTreeActionOnce`（见其注释）；
+      // 原代码此处**没有 catch**（异常向上抛），故不传 onError。
+      await runFileTreeActionOnce({
+        onFinally: () => {
+          setContextMenu(null);
+        },
+        run: () => createEntryAt(entryType, contextMenu.target.directoryPath, locationLabel),
+      });
     },
-    [contextMenu, createEntryAt],
+    // setContextMenu 是 state setter（身份稳定）：编译器会把它推断为依赖，必须显式列出
+    // 才不会报 "Existing memoization could not be preserved"（见 apps/web/AGENTS.md ②）。
+    [contextMenu, createEntryAt, setContextMenu],
   );
 
   const handleDeleteEntry = useCallback(async () => {
@@ -411,24 +476,32 @@ export function TeamSidebarWithFileTree({
         ? getParentDirectory(contextMenu.target.path)
         : contextMenu.target.directoryPath;
 
-    try {
-      await workspaceClient.deleteEntry(token, contextMenu.target.path, {
-        ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
-        ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
-      });
-      applyDeletedEntry(contextMenu.target.path);
-      void refreshDirectory(refreshPath);
-      toast(`已删除：${contextMenu.target.name}`, 'success');
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '删除失败', 'error');
-    } finally {
-      setContextMenu(null);
-    }
+    // try/catch/finally 下沉到模块级 `runFileTreeActionOnce`（见其注释）。
+    await runFileTreeActionOnce({
+      onError: (error) => {
+        toast(error instanceof Error ? error.message : '删除失败', 'error');
+      },
+      onFinally: () => {
+        setContextMenu(null);
+      },
+      run: async () => {
+        await workspaceClient.deleteEntry(token, contextMenu.target.path, {
+          ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
+          ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+        });
+        applyDeletedEntry(contextMenu.target.path);
+        void refreshDirectory(refreshPath);
+        toast(`已删除：${contextMenu.target.name}`, 'success');
+      },
+    });
   }, [
     applyDeletedEntry,
     contextMenu,
     refreshDirectory,
     selectedTeamId,
+    // setContextMenu 是 state setter（身份稳定）：编译器会把它推断为依赖，必须显式列出
+    // 才不会报 "Existing memoization could not be preserved"（见 apps/web/AGENTS.md ②）。
+    setContextMenu,
     token,
     workspaceClient,
     workspacePath,
@@ -466,28 +539,36 @@ export function TeamSidebarWithFileTree({
         : contextMenu.target.directoryPath;
     const newPath = joinFileTreePath(parentDirectory, trimmed);
 
-    try {
-      await workspaceClient.renameEntry(token, contextMenu.target.path, newPath, {
-        ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
-        ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
-      });
-      applyRenamedEntry({
-        oldPath: contextMenu.target.path,
-        newPath,
-        newName: trimmed,
-      });
-      void refreshDirectory(parentDirectory);
-      toast(`已重命名为：${trimmed}`, 'success');
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '重命名失败', 'error');
-    } finally {
-      setContextMenu(null);
-    }
+    // try/catch/finally 下沉到模块级 `runFileTreeActionOnce`（见其注释）。
+    await runFileTreeActionOnce({
+      onError: (error) => {
+        toast(error instanceof Error ? error.message : '重命名失败', 'error');
+      },
+      onFinally: () => {
+        setContextMenu(null);
+      },
+      run: async () => {
+        await workspaceClient.renameEntry(token, contextMenu.target.path, newPath, {
+          ...(selectedTeamId ? { sessionId: selectedTeamId } : {}),
+          ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+        });
+        applyRenamedEntry({
+          oldPath: contextMenu.target.path,
+          newPath,
+          newName: trimmed,
+        });
+        void refreshDirectory(parentDirectory);
+        toast(`已重命名为：${trimmed}`, 'success');
+      },
+    });
   }, [
     applyRenamedEntry,
     contextMenu,
     refreshDirectory,
     selectedTeamId,
+    // setContextMenu 是 state setter（身份稳定）：编译器会把它推断为依赖，必须显式列出
+    // 才不会报 "Existing memoization could not be preserved"（见 apps/web/AGENTS.md ②）。
+    setContextMenu,
     token,
     workspaceClient,
     workspacePath,

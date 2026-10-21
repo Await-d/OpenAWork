@@ -19,7 +19,7 @@
  *   const cached = getCached(sessionId);
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import type { SessionRecoveryReadModel } from '@openAwork/web-client';
 
@@ -120,8 +120,11 @@ export function useSessionPrefetch({
   const runningCountRef = useRef(0);
   // 挂起队列
   const pendingQueueRef = useRef<string[]>([]);
-  // 当前正在预取的 ID 集合（用于暴露给外部）
-  const prefetchingRef = useRef(new Set<string>());
+  // 当前正在预取的 ID 集合（用于暴露给外部）。
+  // 用 state 而非 ref：该值在返回语句里被渲染期读取（渲染期读 ref 会被编译器判为
+  // "Cannot access refs during render" 而放弃优化整个 hook），且 state 让「预取中」
+  // 变化能真正驱动消费方重渲染（ref 版本对消费方只是陈旧快照）。
+  const [prefetching, setPrefetching] = useState<ReadonlySet<string>>(() => new Set<string>());
 
   const getWorkspaceCache = useCallback(
     (wsPath: string | null): LRUCache<SessionRecoveryReadModel> => {
@@ -143,6 +146,17 @@ export function useSessionPrefetch({
     [getWorkspaceCache, workspacePath],
   );
 
+  /**
+   * `processQueue` 的自我调度桥（trampoline）。
+   *
+   * `finally` 里要再排一次队列，直接写 `processQueue()` 属于「`const` 回调在自身
+   * 初始化器内自引用」，React Compiler 判为 "Cannot access variable before it is
+   * declared"（TDZ）并放弃优化整个 hook。改为 ref 持有 + effect 同步
+   * （与 scroll/use-scroll-intent.ts 同一惯用法）：只在异步回调里取值，
+   * 渲染期不读 ref。
+   */
+  const processQueueRef = useRef<() => void>(() => {});
+
   const processQueue = useCallback((): void => {
     const queue = pendingQueueRef.current;
     while (queue.length > 0 && runningCountRef.current < PREFETCH_CONCURRENCY) {
@@ -158,7 +172,11 @@ export function useSessionPrefetch({
 
       runningCountRef.current += 1;
       inflightRef.current.add(nextId);
-      prefetchingRef.current.add(nextId);
+      setPrefetching((prev) => {
+        const next = new Set(prev);
+        next.add(nextId);
+        return next;
+      });
 
       const client = createSessionsClient(gatewayUrl);
 
@@ -173,11 +191,20 @@ export function useSessionPrefetch({
         .finally(() => {
           runningCountRef.current -= 1;
           inflightRef.current.delete(nextId);
-          prefetchingRef.current.delete(nextId);
-          processQueue();
+          setPrefetching((prev) => {
+            const next = new Set(prev);
+            next.delete(nextId);
+            return next;
+          });
+          processQueueRef.current();
         });
     }
   }, [gatewayUrl, getWorkspaceCache, token, workspacePath]);
+
+  // 与 processQueueRef 配对：首个 commit 内同步；请求必然晚于挂载，取值总为最新实例。
+  useEffect(() => {
+    processQueueRef.current = processQueue;
+  }, [processQueue]);
 
   useEffect(() => {
     if (!currentSessionId || !token) return;
@@ -217,6 +244,6 @@ export function useSessionPrefetch({
 
   return {
     getCached,
-    prefetching: prefetchingRef.current,
+    prefetching,
   };
 }

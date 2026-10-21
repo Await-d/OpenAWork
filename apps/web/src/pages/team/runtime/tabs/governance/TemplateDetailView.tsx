@@ -31,6 +31,24 @@ interface TemplateCard {
 
 /* ── Inline editable field ─────────────────────────────────────────────── */
 
+/**
+ * 内联字段保存的统一包装：置 saving → try → finally 清 saving（**无 catch**）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，本组件
+ * 这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runInlineFieldSaveOnce(ctx: {
+  setSaving: (saving: boolean) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSaving(true);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setSaving(false);
+  }
+}
+
 function InlineField({
   editable = true,
   label,
@@ -58,18 +76,19 @@ function InlineField({
       return;
     }
 
-    setSaving(true);
     setSaveError(null);
-    try {
-      const ok = await onSave(draft);
-      if (!ok) {
-        setSaveError('保存失败，请重试。');
-        return;
-      }
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
+    // 置 saving 与 try/finally 一起下沉到模块级 `runInlineFieldSaveOnce`（见其注释）。
+    await runInlineFieldSaveOnce({
+      setSaving,
+      run: async () => {
+        const ok = await onSave(draft);
+        if (!ok) {
+          setSaveError('保存失败，请重试。');
+          return;
+        }
+        setEditing(false);
+      },
+    });
   };
 
   const handleCancel = () => {

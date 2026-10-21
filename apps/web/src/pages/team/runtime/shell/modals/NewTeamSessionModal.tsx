@@ -95,6 +95,30 @@ interface NewTeamSessionModalProps {
   initialWorkingDirectory?: string | null;
 }
 
+/**
+ * 新建团队会话提交的统一包装：清 error / 置 submitting → try → catch 交给 `onError`
+ * → finally 清 submitting。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`||`、`?.`、三元）。语义逐字照搬。
+ */
+async function runNewTeamSessionSubmitOnce(ctx: {
+  setSubmitting: (submitting: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setError(null);
+  ctx.setSubmitting(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSubmitting(false);
+  }
+}
+
 export function NewTeamSessionModal({
   onClose,
   onSubmitDraft,
@@ -203,32 +227,35 @@ export function NewTeamSessionModal({
 
   const handleSubmit = async () => {
     if (!creation.canSubmit || submitting) return;
-    setSubmitError(null);
-    setSubmitting(true);
-    try {
-      // 提交前若标题为空，自动填入默认标题（不阻塞用户）
-      if (!creation.draft.title.trim()) {
-        creation.fillDefaultTitle();
-      }
-      const finalDraft = {
-        ...creation.draft,
-        title: creation.draft.title.trim() || generateDefaultSessionTitle(),
-      };
-      const result = await onSubmitDraft(finalDraft);
-      if (result === false) {
-        setSubmitError('创建团队会话失败，请检查工作区配置或稍后重试。');
-        return;
-      }
-      // 据模板新建会话成功后，记录一次模板使用（最近 + 次数），供模板页统计展示。
-      if (finalDraft.source.kind === 'saved-template' && finalDraft.source.templateId) {
-        recordTemplateUsage(finalDraft.source.templateId);
-      }
-      onClose();
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : '创建团队会话失败。');
-    } finally {
-      setSubmitting(false);
-    }
+    // 清 error / 置 submitting 与 try/catch/finally 一起下沉到模块级
+    // `runNewTeamSessionSubmitOnce`（见其注释）。
+    await runNewTeamSessionSubmitOnce({
+      setSubmitting,
+      setError: setSubmitError,
+      onError: (error) => {
+        setSubmitError(error instanceof Error ? error.message : '创建团队会话失败。');
+      },
+      run: async () => {
+        // 提交前若标题为空，自动填入默认标题（不阻塞用户）
+        if (!creation.draft.title.trim()) {
+          creation.fillDefaultTitle();
+        }
+        const finalDraft = {
+          ...creation.draft,
+          title: creation.draft.title.trim() || generateDefaultSessionTitle(),
+        };
+        const result = await onSubmitDraft(finalDraft);
+        if (result === false) {
+          setSubmitError('创建团队会话失败，请检查工作区配置或稍后重试。');
+          return;
+        }
+        // 据模板新建会话成功后，记录一次模板使用（最近 + 次数），供模板页统计展示。
+        if (finalDraft.source.kind === 'saved-template' && finalDraft.source.templateId) {
+          recordTemplateUsage(finalDraft.source.templateId);
+        }
+        onClose();
+      },
+    });
   };
 
   const stepIndex = STEPS.findIndex((s) => s.key === creation.step);

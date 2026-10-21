@@ -25,6 +25,67 @@ describe('applyStreamToolProgress', () => {
 
     expect(liveToolCalls.get('t1')?.batchProgress?.totalCount).toBe(2);
   });
+
+  it('已完成的工具收到迟到 progress 时保持 completed，不写入新进度', () => {
+    const liveToolCalls = new Map<string, LiveToolCallState>([
+      [
+        't1',
+        {
+          createdAt: 1,
+          inputText: '{}',
+          output: { exitCode: 0 },
+          status: 'completed',
+          toolCallId: 't1',
+          toolName: 'bash',
+        },
+      ],
+    ]);
+
+    applyStreamToolProgress({
+      event: {
+        completedCount: 1,
+        subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'late' }],
+        toolCallId: 't1',
+        toolName: 'bash',
+        totalCount: 1,
+      },
+      liveToolCalls,
+    });
+
+    const state = liveToolCalls.get('t1');
+    expect(state?.status).toBe('completed');
+    expect(state?.output).toEqual({ exitCode: 0 });
+    expect(state?.batchProgress).toBeUndefined();
+  });
+
+  it('paused（待审批）工具收到批准后的 progress 会恢复 streaming', () => {
+    const liveToolCalls = new Map<string, LiveToolCallState>([
+      [
+        't1',
+        {
+          createdAt: 1,
+          inputText: '{}',
+          status: 'paused',
+          toolCallId: 't1',
+          toolName: 'bash',
+        },
+      ],
+    ]);
+
+    applyStreamToolProgress({
+      event: {
+        completedCount: 0,
+        subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'running' }],
+        toolCallId: 't1',
+        toolName: 'bash',
+        totalCount: 1,
+      },
+      liveToolCalls,
+    });
+
+    expect(liveToolCalls.get('t1')?.status).toBe('streaming');
+    expect(liveToolCalls.get('t1')?.batchProgress?.subTools).toHaveLength(1);
+  });
 });
 
 describe('applyStreamToolResult', () => {

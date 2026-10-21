@@ -26,6 +26,45 @@ interface LoginPageProps {
   onToggleTheme?: () => void;
 }
 
+/**
+ * 登录的统一包装：try → catch 归一为可读错误文案（返回值即 useActionState 的 state）。
+ *
+ * 必须留在模块级：try 内的 `||` / 三元都是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个组件（实测）。
+ * 语义逐字照搬。
+ */
+async function runLoginOnce<T>(ctx: {
+  onError: (error: unknown) => T;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    return await ctx.run();
+  } catch (err) {
+    return ctx.onError(err);
+  }
+}
+
+/**
+ * 启动本地服务端并等待健康检查；失败返回错误文案（不抛给调用方）。
+ *
+ * 必须留在模块级：try 内的 `throw` 会让编译器报 "Support ThrowStatement inside of
+ * try/catch" 并放弃优化整个组件（实测）。语义逐字照搬。
+ */
+async function startLocalGatewayAndCheckHealth(
+  port: number,
+  localUrl: string,
+): Promise<string | null> {
+  try {
+    await startDesktopGateway(port);
+    if (!(await waitForGatewayHealth(localUrl))) {
+      return '本地服务端已启动，但健康检查暂未通过。';
+    }
+    return null;
+  } catch (err: unknown) {
+    return err instanceof Error ? err.message : '无法启动本地服务端。';
+  }
+}
+
 export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {}) {
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -52,32 +91,38 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
 
   // React 19 Actions：表单提交由 useActionState 管理 pending / error，
   // 不再手写 setLoading / setError 三件套。
-  const [error, loginAction, isPending] = useActionState<string | null>(async () => {
-    try {
-      const resolvedUrl = normalizeGatewayUrl(gatewayInput) || gatewayUrl;
-      setGatewayUrl(resolvedUrl);
-      if (desktopRuntime) {
-        const nextMode = desktopGatewayModeForUrl(resolvedUrl);
-        setGatewayMode(nextMode);
-        writeDesktopGatewayMode(nextMode);
-        if (nextMode === 'remote') {
-          setWebAccess(false, parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT));
-        }
-      }
-      const data = await login(resolvedUrl, email, password);
-      setAuth(data.accessToken, email, data.refreshToken, data.expiresIn);
-      void preloadRouteModuleByPath('/chat');
-      void navigate('/chat', { replace: true });
-      return null;
-    } catch (err) {
-      const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
-      return isTimeout
-        ? '登录超时 — Gateway 响应过慢，请检查服务是否正常运行'
-        : err instanceof Error
-          ? err.message
-          : '网络错误 — Gateway 是否正在运行？';
-    }
-  }, null);
+  const [error, loginAction, isPending] = useActionState<string | null>(
+    async () =>
+      // try/catch 下沉到模块级 `runLoginOnce`（见其注释）。
+      runLoginOnce<string | null>({
+        onError: (err) => {
+          const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+          return isTimeout
+            ? '登录超时 — Gateway 响应过慢，请检查服务是否正常运行'
+            : err instanceof Error
+              ? err.message
+              : '网络错误 — Gateway 是否正在运行？';
+        },
+        run: async () => {
+          const resolvedUrl = normalizeGatewayUrl(gatewayInput) || gatewayUrl;
+          setGatewayUrl(resolvedUrl);
+          if (desktopRuntime) {
+            const nextMode = desktopGatewayModeForUrl(resolvedUrl);
+            setGatewayMode(nextMode);
+            writeDesktopGatewayMode(nextMode);
+            if (nextMode === 'remote') {
+              setWebAccess(false, parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT));
+            }
+          }
+          const data = await login(resolvedUrl, email, password);
+          setAuth(data.accessToken, email, data.refreshToken, data.expiresIn);
+          void preloadRouteModuleByPath('/chat');
+          void navigate('/chat', { replace: true });
+          return null;
+        },
+      }),
+    null,
+  );
 
   if (token) {
     return <Navigate to="/chat" replace />;
@@ -110,15 +155,14 @@ export default function LoginPage({ theme, onToggleTheme }: LoginPageProps = {})
     setWebAccess(true, port);
     writeDesktopGatewayMode('local');
 
-    try {
-      await startDesktopGateway(port);
-      if (!(await waitForGatewayHealth(localUrl))) {
-        throw new Error('本地服务端已启动，但健康检查暂未通过。');
-      }
+    // 启动 + 健康检查（含 try/catch 与 `throw`）下沉到模块级
+    // `startLocalGatewayAndCheckHealth`（见其注释）。
+    const startFailure = await startLocalGatewayAndCheckHealth(port, localUrl);
+    if (startFailure === null) {
       setLocalStatus('ok');
-    } catch (err: unknown) {
+    } else {
       setLocalStatus('fail');
-      setServerError(err instanceof Error ? err.message : '无法启动本地服务端。');
+      setServerError(startFailure);
     }
   }
 

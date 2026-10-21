@@ -176,6 +176,30 @@ const ERROR_STYLE: CSSProperties = {
   border: '1px solid color-mix(in srgb, var(--error) 30%, transparent)',
 };
 
+/**
+ * 删除工作区确认的统一包装：置 submitting / 清 error → try → catch 交给 `onError`
+ * → finally 清 submitting。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runConfirmDeleteOnce(ctx: {
+  setSubmitting: (submitting: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSubmitting(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSubmitting(false);
+  }
+}
+
 export function ConfirmDeleteWorkspaceModal({
   workspace,
   workspaceGroups,
@@ -208,18 +232,20 @@ export function ConfirmDeleteWorkspaceModal({
 
   const handleConfirm = async () => {
     if (!canConfirm) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const ok = await onConfirm();
-      if (!ok) {
-        setError('删除失败，请稍后重试');
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '删除失败');
-    } finally {
-      setSubmitting(false);
-    }
+    // 置 submitting / 清 error 与 try/catch/finally 一起下沉到模块级 `runConfirmDeleteOnce`。
+    await runConfirmDeleteOnce({
+      setSubmitting,
+      setError,
+      onError: (e) => {
+        setError(e instanceof Error ? e.message : '删除失败');
+      },
+      run: async () => {
+        const ok = await onConfirm();
+        if (!ok) {
+          setError('删除失败，请稍后重试');
+        }
+      },
+    });
   };
 
   return (

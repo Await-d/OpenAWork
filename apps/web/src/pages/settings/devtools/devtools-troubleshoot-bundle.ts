@@ -54,12 +54,76 @@ function codeBlock(value: unknown): string {
  *
  * 纯函数（无 React / 无 IO），单测覆盖格式稳定性。
  */
+export interface IssueCountSummary {
+  /** 去重后的待排查问题合计（诊断记录 + 错误日志 + Worker 异常）。 */
+  total: number;
+  /** 错误日志中与诊断记录指向同一事件的条数。 */
+  duplicatedLogs: number;
+}
+
+/**
+ * 跨数据源识别「同一条问题」的键。
+ *
+ * 优先用 `requestId`：网关的「诊断记录」与「错误日志」都取自 `audit_logs`，
+ * 同一行的 `requestId`（工具调用 id / 请求 id）逐字相同，是唯一可靠的跨源身份；
+ * 缺 `requestId` 时退回行 id（错误日志带审计行 id，workflow 行有 `workflow-`
+ * 前缀，不会与审计行撞车）。两者都没有则返回 null —— 此时按「独立一条」计数，
+ * 宁可高估也不把两条不同的问题合并成一条。
+ */
+function issueIdentity(record: { requestId?: string | null; id?: string | null }): string | null {
+  const requestId = record.requestId?.trim();
+  if (requestId && requestId.length > 0) return `request:${requestId}`;
+  const id = record.id?.trim();
+  return id && id.length > 0 ? `id:${id}` : null;
+}
+
+/**
+ * 统计待排查问题。
+ *
+ * 「直接相加」会系统性虚高：诊断记录筛 `is_error = 1`，而错误日志是同一张表
+ * 不过滤 `is_error`、再按 `is_error` 标成 `level: 'error'`，因此后者是前者的
+ * 超集。2026-10-15 的一份排障包里 19 条诊断 + 8 条错误日志报成「27 项」，
+ * 其中 7 条 requestId 与诊断记录逐字相同。
+ */
+export function summarizeIssues(input: {
+  diagnostics: readonly SettingsDiagnosticRecord[];
+  errorLogs: readonly SettingsDevLogRecord[];
+  workers: readonly WorkerEntry[];
+}): IssueCountSummary {
+  const seen = new Set<string>();
+  let anonymous = 0;
+
+  for (const diagnostic of input.diagnostics) {
+    const identity = issueIdentity(diagnostic);
+    if (identity === null) anonymous += 1;
+    else seen.add(identity);
+  }
+
+  let duplicatedLogs = 0;
+  for (const log of input.errorLogs) {
+    const identity = issueIdentity(log);
+    if (identity === null) {
+      anonymous += 1;
+      continue;
+    }
+    if (seen.has(identity)) duplicatedLogs += 1;
+    else seen.add(identity);
+  }
+
+  const errorWorkers = input.workers.filter((worker) => worker.status === 'error').length;
+  return { total: seen.size + anonymous + errorWorkers, duplicatedLogs };
+}
+
 export function buildTroubleshootBundleMarkdown(input: TroubleshootBundleInput): string {
   const errorWorkers = input.workers.filter((worker) => worker.status === 'error');
   const failedSources = (
     Object.entries(input.sourceStates) as Array<[DevtoolsSourceKey, DevtoolsSourceState]>
   ).filter(([, source]) => source.status === 'error' && source.error);
-  const issueCount = input.diagnostics.length + input.errorLogs.length + errorWorkers.length;
+  const issueSummary = summarizeIssues({
+    diagnostics: input.diagnostics,
+    errorLogs: input.errorLogs,
+    workers: input.workers,
+  });
 
   const lines: string[] = [
     '# OpenAWork 排障上下文',
@@ -75,10 +139,16 @@ export function buildTroubleshootBundleMarkdown(input: TroubleshootBundleInput):
     '## 概览',
     '',
     `- 诊断记录：${input.diagnostics.length} 条`,
-    `- 错误日志：${input.errorLogs.length} 条`,
+    `- 错误日志：${input.errorLogs.length} 条${
+      issueSummary.duplicatedLogs > 0
+        ? `（其中 ${issueSummary.duplicatedLogs} 条与诊断记录指向同一事件）`
+        : ''
+    }`,
     `- Worker 异常：${errorWorkers.length} 个`,
     `- 异常数据源：${failedSources.length} 个`,
-    `- **待排查问题合计：${issueCount} 项**`,
+    `- **待排查问题合计：${issueSummary.total} 项**${
+      issueSummary.duplicatedLogs > 0 ? '（已按 requestId 跨数据源去重）' : ''
+    }`,
     '',
     '## 数据源状态',
     '',

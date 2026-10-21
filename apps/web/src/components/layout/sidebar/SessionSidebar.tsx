@@ -70,6 +70,40 @@ export interface SessionSidebarProps {
   onOpenWorkspacePicker: () => void;
 }
 
+/**
+ * 侧栏文件树条目创建的统一包装：try → catch 交给 `onError`（window.alert 提示）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try 内的值块（`...(cond ? … : {})`、三元），
+ * 本组件这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runSidebarEntryActionOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  }
+}
+
+/**
+ * 批量删除工作区会话的统一包装：try → finally 收尾（**无 catch**：与原语义一致）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，也不支持
+ * try 内的值块（多层三元）。语义逐字照搬。
+ */
+async function runRemoveWorkspaceGroupOnce(ctx: {
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function SessionSidebar({
   onOpenFile,
   fetchRootPath,
@@ -285,54 +319,58 @@ export function SessionSidebar({
         return next;
       });
 
-      const sessionCount = sessionIds.length;
-      let successCount = 0;
-      let failedCount = 0;
+      // try/finally 下沉到模块级 `runRemoveWorkspaceGroupOnce`（见其注释）。
+      await runRemoveWorkspaceGroupOnce({
+        onFinally: () => {
+          setDeletingWorkspaceGroupKeys((previous) => {
+            if (!previous.has(groupKey)) {
+              return previous;
+            }
 
-      try {
-        for (const sessionId of sessionIds) {
-          const deleted = await quickDeleteSession(sessionId, { suppressToast: true });
-          if (deleted) {
-            successCount += 1;
-          } else {
-            failedCount += 1;
-          }
-        }
+            const next = new Set(previous);
+            next.delete(groupKey);
+            return next;
+          });
+          deletingWorkspaceGroupKeysRef.current.delete(groupKey);
+        },
+        run: async () => {
+          const sessionCount = sessionIds.length;
+          let successCount = 0;
+          let failedCount = 0;
 
-        if (failedCount === 0) {
-          if (workspacePath) {
-            removeSavedWorkspace({ workspacePath, sshConnectionId });
+          for (const sessionId of sessionIds) {
+            const deleted = await quickDeleteSession(sessionId, { suppressToast: true });
+            if (deleted) {
+              successCount += 1;
+            } else {
+              failedCount += 1;
+            }
           }
+
+          if (failedCount === 0) {
+            if (workspacePath) {
+              removeSavedWorkspace({ workspacePath, sshConnectionId });
+            }
+            toast(
+              sessionCount > 0
+                ? workspacePath === null
+                  ? `已删除${UNBOUND_WORKSPACE_LABEL}中的 ${successCount} 个会话`
+                  : `已删除工作区「${workspaceLabel}」及 ${successCount} 个会话`
+                : `已移除工作区「${workspaceLabel}」`,
+              'success',
+            );
+            return;
+          }
+
           toast(
-            sessionCount > 0
-              ? workspacePath === null
-                ? `已删除${UNBOUND_WORKSPACE_LABEL}中的 ${successCount} 个会话`
-                : `已删除工作区「${workspaceLabel}」及 ${successCount} 个会话`
-              : `已移除工作区「${workspaceLabel}」`,
-            'success',
+            workspacePath === null
+              ? `${UNBOUND_WORKSPACE_LABEL}删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败。`
+              : `工作区「${workspaceLabel}」删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败，工作区未移除。`,
+            'warning',
+            4200,
           );
-          return;
-        }
-
-        toast(
-          workspacePath === null
-            ? `${UNBOUND_WORKSPACE_LABEL}删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败。`
-            : `工作区「${workspaceLabel}」删除未完成：已删除 ${successCount} 个会话，${failedCount} 个失败，工作区未移除。`,
-          'warning',
-          4200,
-        );
-      } finally {
-        setDeletingWorkspaceGroupKeys((previous) => {
-          if (!previous.has(groupKey)) {
-            return previous;
-          }
-
-          const next = new Set(previous);
-          next.delete(groupKey);
-          return next;
-        });
-        deletingWorkspaceGroupKeysRef.current.delete(groupKey);
-      }
+        },
+      });
     },
     [quickDeleteSession, removeSavedWorkspace],
   );
@@ -348,26 +386,22 @@ export function SessionSidebar({
     [bumpWorkspaceTreeVersion, refreshDirectory],
   );
 
+  // 把 try/catch（含 try 内 `throw`）改成 `.catch()` 链：编译器对「try 内 throw」会放弃优化
+  // 整个组件；`.catch` 里重抛的语义与原来逐字一致（错误文案归一后抛出）。
   const createWorkspaceFile = useCallback(
     async (path: string): Promise<void> => {
-      try {
-        await workspaceClient.createFile(accessToken ?? '', path);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : '新建文件失败';
-        throw new Error(message);
-      }
+      await workspaceClient.createFile(accessToken ?? '', path).catch((err: unknown) => {
+        throw new Error(err instanceof Error ? err.message : '新建文件失败');
+      });
     },
     [accessToken, workspaceClient],
   );
 
   const createWorkspaceDirectory = useCallback(
     async (path: string): Promise<void> => {
-      try {
-        await workspaceClient.createDirectory(accessToken ?? '', path);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : '新建文件夹失败';
-        throw new Error(message);
-      }
+      await workspaceClient.createDirectory(accessToken ?? '', path).catch((err: unknown) => {
+        throw new Error(err instanceof Error ? err.message : '新建文件夹失败');
+      });
     },
     [accessToken, workspaceClient],
   );
@@ -394,37 +428,41 @@ export function SessionSidebar({
 
       const nextPath = joinFileTreePath(directoryPath, entryName);
 
-      try {
-        setFileTreeError(null);
-        if (entryType === 'file') {
-          await createWorkspaceFile(nextPath);
-        } else {
-          await createWorkspaceDirectory(nextPath);
-        }
-        applyCreatedEntry({
-          directoryPath,
-          entry: {
-            path: nextPath,
-            name: entryName,
-            type: entryType === 'file' ? 'file' : 'directory',
-            ...(entryType === 'directory' ? { children: [] } : {}),
-          },
-        });
+      // try/catch 下沉到模块级 `runSidebarEntryActionOnce`（见其注释）。
+      await runSidebarEntryActionOnce({
+        onError: (error) => {
+          window.alert(error instanceof Error ? error.message : '创建失败');
+        },
+        run: async () => {
+          setFileTreeError(null);
+          if (entryType === 'file') {
+            await createWorkspaceFile(nextPath);
+          } else {
+            await createWorkspaceDirectory(nextPath);
+          }
+          applyCreatedEntry({
+            directoryPath,
+            entry: {
+              path: nextPath,
+              name: entryName,
+              type: entryType === 'file' ? 'file' : 'directory',
+              ...(entryType === 'directory' ? { children: [] } : {}),
+            },
+          });
 
-        const refreshed = await refreshDirectoryWithVersion(directoryPath);
-        if (!refreshed) {
-          bumpWorkspaceTreeVersion();
-          setFileTreeError(
-            `已创建${entryType === 'file' ? '文件' : '文件夹'}，但目录刷新失败，请手动刷新后确认`,
-          );
-        }
+          const refreshed = await refreshDirectoryWithVersion(directoryPath);
+          if (!refreshed) {
+            bumpWorkspaceTreeVersion();
+            setFileTreeError(
+              `已创建${entryType === 'file' ? '文件' : '文件夹'}，但目录刷新失败，请手动刷新后确认`,
+            );
+          }
 
-        if (entryType === 'file') {
-          onOpenFile?.(nextPath);
-        }
-      } catch (error) {
-        window.alert(error instanceof Error ? error.message : '创建失败');
-      }
+          if (entryType === 'file') {
+            onOpenFile?.(nextPath);
+          }
+        },
+      });
     },
     [
       bumpWorkspaceTreeVersion,

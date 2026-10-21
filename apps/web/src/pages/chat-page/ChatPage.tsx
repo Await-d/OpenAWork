@@ -38,6 +38,7 @@ import { QuickTerminalPanel } from '../../components/chat/terminal/QuickTerminal
 import { useChatSearch } from '../../components/chat/search/chat-search-overlay.js';
 
 import { CompanionStage } from '../../components/chat/companion/companion-stage.js';
+import { deriveCompanionInputFlags } from '../../components/chat/companion/companion-display-model.js';
 import { useBuddyIdleDetector } from '../../components/chat/companion/use-buddy-idle-detector.js';
 import { InlineQuestionPanel } from '../../components/chat/misc/InlineQuestionPanel.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
@@ -66,6 +67,7 @@ import {
   isComposerReferenceEvent,
 } from '../../utils/chat/composer-reference-events.js';
 import { logger } from '../../utils/log/logger.js';
+import { writeRefCurrent } from '../../utils/ref/ref-current.js';
 
 import {
   requestCurrentSessionRefresh,
@@ -114,6 +116,7 @@ import {
 } from '../../components/conversation-runtime/session/session-runtime.js';
 
 import { type ChatBackendUsageSnapshot } from '../../components/conversation-runtime/stream/stream-usage.js';
+import { recoveredStreamHasVisibleContent } from '../../components/conversation-runtime/stream/stream-recovery.js';
 
 import {
   extractStreamingThinkingTexts,
@@ -175,7 +178,11 @@ import { useChildSessionSelection } from './hooks/use-child-session-selection.js
 import { runEnsureSession } from './hooks/run-ensure-session.js';
 import { runSendMessage } from './hooks/run-send-message.js';
 import { useChatPageDerivations } from './hooks/use-chat-page-derivations.js';
-import { runSessionAttachEffect } from './hooks/run-session-attach-effect.js';
+import {
+  createInitialAttachProgressState,
+  runSessionAttachEffect,
+  type AttachProgressState,
+} from './hooks/run-session-attach-effect.js';
 import { runChatSessionSwitchEffect } from './hooks/run-chat-session-switch-effect.js';
 import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
 import { resolveChatUiWorkspaceScope, useChatUiState } from './hooks/use-chat-ui-state.js';
@@ -198,6 +205,7 @@ import {
 } from './conversation/settings/model-selection-source.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
+import { useStaleRunningResync } from './conversation/snapshot/use-stale-running-resync.js';
 
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
 import { normalizeChatThinkingState } from './conversation/settings/resolve-chat-thinking-request.js';
@@ -250,6 +258,28 @@ type SplitStyle = {
   readonly '--split-pos': string;
 };
 const INITIAL_TURN_LIMIT = SESSION_RECOVERY_MESSAGE_LIMIT;
+
+/**
+ * 刷新模型目录的统一包装：置 busy → try → catch 交给 `onError` → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处
+ * try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runProviderCatalogRefreshOnce(ctx: {
+  onStart: () => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart();
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
 
 export default function ChatPage() {
   const routeParams = useParams<{ sessionId: string }>();
@@ -306,6 +336,7 @@ export default function ChatPage() {
   const currentUserEmail = useAuthStore((s) => s.email) ?? '';
   const currentUserDisplayName = useCurrentUserDisplayName();
   const [providers, setProviders] = useState<ChatSettingsProvider[]>([]);
+  const [providersRefreshing, setProvidersRefreshing] = useState(false);
   const [input, setInput] = useState('');
   const [companionComposerActivity, setCompanionComposerActivity] =
     useState<UnifiedComposerActivity>({
@@ -314,6 +345,19 @@ export default function ChatPage() {
       showVoice: false,
     });
   const idleSeconds = useBuddyIdleDetector({ input });
+  /**
+   * Buddy（CompanionStage）的输入派生量。
+   *
+   * **不要把 `input` 原文传给它**：`input` 每敲一键就变一次，而那棵树含 sprite 动画、
+   * `createPortal` 面板、9 个 effect 与语音合成——逐键整体重渲染正是打字卡顿的主因。
+   * 这里只把「真正影响它行为」的 4 个布尔量 + 「`/buddy` 触发时的文本」筛出来，
+   * 于是绝大多数按键下这些 prop 引用不变，上游编译器的自动 memo 能真正生效。
+   */
+  const companionInputFlags = useMemo(() => deriveCompanionInputFlags(input), [input]);
+  const companionBuddyTriggerText = useMemo(
+    () => (companionInputFlags.inputMentionsBuddy ? input : null),
+    [companionInputFlags.inputMentionsBuddy, input],
+  );
   const lastParentTaskSyncMarkerRef = useRef<string | null>(null);
   const hasAppliedSavedImageDefaultsRef = useRef(false);
   const savedChatDefaultsRef = useRef<{
@@ -428,18 +472,61 @@ export default function ChatPage() {
   // Live refs that mirror streaming/right-panel state so that effects (especially
   // session-switch cleanup) can read the latest values without depending on them.
   const streamBufferRef = useRef('');
-  streamBufferRef.current = streamBuffer;
   const streamThinkingBlocksRef = useRef<StreamingThinkingBlock[]>([]);
-  streamThinkingBlocksRef.current = streamThinkingBlocks;
   const streamingSegmentsRef = useRef<ChatMessagePart[]>([]);
-  streamingSegmentsRef.current = streamingSegments;
   const reportedStreamUsageRef = useRef<ChatBackendUsageSnapshot | null>(null);
-  reportedStreamUsageRef.current = reportedStreamUsage;
   const activeStreamStartedAtRef = useRef<number | null>(null);
-  activeStreamStartedAtRef.current = activeStreamStartedAt;
   const rightPanelStateRef = useRef<ChatRightPanelState>(rightPanelState);
-  rightPanelStateRef.current = rightPanelState;
+  /**
+   * 六个镜像的同步刻意放进无依赖 effect，而非渲染期顶层 `xxxRef.current = value`：
+   * 渲染期写 ref 会被 React Compiler 判定为 "Cannot access refs during render" 并
+   * 放弃优化整个 ChatPage。无依赖数组 = 每次渲染跑一次，与原来的逐帧赋值严格等价
+   * （同 `use-terminal-session.ts` / `use-chat-session-lifecycle.ts` 的收口写法）。
+   * 读取点全部是下方 effect（会话切换 effect、attach effect 等），本 effect 声明在
+   * 它们之前，passive effect 按注册顺序执行，因此同一提交内「镜像先写、读取方后读」，
+   * 读到的仍是本次提交的最新值。
+   */
+  useEffect(() => {
+    streamBufferRef.current = streamBuffer;
+    streamThinkingBlocksRef.current = streamThinkingBlocks;
+    streamingSegmentsRef.current = streamingSegments;
+    reportedStreamUsageRef.current = reportedStreamUsage;
+    activeStreamStartedAtRef.current = activeStreamStartedAt;
+    rightPanelStateRef.current = rightPanelState;
+  });
   const lastAttachAttemptTimestampRef = useRef<number>(0);
+  /**
+   * attach 重连风暴熔断窗口（`{ startedAt, count }`）。
+   *
+   * attach 成功、断线重连、权限回复都会清空 `attachAttemptedSessionRef` 并重新
+   * attach。如果新传输建立后立刻再次断开（网关侧 activeStream 指向已结束的流、
+   * 代理断链、订阅被顶掉），这条链路会形成「attach → 断开 → 重置 → 再 attach」的
+   * 无限循环：每轮都关闭并重建传输、重放事件，几秒内就能把主线程占满，页面卡死到
+   * 无法操作（刷新也只是重新开始循环）。
+   *
+   * 这里在固定窗口内限制自动 attach 次数，超过即熔断并提示用户，把「无限循环」
+   * 降级为「有界重试 + 明确错误」。窗口的读写都在 `runSessionAttachEffect` 内。
+   */
+  const attachAttemptWindowRef = useRef<{
+    startedAt: number;
+    count: number;
+    /** 窗口归属的会话：换会话必须重置，否则 A 的熔断会惩罚 B。 */
+    sessionId: string | null;
+  }>({
+    startedAt: 0,
+    count: 0,
+    sessionId: null,
+  });
+  /**
+   * attach 的「无进展」检测：网关可能长期返回一个**已僵死**的活跃流快照
+   * （`lastSeq` 不再前进），此时 SSE 打开即结束，单靠「确认有没有活跃流」永远
+   * 收敛不了。连续多次重连时 `lastSeq` 完全相同，就说明没有新事件可推，应停止重连。
+   */
+  const attachProgressRef = useRef<AttachProgressState>(createInitialAttachProgressState());
+  /**
+   * 已做过「终态收尾」的会话 id，避免 attach effect 每次重跑都做一次全量快照加载。
+   */
+  const attachTerminalReloadRef = useRef<string | null>(null);
   const [reviewRefreshRevision, setReviewRefreshRevision] = useState(0);
   const previousStreamingRef = useRef(streaming);
   useEffect(() => {
@@ -449,6 +536,8 @@ export default function ChatPage() {
     previousStreamingRef.current = streaming;
   }, [streaming]);
 
+  const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
+
   // ─── 待处理操作域 — 抽到 useChatPendingActions。
   // 参见 docs/architecture/chat-page-split-plan.md 域 C。
   const pendingActions = useChatPendingActions({
@@ -457,6 +546,7 @@ export default function ChatPage() {
     currentSessionId,
     setMessages,
     setRightPanelState,
+    setSessionStateStatus,
     setStreamError,
   });
   const {
@@ -469,6 +559,7 @@ export default function ChatPage() {
     inlineQuestionCustomInputs,
     inlineQuestionReplyStatus,
     inlineQuestionReplyError,
+    inlinePermissionPendingDecision,
     toggleInlineQuestionOption,
     handleInlineQuestionCustomInput,
     replyInlineQuestion,
@@ -538,7 +629,6 @@ export default function ChatPage() {
     string | null
   >(null);
   const devServerDetectedTerminalIdsRef = useRef<Set<string>>(new Set());
-  const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
   const sessionMetadataDirtyRef = useRef(false);
   const sessionRestoredFromCacheRef = useRef(false);
@@ -610,7 +700,7 @@ export default function ChatPage() {
 
   // sidebar / viewport / overlay 自愈 + 整个 UI 状态域 — 抽到 useChatUiState。
   // 参见 docs/architecture/chat-page-split-plan.md 域 D。
-  const openFileRef = useFileEditorContext();
+  const { openRef, setAvailable: setFileEditorAvailable } = useFileEditorContext();
   const effectiveWorkingDirectory = currentSessionId
     ? workspace.workingDirectory
     : selectedWorkspacePath;
@@ -619,10 +709,14 @@ export default function ChatPage() {
   // 文件树 / @ 引用在无工作区会话里也能浏览 Agent 创建的文件。绑定 chip 与
   // 编辑器作用域仍使用 effectiveWorkingDirectory（未绑定语义不变）。
   const fileBrowseRoot = effectiveWorkingDirectory ?? workspace.fallbackWorkspacePath;
+  // 编译器把「hook 返回对象上的方法调用」推断为整个对象依赖(workspace),与源码里更
+  // 具体的 workspace.searchFileIndex 不匹配,会放弃优化整个 ChatPage。先取成局部量即可
+  // 精确对应(useWorkspace 内该方法为 useCallback,引用身份与原先完全一致)。
+  const { searchFileIndex } = workspace;
   const searchMentionFiles = useMemo<MentionFileSearchFn>(
     () => (query, signal) =>
       fileBrowseRoot
-        ? workspace.searchFileIndex(fileBrowseRoot, {
+        ? searchFileIndex(fileBrowseRoot, {
             query,
             limit: MENTION_SEARCH_LIMIT,
             signal,
@@ -634,7 +728,7 @@ export default function ChatPage() {
               : { sshConnectionId: selectedSshConnectionId }),
           })
         : Promise.resolve({ files: [], directories: [] }),
-    [currentSessionId, fileBrowseRoot, selectedSshConnectionId, workspace.searchFileIndex],
+    [currentSessionId, fileBrowseRoot, selectedSshConnectionId, searchFileIndex],
   );
   const uiWorkspaceScope = resolveChatUiWorkspaceScope(effectiveWorkingDirectory, currentSessionId);
 
@@ -731,6 +825,54 @@ export default function ChatPage() {
     }
   }, [currentSessionId, streaming, updateTabStreaming]);
 
+  // useSessionSettingsCallbacks 刻意声明在此处（而非原先靠后位置）：
+  // 其 clearSessionMetadataDirty 在下方 reset-to-welcome effect 与
+  // session-switch effect 里都要用，声明晚于使用会被编译器判为
+  // 「声明前访问」而放弃优化整个 ChatPage。全部入参在本行之前均已声明。
+  const {
+    buildSessionMetadata,
+    markSessionMetadataDirty,
+    clearSessionMetadataDirty,
+    handleDialogueModeChange,
+    handleToggleYolo,
+    handlePermissionModeChange,
+    handleToggleWebSearch: rawHandleToggleWebSearch,
+    handleThinkingEnabledChange,
+    handleReasoningEffortChange,
+    handleManualAgentChange,
+    handleClearManualAgentId,
+  } = useSessionSettingsCallbacks(
+    {
+      dialogueMode,
+      permissionMode,
+      webSearchEnabled,
+      thinkingEnabled,
+      reasoningEffort,
+      activeProviderId,
+      activeModelId,
+      // 传 ref 而不是渲染期读出的值：渲染期读 ref 会让 React Compiler 判定为
+      // "Cannot access refs during render" 并放弃优化整个 ChatPage。该值只在
+      // `buildSessionMetadata` 被调用时（事件 / effect 内）读取，`useCallback`
+      // 体内读 ref 不受该规则约束。
+      modelSelectionSourceRef: sessionModelSelectionSourceRef,
+      manualAgentId,
+      effectiveWorkingDirectory,
+      sessionMetadataDirty,
+      sessionMetadataDirtyRef,
+    },
+    {
+      setDialogueMode,
+      setPermissionMode,
+      setWebSearchEnabled,
+      setThinkingEnabled,
+      setReasoningEffort,
+      setManualAgentId,
+      setSessionMetadataDirty,
+    },
+    gatewayUrl,
+    token,
+  );
+
   // 点击导航栏 Chat 图标时（已在 /chat 路由），清除当前会话回到欢迎页面。
   useEffect(() => {
     if (!resetToWelcomeSignal || resetToWelcomeSignal.route !== 'chat') return;
@@ -751,13 +893,18 @@ export default function ChatPage() {
     setIsSessionSnapshotReady(true);
     setSessionModesHydrated(false);
     clearSessionMetadataDirty();
-    lastPersistedSessionMetadataSnapshotRef.current = null;
+    // 这些共享 ref 由 useChatSessionRefs() 创建后返回，直接写 .current 会被
+    // React Compiler 判为「修改函数返回值」并放弃优化整个 ChatPage——写入统一走
+    // 收敛函数（见 utils/ref/ref-current.ts）。
+    writeRefCurrent(lastPersistedSessionMetadataSnapshotRef, null);
     resetStreamState();
     setStreamError(null);
     setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
-    currentLoadedSessionIdRef.current = null;
+    writeRefCurrent(currentLoadedSessionIdRef, null);
     consumeResetToWelcomeSignal();
-  }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+    // 依赖省略是刻意取舍（reset 全量状态，不需要逐 setter 列入）。不要在此处
+    // 加回 lint 抑制指令——编译器按文本匹配识别它，会放弃优化整个 ChatPage。
+  }, [resetToWelcomeSignal, consumeResetToWelcomeSignal]);
 
   const {
     attachRetryExhausted,
@@ -828,9 +975,7 @@ export default function ChatPage() {
     setEditorFullScreen,
     setEditorMode,
     setReviewPanelOpened,
-    setSidePanelActiveTab,
     setTerminalPanelOpened,
-    sidePanelActiveTab,
     terminalPanelOpened,
     terminalRunningCount: sessionTerminals.runningCount,
   });
@@ -942,6 +1087,7 @@ export default function ChatPage() {
     generateImageForSession,
     hasConfiguredImageModel,
     imageGenerationBusy,
+    imageGenerationPreview,
     imageGenerationDefaults,
     imageGenerationMode,
     imageModelLabel,
@@ -963,46 +1109,6 @@ export default function ChatPage() {
       setWebSearchEnabled(false);
     }
   }, [webSearchAvailable, webSearchEnabled]);
-
-  const {
-    buildSessionMetadata,
-    markSessionMetadataDirty,
-    clearSessionMetadataDirty,
-    handleDialogueModeChange,
-    handleToggleYolo,
-    handlePermissionModeChange,
-    handleToggleWebSearch: rawHandleToggleWebSearch,
-    handleThinkingEnabledChange,
-    handleReasoningEffortChange,
-    handleManualAgentChange,
-    handleClearManualAgentId,
-  } = useSessionSettingsCallbacks(
-    {
-      dialogueMode,
-      permissionMode,
-      webSearchEnabled,
-      thinkingEnabled,
-      reasoningEffort,
-      activeProviderId,
-      activeModelId,
-      modelSelectionSource: sessionModelSelectionSourceRef.current,
-      manualAgentId,
-      effectiveWorkingDirectory,
-      sessionMetadataDirty,
-      sessionMetadataDirtyRef,
-    },
-    {
-      setDialogueMode,
-      setPermissionMode,
-      setWebSearchEnabled,
-      setThinkingEnabled,
-      setReasoningEffort,
-      setManualAgentId,
-      setSessionMetadataDirty,
-    },
-    gatewayUrl,
-    token,
-  );
 
   // 包装 toggle：全局不可用时禁止开启
   const handleToggleWebSearch = useCallback(() => {
@@ -1060,7 +1166,7 @@ export default function ChatPage() {
     if (previousSessionId && previousSessionId !== nextSessionId) {
       setManualAgentId('');
     }
-    previousRouteSessionIdRef.current = nextSessionId;
+    writeRefCurrent(previousRouteSessionIdRef, nextSessionId);
   }, [sessionId]);
 
   // 任务同步 marker 与会话生命周期耦合(切会话即清空,避免上一会话的
@@ -1162,6 +1268,37 @@ export default function ChatPage() {
     return toolCallCards[toolCallCards.length - 1]?.toolName ?? null;
   }, [toolCallCards]);
   const client = useGatewayClient(token);
+  /**
+   * 会话切换时立刻断开旧会话的传输。
+   *
+   * attach 的 cleanup 判据读的是 `currentSessionViewRef`，而该 ref 要等**下一个**
+   * effect 才更新；React 又是先跑旧 cleanup、再跑新 effect。于是切走这一拍两个
+   * 判据都还是旧值，旧 SSE 会继续存活到下一次 effect 重跑，期间的迟到回调
+   * （onerror / onDone / onReconnectRequired）正是「切会话后突然提示断流」的来源。
+   *
+   * 这里用 `currentSessionId` 的变化作为权威信号，在提交后立刻关闭。只关浏览器侧
+   * 连接、不停止服务端 run，回切时按 `afterSeq` 续接。刻意跳过「首页 → 会话」
+   * （previous 为 null）这一拍：新建会话的首条消息可能已经先建好了流。
+   */
+  const previousSessionIdRef = useRef(currentSessionId);
+  useEffect(() => {
+    const previousSessionId = previousSessionIdRef.current;
+    previousSessionIdRef.current = currentSessionId;
+    if (previousSessionId === null || previousSessionId === currentSessionId) {
+      return;
+    }
+    // 关键守卫：只关**属于上一个会话**的传输。
+    //
+    // 「从会话 A 切到新会话 B 并立刻发第一条消息」这条路径上，`setCurrentSessionId(B)`
+    // 与 `client.stream(B)` 落在同一个 microtask 里，而 React 的 passive effect 是
+    // macrotask——于是 `stream()` 先建立、`closeTransports()` 后执行，会把刚开的流
+    // 当场掐断（`activeRequestRef` / `streaming` 都不回滚），表现为「新建 / 分支会话
+    // 丢消息 + 一直转圈」。此时在途传输的 sessionId 已经是 B，不能关。
+    if (client.getActiveStreamSessionId() !== previousSessionId) {
+      return;
+    }
+    client.closeTransports();
+  }, [client, currentSessionId]);
   const taskToolRuntimeLookup = useMemo(
     () => buildTaskToolRuntimeLookup(childSessions, sessionTasks),
     [childSessions, sessionTasks],
@@ -1275,13 +1412,20 @@ export default function ChatPage() {
     }
     setRightOpen(true);
     setRightTab('snapshots');
-  }, [isFusionLayout, setReviewPanelOpened, setSidePanelActiveTab]);
+    // setRightOpen / setRightTab 来自 useChatUiState(自定义 hook,编译器视为反应式值),
+    // 原依赖漏列会让编译器放弃优化整个 ChatPage;setter 身份稳定,补上不改变行为。
+  }, [isFusionLayout, setReviewPanelOpened, setRightOpen, setRightTab, setSidePanelActiveTab]);
 
   // 路由 sessionId 的 ref 镜像。用于让「与当前会话无关」的 effect（保存的
   // provider/model 默认值加载）读取最新 sessionId 而不必把它列入依赖 ——
   // 否则每次切会话都会重发一次与会话无关的 /settings/providers。
+  // 镜像写在 effect 里（渲染期写 ref 会让 React Compiler 放弃优化整个 ChatPage）；
+  // 唯一读取点是下方「保存的默认值加载」effect（声明在本 effect 之后，passive effect
+  // 按注册顺序执行），其 `.then` 回调更是异步读取，因此读到的必定是本次提交的最新值。
   const routeSessionIdRef = useRef(sessionId);
-  routeSessionIdRef.current = sessionId;
+  useEffect(() => {
+    routeSessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   const loadSavedChatDefaults = useCallback(async () => {
     if (!token) {
@@ -1300,6 +1444,39 @@ export default function ChatPage() {
       providers: loadedProviders,
     };
   }, [gatewayUrl, token]);
+
+  /**
+   * 输入框模型弹层里的「刷新模型列表」。
+   *
+   * `providers` 是本页进页面时抓取的快照；用户在设置页增删模型 / 启停 Provider 后，
+   * 不重载整页这里永远是旧目录，只能靠刷新页面才能看到新模型。该回调按需重拉一次
+   * `/settings/providers` 并原地替换目录（同时刷新会话默认值 ref，供无绑定会话回退
+   * 使用），**不改动当前会话已选中的模型**——刷新目录不等于替用户改选型。
+   */
+  const refreshProviderCatalog = useCallback(async () => {
+    if (!token || providersRefreshing) {
+      return;
+    }
+    // try/catch/finally 下沉到模块级 `runProviderCatalogRefreshOnce`（见其注释）。
+    await runProviderCatalogRefreshOnce({
+      onStart: () => {
+        setProvidersRefreshing(true);
+      },
+      onError: (error) => {
+        toast(error instanceof Error ? error.message : '刷新模型列表失败，请稍后重试', 'error');
+      },
+      onFinally: () => {
+        setProvidersRefreshing(false);
+      },
+      run: async () => {
+        const loaded = await loadSavedChatDefaults();
+        if (!loaded) {
+          return;
+        }
+        setProviders(loaded.providers);
+      },
+    });
+  }, [loadSavedChatDefaults, providersRefreshing, token]);
 
   const handleContextWindowOverrideChange = useCallback(
     async (value: number | undefined) => {
@@ -1342,21 +1519,14 @@ export default function ChatPage() {
 
         const { defaults, imageDefaults, providers: loadedProviders } = loaded;
 
-        setActiveProviderId((prev) => {
-          const normalizedPrev = prev.trim();
-          if (routeSessionIdRef.current) {
-            return normalizedPrev || defaults.providerId;
-          }
-          return defaults.providerId;
-        });
-
-        setActiveModelId((prev) => {
-          const normalizedPrev = prev.trim();
-          if (routeSessionIdRef.current) {
-            return normalizedPrev || defaults.modelId;
-          }
-          return defaults.modelId;
-        });
+        // 会话路由下**不**用全局默认值填补 provider/model：切换会话会先把二者清空，
+        // 再由异步 recovery 应用该会话持久化的绑定。若此处抢先补默认值，一旦会话绑定
+        // 「慢一拍」，输入框就会先显示全局默认模型并把它当作会话选型（dirty）回写，
+        // 覆盖会话原本指定的模型 / 思考等级。默认值只服务于无会话的欢迎页输入框；
+        // 会话确实没有绑定（metadata 无 providerId/modelId）时，由
+        // `shouldAdoptSessionModelSelectionDefaults` 在水合完成后统一接管。
+        setActiveProviderId((prev) => (routeSessionIdRef.current ? prev : defaults.providerId));
+        setActiveModelId((prev) => (routeSessionIdRef.current ? prev : defaults.modelId));
 
         setProviders(loadedProviders);
         // Only seed chat-page image defaults from saved settings on first load.
@@ -1375,7 +1545,8 @@ export default function ChatPage() {
       .catch(() => null);
     // 刻意不含 sessionId：保存的 provider/model 默认值与会话无关，切换会话时
     // 通过 routeSessionIdRef 读取最新值即可，无需重发 /settings/providers。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 依赖省略是刻意取舍。不要在此处加回 lint 抑制指令——编译器按文本匹配
+    // 识别它，会放弃优化整个 ChatPage。
   }, [applySavedImageDefaults, loadSavedChatDefaults, token]);
 
   useEffect(() => {
@@ -1530,6 +1701,36 @@ export default function ChatPage() {
     sessionStateStatus,
     streaming,
   ]);
+  /**
+   * composer 专用的占用态：只回答「现在能不能发消息」，与上面的展示态分离。
+   *
+   * `remoteSessionBusyState` 在有待办交互时**无条件**收敛成 `'paused'`，即使
+   * `sessionStateStatus` 仍是 `'running'`（批量审批续跑中 / 另一端发起了新一轮，都是
+   * 真实存在的瞬态——见 `resolveSessionStopCapability` 的同款注释）。
+   *
+   * 那种双轨态下网关**确实**持有单飞锁，硬发必被拒成 SESSION_ALREADY_RUNNING：用户消息
+   * 只有乐观气泡、不会落库，等于白丢一条。所以这里把「paused 且 running」升级回
+   * `'running'` 交回禁用/排队语义。
+   *
+   * 展示侧不跟着变：状态条要继续说「等待审批 / 等待回答」，而不是「持续运行中」。
+   */
+  const composerSessionBusyState = useMemo<'running' | 'paused' | null>(() => {
+    // 回复问题 / 权限的 HTTP 请求尚未完成时，后台续跑即将启动。
+    // 先按 running 处理，避免用户在状态刷新竞态窗口里抢发消息。
+    if (inlineQuestionReplyStatus !== null || inlinePermissionPendingDecision !== null) {
+      return 'running';
+    }
+
+    if (remoteSessionBusyState === 'paused' && sessionStateStatus === 'running') {
+      return 'running';
+    }
+    return remoteSessionBusyState;
+  }, [
+    inlinePermissionPendingDecision,
+    inlineQuestionReplyStatus,
+    remoteSessionBusyState,
+    sessionStateStatus,
+  ]);
   // 有 attach 重试待触发且归属当前会话 = 客户端正在重新接入；用于状态条显示「恢复中」。
   const sessionReconnecting =
     currentSessionId !== null &&
@@ -1558,7 +1759,21 @@ export default function ChatPage() {
     sessionStateStatus,
     streaming,
   ]);
+  // `visibleStreaming` 保持「**流式态**」语义（滚动跟随 / 输入框形态 / 停止按钮都用它）：
+  // 只要本端在流式，或网关还有活跃流快照，就仍算流式。
   const visibleStreaming = streaming || recoveredStreamSnapshot !== null;
+  /**
+   * 是否应该渲染**实时气泡**。
+   *
+   * 与 `visibleStreaming` 分开：恢复快照在「上一轮已落库、下一轮还没开始」时是空的
+   * （只带 `usage` / `upstreamSummary`）。若拿它撑起实时气泡，渲染层会造一条
+   * `status: 'streaming'` 的空消息，`mergeStreamingEntryIntoHistoricalEntries` 再按
+   * `clientRequestId` 精确匹配到历史上刚结束的那一轮并**用它替换** —— 内容是瞬间消失的。
+   * 所以气泡是否出现必须以快照里**有没有可见内容**为准，而流式态不受影响。
+   */
+  const visibleStreamRenderable =
+    streaming ||
+    (recoveredStreamSnapshot !== null && recoveredStreamHasVisibleContent(recoveredStreamSnapshot));
   const visibleStreamBuffer = streaming ? streamBuffer : (recoveredStreamSnapshot?.text ?? '');
   const visibleStreamThinkingBlocks = streaming
     ? extractStreamingThinkingTexts(streamThinkingBlocks)
@@ -1590,8 +1805,40 @@ export default function ChatPage() {
     : recoveredStreamSnapshot
       ? recoveredStreamSnapshot.parts
       : [];
-  const activeStreamMessageId =
-    currentAssistantStreamMessageIdRef.current ?? recoveredStreamSnapshot?.messageId ?? null;
+  /**
+   * 实时助手占位消息 id。真源是 `currentAssistantStreamMessageIdRef`（由
+   * `start-standard-chat-stream` / `commit-streaming-round` / attach effect 在异步
+   * 回调里改写），但渲染期（`useChatRenderData` 的 id 与排序判定）需要它的值，
+   * 而渲染期读 ref 会被 React Compiler 判定为 "Cannot access refs during render"
+   * 并放弃优化整个 ChatPage。故镜像到 state：layout effect 无依赖、每次提交后同步
+   * 读取 ref，值变化时才 setState——值变化必定伴随一次渲染，而下一次渲染由
+   * layout effect 在**绘制前**同步冲刷，因此首帧可见输出与改前一致。
+   *
+   * 用**先比对、再 setState**而不是只依赖同值 updater 兜底：
+   * `setState(prev => prev === next ? prev : next)` 在同值时的确会被 React 的 eager
+   * bailout 丢弃（已实测：把本 effect 与一个无界自增 effect 放一起，抛错时的自增次数
+   * 与「只有自增 effect」完全一致，说明同值 dispatch 对嵌套更新计数零贡献）。
+   * 但那次比较本身仍有成本，且依赖 bailout 生效的**前提**（fiber 无待办 lane）在
+   * 并发渲染下不显然；先比对能直接省掉这次 dispatch，属于纯收益。
+   *
+   * **注意**：本 effect 只是「占位消息 id」的镜像，量级上不可能自持成环——实测
+   * `Maximum update depth exceeded` 的抛点是「该次提交里**第一个真实入队**的
+   * dispatcher」，而非循环的成因（把无界自增 effect 声明在本 effect 之前/之后，
+   * 抛点会随之在两者间移动）。若再次看到报错落在这里，应当去别处找真正的驱动方。
+   *
+   * 比对基准取「本次渲染的 state」而非另一个镜像 ref：layout effect 只在**已提交**的
+   * 渲染后执行，无依赖数组 ⇒ 闭包里的 state 就是本帧真实渲染值，天然自愈（不会出现
+   * 「ref 已前移、state 因丢弃渲染而没跟上」导致后续永久跳过同步的形态）。
+   */
+  const [activeStreamMessageId, setActiveStreamMessageId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    const nextActiveStreamMessageId =
+      currentAssistantStreamMessageIdRef.current ?? recoveredStreamSnapshot?.messageId ?? null;
+    if (activeStreamMessageId === nextActiveStreamMessageId) {
+      return;
+    }
+    setActiveStreamMessageId(nextActiveStreamMessageId);
+  });
 
   const shouldPollSessionSubresources = useMemo(
     () =>
@@ -1759,6 +2006,48 @@ export default function ChatPage() {
     streaming,
   });
 
+  // useScrollManager 刻意声明在此处（而非原先靠后位置）：其 forceFollowToLatest /
+  // restoreScrollTop 在下方 session-switch effect 的配置里就要用，声明晚于使用
+  // 会被编译器判为「声明前访问」而放弃优化整个 ChatPage。
+  // 全部入参（ui 的 refs / setter、currentSessionId、messages、visibleStreaming /
+  // visibleStreamBuffer、editorMode）在本行之前均已声明。
+  const {
+    isFollowingRef,
+    handleScroll,
+    scrollToBottom,
+    forceFollowToLatest,
+    isFollowEngaged,
+    restoreScrollTop,
+  } = useScrollManager(
+    {
+      scrollRegionRef,
+      bottomRef,
+      pendingScrollFrameRef,
+      contentColumnRef,
+      editorPaneRef,
+      textareaRef,
+    },
+    { setShowScrollToBottom, setHasPendingFollowContent },
+    {
+      sessionKey: currentSessionId,
+      messagesLength: messages.length,
+      visibleStreaming,
+      visibleStreamBufferLength: visibleStreamBuffer.length,
+      editorMode,
+    },
+    {
+      // 上滑到顶部附近时动态加载更早的历史消息（本地窗口 / 服务端快照）。
+      // 门控走 ref：`hiddenMessageCount` 在下方 `useChatRenderData` 才派生。
+      onNearTop: () => {
+        if (hiddenMessageCountRef.current > 0) {
+          loadEarlierMessagesRef.current?.();
+        }
+      },
+      nearTopThreshold: 120,
+      nearTopDebounceMs: 800,
+    },
+  );
+
   useEffect(() => {
     return runChatSessionSwitchEffect({
       activateSessionView,
@@ -1770,6 +2059,9 @@ export default function ChatPage() {
       clearSessionMetadataDirty,
       currentAssistantStreamMessageIdRef,
       currentLoadedSessionIdRef,
+      // 缓存恢复分支在「上次离开时就在最新处」时用它贴底（而不是按绝对值
+      // 恢复位置）——见 run-chat-session-switch-effect 的缓存恢复注释。
+      forceFollowToLatest,
       gatewayUrl,
       isCurrentSessionView,
       lastPersistedSessionMetadataSnapshotRef,
@@ -1891,6 +2183,38 @@ export default function ChatPage() {
     token,
   ]);
 
+  // 「running 但持续无活跃流」检测与恢复入口（"批准后卡住"的客户端兜底）：
+  // 网关侧 resume 早期失败若未把会话状态收敛回 idle，会话会永远停在 running 却
+  // 没有活跃流——attach 重试全部落空、发送键被无限禁用。超过阈值后状态条展示
+  // 「重新同步」：stop-active 权威收敛（无活跃流时是纯状态修复，语义安全）+
+  // 刷新本地快照。
+  //
+  // 已知取舍：stop-active 的既有语义是「整会话停止」——会连带作废该会话全部
+  // 待审批 / 待回答。只有「running + 无活跃流持续 60s+」这一矛盾形态（网关正确
+  // 时应为 paused）才会亮按钮，此时那些待办本就卡在不可操作的界面上；网关修复
+  // （stream-runtime.ts 的 convergeSessionStateAfterFailedResume）上线后该形态
+  // 不再产生，此处仅纵深防御。
+  const handleStaleRunningResync = useCallback(async () => {
+    if (!currentSessionId || !token) {
+      return;
+    }
+    try {
+      await createSessionsClient(gatewayUrl).stopActiveStream(token, currentSessionId);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '重新同步失败', 'error');
+      return;
+    }
+    requestCurrentSessionRefresh(currentSessionId);
+  }, [currentSessionId, gatewayUrl, token]);
+
+  const staleRunningResync = useStaleRunningResync({
+    hasActiveStream: recoveryActiveStream !== null,
+    isPageActive,
+    onResync: handleStaleRunningResync,
+    sessionId: currentSessionId,
+    status: remoteSessionBusyState,
+  });
+
   useEffect(() => {
     if (
       !currentSessionId ||
@@ -1912,7 +2236,21 @@ export default function ChatPage() {
         // During active streaming, messages arrive via SSE in real-time.
         // Use lightweight /status endpoint instead of full /recovery to
         // avoid redundant full-message queries and serialization.
-        if (streamingRef.current) {
+        //
+        // 判定必须用「本轮运行是否结束」，而不是只看 `streamingRef`：
+        // attach 断开进入重连时 `handleInterruptedAttachStream` 会把 streaming
+        // 置 false（内容转存到 recoveredStreamSnapshot 继续渲染），但**流并没有
+        // 结束**。此时若按「非流式」走全量 `/recovery`，就会在重连等待期内每秒
+        // 序列化整段会话——实测单会话 362 消息 / 363 parts ≈ 1.6MB，退避到 30s
+        // 时就是连续 30 次，主线程直接被打满（「能动能但非常卡」）。
+        // 网关仍报活跃流（`recoveryActiveStream`）或正在等待 attach 重试时，
+        // 一律走轻量 `/status`：消息内容由重连后的 run event 重放补齐。
+        const isStreamInFlight =
+          streamingRef.current ||
+          recoveryActiveStream !== null ||
+          (attachRetryScheduledSessionId !== null &&
+            attachRetryScheduledSessionId === targetSessionId);
+        if (isStreamInFlight) {
           await loadSessionRuntimeSnapshot(targetSessionId, signal, expectedSessionViewEpoch);
         } else {
           await loadCurrentSessionSnapshot(targetSessionId, {
@@ -1932,11 +2270,13 @@ export default function ChatPage() {
       polling.cancel();
     };
   }, [
+    attachRetryScheduledSessionId,
     currentSessionId,
     isPageActive,
     isSessionSnapshotReady,
     loadCurrentSessionSnapshot,
     loadSessionRuntimeSnapshot,
+    recoveryActiveStream,
     remoteSessionBusyState,
     sessionModesHydrated,
     token,
@@ -1965,7 +2305,7 @@ export default function ChatPage() {
         if (activeSessionRef.current !== targetSessionId) {
           return;
         }
-        lastPersistedSessionMetadataSnapshotRef.current = nextSnapshot;
+        writeRefCurrent(lastPersistedSessionMetadataSnapshotRef, nextSnapshot);
         sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
           modelSelectionSource:
             typeof nextMetadata['modelSelectionSource'] === 'string'
@@ -1993,43 +2333,6 @@ export default function ChatPage() {
     token,
   ]);
 
-  const {
-    isFollowingRef,
-    handleScroll,
-    scrollToBottom,
-    forceFollowToLatest,
-    isFollowEngaged,
-    restoreScrollTop,
-  } = useScrollManager(
-    {
-      scrollRegionRef,
-      bottomRef,
-      pendingScrollFrameRef,
-      contentColumnRef,
-      editorPaneRef,
-      textareaRef,
-    },
-    { setShowScrollToBottom, setHasPendingFollowContent },
-    {
-      sessionKey: currentSessionId,
-      messagesLength: messages.length,
-      visibleStreaming,
-      visibleStreamBufferLength: visibleStreamBuffer.length,
-      editorMode,
-    },
-    {
-      // 上滑到顶部附近时动态加载更早的历史消息（本地窗口 / 服务端快照）。
-      // 门控走 ref：`hiddenMessageCount` 在下方 `useChatRenderData` 才派生。
-      onNearTop: () => {
-        if (hiddenMessageCountRef.current > 0) {
-          loadEarlierMessagesRef.current?.();
-        }
-      },
-      nearTopThreshold: 120,
-      nearTopDebounceMs: 800,
-    },
-  );
-
   const prevSnapshotReadyRef = useRef(false);
   const prevPageActiveRef = useRef(isPageActive);
   // When true, the next scroll-to-latest trigger (Effect A or B) should be
@@ -2039,10 +2342,16 @@ export default function ChatPage() {
   // Refs mirroring reactive state for use inside effects that must NOT
   // re-run when these values change (to avoid canceling an in-progress
   // settleObserver via cleanup).
+  // 镜像写下沉到 **layout** effect：渲染期写 ref 会让 React Compiler 放弃优化整个
+  // ChatPage；而下方 Effect A / Effect B 同为 layout effect，layout effect 按声明
+  // 顺序执行，本 effect 声明在它们之前，因此它们读到的仍是本次提交的最新值。
+  // （若改成 passive effect，Effect A 会先于镜像执行并读到上一帧的值。）
   const isSessionSnapshotReadyRef = useRef(isSessionSnapshotReady);
-  isSessionSnapshotReadyRef.current = isSessionSnapshotReady;
   const messagesLengthRef = useRef(messages.length);
-  messagesLengthRef.current = messages.length;
+  useLayoutEffect(() => {
+    isSessionSnapshotReadyRef.current = isSessionSnapshotReady;
+    messagesLengthRef.current = messages.length;
+  });
 
   // ── Effect A: First snapshot ready → scroll to bottom ────────────────
   // Triggers when `isSessionSnapshotReady` transitions to `true` for the
@@ -2120,15 +2429,20 @@ export default function ChatPage() {
     }
   }, [isPageActive, forceFollowToLatest, isFollowEngaged]);
 
-  const focusComposerWithText = useCallback((text: string) => {
-    setInput(text);
-    requestAnimationFrame(() => {
-      if (!textareaRef.current) return;
-      textareaRef.current.focus();
-      const caret = text.length;
-      textareaRef.current.setSelectionRange(caret, caret);
-    });
-  }, []);
+  const focusComposerWithText = useCallback(
+    (text: string) => {
+      setInput(text);
+      requestAnimationFrame(() => {
+        if (!textareaRef.current) return;
+        textareaRef.current.focus();
+        const caret = text.length;
+        textareaRef.current.setSelectionRange(caret, caret);
+      });
+      // 把 textareaRef（useChatUiState 返回的 ref）列入依赖：编译器要求 memo 内
+      // 用到的 ref 在依赖里可查；ref 身份稳定，行为不变。
+    },
+    [textareaRef],
+  );
 
   /**
    * 欢迎页「新建会话」：把当前视图复位为空白草稿并聚焦输入框，不立即在服务端
@@ -2163,18 +2477,22 @@ export default function ChatPage() {
     selectedWorkspacePath,
   ]);
 
-  const appendTextToComposer = useCallback((text: string) => {
-    setInput((previous) => {
-      const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
-      return `${previous}${separator}${text}`;
-    });
-    requestAnimationFrame(() => {
-      if (!textareaRef.current) return;
-      textareaRef.current.focus();
-      const caret = textareaRef.current.value.length;
-      textareaRef.current.setSelectionRange(caret, caret);
-    });
-  }, []);
+  const appendTextToComposer = useCallback(
+    (text: string) => {
+      setInput((previous) => {
+        const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
+        return `${previous}${separator}${text}`;
+      });
+      requestAnimationFrame(() => {
+        if (!textareaRef.current) return;
+        textareaRef.current.focus();
+        const caret = textareaRef.current.value.length;
+        textareaRef.current.setSelectionRange(caret, caret);
+      });
+      // 同上:textareaRef 列入依赖,满足编译器对既有 memo 的依赖校验。
+    },
+    [textareaRef],
+  );
 
   useEffect(() => {
     const handleComposerReference = (event: Event) => {
@@ -2325,8 +2643,10 @@ export default function ChatPage() {
           tokenEstimate: estimateTokenCount(content),
         },
       ]);
+      // setMessages（会话状态 hook 的 setter，身份稳定）列入依赖：原 deps 为空，
+      // 编译器校验既有 memo 时要求补上，行为不变。
     },
-    [],
+    [setMessages],
   );
 
   // 提交单飞闩：从点击到 `startStandardChatStream` 置位 streaming 之间存在异步窗口
@@ -2335,6 +2655,36 @@ export default function ChatPage() {
   // 网关单飞锁拒成 SESSION_ALREADY_RUNNING——用户看到的就是「第一次没反应，再点
   // 一次报错」。闩在入口同步置位、结算即释放；释放后若流已在跑，由 streamingRef 兜底。
   const sendingRef = useRef(false);
+
+  // useProviderModelInfo 刻意声明在此处（而非原先靠后位置）：其 activeModelOption /
+  // effectiveProviderId / effectiveModelId 在下方 sendMessage 的配置里就要用，
+  // 声明晚于使用会被编译器判为「声明前访问」而放弃优化整个 ChatPage。
+  // 全部入参（providers / activeProviderId / activeModelId / savedChatDefaultsRef /
+  // setter）在本行之前均已声明。
+  const {
+    activeProvider,
+    providerCatalog,
+    activeModelOption,
+    activeModelCanConfigureThinking,
+    activeModelTooltip,
+    effectiveProviderId,
+    effectiveModelId,
+  } = useProviderModelInfo({
+    providers,
+    activeProviderId,
+    activeModelId,
+    // 传 ref 而不是渲染期读出的值：`savedChatDefaultsRef.current` 只能在异步加载
+    // 回调（loadSavedChatDefaults）里改写，而渲染期读 ref 会被 React Compiler 判定为
+    // "Cannot access refs during render" 并放弃优化整个 ChatPage。hook 内部以参数对象
+    // 成员访问取 `.current?.providerId / modelId`，等价于原来的渲染期读取。
+    chatDefaultsRef: savedChatDefaultsRef,
+    // 已有会话路由但会话 metadata 尚未水合：这一窗口内不得用全局默认值填补空选型，
+    // 否则会话自己的模型绑定到达时已经被默认模型抢先占位（见
+    // use-provider-model-info 的 `sessionBindingPending` 说明）。
+    sessionBindingPending: Boolean(sessionId) && !sessionModesHydrated,
+    setActiveProviderId,
+    setActiveModelId,
+  });
 
   async function sendMessage(
     overrideText?: string,
@@ -2386,7 +2736,7 @@ export default function ChatPage() {
         prefersReducedMotion,
         queuedComposerScope,
         reasoningEffort,
-        remoteSessionBusyState,
+        remoteSessionBusyState: composerSessionBusyState,
         resetStreamState,
         resolveAssistantCapabilityKind,
         rightOpenRef,
@@ -2634,7 +2984,8 @@ export default function ChatPage() {
       setRightOpen,
       setRightTab,
       fileEditor,
-      openFileRef,
+      openFileRef: openRef,
+      setFileEditorAvailable,
       openFileInDockPanel: dockOwnsWorkspacePanels
         ? () => openWorkspacePanelTab('code')
         : undefined,
@@ -2705,6 +3056,9 @@ export default function ChatPage() {
       activeStreamStartedAt,
       appendAssistantEventMessages,
       attachAttemptedSessionRef,
+      attachAttemptWindowRef,
+      attachProgressRef,
+      attachTerminalReloadRef,
       attachEligibilitySignatureRef,
       attachOwnerSessionIdRef,
       attachRetryExhausted,
@@ -2726,6 +3080,7 @@ export default function ChatPage() {
       lastAttachAttemptTimestampRef,
       loadCurrentSessionSnapshot,
       loadPendingQuestionForSession,
+      messagesRef,
       pendingStreamRevealFrameRef,
       prefersReducedMotion,
       recoveredStreamSnapshot,
@@ -2826,6 +3181,9 @@ export default function ChatPage() {
    * `useLocalSavedWorkspacePaths()`（已过滤掉远端目录），所以 `sshConnectionId` 恒为 null。
    * 远端工作区必须走 `applySshWorkspaceSelection`，否则会被当成裸路径绑到本机。
    */
+  // 同 clearWorkspaceSelection：方法调用会被推断为整个 workspace 依赖 → 取成局部量，
+  // 与依赖数组里的 setWorkspace 精确对应（useWorkspace 内该值为 useCallback，身份不变）。
+  const { setWorkspace } = workspace;
   const applyWorkspaceSelection = useCallback(
     async (path: string): Promise<void> => {
       const normalizedPath = path.trim();
@@ -2833,9 +3191,12 @@ export default function ChatPage() {
         return;
       }
 
+      // `currentSessionId && canAdjustWorkspaceBinding` 是值块：留在 try 内会让编译器脱靶，
+      // 故先算好布尔量。
+      const shouldRebindWorkspace = Boolean(currentSessionId && canAdjustWorkspaceBinding);
       try {
-        if (currentSessionId && canAdjustWorkspaceBinding) {
-          await workspace.setWorkspace(normalizedPath);
+        if (shouldRebindWorkspace) {
+          await setWorkspace(normalizedPath);
         }
         addSavedWorkspace({ workspacePath: normalizedPath, sshConnectionId: null });
         setSelectedWorkspacePath(normalizedPath);
@@ -2854,7 +3215,7 @@ export default function ChatPage() {
       setFileTreeRootPath,
       setSelectedSshConnectionId,
       setSelectedWorkspacePath,
-      workspace.setWorkspace,
+      setWorkspace,
     ],
   );
 
@@ -2955,10 +3316,14 @@ export default function ChatPage() {
   );
 
   /** 「不绑定工作区」：解除当前绑定；已有会话时同步清空网关侧 metadata。 */
+  // 同上:方法调用 → 取成局部量,依赖精确对应。
+  const { clearWorkspace } = workspace;
   const clearWorkspaceSelection = useCallback(async (): Promise<void> => {
+    // 同上：`&&` 值块先算好布尔量，避免留 try 内。
+    const shouldClearWorkspace = Boolean(currentSessionId && canAdjustWorkspaceBinding);
     try {
-      if (currentSessionId && canAdjustWorkspaceBinding) {
-        await workspace.clearWorkspace();
+      if (shouldClearWorkspace) {
+        await clearWorkspace();
       }
       setSelectedWorkspacePath(null);
       setSelectedSshConnectionId(null);
@@ -2972,7 +3337,7 @@ export default function ChatPage() {
     setFileTreeRootPath,
     setSelectedSshConnectionId,
     setSelectedWorkspacePath,
-    workspace.clearWorkspace,
+    clearWorkspace,
   ]);
 
   /** 「打开本地文件夹」：桌面端调用原生选择器，浏览器端退化为完整浏览弹窗。 */
@@ -3080,24 +3445,6 @@ export default function ChatPage() {
         />
       </>
     ) : null;
-  const {
-    activeProvider,
-    providerCatalog,
-    activeModelOption,
-    activeModelCanConfigureThinking,
-    activeModelTooltip,
-    effectiveProviderId,
-    effectiveModelId,
-  } = useProviderModelInfo({
-    providers,
-    activeProviderId,
-    activeModelId,
-    defaultProviderId: savedChatDefaultsRef.current?.providerId,
-    defaultModelId: savedChatDefaultsRef.current?.modelId,
-    setActiveProviderId,
-    setActiveModelId,
-  });
-
   const handleFastModeToggle = useCallback(
     async (enabled: boolean): Promise<void> => {
       if (!token || !effectiveProviderId || activeProvider?.type !== 'openai') {
@@ -3150,6 +3497,14 @@ export default function ChatPage() {
    * 变化时更新）：它进入 useChatRenderData 的 memo 依赖，流式帧里若每帧换新，
    * 历史 entry / 分组缓存会整帧失效，整个消息列表随之重渲染。
    */
+  // 同 workspace 的情形:multiSelect 是 useMessageMultiSelect() 返回的对象,对其方法
+  // 调用会被推断为整个对象依赖 → 先取成局部量,依赖精确对应。
+  const {
+    isSelected: isMessageSelected,
+    toggleMessage: toggleMessageSelection,
+    multiSelect: messageMultiSelectState,
+  } = multiSelect;
+  const messageMultiSelectEnabled = messageMultiSelectState.enabled;
   const buildRenderMessageActions = useCallback(
     (message: ChatMessage) => {
       const baseActions = buildMessageActions(message);
@@ -3179,12 +3534,12 @@ export default function ChatPage() {
             }
           },
         },
-        ...(multiSelect.multiSelect.enabled
+        ...(messageMultiSelectEnabled
           ? [
               {
                 id: 'select',
-                label: multiSelect.isSelected(message.id) ? '☑ 已选' : '☐ 选择',
-                onClick: () => multiSelect.toggleMessage(message.id),
+                label: isMessageSelected(message.id) ? '☑ 已选' : '☐ 选择',
+                onClick: () => toggleMessageSelection(message.id),
               },
             ]
           : []),
@@ -3194,9 +3549,9 @@ export default function ChatPage() {
       bookmarkStore,
       buildMessageActions,
       currentSessionId,
-      multiSelect.isSelected,
-      multiSelect.multiSelect.enabled,
-      multiSelect.toggleMessage,
+      isMessageSelected,
+      messageMultiSelectEnabled,
+      toggleMessageSelection,
     ],
   );
 
@@ -3223,7 +3578,10 @@ export default function ChatPage() {
     activeProviderId: effectiveProviderId,
     activeModelId: effectiveModelId,
     activeModelOption,
-    visibleStreaming,
+    // 传「是否渲染实时气泡」而非「是否流式」：`useChatRenderData` 里这个标志同时
+    // 决定气泡是否存在、历史 streaming 光标归谁、以及是否优先用实时用量估算。
+    // 空快照（上一轮已落库）三者都应回到历史侧的语义。
+    visibleStreaming: visibleStreamRenderable,
     visibleStreamBuffer,
     visibleStreamThinkingBuffer,
     visibleStreamThinkingBlocks,
@@ -3254,8 +3612,14 @@ export default function ChatPage() {
   // 窗口 / 替换 messages，旧消息插入渲染列表**头部**。视口若不加锚定，会被内容
   // 增长推离阅读位置。这里在插入前捕获「视口内最靠上的可见消息」，插入后恢复。
 
-  firstVisibleMessageIdRef.current = firstVisibleMessageId;
-  hiddenMessageCountRef.current = hiddenMessageCount;
+  // 两个镜像的写入同样下沉到 effect（渲染期写 ref 会让 React Compiler 放弃优化整个
+  // ChatPage）。读取点只有事件回调——`onNearTop`（上滑加载更早）与
+  // `captureHistoryScrollAnchor` / `armHistoryAnchorImpl`（按钮点击），均发生在本次
+  // 提交的 effect 之后，读到的仍是本次提交的值。
+  useEffect(() => {
+    firstVisibleMessageIdRef.current = firstVisibleMessageId;
+    hiddenMessageCountRef.current = hiddenMessageCount;
+  });
 
   /** 捕获当前滚动锚点：视口内最靠上的一条可见消息 + 滚动区几何。 */
   const captureHistoryScrollAnchor = useCallback((): ScrollAnchorSnapshot => {
@@ -3613,11 +3977,15 @@ export default function ChatPage() {
       <CompanionStage
         agentId={effectiveAgentId}
         attachedCount={companionComposerActivity.attachedCount}
+        buddyTriggerText={companionBuddyTriggerText}
         currentUserEmail={currentUserEmail}
         editorMode={editorMode}
         hasStreamError={streamError !== null}
         idleSeconds={idleSeconds}
-        input={input}
+        inputHasMention={companionInputFlags.inputHasMention}
+        inputIsLong={companionInputFlags.inputIsLong}
+        inputMentionsBuddy={companionInputFlags.inputMentionsBuddy}
+        inputStartsWithSlash={companionInputFlags.inputStartsWithSlash}
         lastToolName={lastToolName}
         panelOpenSignal={companionPanelSignal}
         pendingPermissionCount={pendingPermissions.length}
@@ -3642,6 +4010,8 @@ export default function ChatPage() {
     showSessionSwitchSkeleton,
     remoteSessionBusyState,
     reconnecting: sessionReconnecting,
+    staleRunningResync: staleRunningResync.stale,
+    onStaleRunningResync: staleRunningResync.resync,
     pendingPermissions,
     resolveInlinePermissionActions,
     providerCatalog,
@@ -3746,6 +4116,7 @@ export default function ChatPage() {
     imageGenerationMode,
     hasConfiguredImageModel,
     imageGenerationBusy,
+    imageGenerationPreview,
     imageGenerationDefaults,
     imageModelLabel,
     imagePluginEnabled,
@@ -3785,6 +4156,8 @@ export default function ChatPage() {
       sessionModelSelectionSourceRef.current = 'manual';
       markSessionMetadataDirty();
     },
+    onRefreshProviders: refreshProviderCatalog,
+    providersRefreshing,
     onFastModeToggle: handleFastModeToggle,
     onContextWindowOverrideChange: handleContextWindowOverrideChange,
     onToggleWebSearch: handleToggleWebSearch,

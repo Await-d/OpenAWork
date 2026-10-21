@@ -108,7 +108,13 @@ export function usePageReadiness(options: UsePageReadinessOptions): UsePageReadi
   // onReady 只在"首次就绪"时触发一次，避免每轮重试成功都刷新页面。
   const readyNotifiedRef = useRef(false);
   const onReadyRef = useRef(onReady);
-  onReadyRef.current = onReady;
+  // 最新 onReady 的同步刻意放在 effect 里，而不是渲染期直接 `onReadyRef.current = onReady`：
+  // 渲染期写 ref 会被 React Compiler 判定为 "Cannot access refs during render" 并放弃优化本 Hook。
+  // effect 按声明顺序执行，本 effect 排在下方探测 effect 之前，因此探测时读到的仍是最新值——
+  // 与原写法行为等价（onReadyRef 只在下方的异步 probe 内被读取）。
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
 
   useEffect(() => {
     readyNotifiedRef.current = false;

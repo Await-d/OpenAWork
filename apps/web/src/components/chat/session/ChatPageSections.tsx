@@ -246,7 +246,12 @@ function UserAttachedImagesGallery({ images }: { images: ReturnType<typeof extra
           open
           items={lightboxItems}
           index={openPosition}
-          onIndexChange={(next) => setOpenIndex(viewableImages[next]?.imageIndex ?? null)}
+          onIndexChange={(next) => {
+            // 可选链读值先落局部变量：直接写 `?.imageIndex ?? null` 会让编译器报
+            // "Unexpected terminal in optional" 并放弃优化本组件。
+            const nextImageIndex = viewableImages[next]?.imageIndex;
+            setOpenIndex(nextImageIndex ?? null);
+          }}
           onClose={() => setOpenIndex(null)}
         />
       )}
@@ -365,6 +370,20 @@ function renderAssistantMessageContentValue(
   contentOrMessage: ChatMessage | string,
   options?: ChatToolRenderOptions,
 ) {
+  // Parts-first 短路：带工具 / 思考分段、且正文足够长（trace JSON 内含大量工具输出）
+  // 的消息，最终一律由 parts 渲染，下面针对 `content` 的「结构化 JSON 探测」在这类
+  // 消息上纯属浪费——它会把整段 trace JSON 做一次 `JSON.parse`，而且发生在**每次
+  // 重渲染**上：流式期间可能每帧一次，权限弹窗出现 / 消失时又会把整段历史重建一次。
+  // 短正文（压缩卡片、权限卡片、轻量 trace）仍走下方原路径，保持既有判定语义。
+  if (
+    typeof contentOrMessage !== 'string' &&
+    Array.isArray(contentOrMessage.parts) &&
+    contentOrMessage.content.length > 4_096 &&
+    contentOrMessage.parts.some((part) => part.type === 'reasoning' || part.type === 'tool')
+  ) {
+    return <AssistantPartsContent message={contentOrMessage} options={options} />;
+  }
+
   // 统一拦截：将 assistant_event + kind:'compaction' 消息转为格式化的 compaction 卡片
   // 此拦截在 parts/content 路径分流之前，确保所有压缩事件都使用 UICompaction 渲染
   const earlyContent =
@@ -375,15 +394,20 @@ function renderAssistantMessageContentValue(
         type?: string;
         payload?: Record<string, unknown>;
       };
-      if (earlyParsed?.type === 'assistant_event' && earlyParsed.payload?.kind === 'compaction') {
+      // 同 AssistantRichContentBody：可选链读值先落局部变量，避免
+      // "Unexpected terminal in optional" 让本函数脱靶。payload 单独取出还顺带保住
+      // TS 的收窄（否则分支内 `earlyParsed.payload[...]` 会报 possibly undefined）。
+      const earlyType = earlyParsed?.type;
+      const earlyPayload = earlyParsed.payload;
+      if (earlyPayload && earlyType === 'assistant_event' && earlyPayload.kind === 'compaction') {
         const card = createCompactionCardContent({
-          title: (earlyParsed.payload['title'] as string)?.trim() || 'compact',
-          summary: (earlyParsed.payload['message'] as string) || '',
+          title: (earlyPayload['title'] as string)?.trim() || 'compact',
+          summary: (earlyPayload['message'] as string) || '',
           trigger: 'automatic',
           phase:
-            earlyParsed.payload['status'] === 'running'
+            earlyPayload['status'] === 'running'
               ? 'started'
-              : earlyParsed.payload['status'] === 'error'
+              : earlyPayload['status'] === 'error'
                 ? 'failed'
                 : 'completed',
         });
@@ -412,6 +436,9 @@ function renderAssistantMessageContentValue(
   }
   const content =
     typeof contentOrMessage === 'string' ? contentOrMessage : contentOrMessage.content;
+  // 可选链读值先落局部变量：把 `options?.resolveInlinePermissionActions` 直接写进
+  // 逻辑测试再做三元，会让编译器报 "Unexpected terminal in optional" 并放弃优化本函数。
+  const resolveInlinePermissionActions = options?.resolveInlinePermissionActions;
   const copiedToolCard = parseCopiedToolCardContent(content);
   if (copiedToolCard) {
     return renderToolCallContent({
@@ -423,8 +450,8 @@ function renderAssistantMessageContentValue(
       onOpenChildSession: options?.onOpenChildSession,
       pendingPermissionRequestId: copiedToolCard.pendingPermissionRequestId,
       approvalActions:
-        copiedToolCard.pendingPermissionRequestId && options?.resolveInlinePermissionActions
-          ? options.resolveInlinePermissionActions(copiedToolCard.pendingPermissionRequestId)
+        copiedToolCard.pendingPermissionRequestId && resolveInlinePermissionActions
+          ? resolveInlinePermissionActions(copiedToolCard.pendingPermissionRequestId)
           : undefined,
       durationMs: copiedToolCard.durationMs,
       resumedAfterApproval: copiedToolCard.resumedAfterApproval,
@@ -633,23 +660,24 @@ function AssistantPartsContent({
     (part) => part.type === 'text' && part.text.trim().length > 0,
   );
 
-  // 将 parts 转换为支持分组的渲染序列，连续的 tool parts 会被合并
-  const groupedParts = React.useMemo(() => groupMessageParts(parts), [parts]);
+  // 将 parts 转换为支持分组的渲染序列，连续的 tool parts 会被合并。
+  // 去手写 memo，交由编译器自动 memoize（保留 useMemo 会让编译器报
+  // 「Existing memoization could not be preserved」而放弃优化整个组件）。
+  const groupedParts = groupMessageParts(parts);
 
   // 一条消息可能被拆成多个文本段（text → tool → text）。光标只交给**最后一个
   // 非空文本段**：工具卡不绘制光标，而推理块仅在没有正文时才绘制（见
   // `shouldStreamLocalReasoningBlock` 的 `hasAssistantText` 分支），因此这样
   // 恰好只有一个光标，且存在正文时不会退化为零。若给每个文本段都画，就会同时
   // 出现多个闪烁光标。
-  const activeTextPartIndex = React.useMemo(() => {
-    for (let index = groupedParts.length - 1; index >= 0; index -= 1) {
-      const item = groupedParts[index];
-      if (item?.type === 'text' && item.part.text.trim().length > 0) {
-        return index;
-      }
+  let activeTextPartIndex = -1;
+  for (let index = groupedParts.length - 1; index >= 0; index -= 1) {
+    const item = groupedParts[index];
+    if (item?.type === 'text' && item.part.text.trim().length > 0) {
+      activeTextPartIndex = index;
+      break;
     }
-    return -1;
-  }, [groupedParts]);
+  }
 
   // 管理简化思考过程的展开/收起状态
   const [expandedReasoningIds, setExpandedReasoningIds] = useState<Set<string>>(new Set());
@@ -1080,6 +1108,39 @@ const renderReasoningRichBody = (reasoningContent: string, isStreaming: boolean)
   </FoldDisabledContext>
 );
 
+/**
+ * 尝试把正文解析成 compaction 卡片（不是该形态 / 解析失败时返回 null）。
+ *
+ * 必须留在模块级：`try/catch` 内的值块（条件 / 逻辑 / 可选链）会让 React Compiler
+ * 报 "Support value blocks ... within a try/catch statement"（去掉 `?.` 也仍是同一
+ * 诊断，只是换个说法）并放弃优化调用方组件——实测 `AssistantRichContentBody` 因此
+ * 脱靶。模块级普通函数不在编译器检查范围内，语义逐字不变：同一份解析、同样
+ * 「失败即跳过」。
+ */
+function tryCreateCompactionCard(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content) as { type?: string; payload?: Record<string, unknown> };
+    const parsedType = parsed?.type;
+    const parsedPayload = parsed.payload;
+    if (parsedPayload && parsedType === 'assistant_event' && parsedPayload.kind === 'compaction') {
+      return createCompactionCardContent({
+        title: (parsedPayload['title'] as string)?.trim() || 'compact',
+        summary: (parsedPayload['message'] as string) || '',
+        trigger: 'automatic',
+        phase:
+          parsedPayload['status'] === 'running'
+            ? 'started'
+            : parsedPayload['status'] === 'error'
+              ? 'failed'
+              : 'completed',
+      });
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function AssistantRichContentBody({
   content,
   foldMode = 'auto',
@@ -1116,24 +1177,10 @@ function AssistantRichContentBody({
   // JSON 内容：先尝试解析为 incident 卡片，否则格式化为代码块
   if (!streaming && looksLikeJson(content)) {
     // 0. assistant_event + kind:'compaction' → 格式化的 compaction 卡片
-    try {
-      const parsed = JSON.parse(content) as { type?: string; payload?: Record<string, unknown> };
-      if (parsed?.type === 'assistant_event' && parsed.payload?.kind === 'compaction') {
-        const card = createCompactionCardContent({
-          title: (parsed.payload['title'] as string)?.trim() || 'compact',
-          summary: (parsed.payload['message'] as string) || '',
-          trigger: 'automatic',
-          phase:
-            parsed.payload['status'] === 'running'
-              ? 'started'
-              : parsed.payload['status'] === 'error'
-                ? 'failed'
-                : 'completed',
-        });
-        return <GenerativeUIRenderer message={JSON.parse(card) as GenerativeUIMessage} />;
-      }
-    } catch {
-      // Fall through
+    // 解析（含 try/catch）已下沉到模块级 `tryCreateCompactionCard`，见其注释。
+    const compactionCard = tryCreateCompactionCard(content);
+    if (compactionCard) {
+      return <GenerativeUIRenderer message={JSON.parse(compactionCard) as GenerativeUIMessage} />;
     }
 
     // 1. 尝试解析为 incident JSON → 人类可读卡片

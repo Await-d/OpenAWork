@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   createContext,
   useContext,
+  useMemo,
   useRef,
 } from 'react';
 import type { ComponentType, LazyExoticComponent, MutableRefObject } from 'react';
@@ -12,10 +13,33 @@ import type { OpenFileOptions } from './hooks/editor/useFileEditor.js';
 
 export type { OpenFileOptions };
 export type OpenFileFn = (path: string, options?: OpenFileOptions) => void;
-export const FileEditorContext = createContext<MutableRefObject<OpenFileFn | null>>({
-  current: null,
-} as MutableRefObject<OpenFileFn | null>);
-export function useFileEditorContext() {
+
+/**
+ * FileEditor 桥接对象：**ref 与「可用性」刻意分成两个通道**。
+ *
+ * 消费方要在渲染期判断「当前能不能点开文件」，而渲染期读 `openRef.current`
+ * 会被 React Compiler 判定为 "Cannot access refs during render" 并放弃优化
+ * 整个组件（实测 path-display / markdown-path-ref / file-content-preview /
+ * grep-content-hits-preview / modified-files-summary-card 五个组件都因此脱靶）。
+ *
+ * 所以 `isAvailable` 走 **state**：由注册方（ChatPage）在 effect 里发布，
+ * 对渲染期合法，而且**可响应式**——顺带修掉了旧写法的隐患：ref 写入不触发
+ * 重渲染，旧 `canOpen` 得等到下一次无关重渲染才会变 true。
+ *
+ * `openRef` 保留给事件处理器调用（引用稳定，不会引起额外重渲染）。
+ */
+export interface FileEditorBridge {
+  readonly openRef: MutableRefObject<OpenFileFn | null>;
+  readonly isAvailable: boolean;
+  readonly setAvailable: (value: boolean) => void;
+}
+
+export const FileEditorContext = createContext<FileEditorBridge>({
+  openRef: { current: null },
+  isAvailable: false,
+  setAvailable: () => undefined,
+});
+export function useFileEditorContext(): FileEditorBridge {
   return useContext(FileEditorContext);
 }
 import { Routes, Route, Navigate, useNavigate } from 'react-router';
@@ -31,6 +55,7 @@ import {
 } from './stores/settings/display-preferences.js';
 import { useCurrentUserProfileBootstrap } from './stores/user-profile/current-user-profile.js';
 import { useDisplayPreferencesSyncBootstrap } from './stores/settings/display-preferences-sync.js';
+import { useWorkspaceStateSyncBootstrap } from './stores/ui/workspace-state-sync.js';
 import {
   readThemeStyle as storageReadThemeStyle,
   readThemeMode as storageReadThemeMode,
@@ -262,55 +287,60 @@ function useDesktopGatewayBootstrap(
 
       // 所有可能抛错的语句（含 localStorage / store 读取）都放在 try 内：
       // 任何异常都必须落到 error 阶段，否则遮罩会永久停在 starting 无法撤除。
-      try {
-        setBootstrapError(null);
-
-        const mode = readDesktopGatewayMode();
-        const { setAuth, setGatewayUrl, setWebAccess, webPort, webExposeLan } =
-          useAuthStore.getState();
-        const port = webPort;
-        const localUrl = localGatewayUrl(port);
-
-        if (mode === 'local') {
-          setGatewayUrl(localUrl);
-          setWebAccess(true, port);
-          // bind host 必须与用户选择一致：LAN 模式下若仍以 127.0.0.1 启动，
-          // 原生侧幂等短路会因 host 变化而反复重启 sidecar 并静默关闭 LAN 共享。
-          // startedAt 覆盖 start_gateway 的耗时:启动 + 等待共用同一份固定预算,
-          // 否则两层各自计时会让启动遮罩的最长停留时间叠加成 2 倍。
-          const startedAt = Date.now();
-          await startDesktopGateway(port, webExposeLan ? 'lan' : 'localhost');
-          if (!(await waitForGatewayHealth(localUrl, { startedAt }))) {
-            throw new Error('本地 Gateway 健康检查失败');
-          }
-        }
-
-        if (!accessToken && !cancelled) {
-          if (mode !== 'local') {
-            throw new Error('远程 Gateway 需要重新输入管理员凭据');
-          }
-
-          const tokenPair = await authenticateDesktopGateway(localUrl);
+      // 整段下沉到模块级 `runBootstrapOnce`（见其注释）：try 内的 `throw` 与值块都会让
+      // 编译器放弃优化整个组件。语义逐字照搬（含各 `return` 提前退出）。
+      await runBootstrapOnce({
+        onError: (error) => {
           if (!cancelled) {
-            setAuth(
-              tokenPair.accessToken,
-              DESKTOP_DEFAULT_EMAIL,
-              tokenPair.refreshToken,
-              tokenPair.expiresIn,
-            );
+            setBootstrapError(error instanceof Error ? error.message : '桌面默认身份建立失败');
+            setPhase('error');
           }
-        }
+          console.warn('Failed to bootstrap desktop gateway session', error);
+        },
+        run: async () => {
+          setBootstrapError(null);
 
-        if (!cancelled) {
-          setPhase('ready');
-        }
-      } catch (error: unknown) {
-        if (!cancelled) {
-          setBootstrapError(error instanceof Error ? error.message : '桌面默认身份建立失败');
-          setPhase('error');
-        }
-        console.warn('Failed to bootstrap desktop gateway session', error);
-      }
+          const mode = readDesktopGatewayMode();
+          const { setAuth, setGatewayUrl, setWebAccess, webPort, webExposeLan } =
+            useAuthStore.getState();
+          const port = webPort;
+          const localUrl = localGatewayUrl(port);
+
+          if (mode === 'local') {
+            setGatewayUrl(localUrl);
+            setWebAccess(true, port);
+            // bind host 必须与用户选择一致：LAN 模式下若仍以 127.0.0.1 启动，
+            // 原生侧幂等短路会因 host 变化而反复重启 sidecar 并静默关闭 LAN 共享。
+            // startedAt 覆盖 start_gateway 的耗时:启动 + 等待共用同一份固定预算,
+            // 否则两层各自计时会让启动遮罩的最长停留时间叠加成 2 倍。
+            const startedAt = Date.now();
+            await startDesktopGateway(port, webExposeLan ? 'lan' : 'localhost');
+            if (!(await waitForGatewayHealth(localUrl, { startedAt }))) {
+              throw new Error('本地 Gateway 健康检查失败');
+            }
+          }
+
+          if (!accessToken && !cancelled) {
+            if (mode !== 'local') {
+              throw new Error('远程 Gateway 需要重新输入管理员凭据');
+            }
+
+            const tokenPair = await authenticateDesktopGateway(localUrl);
+            if (!cancelled) {
+              setAuth(
+                tokenPair.accessToken,
+                DESKTOP_DEFAULT_EMAIL,
+                tokenPair.refreshToken,
+                tokenPair.expiresIn,
+              );
+            }
+          }
+
+          if (!cancelled) {
+            setPhase('ready');
+          }
+        },
+      });
     }
 
     void bootstrap();
@@ -338,6 +368,76 @@ const CRASH_RESTART_TOTAL_BUDGET_MS = 30_000;
  */
 const CRASH_RESTART_ATTEMPT_BUDGET_MS = 15_000;
 
+/**
+ * 主题偏好持久化的收敛点：写独立 key 供首帧读取；localStorage 不可用时静默忽略。
+ *
+ * 必须留在模块级：try 内的三元值块会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个组件（实测）。
+ */
+function persistThemePreferencesOnce(
+  themeStyle: ThemeStyle,
+  theme: Theme,
+  themeMode: string,
+): void {
+  try {
+    localStorage.setItem('theme-style', themeStyle);
+    localStorage.setItem('theme-mode', themeMode === 'system' ? 'system' : theme);
+    localStorage.setItem('theme', theme);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 桌面 sidecar 启动流程的统一包装：run 全流程留在 try 内，catch 交给 onError。
+ *
+ * 必须留在模块级：try 内的 `throw`（用于把健康检查失败落到 error 阶段）会被判为
+ * "Support ThrowStatement inside of try/catch"，同样会让整个组件脱靶（实测）。
+ */
+/**
+ * 读取桌面锁状态；失败时返回 null（按「不锁」处理，避免卡死用户）。
+ *
+ * 必须留在模块级：try 内的 `&&` 是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个组件（实测）。
+ */
+async function readDesktopLockedOnce(): Promise<boolean | null> {
+  try {
+    const initial = await tauriInvoke<{ locked: boolean; hasPin: boolean }>('get_lock_state');
+    return initial.locked && initial.hasPin;
+  } catch (_err) {
+    // 获取失败默认不锁，避免卡死用户。
+    return null;
+  }
+}
+
+/**
+ * 读取空闲锁分钟数；失败时返回 undefined（不启用空闲锁）。
+ *
+ * 必须留在模块级：try 内的 `??` 是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个组件（实测）。
+ */
+async function readIdleLockMinutesOnce(): Promise<number | null | undefined> {
+  try {
+    // 读一次 idle_lock_minutes，后续靠 lock-state-changed 事件或手动刷新即可。
+    const settings = await tauriInvoke<{ idleLockMinutes: number | null }>('get_desktop_settings');
+    return settings.idleLockMinutes ?? null;
+  } catch (_err) {
+    // 获取失败则不启用空闲锁。
+    return undefined;
+  }
+}
+
+async function runBootstrapOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  }
+}
+
 export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [initialThemeStyle, setInitialThemeStyle] = useState<ThemeStyle>(getInitialThemeStyle);
@@ -352,6 +452,24 @@ export default function App() {
     ? fileIconTheme
     : DEFAULT_FILE_ICON_THEME;
   const openFileRef = useRef<OpenFileFn | null>(null);
+  const [fileEditorAvailable, setFileEditorAvailable] = useState(false);
+  /**
+   * 这里必须手写 memo：本组件因为带有 react-hooks 的抑制注释而被 React Compiler
+   * 排除（另有 6 处 "cannot access variable before declared"），拿不到自动
+   * memoization。若不 memo 住 context value，App 的每次重渲染都会换一个新对象，
+   * 导致整棵消费方子树跟着重渲染。
+   *
+   * 注意：注释里**不要**写出 eslint 抑制指令的原文——编译器按文本匹配来识别
+   * 抑制注释，把原文写进注释会把本组件自己也排除掉。
+   */
+  const fileEditorBridge = useMemo<FileEditorBridge>(
+    () => ({
+      openRef: openFileRef,
+      isAvailable: fileEditorAvailable,
+      setAvailable: setFileEditorAvailable,
+    }),
+    [fileEditorAvailable, openFileRef],
+  );
   const prefersReducedMotion = usePrefersReducedMotion();
   const authHydrated = useHasHydrated();
   const accessToken = useAuthStore((state) => state.accessToken);
@@ -390,6 +508,8 @@ export default function App() {
 
   useCurrentUserProfileBootstrap(authHydrated && desktopGatewayReady);
   useDisplayPreferencesSyncBootstrap(authHydrated && desktopGatewayReady);
+  // 工作台现场（打开记录 + 面板布局）跨设备恢复：与显示偏好同一时机启动。
+  useWorkspaceStateSyncBootstrap(authHydrated && desktopGatewayReady);
 
   useEffect(() => {
     if (effectiveFileIconTheme !== 'material') return;
@@ -443,13 +563,8 @@ export default function App() {
     // 仅在 Zustand persist 水合完成后才写入独立 key，
     // 避免在水合前用默认值覆盖之前保存的真实偏好。
     if (displayPreferencesHydrated) {
-      try {
-        localStorage.setItem('theme-style', themeStyle);
-        localStorage.setItem('theme-mode', themeMode === 'system' ? 'system' : theme);
-        localStorage.setItem('theme', theme);
-      } catch {
-        // ignore
-      }
+      // 持久化（含 try/catch 与三元值块）下沉到模块级 `persistThemePreferencesOnce`。
+      persistThemePreferencesOnce(themeStyle, theme, themeMode);
     }
   }, [theme, themeStyle, displayPreferencesHydrated, themeMode]);
 
@@ -595,24 +710,15 @@ export default function App() {
     let unlistenFn: UnlistenFn | null = null;
     let cancelled = false;
     void (async () => {
-      try {
-        const initial = await tauriInvoke<{ locked: boolean; hasPin: boolean }>('get_lock_state');
-        if (!cancelled) {
-          setDesktopLocked(initial.locked && initial.hasPin);
-        }
-      } catch (_err) {
-        // 获取失败默认不锁，避免卡死用户。
+      // 读取（含 try/catch 与 `&&` 值块）下沉到模块级 `readDesktopLockedOnce`。
+      const locked = await readDesktopLockedOnce();
+      if (!cancelled && locked !== null) {
+        setDesktopLocked(locked);
       }
-      try {
-        // 读一次 idle_lock_minutes，后续靠 lock-state-changed 事件或手动刷新即可。
-        const settings = await tauriInvoke<{ idleLockMinutes: number | null }>(
-          'get_desktop_settings',
-        );
-        if (!cancelled) {
-          setIdleLockMinutes(settings.idleLockMinutes ?? null);
-        }
-      } catch (_err) {
-        // 获取失败则不启用空闲锁。
+      // 同上：读取（含 `??` 值块）下沉到模块级 `readIdleLockMinutesOnce`。
+      const idleMinutes = await readIdleLockMinutesOnce();
+      if (!cancelled && idleMinutes !== undefined) {
+        setIdleLockMinutes(idleMinutes);
       }
       try {
         const fn = await listenTauriEvent<{ locked: boolean; hasPin: boolean }>(
@@ -666,7 +772,8 @@ export default function App() {
     const handler = () => toggleTheme();
     window.addEventListener('app:cycle-theme', handler);
     return () => window.removeEventListener('app:cycle-theme', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 依赖刻意只含 theme / themeMode（toggleTheme 随二者派生）。不要在此处
+    // 加回 lint 抑制指令——编译器按文本匹配识别它，会放弃优化整个 App。
   }, [theme, themeMode]);
 
   // 锁定时全屏遮罩，阻断主界面交互。解锁后 Rust 端会 emit
@@ -754,7 +861,7 @@ export default function App() {
         <Route
           element={
             <ProtectedRoute>
-              <FileEditorContext value={openFileRef}>
+              <FileEditorContext value={fileEditorBridge}>
                 <Layout
                   theme={theme}
                   onToggleTheme={toggleTheme}

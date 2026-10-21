@@ -1,0 +1,64 @@
+/*
+ * 实时预览画布的交互态样式。
+ *
+ * 画布本身承接鼠标点击（转发给远端页面），因此焦点指示必须走 `:focus-visible`：
+ * 按 `:focus` 判定会让每次点击都常驻一圈 accent 描边，看起来像页面自带的选中框。
+ * 键盘 Tab / 键盘交互才显示，鼠标点击不显示。
+ */
+
+.cdp-live-engine__surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+ * 拾取模式是模态交互（点击不再转发、而是选中元素），必须无条件给出可见边界，
+ * 与焦点来源无关。
+ */
+.cdp-live-engine__surface[data-pick-armed='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+ * 实时预览的自绘纵向滚动条。
+ *
+ * 远端页面的滚动条不会出现在 screencast 位图里，用户既看不见也拖不动。这条由
+ * `LiveScrollbar` 画在画面右缘，thumb 高度 / 位置按远端视口与内容高度等比换算；
+ * 默认常驻（半透明）——「看得见」正是它存在的理由。
+ */
+.cdp-live-scrollbar {
+  position: absolute;
+  z-index: 4;
+  border-radius: var(--radius-pill, 9999px);
+  background: transparent;
+  touch-action: none;
+  outline: none;
+  transition: background 120ms ease;
+}
+
+.cdp-live-scrollbar:hover,
+.cdp-live-scrollbar:focus-visible {
+  background: color-mix(in oklch, var(--bg-overlay) 70%, transparent);
+}
+
+.cdp-live-scrollbar:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+.cdp-live-scrollbar__thumb {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  min-height: 26px;
+  border-radius: var(--radius-pill, 9999px);
+  background: color-mix(in oklch, var(--fg-muted) 62%, transparent);
+  cursor: grab;
+  transition: background 120ms ease;
+}
+
+.cdp-live-scrollbar:hover .cdp-live-scrollbar__thumb,
+.cdp-live-scrollbar__thumb[data-dragging='true'] {
+  background: color-mix(in oklch, var(--accent) 72%, var(--fg-muted));
+  cursor: grabbing;
+}

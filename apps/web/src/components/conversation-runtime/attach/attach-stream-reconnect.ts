@@ -52,6 +52,14 @@ export interface InterruptedAttachStreamActions {
 export interface InterruptedAttachStreamInput {
   actions: InterruptedAttachStreamActions;
   attachSessionViewEpoch: number;
+  /**
+   * 本次重连的基础延迟。默认固定 400ms，**不适合反复中断的场景**：
+   * `scheduleAttachRetry` 的退避基数会在每次 attach 成功后被 `cancelAttachRetry`
+   * 清零，所以恒定传 400ms 会让「attach → 收到事件 → 又断开」退化成 400ms 死循环，
+   * 且每轮都会全量重载一次会话快照（几秒内把主线程占满，页面卡死）。
+   * 调用方应传入**由自身失败计数推导**的递增延迟。
+   */
+  retryDelayMs?: number;
   sessionId: string;
   state: InterruptedAttachStreamState;
 }
@@ -59,7 +67,7 @@ export interface InterruptedAttachStreamInput {
 const INTERRUPTED_ATTACH_RETRY_DELAY_MS = 400;
 
 export function handleInterruptedAttachStream(input: InterruptedAttachStreamInput): void {
-  const { actions, attachSessionViewEpoch, sessionId, state } = input;
+  const { actions, attachSessionViewEpoch, retryDelayMs, sessionId, state } = input;
 
   // 只有关注点切到别的会话才放弃；同一会话但 epoch 已推进（重连自身的恢复
   // 副作用会导致视图代次变化）必须继续重挂，epoch 由 attach effect 重新读取。
@@ -93,7 +101,7 @@ export function handleInterruptedAttachStream(input: InterruptedAttachStreamInpu
 
   actions.setSessionStateStatus('running');
   actions.scheduleAttachRetry({
-    delayMs: INTERRUPTED_ATTACH_RETRY_DELAY_MS,
+    delayMs: retryDelayMs ?? INTERRUPTED_ATTACH_RETRY_DELAY_MS,
     sessionId,
     beforeRetry: () => {
       if (actions.getActiveSessionId() !== sessionId) {

@@ -6,7 +6,7 @@
  * 宿主解除武装之后仍能到达输入框、Esc 取消拾取且不注入远端。
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserLiveEnvelope, BrowserLiveNodePayload } from '@openAwork/shared';
 
@@ -18,6 +18,9 @@ import {
   computeFrameLayout,
   DEVICE_SYNC_DEBOUNCE_MS,
   FALLBACK_FRAME_MAX_SIZE,
+  resolveDisplayScale,
+  resolveScreencastRequest,
+  SCREENCAST_FRAME_EDGE_LIMIT,
   toDevicePoint,
 } from './cdp-live-engine.js';
 
@@ -117,6 +120,7 @@ interface EngineOverrides {
   onPickConsumed?: () => void;
   onPickCancel?: () => void;
   devicePresetId?: string;
+  qualityPresetId?: string;
   zoom?: number;
 }
 
@@ -126,12 +130,14 @@ function armSurface(harness: SessionHarness, overrides: EngineOverrides = {}) {
     <CdpLiveEngine
       session={harness.session}
       url="about:blank"
+      tabId="tab-1"
       hidden={false}
       pickArmed={overrides.pickArmed ?? true}
       onPickConsumed={overrides.onPickConsumed ?? (() => undefined)}
       onPickCancel={overrides.onPickCancel ?? (() => undefined)}
       refreshKey={0}
       devicePresetId={overrides.devicePresetId ?? DEFAULT_DEVICE_PRESET_ID}
+      qualityPresetId={overrides.qualityPresetId ?? 'smooth'}
       zoom={overrides.zoom ?? 1}
     />,
   );
@@ -187,8 +193,10 @@ describe('CdpLiveEngine 元素拾取', () => {
         hidden: false,
         onPickConsumed,
         onPickCancel,
+        tabId: 'tab-1',
         refreshKey: 0,
         devicePresetId: DEFAULT_DEVICE_PRESET_ID,
+        qualityPresetId: 'smooth',
         zoom: 1,
       };
       const view = render(<CdpLiveEngine {...baseProps} pickArmed />);
@@ -230,8 +238,10 @@ describe('CdpLiveEngine 元素拾取', () => {
         hidden: false,
         onPickConsumed: () => undefined,
         onPickCancel: () => undefined,
+        tabId: 'tab-1',
         refreshKey: 0,
         devicePresetId: DEFAULT_DEVICE_PRESET_ID,
+        qualityPresetId: 'smooth',
         zoom: 1,
       };
       const view = render(<CdpLiveEngine {...baseProps} pickArmed />);
@@ -273,8 +283,10 @@ describe('CdpLiveEngine 元素拾取', () => {
         onPickCancel: () => undefined,
         pickIntent: 'styles' as const,
         onPickPoint,
+        tabId: 'tab-1',
         refreshKey: 0,
         devicePresetId: DEFAULT_DEVICE_PRESET_ID,
+        qualityPresetId: 'smooth',
         zoom: 1,
       };
       const view = render(<CdpLiveEngine {...baseProps} pickArmed />);
@@ -312,8 +324,10 @@ describe('CdpLiveEngine 元素拾取', () => {
       hidden: false,
       onPickConsumed: vi.fn(),
       onPickCancel,
+      tabId: 'tab-1',
       refreshKey: 0,
       devicePresetId: DEFAULT_DEVICE_PRESET_ID,
+      qualityPresetId: 'balanced',
       zoom: 1,
     };
     const view = render(<CdpLiveEngine {...baseProps} pickArmed />);
@@ -343,6 +357,53 @@ describe('CdpLiveEngine 元素拾取', () => {
   });
 });
 
+describe('CdpLiveEngine 指针输入', () => {
+  /** 只取 `mouseMoved`：按下 / 抬起不走合并。 */
+  function mouseMoves(harness: SessionHarness): Array<Record<string, unknown>> {
+    return harness.sent.filter(
+      (message) => message['ch'] === 'input' && message['type'] === 'mouseMoved',
+    );
+  }
+
+  it('同一帧内多次移动只下发最后一次坐标（按帧合并）', async () => {
+    const harness = createSessionHarness();
+    const { surface } = armSurface(harness, { pickArmed: false });
+
+    // 容器 100×100、帧 200×100：内容盒是居中的 100×50（y ∈ [25, 75]）。
+    fireEvent.mouseMove(surface, { clientX: 10, clientY: 50 });
+    fireEvent.mouseMove(surface, { clientX: 20, clientY: 60 });
+
+    await waitFor(() => {
+      expect(mouseMoves(harness)).toHaveLength(1);
+    });
+    expect(mouseMoves(harness)[0]).toEqual({
+      ch: 'input',
+      kind: 'mouse',
+      type: 'mouseMoved',
+      x: 40,
+      y: 70,
+    });
+  });
+
+  it('坐标没变则不再下行（重复 mouseMoved 是纯噪声）', async () => {
+    const harness = createSessionHarness();
+    const { surface } = armSurface(harness, { pickArmed: false });
+
+    fireEvent.mouseMove(surface, { clientX: 20, clientY: 60 });
+    await waitFor(() => {
+      expect(mouseMoves(harness)).toHaveLength(1);
+    });
+
+    fireEvent.mouseMove(surface, { clientX: 20, clientY: 60 });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // 再等一帧：仍不应有第二条。
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(mouseMoves(harness)).toHaveLength(1);
+  });
+});
+
 describe('CdpLiveEngine 会话相位', () => {
   function phaseProps(harness: SessionHarness) {
     return {
@@ -352,8 +413,10 @@ describe('CdpLiveEngine 会话相位', () => {
       pickArmed: false,
       onPickConsumed: () => undefined,
       onPickCancel: () => undefined,
+      tabId: 'tab-1',
       refreshKey: 0,
       devicePresetId: DEFAULT_DEVICE_PRESET_ID,
+      qualityPresetId: 'smooth',
       zoom: 1,
     };
   }
@@ -362,6 +425,10 @@ describe('CdpLiveEngine 会话相位', () => {
   function withPhase(harness: SessionHarness, phase: BrowserLivePhase): BrowserLiveSession {
     return { ...harness.session, phase };
   }
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'visibilityState');
+  });
 
   it('idle → connected 之后才请求 screencast.start，且同一连接段只请求一次', () => {
     const harness = createSessionHarness();
@@ -373,11 +440,161 @@ describe('CdpLiveEngine 会话相位', () => {
 
     view.rerender(<CdpLiveEngine {...props} session={withPhase(harness, 'connected')} />);
     expect(countMessages(harness, 'control', 'screencast.start')).toEqual([
-      { ch: 'control', action: 'screencast.start' },
+      { ch: 'control', action: 'screencast.start', quality: 45 },
     ]);
 
     view.rerender(<CdpLiveEngine {...props} session={withPhase(harness, 'connected')} />);
     expect(countMessages(harness, 'control', 'screencast.start')).toHaveLength(1);
+  });
+
+  /**
+   * 帧盒协商：面板只有 400×800 时，网关不该按默认 1024 边产帧——多出来的像素
+   * 会全部变成编码 / 传输 / 解码成本，而画面最终也只是缩放到面板里显示。
+   */
+  it('起流时按面板显示尺寸协商帧盒（窄面板不再要 1024 边）', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = (): DOMRect =>
+      ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 800,
+        width: 400,
+        height: 800,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    try {
+      const view = render(<CdpLiveEngine {...props} session={withPhase(harness, 'idle')} />);
+      view.rerender(<CdpLiveEngine {...props} session={withPhase(harness, 'connected')} />);
+
+      expect(countMessages(harness, 'control', 'screencast.start')).toEqual([
+        { ch: 'control', action: 'screencast.start', maxWidth: 400, maxHeight: 800, quality: 45 },
+      ]);
+    } finally {
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  /** 能离线程解码时协商二进制帧：省掉 base64 的 33% 体积与前端逐字节搬运。 */
+  it('支持离线程解码时协商二进制帧', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    vi.stubGlobal('createImageBitmap', vi.fn());
+    try {
+      const view = render(<CdpLiveEngine {...props} session={withPhase(harness, 'idle')} />);
+      view.rerender(<CdpLiveEngine {...props} session={withPhase(harness, 'connected')} />);
+
+      expect(countMessages(harness, 'control', 'screencast.start')).toEqual([
+        { ch: 'control', action: 'screencast.start', quality: 45, binary: true },
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  /**
+   * 画质档位切换必须重新起流：`Page.startScreencast` 只在起流时定档。
+   *
+   * 像素倍数要收敛到显示器 DPR 以内——jsdom 的 DPR 是 1，所以「清晰」档（2 倍）在这
+   * 里退化成 1:1：在 1x 屏上按 2 倍取像素只是让 Chromium 多光栅化一遍再缩回去显示，
+   * 清晰度不涨，编码 / 传输 / 解码却全额变慢。
+   */
+  it('切换画质档位会重新起流，且像素倍数收敛到 DPR 以内', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = (): DOMRect =>
+      ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 800,
+        width: 400,
+        height: 800,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    try {
+      // 先以 idle 渲染让测量 effect 落定 surfaceSize，再进入 connected 起流；
+      // 直接以 connected 挂载会在尺寸尚未测量时先发一次无帧盒的 start。
+      const view = render(<CdpLiveEngine {...props} session={withPhase(harness, 'idle')} />);
+      view.rerender(<CdpLiveEngine {...props} session={withPhase(harness, 'connected')} />);
+      expect(countMessages(harness, 'control', 'screencast.start')).toEqual([
+        { ch: 'control', action: 'screencast.start', maxWidth: 400, maxHeight: 800, quality: 45 },
+      ]);
+
+      view.rerender(
+        <CdpLiveEngine
+          {...props}
+          qualityPresetId="sharp"
+          session={withPhase(harness, 'connected')}
+        />,
+      );
+
+      // DPR = 1：sharp 的 2 倍被收敛到 1 倍，质量仍按档位上调。
+      expect(countMessages(harness, 'control', 'screencast.start')).toEqual([
+        { ch: 'control', action: 'screencast.start', maxWidth: 400, maxHeight: 800, quality: 45 },
+        { ch: 'control', action: 'screencast.start', maxWidth: 400, maxHeight: 800, quality: 50 },
+      ]);
+    } finally {
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it('无损档位请求 PNG 且不发送 JPEG quality', () => {
+    const harness = createSessionHarness();
+    const props = { ...phaseProps(harness), qualityPresetId: 'lossless' };
+    const view = render(<CdpLiveEngine {...props} session={withPhase(harness, 'idle')} />);
+    view.rerender(<CdpLiveEngine {...props} session={withPhase(harness, 'connected')} />);
+
+    expect(countMessages(harness, 'control', 'screencast.start')).toEqual([
+      { ch: 'control', action: 'screencast.start', format: 'png' },
+    ]);
+  });
+
+  /**
+   * 高 DPR 屏上档位倍数有效：2x 屏的 sharp 档才能真的要到 2 倍像素。
+   */
+  it('DPR 为 2 时 sharp 档按 2 倍协商帧盒', () => {
+    const originalDpr = window.devicePixelRatio;
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = (): DOMRect =>
+      ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 800,
+        width: 400,
+        height: 800,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    try {
+      const harness = createSessionHarness();
+      const props = { ...phaseProps(harness), qualityPresetId: 'sharp' };
+      const view = render(<CdpLiveEngine {...props} session={withPhase(harness, 'idle')} />);
+      view.rerender(<CdpLiveEngine {...props} session={withPhase(harness, 'connected')} />);
+
+      expect(countMessages(harness, 'control', 'screencast.start')).toEqual([
+        { ch: 'control', action: 'screencast.start', maxWidth: 800, maxHeight: 1600, quality: 50 },
+      ]);
+    } finally {
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      Object.defineProperty(window, 'devicePixelRatio', {
+        configurable: true,
+        value: originalDpr,
+      });
+    }
   });
 
   it('重连（connected → reconnecting → connected）后重新请求 screencast.start', () => {
@@ -403,22 +620,134 @@ describe('CdpLiveEngine 会话相位', () => {
     ]);
   });
 
-  it('navigate 每个 URL 只发一次，URL 变化后重新导航，非 http(s) 不下发', () => {
+  it('面板不可见时停流，重新可见时重新请求 screencast.start', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    const view = render(<CdpLiveEngine {...props} />);
+    expect(countMessages(harness, 'control', 'screencast.start')).toHaveLength(1);
+
+    view.rerender(<CdpLiveEngine {...props} hidden />);
+    expect(countMessages(harness, 'control', 'screencast.stop')).toEqual([
+      { ch: 'control', action: 'screencast.stop' },
+    ]);
+
+    // 持续不可见不重复下发（隐藏期间后台不再解码任何帧）。
+    view.rerender(<CdpLiveEngine {...props} hidden />);
+    expect(countMessages(harness, 'control', 'screencast.stop')).toHaveLength(1);
+
+    view.rerender(<CdpLiveEngine {...props} hidden={false} />);
+    expect(countMessages(harness, 'control', 'screencast.start')).toHaveLength(2);
+  });
+
+  /** 模拟浏览器标签页可见性切换（jsdom 默认 visible）。 */
+  function applyVisibility(value: 'visible' | 'hidden'): void {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+
+  it('整页不可见（标签页切走）时同样停流，恢复可见后重新起流', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    render(<CdpLiveEngine {...props} />);
+    expect(countMessages(harness, 'control', 'screencast.start')).toHaveLength(1);
+
+    act(() => applyVisibility('hidden'));
+    expect(countMessages(harness, 'control', 'screencast.stop')).toEqual([
+      { ch: 'control', action: 'screencast.stop' },
+    ]);
+
+    act(() => applyVisibility('visible'));
+    expect(countMessages(harness, 'control', 'screencast.start')).toHaveLength(2);
+  });
+
+  it('挂载时即不可见则完全不请求产帧，连接建立后同样不请求', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    const view = render(
+      <CdpLiveEngine {...props} session={withPhase(harness, 'connecting')} hidden />,
+    );
+    expect(countMessages(harness, 'control', 'screencast.start')).toHaveLength(0);
+
+    view.rerender(<CdpLiveEngine {...props} session={withPhase(harness, 'connected')} hidden />);
+    expect(countMessages(harness, 'control', 'screencast.start')).toHaveLength(0);
+    expect(countMessages(harness, 'control', 'screencast.stop')).toHaveLength(0);
+  });
+
+  it('切到同 URL 的另一个标签时强制重载，让远端产出新帧', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    const view = render(<CdpLiveEngine {...props} tabId="tab-1" url="http://localhost:5173/" />);
+    expect(countMessages(harness, 'control', 'reload')).toHaveLength(0);
+
+    // 两个标签 URL 相同：url effect 不会下发 navigate，必须显式 reload，
+    // 否则清空后的画面要等页面下一次 damage 才会恢复。
+    view.rerender(<CdpLiveEngine {...props} tabId="tab-2" url="http://localhost:5173/" />);
+
+    expect(countMessages(harness, 'control', 'reload')).toHaveLength(1);
+  });
+
+  it('远端自身导航（nav 回报地址）不重复下发 navigate，避免整页重载', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    const view = render(<CdpLiveEngine {...props} tabId="tab-1" url="http://localhost:5173/a" />);
+    const before = countMessages(harness, 'control', 'navigate').length;
+
+    // 远端点了内部链接：网关回报新地址，宿主随后把地址写回标签 → url prop 变化。
+    act(() => {
+      harness.emit({
+        ch: 'nav',
+        seq: 1,
+        ts: 0,
+        payload: { url: 'http://localhost:5173/b', title: 'B', timestamp: 0 },
+      });
+    });
+    view.rerender(<CdpLiveEngine {...props} tabId="tab-1" url="http://localhost:5173/b" />);
+
+    expect(countMessages(harness, 'control', 'navigate')).toHaveLength(before);
+  });
+
+  it('切到不同 URL 的标签只导航，不额外重载', () => {
+    const harness = createSessionHarness();
+    const props = phaseProps(harness);
+    const view = render(<CdpLiveEngine {...props} tabId="tab-1" url="http://localhost:5173/a" />);
+    const navigateBefore = countMessages(harness, 'control', 'navigate').length;
+
+    view.rerender(<CdpLiveEngine {...props} tabId="tab-2" url="http://localhost:5173/b" />);
+
+    expect(countMessages(harness, 'control', 'navigate')).toHaveLength(navigateBefore + 1);
+    expect(countMessages(harness, 'control', 'reload')).toHaveLength(0);
+  });
+
+  it('navigate 每个 URL 只发一次，URL 变化后重新导航（占位页同样下发）', () => {
     const harness = createSessionHarness();
     const props = phaseProps(harness);
     const view = render(<CdpLiveEngine {...props} url="about:blank" />);
-    expect(countMessages(harness, 'control', 'navigate')).toHaveLength(0);
+    expect(countMessages(harness, 'control', 'navigate')).toEqual([
+      { ch: 'control', action: 'navigate', url: 'about:blank' },
+    ]);
 
     view.rerender(<CdpLiveEngine {...props} url="https://example.test/a" />);
     view.rerender(<CdpLiveEngine {...props} url="https://example.test/a" />);
     expect(countMessages(harness, 'control', 'navigate')).toEqual([
+      { ch: 'control', action: 'navigate', url: 'about:blank' },
       { ch: 'control', action: 'navigate', url: 'https://example.test/a' },
     ]);
 
     view.rerender(<CdpLiveEngine {...props} url="https://example.test/b" />);
     expect(countMessages(harness, 'control', 'navigate')).toEqual([
+      { ch: 'control', action: 'navigate', url: 'about:blank' },
       { ch: 'control', action: 'navigate', url: 'https://example.test/a' },
       { ch: 'control', action: 'navigate', url: 'https://example.test/b' },
+    ]);
+
+    // 关掉最后一个标签 / 切到新建的空标签：地址回落到占位页。必须让远端真的切到
+    // 空白文档，否则 Chromium 停在旧页面继续产旧帧——画面与地址栏错位。
+    view.rerender(<CdpLiveEngine {...props} url="about:blank" />);
+    expect(countMessages(harness, 'control', 'navigate')).toEqual([
+      { ch: 'control', action: 'navigate', url: 'about:blank' },
+      { ch: 'control', action: 'navigate', url: 'https://example.test/a' },
+      { ch: 'control', action: 'navigate', url: 'https://example.test/b' },
+      { ch: 'control', action: 'navigate', url: 'about:blank' },
     ]);
   });
 });
@@ -494,6 +823,44 @@ describe('CdpLiveEngine 缩放坐标', () => {
   });
 });
 
+describe('resolveDisplayScale 与 DPR 收敛', () => {
+  it('档位倍数不超过显示器 DPR', () => {
+    // 1x 屏：1.5 / 2 倍都退化成 1 倍——多光栅化一遍再缩回去显示，成本全额支付、清晰度不涨。
+    expect(resolveDisplayScale(1.5, 1)).toBe(1);
+    expect(resolveDisplayScale(2, 1)).toBe(1);
+    // 2x 屏：1.5 倍有效，2 倍也刚好可用。
+    expect(resolveDisplayScale(1.5, 2)).toBe(1.5);
+    expect(resolveDisplayScale(2, 2)).toBe(2);
+    // 3x 屏：档位倍数就是上限，不会被 DPR 反向放大。
+    expect(resolveDisplayScale(2, 3)).toBe(2);
+  });
+
+  it('异常 DPR / 档位一律按 1 处理', () => {
+    expect(resolveDisplayScale(1.5, 0)).toBe(1);
+    expect(resolveDisplayScale(1.5, Number.NaN)).toBe(1);
+    expect(resolveDisplayScale(0, 2)).toBe(1);
+    // 非法档位（非有限值）按 1 处理，不会被 DPR 放大成更大盒子。
+    expect(resolveDisplayScale(Number.POSITIVE_INFINITY, 2)).toBe(1);
+  });
+
+  it('帧盒按实得倍数换算并封顶', () => {
+    expect(resolveScreencastRequest({ width: 400, height: 800 }, 1)).toEqual({
+      maxWidth: 400,
+      maxHeight: 800,
+    });
+    expect(resolveScreencastRequest({ width: 400, height: 800 }, 2)).toEqual({
+      maxWidth: 800,
+      maxHeight: 1600,
+    });
+    expect(resolveScreencastRequest({ width: 4000, height: 3000 }, 2)).toEqual({
+      maxWidth: SCREENCAST_FRAME_EDGE_LIMIT,
+      maxHeight: SCREENCAST_FRAME_EDGE_LIMIT,
+    });
+    // 尺寸未知时不带字段，交给服务端默认定档。
+    expect(resolveScreencastRequest(null, 2)).toEqual({});
+  });
+});
+
 describe('computeFrameLayout 退化盒子兜底', () => {
   const frame = { deviceWidth: 200, deviceHeight: 100 };
 
@@ -560,12 +927,14 @@ describe('CdpLiveEngine 退化容器', () => {
       <CdpLiveEngine
         session={harness.session}
         url="about:blank"
+        tabId="tab-1"
         hidden={false}
         pickArmed={false}
         onPickConsumed={() => undefined}
         onPickCancel={() => undefined}
         refreshKey={0}
         devicePresetId={DEFAULT_DEVICE_PRESET_ID}
+        qualityPresetId="balanced"
         zoom={1}
       />,
     );
@@ -573,9 +942,174 @@ describe('CdpLiveEngine 退化容器', () => {
     act(() => harness.emit(FRAME_ENVELOPE));
 
     expect(screen.queryByTestId('cdp-live-frame')).not.toBeNull();
-    const img = screen.getByTestId('cdp-live-frame');
-    expect(img.style.width).toBe('200px');
-    expect(img.style.height).toBe('100px');
+    const canvas = screen.getByTestId('cdp-live-frame');
+    expect(canvas.style.width).toBe('200px');
+    expect(canvas.style.height).toBe('100px');
+  });
+});
+
+describe('CdpLiveEngine 键盘与输入法', () => {
+  function keyboardProps(harness: SessionHarness) {
+    return {
+      session: harness.session,
+      url: 'about:blank',
+      hidden: false,
+      pickArmed: false,
+      onPickConsumed: () => undefined,
+      onPickCancel: () => undefined,
+      tabId: 'tab-1',
+      refreshKey: 0,
+      devicePresetId: DEFAULT_DEVICE_PRESET_ID,
+      qualityPresetId: 'smooth',
+      zoom: 1,
+    };
+  }
+
+  /**
+   * 中文输入法的核心回归：组合期间（拼音字母）不能注入按键，组合结束后整段提交。
+   *
+   * 旧实现把每个 keydown 直接转发成 `char`，拼音字母会被逐个打进页面，中文根本
+   * 打不出来。
+   */
+  it('输入法组合结束后一次性提交整段文本，组合期间不注入按键', () => {
+    const harness = createSessionHarness();
+    render(<CdpLiveEngine {...keyboardProps(harness)} />);
+    const ime = screen.getByLabelText('预览页输入');
+
+    fireEvent.compositionStart(ime);
+    fireEvent.input(ime, { target: { value: 'nihao' } });
+    fireEvent.keyDown(ime, { key: 'n', code: 'KeyN', keyCode: 78 });
+
+    expect(harness.sent.filter((message) => message['kind'] === 'key')).toHaveLength(0);
+    expect(harness.sent.filter((message) => message['kind'] === 'text')).toHaveLength(0);
+
+    fireEvent.input(ime, { target: { value: '你好' } });
+    fireEvent.compositionEnd(ime, { data: '你好' });
+
+    expect(harness.sent.filter((message) => message['kind'] === 'text')).toEqual([
+      { ch: 'input', kind: 'text', text: '你好' },
+    ]);
+  });
+
+  it('普通键仍然走 char + keyDown', () => {
+    const harness = createSessionHarness();
+    render(<CdpLiveEngine {...keyboardProps(harness)} />);
+    const ime = screen.getByLabelText('预览页输入');
+
+    fireEvent.keyDown(ime, { key: 'a', code: 'KeyA', keyCode: 65 });
+
+    expect(harness.sent.filter((message) => message['kind'] === 'key')).toEqual([
+      { ch: 'input', kind: 'key', type: 'char', text: 'a' },
+      {
+        ch: 'input',
+        kind: 'key',
+        type: 'keyDown',
+        key: 'a',
+        code: 'KeyA',
+        windowsVirtualKeyCode: 65,
+      },
+    ]);
+  });
+
+  it('Ctrl+A / Ctrl+Z 走 Blink 编辑命令，Ctrl+V 留给本地粘贴事件', () => {
+    const harness = createSessionHarness();
+    render(<CdpLiveEngine {...keyboardProps(harness)} />);
+    const ime = screen.getByLabelText('预览页输入');
+
+    fireEvent.keyDown(ime, { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true });
+    expect(harness.sent.at(-1)).toEqual({
+      ch: 'input',
+      kind: 'key',
+      type: 'keyDown',
+      key: 'a',
+      code: 'KeyA',
+      windowsVirtualKeyCode: 65,
+      modifiers: 2,
+      commands: ['selectAll'],
+    });
+
+    fireEvent.keyDown(ime, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });
+    expect(harness.sent.at(-1)).toEqual({
+      ch: 'input',
+      kind: 'key',
+      type: 'keyDown',
+      key: 'z',
+      code: 'KeyZ',
+      windowsVirtualKeyCode: 90,
+      modifiers: 2,
+      commands: ['undo'],
+    });
+
+    // 粘贴不能 preventDefault，也不能注入按键：要留给 textarea 的 paste 事件。
+    const before = harness.sent.length;
+    fireEvent.keyDown(ime, { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true });
+    expect(harness.sent).toHaveLength(before);
+  });
+
+  it('修饰键透传：Shift+Enter 不再退化成普通 Enter', () => {
+    const harness = createSessionHarness();
+    render(<CdpLiveEngine {...keyboardProps(harness)} />);
+    const ime = screen.getByLabelText('预览页输入');
+
+    fireEvent.keyDown(ime, { key: 'Enter', code: 'Enter', keyCode: 13, shiftKey: true });
+
+    expect(harness.sent.filter((message) => message['kind'] === 'key').at(-1)).toEqual({
+      ch: 'input',
+      kind: 'key',
+      type: 'keyDown',
+      key: 'Enter',
+      code: 'Enter',
+      windowsVirtualKeyCode: 13,
+      modifiers: 8,
+    });
+  });
+
+  it('F5 映射到预览刷新；Ctrl+W 等宿主组合放行且不注入', () => {
+    const harness = createSessionHarness();
+    render(<CdpLiveEngine {...keyboardProps(harness)} />);
+    const ime = screen.getByLabelText('预览页输入');
+
+    fireEvent.keyDown(ime, { key: 'F5', code: 'F5', keyCode: 116 });
+    expect(harness.sent.at(-1)).toEqual({ ch: 'control', action: 'reload' });
+
+    // Ctrl+W 属于宿主浏览器：不能 preventDefault，也不能注入远端。
+    const before = harness.sent.length;
+    fireEvent.keyDown(ime, { key: 'w', code: 'KeyW', keyCode: 87, ctrlKey: true });
+    expect(harness.sent).toHaveLength(before);
+  });
+
+  it('Alt+← / Alt+→ 映射到预览历史', () => {
+    const harness = createSessionHarness();
+    render(<CdpLiveEngine {...keyboardProps(harness)} />);
+    const ime = screen.getByLabelText('预览页输入');
+
+    fireEvent.keyDown(ime, { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, altKey: true });
+    expect(harness.sent.at(-1)).toEqual({ ch: 'control', action: 'goBack' });
+
+    fireEvent.keyDown(ime, { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, altKey: true });
+    expect(harness.sent.at(-1)).toEqual({ ch: 'control', action: 'goForward' });
+  });
+
+  it('粘贴走本地剪贴板文本，复制向网关索取远端选区', () => {
+    const harness = createSessionHarness();
+    render(<CdpLiveEngine {...keyboardProps(harness)} />);
+    const ime = screen.getByLabelText('预览页输入');
+
+    const paste = new Event('paste', { bubbles: true });
+    Object.defineProperty(paste, 'clipboardData', {
+      value: { getData: () => 'pasted text' },
+    });
+    act(() => {
+      ime.dispatchEvent(paste);
+    });
+    expect(harness.sent.at(-1)).toEqual({
+      ch: 'input',
+      kind: 'text',
+      text: 'pasted text',
+    });
+
+    fireEvent.keyDown(ime, { key: 'c', code: 'KeyC', keyCode: 67, ctrlKey: true });
+    expect(harness.sent.at(-1)).toEqual({ ch: 'control', action: 'copySelection' });
   });
 });
 
@@ -588,8 +1122,10 @@ describe('CdpLiveEngine 设备同步', () => {
       pickArmed: false,
       onPickConsumed: () => undefined,
       onPickCancel: () => undefined,
+      tabId: 'tab-1',
       refreshKey: 0,
       devicePresetId,
+      qualityPresetId: 'smooth',
       zoom: 1,
     };
   }
@@ -692,5 +1228,30 @@ describe('CdpLiveEngine 设备同步', () => {
     expect(countMessages(harness, 'device')).toEqual([
       { ch: 'device', width: 500, height: 400, deviceScaleFactor: 1, mobile: false },
     ]);
+  });
+
+  it('收到滚动指标后渲染自绘滚动条，键盘 End 下发 scrollTo', () => {
+    const harness = createSessionHarness();
+    armSurface(harness, { pickArmed: false });
+
+    act(() => {
+      harness.emit({
+        ch: 'scroll',
+        seq: 9,
+        ts: 0,
+        payload: { scrollY: 0, maxScrollY: 600, viewportHeight: 300, contentHeight: 900 },
+      });
+    });
+
+    const scrollbar = screen.getByRole('scrollbar');
+    expect(scrollbar.getAttribute('aria-valuemax')).toBe('600');
+
+    fireEvent.keyDown(scrollbar, { key: 'End' });
+
+    expect(countMessages(harness, 'control', 'scrollTo').at(-1)).toEqual({
+      ch: 'control',
+      action: 'scrollTo',
+      y: 600,
+    });
   });
 });

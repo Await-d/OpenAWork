@@ -32,6 +32,58 @@ interface Props {
 type DesktopOnboardingStep = 'mode' | 'connect';
 type DesktopRemoteStatus = 'idle' | 'testing' | 'ok' | 'fail';
 
+/**
+ * 启动本地网关并等待健康检查（与调用方共用同一份启动预算）。
+ *
+ * 抽到模块级的原因：原来的 `throw new Error(...)` 写在组件内 try 的**嵌套异步闭包**里，
+ * 会被 React Compiler 判为 "Support ThrowStatement inside of try/catch" 并放弃优化整个
+ * 组件（实测）。行为逐字不变。
+ */
+async function startLocalDesktopGatewayWithHealthCheck(
+  url: string,
+  port: number,
+  startedAt: number,
+  completeOnboarding: (url: string, port: number) => Promise<void>,
+): Promise<void> {
+  await startDesktopGateway(port);
+  if (!(await waitForGatewayHealth(url, { startedAt }))) {
+    throw new Error('本地网关健康检查未通过。请确认该端口未被其他程序占用，或改用其它端口后重试。');
+  }
+
+  await completeOnboarding(url, port);
+}
+
+/**
+ * 启动本地服务端并等待健康检查。
+ *
+ * 同上：`throw` 从 try 内移到模块级，消除 "Support ThrowStatement inside of try/catch"
+ * 脱靶。行为逐字不变。
+ */
+async function startLocalServerAndWaitHealthy(url: string, port: number): Promise<void> {
+  await startDesktopGateway(port);
+  if (!(await waitForGatewayHealth(url))) {
+    throw new Error('本地服务端已启动，但健康检查暂未通过。');
+  }
+}
+
+/**
+ * 校验远程网关健康并登录。
+ *
+ * 同上：`throw` 从 try 内移到模块级函数，消除编译器的
+ * "Support ThrowStatement inside of try/catch" 脱靶。行为逐字不变。
+ */
+async function verifyAndLoginRemoteGateway(
+  url: string,
+  remoteEmail: string,
+  remotePassword: string,
+) {
+  if (!(await waitForGatewayHealth(url))) {
+    throw new Error('远程网关健康检查失败，请确认地址可访问。');
+  }
+
+  return login(url, remoteEmail, remotePassword);
+}
+
 export default function OnboardingModal(props: Props) {
   if (isTauriRuntime()) {
     return <DesktopGatewayOnboarding {...props} />;
@@ -267,17 +319,14 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
     const startedAt = Date.now();
 
     try {
+      // 健康检查与 `throw` 已移到模块级 `startLocalDesktopGatewayWithHealthCheck`（见其注释）。
       await withStartupWatchdog(
-        (async () => {
-          await startDesktopGateway(port);
-          if (!(await waitForGatewayHealth(url, { startedAt }))) {
-            throw new Error(
-              '本地网关健康检查未通过。请确认该端口未被其他程序占用，或改用其它端口后重试。',
-            );
-          }
-
-          await completeLocalDesktopOnboarding(url, port);
-        })(),
+        startLocalDesktopGatewayWithHealthCheck(
+          url,
+          port,
+          startedAt,
+          completeLocalDesktopOnboarding,
+        ),
         LOCAL_GATEWAY_START_WATCHDOG_MS,
         '启动本地网关超时（45 秒）。内置网关可能未能启动，请重试；若反复失败请改用「连接远程网关」。',
       );
@@ -344,11 +393,8 @@ function DesktopGatewayOnboarding({ onComplete }: Props) {
 
     setRemoteStatus('testing');
     try {
-      if (!(await waitForGatewayHealth(url))) {
-        throw new Error('远程网关健康检查失败，请确认地址可访问。');
-      }
-
-      const tokenPair = await login(url, remoteEmail, remotePassword);
+      // 健康检查与 `throw` 已移到模块级 `verifyAndLoginRemoteGateway`（见其注释）。
+      const tokenPair = await verifyAndLoginRemoteGateway(url, remoteEmail, remotePassword);
       setRemoteStatus('ok');
       completeDesktopOnboarding(url, 'remote', port, tokenPair, remoteEmail);
     } catch (eventualError: unknown) {
@@ -608,11 +654,8 @@ function BrowserOnboardingModal({ onComplete }: Props) {
     setTestStatus('idle');
 
     try {
-      await startDesktopGateway(port);
-      if (!(await waitForGatewayHealth(url))) {
-        throw new Error('本地服务端已启动，但健康检查暂未通过。');
-      }
-
+      // 健康检查与 `throw` 已移到模块级 `startLocalServerAndWaitHealthy`（见其注释）。
+      await startLocalServerAndWaitHealthy(url, port);
       setLocalStatus('ok');
       setStep('login');
     } catch (error: unknown) {

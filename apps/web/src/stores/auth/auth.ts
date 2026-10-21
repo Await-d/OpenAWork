@@ -164,7 +164,15 @@ export const useAuthStore = create<AuthState>()(
           },
           clearAuth: () => get().clearAuth(),
         };
-        await acquireRefresh(gatewayUrl, tokenStore);
+        try {
+          await acquireRefresh(gatewayUrl, tokenStore);
+        } catch (error) {
+          // 瞬态刷新失败（网络 / 墙钟超时 / 5xx）：acquireRefresh 会保留登录态并抛出，
+          // 这里必须吞掉——定时器里的 `void` 调用否则会变成 unhandled rejection。
+          // 下一次到期检查或任意 401 会自然重试；凭证被服务端拒绝（401/403）时
+          // acquireRefresh 已代为 clearAuth 并返回 null。
+          console.warn('[auth] 令牌刷新失败（保留登录态，等待下次重试）', error);
+        }
       },
     }),
     {

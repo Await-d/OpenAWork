@@ -1,11 +1,12 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import type { RunEvent } from '@openAwork/shared';
 import type { PendingPermissionRequest } from '@openAwork/web-client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   readAssistantTracePayload,
   type ChatMessage,
   type ChatMessagePart,
+  type ChatToolPart,
 } from '../messages/support.js';
 import {
   useConversationStream,
@@ -18,7 +19,7 @@ import type { ChatBackendUsageSnapshot } from './stream-usage.js';
 
 const noop = () => undefined;
 
-function createHarness() {
+function createHarness(setterOverrides?: Partial<ConversationStreamSetters>) {
   const messages: { current: ChatMessage[] } = { current: [] };
   const segments: { current: ChatMessagePart[] } = { current: [] };
 
@@ -46,19 +47,27 @@ function createHarness() {
     setLatestUpstreamSummary: noop,
     setSessionStateStatus: noop,
     setPendingPermissions: noop as React.Dispatch<React.SetStateAction<PendingPermissionRequest[]>>,
+    ...setterOverrides,
   };
 
   const refs: ConversationStreamRefs = {
     currentAssistantStreamMessageIdRef: { current: 'round-message' },
     streamingRef: { current: true },
     stoppingStreamRef: { current: false },
+    streamClientRequestIdRef: { current: null },
+    requestProviderIdRef: { current: undefined },
+    requestModelLabelRef: { current: undefined },
+    requestAgentIdRef: { current: undefined },
   };
 
   return { messages, refs, segments, setters };
 }
 
-function renderStream(config?: Partial<ConversationStreamConfig>) {
-  const harness = createHarness();
+function renderStream(
+  config?: Partial<ConversationStreamConfig>,
+  setterOverrides?: Partial<ConversationStreamSetters>,
+) {
+  const harness = createHarness(setterOverrides);
   const rendered = renderHook(() =>
     useConversationStream(harness.refs, harness.setters, {
       sessionId: 'session-1',
@@ -129,6 +138,35 @@ describe('useConversationStream 事件幂等', () => {
     });
 
     expect(result.current.getAccumulatedText()).toBe('重复重复');
+  });
+
+  it('tool_progress 会实时写入当前工具段的 _batchProgress（长命令不再只有“运行中”）', () => {
+    const { result, segments } = renderStream();
+
+    act(() => {
+      result.current.handleEvent({
+        type: 'tool_call_delta',
+        toolCallId: 'tool-1',
+        toolName: 'bash',
+        inputDelta: '{"command":"bun test"}',
+      });
+      result.current.handleEvent({
+        type: 'tool_progress',
+        toolCallId: 'tool-1',
+        toolName: 'bash',
+        subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'PASS 1 test' }],
+        completedCount: 0,
+        totalCount: 1,
+      });
+    });
+
+    const tool = segments.current.find((part): part is ChatToolPart => part.type === 'tool');
+    expect(tool?.input['command']).toBe('bun test');
+    expect(tool?.input['_batchProgress']).toEqual({
+      subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'PASS 1 test' }],
+      completedCount: 0,
+      totalCount: 1,
+    });
   });
 
   it('同一 eventId 的 tool_call_delta 重放不重复拼接入参', () => {
@@ -406,7 +444,9 @@ describe('useConversationStream 轮次边界', () => {
 
 describe('useConversationStream 提交消息的请求 ID', () => {
   it('配置 clientRequestId 时中间轮盖派生 ID、done 提交盖原始 ID', () => {
-    const { messages, result } = renderStream({ clientRequestId: 'req-1' });
+    const { messages, refs, result } = renderStream();
+    // 消费点在事件回调里惰性读 ref，故在发事件前赋值即可。
+    refs.streamClientRequestIdRef.current = 'req-1';
 
     act(() => {
       result.current.handleEvent({ type: 'text_delta', delta: '第一轮' });
@@ -482,5 +522,44 @@ describe('useConversationStream 提交消息的请求 ID', () => {
     expect('clientRequestId' in messages.current[0]!).toBe(false);
     expect('clientRequestId' in messages.current[1]!).toBe(false);
     expect('clientRequestId' in messages.current[2]!).toBe(false);
+  });
+});
+
+/**
+ * 错误码分级。
+ *
+ * 回归背景：`TOOL_ERROR` 只是「单次工具调用被上游放弃」，流仍在继续；把它当
+ * 流式失败处理会在正文气泡与顶部横幅同时渲染一条错误，而用户实际什么都没坏。
+ * 名单与传输层（useGatewayClient）、右侧面板状态（chat-stream-state）共用。
+ */
+describe('useConversationStream 错误码分级', () => {
+  it('流内非终态错误（TOOL_ERROR）不写入 streamError', () => {
+    const setStreamError = vi.fn();
+    const { result } = renderStream(undefined, { setStreamError });
+
+    act(() => {
+      result.current.handleEvent({
+        type: 'error',
+        code: 'TOOL_ERROR',
+        message: 'Tool bash 的入参不是合法 JSON，已放弃本次调用',
+      });
+    });
+
+    expect(setStreamError).not.toHaveBeenCalled();
+  });
+
+  it('终态错误照常写入 streamError', () => {
+    const setStreamError = vi.fn();
+    const { result } = renderStream(undefined, { setStreamError });
+
+    act(() => {
+      result.current.handleEvent({
+        type: 'error',
+        code: 'MODEL_ERROR',
+        message: '上游 500',
+      });
+    });
+
+    expect(setStreamError).toHaveBeenCalledTimes(1);
   });
 });

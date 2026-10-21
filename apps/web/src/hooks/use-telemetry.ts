@@ -35,6 +35,26 @@ interface UseTelemetryResult {
   updateConsent: (status: 'accepted' | 'declined') => Promise<void>;
 }
 
+/**
+ * 遥测同意状态拉取的统一包装：try → catch 交给 `onError`（降级缓存）→ finally 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内的
+ * 值块（`?.`、`??`、`===`）。语义逐字照搬。
+ */
+async function runTelemetryConsentLoadOnce(ctx: {
+  onError: () => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch {
+    ctx.onError();
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useTelemetry(): UseTelemetryResult {
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -52,28 +72,33 @@ export function useTelemetry(): UseTelemetryResult {
     let cancelled = false;
 
     void (async () => {
-      try {
-        const result = (await createSettingsClient(gatewayUrl).getTelemetryConsent(
-          accessToken,
-        )) as { status?: string | null };
+      // try/catch/finally 下沉到模块级 `runTelemetryConsentLoadOnce`（见其注释）。
+      await runTelemetryConsentLoadOnce({
+        onError: () => {
+          // 网络失败时降级到 localStorage 缓存
+          const cached = localStorage.getItem('telemetry_consent');
+          setIsTelemetryEnabled(cached === 'accepted');
+        },
+        onFinally: () => {
+          if (!cancelled) setIsLoading(false);
+        },
+        run: async () => {
+          const result = (await createSettingsClient(gatewayUrl).getTelemetryConsent(
+            accessToken,
+          )) as { status?: string | null };
 
-        if (cancelled) return;
+          if (cancelled) return;
 
-        const status = result?.status ?? null;
-        const enabled = status === 'accepted';
-        setIsTelemetryEnabled(enabled);
+          const status = result?.status ?? null;
+          const enabled = status === 'accepted';
+          setIsTelemetryEnabled(enabled);
 
-        // 同步到 localStorage 作为缓存
-        if (status === 'accepted' || status === 'declined') {
-          localStorage.setItem('telemetry_consent', status);
-        }
-      } catch {
-        // 网络失败时降级到 localStorage 缓存
-        const cached = localStorage.getItem('telemetry_consent');
-        setIsTelemetryEnabled(cached === 'accepted');
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
+          // 同步到 localStorage 作为缓存
+          if (status === 'accepted' || status === 'declined') {
+            localStorage.setItem('telemetry_consent', status);
+          }
+        },
+      });
     })();
 
     return () => {

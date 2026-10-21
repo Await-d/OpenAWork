@@ -138,7 +138,10 @@ export function BlockToolCall({
   // `_batchProgress`（与 batch 子行同一条数据通道），这里把它合成为终端卡的
   // live 输出；工具结算后 `_batchProgress` 消失，自动回到最终 output。
   const liveBashOutputText = useMemo(() => {
-    if (!isBashLike || output !== undefined) return undefined;
+    if (!isBashLike) return undefined;
+    // 审批恢复后仍可能残留 paused 阶段的占位 output；只要工具重新进入
+    // running，实时快照就应优先于旧 output，否则终端会停在审批前的画面。
+    if (output !== undefined && visualState !== 'running') return undefined;
     const progress = input['_batchProgress'];
     if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return undefined;
     const subTools = (progress as Record<string, unknown>).subTools;
@@ -150,7 +153,7 @@ export function BlockToolCall({
     const partial = record.partialOutput;
     if (typeof partial !== 'string' || partial.length === 0) return undefined;
     return partial;
-  }, [isBashLike, input, output]);
+  }, [isBashLike, input, output, visualState]);
 
   const bashView = useMemo(
     () =>

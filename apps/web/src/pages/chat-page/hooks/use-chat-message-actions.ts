@@ -49,6 +49,63 @@ export interface UseChatMessageActionsReturn {
   buildMessageActions: (message: ChatMessage) => MessageActionItem[];
 }
 
+/**
+ * 判断是否为「压缩标记」内容（`{"type":"compaction"}`，即系统提示而非可重试的助手回合）。
+ *
+ * 必须留在模块级：try 内的 `?.` / `===` 是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+function isCompactionMarkerContent(content: string): boolean {
+  try {
+    const parsed = JSON.parse(content) as { type?: unknown };
+    return parsed?.type === 'compaction';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 把生成式 UI 消息体（status / compaction / tool_call）格式化成可复制的纯文本；
+ * 解析失败或不是已知类型时返回 null，调用方回落到原文（与原 `return message.content`
+ * 语义一致）。
+ *
+ * 必须留在模块级：try 内的三元 / `.filter(...)` / `Boolean(item)` 都是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+function formatGenerativeUiContentOnce(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content) as GenerativeUIMessage;
+    if (parsed.type === 'status') {
+      const payload = parsed.payload as Record<string, unknown>;
+      return [payload['title'], payload['message']]
+        .filter((item) => typeof item === 'string')
+        .join('\n');
+    }
+    if (parsed.type === 'compaction') {
+      const payload = parsed.payload as Record<string, unknown>;
+      return [payload['title'], payload['summary']]
+        .filter((item) => typeof item === 'string')
+        .join('\n');
+    }
+    if (parsed.type === 'tool_call') {
+      const payload = parsed.payload as Record<string, unknown>;
+      const lines = [
+        typeof payload['toolName'] === 'string' ? `工具：${payload['toolName']}` : undefined,
+        payload['input'] !== undefined
+          ? `输入：${JSON.stringify(payload['input'], null, 2)}`
+          : undefined,
+        payload['output'] !== undefined
+          ? `输出：${JSON.stringify(payload['output'], null, 2)}`
+          : undefined,
+      ].filter((item): item is string => Boolean(item));
+      return lines.join('\n');
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function useChatMessageActions(
   options: UseChatMessageActionsOptions,
 ): UseChatMessageActionsReturn {
@@ -79,35 +136,10 @@ export function useChatMessageActions(
       return lines.filter((item) => item && item.trim().length > 0).join('\n\n');
     }
 
-    try {
-      const parsed = JSON.parse(message.content) as GenerativeUIMessage;
-      if (parsed.type === 'status') {
-        const payload = parsed.payload as Record<string, unknown>;
-        return [payload['title'], payload['message']]
-          .filter((item) => typeof item === 'string')
-          .join('\n');
-      }
-      if (parsed.type === 'compaction') {
-        const payload = parsed.payload as Record<string, unknown>;
-        return [payload['title'], payload['summary']]
-          .filter((item) => typeof item === 'string')
-          .join('\n');
-      }
-      if (parsed.type === 'tool_call') {
-        const payload = parsed.payload as Record<string, unknown>;
-        const lines = [
-          typeof payload['toolName'] === 'string' ? `工具：${payload['toolName']}` : undefined,
-          payload['input'] !== undefined
-            ? `输入：${JSON.stringify(payload['input'], null, 2)}`
-            : undefined,
-          payload['output'] !== undefined
-            ? `输出：${JSON.stringify(payload['output'], null, 2)}`
-            : undefined,
-        ].filter((item): item is string => Boolean(item));
-        return lines.join('\n');
-      }
-    } catch {
-      return message.content;
+    // 解析（含 try/catch 与大量值块）下沉到模块级 `formatGenerativeUiContentOnce`。
+    const formatted = formatGenerativeUiContentOnce(message.content);
+    if (formatted !== null) {
+      return formatted;
     }
     return message.content;
   }, []);
@@ -201,19 +233,15 @@ export function useChatMessageActions(
     (message: ChatMessage): MessageActionItem[] => {
       // Compaction markers are system notices, not retriable assistant turns.
       if (message.role === 'assistant') {
-        try {
-          const parsed = JSON.parse(message.content) as { type?: unknown };
-          if (parsed?.type === 'compaction') {
-            return [
-              {
-                id: 'copy',
-                label: '复制',
-                onClick: () => handleCopyMessage(message),
-              },
-            ];
-          }
-        } catch {
-          // fall through to normal actions
+        // 解析（含 try/catch 与 `?.`）下沉到模块级 `isCompactionMarkerContent`。
+        if (isCompactionMarkerContent(message.content)) {
+          return [
+            {
+              id: 'copy',
+              label: '复制',
+              onClick: () => handleCopyMessage(message),
+            },
+          ];
         }
         const assistantEvent = parseAssistantEventContent(message.content);
         if (assistantEvent?.kind === 'compaction') {

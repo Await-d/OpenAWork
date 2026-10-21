@@ -272,6 +272,99 @@ export function upsertNetworkEntry(
   ];
 }
 
+/** 一批待应用的日志操作：普通追加，或把网络阶段补丁并进已有行。 */
+export type ConsoleBatchOp =
+  | { kind: 'append'; tabId: string; entry: ConsoleEntry }
+  | { kind: 'upsertNetwork'; tabId: string; exchange: NetworkExchange };
+
+export interface ApplyConsoleOpsOptions {
+  /** 新建网络行的 timestamp。 */
+  now: number;
+  /** 每个 tab 保留的条目上限（与 `CONSOLE_ENTRY_LIMIT` 同口径）。 */
+  limit?: number;
+}
+
+/**
+ * 一次性应用一批日志操作（按 tab 分组）。
+ *
+ * 为什么不做成「逐条 `upsertNetworkEntry` + 逐条 `append`」：
+ * - `upsertNetworkEntry` 每次都要 `findIndex` 扫全表、再 `map` 复制一份新数组；
+ * - `append` 的 `[...list.slice(-limit), entry]` 同样每加一条就复制整表。
+ *
+ * 页面首屏能一口气产生几百条 console / network 事件，而 flush 是 80ms 一次的全量
+ * 批处理——按「操作数 × 表长」算就是数万到数十万次元素搬运，全部落在主线程上，
+ * 正好和实时画面的解码绘制抢 CPU。这里改成「每个 tab 建一次 networkId → 下标索引、
+ * 数组只复制一次、批量结束后统一裁剪」，复杂度降到 O(表长 + 操作数)。
+ */
+export function applyConsoleOps(
+  previous: Record<string, ConsoleEntry[]>,
+  ops: readonly ConsoleBatchOp[],
+  options: ApplyConsoleOpsOptions,
+): Record<string, ConsoleEntry[]> {
+  /** 本批被写过的 tab → 其可变工作副本（未写过的 tab 保持原引用，避免无谓渲染）。 */
+  const working = new Map<string, ConsoleEntry[]>();
+  /** tab → networkId → 行下标；首次写入该 tab 时按需构建。 */
+  const indexes = new Map<string, Map<string, number>>();
+
+  const listFor = (tabId: string): ConsoleEntry[] => {
+    const cached = working.get(tabId);
+    if (cached !== undefined) return cached;
+    // 只复制本批要动的 tab：其余 tab 的数组引用必须保持稳定，否则面板整片重刷。
+    const next = [...(previous[tabId] ?? [])];
+    working.set(tabId, next);
+    return next;
+  };
+
+  const indexFor = (tabId: string, list: ConsoleEntry[]): Map<string, number> => {
+    const cached = indexes.get(tabId);
+    if (cached !== undefined) return cached;
+    const built = new Map<string, number>();
+    for (let i = 0; i < list.length; i += 1) {
+      const networkId = list[i]?.network?.networkId;
+      if (networkId !== undefined) built.set(networkId, i);
+    }
+    indexes.set(tabId, built);
+    return built;
+  };
+
+  for (const op of ops) {
+    const list = listFor(op.tabId);
+    if (op.kind === 'append') {
+      list.push(op.entry);
+      continue;
+    }
+
+    const index = indexFor(op.tabId, list);
+    const existing = index.get(op.exchange.networkId);
+    const existingEntry = existing === undefined ? undefined : list[existing];
+    if (existing !== undefined && existingEntry !== undefined) {
+      list[existing] = mergeNetworkIntoEntry(existingEntry, op.exchange);
+      continue;
+    }
+
+    index.set(op.exchange.networkId, list.length);
+    list.push({
+      id: `${NETWORK_ENTRY_ID_PREFIX}${op.exchange.networkId}`,
+      level: 'network',
+      message: formatNetworkEntryMessage(op.exchange),
+      timestamp: options.now,
+      network: op.exchange,
+    });
+  }
+
+  const limit = options.limit;
+  const result: Record<string, ConsoleEntry[]> = { ...previous };
+  for (const [tabId, list] of working) {
+    // 与逐条路径的稳态长度一致：先留下最近 `limit` 条、再追加本次新增。
+    const overflow = limit === undefined || limit <= 0 ? 0 : list.length - (limit + 1);
+    if (overflow > 0) {
+      list.splice(0, overflow);
+    }
+    result[tabId] = list;
+  }
+  return result;
+}
+
 /**
  * 元素拾取结果 → composer markdown 块。
  *

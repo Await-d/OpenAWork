@@ -86,7 +86,7 @@ function Viewport(props: { label: string; width: number }) {
       {/*
         真实链路 A —— chat 端虚拟化列表：群组被包在 `position:absolute; left:0; right:0`
         的定位层里（绝对定位元素不是 flex 项，宽度由 left/right 决定）。
-        见 components/chat/message/virtualized-chat-group-list.tsx。
+        见 components/chat/message/chat-message-group-list.tsx 的 VirtualizedChatGroupViewport。
       */}
       <div style={{ position: 'relative', minHeight: 120 }}>
         <div

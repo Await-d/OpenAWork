@@ -55,6 +55,8 @@ function resetLayoutState(): void {
     terminalPanelOpenedBySession: {},
     terminalPanelPosition: 'bottom',
     readIdentity: EMPTY_READ_IDENTITY,
+    sidePanelActiveTab: 'review',
+    sidePanelActiveTabBySession: {},
     workbenchLayoutMode: 'fusion',
     // 工作区列表是跨用例共享的单例 store 状态，不重置会让身份相关用例互相污染。
     savedWorkspaces: [],
@@ -459,6 +461,90 @@ describe('sidePanelActiveTab 载入期兜底（统一面板 tab）', () => {
     );
     expect(merge({ sidePanelActiveTab: 42 }, defaultCurrent).sidePanelActiveTab).toBe('review');
     expect(merge({}, defaultCurrent).sidePanelActiveTab).toBe('review');
+  });
+
+  it('merge 丢弃桶内非法值，只保留已知成员；结构非法回落空桶', () => {
+    const merge = useUIStateStore.persist.getOptions().merge;
+    if (!merge) {
+      throw new Error('useUIStateStore.persist 未配置 merge');
+    }
+    const current = useUIStateStore.getState();
+
+    const merged = merge(
+      {
+        sidePanelActiveTabBySession: {
+          '/chat/session-a': 'code',
+          '/chat/session-b': 'legacy-unknown',
+          '/chat/session-c': 42,
+        },
+      },
+      current,
+    );
+    expect(merged.sidePanelActiveTabBySession).toEqual({ '/chat/session-a': 'code' });
+
+    const mergedNonObject = merge({ sidePanelActiveTabBySession: ['/chat/session-a'] }, current);
+    expect(mergedNonObject.sidePanelActiveTabBySession).toEqual({});
+    expect(merge({}, current).sidePanelActiveTabBySession).toEqual(
+      current.sidePanelActiveTabBySession,
+    );
+  });
+});
+
+describe('sidePanelActiveTab 按会话记忆', () => {
+  it('会话 A 选代码 → 切到 B 回落审查 → 切回 A 仍是代码', () => {
+    const store = useUIStateStore.getState();
+    store.setLastChatPath('/chat/session-a');
+    store.setSidePanelActiveTab('code');
+
+    store.setLastChatPath('/chat/session-b');
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('review');
+
+    store.setLastChatPath('/chat/session-a');
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('code');
+  });
+
+  it('setSidePanelActiveTab 只写当前会话桶，不污染其他会话', () => {
+    const store = useUIStateStore.getState();
+    store.setLastChatPath('/chat/session-a');
+    store.setSidePanelActiveTab('agent');
+    store.setLastChatPath('/chat/session-b');
+    store.setSidePanelActiveTab('background');
+
+    const state = useUIStateStore.getState();
+    expect(state.sidePanelActiveTabBySession['/chat/session-a']).toBe('agent');
+    expect(state.sidePanelActiveTabBySession['/chat/session-b']).toBe('background');
+    expect(state.sidePanelActiveTab).toBe('background');
+  });
+
+  it('同一会话内重复 setLastChatPath 不重置镜像', () => {
+    const store = useUIStateStore.getState();
+    store.setLastChatPath('/chat/session-a');
+    store.setSidePanelActiveTab('preview');
+
+    store.setLastChatPath('/chat/session-a');
+    store.setLastChatPath('/chat/session-a  ');
+
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('preview');
+  });
+
+  it('无 chat path 时归入 __default__ 桶', () => {
+    useUIStateStore.getState().setSidePanelActiveTab('context');
+
+    const state = useUIStateStore.getState();
+    expect(state.sidePanelActiveTabBySession[DEFAULT_TERMINAL_PANEL_SESSION_KEY]).toBe('context');
+    expect(state.sidePanelActiveTab).toBe('context');
+  });
+
+  it('缺省值 review 不落桶（等价于无记录）', () => {
+    const store = useUIStateStore.getState();
+    store.setLastChatPath('/chat/session-a');
+    store.setSidePanelActiveTab('code');
+    store.setSidePanelActiveTab('review');
+
+    expect(
+      useUIStateStore.getState().sidePanelActiveTabBySession['/chat/session-a'],
+    ).toBeUndefined();
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('review');
   });
 });
 
@@ -1597,6 +1683,27 @@ describe('resetBrowserPreviewView（会话切换时收起预览）', () => {
     act(() => {
       useUIStateStore.getState().resetBrowserPreviewView();
     });
+
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('review');
+  });
+
+  it('收起结果同步写回当前会话桶，不被旧桶在下次换镜时载回', () => {
+    const store = useUIStateStore.getState();
+    store.setLastChatPath('/chat/session-a');
+    store.setSidePanelActiveTab('preview');
+
+    act(() => {
+      useUIStateStore.getState().resetBrowserPreviewView();
+    });
+
+    // review 是缺省值（等价于「没有记录」）：桶里清空条目，读取端回落 review。
+    expect(
+      useUIStateStore.getState().sidePanelActiveTabBySession['/chat/session-a'],
+    ).toBeUndefined();
+    expect(useUIStateStore.getState().sidePanelActiveTab).toBe('review');
+
+    useUIStateStore.getState().setLastChatPath('/chat/session-b');
+    useUIStateStore.getState().setLastChatPath('/chat/session-a');
 
     expect(useUIStateStore.getState().sidePanelActiveTab).toBe('review');
   });

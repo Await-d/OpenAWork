@@ -58,6 +58,28 @@ interface MemoryExtractResponse {
   updated?: number;
 }
 
+/**
+ * 记忆管理动作的统一包装：置状态 / 清错误 → try → catch 交给 `onError` → finally 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`??`、三元）。语义逐字照搬。
+ */
+async function runMemoryActionOnce(ctx: {
+  onStart: () => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart();
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useMemoryManagement({
   gatewayUrl,
   token,
@@ -104,52 +126,73 @@ export function useMemoryManagement({
     if (!token) {
       return;
     }
-    setLoadStatus('loading');
-    setLoadError(null);
-    try {
-      const payload = (await createMemoriesClient(gatewayUrl).list(token)) as MemoriesResponse;
-      setMemories(payload.memories ?? []);
-      setLoadStatus('loaded');
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '加载记忆列表失败';
-      setLoadError(message);
-      setLoadStatus('error');
-      logger.error('failed to load memories', error);
-    }
+    // 置状态 / 清错误与 try/catch 一起下沉到模块级 `runMemoryActionOnce`（见其注释）。
+    await runMemoryActionOnce({
+      onStart: () => {
+        setLoadStatus('loading');
+        setLoadError(null);
+      },
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : '加载记忆列表失败';
+        setLoadError(message);
+        setLoadStatus('error');
+        logger.error('failed to load memories', error);
+      },
+      onFinally: () => {},
+      run: async () => {
+        const payload = (await createMemoriesClient(gatewayUrl).list(token)) as MemoriesResponse;
+        setMemories(payload.memories ?? []);
+        setLoadStatus('loaded');
+      },
+    });
   }, [gatewayUrl, token]);
 
   const refreshStats = useCallback(async () => {
     if (!token) {
       return;
     }
-    setStatsStatus('loading');
-    try {
-      const payload = (await createMemoriesClient(gatewayUrl).getStats(
-        token,
-      )) as MemoryStatsResponse;
-      setStats(payload.stats ?? null);
-      setStatsStatus('loaded');
-    } catch (error: unknown) {
-      setStatsStatus('error');
-      logger.error('failed to load memory stats', error);
-    }
+    // try/catch 下沉到模块级 `runMemoryActionOnce`（见其注释）。
+    await runMemoryActionOnce({
+      onStart: () => {
+        setStatsStatus('loading');
+      },
+      onError: (error) => {
+        setStatsStatus('error');
+        logger.error('failed to load memory stats', error);
+      },
+      onFinally: () => {},
+      run: async () => {
+        const payload = (await createMemoriesClient(gatewayUrl).getStats(
+          token,
+        )) as MemoryStatsResponse;
+        setStats(payload.stats ?? null);
+        setStatsStatus('loaded');
+      },
+    });
   }, [gatewayUrl, token]);
 
   const loadSettings = useCallback(async () => {
     if (!token) {
       return;
     }
-    setSettingsStatus('loading');
-    try {
-      const payload = (await createMemoriesClient(gatewayUrl).getSettings(
-        token,
-      )) as MemorySettingsResponse;
-      setSettings(payload.settings ?? DEFAULT_SETTINGS);
-      setSettingsStatus('loaded');
-    } catch (error: unknown) {
-      setSettingsStatus('error');
-      logger.error('failed to load memory settings', error);
-    }
+    // 同 stats：整段下沉到 `runMemoryActionOnce`（见其注释）。
+    await runMemoryActionOnce({
+      onStart: () => {
+        setSettingsStatus('loading');
+      },
+      onError: (error) => {
+        setSettingsStatus('error');
+        logger.error('failed to load memory settings', error);
+      },
+      onFinally: () => {},
+      run: async () => {
+        const payload = (await createMemoriesClient(gatewayUrl).getSettings(
+          token,
+        )) as MemorySettingsResponse;
+        setSettings(payload.settings ?? DEFAULT_SETTINGS);
+        setSettingsStatus('loaded');
+      },
+    });
   }, [gatewayUrl, token]);
 
   useEffect(() => {
@@ -166,24 +209,31 @@ export function useMemoryManagement({
         return;
       }
       showFeedback('pending', '正在创建记忆…');
-      try {
-        const payload = (await createMemoriesClient(gatewayUrl).create(token, {
-          type: input.type,
-          key: input.key,
-          value: input.value,
-          workspaceRoot: input.workspaceRoot.trim().length > 0 ? input.workspaceRoot.trim() : null,
-          source: 'manual',
-        })) as MemoryMutationResponse;
-        if (payload.memory) {
-          setMemories((previous) => [payload.memory!, ...previous]);
-        }
-        showFeedback('success', '记忆已创建');
-        void refreshStats();
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : '创建记忆失败';
-        showFeedback('error', message);
-        logger.error('failed to create memory', error);
-      }
+      // try/catch 下沉到模块级 `runMemoryActionOnce`（见其注释）。
+      await runMemoryActionOnce({
+        onStart: () => {},
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : '创建记忆失败';
+          showFeedback('error', message);
+          logger.error('failed to create memory', error);
+        },
+        onFinally: () => {},
+        run: async () => {
+          const payload = (await createMemoriesClient(gatewayUrl).create(token, {
+            type: input.type,
+            key: input.key,
+            value: input.value,
+            workspaceRoot:
+              input.workspaceRoot.trim().length > 0 ? input.workspaceRoot.trim() : null,
+            source: 'manual',
+          })) as MemoryMutationResponse;
+          if (payload.memory) {
+            setMemories((previous) => [payload.memory!, ...previous]);
+          }
+          showFeedback('success', '记忆已创建');
+          void refreshStats();
+        },
+      });
     },
     [gatewayUrl, refreshStats, showFeedback, token],
   );
@@ -194,16 +244,22 @@ export function useMemoryManagement({
         return;
       }
       showFeedback('pending', '正在删除…');
-      try {
-        await createMemoriesClient(gatewayUrl).remove(token, id);
-        setMemories((previous) => previous.filter((memory) => memory.id !== id));
-        showFeedback('success', '已删除');
-        void refreshStats();
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : '删除记忆失败';
-        showFeedback('error', message);
-        logger.error('failed to delete memory', error);
-      }
+      // 同上：整段下沉到 `runMemoryActionOnce`（见其注释）。
+      await runMemoryActionOnce({
+        onStart: () => {},
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : '删除记忆失败';
+          showFeedback('error', message);
+          logger.error('failed to delete memory', error);
+        },
+        onFinally: () => {},
+        run: async () => {
+          await createMemoriesClient(gatewayUrl).remove(token, id);
+          setMemories((previous) => previous.filter((memory) => memory.id !== id));
+          showFeedback('success', '已删除');
+          void refreshStats();
+        },
+      });
     },
     [gatewayUrl, refreshStats, showFeedback, token],
   );
@@ -214,21 +270,27 @@ export function useMemoryManagement({
         return;
       }
       showFeedback('pending', '正在保存…');
-      try {
-        const payload = (await createMemoriesClient(gatewayUrl).update(token, id, {
-          value,
-        })) as MemoryMutationResponse;
-        if (payload.memory) {
-          setMemories((previous) =>
-            previous.map((memory) => (memory.id === id ? payload.memory! : memory)),
-          );
-        }
-        showFeedback('success', '已保存');
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : '更新记忆失败';
-        showFeedback('error', message);
-        logger.error('failed to update memory', error);
-      }
+      // 同上：整段下沉到 `runMemoryActionOnce`（见其注释）。
+      await runMemoryActionOnce({
+        onStart: () => {},
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : '更新记忆失败';
+          showFeedback('error', message);
+          logger.error('failed to update memory', error);
+        },
+        onFinally: () => {},
+        run: async () => {
+          const payload = (await createMemoriesClient(gatewayUrl).update(token, id, {
+            value,
+          })) as MemoryMutationResponse;
+          if (payload.memory) {
+            setMemories((previous) =>
+              previous.map((memory) => (memory.id === id ? payload.memory! : memory)),
+            );
+          }
+          showFeedback('success', '已保存');
+        },
+      });
     },
     [gatewayUrl, showFeedback, token],
   );
@@ -238,24 +300,31 @@ export function useMemoryManagement({
       return;
     }
     showFeedback('pending', '正在提取记忆…');
-    try {
-      const payload = (await createMemoriesClient(gatewayUrl).extract(
-        token,
-        {},
-      )) as MemoryExtractResponse;
-      const written = payload.extracted ?? payload.created ?? 0;
-      const reviewed = payload.reviewed ?? 0;
-      const skipped = (payload.duplicates ?? 0) + (payload.rejected ?? 0) + (payload.blocked ?? 0);
-      showFeedback(
-        'success',
-        `已写入 ${String(written)} 条，待确认 ${String(reviewed)} 条，已跳过 ${String(skipped)} 条`,
-      );
-      await Promise.all([refreshMemories(), refreshStats()]);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '提取记忆失败';
-      showFeedback('error', message);
-      logger.error('failed to extract memories', error);
-    }
+    // 同上：整段下沉到 `runMemoryActionOnce`（见其注释）。
+    await runMemoryActionOnce({
+      onStart: () => {},
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : '提取记忆失败';
+        showFeedback('error', message);
+        logger.error('failed to extract memories', error);
+      },
+      onFinally: () => {},
+      run: async () => {
+        const payload = (await createMemoriesClient(gatewayUrl).extract(
+          token,
+          {},
+        )) as MemoryExtractResponse;
+        const written = payload.extracted ?? payload.created ?? 0;
+        const reviewed = payload.reviewed ?? 0;
+        const skipped =
+          (payload.duplicates ?? 0) + (payload.rejected ?? 0) + (payload.blocked ?? 0);
+        showFeedback(
+          'success',
+          `已写入 ${String(written)} 条，待确认 ${String(reviewed)} 条，已跳过 ${String(skipped)} 条`,
+        );
+        await Promise.all([refreshMemories(), refreshStats()]);
+      },
+    });
   }, [gatewayUrl, refreshMemories, refreshStats, showFeedback, token]);
 
   const updateSettings = useCallback(
@@ -266,19 +335,25 @@ export function useMemoryManagement({
       const previous = settings;
       const nextSettings = { ...settings, ...patch };
       setSettings(nextSettings);
-      try {
-        const payload = (await createMemoriesClient(gatewayUrl).putSettings(
-          token,
-          nextSettings,
-        )) as MemorySettingsResponse;
-        setSettings(payload.settings ?? nextSettings);
-        showFeedback('success', '设置已保存');
-      } catch (error: unknown) {
-        setSettings(previous);
-        const message = error instanceof Error ? error.message : '保存记忆设置失败';
-        showFeedback('error', message);
-        logger.error('failed to save memory settings', error);
-      }
+      // 同上：整段下沉到 `runMemoryActionOnce`（见其注释）。
+      await runMemoryActionOnce({
+        onStart: () => {},
+        onError: (error) => {
+          setSettings(previous);
+          const message = error instanceof Error ? error.message : '保存记忆设置失败';
+          showFeedback('error', message);
+          logger.error('failed to save memory settings', error);
+        },
+        onFinally: () => {},
+        run: async () => {
+          const payload = (await createMemoriesClient(gatewayUrl).putSettings(
+            token,
+            nextSettings,
+          )) as MemorySettingsResponse;
+          setSettings(payload.settings ?? nextSettings);
+          showFeedback('success', '设置已保存');
+        },
+      });
     },
     [gatewayUrl, settings, showFeedback, token],
   );

@@ -10,12 +10,14 @@
 import { describe, expect, it } from 'vitest';
 import type { BrowserLiveNetworkPayload, BrowserLiveNodePayload } from '@openAwork/shared';
 import {
+  applyConsoleOps,
   consolePayloadToEntry,
   errorPayloadToEntry,
   mapLiveConsoleLevel,
   networkPayloadToExchange,
   nodePayloadToMarkdown,
   upsertNetworkEntry,
+  type ConsoleBatchOp,
 } from './live-console-bridge.js';
 import type {
   ConsoleEntry,
@@ -84,7 +86,6 @@ describe('consolePayloadToEntry 调用栈', () => {
       line: 0,
       column: 8,
       functionName: 'boom',
-      source: 'console.error',
       sourceLine: 0,
       sourceColumn: 8,
       sourceName: 'original.ts',
@@ -292,6 +293,90 @@ describe('upsertNetworkEntry', () => {
     expect(entries).toHaveLength(2);
     expect(entries[0]?.id).toBe('b');
     expect(entries[1]?.network?.networkId).toBe('req-2');
+  });
+});
+
+describe('applyConsoleOps', () => {
+  function logEntry(id: string): ConsoleEntry {
+    return { id, level: 'log', message: id, timestamp: NOW };
+  }
+
+  it('结果与逐条 upsertNetworkEntry 完全一致', () => {
+    const exchanges = [
+      networkPayloadToExchange(networkPayload({ requestId: 'r1' })),
+      networkPayloadToExchange(networkPayload({ requestId: 'r2' })),
+      networkPayloadToExchange(
+        networkPayload({ requestId: 'r1', phase: 'response', status: 200, durationMs: 7 }),
+      ),
+      networkPayloadToExchange(
+        networkPayload({ requestId: 'r2', phase: 'failed', errorText: 'boom' }),
+      ),
+    ];
+    const ops: ConsoleBatchOp[] = [
+      { kind: 'append', tabId: 't1', entry: logEntry('a') },
+      { kind: 'upsertNetwork', tabId: 't1', exchange: exchanges[0]! },
+      { kind: 'append', tabId: 't1', entry: logEntry('b') },
+      { kind: 'upsertNetwork', tabId: 't1', exchange: exchanges[1]! },
+      { kind: 'upsertNetwork', tabId: 't1', exchange: exchanges[2]! },
+      { kind: 'upsertNetwork', tabId: 't1', exchange: exchanges[3]! },
+    ];
+
+    // 参照实现：就是改造前的逐条路径。
+    let expected: ConsoleEntry[] = [];
+    for (const op of ops) {
+      expected =
+        op.kind === 'append'
+          ? [...expected, op.entry]
+          : upsertNetworkEntry(expected, op.exchange, { now: NOW });
+    }
+
+    const actual = applyConsoleOps({}, ops, { now: NOW });
+
+    expect(actual['t1']).toEqual(expected);
+    // 顺序是 [a, r1, b, r2]：两个网络请求各占一行，后续阶段归并回原行。
+    expect(actual['t1']).toHaveLength(4);
+    expect(actual['t1']?.[1]?.network?.networkId).toBe('r1');
+    expect(actual['t1']?.[1]?.network?.status).toBe(200);
+    expect(actual['t1']?.[3]?.network?.networkId).toBe('r2');
+    expect(actual['t1']?.[3]?.network?.errorMessage).toBe('boom');
+  });
+
+  it('未涉及的 tab 保持原数组引用（避免面板整片重刷）', () => {
+    const untouched = [logEntry('x')];
+    const previous = { t1: untouched, t2: [logEntry('y')] };
+
+    const next = applyConsoleOps(
+      previous,
+      [{ kind: 'append', tabId: 't1', entry: logEntry('z') }],
+      { now: NOW },
+    );
+
+    expect(next['t2']).toBe(previous['t2']);
+    // 被改动的 tab 必须是新数组，否则 React 感知不到变化。
+    expect(next['t1']).not.toBe(previous['t1']);
+    expect(previous['t1']).toHaveLength(1);
+  });
+
+  it('批量结束后按 limit 裁剪，结果与逐条 append 的稳态一致', () => {
+    const base: ConsoleEntry[] = [logEntry('a'), logEntry('b'), logEntry('c')];
+    const ops: ConsoleBatchOp[] = [
+      { kind: 'append', tabId: 't1', entry: logEntry('d') },
+      { kind: 'append', tabId: 't1', entry: logEntry('e') },
+    ];
+
+    const next = applyConsoleOps({ t1: base }, ops, { now: NOW, limit: 2 });
+
+    // 参照实现：`[...list.slice(-limit), entry]` 逐条追加 → ['c','d','e']。
+    let expected = base;
+    for (const op of ops) {
+      if (op.kind === 'append') {
+        expected = [...expected.slice(-2), op.entry];
+      }
+    }
+    expect(next['t1']).toEqual(expected);
+    expect(next['t1']?.map((entry) => entry.id)).toEqual(['c', 'd', 'e']);
+    // 不得就地改写调用方的旧数组。
+    expect(base).toHaveLength(3);
   });
 });
 

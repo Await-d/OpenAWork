@@ -99,6 +99,67 @@ function releaseOpenFileContent(file: OpenFile | null | undefined): void {
  * 这样跨 workspace 切回 A 时,A 上次留下的文件会被重新加载;不会再共享一个全局
  * openFilePaths 列表导致跨 workspace 文件路径串。
  */
+/**
+ * 打开文件的统一包装：置 loading / 清 error → try → catch 交给 `onError` → finally 清 loading。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内的
+ * 值块（`??`、`?.`）。语义逐字照搬。
+ */
+async function runOpenFileOnce(ctx: {
+  setLoading: (loading: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setLoading(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setLoading(false);
+  }
+}
+
+/**
+ * 恢复会话时读取单个持久化文件：二进制预览类型直接给占位内容，读取失败返回 null
+ * （单个文件失败不阻塞其它文件，与原 try/catch 语义一致）。
+ *
+ * 必须留在模块级：try 内的 `??` / 三元是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+async function loadRestoredOpenFileOnce(
+  path: string,
+  loadPreview: () => Promise<Awaited<ReturnType<typeof loadPreviewContent>>>,
+): Promise<OpenFile | null> {
+  try {
+    const previewKind = getFilePreviewKind(path);
+    if (isBinaryPreviewKind(previewKind)) {
+      return {
+        path,
+        name: path.split('/').pop() ?? path,
+        content: '',
+        originalContent: '',
+        language: 'plaintext',
+      };
+    }
+    const next = await loadPreview();
+    return {
+      path,
+      name: path.split('/').pop() ?? path,
+      content: next.content,
+      originalContent: next.content,
+      language: getLanguage(path),
+      disposeContent: next.dispose,
+      truncated: next.truncated,
+    };
+  } catch (_e) {
+    // 单个文件加载失败不阻塞其他文件
+    return null;
+  }
+}
+
 export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: string | null) {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -135,7 +196,12 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
   const [revealTarget, setRevealTarget] = useState<RevealTarget | null>(null);
   const revealNonceRef = useRef(0);
   const openFilesRef = useRef(openFiles);
-  openFilesRef.current = openFiles;
+  // 渲染期直接写 ref 会被编译器判为 "Cannot update ref during render" 并放弃优化整个 hook，
+  // 故改为 effect 同步；本 effect 声明在下面两个会读取该 ref 的 effect **之前**，同一次提交里
+  // 先执行，读取到的仍是最新的 openFiles。
+  useEffect(() => {
+    openFilesRef.current = openFiles;
+  }, [openFiles]);
 
   // 当 workspace 切换时清掉内存中的 openFiles,后续 reload effect 会按新 workspace
   // 的 persistedPaths 加载文件。
@@ -180,16 +246,21 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
   //   1) workspace 切换初期,reload effect 还没把文件加载回来
   //   2) 用户在该 workspace 里关掉了最后一个文件 → 由 closeFile 直接调 store setter
   // 两种场景都不能依赖这个 sync effect 来反映"清空"。
-  const openFilePathsRef = useRef(openFiles.map((f) => f.path));
-  openFilePathsRef.current = openFiles.map((f) => f.path);
+  //
+  // 原实现用一个渲染期同步的 ref 持有路径列表；渲染期写 ref 会被编译器判为
+  // "Cannot access refs during render" 而放弃优化整个 hook，而本 effect 是它
+  // 的唯一读者——直接在这里由 openFiles 现算即可，ref 已移除。
+  //
+  // 依赖刻意不含 openFilePathsByWorkspace / setOpenFilePathsForWorkspace：
+  // workspace 切换初期它们会先于 reload effect 变化，被触发就会把旧 workspace
+  // 的路径写进新 workspace 的桶。也不要在本 effect 里加回 lint 抑制指令。
   useEffect(() => {
     if (openFiles.length === 0) return;
     if (lastSeenWorkspaceKeyRef.current !== wsKey) return;
-    const next = openFilePathsRef.current;
+    const next = openFiles.map((f) => f.path);
     const current = openFilePathsByWorkspace[wsKey] ?? [];
     if (current.length === next.length && current.every((p, i) => p === next[i])) return;
     setOpenFilePathsForWorkspace(persistenceWorkspaceScope, next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openFiles, wsKey]);
 
   const setActiveFilePath = useCallback(
@@ -258,35 +329,37 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
         setActiveFilePath(resolvedPath);
         return;
       }
-      setLoading(true);
-      setSaveError(null);
-      try {
-        const loaded = await loadPreviewContent({
-          client: workspaceClient,
-          token: token ?? '',
-          path: resolvedPath,
-          workspaceRoot: workspacePath ?? null,
-          identity: readIdentity,
-        });
-        const name = resolvedPath.split('/').pop() ?? resolvedPath;
-        const file: OpenFile = {
-          path: resolvedPath,
-          name,
-          content: loaded.content,
-          originalContent: loaded.content,
-          language: getLanguage(resolvedPath),
-          disposeContent: loaded.dispose,
-          truncated: loaded.truncated,
-        };
-        setOpenFiles((prev) => [...prev, file]);
-        setActiveFilePath(resolvedPath);
-        queueReveal(resolvedPath);
-      } catch (err) {
-        // 超限时网关返回 413：给出统一的 10MB 提示，而不是裸的英文/状态码文案。
-        setSaveError(describeFileReadError(err, '打开文件失败'));
-      } finally {
-        setLoading(false);
-      }
+      // 置 loading / 清 error 与 try/catch/finally 一起下沉到模块级 `runOpenFileOnce`。
+      await runOpenFileOnce({
+        setLoading,
+        setError: setSaveError,
+        onError: (err) => {
+          // 超限时网关返回 413：给出统一的 10MB 提示，而不是裸的英文/状态码文案。
+          setSaveError(describeFileReadError(err, '打开文件失败'));
+        },
+        run: async () => {
+          const loaded = await loadPreviewContent({
+            client: workspaceClient,
+            token: token ?? '',
+            path: resolvedPath,
+            workspaceRoot: workspacePath ?? null,
+            identity: readIdentity,
+          });
+          const name = resolvedPath.split('/').pop() ?? resolvedPath;
+          const file: OpenFile = {
+            path: resolvedPath,
+            name,
+            content: loaded.content,
+            originalContent: loaded.content,
+            language: getLanguage(resolvedPath),
+            disposeContent: loaded.dispose,
+            truncated: loaded.truncated,
+          };
+          setOpenFiles((prev) => [...prev, file]);
+          setActiveFilePath(resolvedPath);
+          queueReveal(resolvedPath);
+        },
+      });
     },
     [openFiles, readIdentity, token, workspaceClient, workspacePath, setActiveFilePath],
   );
@@ -301,36 +374,18 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
       setLoading(true);
       const loaded: OpenFile[] = [];
       for (const path of restorablePaths) {
-        try {
-          const previewKind = getFilePreviewKind(path);
-          if (isBinaryPreviewKind(previewKind)) {
-            loaded.push({
-              path,
-              name: path.split('/').pop() ?? path,
-              content: '',
-              originalContent: '',
-              language: 'plaintext',
-            });
-            continue;
-          }
-          const next = await loadPreviewContent({
+        // 单个文件的读取（含 try/catch 与值块）下沉到模块级 `loadRestoredOpenFileOnce`。
+        const restored = await loadRestoredOpenFileOnce(path, () =>
+          loadPreviewContent({
             client: workspaceClient,
             token: token ?? '',
             path,
             workspaceRoot: workspacePath ?? null,
             identity: readIdentity,
-          });
-          loaded.push({
-            path,
-            name: path.split('/').pop() ?? path,
-            content: next.content,
-            originalContent: next.content,
-            language: getLanguage(path),
-            disposeContent: next.dispose,
-            truncated: next.truncated,
-          });
-        } catch (_e) {
-          // 单个文件加载失败不阻塞其他文件
+          }),
+        );
+        if (restored) {
+          loaded.push(restored);
         }
       }
       if (!cancelled) {
@@ -417,18 +472,22 @@ export function useFileEditor(workspacePath?: string | null, uiWorkspaceScope?: 
         return;
       }
       setSaveError(null);
+      // `??` 与 `...(cond ? … : {})` 都是值块：留在 try 内会让编译器报
+      // "Support value blocks … within a try/catch statement"，故先在 try 外构造好。
+      const authToken = token ?? '';
+      // SSH 远端会话必须下发身份：网关 PUT /workspace/file 的 SSH 分支据此写
+      // 远端文件；缺身份时会写到网关本机的同名路径（静默写错位置）。
+      const writeIdentity = {
+        ...(readIdentity.sessionId ? { sessionId: readIdentity.sessionId } : {}),
+        ...(!readIdentity.sessionId && readIdentity.sshConnectionId
+          ? { sshConnectionId: readIdentity.sshConnectionId }
+          : {}),
+        // 用 workspacePath（真实路径）而非 persistenceWorkspaceScope（持久化桶
+        // 键，可能是 `__session__:xxx`，不是路径）。
+        ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
+      };
       try {
-        // SSH 远端会话必须下发身份：网关 PUT /workspace/file 的 SSH 分支据此写
-        // 远端文件；缺身份时会写到网关本机的同名路径（静默写错位置）。
-        await workspaceClient.writeFile(token ?? '', path, file.content, {
-          ...(readIdentity.sessionId ? { sessionId: readIdentity.sessionId } : {}),
-          ...(!readIdentity.sessionId && readIdentity.sshConnectionId
-            ? { sshConnectionId: readIdentity.sshConnectionId }
-            : {}),
-          // 用 workspacePath（真实路径）而非 persistenceWorkspaceScope（持久化桶
-          // 键，可能是 `__session__:xxx`，不是路径）。
-          ...(workspacePath ? { workspaceRoot: workspacePath } : {}),
-        });
+        await workspaceClient.writeFile(authToken, path, file.content, writeIdentity);
         setOpenFiles((prev) =>
           prev.map((f) => (f.path === path ? { ...f, originalContent: f.content } : f)),
         );

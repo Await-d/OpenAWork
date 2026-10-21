@@ -93,6 +93,23 @@ function serversForPersistence(servers: MCPServerEntry[]): MCPServerEntry[] {
   return toPersistedMcpServers(servers);
 }
 
+/**
+ * MCP 运行状态重拉的统一包装：try → catch 交给 `onError`（返回值即失败兜底值）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try 内的值块（`??`、`.map(...)`），本 hook
+ * 这处 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runMcpStatusesFetchOnce<T>(ctx: {
+  onError: (error: unknown) => T;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    return await ctx.run();
+  } catch (error) {
+    return ctx.onError(error);
+  }
+}
+
 export function useMcpServers({
   gatewayUrl,
   token,
@@ -109,16 +126,20 @@ export function useMcpServers({
    */
   const fetchStatuses = useCallback(async (): Promise<MCPServerStatus[] | null> => {
     if (!token) return null;
-    try {
-      const data = (await createSettingsClient(gatewayUrl).getMcpStatus(token, {
-        includeTools: true,
-      })) as McpStatusPayload;
-      return (data.servers ?? []).map(toMcpServerStatus);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : '加载 MCP 服务失败');
-      logger.error('failed to load mcp statuses', error);
-      return null;
-    }
+    // try/catch 下沉到模块级 `runMcpStatusesFetchOnce`（见其注释）。
+    return runMcpStatusesFetchOnce<MCPServerStatus[] | null>({
+      onError: (error) => {
+        setLoadError(error instanceof Error ? error.message : '加载 MCP 服务失败');
+        logger.error('failed to load mcp statuses', error);
+        return null;
+      },
+      run: async () => {
+        const data = (await createSettingsClient(gatewayUrl).getMcpStatus(token, {
+          includeTools: true,
+        })) as McpStatusPayload;
+        return (data.servers ?? []).map(toMcpServerStatus);
+      },
+    });
   }, [gatewayUrl, token]);
 
   useEffect(() => {

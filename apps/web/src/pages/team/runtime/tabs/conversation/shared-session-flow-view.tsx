@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from 'react';
+import { type CSSProperties } from 'react';
 import type { Message } from '@openAwork/shared';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
@@ -129,35 +129,33 @@ export function SharedSessionFlowView({ selectedTeam }: { selectedTeam: AgentTea
     },
   ];
 
-  const recentEvents = useMemo(() => {
-    const items = [
-      ...assistantMessages.map((message) => ({
-        detail: summarizeAssistantMessage(message),
-        id: `assistant-${message.id}`,
-        tag: '输出',
-        timestampMs: message.createdAt,
+  // 去手写 memo，交由编译器自动 memoize：保留 useMemo 会让编译器报
+  // 「Existing memoization could not be preserved」而放弃优化整个组件。
+  const recentEvents = [
+    ...assistantMessages.map((message) => ({
+      detail: summarizeAssistantMessage(message),
+      id: `assistant-${message.id}`,
+      tag: '输出',
+      timestampMs: message.createdAt,
+    })),
+    ...(sharedSession?.comments ?? []).map((comment) => ({
+      detail: comment.content,
+      id: `comment-${comment.id}`,
+      tag: '评论',
+      timestampMs: parseIsoMs(comment.createdAt) ?? 0,
+    })),
+    ...auditLogs
+      .filter((log) => log.sessionId === selectedTeam.id)
+      .map((log) => ({
+        detail: formatTimelineDetail(log.summary, 200),
+        id: `audit-${log.id}`,
+        tag: '审计',
+        timestampMs: parseIsoMs(log.createdAt) ?? 0,
       })),
-      ...(sharedSession?.comments ?? []).map((comment) => ({
-        detail: comment.content,
-        id: `comment-${comment.id}`,
-        tag: '评论',
-        timestampMs: parseIsoMs(comment.createdAt) ?? 0,
-      })),
-      ...auditLogs
-        .filter((log) => log.sessionId === selectedTeam.id)
-        .map((log) => ({
-          detail: formatTimelineDetail(log.summary, 200),
-          id: `audit-${log.id}`,
-          tag: '审计',
-          timestampMs: parseIsoMs(log.createdAt) ?? 0,
-        })),
-    ]
-      .filter((item) => item.timestampMs > 0)
-      .sort((left, right) => right.timestampMs - left.timestampMs)
-      .slice(0, 8);
-
-    return items;
-  }, [assistantMessages, auditLogs, selectedTeam.id, sharedSession?.comments]);
+  ]
+    .filter((item) => item.timestampMs > 0)
+    .sort((left, right) => right.timestampMs - left.timestampMs)
+    .slice(0, 8);
 
   if (sharedSessionLoading && !sharedSession) {
     return (

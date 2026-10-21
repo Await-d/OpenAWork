@@ -77,7 +77,8 @@ function getSessionRunStateMeta(phase: SessionRunStatePhase): SessionRunStateMet
   if (phase === 'awaiting_permission') {
     return {
       badge: '等待审批',
-      description: '当前会话已暂停，等待你批准或拒绝授权后会继续同步最新结果。',
+      description:
+        '有一项授权等待你批准或拒绝，处理后会继续本次回答。等待期间可以直接继续发送消息，审批结果会排队生效。',
       ...WARNING_TONE,
     };
   }
@@ -85,7 +86,8 @@ function getSessionRunStateMeta(phase: SessionRunStatePhase): SessionRunStateMet
   if (phase === 'awaiting_question') {
     return {
       badge: '等待回答',
-      description: '当前会话已暂停，等待你回答问题后会继续同步最新结果。',
+      description:
+        '有一个问题等待你回答，回答后会继续本次回答。等待期间可以直接继续发送消息，回答结果会排队生效。',
       ...WARNING_TONE,
     };
   }
@@ -217,8 +219,14 @@ export function SessionRunStateBar({
   pendingPermissionsCount = 0,
   pendingQuestionsCount = 0,
   reconnecting = false,
+  /**
+   * running 且持续无活跃流（疑似网关侧把会话卡在 running）时为 true；相位为
+   * running 类时展示「重新同步」按钮，让用户主动收敛而非无限禁用发送。
+   */
+  staleRunning = false,
   status,
   stopCapability = 'observe_only',
+  onResync,
 }: {
   checkpointCount?: number;
   latestCompaction?: {
@@ -234,8 +242,11 @@ export function SessionRunStateBar({
   pendingQuestionsCount?: number;
   /** 客户端是否正在重新接入（attach 重试待触发）；为 true 且无待办交互时展示「恢复中」。 */
   reconnecting?: boolean;
+  staleRunning?: boolean;
   status: Extract<SessionStateStatus, 'running' | 'paused'>;
   stopCapability?: StopCapability;
+  /** 「重新同步」点击回调；与 staleRunning 同时提供时才渲染按钮。 */
+  onResync?: () => void;
 }) {
   const phase = resolveSessionRunStatePhase({
     latestUpstreamSummary,
@@ -274,8 +285,9 @@ export function SessionRunStateBar({
   const upstreamSummaryLabel = formatChatUpstreamSummaryLabel(latestUpstreamSummary);
 
   // running 相位且无检查点 / 压缩 / 上游流摘要等附加信息时,状态条只剩「会话持续运行中」
-  // 这类与 composer 内联提示完全重复的内容,直接不渲染以免重复提示。
-  if (phase === 'running' && counterParts.length === 0 && !upstreamSummaryLabel) {
+  // 这类与 composer 内联提示完全重复的内容,直接不渲染以免重复提示。staleRunning 是
+  // 例外:此时状态条承载唯一的恢复入口(「重新同步」按钮),必须渲染。
+  if (phase === 'running' && !staleRunning && counterParts.length === 0 && !upstreamSummaryLabel) {
     return null;
   }
 
@@ -363,6 +375,26 @@ export function SessionRunStateBar({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+          {staleRunning && onResync ? (
+            <button
+              type="button"
+              onClick={onResync}
+              title="会话状态疑似卡住（长时间无活跃流）。点击让网关重新收敛会话状态并刷新。"
+              style={{
+                height: 20,
+                padding: '0 7px',
+                borderRadius: 999,
+                border: '1px solid color-mix(in srgb, var(--warning) 28%, var(--border-default))',
+                background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
+                color: 'var(--warning)',
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              重新同步
+            </button>
+          ) : null}
           {onOpenRecovery ? (
             <button
               type="button"

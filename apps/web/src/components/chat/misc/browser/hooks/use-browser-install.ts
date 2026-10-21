@@ -13,6 +13,27 @@ import type { BrowserInstallStatus, BrowserLiveClient } from '@openAwork/web-cli
 import { HttpError } from '@openAwork/web-client';
 
 /** 安装进行中的轮询间隔。 */
+/**
+ * 浏览器安装流程的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`（可 await），
+ * finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 这处 try
+ * 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runBrowserInstallOnce(ctx: {
+  onError: (error: unknown) => void | Promise<void>;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    await ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export const BROWSER_INSTALL_POLL_INTERVAL_MS = 1500;
 
 /** CLI 缺席时用户可手动执行的命令（与网关侧常量保持一致）。 */
@@ -140,22 +161,27 @@ export function useBrowserInstall({
     stopPolling();
     setStarting(true);
     void (async () => {
-      try {
-        await browserClient.installBrowser(authToken);
-        // POST 成功（202）：进入轮询读取真实进度。
-        await poll(browserClient, authToken);
-      } catch (error) {
-        // 409：别的会话已在进行中。接管进度而不是报错——这正是单飞要表达的语义。
-        if (error instanceof HttpError && error.status === INSTALL_CONFLICT_STATUS) {
+      // try/catch/finally 下沉到模块级 `runBrowserInstallOnce`（见其注释）。
+      await runBrowserInstallOnce({
+        onError: async (error) => {
+          // 409：别的会话已在进行中。接管进度而不是报错——这正是单飞要表达的语义。
+          if (error instanceof HttpError && error.status === INSTALL_CONFLICT_STATUS) {
+            await poll(browserClient, authToken);
+            return;
+          }
+          if (!disposedRef.current) {
+            failLocal(readError(error, `安装失败，请手动执行 ${MANUAL_INSTALL_COMMAND}。`));
+          }
+        },
+        onFinally: () => {
+          setStarting(false);
+        },
+        run: async () => {
+          await browserClient.installBrowser(authToken);
+          // POST 成功（202）：进入轮询读取真实进度。
           await poll(browserClient, authToken);
-          return;
-        }
-        if (!disposedRef.current) {
-          failLocal(readError(error, `安装失败，请手动执行 ${MANUAL_INSTALL_COMMAND}。`));
-        }
-      } finally {
-        setStarting(false);
-      }
+        },
+      });
     })();
   }, [client, token, installable, starting, poll, stopPolling, failLocal]);
 

@@ -62,6 +62,31 @@ function normalizePluginId(value: string | null): PluginId {
  * 路由到各插件面板；插件元数据（图标/描述/工具清单）集中在 `plugin-registry`，
  * 详情页头与工具摘要共用同一模板，避免每个插件重复一套卡片 JSX。
  */
+/**
+ * 插件设置动作的统一包装：`onStart` 进入态 → try → catch（静默保留本地状态）→
+ * `onFinally` 退出态。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 2 处
+ * 这类 try 会让整个组件脱靶（实测）。语义逐字照搬——注意「加载完成」是
+ * `setLoaded(true)`，由调用点在 `onFinally` 里显式给出，不能和 busy 语义混为一谈。
+ */
+async function runPluginsActionOnce(ctx: {
+  onStart?: () => void;
+  /** catch 的处理（保持「静默保留本地状态」的原语义，注释由调用点保留）。 */
+  onError: () => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart?.();
+  try {
+    await ctx.run();
+  } catch {
+    ctx.onError();
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function PluginsTabContent({
   providers,
   activeImageProviderId,
@@ -112,28 +137,41 @@ export function PluginsTabContent({
   useEffect(() => {
     if (!token) return;
     void (async () => {
-      try {
-        const data = (await createSettingsClient(gatewayUrl).getPlugins(token)) as PluginSettings;
-        setPluginSettings(data);
-      } catch {
-        /* 读取失败时保持默认值（全部禁用），不阻塞页面 */
-      } finally {
-        setLoaded(true);
-      }
+      // try/catch/finally 下沉到模块级 `runPluginsActionOnce`（见其注释）。
+      await runPluginsActionOnce({
+        onError: () => {
+          /* 读取失败时保持默认值（全部禁用），不阻塞页面 */
+        },
+        onFinally: () => {
+          setLoaded(true);
+        },
+        run: async () => {
+          const data = (await createSettingsClient(gatewayUrl).getPlugins(token)) as PluginSettings;
+          setPluginSettings(data);
+        },
+      });
     })();
   }, [gatewayUrl, token]);
 
   const saveSettings = useCallback(
     async (next: PluginSettings) => {
       if (!token) return;
-      setSaving(true);
-      try {
-        await createSettingsClient(gatewayUrl).putPlugins(token, next);
-      } catch {
-        /* 保存失败保留本地状态，下次切换开关会重试 */
-      } finally {
-        setSaving(false);
-      }
+      // 同上：置 saving / 清 saving 与 try/catch/finally 一起下沉到
+      // `runPluginsActionOnce`（见其注释）。
+      await runPluginsActionOnce({
+        onStart: () => {
+          setSaving(true);
+        },
+        onError: () => {
+          /* 保存失败保留本地状态，下次切换开关会重试 */
+        },
+        onFinally: () => {
+          setSaving(false);
+        },
+        run: async () => {
+          await createSettingsClient(gatewayUrl).putPlugins(token, next);
+        },
+      });
     },
     [gatewayUrl, token],
   );

@@ -100,6 +100,26 @@ function confirmRejectAll(count: number): boolean {
   );
 }
 
+/**
+ * 提交文件审查决定的统一包装：try → catch 归一为失败态 → finally 清 pending key。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`...(cond ? … : {})`、模板串）。语义逐字照搬。
+ */
+async function runReviewDecisionOnce<T>(ctx: {
+  onError: (error: unknown) => T;
+  onFinally: () => void;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    return await ctx.run();
+  } catch (error) {
+    return ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useReviewPanelFileActions({
   files,
   gatewayUrl,
@@ -134,23 +154,26 @@ export function useReviewPanelFileActions({
 
     const key = `${target.requestId}\u0000${target.filePath}`;
     setPendingKeys((previous) => [...previous, key]);
-    try {
-      await createSessionsClient(gatewayUrl).reviewFileChange(token, sessionId, {
-        decision,
-        filePath: target.filePath,
-        requestId: target.requestId,
-        ...(forceConflicts ? { forceConflicts: true } : {}),
-      });
-      setFeedback(null);
-      return { ok: true };
-    } catch (error) {
-      return {
+    // try/catch/finally 下沉到模块级 `runReviewDecisionOnce`（见其注释）。
+    return runReviewDecisionOnce<MutationOutcome>({
+      onError: (error) => ({
         ok: false,
         failure: toMutationFailure(error, `提交文件审查决定失败：${target.filePath}`),
-      };
-    } finally {
-      setPendingKeys((previous) => previous.filter((item) => item !== key));
-    }
+      }),
+      onFinally: () => {
+        setPendingKeys((previous) => previous.filter((item) => item !== key));
+      },
+      run: async () => {
+        await createSessionsClient(gatewayUrl).reviewFileChange(token, sessionId, {
+          decision,
+          filePath: target.filePath,
+          requestId: target.requestId,
+          ...(forceConflicts ? { forceConflicts: true } : {}),
+        });
+        setFeedback(null);
+        return { ok: true } as MutationOutcome;
+      },
+    });
   }
 
   async function runSingleFile(

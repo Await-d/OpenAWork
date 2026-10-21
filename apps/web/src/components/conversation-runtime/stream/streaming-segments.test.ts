@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appendStreamingTextDelta,
   appendStreamingThinkingDelta,
+  applyToolProgressToStreamingSegment,
   applyToolResultToStreamingSegment,
   markStreamingReasoningSegmentEnded,
   segmentsFromRecoverySnapshot,
@@ -296,6 +297,139 @@ describe('upsertStreamingToolSegment', () => {
       input: {},
     });
     expect(segments.map((s) => (s as ChatToolPart).toolCallId)).toEqual(['tool-1', 'tool-2']);
+  });
+});
+
+describe('applyToolProgressToStreamingSegment', () => {
+  it('把实时输出写进匹配工具段的 input._batchProgress，并保留原有入参', () => {
+    let segments: ChatMessagePart[] = [];
+    segments = upsertStreamingToolSegment(segments, {
+      toolCallId: 'tool-bash',
+      toolName: 'bash',
+      input: { command: 'bun test' },
+    });
+
+    const after = applyToolProgressToStreamingSegment(segments, {
+      toolCallId: 'tool-bash',
+      subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'PASS 1 test' }],
+      completedCount: 0,
+      totalCount: 1,
+    });
+
+    const tool = after[0] as ChatToolPart;
+    expect(tool.input['command']).toBe('bun test');
+    expect(tool.input['_batchProgress']).toEqual({
+      subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'PASS 1 test' }],
+      completedCount: 0,
+      totalCount: 1,
+    });
+    // 旧数组不被修改，React 才能识别引用变化。
+    expect((segments[0] as ChatToolPart).input['_batchProgress']).toBeUndefined();
+  });
+
+  it('只更新匹配的 toolCallId，不触碰其它工具段', () => {
+    let segments: ChatMessagePart[] = [];
+    segments = upsertStreamingToolSegment(segments, {
+      toolCallId: 'tool-1',
+      toolName: 'bash',
+      input: {},
+    });
+    segments = upsertStreamingToolSegment(segments, {
+      toolCallId: 'tool-2',
+      toolName: 'bash',
+      input: {},
+    });
+
+    const after = applyToolProgressToStreamingSegment(segments, {
+      toolCallId: 'tool-2',
+      subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'line' }],
+      completedCount: 0,
+      totalCount: 1,
+    });
+
+    expect((after[0] as ChatToolPart).input['_batchProgress']).toBeUndefined();
+    expect((after[1] as ChatToolPart).input['_batchProgress']).toBeDefined();
+  });
+
+  it('paused（待审批）工具段收到批准后的 progress 会恢复 running', () => {
+    let segments: ChatMessagePart[] = [];
+    segments = upsertStreamingToolSegment(segments, {
+      toolCallId: 'tool-bash',
+      toolName: 'bash',
+      input: {},
+      status: 'paused',
+      pendingPermissionRequestId: 'perm-1',
+    });
+
+    const after = applyToolProgressToStreamingSegment(segments, {
+      toolCallId: 'tool-bash',
+      subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'resumed' }],
+      completedCount: 0,
+      totalCount: 1,
+    });
+
+    const tool = after[0] as ChatToolPart;
+    expect(tool.status).toBe('running');
+    expect(tool.input['_batchProgress']).toBeDefined();
+    expect(tool.pendingPermissionRequestId).toBeUndefined();
+  });
+
+  it('找不到对应工具段时原样返回（progress 先于 tool_call_delta 到达）', () => {
+    const before: ChatMessagePart[] = [{ id: `${MESSAGE_ID}:text`, type: 'text', text: 'hi' }];
+    const after = applyToolProgressToStreamingSegment(before, {
+      toolCallId: 'missing',
+      subTools: [],
+      completedCount: 0,
+      totalCount: 1,
+    });
+    expect(after).toBe(before);
+  });
+
+  it('后续进度覆盖上一帧，且不把已终态的工具段改回运行中', () => {
+    let segments: ChatMessagePart[] = [];
+    segments = upsertStreamingToolSegment(segments, {
+      toolCallId: 'tool-bash',
+      toolName: 'bash',
+      input: {},
+      status: 'running',
+    });
+    segments = applyToolProgressToStreamingSegment(segments, {
+      toolCallId: 'tool-bash',
+      subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'first' }],
+      completedCount: 0,
+      totalCount: 1,
+    });
+    segments = applyToolProgressToStreamingSegment(segments, {
+      toolCallId: 'tool-bash',
+      subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'first\nsecond' }],
+      completedCount: 0,
+      totalCount: 1,
+    });
+
+    let tool = segments[0] as ChatToolPart;
+    const progress = tool.input['_batchProgress'] as {
+      subTools: Array<{ partialOutput?: string }>;
+    };
+    expect(progress.subTools[0]?.partialOutput).toBe('first\nsecond');
+    expect(tool.status).toBe('running');
+
+    // 结算时清掉实时快照；迟到的 progress 也不得把已结算的工具段改回运行中、
+    // 更不能用半成品输出覆盖最终结果。
+    segments = applyToolResultToStreamingSegment(segments, {
+      toolCallId: 'tool-bash',
+      output: { exitCode: 0 },
+      status: 'completed',
+    });
+    segments = applyToolProgressToStreamingSegment(segments, {
+      toolCallId: 'tool-bash',
+      subTools: [{ index: 0, tool: 'bash', status: 'running', partialOutput: 'late' }],
+      completedCount: 1,
+      totalCount: 1,
+    });
+    tool = segments[0] as ChatToolPart;
+    expect(tool.input['_batchProgress']).toBeUndefined();
+    expect(tool.status).toBe('completed');
+    expect(tool.output).toEqual({ exitCode: 0 });
   });
 });
 

@@ -122,6 +122,34 @@ const CONNECTION_NOTICE_COLOR: Record<'success' | 'warning' | 'error', string> =
   error: 'var(--danger)',
 };
 
+/**
+ * 统一的「busy + try/catch/finally」动作包装（SSH 远端目录选择器）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（条件 / 逻辑），本组件 6 处 try/catch/finally 会让它整体脱靶（实测）。
+ * 语义逐字照搬：`run` 的全流程仍在 try 内；**不传 `onError` 就沿用「异常向上抛」的
+ * 原语义**（新建 / 更新连接要靠它让表单就地展示错误），finally 无条件清 busy。
+ */
+async function runSshActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  run: () => Promise<void>;
+  /** 传了才捕获异常并按调用方的方式提示；不传则异常继续向上抛。 */
+  onError?: (error: unknown) => void;
+}): Promise<void> {
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      // 没有错误处理器 = 调用方要「异常向上抛」的原语义（表单就地展示错误）。
+      throw error;
+    }
+    ctx.onError(error);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export default function SshWorkspacePickerModal({
   isOpen,
   onClose,
@@ -190,18 +218,19 @@ export default function SshWorkspacePickerModal({
 
   const openDirectory = useCallback(
     async (targetConnectionId: string, path: string) => {
-      setBrowsing(true);
       setError(null);
-      try {
-        const nodes = await fetchTree(targetConnectionId, path);
-        setCurrentPath(path);
-        setPathInput(path);
-        setDirectories(nodes.filter((node) => node.type === 'directory'));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '无法读取远端目录');
-      } finally {
-        setBrowsing(false);
-      }
+      await runSshActionOnce({
+        setBusy: setBrowsing,
+        onError: (err) => {
+          setError(err instanceof Error ? err.message : '无法读取远端目录');
+        },
+        run: async () => {
+          const nodes = await fetchTree(targetConnectionId, path);
+          setCurrentPath(path);
+          setPathInput(path);
+          setDirectories(nodes.filter((node) => node.type === 'directory'));
+        },
+      });
     },
     [fetchTree],
   );
@@ -325,25 +354,26 @@ export default function SshWorkspacePickerModal({
       return;
     }
 
-    setCreatingConnection(true);
     setError(null);
-    try {
-      const created = await onCreateConnection(draft);
-      preferredConnectionIdRef.current = created.id;
-      initializedConnectionIdRef.current = created.id;
-      setConnectionId(created.id);
-      setShowCreateConnectionForm(false);
-      if (created.status === 'connected') {
-        await openDirectory(created.id, '/');
-      } else {
-        setConnectionNotice({
-          tone: 'warning',
-          message: '连接已保存，但尚未连通；点「测试连接」验证后即可浏览远端目录',
-        });
-      }
-    } finally {
-      setCreatingConnection(false);
-    }
+    // 不传 onError：沿用「异常向上抛」的原语义（由表单就地展示错误）。
+    await runSshActionOnce({
+      setBusy: setCreatingConnection,
+      run: async () => {
+        const created = await onCreateConnection(draft);
+        preferredConnectionIdRef.current = created.id;
+        initializedConnectionIdRef.current = created.id;
+        setConnectionId(created.id);
+        setShowCreateConnectionForm(false);
+        if (created.status === 'connected') {
+          await openDirectory(created.id, '/');
+        } else {
+          setConnectionNotice({
+            tone: 'warning',
+            message: '连接已保存，但尚未连通；点「测试连接」验证后即可浏览远端目录',
+          });
+        }
+      },
+    });
   }
 
   /**
@@ -356,28 +386,29 @@ export default function SshWorkspacePickerModal({
       return;
     }
 
-    setUpdatingConnection(true);
     setError(null);
-    try {
-      const updated = await onUpdateConnection(editingConnectionId, draft);
-      preferredConnectionIdRef.current = updated.id;
-      initializedConnectionIdRef.current = updated.id;
-      setConnectionId(updated.id);
-      setEditingConnectionId(null);
-      if (updated.status === 'connected') {
-        setConnectionNotice({ tone: 'success', message: '连接配置已更新' });
-        // 连接客户端已按新配置重建，复读当前路径而不是强制回到根目录。
-        await openDirectory(updated.id, currentPath ?? '/');
-      } else {
-        // 未连接时远端目录本就不可读，这里只提示保存成功，避免误报读取错误。
-        setConnectionNotice({
-          tone: 'warning',
-          message: '连接配置已更新；点「测试连接」验证连通后可浏览远端目录',
-        });
-      }
-    } finally {
-      setUpdatingConnection(false);
-    }
+    // 同 handleCreateConnection：不传 onError，异常继续向上抛给表单。
+    await runSshActionOnce({
+      setBusy: setUpdatingConnection,
+      run: async () => {
+        const updated = await onUpdateConnection(editingConnectionId, draft);
+        preferredConnectionIdRef.current = updated.id;
+        initializedConnectionIdRef.current = updated.id;
+        setConnectionId(updated.id);
+        setEditingConnectionId(null);
+        if (updated.status === 'connected') {
+          setConnectionNotice({ tone: 'success', message: '连接配置已更新' });
+          // 连接客户端已按新配置重建，复读当前路径而不是强制回到根目录。
+          await openDirectory(updated.id, currentPath ?? '/');
+        } else {
+          // 未连接时远端目录本就不可读，这里只提示保存成功，避免误报读取错误。
+          setConnectionNotice({
+            tone: 'warning',
+            message: '连接配置已更新；点「测试连接」验证连通后可浏览远端目录',
+          });
+        }
+      },
+    });
   }
 
   /**
@@ -389,24 +420,25 @@ export default function SshWorkspacePickerModal({
       return;
     }
 
-    setTestingConnection(true);
     setConnectionNotice(null);
-    try {
-      await onTestConnection(targetConnectionId);
-      setConnectionNotice({ tone: 'success', message: '连接成功，远端可用' });
-      // 连通后同步刷新当前目录：既让「先测试再浏览」的路径立刻可用，
-      // 也能把此前因未连接而失败的目录读取纠正过来。
-      if (currentPath) {
-        await openDirectory(targetConnectionId, currentPath);
-      }
-    } catch (err) {
-      setConnectionNotice({
-        tone: 'error',
-        message: err instanceof Error ? err.message : '连接失败，请检查主机与凭据',
-      });
-    } finally {
-      setTestingConnection(false);
-    }
+    await runSshActionOnce({
+      setBusy: setTestingConnection,
+      onError: (err) => {
+        setConnectionNotice({
+          tone: 'error',
+          message: err instanceof Error ? err.message : '连接失败，请检查主机与凭据',
+        });
+      },
+      run: async () => {
+        await onTestConnection(targetConnectionId);
+        setConnectionNotice({ tone: 'success', message: '连接成功，远端可用' });
+        // 连通后同步刷新当前目录：既让「先测试再浏览」的路径立刻可用，
+        // 也能把此前因未连接而失败的目录读取纠正过来。
+        if (currentPath) {
+          await openDirectory(targetConnectionId, currentPath);
+        }
+      },
+    });
   }
 
   /** 连接操作按钮（新建 / 编辑 / 测试）的统一样式：`active` 表示对应的展开态。 */
@@ -443,17 +475,18 @@ export default function SshWorkspacePickerModal({
 
     const nextPath = joinDirectoryPath(currentPath, name);
     setError(null);
-    setCreatingDirectory(true);
-    try {
-      await createDirectory(connectionId, nextPath);
-      await openDirectory(connectionId, nextPath);
-      setShowCreateDirectoryForm(false);
-      setNewDirectoryName('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '创建远端文件夹失败');
-    } finally {
-      setCreatingDirectory(false);
-    }
+    await runSshActionOnce({
+      setBusy: setCreatingDirectory,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '创建远端文件夹失败');
+      },
+      run: async () => {
+        await createDirectory(connectionId, nextPath);
+        await openDirectory(connectionId, nextPath);
+        setShowCreateDirectoryForm(false);
+        setNewDirectoryName('');
+      },
+    });
   }
 
   async function handleSelectCurrent() {
@@ -462,15 +495,16 @@ export default function SshWorkspacePickerModal({
       return;
     }
     setError(null);
-    setConfirming(true);
-    try {
-      await onSelect({ connectionId, path: currentPath });
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '绑定远端工作区失败');
-    } finally {
-      setConfirming(false);
-    }
+    await runSshActionOnce({
+      setBusy: setConfirming,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '绑定远端工作区失败');
+      },
+      run: async () => {
+        await onSelect({ connectionId, path: currentPath });
+        onClose();
+      },
+    });
   }
   return (
     <div

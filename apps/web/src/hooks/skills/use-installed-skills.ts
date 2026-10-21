@@ -68,6 +68,43 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * 技能动作的统一包装：`run` 全流程在 try 内，catch 把错误归一成文案交给 `onError`
+ * （不传 `onError` 表示沿用「异常向上抛」的原语义，**不得静默吞掉**），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（catch 里的 `errorMessage(err)` 调用同样触发），本 hook 5 处 try 会让
+ * 整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runSkillActionOnce(ctx: {
+  onError?: (message: string) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (err) {
+    if (!ctx.onError) {
+      throw err;
+    }
+    ctx.onError(errorMessage(err));
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
+/** 系统目录重扫：失败只记日志并返回 null（与原 catch 一致）。 */
+async function resyncSystemSkillsOnce(ctx: {
+  resync: () => Promise<SkillResyncSummary>;
+}): Promise<SkillResyncSummary | null> {
+  try {
+    return await ctx.resync();
+  } catch (err) {
+    logger.error('installed-skills.resync-failed', { error: errorMessage(err) });
+    return null;
+  }
+}
+
 export function useInstalledSkills(): UseInstalledSkillsResult {
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -81,17 +118,21 @@ export function useInstalledSkills(): UseInstalledSkillsResult {
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
-    try {
-      const data = (await client.listInstalled(accessToken)) as { skills: InstalledSkillDto[] };
-      setSkills(data.skills.map(mapInstalledSkill));
-      setError(null);
-    } catch (err) {
-      const message = errorMessage(err);
-      logger.error('installed-skills.load-failed', { error: message });
-      setError(`加载失败：${message}`);
-    } finally {
-      setLoaded(true);
-    }
+    // try/catch/finally 下沉到模块级 `runSkillActionOnce`（见其注释）。
+    await runSkillActionOnce({
+      onError: (message) => {
+        logger.error('installed-skills.load-failed', { error: message });
+        setError(`加载失败：${message}`);
+      },
+      onFinally: () => {
+        setLoaded(true);
+      },
+      run: async () => {
+        const data = (await client.listInstalled(accessToken)) as { skills: InstalledSkillDto[] };
+        setSkills(data.skills.map(mapInstalledSkill));
+        setError(null);
+      },
+    });
   }, [accessToken, client]);
 
   useEffect(() => {
@@ -104,20 +145,24 @@ export function useInstalledSkills(): UseInstalledSkillsResult {
       // 导致的本地与服务端状态不一致。
       setSkills((prev) => prev.map((s) => (s.id === skillId ? { ...s, enabled: nextEnabled } : s)));
       setBusy(true);
-      try {
-        await client.setEnabled(accessToken ?? '', skillId, nextEnabled);
-        setStatusMessage(`已${nextEnabled ? '启用' : '禁用'}：${skillId}`);
-        void reload();
-      } catch (err) {
-        const message = errorMessage(err);
-        logger.error('installed-skills.toggle-failed', { skillId, error: message });
-        setError(`切换失败：${message}`);
-        setSkills((prev) =>
-          prev.map((s) => (s.id === skillId ? { ...s, enabled: !nextEnabled } : s)),
-        );
-      } finally {
-        setBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runSkillActionOnce`（见其注释）。
+      await runSkillActionOnce({
+        onError: (message) => {
+          logger.error('installed-skills.toggle-failed', { skillId, error: message });
+          setError(`切换失败：${message}`);
+          setSkills((prev) =>
+            prev.map((s) => (s.id === skillId ? { ...s, enabled: !nextEnabled } : s)),
+          );
+        },
+        onFinally: () => {
+          setBusy(false);
+        },
+        run: async () => {
+          await client.setEnabled(accessToken ?? '', skillId, nextEnabled);
+          setStatusMessage(`已${nextEnabled ? '启用' : '禁用'}：${skillId}`);
+          void reload();
+        },
+      });
     },
     [accessToken, client, reload],
   );
@@ -125,48 +170,55 @@ export function useInstalledSkills(): UseInstalledSkillsResult {
   const uninstall = useCallback(
     async (skillId: string) => {
       setBusy(true);
-      try {
-        await client.uninstall(accessToken ?? '', skillId);
-        setStatusMessage(`已移除：${skillId}`);
-        await reload();
-      } catch (err) {
-        const message = errorMessage(err);
-        logger.error('installed-skills.uninstall-failed', { skillId, error: message });
-        setError(`移除失败：${message}`);
-      } finally {
-        setBusy(false);
-      }
+      // try/catch/finally 下沉到模块级 `runSkillActionOnce`（见其注释）。
+      await runSkillActionOnce({
+        onError: (message) => {
+          logger.error('installed-skills.uninstall-failed', { skillId, error: message });
+          setError(`移除失败：${message}`);
+        },
+        onFinally: () => {
+          setBusy(false);
+        },
+        run: async () => {
+          await client.uninstall(accessToken ?? '', skillId);
+          setStatusMessage(`已移除：${skillId}`);
+          await reload();
+        },
+      });
     },
     [accessToken, client, reload],
   );
 
   const resync = useCallback(async (): Promise<SkillResyncSummary | null> => {
     if (!accessToken) return null;
-    try {
-      return (await client.resyncSystem(accessToken)) as SkillResyncSummary;
-    } catch (err) {
-      logger.error('installed-skills.resync-failed', { error: errorMessage(err) });
-      return null;
-    }
+    // try/catch 下沉到模块级 `resyncSystemSkillsOnce`（见其注释）。
+    return resyncSystemSkillsOnce({
+      resync: async () => (await client.resyncSystem(accessToken)) as SkillResyncSummary,
+    });
   }, [accessToken, client]);
 
   const checkUpdates = useCallback(async () => {
     setBusy(true);
     setError(null);
     setStatusMessage(null);
-    try {
-      // 先重扫系统目录（如 ~/.claude/skills），让新增/改动立即出现在列表中；
-      // 重扫失败不阻塞列表刷新。
-      const summary = await resync();
-      if (summary) {
-        setStatusMessage(
-          `系统目录扫描完成：新增 ${summary.added}，更新 ${summary.updated}，移除 ${summary.removed}（共 ${summary.total}）`,
-        );
-      }
-      await reload();
-    } finally {
-      setBusy(false);
-    }
+    // try/finally 下沉到模块级 `runSkillActionOnce`；原代码此处**没有 catch**
+    // （异常向上抛），所以不传 onError，保持同一语义。
+    await runSkillActionOnce({
+      onFinally: () => {
+        setBusy(false);
+      },
+      run: async () => {
+        // 先重扫系统目录（如 ~/.claude/skills），让新增/改动立即出现在列表中；
+        // 重扫失败不阻塞列表刷新。
+        const summary = await resync();
+        if (summary) {
+          setStatusMessage(
+            `系统目录扫描完成：新增 ${summary.added}，更新 ${summary.updated}，移除 ${summary.removed}（共 ${summary.total}）`,
+          );
+        }
+        await reload();
+      },
+    });
   }, [reload, resync]);
 
   const dismissError = useCallback(() => setError(null), []);

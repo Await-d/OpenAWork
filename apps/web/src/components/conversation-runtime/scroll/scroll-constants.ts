@@ -74,6 +74,21 @@ export const CHAT_LATEST_EDGE_TOLERANCE_PX = 32;
 export const CHAT_TRUE_BOTTOM_TOLERANCE_PX = 32;
 
 /**
+ * 会话切换缓存恢复的裁决阈值（像素）：`distanceFromBottom` 落在该窗口内即认为
+ * 「上次离开时视口停在最新处」，恢复时应当**贴底**而不是按绝对值恢复位置。
+ *
+ * 刻意比两个位置容差（32px）都宽：用户把末条消息停在视口底部（最自然的阅读
+ * 位置）时 `distanceFromBottom` 恰好等于底部 spacer 高度
+ * （`CHAT_SCROLL_BOTTOM_SPACER_HEIGHT` = `clamp(80px, 14vh, 160px)`）加上内容列
+ * 底部 padding，用严格容差会把它判成「停在历史中部」，从而按旧布局的绝对
+ * `scrollTop` 恢复——那正是「切回长会话停在第一条消息处」的成因。
+ *
+ * 与「翻历史」的手势（至少一个视口高度，通常 600px 以上）之间留有充足间隔，
+ * 误判方向只会是「保守地不贴底」，代价是保持阅读位置。
+ */
+export const CHAT_LATEST_RESTORE_TOLERANCE_PX = 200;
+
+/**
  * `forceFollowToLatest` settle 循环的硬上限（帧）：**同步首帧**滚动 + 至多 2 帧复检。
  * 持续增高的内容由 ResizeObserver 接管，不在这里无限重试（也刻意不用 WebKit
  * 支持不可靠的 `scrollend`）。

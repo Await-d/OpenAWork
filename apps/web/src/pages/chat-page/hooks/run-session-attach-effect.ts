@@ -4,12 +4,16 @@
  * 由 `ChatPage` 的 `useEffect` 原位调用：依赖对象在 effect 回调**内部**构造，
  * 保留原有 effect 执行顺序，并避免「后声明的值被急切求值」的 TDZ 问题。
  */
+import { evaluateAttachStormGuard } from '../../../components/conversation-runtime/attach/attach-storm-guard.js';
 import {
   resolveAttachEffectDisposition,
   shouldAttemptAttachToSession,
   shouldResetAttachAttempt,
 } from '../../../components/conversation-runtime/attach/attach-stream-eligibility.js';
-import { createAttachStreamReconnectWiring } from '../../../components/conversation-runtime/attach/attach-stream-reconnect-wiring.js';
+import {
+  createAttachStreamReconnectWiring,
+  type AttachStreamCloseReason,
+} from '../../../components/conversation-runtime/attach/attach-stream-reconnect-wiring.js';
 import { handleInterruptedAttachStream } from '../../../components/conversation-runtime/attach/attach-stream-reconnect.js';
 import type { ScheduleStreamAttachRetryInput } from '../../../components/conversation-runtime/attach/use-stream-attach-retry.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
@@ -29,7 +33,10 @@ import type {
 } from '../../../components/conversation-runtime/messages/support.js';
 import { shouldShowRunEventInTranscript } from '../../../components/conversation-runtime/messages/transcript-visibility.js';
 import { isAutoAcceptEnabled } from '../../../components/conversation-runtime/session/permission-auto-respond.js';
-import { createRoundAssistantRequestId } from '../../../components/conversation-runtime/stream/round-request-id.js';
+import {
+  createRoundAssistantRequestId,
+  resolveNextAssistantRoundIndex,
+} from '../../../components/conversation-runtime/stream/round-request-id.js';
 import type { RecoveredActiveAssistantStream } from '../../../components/conversation-runtime/stream/stream-recovery.js';
 import {
   hasGatewayAdvancedRound,
@@ -41,6 +48,7 @@ import type { ChatBackendUsageSnapshot } from '../../../components/conversation-
 import {
   appendStreamingTextDelta,
   appendStreamingThinkingDelta,
+  applyToolProgressToStreamingSegment,
   markStreamingReasoningSegmentEnded,
   upsertStreamingToolSegment,
 } from '../../../components/conversation-runtime/stream/streaming-segments.js';
@@ -58,6 +66,7 @@ import {
 } from '../../../hooks/gateway/useGatewayClient.js';
 import type { ChatSettingsModel } from '../../../utils/chat/chat-session-defaults.js';
 import { logger } from '../../../utils/log/logger.js';
+import { resolveStreamTerminalStatus } from '../state/resolve-stream-terminal-status.js';
 import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
 import {
   requestCurrentSessionRefresh,
@@ -93,6 +102,7 @@ import type {
 import {
   createPendingPermissionRequestSnapshot,
   createClientErrorReporter,
+  createSessionsClient,
   dedupePendingPermissionRequests,
   isClientSyntheticStreamErrorCode,
 } from '@openAwork/web-client';
@@ -104,6 +114,101 @@ import type {
 } from '@openAwork/web-client';
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
 
+/**
+ * attach 风暴熔断：固定窗口内的绝对次数上限。
+ *
+ * 不能用「两次间隔是否够长」来重置计数：重连退避是 400ms + 网络往返 + 快照加载，
+ * 单轮很容易超过 2s，一重置就永远熔断不了（上一版就是这么失效的）。窗口过期才清零，
+ * 保证最坏情况下循环也在有限次数内停住。
+ */
+const ATTACH_STORM_WINDOW_MS = 60_000;
+const ATTACH_STORM_MAX_ATTEMPTS = 10;
+/**
+ * 连续多少次重连时 `lastSeq` 完全没有前进，就判定流已僵死并停止重连。
+ *
+ * 正常流式期间每次断开前都会有新事件（`lastSeq` 前进），计数会被重置；只有
+ * 「网关报活跃、SSE 打开即结束」的僵死状态才会连续命中。
+ */
+/**
+ * 反复中断时的重连退避序列。
+ *
+ * 与 `SILENT_CLOSE_RETRY_DELAYS_MS` 的区别：这里对应的是「attach 建立过、收到过事件、
+ * 又断开」——即连接**真的建立过又掉了**，比 0 事件的等待更可疑，因此起步更慢
+ * （800ms）以便尽快恢复，同时逐级退避，避免退化成高频循环。
+ *
+ * 关键点：退避基数**不能**依赖 `useStreamAttachRetry` 内部的 `retryAttemptRef`——
+ * 它会在每次 attach 成功后被 `cancelAttachRetry()` 清零，于是「成功 → 又断开」
+ * 永远是第一次尝试、恒定 400ms，并在每轮全量重载快照。这就是页面卡死的成因之一，
+ * 也是本页最初的故障现象。
+ */
+export const DISCONNECT_RETRY_DELAYS_MS = [
+  800, 1_600, 3_200, 6_400, 12_800, 25_600, 30_000,
+] as const;
+
+export function resolveDisconnectRetryDelayMs(disconnects: number): number {
+  const index = Math.min(Math.max(disconnects - 1, 0), DISCONNECT_RETRY_DELAYS_MS.length - 1);
+  return DISCONNECT_RETRY_DELAYS_MS[index]!;
+}
+
+/**
+ * 连接至少稳定存活该时长，才认为「上次的中断是偶发」，允许把失败计数归零。
+ *
+ * 立刻归零会让「秒断」场景退回固定 400ms 循环；永，归零则一次网络抖动后要等很久
+ * 才能恢复正常。30s 是权衡点：超过它才认为这条连接真的稳定过。
+ */
+const STABLE_ATTACH_WINDOW_MS = 30_000;
+
+/**
+ * 等待新输出时的退避序列。
+ *
+ * 工具执行（bash / mcp / 长思考）期间网关不产生 run event，attach 只会「打开 → 0
+ * 事件 → EOF」。此时应低频重挂等待，而不是高频重连：每轮重连都会清空流缓冲并全量
+ * 重载一次会话快照，工具跑得越久卡顿越明显。
+ *
+ * 封顶 10s（不是 30s）：每次尝试的开销只是「一次活跃流查询 + 一次 SSE 建连」，
+ * 不含快照重载，10s 一次完全可以承受；而工具一旦结束，输出最迟 10s 内就能接上。
+ */
+export const SILENT_CLOSE_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 10_000] as const;
+
+export function resolveSilentCloseRetryDelayMs(silentCloses: number): number {
+  const index = Math.min(Math.max(silentCloses - 1, 0), SILENT_CLOSE_RETRY_DELAYS_MS.length - 1);
+  return SILENT_CLOSE_RETRY_DELAYS_MS[index]!;
+}
+
+/**
+ * attach 连续性状态：跨 effect 运行持久，用于识别「无进展」的重连循环。
+ */
+export interface AttachProgressState {
+  /** 上次记录归属的会话。 */
+  sessionId: string | null;
+  /** 上次确认到的服务端事件游标。 */
+  lastSeq: number;
+  /** 连续「打开后 0 事件」的次数。 */
+  silentCloses: number;
+  /** 连续「游标没有前进」的重连次数。 */
+  stalledReconnects: number;
+  /**
+   * 连续「attach 建立后又断开」的次数。
+   *
+   * **不因 attach 成功而清零**：只有连接稳定存活 `STABLE_ATTACH_WINDOW_MS` 后才归零
+   * （见 `handleAttachReconnect`）。否则秒断场景会退回固定 400ms 循环。
+   */
+  disconnects: number;
+  /** 本次 attach 建立连接的时刻，用于判断连接是否稳定存活过。 */
+  attachedAt: number;
+}
+
+export function createInitialAttachProgressState(): AttachProgressState {
+  return {
+    attachedAt: 0,
+    disconnects: 0,
+    lastSeq: -1,
+    sessionId: null,
+    silentCloses: 0,
+    stalledReconnects: 0,
+  };
+}
+
 export interface SessionAttachDeps {
   readonly activeGatewayStreamSessionId: string | null;
   readonly activeModelOption: ChatSettingsModel | undefined;
@@ -114,6 +219,31 @@ export interface SessionAttachDeps {
     options?: { excludeCompaction?: boolean | undefined } | undefined,
   ) => void;
   readonly attachAttemptedSessionRef: RefObject<string | null>;
+  /**
+   * attach 重连风暴熔断窗口：固定时间窗内允许的自动 attach 次数。
+   *
+   * 见 `ChatPage` 里该 ref 的说明。超限后停止自动 attach 并给出明确错误，避免
+   * 「attach → 断开 → 重置 → 再 attach」的无限循环把主线程占满、页面卡死。
+   */
+  readonly attachAttemptWindowRef: RefObject<{
+    startedAt: number;
+    count: number;
+    sessionId: string | null;
+  }>;
+  /**
+   * attach 的「无进展」检测状态：网关可能长期返回已僵死的活跃流快照，此时
+   * `lastSeq` 不再前进、SSE 打开即结束。连续多次重连没有任何进展，就应停止
+   * 重连并收敛，而不是无限重建传输。见 `AttachProgressState`。
+   */
+  readonly attachProgressRef: MutableRefObject<AttachProgressState>;
+  /**
+   * 已做过「终态收尾」的会话 id。
+   *
+   * attach effect 会因流式状态高频重跑，而终态分支里的 `loadCurrentSessionSnapshot`
+   * 是全量快照（getRecovery + normalize + setMessages）。没有这个去重，抖动期间
+   * 会一轮接一轮地跑数百毫秒的长任务，直接表现为页面卡死。
+   */
+  readonly attachTerminalReloadRef: MutableRefObject<string | null>;
   readonly attachEligibilitySignatureRef: RefObject<string | null>;
   /**
    * 当前已建立 attach 传输的会话 id；无 attach 在途时为 null。
@@ -157,6 +287,13 @@ export interface SessionAttachDeps {
     targetSessionId: string,
     requestId: string,
   ) => Promise<void>;
+  /**
+   * 已提交消息的 ref 镜像。attach 需要从**已落库的历史**反推续跑轮次
+   * （`resolveNextAssistantRoundIndex`）——提问 / 审批暂停时 `/recovery` 的
+   * `runEvents` 为空，恢复快照可能是若干轮之前的旧值，只按它推会铸出与历史
+   * 同键的 `clientRequestId`，本地副本在判重时顶掉旧槽位导致顺序漂移。
+   */
+  readonly messagesRef: RefObject<ChatMessage[]>;
   readonly pendingStreamRevealFrameRef: MutableRefObject<number | null>;
   readonly prefersReducedMotion: boolean;
   readonly recoveredStreamSnapshot: RecoveredActiveAssistantStream | null;
@@ -218,6 +355,9 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     activeStreamStartedAt,
     appendAssistantEventMessages,
     attachAttemptedSessionRef,
+    attachAttemptWindowRef,
+    attachProgressRef,
+    attachTerminalReloadRef,
     attachEligibilitySignatureRef,
     attachOwnerSessionIdRef,
     attachRetryExhausted,
@@ -239,6 +379,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     lastAttachAttemptTimestampRef,
     loadCurrentSessionSnapshot,
     loadPendingQuestionForSession,
+    messagesRef,
     pendingStreamRevealFrameRef,
     prefersReducedMotion,
     recoveredStreamSnapshot,
@@ -331,7 +472,14 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
    */
   const cleanupAttachTransport = () => {
     const ownerSessionId = attachOwnerSessionIdRef.current;
-    if (ownerSessionId === null || ownerSessionId === currentSessionId) {
+    if (ownerSessionId === null) {
+      return;
+    }
+    // 判据必须是「当前视图会话」而不是本次 effect run 的闭包值：切走时先执行的是
+    // 旧 run 的 cleanup，此时闭包里的 `currentSessionId` 仍是旧会话，会把「已切走」
+    // 误判成「没切走」而漏关旧 SSE——它的 onerror / onDone 迟到回调正是污染新会话
+    // 的入口。
+    if (ownerSessionId === currentSessionViewRef.current.sessionId) {
       return;
     }
     attachOwnerSessionIdRef.current = null;
@@ -348,11 +496,19 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     case 'terminal': {
       cancelAttachRetry();
       setStreamError(null);
-      if (currentSessionId) {
+      // 终态收尾只需一次。该 effect 会因 `streaming` / `sessionStateStatus` 频繁
+      // 重跑，若每次都 `loadCurrentSessionSnapshot`（全量 getRecovery + normalize +
+      // setMessages），在 attach 抖动期间就是一轮接一轮的数百毫秒长任务——这是
+      // 「页面卡死」里最容易观察到的重复开销之一。
+      if (currentSessionId && attachTerminalReloadRef.current !== currentSessionId) {
+        attachTerminalReloadRef.current = currentSessionId;
+        // 刻意不用 `replaceMessages`：收尾时上游可能**还没把这一轮的消息持久化完**，
+        // 整体替换会把刚渲染出来的用户消息与助手回复一起覆盖成一份更短的历史，
+        // 界面直接变空，且此后不会再触发加载——只能刷新或切会话才恢复。
+        // 走 loader 的 reconcile 路径：服务端更完整时合并，缺少时保留本地。
         void loadCurrentSessionSnapshot(currentSessionId, {
           expectedSessionViewEpoch: currentSessionViewRef.current.epoch,
           messageLimit: INITIAL_TURN_LIMIT,
-          replaceMessages: true,
         }).catch(() => undefined);
       }
       return cleanupAttachTransport;
@@ -387,6 +543,18 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     return cleanupAttachTransport;
   }
 
+  // 换了会话必须重置熔断窗口：否则 A 触发熔断后切到 B，B 会在窗口剩余的几十秒内
+  // 被直接判定为风暴并「永久无法 attach」，表现为切过去的会话卡住不出内容。
+  // 判据用窗口自带的归属会话，不能借用 `attachAttemptedSessionRef`——重试路径会
+  // 把它清空，那样每轮重试都会重置窗口，熔断又永远不触发。
+  if (attachAttemptWindowRef.current.sessionId !== currentSessionId) {
+    attachAttemptWindowRef.current = {
+      count: 0,
+      sessionId: currentSessionId,
+      startedAt: 0,
+    };
+  }
+
   if (attachAttemptedSessionRef.current === currentSessionId) {
     return cleanupAttachTransport;
   }
@@ -397,7 +565,43 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     return cleanupAttachTransport;
   }
 
+  // ── 重连风暴熔断（固定窗口 + 绝对次数）─────────────────────────────
+  // 「attach 成功 → 断开 → 重置 → 再 attach」一旦自激，就会无限关闭/重建传输、
+  // 重放事件、甚至全量重载快照，几秒内占满主线程、页面卡死。窗口内超过上限即停止
+  // 自动重连并明确报错，把「无限循环」降级为「有界重试 + 可操作页面」。
+  const attachNow = Date.now();
+  const attemptWindow = attachAttemptWindowRef.current;
+  const stormGuard = evaluateAttachStormGuard({
+    attemptsInWindow: attemptWindow.count,
+    maxAttempts: ATTACH_STORM_MAX_ATTEMPTS,
+    now: attachNow,
+    windowMs: ATTACH_STORM_WINDOW_MS,
+    windowStartedAt: attemptWindow.startedAt,
+  });
+  attemptWindow.count = stormGuard.attemptsInWindow;
+  attemptWindow.startedAt = stormGuard.windowStartedAt;
+  // **只记录，不再中止重连。**
+  //
+  // 曾经的「熔断」在这里 return 并弹「连接反复中断，已暂停自动重连」，但它的两个
+  // 终止条件都会自己被绕过：循环本身会把 `sessionStateStatus` 置成 `running`（于是
+  // running 豁免让它永不触发），而每次 attach 成功都会 `cancelAttachRetry()` 重置重试
+  // 计数（于是 8 次上限也永达不到）。结果是它既挡不住真正的死循环，又会在工具执行
+  // 期间误伤正常等待。
+  //
+  // 现在把「不产生高频循环」这件事完全交给退避（silent 1s→10s、disconnect 800ms→30s，
+  // 两者的频率上限都 ≤1 次/10s），主线程不会被占用；而重连永远保持可用，工具跑完
+  // 一定能接上。真正结束时网关会返回「无活跃流」，走 `settleAsEnded()` 正常收敛。
+  // 仅在「刚好跨过阈值」时打一次，避免高频循环把控制台刷爆。
+  if (!stormGuard.allowed && attemptWindow.count === ATTACH_STORM_MAX_ATTEMPTS + 1) {
+    console.warn('[ATTACH] high attach rate, continuing with backoff', {
+      attemptsInWindow: attemptWindow.count,
+      sessionId: currentSessionId,
+      windowMs: ATTACH_STORM_WINDOW_MS,
+    });
+  }
+
   attachAttemptedSessionRef.current = currentSessionId;
+  attachTerminalReloadRef.current = null;
   lastAttachAttemptTimestampRef.current = Date.now();
   console.log('[ATTACH_ELIGIBILITY] proceeding with attach for', currentSessionId);
 
@@ -461,6 +665,30 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
   // 累积的是它的下一轮。
   let lastCompletedRoundIndex: number | null = initialUsage?.round ?? null;
   let currentRoundIndex = (lastCompletedRoundIndex ?? 0) + 1;
+  /**
+   * 提交本轮时实际使用的轮次号。
+   *
+   * 不能只信 `currentRoundIndex`：AskUserQuestion / 审批暂停会把 runtime thread
+   * 清掉，`/recovery` 的 `runEvents` 随之为空，恢复快照可能是**若干轮之前**的旧值
+   * （`initialUsage.round` 偏小）。按它推出来的轮次会与历史里已存在的某一轮**同键**，
+   * 本地提交的那条随即在 `deduplicateOverlappingMessages` 里被当成同一回合并顶掉
+   * 旧槽位 —— 用户看到的就是「历史消息相对顺序变化」。
+   *
+   * 因此提交时再从已落库消息里反推一次（与网关 `deriveResumeRound` 同一语义），
+   * 取两者较大值：既不重复历史轮次，也不回退已推进的本地轮次。
+   */
+  const resolveCommitRoundIndex = (): number => {
+    const fallbackRound = Math.max((lastCompletedRoundIndex ?? 0) + 1, currentRoundIndex);
+    const requestId = attachStreamClientRequestId;
+    if (!requestId) {
+      return fallbackRound;
+    }
+    return resolveNextAssistantRoundIndex({
+      clientRequestId: requestId,
+      fallbackRound,
+      messages: messagesRef.current,
+    });
+  };
   const reasoningSegmentMeta = new Map<string, { blockKey: string }>();
   let pendingThinkingFlushFrame: number | null = null;
   let pendingSegmentsFlushFrame: number | null = null;
@@ -582,6 +810,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     // Cancel pending RAF before resetting thinking buffers below.
     cancelThinkingFlush();
     cancelSegmentsFlush();
+    const commitRoundIndex = resolveCommitRoundIndex();
     const committed = commitStreamingRound({
       accumulated,
       accumulatedSegments,
@@ -590,7 +819,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
       buildTraceMessage: (messageId, textContent) =>
         buildAttachTraceMessage(messageId, textContent, 'completed'),
       clientRequestId: attachStreamClientRequestId
-        ? createRoundAssistantRequestId(attachStreamClientRequestId, currentRoundIndex)
+        ? createRoundAssistantRequestId(attachStreamClientRequestId, commitRoundIndex)
         : undefined,
       currentAssistantStreamMessageIdRef,
       currentRoundStartedAt,
@@ -650,74 +879,259 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
 
   const getActiveSessionId = () => activeSessionRef.current;
 
-  const handleAttachReconnect = (technicalDetail?: string) => {
-    if (technicalDetail) {
-      setStreamError(
-        formatGatewayStreamErrorMessage(
-          'ATTACH_STREAM_DISCONNECTED',
-          '实时流连接已断开。',
-          technicalDetail,
-        ),
-      );
+  /**
+   * 记录「这条流刚刚有活动」，用于把等待类计数清零。
+   *
+   * 只要收到任何真实输出（run event / 文本 / 思考 / 工具调用），就证明连接是通的：
+   * 「静默关闭」与「游标停滞」的计数必须清零，否则一次长时间工具执行会把退避永久
+   * 顶在封顶值上，之后每次等待都要等满封顶才接上输出。
+   *
+   * 必须挂在**所有**产出型回调上（不只 `onEvent`）：纯文本与纯思考回复走的是
+   * `onDelta` / `onThinkingDelta`，它们不产生 run event——只清 `onEvent` 会让退避
+   * 比预期更快爬到封顶。
+   */
+  const noteAttachActivity = () => {
+    attachProgressRef.current.silentCloses = 0;
+    attachProgressRef.current.stalledReconnects = 0;
+  };
+
+  const handleAttachReconnect = (reason?: AttachStreamCloseReason, technicalDetail?: string) => {
+    // 会话已切走（或视图代次已变）：下面所有写入都是「当前会话级」状态，迟到回调
+    // 一旦落地就会把别的会话强制打成 idle、清掉它的活跃流快照、弹出属于旧会话的
+    // 错误条。传输层无法区分「这个 ES 属于哪个会话」，守卫只能放在这里。
+    if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
+      return;
     }
-    handleInterruptedAttachStream({
-      actions: {
-        cancelPendingRevealAnimation: () => {
-          if (pendingStreamRevealFrameRef.current !== null) {
-            cancelAnimationFrame(pendingStreamRevealFrameRef.current);
-            pendingStreamRevealFrameRef.current = null;
+
+    /**
+     * 网关权威确认「没有活跃流」后的收尾：这是**正常结束**，不是中断。
+     *
+     * 刻意不调 `handleInterruptedAttachStream`——那条路径会强制 `running` 并调度
+     * 重连，正是死循环的来源。这里清掉本地活跃流快照（否则
+     * `activeGatewayStreamSessionId` 恒指向当前会话，attach 判定永不进入终态）、
+     * 取消自动重连、把状态收敛到 idle，并做一次快照加载补齐最后一次输出。
+     */
+    const settleAsEnded = () => {
+      cancelAttachRetry();
+      attachAttemptedSessionRef.current = sid;
+      attachAttemptWindowRef.current = { count: 0, sessionId: sid, startedAt: Date.now() };
+      attachProgressRef.current = createInitialAttachProgressState();
+      // 只清属于本会话的快照：gateway client 是组件级单例，若快照已经被别的会话
+      // 接管（用户切走后又开了新流），这里无条件清空会掐掉那个会话的续接依据。
+      if (client.getActiveStreamSessionId() === sid) {
+        client.clearActiveStreamSnapshot();
+      }
+      setStreamError(null);
+      setStreaming(false);
+      setStoppingStream(false);
+      setSessionStateStatus('idle');
+      // 同样不用 `replaceMessages`：收尾瞬间上游持久化可能尚未完成，整体替换
+      // 会把刚渲染的对话覆盖成更短的历史（表现为「发完消息对话不见了」）。
+      void loadCurrentSessionSnapshot(sid, {
+        expectedSessionViewEpoch: attachSessionViewEpoch,
+        messageLimit: INITIAL_TURN_LIMIT,
+      }).catch(() => undefined);
+      requestSessionListRefresh();
+    };
+
+    const reconnectNow = () => {
+      // 双保险：`reconnectNow` 也由 `!token` 分支直接调用，不能依赖调用方守卫。
+      if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
+        return;
+      }
+      // 单次中断一律静默重连，不再向用户抛「实时流连接已断开」。
+      //
+      // attach 是「续接已有运行」的通道，断开后会自动重试并重放游标之后的事件，
+      // 大多数情况下用户根本感知不到；而这条错误条是**持久化**的（sessionStorage，
+      // 5 分钟内切回来还在），来回切换会话时会被反复看到，正是「老是提示断流重连」
+      // 的来源。真正需要用户知晓的是「重连彻底失败」（熔断 / 重试耗尽），那两处
+      // 仍然保留提示。这里只留诊断日志。
+      if (technicalDetail) {
+        console.warn('[ATTACH] reconnect required (silent retry)', {
+          detail: technicalDetail,
+          sessionId: sid,
+        });
+      }
+      // 重连延迟由**连续中断次数**推导，而不是固定 400ms。
+      //
+      // `useStreamAttachRetry` 内部的退避基数会在每次 attach 成功后被
+      // `cancelAttachRetry()` 清零，所以固定传 400ms 会让「attach → 收到事件 → 又断开」
+      // 永远停在第一次尝试，形成 400ms 死循环；每轮 `handleInterruptedAttachStream`
+      // 还会全量重载一次会话快照，几秒内就能把主线程占满——这正是最初的卡死成因。
+      // `disconnects` 只在连接稳定存活 30s 后才归零（见 `handleAttachReconnect`），
+      // 因此偶发抖动仍是快速恢复，反复抖动则指数退避到 30s 封顶。
+      const disconnectCount = attachProgressRef.current.disconnects;
+      handleInterruptedAttachStream({
+        retryDelayMs: resolveDisconnectRetryDelayMs(disconnectCount),
+        actions: {
+          cancelPendingRevealAnimation: () => {
+            if (pendingStreamRevealFrameRef.current !== null) {
+              cancelAnimationFrame(pendingStreamRevealFrameRef.current);
+              pendingStreamRevealFrameRef.current = null;
+            }
+          },
+          clearCurrentAssistantStreamMessageId: () => {
+            currentAssistantStreamMessageIdRef.current = null;
+          },
+          clearStreamingBuffers: () => {
+            setStreamBuffer('');
+            setStreamThinkingBuffer('');
+            setStreamThinkingBlocks([]);
+            setStreamingSegments([]);
+          },
+          getActiveSessionId,
+          isCurrentSessionRequest,
+          // 重连时补上 `messageLimit`：不传的话服务端会回一整段历史（实测单会话
+          // 363 个 part / 1535KB），而重连会反复触发，主线程被打满。
+          //
+          // 这里同时在两个层面收敛成本：一是限制返回条数，二是让这次请求与 ChatPage
+          // 1s 轮询的在途请求**共用同一 key**（单飞层按 sessionId+messageLimit 复用），
+          // 从而不再额外多发一次完整往返。重连真正需要的是活跃流的 run events，
+          // 历史消息只是背景。
+          loadCurrentSessionSnapshot: (targetSessionId, options) =>
+            loadCurrentSessionSnapshot(targetSessionId, {
+              ...options,
+              messageLimit: INITIAL_TURN_LIMIT,
+            }),
+          requestSessionListRefresh,
+          resetAttachAttempt: () => {
+            attachAttemptedSessionRef.current = null;
+          },
+          resetRevealState: () => {
+            stoppingStreamRef.current = false;
+            streamRevealTargetRef.current = '';
+            streamRevealVisibleRef.current = '';
+            streamRevealTargetCodePointsRef.current = [];
+            streamRevealVisibleCodePointCountRef.current = 0;
+            streamRevealNextAllowedAtRef.current = 0;
+            streamingRef.current = false;
+          },
+          scheduleAttachRetry,
+          setActiveStreamFirstTokenLatencyMs,
+          setActiveStreamStartedAt,
+          setRecoveredStreamSnapshot,
+          setSessionStateStatus,
+          setStoppingStream,
+          setStreaming,
+        },
+        attachSessionViewEpoch,
+        sessionId: sid,
+        state: {
+          accumulatedText: accumulated,
+          accumulatedThinkingBlocks,
+          accumulatedUsage,
+          attachStateInitialized,
+          currentAssistantStreamMessageId: currentAssistantStreamMessageIdRef.current,
+          parts: accumulatedSegments,
+          ...(visibleLatestUpstreamSummary
+            ? { latestUpstreamSummary: visibleLatestUpstreamSummary }
+            : {}),
+          ...(recoveredModifiedFilesSummary ? { recoveredModifiedFilesSummary } : {}),
+          requestStartedAt,
+          toolCalls: buildAttachToolCalls(),
+        },
+      });
+    };
+
+    // ── 权威确认：先问网关「这条流还在不在」，再决定是结束还是重连 ────────
+    // EventSource 在服务端正常结束（EOF / 关闭响应）时同样会触发 `onerror`。
+    // 不确认就无条件重连，会形成「attach 成功 → EOF → 当成断线重连 → 又 attach」
+    // 的死循环：每轮都重放事件、强制 running、再全量 reload 一次快照，几秒内就把
+    // 主线程占满（页面卡死、刷新后重新开始循环）。
+    if (!token) {
+      reconnectNow();
+      return;
+    }
+
+    // ── 静默结束（打开后 0 事件）＝「服务端暂时没有可推送的内容」──────────
+    //
+    // 绝大多数情况这是**正常状态**：模型正在执行 bash / mcp 等长耗时工具，或仍在
+    // 思考，网关在这段时间不产生新的 run event，attach 于是「打开 → 0 事件 → EOF」。
+    // 此时既不该判定连接异常，也不该提示用户，更不该高频重连（每轮都会清缓冲 +
+    // 全量 reload，工具跑得越久越卡）。
+    //
+    // 因此这里**无条件**低频等待：递增退避重挂，不碰流状态、不 reload、不提示。
+    // 不再设「达到次数就停止并报错」的分支——那个判据依赖 `sessionStateStatus`，
+    // 而循环自身会把它置成 `running`（见下），所以它既不可达，又会在工具执行
+    // 期间弹「实时流长时间没有新输出，已停止自动重连」。会话是否真的结束，由网关
+    // 权威回答：下面 `getActiveStream()` 返回 null 时走 `settleAsEnded()` 正常收敛。
+    if (reason === 'attach_stream_silent_close') {
+      const silentProgress = attachProgressRef.current;
+      // 跨会话重置「静默」相关计数；`disconnects` / `attachedAt` 属于断线维度，
+      // 跨会话同样无意义，但保留结构更清晰——这里整体重置即可。
+      if (silentProgress.sessionId !== sid) {
+        attachProgressRef.current = { ...createInitialAttachProgressState(), sessionId: sid };
+      }
+      attachProgressRef.current.silentCloses += 1;
+      const silentCloses = attachProgressRef.current.silentCloses;
+
+      setSessionStateStatus('running');
+      scheduleAttachRetry({
+        delayMs: resolveSilentCloseRetryDelayMs(silentCloses),
+        sessionId: sid,
+        silent: true,
+        beforeRetry: () => {
+          if (getActiveSessionId() !== sid) {
+            return 'abort';
           }
-        },
-        clearCurrentAssistantStreamMessageId: () => {
-          currentAssistantStreamMessageIdRef.current = null;
-        },
-        clearStreamingBuffers: () => {
-          setStreamBuffer('');
-          setStreamThinkingBuffer('');
-          setStreamThinkingBlocks([]);
-          setStreamingSegments([]);
-        },
-        getActiveSessionId,
-        isCurrentSessionRequest,
-        loadCurrentSessionSnapshot,
-        requestSessionListRefresh,
-        resetAttachAttempt: () => {
           attachAttemptedSessionRef.current = null;
+          return 'proceed';
         },
-        resetRevealState: () => {
-          stoppingStreamRef.current = false;
-          streamRevealTargetRef.current = '';
-          streamRevealVisibleRef.current = '';
-          streamRevealTargetCodePointsRef.current = [];
-          streamRevealVisibleCodePointCountRef.current = 0;
-          streamRevealNextAllowedAtRef.current = 0;
-          streamingRef.current = false;
-        },
-        scheduleAttachRetry,
-        setActiveStreamFirstTokenLatencyMs,
-        setActiveStreamStartedAt,
-        setRecoveredStreamSnapshot,
-        setSessionStateStatus,
-        setStoppingStream,
-        setStreaming,
-      },
-      attachSessionViewEpoch,
-      sessionId: sid,
-      state: {
-        accumulatedText: accumulated,
-        accumulatedThinkingBlocks,
-        accumulatedUsage,
-        attachStateInitialized,
-        currentAssistantStreamMessageId: currentAssistantStreamMessageIdRef.current,
-        parts: accumulatedSegments,
-        ...(visibleLatestUpstreamSummary
-          ? { latestUpstreamSummary: visibleLatestUpstreamSummary }
-          : {}),
-        ...(recoveredModifiedFilesSummary ? { recoveredModifiedFilesSummary } : {}),
-        requestStartedAt,
-        toolCalls: buildAttachToolCalls(),
-      },
-    });
+      });
+      return;
+    } else if (reason === 'attach_stream_disconnected') {
+      // 真实中断：连接建立过又掉了。累加失败计数（**不**在这里归零——归零只发生在
+      // 连接稳定存活满 `STABLE_ATTACH_WINDOW_MS` 之后），并重置静默计数。
+      const disconnectProgress = attachProgressRef.current;
+      const livedLongEnough =
+        disconnectProgress.attachedAt > 0 &&
+        Date.now() - disconnectProgress.attachedAt >= STABLE_ATTACH_WINDOW_MS;
+      if (livedLongEnough) {
+        // 上一条连接稳定存在过：这次中断视为偶发，退避回到起步值。
+        disconnectProgress.disconnects = 0;
+      } else {
+        disconnectProgress.disconnects += 1;
+      }
+      disconnectProgress.silentCloses = 0;
+      disconnectProgress.stalledReconnects = 0;
+    }
+
+    void createSessionsClient(gatewayUrl)
+      .getActiveStream(token, sid)
+      .then((activeStream) => {
+        if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
+          return;
+        }
+        if (!activeStream) {
+          attachProgressRef.current = createInitialAttachProgressState();
+          settleAsEnded();
+          return;
+        }
+
+        // 游标停滞只用于**诊断**：网关可能返回一个已僵死的活跃流快照（`lastSeq`
+        // 不再前进）。这里既不收敛也不提示——工具执行期间游标本来就不动，而真正
+        // 结束的情况网关会返回 null（上面已 `settleAsEnded()`）。统计结果只写进
+        // 日志，便于排查「反复 attach 却收不到事件」。
+        const progress = attachProgressRef.current;
+        if (progress.sessionId !== sid) {
+          progress.sessionId = sid;
+          progress.lastSeq = activeStream.lastSeq;
+          progress.stalledReconnects = 0;
+        } else if (activeStream.lastSeq <= progress.lastSeq) {
+          progress.stalledReconnects += 1;
+        } else {
+          progress.lastSeq = activeStream.lastSeq;
+          progress.stalledReconnects = 0;
+        }
+
+        reconnectNow();
+      })
+      .catch(() => {
+        // 查询失败（网关不可达 / 鉴权异常）：按原逻辑重连，由熔断兜底。
+        if (isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
+          reconnectNow();
+        }
+      });
   };
   const attachReconnectWiring = createAttachStreamReconnectWiring({
     attachSessionViewEpoch,
@@ -772,6 +1186,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     // Recovery already replays runEvents into wire-ordered parts. Reuse
     // those parts directly so tools remain between the text/reasoning
     // segments that surrounded them before a refresh or session switch.
+    //
     const seededSegments = (recoveredStreamSnapshot?.parts ?? []).map((part) => {
       if (part.type === 'reasoning') {
         const recoveredBlock = initialThinkingBlocks.find(
@@ -819,6 +1234,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
           return;
         }
+        noteAttachActivity();
         ensureAttachStateInitialized();
 
         if (event.type === 'upstream_route') {
@@ -889,6 +1305,10 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
 
         if (event.type === 'tool_progress') {
           applyStreamToolProgress({ event, liveToolCalls });
+          // 断线重连 / 附着到活跃流时同样要把实时进度镜像到渲染分段，
+          // 否则重连后只会看到“运行中”而没有输出。
+          accumulatedSegments = applyToolProgressToStreamingSegment(accumulatedSegments, event);
+          scheduleSegmentsFlush();
         }
 
         if (event.type === 'tool_result') {
@@ -1030,8 +1450,11 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
               );
             },
             onQuestionAsked: (questionEvent) => {
+              // 与 `onPermissionAsked` 对称：提问是「流暂停等输入」，不清流式状态。
+              // `resetStreamState()` 会清空正在输出的内容、并把
+              // `recoveryActiveStream` / 助手消息 id 一并抹掉——回答后重启的输出
+              // 因此接不回来（表现为「提问一出现就断流」），同一轮还会被拆成两条消息。
               setSessionStateStatus('paused');
-              resetStreamState();
               void loadPendingQuestionForSession(sid, questionEvent.requestId);
             },
             onQuestionReplied: (questionEvent) => {
@@ -1081,6 +1504,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         if (!isCurrentSessionRequest(sid, attachSessionViewEpoch) || stoppingStreamRef.current) {
           return;
         }
+        noteAttachActivity();
         ensureAttachStateInitialized();
         if (firstTokenObservedAt === null) {
           firstTokenObservedAt = Date.now();
@@ -1118,6 +1542,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         if (!isCurrentSessionRequest(sid, attachSessionViewEpoch) || stoppingStreamRef.current) {
           return;
         }
+        noteAttachActivity();
         ensureAttachStateInitialized();
         // Mirror the main stream handler: reasoning chunks are real model
         // output, so capturing first-token latency here keeps the assistant
@@ -1167,6 +1592,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         if (!isCurrentSessionRequest(sid, attachSessionViewEpoch)) {
           return;
         }
+        noteAttachActivity();
         ensureAttachStateInitialized();
         toolCallIds.add(chunk.toolCallId);
         if (!rightOpenRef.current) {
@@ -1268,7 +1694,15 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
           });
           firstTokenLatencyAttached = finalized.firstTokenLatencyAttached;
         }
-        setSessionStateStatus(isPausedForPermission ? 'paused' : 'idle');
+        // attach 也可能收到暂停前旧流迟到的 done：若回复操作已把状态乐观置为
+        // running，不能让这个终态事件把后台续跑重新降级为 paused/idle。
+        setSessionStateStatus((currentStatus) => {
+          return resolveStreamTerminalStatus({
+            currentStatus,
+            pausedForPermission,
+            pausedForQuestion,
+          });
+        });
         resetStreamState();
         // 流式完成后延迟快照恢复，给服务器足够时间持久化消息。
         window.setTimeout(() => {
@@ -1327,13 +1761,12 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
           void loadCurrentSessionSnapshot(sid, {
             expectedSessionViewEpoch: attachSessionViewEpoch,
             messageLimit: INITIAL_TURN_LIMIT,
-            replaceMessages: true,
           }).catch(() => undefined);
         }, 500);
         requestSessionListRefresh();
       },
-      onReconnectRequired: (_reason, technicalDetail) => {
-        attachReconnectWiring.handleReconnectRequired(technicalDetail);
+      onReconnectRequired: (reason, technicalDetail) => {
+        attachReconnectWiring.handleReconnectRequired(reason, technicalDetail);
       },
     })
     .then((attachResult) => {
@@ -1343,6 +1776,11 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
       switch (attachResult.status) {
         case 'attached': {
           attachStreamClientRequestId = client.getActiveStreamClientRequestId();
+          // 记录连接建立时刻：只有它稳定存活满 `STABLE_ATTACH_WINDOW_MS`，下一次
+          // 中断才被当作偶发、把重连退避重置回起步值。`cancelAttachRetry()` 依旧
+          // 要调（取消待触发的重试），但它内部会清空退避基数，所以真正的退避由
+          // `attachProgressRef.disconnects` 独立承担。
+          attachProgressRef.current.attachedAt = Date.now();
           cancelAttachRetry();
           setStreamError(null);
           // 标记这个会话的 attach 已成功完成，防止后续重复触发

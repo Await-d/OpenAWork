@@ -145,14 +145,11 @@ export function useTerminalSession({
   const searchRef = useRef<SearchAddon | null>(null);
   const actionsRef = useRef<TerminalSessionActions | null>(null);
   const inputEnabledRef = useRef(inputEnabled);
-  inputEnabledRef.current = inputEnabled;
   const copyOnSelectRef = useRef(readTerminalPreference('copyOnSelect'));
   const pasteResolveRef = useRef<((approved: boolean) => void) | null>(null);
   const onWriteErrorRef = useRef(onWriteError);
-  onWriteErrorRef.current = onWriteError;
   // 标题上报同样走 ref：内联箭头每次渲染都换身份，进 effect 依赖会让 xterm 重建。
   const onTitleChangeRef = useRef(onTitleChange);
-  onTitleChangeRef.current = onTitleChange;
 
   /**
    * 令牌走 ref，不进 effect 依赖：JWT 到期前会自动轮换 `accessToken`，若让
@@ -161,7 +158,6 @@ export function useTerminalSession({
    * 请求在调用时读取最新令牌即可；只有「有没有令牌」变化才需要重挂终端。
    */
   const tokenRef = useRef(token);
-  tokenRef.current = token;
   const hasToken = token !== null;
   /** WS 断线窗口的按键缓冲；跨 effect 重建保留，由新实例在首帧后补发。 */
   const pendingInputRef = useRef<{ terminalId: string; data: string }>({
@@ -175,13 +171,28 @@ export function useTerminalSession({
   // 处理，避免在真正支持 PTY 的运行时上静默退化；只有显式 false 才跳过请求。
   const resizeSupported = terminal.supportsResize !== false;
   const resizeSupportedRef = useRef(resizeSupported);
-  resizeSupportedRef.current = resizeSupported;
   /**
    * 是否为真实 PTY（显式 true 才算）。决定 `\x15`（删到行首）这类控制字符是否
    * 值得下发：管道后端没有行编辑，控制字符会混进命令行文本。
    */
   const interactiveRef = useRef(terminal.interactive === true);
-  interactiveRef.current = terminal.interactive === true;
+
+  /**
+   * 六个「最新值 ref」的同步：渲染期直接 `xxxRef.current = value` 是渲染期写 ref，
+   * React Compiler 会因此放弃优化整个 hook（报 Cannot access refs during render）。
+   * 统一挪到提交后：无依赖数组 = 每次渲染都跑一次，与原来的逐帧赋值严格等价。
+   * 这些 ref 的读取点全部是事件回调 / xterm 回调 / effect——都发生在本次提交
+   * 之后；且本 effect 声明在下方连接 effect 之前，连接 effect 读 tokenRef 时
+   * 必定已是本帧最新值（effect 按声明顺序执行）。
+   */
+  useEffect(() => {
+    inputEnabledRef.current = inputEnabled;
+    onWriteErrorRef.current = onWriteError;
+    onTitleChangeRef.current = onTitleChange;
+    tokenRef.current = token;
+    resizeSupportedRef.current = resizeSupported;
+    interactiveRef.current = terminal.interactive === true;
+  });
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [streamStatus, setStreamStatus] = useState<TerminalStreamStatus>('connecting');
@@ -190,6 +201,8 @@ export function useTerminalSession({
   const [pastePrompt, setPastePrompt] = useState<PasteGuardSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copyOnSelect, setCopyOnSelect] = useState(() => readTerminalPreference('copyOnSelect'));
+  /** 当前选区文本：渲染期不能读 `termRef.current`，改为由 onSelectionChange 事件驱动。 */
+  const [selection, setSelection] = useState('');
 
   useEffect(() => {
     const container = containerRef.current;
@@ -410,11 +423,14 @@ export function useTerminalSession({
     });
 
     const selectionDisposable = term.onSelectionChange(() => {
+      // 渲染期不能读 termRef.current（整 hook 会脱靶），选区改为事件驱动状态：
+      // 右键菜单的「复制」禁用态在菜单打开那一刻读到的一定是最新值，行为等价。
+      const selectedText = term.getSelection();
+      setSelection(selectedText);
       if (!copyOnSelectRef.current) return;
-      const selection = term.getSelection();
-      if (selection.length === 0) return;
+      if (selectedText.length === 0) return;
       // 选中即复制是纯增益功能，失败静默 —— 每次拖选都弹错误反而打扰。
-      void writeClipboardText(selection).catch(() => undefined);
+      void writeClipboardText(selectedText).catch(() => undefined);
     });
 
     /** 回退路径：原有 SSE + `POST /stdin` + `POST /resize`，行为与升级前一致。 */
@@ -770,6 +786,8 @@ export function useTerminalSession({
       setPastePrompt(null);
       setSearchOpen(false);
       setContextMenu(null);
+      // 旧终端已销毁：残留选区文本会让新终端的「复制」仍可点但复制出旧内容。
+      setSelection('');
     };
     // 依赖里用 `hasToken` 而不是 `token`：令牌轮换不应触发终端重建（见 tokenRef 注释）。
   }, [gatewayUrl, hasToken, sessionId, terminalId, terminalSessionId]);
@@ -821,21 +839,25 @@ export function useTerminalSession({
     setCopyOnSelect(next);
   };
 
-  const selection = termRef.current?.getSelection() ?? '';
-  const clipboardItems: TerminalContextMenuItem[] = [
-    {
-      id: 'copy',
-      label: '复制',
-      hint: 'Ctrl+Shift+C',
-      disabled: selection.length === 0,
-      onSelect: () => {
-        void writeClipboardText(selection).catch((error: unknown) => {
-          const message = `复制失败：${errorMessage(error)}`;
-          setNotice(message);
-          onWriteErrorRef.current?.(message);
-        });
-      },
+  // 剪贴板菜单项拆成「首项（copy）」与「末段」两个字面量，并以纯展开拼接：
+  // 这些 onSelect 闭包读 ref，编译器会把「读 ref 的函数类型」join 进数组自身的类型 ——
+  // 任何对数组的方法调用（.map / .entries / .slice）或 for-of 迭代都会被判成渲染期
+  // 访问 ref（Cannot access refs during render）。展开（spread）不经过
+  // CallExpression，不触发该校验。
+  const copyItem: TerminalContextMenuItem = {
+    id: 'copy',
+    label: '复制',
+    hint: 'Ctrl+Shift+C',
+    disabled: selection.length === 0,
+    onSelect: () => {
+      void writeClipboardText(selection).catch((error: unknown) => {
+        const message = `复制失败：${errorMessage(error)}`;
+        setNotice(message);
+        onWriteErrorRef.current?.(message);
+      });
     },
+  };
+  const clipboardTailItems: TerminalContextMenuItem[] = [
     {
       id: 'paste',
       label: '粘贴',
@@ -876,9 +898,8 @@ export function useTerminalSession({
   const contextMenuItems: TerminalContextMenuItem[] = contextMenu
     ? [
         ...(menuItems ?? []),
-        ...clipboardItems.map((item, index) =>
-          hasCommandItems && index === 0 ? { ...item, separatorBefore: true } : item,
-        ),
+        ...(hasCommandItems ? [{ ...copyItem, separatorBefore: true }] : [copyItem]),
+        ...clipboardTailItems,
       ]
     : [];
 

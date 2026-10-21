@@ -155,6 +155,124 @@ function loadSessionListSingleFlight(
   return pending;
 }
 
+/**
+ * 统一的「try/catch」导出动作包装（无 busy 标志）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try/catch 内的值块（条件 / 逻辑 /
+ * 三元），也不支持 finally 子句，本 hook 内多处 try/catch/finally 会让它整体脱靶
+ * （实测）。语义逐字照搬：`run` 的全流程仍在 try 内，catch 只记日志。
+ */
+async function runSessionExportOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (err) {
+    ctx.onError(err);
+  }
+}
+
+/**
+ * 重命名会话（含本地缓存 / 列表同步与 finally 清理）。
+ *
+ * 同 `runSessionExportOnce`：try/catch/finally 必须留在模块级，否则整个 hook 脱靶。
+ * 语义逐字照搬：成功时同步父会话缓存与列表，失败只记日志，finally 无条件退出重命名态。
+ */
+async function runSessionRenameOnce(ctx: {
+  sessionId: string;
+  nextTitle: string;
+  gatewayUrl: string;
+  tokenStore: TokenStore;
+  parentSessionCacheRef: { current: Map<string, { title?: string | null }> };
+  setSessions: (updater: (prev: Session[]) => Session[]) => void;
+  setRenamingSessionId: (value: string | null) => void;
+  setRenameValue: (value: string) => void;
+}): Promise<void> {
+  try {
+    await withTokenRefresh(ctx.gatewayUrl, ctx.tokenStore, (token) =>
+      createSessionsClient(ctx.gatewayUrl).rename(token, ctx.sessionId, ctx.nextTitle),
+    );
+    const cachedParentSession = ctx.parentSessionCacheRef.current.get(ctx.sessionId);
+    if (cachedParentSession) {
+      ctx.parentSessionCacheRef.current.set(ctx.sessionId, {
+        ...cachedParentSession,
+        title: ctx.nextTitle,
+      });
+    }
+    ctx.setSessions((prev) =>
+      prev.map((s) => (s.id === ctx.sessionId ? { ...s, title: ctx.nextTitle } : s)),
+    );
+  } catch (err) {
+    logger.error('Failed to rename session:', err);
+  } finally {
+    ctx.setRenamingSessionId(null);
+    ctx.setRenameValue('');
+  }
+}
+
+/**
+ * 会话动作的通用「try/catch/finally」包装：`run` 全流程留在 try 内，catch 交给
+ * `onError`（不传＝异常继续向上抛，不得静默吞掉），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块与 `throw`，本 hook 多处 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runSessionsFetchOnce<T>(ctx: {
+  /** catch 处理；返回值即本函数返回值（用来保留原 catch 里的 `return true/false`）。 */
+  onError?: (error: unknown) => T | Promise<T>;
+  onFinally?: () => void;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    return await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      throw error;
+    }
+    return await ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
+/**
+ * 会话列表的「瞬时传输失败重试」循环。
+ *
+ * 同样必须留在模块级：循环内的 try/catch 与两处 `throw`，会被 React Compiler 判为
+ * "Support ThrowStatement inside of try/catch" 并放弃优化整个 hook。语义逐字照搬：
+ * 重试预算耗尽（`undefined` 档位）、`HttpError`（服务端确定性结果）、单次尝试超时、
+ * 请求已过期——四种情况都直接抛出原错误；只有「快速失败的传输层错误」才退避重试。
+ */
+async function loadSessionsWithTransientRetry(ctx: {
+  loadSessionList: () => Promise<Session[]>;
+  /** 当前请求是否已被更新的请求取代（取代即放弃重试并抛出）。 */
+  isStale: () => boolean;
+}): Promise<Session[]> {
+  let attempt = 0;
+  while (true) {
+    const attemptStartedAt = Date.now();
+    try {
+      return await ctx.loadSessionList();
+    } catch (error) {
+      const retryDelayMs = SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS[attempt];
+      if (
+        retryDelayMs === undefined ||
+        error instanceof HttpError ||
+        Date.now() - attemptStartedAt > SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS ||
+        ctx.isStale()
+      ) {
+        throw error;
+      }
+      logger.warn(`Failed to fetch sessions, retrying in ${retryDelayMs}ms`, error);
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, retryDelayMs);
+      });
+    }
+    attempt += 1;
+  }
+}
+
 export function useSessions() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const location = useLocation();
@@ -174,7 +292,12 @@ export function useSessions() {
    * 完全可以用 ref 读取最新值，不该参与请求回调的依赖计算。
    */
   const navigateRef = useRef(navigate);
-  navigateRef.current = navigate;
+  // 渲染期直接写 ref 会被 React Compiler 判为 "Cannot update ref during render" 并放弃
+  // 优化整个 hook，故改为 effect 同步。读取点全在异步回调（401 跳登录）里，晚于提交，
+  // 拿到的一直是最新 navigate；`navigate` 依旧**不进**任何请求回调的依赖（上述取舍不变）。
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
   const accessToken = useAuthStore((s) => s.accessToken);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -219,13 +342,20 @@ export function useSessions() {
   const parentSessionCacheScopeRef = useRef('');
 
   const parentSessionCacheScope = `${accessToken ?? ''}:${gatewayUrl}`;
-  if (parentSessionCacheScopeRef.current !== parentSessionCacheScope) {
+  // 渲染期读写 ref 会被 React Compiler 判为 "Cannot access refs during render" /
+  // "Passing a ref to a function may read its value during render" 并放弃优化整个 hook，
+  // 故改为 effect 里比对 scope 再清空。这些缓存只服务于异步请求路径（fetchSessions /
+  // hydrate），而本 effect 声明在挂载/重取 effect 之前、同一次提交里先执行，行为等价。
+  useEffect(() => {
+    if (parentSessionCacheScopeRef.current === parentSessionCacheScope) {
+      return;
+    }
     parentSessionCacheRef.current.clear();
     parentSessionInFlightRef.current.clear();
     missingParentSessionExpiryRef.current.clear();
     runStateOverridesRef.current.clear();
     parentSessionCacheScopeRef.current = parentSessionCacheScope;
-  }
+  }, [parentSessionCacheScope]);
 
   const fetchSessions = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -238,137 +368,124 @@ export function useSessions() {
       if (!options?.silent) {
         setIsLoadingSessions(true);
       }
-      try {
-        const loadSessionList = async (): Promise<Session[]> =>
-          withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
-            const activeStreamSessionId = readPersistedActiveStreamSessionId();
-            // P3-PATH: when the user opted into "scope sidebar to current
-            // workspace", thread the selected path through the list call.
-            // We only forward it when both (a) the toggle is on AND (b) the
-            // user has actually picked a workspace, otherwise we keep the
-            // legacy global list behaviour.
-            // T-PATH-04: the feature flag in settings short-circuits the
-            // toggle entirely so an admin can pin the legacy global
-            // listing for the whole user without forcing them to clear
-            // the per-tab toggle they may have already enabled.
-            const listOptions: SessionsListOptions = { excludeTeam: true };
-            if (
-              sessionListPathFilterFeatureEnabled &&
-              sessionListPathFilterEnabled &&
-              selectedWorkspacePath
-            ) {
-              listOptions.path = selectedWorkspacePath;
-              // 远端工作区必须带上连接 id：路径在跨主机时并不唯一，
-              // 只按路径过滤会把其它服务器同名目录的会话一起捞进来。
-              listOptions.sshConnectionId = selectedSshConnectionId;
-            }
-            // 多实例并发时合并为一次网络往返(见 loadSessionListSingleFlight)。
-            const listedSessions = (await loadSessionListSingleFlight(
-              resolveSessionListRequestKey(gatewayUrl, token, listOptions),
-              () => createSessionsClient(gatewayUrl).list(token, listOptions),
-            )) as unknown as Session[];
-            const hydratedSessions = await hydrateMissingParentSessions(
-              listedSessions,
-              gatewayUrl,
-              tokenStore,
-              parentSessionCacheRef.current,
-              parentSessionInFlightRef.current,
-              missingParentSessionExpiryRef.current,
-            );
-
-            // 剪除失效的折叠父会话 ID。仅在列表完整时执行：路径过滤或触达页大小
-            // 上限时列表可能残缺，「未出现」不等于「已删除」，此时剪除会误删其它
-            // 工作区的折叠偏好。keep 集合 = 当前仍作为父会话出现的 ID。
-            if (!listOptions.path && listedSessions.length < SESSIONS_LIST_PAGE_LIMIT) {
-              const liveParentSessionIds = new Set<string>();
-              for (const session of hydratedSessions) {
-                const parentSessionId = extractParentSessionId(session.metadata_json);
-                if (parentSessionId) {
-                  liveParentSessionIds.add(parentSessionId);
-                }
-              }
-              retainSubagentCollapsed([...liveParentSessionIds]);
-            }
-
-            for (const session of hydratedSessions) {
-              const overrideState = runStateOverridesRef.current.get(session.id);
-              if (!overrideState) {
-                continue;
-              }
-
-              if (session.state_status === overrideState) {
-                runStateOverridesRef.current.delete(session.id);
-                continue;
-              }
-
-              if (
-                session.state_status === 'idle' &&
-                overrideState !== 'idle' &&
-                session.id !== activeStreamSessionId
-              ) {
-                runStateOverridesRef.current.delete(session.id);
-              }
-            }
-
-            const nonTeamSessions = hydratedSessions.filter((session) => !isTeamSession(session));
-            return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
-          });
-
-        // 瞬时传输失败重试：见 SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS 的常量注释。
-        // 只对「非 HttpError」（即 fetch 直接被拒、被归一成中文网络文案的传输层失败）
-        // 且「快速失败」的尝试重试；HttpError 是服务端给出的确定性结果，慢失败
-        // （墙钟超时）见 SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS 的说明。
-        let data: Session[] = [];
-        for (let attempt = 0; ; attempt += 1) {
-          const attemptStartedAt = Date.now();
-          try {
-            data = await loadSessionList();
-            break;
-          } catch (error) {
-            const retryDelayMs = SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS[attempt];
-            if (
-              retryDelayMs === undefined ||
-              error instanceof HttpError ||
-              Date.now() - attemptStartedAt > SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS
-            ) {
-              throw error;
-            }
-            if (fetchRequestIdRef.current !== requestId) {
-              throw error;
-            }
-            logger.warn(`Failed to fetch sessions, retrying in ${retryDelayMs}ms`, error);
-            await new Promise<void>((resolve) => {
-              window.setTimeout(resolve, retryDelayMs);
-            });
+      // `loadSessionList` 定义本身不需要被 try 包着（它只是闭包），移出来便于把外层
+      // try/catch/finally 整体下沉（见下方 `runSessionsFetchOnce`）。
+      const loadSessionList = async (): Promise<Session[]> =>
+        withTokenRefresh(gatewayUrl, tokenStore, async (token) => {
+          const activeStreamSessionId = readPersistedActiveStreamSessionId();
+          // P3-PATH: when the user opted into "scope sidebar to current
+          // workspace", thread the selected path through the list call.
+          // We only forward it when both (a) the toggle is on AND (b) the
+          // user has actually picked a workspace, otherwise we keep the
+          // legacy global list behaviour.
+          // T-PATH-04: the feature flag in settings short-circuits the
+          // toggle entirely so an admin can pin the legacy global
+          // listing for the whole user without forcing them to clear
+          // the per-tab toggle they may have already enabled.
+          const listOptions: SessionsListOptions = { excludeTeam: true };
+          if (
+            sessionListPathFilterFeatureEnabled &&
+            sessionListPathFilterEnabled &&
+            selectedWorkspacePath
+          ) {
+            listOptions.path = selectedWorkspacePath;
+            // 远端工作区必须带上连接 id：路径在跨主机时并不唯一，
+            // 只按路径过滤会把其它服务器同名目录的会话一起捞进来。
+            listOptions.sshConnectionId = selectedSshConnectionId;
           }
-        }
-        if (fetchRequestIdRef.current !== requestId) {
-          return;
-        }
-        const nextSessions = data;
-        mergeSavedWorkspaces(listWorkspaceIdentitiesFromSessions(nextSessions));
-        setSessions((previous) =>
-          isSessionListSemanticallyEqual(previous, nextSessions) ? previous : nextSessions,
-        );
-        setSessionsError(null);
-      } catch (err) {
-        if (fetchRequestIdRef.current !== requestId) {
-          return;
-        }
-        if (err instanceof HttpError && err.status === 401) {
-          clearAuth();
-          void navigateRef.current('/');
-          return;
-        }
-        logger.error('Failed to fetch sessions:', err);
-        if (!options?.silent) {
-          setSessionsError('会话列表加载失败');
-        }
-      } finally {
-        if (fetchRequestIdRef.current === requestId) {
-          setIsLoadingSessions(false);
-        }
-      }
+          // 多实例并发时合并为一次网络往返(见 loadSessionListSingleFlight)。
+          const listedSessions = (await loadSessionListSingleFlight(
+            resolveSessionListRequestKey(gatewayUrl, token, listOptions),
+            () => createSessionsClient(gatewayUrl).list(token, listOptions),
+          )) as unknown as Session[];
+          const hydratedSessions = await hydrateMissingParentSessions(
+            listedSessions,
+            gatewayUrl,
+            tokenStore,
+            parentSessionCacheRef.current,
+            parentSessionInFlightRef.current,
+            missingParentSessionExpiryRef.current,
+          );
+
+          // 剪除失效的折叠父会话 ID。仅在列表完整时执行：路径过滤或触达页大小
+          // 上限时列表可能残缺，「未出现」不等于「已删除」，此时剪除会误删其它
+          // 工作区的折叠偏好。keep 集合 = 当前仍作为父会话出现的 ID。
+          if (!listOptions.path && listedSessions.length < SESSIONS_LIST_PAGE_LIMIT) {
+            const liveParentSessionIds = new Set<string>();
+            for (const session of hydratedSessions) {
+              const parentSessionId = extractParentSessionId(session.metadata_json);
+              if (parentSessionId) {
+                liveParentSessionIds.add(parentSessionId);
+              }
+            }
+            retainSubagentCollapsed([...liveParentSessionIds]);
+          }
+
+          for (const session of hydratedSessions) {
+            const overrideState = runStateOverridesRef.current.get(session.id);
+            if (!overrideState) {
+              continue;
+            }
+
+            if (session.state_status === overrideState) {
+              runStateOverridesRef.current.delete(session.id);
+              continue;
+            }
+
+            if (
+              session.state_status === 'idle' &&
+              overrideState !== 'idle' &&
+              session.id !== activeStreamSessionId
+            ) {
+              runStateOverridesRef.current.delete(session.id);
+            }
+          }
+
+          const nonTeamSessions = hydratedSessions.filter((session) => !isTeamSession(session));
+          return applySessionRunStateOverrides(nonTeamSessions, runStateOverridesRef.current);
+        });
+
+      // 瞬时传输失败重试：见 SESSION_LIST_TRANSIENT_RETRY_DELAYS_MS 的常量注释。
+      // 只对「非 HttpError」（即 fetch 直接被拒、被归一成中文网络文案的传输层失败）
+      // 且「快速失败」的尝试重试；HttpError 是服务端给出的确定性结果，慢失败
+      // （墙钟超时）见 SESSION_LIST_TRANSIENT_FAILURE_MAX_ELAPSED_MS 的说明。
+      // 外层 try/catch/finally 下沉到模块级 `runSessionsFetchOnce`（见其注释）。
+      await runSessionsFetchOnce({
+        onError: (err) => {
+          if (fetchRequestIdRef.current !== requestId) {
+            return;
+          }
+          if (err instanceof HttpError && err.status === 401) {
+            clearAuth();
+            void navigateRef.current('/');
+            return;
+          }
+          logger.error('Failed to fetch sessions:', err);
+          if (!options?.silent) {
+            setSessionsError('会话列表加载失败');
+          }
+        },
+        onFinally: () => {
+          if (fetchRequestIdRef.current === requestId) {
+            setIsLoadingSessions(false);
+          }
+        },
+        run: async () => {
+          const loadedSessions = await loadSessionsWithTransientRetry({
+            loadSessionList,
+            isStale: () => fetchRequestIdRef.current !== requestId,
+          });
+          if (fetchRequestIdRef.current !== requestId) {
+            return;
+          }
+          const nextSessions = loadedSessions;
+          mergeSavedWorkspaces(listWorkspaceIdentitiesFromSessions(nextSessions));
+          setSessions((previous) =>
+            isSessionListSemanticallyEqual(previous, nextSessions) ? previous : nextSessions,
+          );
+          setSessionsError(null);
+        },
+      });
     },
     [
       accessToken,
@@ -443,26 +560,17 @@ export function useSessions() {
         setRenamingSessionId(null);
         return;
       }
-      try {
-        await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
-          createSessionsClient(gatewayUrl).rename(token, sessionIdToRename, nextTitle),
-        );
-        const cachedParentSession = parentSessionCacheRef.current.get(sessionIdToRename);
-        if (cachedParentSession) {
-          parentSessionCacheRef.current.set(sessionIdToRename, {
-            ...cachedParentSession,
-            title: nextTitle,
-          });
-        }
-        setSessions((prev) =>
-          prev.map((s) => (s.id === sessionIdToRename ? { ...s, title: nextTitle } : s)),
-        );
-      } catch (err) {
-        logger.error('Failed to rename session:', err);
-      } finally {
-        setRenamingSessionId(null);
-        setRenameValue('');
-      }
+      // 含 try/catch/finally 的动作体下沉到模块级 `runSessionRenameOnce`（见其注释）。
+      await runSessionRenameOnce({
+        sessionId: sessionIdToRename,
+        nextTitle,
+        gatewayUrl,
+        tokenStore,
+        parentSessionCacheRef,
+        setSessions,
+        setRenamingSessionId,
+        setRenameValue,
+      });
     },
     [accessToken, gatewayUrl, tokenStore, renameValue],
   );
@@ -486,66 +594,72 @@ export function useSessions() {
         return next;
       });
 
-      try {
-        const result = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
-          createSessionsClient(gatewayUrl).delete(token, sessionIdToDelete),
-        );
-        const deletedSessionIds = new Set(resolveDeletedSessionIds(result, sessionIdToDelete));
-        for (const deletedSessionId of deletedSessionIds) {
-          parentSessionCacheRef.current.delete(deletedSessionId);
-          parentSessionInFlightRef.current.delete(deletedSessionId);
-          missingParentSessionExpiryRef.current.set(
-            deletedSessionId,
-            Date.now() + MISSING_PARENT_SESSION_CACHE_TTL_MS,
+      // try/catch/finally 下沉到模块级 `runSessionsFetchOnce`；其 `onError` 的返回值
+      // 就是本回调的返回值，用来保留原 catch 里的 `return true / false`。
+      return runSessionsFetchOnce<boolean>({
+        onError: (err) => {
+          if (isSessionAlreadyDeletedError(err)) {
+            parentSessionCacheRef.current.delete(sessionIdToDelete);
+            parentSessionInFlightRef.current.delete(sessionIdToDelete);
+            missingParentSessionExpiryRef.current.set(
+              sessionIdToDelete,
+              Date.now() + MISSING_PARENT_SESSION_CACHE_TTL_MS,
+            );
+            setSessions((prev) => prev.filter((s) => s.id !== sessionIdToDelete));
+            const nextActiveTab = useUIStateStore.getState().closeSessionTabs([sessionIdToDelete]);
+            if (sessionId === sessionIdToDelete) {
+              navigateToClosedSessionTarget(nextActiveTab, navigate);
+            }
+            void fetchSessions();
+            return true;
+          }
+
+          logger.error('Failed to delete session:', err);
+          if (!options?.suppressToast) {
+            toast(getSessionDeleteErrorMessage(err), 'error', 4200);
+          }
+          return false;
+        },
+        onFinally: () => {
+          deletingSessionIdsRef.current.delete(sessionIdToDelete);
+          setDeletingSessionIds((previous) => {
+            if (!previous.has(sessionIdToDelete)) {
+              return previous;
+            }
+
+            const next = new Set(previous);
+            next.delete(sessionIdToDelete);
+            return next;
+          });
+        },
+        run: async () => {
+          const result = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
+            createSessionsClient(gatewayUrl).delete(token, sessionIdToDelete),
           );
-        }
-        setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
-        // 顶部会话标签（融合布局）与列表联动：删除后同步关闭对应标签页，
-        // 若被删会话正是当前路由，则改跳到关闭后应激活的标签页。
-        const nextActiveTab = useUIStateStore
-          .getState()
-          .closeSessionTabs(Array.from(deletedSessionIds));
-        if (sessionId && deletedSessionIds.has(sessionId)) {
-          navigateToClosedSessionTarget(nextActiveTab, navigate);
-        }
-        // 从服务器刷新完整列表——删除可能触发关联会话的级联删除
-        // （如 team session 的子会话），本地过滤可能遗漏。
-        void fetchSessions();
-        return true;
-      } catch (err) {
-        if (isSessionAlreadyDeletedError(err)) {
-          parentSessionCacheRef.current.delete(sessionIdToDelete);
-          parentSessionInFlightRef.current.delete(sessionIdToDelete);
-          missingParentSessionExpiryRef.current.set(
-            sessionIdToDelete,
-            Date.now() + MISSING_PARENT_SESSION_CACHE_TTL_MS,
-          );
-          setSessions((prev) => prev.filter((s) => s.id !== sessionIdToDelete));
-          const nextActiveTab = useUIStateStore.getState().closeSessionTabs([sessionIdToDelete]);
-          if (sessionId === sessionIdToDelete) {
+          const deletedSessionIds = new Set(resolveDeletedSessionIds(result, sessionIdToDelete));
+          for (const deletedSessionId of deletedSessionIds) {
+            parentSessionCacheRef.current.delete(deletedSessionId);
+            parentSessionInFlightRef.current.delete(deletedSessionId);
+            missingParentSessionExpiryRef.current.set(
+              deletedSessionId,
+              Date.now() + MISSING_PARENT_SESSION_CACHE_TTL_MS,
+            );
+          }
+          setSessions((prev) => prev.filter((s) => !deletedSessionIds.has(s.id)));
+          // 顶部会话标签（融合布局）与列表联动：删除后同步关闭对应标签页，
+          // 若被删会话正是当前路由，则改跳到关闭后应激活的标签页。
+          const nextActiveTab = useUIStateStore
+            .getState()
+            .closeSessionTabs(Array.from(deletedSessionIds));
+          if (sessionId && deletedSessionIds.has(sessionId)) {
             navigateToClosedSessionTarget(nextActiveTab, navigate);
           }
+          // 从服务器刷新完整列表——删除可能触发关联会话的级联删除
+          // （如 team session 的子会话），本地过滤可能遗漏。
           void fetchSessions();
           return true;
-        }
-
-        logger.error('Failed to delete session:', err);
-        if (!options?.suppressToast) {
-          toast(getSessionDeleteErrorMessage(err), 'error', 4200);
-        }
-        return false;
-      } finally {
-        deletingSessionIdsRef.current.delete(sessionIdToDelete);
-        setDeletingSessionIds((previous) => {
-          if (!previous.has(sessionIdToDelete)) {
-            return previous;
-          }
-
-          const next = new Set(previous);
-          next.delete(sessionIdToDelete);
-          return next;
-        });
-      }
+        },
+      });
     },
     [accessToken, gatewayUrl, tokenStore, sessionId, navigate, fetchSessions],
   );
@@ -558,14 +672,17 @@ export function useSessions() {
   const quickExportSession = useCallback(
     async (sessionIdToExport: string) => {
       if (!accessToken) return;
-      try {
-        const session = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
-          createSessionsClient(gatewayUrl).get(token, sessionIdToExport),
-        );
-        exportSession(sessionIdToExport, session.messages ?? []);
-      } catch (err) {
-        logger.error('Failed to export session:', err);
-      }
+      await runSessionExportOnce({
+        onError: (err) => {
+          logger.error('Failed to export session:', err);
+        },
+        run: async () => {
+          const session = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
+            createSessionsClient(gatewayUrl).get(token, sessionIdToExport),
+          );
+          exportSession(sessionIdToExport, session.messages ?? []);
+        },
+      });
     },
     [accessToken, gatewayUrl, tokenStore],
   );
@@ -573,14 +690,17 @@ export function useSessions() {
   const exportSessionAsMarkdown = useCallback(
     async (sId: string) => {
       if (!accessToken) return;
-      try {
-        const session = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
-          createSessionsClient(gatewayUrl).get(token, sId),
-        );
-        exportSession(sId, session.messages ?? []);
-      } catch (err) {
-        logger.error('Failed to export markdown:', err);
-      }
+      await runSessionExportOnce({
+        onError: (err) => {
+          logger.error('Failed to export markdown:', err);
+        },
+        run: async () => {
+          const session = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
+            createSessionsClient(gatewayUrl).get(token, sId),
+          );
+          exportSession(sId, session.messages ?? []);
+        },
+      });
     },
     [accessToken, gatewayUrl, tokenStore],
   );
@@ -588,25 +708,28 @@ export function useSessions() {
   const exportSessionAsJson = useCallback(
     async (sId: string) => {
       if (!accessToken) return;
-      try {
-        const session = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
-          createSessionsClient(gatewayUrl).get(token, sId),
-        );
-        const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${
-          (session.title ?? 'session')
-            .replace(/[^a-zA-Z0-9\-_ ]/g, '')
-            .trim()
-            .slice(0, 50) || 'session'
-        }.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        logger.error('Failed to export json:', err);
-      }
+      await runSessionExportOnce({
+        onError: (err) => {
+          logger.error('Failed to export json:', err);
+        },
+        run: async () => {
+          const session = await withTokenRefresh(gatewayUrl, tokenStore, (token) =>
+            createSessionsClient(gatewayUrl).get(token, sId),
+          );
+          const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${
+            (session.title ?? 'session')
+              .replace(/[^a-zA-Z0-9\-_ ]/g, '')
+              .trim()
+              .slice(0, 50) || 'session'
+          }.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        },
+      });
     },
     [accessToken, gatewayUrl, tokenStore],
   );

@@ -35,61 +35,67 @@ export function useProviderCatalogActions({
   setActiveSelection,
   setSavedActiveSelection,
 }: UseProviderCatalogActionsOptions) {
+  // 下面的动作函数一律是**普通箭头函数**，不要再包 React.useCallback。
+  //
+  // 手写 useCallback 会让 React Compiler 报
+  // "Existing memoization could not be preserved" 并放弃优化整个 hook
+  // （实测这个 hook 因此 9 个函数脱靶）。编译器会按真实依赖自动 memoize，
+  // 引用稳定性与原手写依赖数组等价；这里依赖的是稳定的 token / gatewayUrl
+  // 与不参与响应的 ref / setState setter。
+  //
+
   // 连通性自检：用「当前内存里的 provider 配置」(含尚未保存的编辑)对指定模型
   // 发起一次最小化上游调用，返回结构化结果给 ModelManager 的检测按钮显示。
-  const handleTestModel = React.useCallback(
-    async (
-      providerId: string,
-      modelId: string,
-    ): Promise<{
-      ok: boolean;
-      status: 'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
-      message: string;
-      latencyMs?: number;
-    }> => {
-      if (!token) {
-        return { ok: false, status: 'error', message: '未登录，无法发起检测。' };
-      }
-      const provider = providersRef.current.find((item) => item.id === providerId);
-      if (!provider) {
-        return { ok: false, status: 'error', message: '未找到该 provider，请先保存配置。' };
-      }
-      try {
-        const result = (await createSettingsClient(gatewayUrl).testProvider(token, {
-          modelId,
-          // 传内联 provider，测「尚未保存」的表单值；带上 createdAt/updatedAt 占位
-          // 以满足网关 schema(后端会重新规整)。
-          provider: {
-            ...provider,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        })) as {
-          ok?: boolean;
-          status?: 'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
-          message?: string;
-          latencyMs?: number;
-        };
-        return {
-          ok: result.ok === true,
-          status: result.status ?? (result.ok ? 'ok' : 'error'),
-          message: result.message ?? (result.ok ? '连接正常' : '检测失败'),
-          ...(typeof result.latencyMs === 'number' ? { latencyMs: result.latencyMs } : {}),
-        };
-      } catch (error: unknown) {
-        return {
-          ok: false,
-          status: 'error',
-          message: error instanceof Error ? error.message : '检测请求失败',
-        };
-      }
-    },
-    [token, gatewayUrl],
-  );
+  const handleTestModel = async (
+    providerId: string,
+    modelId: string,
+  ): Promise<{
+    ok: boolean;
+    status: 'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
+    message: string;
+    latencyMs?: number;
+  }> => {
+    if (!token) {
+      return { ok: false, status: 'error', message: '未登录，无法发起检测。' };
+    }
+    const provider = providersRef.current.find((item) => item.id === providerId);
+    if (!provider) {
+      return { ok: false, status: 'error', message: '未找到该 provider，请先保存配置。' };
+    }
+    try {
+      const result = (await createSettingsClient(gatewayUrl).testProvider(token, {
+        modelId,
+        // 传内联 provider，测「尚未保存」的表单值；带上 createdAt/updatedAt 占位
+        // 以满足网关 schema(后端会重新规整)。
+        provider: {
+          ...provider,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      })) as {
+        ok?: boolean;
+        status?: 'ok' | 'auth_error' | 'rate_limited' | 'timeout' | 'not_found' | 'error';
+        message?: string;
+        latencyMs?: number;
+      };
+      return {
+        ok: result.ok === true,
+        status: result.status ?? (result.ok ? 'ok' : 'error'),
+        message: result.message ?? (result.ok ? '连接正常' : '检测失败'),
+        ...(typeof result.latencyMs === 'number' ? { latencyMs: result.latencyMs } : {}),
+      };
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        status: 'error',
+        message: error instanceof Error ? error.message : '检测请求失败',
+      };
+    }
+  };
 
   // 手动同步内置模型目录：触发网关从 models.dev 重新拉取，成功后重新加载 provider
   // 列表，使新模型 / 更新后的上下文与价格即时反映到表格里。
-  const handleSyncCatalog = React.useCallback(async (): Promise<{
+  const handleSyncCatalog = async (): Promise<{
     ok: boolean;
     providerCount?: number;
     modelCount?: number;
@@ -130,71 +136,68 @@ export function useProviderCatalogActions({
         message: error instanceof Error ? error.message : '同步请求失败',
       };
     }
-  }, [token, gatewayUrl]);
+  };
 
   // 拉取「当前接口上游」实际暴露的模型列表:用「当前内存里的 provider 配置」
   // (含尚未保存的编辑)发起一次 `GET {baseUrl}/models`;结果结构化返回,由
   // ModelManager 的面板展示并勾选导入。合并/保存由 handleImportUpstreamModels 负责。
-  const handleFetchUpstreamModels = React.useCallback(
-    async (providerId: string): Promise<UpstreamModelsResult> => {
-      if (!token) {
-        return { ok: false, status: 'error', message: '未登录,无法拉取上游模型列表。', models: [] };
-      }
-      const provider = providersRef.current.find((item) => item.id === providerId);
-      if (!provider) {
-        return {
-          ok: false,
-          status: 'error',
-          message: '未找到该 provider,请先保存配置。',
-          models: [],
-        };
-      }
-      try {
-        const data = (await createSettingsClient(gatewayUrl).fetchUpstreamModels(token, {
-          // 传内联 provider,拉「尚未保存」的表单值对应上游;带 createdAt/updatedAt
-          // 占位以满足网关 schema(后端会重新规整)。
-          provider: {
-            ...provider,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        })) as {
-          ok?: boolean;
-          status?: UpstreamModelsResult['status'];
-          message?: string;
-          models?: unknown;
-          baseUrl?: string;
-          protocol?: string;
-          latencyMs?: number;
-        };
-        const items = toUpstreamItems(data.models);
-        // 兜底:客户端自身的 provider 状态就是用户看到的「本地配置」(含内置平台由
-        // models.dev 派生的上下文 / 能力)。网关若未能给出 meta(例如目录未命中的
-        // 同名模型),这里按 id 再补一次,确保「本地相同模型」的上下文 / 能力迁移到位。
-        const localIndex = buildLocalMetadataIndex(providersRef.current, providerId);
-        const models = applyLocalMetadataFallback(items, localIndex);
-        return {
-          ok: data.ok === true,
-          status: data.status ?? (data.ok ? 'ok' : 'error'),
-          message: data.message ?? (data.ok ? '已拉取上游模型。' : '拉取上游模型列表失败'),
-          models,
-          ...(typeof data.baseUrl === 'string' ? { baseUrl: data.baseUrl } : {}),
-          ...(typeof data.protocol === 'string' ? { protocol: data.protocol } : {}),
-          ...(typeof data.latencyMs === 'number' ? { latencyMs: data.latencyMs } : {}),
-        };
-      } catch (error: unknown) {
-        return {
-          ok: false,
-          status: 'error',
-          message: error instanceof Error ? error.message : '拉取上游模型列表失败',
-          models: [],
-        };
-      }
-    },
-    [token, gatewayUrl],
-  );
+  const handleFetchUpstreamModels = async (providerId: string): Promise<UpstreamModelsResult> => {
+    if (!token) {
+      return { ok: false, status: 'error', message: '未登录,无法拉取上游模型列表。', models: [] };
+    }
+    const provider = providersRef.current.find((item) => item.id === providerId);
+    if (!provider) {
+      return {
+        ok: false,
+        status: 'error',
+        message: '未找到该 provider,请先保存配置。',
+        models: [],
+      };
+    }
+    try {
+      const data = (await createSettingsClient(gatewayUrl).fetchUpstreamModels(token, {
+        // 传内联 provider,拉「尚未保存」的表单值对应上游;带 createdAt/updatedAt
+        // 占位以满足网关 schema(后端会重新规整)。
+        provider: {
+          ...provider,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      })) as {
+        ok?: boolean;
+        status?: UpstreamModelsResult['status'];
+        message?: string;
+        models?: unknown;
+        baseUrl?: string;
+        protocol?: string;
+        latencyMs?: number;
+      };
+      const items = toUpstreamItems(data.models);
+      // 兜底:客户端自身的 provider 状态就是用户看到的「本地配置」(含内置平台由
+      // models.dev 派生的上下文 / 能力)。网关若未能给出 meta(例如目录未命中的
+      // 同名模型),这里按 id 再补一次,确保「本地相同模型」的上下文 / 能力迁移到位。
+      const localIndex = buildLocalMetadataIndex(providersRef.current, providerId);
+      const models = applyLocalMetadataFallback(items, localIndex);
+      return {
+        ok: data.ok === true,
+        status: data.status ?? (data.ok ? 'ok' : 'error'),
+        message: data.message ?? (data.ok ? '已拉取上游模型。' : '拉取上游模型列表失败'),
+        models,
+        ...(typeof data.baseUrl === 'string' ? { baseUrl: data.baseUrl } : {}),
+        ...(typeof data.protocol === 'string' ? { protocol: data.protocol } : {}),
+        ...(typeof data.latencyMs === 'number' ? { latencyMs: data.latencyMs } : {}),
+      };
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        status: 'error',
+        message: error instanceof Error ? error.message : '拉取上游模型列表失败',
+        models: [],
+      };
+    }
+  };
 
-  const handleDiscoverProviders = React.useCallback(async (): Promise<{
+  const handleDiscoverProviders = async (): Promise<{
     providers: Array<{
       id: string;
       name: string;
@@ -216,36 +219,33 @@ export function useProviderCatalogActions({
       }>;
     };
     return { providers: data.providers ?? [] };
-  }, [token, gatewayUrl]);
+  };
 
-  const handleImportDiscoveredProvider = React.useCallback(
-    async (modelsDevProviderId: string): Promise<void> => {
-      if (!token) {
-        throw new Error('未登录，无法导入平台。');
+  const handleImportDiscoveredProvider = async (modelsDevProviderId: string): Promise<void> => {
+    if (!token) {
+      throw new Error('未登录，无法导入平台。');
+    }
+    const data = (await createSettingsClient(gatewayUrl).importProviderFromModelsDev(token, {
+      modelsDevProviderId,
+    })) as {
+      providers?: AIProviderRef[];
+      activeSelection?: ActiveSelectionRef;
+    };
+    if (data.providers) {
+      providersRef.current = data.providers;
+      setProviders(data.providers);
+      const { draftSelection, savedSelection } = syncSelectionForProviders(data.providers);
+      if (data.activeSelection) {
+        activeSelectionRef.current = data.activeSelection;
+        setActiveSelection(data.activeSelection);
+        setSavedActiveSelection(data.activeSelection);
+      } else {
+        activeSelectionRef.current = draftSelection;
+        setActiveSelection(draftSelection);
+        setSavedActiveSelection(savedSelection);
       }
-      const data = (await createSettingsClient(gatewayUrl).importProviderFromModelsDev(token, {
-        modelsDevProviderId,
-      })) as {
-        providers?: AIProviderRef[];
-        activeSelection?: ActiveSelectionRef;
-      };
-      if (data.providers) {
-        providersRef.current = data.providers;
-        setProviders(data.providers);
-        const { draftSelection, savedSelection } = syncSelectionForProviders(data.providers);
-        if (data.activeSelection) {
-          activeSelectionRef.current = data.activeSelection;
-          setActiveSelection(data.activeSelection);
-          setSavedActiveSelection(data.activeSelection);
-        } else {
-          activeSelectionRef.current = draftSelection;
-          setActiveSelection(draftSelection);
-          setSavedActiveSelection(savedSelection);
-        }
-      }
-    },
-    [token, gatewayUrl, syncSelectionForProviders],
-  );
+    }
+  };
 
   return {
     handleTestModel,

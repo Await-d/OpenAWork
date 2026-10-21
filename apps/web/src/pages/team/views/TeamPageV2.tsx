@@ -199,6 +199,30 @@ const MAIN_GRID_BASE_STYLE: CSSProperties = {
 
 // ───── 入口组件 ─────
 
+/**
+ * 运行树控制（暂停 / 恢复全部）的统一包装：置 busy / 清 error → try → catch 交给 `onError`
+ * → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 2 处
+ * 这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runTeamRuntimeControlOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export default function TeamPageV2() {
   const { teamWorkspaceId } = useParams<{ teamWorkspaceId?: string }>();
   const navigate = useNavigate();
@@ -639,7 +663,9 @@ export default function TeamPageV2() {
 
   const handleToggleFocusMode = useCallback(() => {
     setFocusMode((prev) => !prev);
-  }, []);
+    // setFocusMode 是 state setter（身份稳定）：编译器会把它推断为依赖，必须显式列出
+    // 才不会报 "Existing memoization could not be preserved"（见 apps/web/AGENTS.md ②）。
+  }, [setFocusMode]);
 
   const handleSidebarDividerToggle = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -735,15 +761,21 @@ export default function TeamPageV2() {
     [selectTeamInternal],
   );
 
-  const handleSelectAgent = useCallback((agentId: string) => {
-    setSelectedAgentId(agentId);
-  }, []);
+  const handleSelectAgent = useCallback(
+    (agentId: string) => {
+      setSelectedAgentId(agentId);
+    },
+    [setSelectedAgentId],
+  );
 
   const handleSubmitMessage = useCallback(
     async (text: string) => {
       await data.sendMessage({ content: text, type: 'update' });
     },
-    [data.sendMessage],
+    // 依赖写 `data` 而不是 `data.sendMessage`：编译器推断的是 `data`（"Inferred less
+    // specific property than source"），写细粒度属性同样会被判为不可保留
+    // （见 apps/web/AGENTS.md ②）。
+    [data],
   );
 
   const { refresh: refreshWorkspaces } = workspaceState;
@@ -772,19 +804,22 @@ export default function TeamPageV2() {
     ) {
       return;
     }
-    setPauseResumeBusy(true);
-    setRuntimeControlError(null);
     setRuntimeResumeNotice(null);
-    try {
-      await teamClient.pauseAllRuntimeSessions(accessToken, selectedTeamId, {
-        reason: 'team-page-v2-pause-all',
-      });
-      refreshWorkspaceSnapshot();
-    } catch (error) {
-      setRuntimeControlError(error instanceof Error ? error.message : '暂停运行树失败');
-    } finally {
-      setPauseResumeBusy(false);
-    }
+    // 置 busy / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runTeamRuntimeControlOnce`（见其注释）。
+    await runTeamRuntimeControlOnce({
+      setBusy: setPauseResumeBusy,
+      setError: setRuntimeControlError,
+      onError: (error) => {
+        setRuntimeControlError(error instanceof Error ? error.message : '暂停运行树失败');
+      },
+      run: async () => {
+        await teamClient.pauseAllRuntimeSessions(accessToken, selectedTeamId, {
+          reason: 'team-page-v2-pause-all',
+        });
+        refreshWorkspaceSnapshot();
+      },
+    });
   }, [
     accessToken,
     isSelectedSharedSession,
@@ -806,19 +841,21 @@ export default function TeamPageV2() {
     ) {
       return;
     }
-    setPauseResumeBusy(true);
-    setRuntimeControlError(null);
     setRuntimeResumeNotice(buildRuntimeResumeResumingNotice());
-    try {
-      const result = await teamClient.resumeAllRuntimeSessions(accessToken, selectedTeamId);
-      setRuntimeResumeNotice(buildRuntimeResumeSubmittedNotice(result));
-      refreshWorkspaceSnapshot();
-    } catch (error) {
-      setRuntimeResumeNotice(null);
-      setRuntimeControlError(error instanceof Error ? error.message : '恢复运行树失败');
-    } finally {
-      setPauseResumeBusy(false);
-    }
+    // 同暂停：整段下沉到 `runTeamRuntimeControlOnce`（见其注释）。
+    await runTeamRuntimeControlOnce({
+      setBusy: setPauseResumeBusy,
+      setError: setRuntimeControlError,
+      onError: (error) => {
+        setRuntimeResumeNotice(null);
+        setRuntimeControlError(error instanceof Error ? error.message : '恢复运行树失败');
+      },
+      run: async () => {
+        const result = await teamClient.resumeAllRuntimeSessions(accessToken, selectedTeamId);
+        setRuntimeResumeNotice(buildRuntimeResumeSubmittedNotice(result));
+        refreshWorkspaceSnapshot();
+      },
+    });
   }, [
     accessToken,
     isSelectedSharedSession,
@@ -841,16 +878,19 @@ export default function TeamPageV2() {
     // classic 弃用底部「层级对话」抽屉
     if (useUIStateStore.getState().workbenchLayoutMode === 'classic') return;
     setDrawerVisible(true);
-  }, []);
+  }, [setDrawerVisible]);
 
-  const handleStatusBarClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    if (event.target instanceof HTMLElement && event.target.closest('button')) {
-      return;
-    }
-    // classic 工作台弃用底部「层级对话」抽屉，状态栏点击不再打开
-    if (useUIStateStore.getState().workbenchLayoutMode === 'classic') return;
-    setDrawerVisible(true);
-  }, []);
+  const handleStatusBarClick = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (event.target instanceof HTMLElement && event.target.closest('button')) {
+        return;
+      }
+      // classic 工作台弃用底部「层级对话」抽屉，状态栏点击不再打开
+      if (useUIStateStore.getState().workbenchLayoutMode === 'classic') return;
+      setDrawerVisible(true);
+    },
+    [setDrawerVisible],
+  );
 
   const handleSubmitDraft = useCallback(
     async (draft: TeamSessionCreationDraft) => {
@@ -1046,13 +1086,16 @@ export default function TeamPageV2() {
    * URL 里的 sessionId 会被 resolveTeamSessionFromRoute 判为无效又跳回默认会话。
    * 抽屉是自带会话上下文的自足面板，既不扰动页面作用域，又真的能看到完整对话。
    */
-  const handleOpenRoleSession = useCallback((sessionId: string) => {
-    // classic 工作台弃用底部「层级对话」抽屉（该布局下卡片墙本身也不可达）
-    if (useUIStateStore.getState().workbenchLayoutMode === 'classic') return;
-    if (!sessionId) return;
-    setDrawerTarget({ sessionId, nonce: Date.now() });
-    setDrawerVisible(true);
-  }, []);
+  const handleOpenRoleSession = useCallback(
+    (sessionId: string) => {
+      // classic 工作台弃用底部「层级对话」抽屉（该布局下卡片墙本身也不可达）
+      if (useUIStateStore.getState().workbenchLayoutMode === 'classic') return;
+      if (!sessionId) return;
+      setDrawerTarget({ sessionId, nonce: Date.now() });
+      setDrawerVisible(true);
+    },
+    [setDrawerTarget, setDrawerVisible],
+  );
 
   /**
    * 当前激活的主 tab：从叶子 key 反向查表得到。
@@ -1071,7 +1114,9 @@ export default function TeamPageV2() {
       if (LEAF_TO_PRIMARY.get(middleTab) === next) return;
       handleMiddleTabChange(readRememberedLeaf(next) ?? getDefaultLeafFor(next));
     },
-    [handleMiddleTabChange, middleTab],
+    // 补 readRememberedLeaf：编译器把它推断为依赖（"Inferred different dependency than
+    // source"，见 apps/web/AGENTS.md ②）。
+    [handleMiddleTabChange, middleTab, readRememberedLeaf],
   );
 
   const handoffsClient = useMemo(
@@ -1139,7 +1184,7 @@ export default function TeamPageV2() {
 
   const handleOpenFullscreen = useCallback(() => {
     setShowOfficeFullscreen(true);
-  }, []);
+  }, [setShowOfficeFullscreen]);
 
   // 文件目录点击 → 编辑器浮层。文件状态 / 浮层开关 / pane / 预览地址的接线已收敛到
   // useTeamEditorOverlay。viewState 显式注入：本组件自己渲染

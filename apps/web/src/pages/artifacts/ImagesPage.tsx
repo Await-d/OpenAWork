@@ -188,6 +188,32 @@ const referenceTriggerStyle: CSSProperties = {
   height: '100%',
 };
 
+/**
+ * 统一的「busy + try/catch/finally」图片工作台动作包装。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（条件 / 逻辑 / 三元），本页 3 处 try/catch/finally 会让它整体脱靶
+ * （实测）。语义逐字照搬：`run` 的全流程仍在 try 内（含 `throw`），catch 只做错误
+ * 文案映射，finally 先跑 `onFinally`（如重置 in-flight ref）再清 busy。
+ */
+async function runImageWorkbenchActionOnce(ctx: {
+  setBusy?: (busy: boolean) => void;
+  /** finally 的附加清理，在清 busy **之前**执行（与原 finally 的语句顺序一致）。 */
+  onFinally?: () => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy?.(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+    ctx.setBusy?.(false);
+  }
+}
+
 export default function ImagesPage() {
   const navigate = useNavigate();
   const params = useParams<{ sessionId?: string }>();
@@ -225,6 +251,7 @@ export default function ImagesPage() {
     hasConfiguredImageModel,
     imageGenerationBusy,
     imageGenerationDefaults,
+    imageGenerationPreview,
     imageModelLabel,
     imagePluginEnabled,
     imagePluginLoaded,
@@ -270,19 +297,22 @@ export default function ImagesPage() {
     sessionCreationInFlightRef.current = true;
     setCreatingSession(true);
     void (async () => {
-      try {
-        const session = await createSessionsClient(gatewayUrl).create(accessToken, {
-          title: '图片工作台',
-          metadata: { imageWorkbench: true },
-        });
-        navigate(`/images/${session.id}`, { replace: true });
-      } catch (err) {
-        logger.error('Failed to create image workbench session', err);
-        setError(err instanceof Error ? err.message : '无法创建图片工作台会话');
-        sessionCreationInFlightRef.current = false;
-      } finally {
-        setCreatingSession(false);
-      }
+      // 含 try/catch/finally 的动作体下沉到模块级 `runImageWorkbenchActionOnce`（见其注释）。
+      await runImageWorkbenchActionOnce({
+        setBusy: setCreatingSession,
+        onError: (err) => {
+          logger.error('Failed to create image workbench session', err);
+          setError(err instanceof Error ? err.message : '无法创建图片工作台会话');
+          sessionCreationInFlightRef.current = false;
+        },
+        run: async () => {
+          const session = await createSessionsClient(gatewayUrl).create(accessToken, {
+            title: '图片工作台',
+            metadata: { imageWorkbench: true },
+          });
+          navigate(`/images/${session.id}`, { replace: true });
+        },
+      });
     })();
   }, [accessToken, gatewayUrl, navigate, providersLoaded, routeSessionId]);
 
@@ -418,37 +448,41 @@ export default function ImagesPage() {
     optimizingRef.current = true;
     setOptimizing(true);
     setError(null);
-    try {
-      const client = createWorkflowsClient(gatewayUrl);
-      const result = await client.optimizePrompt(accessToken, {
-        originalPrompt: trimmed,
-        // 给优化器一个图像生成场景的上下文，让它优先补充视觉细节
-        // 而非套用「角色/技能/输出格式」那套对话型 LangGPT 模板。
-        context:
-          '用于 AI 图像生成的视觉描述提示词。请补充构图、镜头、光影、风格、媒介、色彩、情绪等可视化细节；保持原意；不要使用「角色/技能/输出格式」等结构化对话模板；输出与原文同语言。',
-        candidateCount: 3,
-      });
-      if (!result.candidates || result.candidates.length === 0) {
-        throw new Error('优化器没有返回任何候选项');
-      }
-      const recommended =
-        result.candidates.find((candidate) => candidate.id === result.recommended) ??
-        result.candidates[0];
-      if (!recommended || !recommended.text) {
-        throw new Error('优化器返回的候选项内容为空');
-      }
-      // Multi-level history: each optimize call pushes the current
-      // prompt onto the stack so consecutive optimizes can be undone
-      // step by step. Manual edits clear the stack to avoid reverting
-      // to a stale baseline.
-      setPromptHistory((prev) => [...prev, trimmed]);
-      setPrompt(recommended.text);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '优化提示词失败，请稍后重试。');
-    } finally {
-      optimizingRef.current = false;
-      setOptimizing(false);
-    }
+    await runImageWorkbenchActionOnce({
+      // finally 顺序照搬原文：先重置 in-flight ref，再清 optimizing 标志。
+      onFinally: () => {
+        optimizingRef.current = false;
+      },
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '优化提示词失败，请稍后重试。');
+      },
+      run: async () => {
+        const client = createWorkflowsClient(gatewayUrl);
+        const result = await client.optimizePrompt(accessToken, {
+          originalPrompt: trimmed,
+          // 给优化器一个图像生成场景的上下文，让它优先补充视觉细节
+          // 而非套用「角色/技能/输出格式」那套对话型 LangGPT 模板。
+          context:
+            '用于 AI 图像生成的视觉描述提示词。请补充构图、镜头、光影、风格、媒介、色彩、情绪等可视化细节；保持原意；不要使用「角色/技能/输出格式」等结构化对话模板；输出与原文同语言。',
+          candidateCount: 3,
+        });
+        if (!result.candidates || result.candidates.length === 0) {
+          throw new Error('优化器没有返回任何候选项');
+        }
+        const recommended =
+          result.candidates.find((candidate) => candidate.id === result.recommended) ??
+          result.candidates[0];
+        if (!recommended || !recommended.text) {
+          throw new Error('优化器返回的候选项内容为空');
+        }
+        // Multi-level history: each optimize call pushes the current
+        // prompt onto the stack so consecutive optimizes can be undone
+        // step by step. Manual edits clear the stack to avoid reverting
+        // to a stale baseline.
+        setPromptHistory((prev) => [...prev, trimmed]);
+        setPrompt(recommended.text);
+      },
+    });
   }, [accessToken, gatewayUrl, prompt]);
 
   const handleRevertOptimize = useCallback(() => {
@@ -465,63 +499,66 @@ export default function ImagesPage() {
     if (submitDisabled || !routeSessionId || !accessToken) return;
     setError(null);
 
-    try {
-      let inputArtifacts:
-        Array<{ artifactId: string; fileName?: string; mimeType?: string }> | undefined;
+    await runImageWorkbenchActionOnce({
+      onError: (err) => {
+        const message = err instanceof Error ? err.message : '图片生成失败，请稍后重试。';
+        setError(message);
+      },
+      run: async () => {
+        let inputArtifacts:
+          Array<{ artifactId: string; fileName?: string; mimeType?: string }> | undefined;
 
-      if (selectedReferenceArtifact) {
-        inputArtifacts = [
-          {
-            artifactId: selectedReferenceArtifact.artifactId,
-            ...(selectedReferenceArtifact.fileName
-              ? { fileName: selectedReferenceArtifact.fileName }
-              : {}),
-            ...(selectedReferenceArtifact.mimeType
-              ? { mimeType: selectedReferenceArtifact.mimeType }
-              : {}),
-          },
-        ];
-      } else if (pendingFile) {
-        const uploaded = await uploadChatAttachments({
-          files: [pendingFile],
-          gatewayUrl,
-          sessionId: routeSessionId,
-          token: accessToken,
-        });
-        inputArtifacts = uploaded
-          .filter((attachment) => attachment.type === 'image')
-          .map((attachment) => ({
-            artifactId: attachment.artifactId,
-            ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
-            ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-          }));
-        if (inputArtifacts.length === 0) {
-          throw new Error('参考图上传失败，请稍后重试。');
+        if (selectedReferenceArtifact) {
+          inputArtifacts = [
+            {
+              artifactId: selectedReferenceArtifact.artifactId,
+              ...(selectedReferenceArtifact.fileName
+                ? { fileName: selectedReferenceArtifact.fileName }
+                : {}),
+              ...(selectedReferenceArtifact.mimeType
+                ? { mimeType: selectedReferenceArtifact.mimeType }
+                : {}),
+            },
+          ];
+        } else if (pendingFile) {
+          const uploaded = await uploadChatAttachments({
+            files: [pendingFile],
+            gatewayUrl,
+            sessionId: routeSessionId,
+            token: accessToken,
+          });
+          inputArtifacts = uploaded
+            .filter((attachment) => attachment.type === 'image')
+            .map((attachment) => ({
+              artifactId: attachment.artifactId,
+              ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+              ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+            }));
+          if (inputArtifacts.length === 0) {
+            throw new Error('参考图上传失败，请稍后重试。');
+          }
         }
-      }
 
-      const payload = await generateImageForSession({
-        ...(inputArtifacts && inputArtifacts.length > 0 ? { inputArtifacts } : {}),
-        prompt: prompt.trim(),
-        sessionId: routeSessionId,
-      });
+        const payload = await generateImageForSession({
+          ...(inputArtifacts && inputArtifacts.length > 0 ? { inputArtifacts } : {}),
+          prompt: prompt.trim(),
+          sessionId: routeSessionId,
+        });
 
-      // 拉一遍最新的 artifact 拿 dataUrl 作为预览（接口返回里只有 id+title）。
-      setArtifactsRefreshKey((value) => value + 1);
-      setLatestResult({
-        artifactId: payload.artifact.id,
-        imageUrl: '',
-        prompt: prompt.trim(),
-        revisedPrompt: payload.revisedPrompt,
-        size: payload.parameters.size,
-        quality: payload.parameters.quality,
-        outputFormat: payload.parameters.outputFormat,
-      });
-      setPendingFile(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '图片生成失败，请稍后重试。';
-      setError(message);
-    }
+        // 拉一遍最新的 artifact 拿 dataUrl 作为预览（接口返回里只有 id+title）。
+        setArtifactsRefreshKey((value) => value + 1);
+        setLatestResult({
+          artifactId: payload.artifact.id,
+          imageUrl: '',
+          prompt: prompt.trim(),
+          revisedPrompt: payload.revisedPrompt,
+          size: payload.parameters.size,
+          quality: payload.parameters.quality,
+          outputFormat: payload.parameters.outputFormat,
+        });
+        setPendingFile(null);
+      },
+    });
   }, [
     accessToken,
     gatewayUrl,
@@ -574,6 +611,7 @@ export default function ImagesPage() {
               disabled={!hasConfiguredImageModel || creatingSession}
               hasConfiguredModel={hasConfiguredImageModel}
               imageDefaults={imageGenerationDefaults}
+              imageGenerationPreview={imageGenerationPreview}
               imageMode={true}
               imageModelLabel={imageModelLabel}
               imagePluginEnabled={imagePluginEnabled}

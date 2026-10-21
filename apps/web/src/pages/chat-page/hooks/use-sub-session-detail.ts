@@ -87,6 +87,25 @@ function sameByKey(
   return true;
 }
 
+/**
+ * 子会话详情刷新（runRefresh）的统一包装：try → finally 复位单飞标记（**无 catch**：
+ * 错误态在 catch 之外统一处理）。必须留在模块级：React Compiler 1.0.0 不支持
+ * `try/catch` 的 finally 子句与 try 内值块（`??`、`?.`、三元）。语义逐字照搬。
+ */
+async function runSubSessionRefreshOnce(ctx: {
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useSubSessionDetail(
   childSessionId: string | null,
   gatewayUrl: string,
@@ -133,69 +152,76 @@ export function useSubSessionDetail(
           : { ...previous, error: null, loading: true },
       );
 
-      try {
-        const sessionsClient = createSessionsClient(gatewayUrl);
-        const permissionsClient = createPermissionsClient(gatewayUrl);
-        const [session, tasksResult, permissionsResult] = await Promise.all([
-          sessionsClient.get(token, childSessionId),
-          sessionsClient
-            .getTasks(token, childSessionId)
-            .then((tasks) => ({ ok: true as const, tasks }))
-            .catch(() => ({ ok: false as const, tasks: [] as SessionTask[] })),
-          permissionsClient
-            .listPending(token, childSessionId)
-            .then((perms) => ({ ok: true as const, perms }))
-            .catch(() => ({ ok: false as const, perms: [] as PendingPermissionRequest[] })),
-        ]);
+      // try/catch/finally 下沉到模块级 `runSubSessionRefreshOnce`（见其注释）。
+      await runSubSessionRefreshOnce({
+        onFinally: () => {
+          inFlightRef.current = false;
+        },
+        run: async () => {
+          const sessionsClient = createSessionsClient(gatewayUrl);
+          const permissionsClient = createPermissionsClient(gatewayUrl);
+          const [session, tasksResult, permissionsResult] = await Promise.all([
+            sessionsClient.get(token, childSessionId),
+            sessionsClient
+              .getTasks(token, childSessionId)
+              .then((tasks) => ({ ok: true as const, tasks }))
+              .catch(() => ({ ok: false as const, tasks: [] as SessionTask[] })),
+            permissionsClient
+              .listPending(token, childSessionId)
+              .then((perms) => ({ ok: true as const, perms }))
+              .catch(() => ({ ok: false as const, perms: [] as PendingPermissionRequest[] })),
+          ]);
 
-        if (refreshNonceRef.current !== requestId) {
-          return;
-        }
+          if (refreshNonceRef.current !== requestId) {
+            return;
+          }
 
-        const fingerprint = messageFingerprint(session.messages);
-        let messages: ChatMessage[];
-        if (canReuseNormalizedMessages(fingerprint, lastFingerprintRef.current, session)) {
-          messages = lastNormalizedRef.current;
-        } else {
-          messages = filterTranscriptMessages(normalizeChatMessages(session.messages));
-          lastFingerprintRef.current = fingerprint;
-          lastNormalizedRef.current = messages;
-        }
+          const fingerprint = messageFingerprint(session.messages);
+          let messages: ChatMessage[];
+          if (canReuseNormalizedMessages(fingerprint, lastFingerprintRef.current, session)) {
+            messages = lastNormalizedRef.current;
+          } else {
+            messages = filterTranscriptMessages(normalizeChatMessages(session.messages));
+            lastFingerprintRef.current = fingerprint;
+            lastNormalizedRef.current = messages;
+          }
 
-        lastKnownRunningRef.current =
-          session.state_status === 'running' || session.state_status === 'paused';
-        setState((previous) => ({
-          error: null,
-          loading: false,
-          messages,
-          pendingPermissions: sameByKey(previous.pendingPermissions, permissionsResult.perms)
-            ? previous.pendingPermissions
-            : permissionsResult.perms,
-          session,
-          tasks: sameByKey(previous.tasks, tasksResult.tasks) ? previous.tasks : tasksResult.tasks,
-        }));
-      } catch (error) {
-        if (refreshNonceRef.current !== requestId) {
-          return;
-        }
+          lastKnownRunningRef.current =
+            session.state_status === 'running' || session.state_status === 'paused';
+          setState((previous) => ({
+            error: null,
+            loading: false,
+            messages,
+            pendingPermissions: sameByKey(previous.pendingPermissions, permissionsResult.perms)
+              ? previous.pendingPermissions
+              : permissionsResult.perms,
+            session,
+            tasks: sameByKey(previous.tasks, tasksResult.tasks)
+              ? previous.tasks
+              : tasksResult.tasks,
+          }));
+        },
+        onError: (error) => {
+          if (refreshNonceRef.current !== requestId) {
+            return;
+          }
 
-        lastFingerprintRef.current = null;
-        lastNormalizedRef.current = [];
-        // 读取失败时不再假设子代理仍在运行:否则若它其实已结束、而轻量探针又读到
-        // activeStream，本 hook 会每拍补一次全量刷新。子代理确实在跑时,`/status`
-        // 的 activeStream 会让探针自行恢复全量刷新,故这里清零不丢实时性。
-        lastKnownRunningRef.current = false;
-        setState({
-          error: error instanceof Error ? error.message : '加载子代理详情失败',
-          loading: false,
-          messages: [],
-          pendingPermissions: [],
-          session: null,
-          tasks: [],
-        });
-      } finally {
-        inFlightRef.current = false;
-      }
+          lastFingerprintRef.current = null;
+          lastNormalizedRef.current = [];
+          // 读取失败时不再假设子代理仍在运行:否则若它其实已结束、而轻量探针又读到
+          // activeStream，本 hook 会每拍补一次全量刷新。子代理确实在跑时,`/status`
+          // 的 activeStream 会让探针自行恢复全量刷新,故这里清零不丢实时性。
+          lastKnownRunningRef.current = false;
+          setState({
+            error: error instanceof Error ? error.message : '加载子代理详情失败',
+            loading: false,
+            messages: [],
+            pendingPermissions: [],
+            session: null,
+            tasks: [],
+          });
+        },
+      });
     },
     [childSessionId, gatewayUrl, token],
   );

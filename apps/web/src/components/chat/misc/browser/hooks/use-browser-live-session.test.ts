@@ -200,7 +200,7 @@ describe('useBrowserLiveSession', () => {
     expect(result.current.availability?.available).toBe(true);
   });
 
-  it('可用时建连，open 后进入 connected，hello 后请求 screencast', async () => {
+  it('可用时建连，open 后进入 connected，hello 只刷新能力状态', async () => {
     const status = createDeferred<BrowserLiveStatus>();
     mocks.getStatus.mockReturnValue(status.promise);
     const connections = installFakeConnections();
@@ -232,10 +232,7 @@ describe('useBrowserLiveSession', () => {
       });
     });
 
-    expect(connections[0]?.connection.send).toHaveBeenCalledWith({
-      ch: 'control',
-      action: 'screencast.start',
-    });
+    expect(connections[0]?.connection.send).not.toHaveBeenCalled();
   });
 
   it('hello 刷新可用性（screencast 能力以会话为准），不支持 screencast 时不请求', async () => {
@@ -398,7 +395,7 @@ describe('useBrowserLiveSession', () => {
     expect(connections[1]?.connection.send).not.toHaveBeenCalled();
   });
 
-  it('掉线后按 500ms 退避重连，成功后重发 screencast.start', async () => {
+  it('掉线后按 500ms 退避重连，成功后交给引擎重新定档', async () => {
     mocks.getStatus.mockResolvedValue(AVAILABLE_STATUS);
     const connections = installFakeConnections();
 
@@ -443,10 +440,7 @@ describe('useBrowserLiveSession', () => {
       });
     });
 
-    expect(connections[1]?.connection.send).toHaveBeenCalledWith({
-      ch: 'control',
-      action: 'screencast.start',
-    });
+    expect(connections[1]?.connection.send).not.toHaveBeenCalled();
   });
 
   it('退避到 1s / 2s / 4s，5 次重连用尽后进入 error', async () => {

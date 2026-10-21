@@ -219,6 +219,30 @@ const FIELD_WRAP_STYLE: CSSProperties = {
   minWidth: 0,
 };
 
+/**
+ * SSH 连接表单提交的统一包装：置 submitting / 清 error → try → catch 交给 `onError`
+ * → finally 清 submitting。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runSshConnectionSubmitOnce(ctx: {
+  setSubmitting: (submitting: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSubmitting(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSubmitting(false);
+  }
+}
+
 export default function SshConnectionCreateForm({
   onSubmit,
   onCancel,
@@ -257,17 +281,20 @@ export default function SshConnectionCreateForm({
       return;
     }
 
-    setError(null);
-    setSubmitting(true);
-    try {
-      await onSubmit(resolved.draft);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : isEdit ? '更新 SSH 连接失败' : '保存 SSH 连接失败',
-      );
-    } finally {
-      setSubmitting(false);
-    }
+    // 置 submitting / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runSshConnectionSubmitOnce`（见其注释）。
+    await runSshConnectionSubmitOnce({
+      setSubmitting,
+      setError,
+      onError: (err) => {
+        setError(
+          err instanceof Error ? err.message : isEdit ? '更新 SSH 连接失败' : '保存 SSH 连接失败',
+        );
+      },
+      run: async () => {
+        await onSubmit(resolved.draft);
+      },
+    });
   }
 
   return (

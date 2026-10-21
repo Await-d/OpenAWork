@@ -15,14 +15,17 @@ export function useGlobalTeamRuntimeSessions(
     }
     let cancelled = false;
     void (async () => {
+      // try 里只留请求本身：`result.ok && result.runtime` 是值块，留在 try 内会让编译器报
+      // "Support value blocks ... within a try/catch statement"。
+      let result: Awaited<ReturnType<typeof teamClient.getRuntimeResult>> | null = null;
       try {
-        const result = await teamClient.getRuntimeResult(accessToken);
-        if (cancelled) return;
-        if (result.ok && result.runtime) {
-          setGlobalSessions(result.runtime.sessions);
-        }
+        result = await teamClient.getRuntimeResult(accessToken);
       } catch {
         // 全局 sessions 加载失败不影响主流程，侧边栏回退到当前工作区数据
+      }
+      if (cancelled || !result) return;
+      if (result.ok && result.runtime) {
+        setGlobalSessions(result.runtime.sessions);
       }
     })();
     return () => {
@@ -44,14 +47,16 @@ export function useGlobalTeamRuntimeSessions(
     if (!accessToken || globalSessionsTick === 0) return;
     let cancelled = false;
     void (async () => {
+      // 同上：try 里只留请求，值块判定移到 try 外。
+      let result: Awaited<ReturnType<typeof teamClient.getRuntimeResult>> | null = null;
       try {
-        const result = await teamClient.getRuntimeResult(accessToken);
-        if (cancelled) return;
-        if (result.ok && result.runtime) {
-          setGlobalSessions(result.runtime.sessions);
-        }
+        result = await teamClient.getRuntimeResult(accessToken);
       } catch {
         // 轮询失败不影响已有数据
+      }
+      if (cancelled || !result) return;
+      if (result.ok && result.runtime) {
+        setGlobalSessions(result.runtime.sessions);
       }
     })();
     return () => {

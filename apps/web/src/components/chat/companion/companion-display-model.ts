@@ -7,12 +7,30 @@ import {
   type CompanionSpriteSpecies,
 } from './companion-sprite-model.js';
 
+/**
+ * Buddy（CompanionStage）的活动快照。
+ *
+ * **刻意不含 `input` 原始字符串**：这个快照会被喂进 `snapshot` 的 `useMemo` 依赖，而
+ * `input` 每敲一个字符就变一次——整棵 Buddy 树（sprite 动画 + `createPortal` 面板 +
+ * 9 个 effect + 语音合成）随之每键重渲染，是打字卡顿的主因。
+ *
+ * 而消费方对输入框文本的判断只有 4 种粗粒度形态（见 `deriveCompanionStatus`）：
+ * 是否点名 Buddy、是否是命令、是否带文件引用、是否超长。因此这里只传这 4 个
+ * **布尔**量：绝大多数按键不会让它们变化，memo 因此能真正生效。
+ */
 export interface CompanionActivitySnapshot {
   attachedCount: number;
   currentUserEmail: string;
   hasStreamError: boolean;
   idleSeconds: number;
-  input: string;
+  /** 输入非空且包含 `/buddy`。 */
+  inputMentionsBuddy: boolean;
+  /** 输入以 `/` 开头（命令模式）。 */
+  inputStartsWithSlash: boolean;
+  /** 输入包含 `@`（文件引用）。 */
+  inputHasMention: boolean;
+  /** 输入长度超过「长输入」阈值。 */
+  inputIsLong: boolean;
   lastToolName: string | null;
   pendingPermissionCount: number;
   queuedCount: number;
@@ -100,6 +118,31 @@ const IDLE_REACTIONS = [
   '我先在边上待命，需要时叫我一声就行。',
 ];
 const IDLE_REMINDER_THRESHOLD_SECONDS = 180;
+/**
+ * 「长输入」阈值。调用方（ChatPage）据此派生 `inputIsLong`，判定方据此消费——必须同源，
+ * 否则会出现「文案说长输入、状态却没进入长输入」的不一致。
+ */
+export const COMPANION_LONG_INPUT_THRESHOLD_CHARS = 84;
+
+/**
+ * 从输入框原文派生 snapshot 需要的 4 个布尔量。
+ *
+ * 独立成函数（而不是散在调用方的 useMemo 里）是为了让阈值口径只有这一处，
+ * 且便于单测直接覆盖边界。
+ */
+export function deriveCompanionInputFlags(input: string): {
+  inputHasMention: boolean;
+  inputIsLong: boolean;
+  inputMentionsBuddy: boolean;
+  inputStartsWithSlash: boolean;
+} {
+  return {
+    inputHasMention: input.includes('@'),
+    inputIsLong: input.trim().length > COMPANION_LONG_INPUT_THRESHOLD_CHARS,
+    inputMentionsBuddy: input.includes('/buddy'),
+    inputStartsWithSlash: input.trim().startsWith('/'),
+  };
+}
 
 const HUBBY_NAMES = ['暖石', '锚点', '壁炉', '护城', '基石', '织网', '归港', '承托'];
 const HUBBY_ARCHETYPES = [
@@ -405,7 +448,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     };
   }
 
-  if (snapshot.input.includes('/buddy')) {
+  if (snapshot.inputMentionsBuddy) {
     return {
       badge: '被点名',
       importance: 'active',
@@ -413,7 +456,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     };
   }
 
-  if (snapshot.input.trim().startsWith('/')) {
+  if (snapshot.inputStartsWithSlash) {
     return {
       badge: '命令模式',
       importance: 'ambient',
@@ -421,7 +464,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     };
   }
 
-  if (snapshot.input.includes('@')) {
+  if (snapshot.inputHasMention) {
     return {
       badge: '文件引用',
       importance: 'ambient',
@@ -445,7 +488,7 @@ export function deriveCompanionReaction(snapshot: CompanionActivitySnapshot): Co
     };
   }
 
-  if (snapshot.input.trim().length > 84) {
+  if (snapshot.inputIsLong) {
     return {
       badge: '长输入',
       importance: 'ambient',

@@ -156,18 +156,18 @@ describe('EditorBrowserWorkspace 浏览器入口', () => {
     expect(screen.getByTestId('built-in-browser-mock').getAttribute('data-hidden')).toBe('true');
   });
 
-  it('alwaysShowBrowserTab：无地址时也提供预览入口，空态输入地址后回调规范化 URL', () => {
+  it('alwaysShowBrowserTab：无地址时也提供预览入口，开始页输入地址后回调规范化 URL', () => {
     const onBrowserPreviewUrlChange = vi.fn();
     renderWorkspace({ alwaysShowBrowserTab: true, onBrowserPreviewUrlChange });
 
     fireEvent.click(screen.getByRole('button', { name: '预览' }));
 
     expect(screen.getByTestId('editor-browser-empty-state')).not.toBeNull();
-    expect(screen.getByText('还没有预览地址')).not.toBeNull();
+    expect(screen.getByTestId('browser-start-page')).not.toBeNull();
     expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
 
     const input = screen.getByLabelText('预览地址');
-    const submit = screen.getByRole('button', { name: '打开预览' });
+    const submit = screen.getByRole('button', { name: '前往' });
     expect(submit.hasAttribute('disabled')).toBe(true);
 
     fireEvent.change(input, { target: { value: 'localhost:5173' } });
@@ -177,7 +177,6 @@ describe('EditorBrowserWorkspace 浏览器入口', () => {
 
     expect(onBrowserPreviewUrlChange).toHaveBeenCalledTimes(1);
     expect(onBrowserPreviewUrlChange).toHaveBeenCalledWith('http://localhost:5173');
-    expect((input as HTMLInputElement).value).toBe('');
     expect(screen.queryByTestId('built-in-browser-mock')).toBeNull();
   });
 
@@ -228,7 +227,7 @@ describe('EditorBrowserWorkspace 浏览器入口', () => {
     expect(screen.queryByRole('button', { name: '预览', hidden: true })).toBeNull();
 
     fireEvent.change(screen.getByLabelText('预览地址'), { target: { value: 'localhost:5173' } });
-    fireEvent.click(screen.getByRole('button', { name: '打开预览' }));
+    fireEvent.click(screen.getByRole('button', { name: '前往' }));
 
     expect(onBrowserPreviewUrlChange).toHaveBeenCalledWith('http://localhost:5173');
   });
@@ -266,7 +265,7 @@ describe('EditorBrowserWorkspace 浏览器入口', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '预览' }));
     fireEvent.change(screen.getByLabelText('预览地址'), { target: { value: 'localhost:4173' } });
-    fireEvent.click(screen.getByRole('button', { name: '打开预览' }));
+    fireEvent.click(screen.getByRole('button', { name: '前往' }));
 
     expect(screen.getAllByTestId('built-in-browser-mock')).toHaveLength(1);
     expect(screen.getByTestId('built-in-browser-mock').getAttribute('data-hidden')).toBe('false');
@@ -305,17 +304,13 @@ describe('EditorBrowserWorkspace 浏览器入口', () => {
     expect(screen.getByLabelText('预览地址')).not.toBeNull();
   });
 
-  it('空态样式契约：表单 intrinsic 换行，可在 ~360px 停靠宽度下使用', () => {
-    const formRule = workspaceCss.match(
-      /\.editor-browser-workspace__empty-form\s*\{([^}]*)\}/,
-    )?.[1];
-    const inputRule = workspaceCss.match(
-      /\.editor-browser-workspace__empty-input\s*\{([^}]*)\}/,
-    )?.[1];
+  it('空态样式契约：开始页宿主铺满剩余高度，窄面板也不塌陷', () => {
+    const rule = workspaceCss.match(/\.editor-browser-workspace__start\s*\{([^}]*)\}/)?.[1];
 
-    expect(formRule).toBeTruthy();
-    expect(formRule).toMatch(/flex-wrap:\s*wrap/);
-    expect(inputRule).toBeTruthy();
-    expect(inputRule).toMatch(/min-width:\s*0/);
+    expect(rule).toBeTruthy();
+    expect(rule).toMatch(/display:\s*flex/);
+    expect(rule).toMatch(/flex:\s*1/);
+    expect(rule).toMatch(/min-height:\s*0/);
+    expect(rule).toMatch(/min-width:\s*0/);
   });
 });

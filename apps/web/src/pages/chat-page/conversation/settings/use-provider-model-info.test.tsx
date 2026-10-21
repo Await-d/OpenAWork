@@ -33,13 +33,14 @@ describe('useProviderModelInfo', () => {
     const setActiveProviderId = vi.fn();
     const setActiveModelId = vi.fn();
 
+    const chatDefaultsRef = { current: { providerId: 'openai', modelId: 'gpt-5.4' } };
+
     const { result } = renderHook(() =>
       useProviderModelInfo({
         providers: PROVIDERS,
         activeProviderId: 'openai',
         activeModelId: 'snapshot-model',
-        defaultProviderId: 'openai',
-        defaultModelId: 'gpt-5.4',
+        chatDefaultsRef,
         setActiveProviderId,
         setActiveModelId,
       }),
@@ -64,13 +65,14 @@ describe('useProviderModelInfo', () => {
     const setActiveProviderId = vi.fn();
     const setActiveModelId = vi.fn();
 
+    const chatDefaultsRef = { current: { providerId: 'openai', modelId: 'gpt-5.4' } };
+
     renderHook(() =>
       useProviderModelInfo({
         providers: PROVIDERS,
         activeProviderId: '',
         activeModelId: '',
-        defaultProviderId: 'openai',
-        defaultModelId: 'gpt-5.4',
+        chatDefaultsRef,
         setActiveProviderId,
         setActiveModelId,
       }),
@@ -80,6 +82,42 @@ describe('useProviderModelInfo', () => {
       expect(setActiveProviderId).toHaveBeenCalledWith('openai');
     });
 
+    expect(setActiveModelId).toHaveBeenCalledWith('gpt-5.4');
+  });
+
+  it('会话绑定加载中不补默认值（避免默认模型抢先覆盖会话绑定）', async () => {
+    const setActiveProviderId = vi.fn();
+    const setActiveModelId = vi.fn();
+
+    const chatDefaultsRef = { current: { providerId: 'openai', modelId: 'gpt-5.4' } };
+
+    const { rerender, result } = renderHook(
+      ({ pending }: { pending: boolean }) =>
+        useProviderModelInfo({
+          providers: PROVIDERS,
+          activeProviderId: '',
+          activeModelId: '',
+          chatDefaultsRef,
+          sessionBindingPending: pending,
+          setActiveProviderId,
+          setActiveModelId,
+        }),
+      { initialProps: { pending: true } },
+    );
+
+    // 加载窗口内：选型为空但**不得**写入全局默认值。
+    await waitFor(() => {
+      expect(result.current.effectiveModelId).toBe('gpt-5.4');
+    });
+    expect(setActiveProviderId).not.toHaveBeenCalled();
+    expect(setActiveModelId).not.toHaveBeenCalled();
+
+    // 水合完成（会话确实没有绑定）后才接管默认值。
+    rerender({ pending: false });
+
+    await waitFor(() => {
+      expect(setActiveProviderId).toHaveBeenCalledWith('openai');
+    });
     expect(setActiveModelId).toHaveBeenCalledWith('gpt-5.4');
   });
 });

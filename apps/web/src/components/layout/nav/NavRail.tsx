@@ -65,6 +65,23 @@ type GatewayStatus = 'online' | 'offline' | 'warning';
  * Polls every 30s with a 4s timeout; failures fall back to "offline" without
  * spamming the console.
  */
+/**
+ * 网关探活一次；任何失败都按 offline 处理（与原 try/catch 语义一致）。
+ *
+ * 必须留在模块级：try 内的 `healthy ? … : …` 是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+async function probeGatewayHealthOnce(
+  client: ReturnType<typeof createHealthClient>,
+): Promise<'online' | 'offline'> {
+  try {
+    const healthy = await client.check({ timeoutMs: 4000 });
+    return healthy ? 'online' : 'offline';
+  } catch {
+    return 'offline';
+  }
+}
+
 function useGatewayStatus(gatewayUrl: string): GatewayStatus {
   const [status, setStatus] = useState<GatewayStatus>('online');
 
@@ -78,14 +95,10 @@ function useGatewayStatus(gatewayUrl: string): GatewayStatus {
     const client = createHealthClient(gatewayUrl);
 
     const probe = async () => {
-      try {
-        const healthy = await client.check({ timeoutMs: 4000 });
-        if (cancelled) return;
-        setStatus(healthy ? 'online' : 'offline');
-      } catch {
-        if (cancelled) return;
-        setStatus('offline');
-      }
+      // 探活（含 try/catch 与值块）下沉到模块级 `probeGatewayHealthOnce`；取消守卫留在这里。
+      const nextStatus = await probeGatewayHealthOnce(client);
+      if (cancelled) return;
+      setStatus(nextStatus);
     };
 
     void probe();

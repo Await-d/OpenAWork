@@ -83,6 +83,27 @@ export interface TeamMiddleAreaState {
   readonly suggestionContext: SuggestionContext;
 }
 
+/**
+ * 重试失败任务的统一包装：置 busy → try → catch 交给 `onError` → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 这处 try
+ * 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runRetryFailedOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export function useTeamMiddleArea({
   accessToken,
   clarificationItems,
@@ -144,17 +165,19 @@ export function useTeamMiddleArea({
     ) {
       return;
     }
-    setRetryingFailed(true);
-    try {
-      await teamClient.resumeAllRuntimeSessions(accessToken, selectedTeamId);
-      refreshWorkspaceSnapshot();
-      toast('已提交失败任务重试请求，正在断点续传…', 'success');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '重试失败任务时发生错误';
-      toast(`重试失败：${message}`, 'error');
-    } finally {
-      setRetryingFailed(false);
-    }
+    // 置 busy 与 try/catch/finally 一起下沉到模块级 `runRetryFailedOnce`（见其注释）。
+    await runRetryFailedOnce({
+      setBusy: setRetryingFailed,
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : '重试失败任务时发生错误';
+        toast(`重试失败：${message}`, 'error');
+      },
+      run: async () => {
+        await teamClient.resumeAllRuntimeSessions(accessToken, selectedTeamId);
+        refreshWorkspaceSnapshot();
+        toast('已提交失败任务重试请求，正在断点续传…', 'success');
+      },
+    });
   }, [
     accessToken,
     isSelectedSharedSession,

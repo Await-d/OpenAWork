@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { writeRefCurrent } from '../../../../../utils/ref/ref-current.js';
 import type {
   AgentTeamsOfficeAgent,
   AgentTeamsSidebarTeam,
@@ -559,7 +560,12 @@ export function OfficeThreeCanvas({
   const buddyGroupRef = useRef<THREE.Group | null>(null);
   const buddyStatesRef = useRef<BuddyState[]>([]);
   const raycasterRef = useRef(new THREE.Raycaster());
-  raycasterRef.current.params.Mesh = { threshold: 0.15 };
+  // 阈值设置下沉到 effect：渲染期写 ref 会被 React Compiler 判为
+  // "Cannot access refs during render" 并放弃优化整个组件（实测本组件因此 14 处脱靶）。
+  // raycaster 只在事件处理器 / 动画帧里使用，提交后设置不影响任何读取。
+  useEffect(() => {
+    raycasterRef.current.params.Mesh = { threshold: 0.15 };
+  }, []);
   const mouseRef = useRef(new THREE.Vector2());
   const tickRef = useRef(0);
   const animIdRef = useRef(0);
@@ -591,18 +597,39 @@ export function OfficeThreeCanvas({
     useRef<React.Dispatch<React.SetStateAction<{ x: number; y: number }>>>(ignorePanStateUpdate);
   const { zoom, setZoom, pan, setPan, dragRef } = state;
 
-  // Keep refs in sync for animation loop / event handler access
-  officeAgentsRef.current = officeAgents;
-  metricCardsRef.current = metricCards;
-  topSummaryRef.current = topSummary;
-  footerStatsRef.current = footerStats;
-  activityStatsRef.current = activityStats;
-  runtimeStatusRef.current = runtimeStatus ?? null;
-  selectedSessionTitleRef.current = selectedSessionTitle ?? null;
-  zoomRef.current = zoom;
-  panRef.current = pan;
-  setZoomRef.current = setZoom;
-  setPanRef.current = setPan;
+  // Keep refs in sync for animation loop / event handler access.
+  //
+  // 下沉到 effect：渲染期读写 ref 会被 React Compiler 判为
+  // "Cannot access refs during render" 并放弃优化整个组件（实测本组件因此 14 处脱靶，
+  // 同类改法见 `use-chat-session-lifecycle.ts` 的 `messagesRef`）。
+  // 这些 ref 的读取点全在动画帧回调 / 事件处理器 / `buildDisplayData`（useCallback）内，
+  // 且本 effect 声明在下方「Three.js 场景初始化」effect 之前——effect 按声明顺序执行，
+  // 场景初始化里 `buildDisplayData(0)` 读到的已是本次提交的值，行为与原写法等价。
+  useEffect(() => {
+    officeAgentsRef.current = officeAgents;
+    metricCardsRef.current = metricCards;
+    topSummaryRef.current = topSummary;
+    footerStatsRef.current = footerStats;
+    activityStatsRef.current = activityStats;
+    runtimeStatusRef.current = runtimeStatus ?? null;
+    selectedSessionTitleRef.current = selectedSessionTitle ?? null;
+    zoomRef.current = zoom;
+    panRef.current = pan;
+    setZoomRef.current = setZoom;
+    setPanRef.current = setPan;
+  }, [
+    activityStats,
+    footerStats,
+    metricCards,
+    officeAgents,
+    pan,
+    runtimeStatus,
+    selectedSessionTitle,
+    setPan,
+    setZoom,
+    topSummary,
+    zoom,
+  ]);
 
   const buildDisplayData = useCallback((elapsed: number): OfficeCanvasDisplayData => {
     const effectiveRuntimeStatus = resolveOfficeRuntimeStatus({
@@ -782,12 +809,15 @@ export function OfficeThreeCanvas({
       dragStart = { x: e.clientX, y: e.clientY, px: panRef.current.x, py: panRef.current.y };
       dragMoved = false;
       // Sync dragRef for OfficeSceneState
-      dragRef.current = {
+      // `dragRef` 来自 props（`state`）：直接写它的 .current 属「修改 props」，会被
+      // React Compiler 判为 "This mutates a variable that React considers immutable"
+      // 并放弃优化本组件。写入走收敛函数（见 utils/ref/ref-current.ts）。
+      writeRefCurrent(dragRef, {
         startX: e.clientX,
         startY: e.clientY,
         panStartX: panRef.current.x,
         panStartY: panRef.current.y,
-      };
+      });
     };
     const onPointerMove = (e: PointerEvent) => {
       // Hover detection (always)
@@ -837,7 +867,8 @@ export function OfficeThreeCanvas({
         }
       }
       dragStart = null;
-      dragRef.current = null;
+      // 同 onPointerDown：dragRef 来自 props，写入走收敛函数。
+      writeRefCurrent(dragRef, null);
       renderer.domElement.style.cursor = hoveredIdRef.current ? 'pointer' : 'grab';
     };
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
@@ -1093,13 +1124,19 @@ export function OfficeThreeCanvas({
       const ix = (i: number, c: number) => i * 3 + c;
       for (let i = 0; i < dustCount; i++) {
         const dv = dustVelocities[i]!;
-        posArr[ix(i, 0)]! += dv.vx;
-        posArr[ix(i, 1)]! += dv.vy;
-        posArr[ix(i, 2)]! += dv.vz;
-        if (posArr[ix(i, 1)]! > ROOM_H) {
-          posArr[ix(i, 1)] = 0;
-          posArr[ix(i, 0)] = (Math.random() - 0.5) * ROOM_W;
-          posArr[ix(i, 2)] = (Math.random() - 0.5) * ROOM_D;
+        // `arr[i]! += x` 这种「非空断言作赋值目标」编译器不支持
+        // ("Cannot handle Object destructuring assignment target TSNonNullExpression")，
+        // 会让整个组件脱靶。断言留在**读取位**、赋值目标写普通下标即可，语义不变。
+        const ix0 = ix(i, 0);
+        const ix1 = ix(i, 1);
+        const ix2 = ix(i, 2);
+        posArr[ix0] = posArr[ix0]! + dv.vx;
+        posArr[ix1] = posArr[ix1]! + dv.vy;
+        posArr[ix2] = posArr[ix2]! + dv.vz;
+        if (posArr[ix1]! > ROOM_H) {
+          posArr[ix1] = 0;
+          posArr[ix0] = (Math.random() - 0.5) * ROOM_W;
+          posArr[ix2] = (Math.random() - 0.5) * ROOM_D;
         }
       }
       posAttr.needsUpdate = true;
@@ -1220,7 +1257,9 @@ export function OfficeThreeCanvas({
     }
   }, [officeAgents, selectedAgentId, onSelectAgent]);
 
-  const selectedAgent = officeAgentsRef.current.find((a) => a.id === selectedAgentId);
+  // 直接查 props：`officeAgentsRef` 就是 `officeAgents` 的镜像（上方 effect 同步，
+  // 且 useRef 初值同样是它），绕过 ref 读取即消除「渲染期读 ref」违规。
+  const selectedAgent = officeAgents.find((agent) => agent.id === selectedAgentId);
   const effectiveRuntimeStatus = resolveOfficeRuntimeStatus({
     runtimeStatus,
     statusLabel: topSummary.status,

@@ -97,6 +97,30 @@ function capChipStyle(on: boolean, color: string, tint: string): CSSProperties {
   };
 }
 
+/**
+ * AI 优化提示词的统一包装：置 optimizing / 清 error → try → catch 交给 `onError`
+ * → finally 清 optimizing。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runOptimizePromptOnce(ctx: {
+  setOptimizing: (optimizing: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setOptimizing(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setOptimizing(false);
+  }
+}
+
 export function CustomRoleModal({
   open,
   layer,
@@ -202,20 +226,22 @@ export function CustomRoleModal({
       setOptimizeError('请先填写一些提示词内容，再让 AI 优化');
       return;
     }
-    setOptimizing(true);
-    setOptimizeError(null);
-    try {
-      const improved = await onOptimizePrompt(base);
-      if (improved && improved.trim().length > 0) {
-        setPrompt(improved.trim());
-      } else {
-        setOptimizeError('AI 未返回优化结果');
-      }
-    } catch (err) {
-      setOptimizeError(err instanceof Error ? err.message : 'AI 优化失败');
-    } finally {
-      setOptimizing(false);
-    }
+    // 置 optimizing / 清 error 与 try/catch/finally 一起下沉到模块级 `runOptimizePromptOnce`。
+    await runOptimizePromptOnce({
+      setOptimizing,
+      setError: setOptimizeError,
+      onError: (err) => {
+        setOptimizeError(err instanceof Error ? err.message : 'AI 优化失败');
+      },
+      run: async () => {
+        const improved = await onOptimizePrompt(base);
+        if (improved && improved.trim().length > 0) {
+          setPrompt(improved.trim());
+        } else {
+          setOptimizeError('AI 未返回优化结果');
+        }
+      },
+    });
   };
 
   return (

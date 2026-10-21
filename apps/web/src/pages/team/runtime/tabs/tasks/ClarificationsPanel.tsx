@@ -339,6 +339,25 @@ interface ClarificationsPanelProps {
   headerExtra?: ReactNode;
 }
 
+/**
+ * 澄清卡片动作（提交回答 / 忽略）的统一包装：置 busy → try → finally 清 busy
+ * （**无 catch**：异常向上抛给调用方，与原语义一致）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句与「无 catch 的
+ * try」，本组件 2 处这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runClarificationCardActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export function ClarificationsPanel({
   filterSessionId = null,
   onError,
@@ -522,19 +541,21 @@ function PendingCard({
   const canSubmit = !isPending && draft.trim().length > 0;
 
   const submitAnswer = async (answer: string): Promise<void> => {
-    setSubmitting(true);
     setActionError(null);
-    try {
-      const errorMessage = await onSubmit(answer);
-      if (errorMessage) {
-        setActionError(errorMessage);
-        return;
-      }
-      setDraft('');
-      setFreeInputOpen(false);
-    } finally {
-      setSubmitting(false);
-    }
+    // 置 submitting 与 try/finally 一起下沉到模块级
+    // `runClarificationCardActionOnce`（见其注释）。
+    await runClarificationCardActionOnce({
+      setBusy: setSubmitting,
+      run: async () => {
+        const errorMessage = await onSubmit(answer);
+        if (errorMessage) {
+          setActionError(errorMessage);
+          return;
+        }
+        setDraft('');
+        setFreeInputOpen(false);
+      },
+    });
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -547,16 +568,18 @@ function PendingCard({
   };
 
   const handleDismiss = async () => {
-    setDismissing(true);
     setActionError(null);
-    try {
-      const errorMessage = await onDismiss();
-      if (errorMessage) {
-        setActionError(errorMessage);
-      }
-    } finally {
-      setDismissing(false);
-    }
+    // 同提交：置 dismissing 与 try/finally 一起下沉到
+    // `runClarificationCardActionOnce`（见其注释）。
+    await runClarificationCardActionOnce({
+      setBusy: setDismissing,
+      run: async () => {
+        const errorMessage = await onDismiss();
+        if (errorMessage) {
+          setActionError(errorMessage);
+        }
+      },
+    });
   };
 
   return (

@@ -1,6 +1,15 @@
 import { createSettingsClient, type SettingsProvidersLoadResult } from '@openAwork/web-client';
 import type { ModelReasoningOption } from '@openAwork/shared-ui';
-import { DEFAULT_IMAGE_GENERATION_SIZE, normalizeImageGenerationSize } from '@openAwork/shared';
+import {
+  DEFAULT_IMAGE_GENERATION_SIZE,
+  IMAGE_GENERATION_COUNT_RANGE,
+  IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE,
+  normalizeImageGenerationSize,
+  type ImageGenerationBackground,
+  type ImageGenerationModeration,
+  type ImageGenerationOutputFormat,
+  type ImageGenerationQuality,
+} from '@openAwork/shared';
 import type { ReasoningEffort } from '../../components/conversation-runtime/messages/support.js';
 import type { ModelSelectionSource } from '../../pages/chat-page/conversation/settings/model-selection-source.js';
 import { useDisplayPreferencesStore } from '../../stores/settings/display-preferences.js';
@@ -26,9 +35,20 @@ export interface SavedChatImageDefaults {
   providerId: string;
   modelId: string;
   size: string;
-  quality: 'low' | 'medium' | 'high';
-  outputFormat: 'png' | 'jpeg' | 'webp';
-  background: 'auto' | 'opaque';
+  quality: ImageGenerationQuality;
+  outputFormat: ImageGenerationOutputFormat;
+  background: ImageGenerationBackground;
+  moderation: ImageGenerationModeration;
+  /** 压缩率百分比，仅 jpeg / webp 生效；缺省表示交由上游决定。 */
+  outputCompression?: number | undefined;
+  /** 单次生成张数（对应官方 `n`）。 */
+  count: number;
+  /**
+   * 局部编辑遮罩的产物 id（官方 `/images/edits` 的 `mask`）。
+   * 这是**会话内**选择，服务端 schema 不收录该字段，因此不会被持久化——
+   * 与「参考图」一样每次进会话都要重新挑。
+   */
+  maskArtifactId?: string | null | undefined;
 }
 
 export interface ChatSettingsProvider {
@@ -70,6 +90,50 @@ function normalizeReasoningEffort(value: unknown): ReasoningEffort {
     value === 'max'
     ? value
     : 'medium';
+}
+
+const IMAGE_GENERATION_QUALITY_VALUES: readonly ImageGenerationQuality[] = [
+  'auto',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+function normalizeImageGenerationQuality(value: unknown): ImageGenerationQuality {
+  return IMAGE_GENERATION_QUALITY_VALUES.find((candidate) => candidate === value) ?? 'medium';
+}
+
+function normalizeImageGenerationBackground(value: unknown): ImageGenerationBackground {
+  if (value === 'opaque' || value === 'transparent') {
+    return value;
+  }
+  return 'auto';
+}
+
+function normalizeImageGenerationModeration(value: unknown): ImageGenerationModeration {
+  return value === 'low' ? 'low' : 'auto';
+}
+
+function normalizeImageGenerationOutputCompression(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return undefined;
+  }
+  return value >= IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE.min &&
+    value <= IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE.max
+    ? value
+    : undefined;
+}
+
+function normalizeImageGenerationCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return IMAGE_GENERATION_COUNT_RANGE.min;
+  }
+  return Math.min(
+    Math.max(value, IMAGE_GENERATION_COUNT_RANGE.min),
+    IMAGE_GENERATION_COUNT_RANGE.max,
+  );
 }
 
 export async function loadSavedChatSessionDefaults(
@@ -150,17 +214,18 @@ export async function loadSavedChatSessionDefaultsResult(
           data.imageGenerationDefaults?.size,
           DEFAULT_IMAGE_GENERATION_SIZE,
         ),
-        quality:
-          data.imageGenerationDefaults?.quality === 'low' ||
-          data.imageGenerationDefaults?.quality === 'high'
-            ? data.imageGenerationDefaults.quality
-            : 'medium',
+        quality: normalizeImageGenerationQuality(data.imageGenerationDefaults?.quality),
         outputFormat:
           data.imageGenerationDefaults?.outputFormat === 'jpeg' ||
           data.imageGenerationDefaults?.outputFormat === 'webp'
             ? data.imageGenerationDefaults.outputFormat
             : 'png',
-        background: data.imageGenerationDefaults?.background === 'opaque' ? 'opaque' : 'auto',
+        background: normalizeImageGenerationBackground(data.imageGenerationDefaults?.background),
+        moderation: normalizeImageGenerationModeration(data.imageGenerationDefaults?.moderation),
+        outputCompression: normalizeImageGenerationOutputCompression(
+          data.imageGenerationDefaults?.outputCompression,
+        ),
+        count: normalizeImageGenerationCount(data.imageGenerationDefaults?.count),
       },
       providers,
     },

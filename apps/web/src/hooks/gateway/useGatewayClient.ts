@@ -2,6 +2,13 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { stripOversizedInlineImageUrls } from './sanitize-input-image-parts.js';
+import {
+  isNonTerminalStreamErrorCode,
+  NON_TERMINAL_STREAM_ERROR_CODES,
+} from './stream-error-classification.js';
+
+// 保持既有对外出口：错误码分类实现已下沉到纯模块，消费方仍可从本文件导入。
+export { isNonTerminalStreamErrorCode, NON_TERMINAL_STREAM_ERROR_CODES };
 import type {
   DialogueMode,
   InputImageContent,
@@ -37,7 +44,18 @@ interface StreamCallbacks {
     upstreamSummary?: UpstreamStreamSummary,
   ) => void;
   onError: (code: string, message?: string, technicalDetail?: string) => void;
-  onReconnectRequired?: (reason: 'attach_stream_disconnected', technicalDetail?: string) => void;
+  /**
+   * 需要上层确认后再决定「重连 / 收敛」。
+   *
+   * - `attach_stream_disconnected`：确实收到过事件后中断，属于真实断线，应提示并重连。
+   * - `attach_stream_silent_close`：SSE 打开后**一个事件都没收到**就结束。EventSource
+   *   无法区分「服务端回放完毕正常结束」与「网络中断」，这种情形更多是前者
+   *   （游标已到末尾 / 网关立即 EOF），不应向用户报「连接中断」，只需静默确认。
+   */
+  onReconnectRequired?: (
+    reason: 'attach_stream_disconnected' | 'attach_stream_silent_close',
+    technicalDetail?: string,
+  ) => void;
   model?: string;
   thinkingEnabled?: boolean;
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -64,6 +82,13 @@ interface GatewayClient {
    * 用于会话切换等纯客户端生命周期收尾（用户主动停止请用 `stopStream`）。
    */
   closeTransports: () => void;
+  /**
+   * 清掉本地缓存的「当前活跃流」快照。
+   *
+   * 网关权威确认没有活跃流后必须调用：`activeGatewayStreamSessionId` 会一直指向
+   * 当前会话，使 attach 判定永不进入终态（反复 attach → 关闭 → 再 attach）。
+   */
+  clearActiveStreamSnapshot: () => void;
   getActiveStreamClientRequestId: () => string | null;
   getActiveStreamSessionId: () => string | null;
   stream: (sessionId: string, message: string, callbacks: StreamCallbacks) => void;
@@ -171,6 +196,13 @@ interface ActiveStreamSnapshot {
 }
 
 interface AttachEventSourceLike {
+  /**
+   * 可选：仅用于接收网关的具名事件（`attach-replay-end`）。
+   *
+   * 声明成可选是因为测试替身与部分运行时只实现了四个 `on*` 句柄；调用点必须先
+   * 判空再订阅，缺失时退化为「没有正常结束信号」的旧判定。
+   */
+  addEventListener?: (type: string, listener: (event: MessageEvent) => void) => void;
   close: EventSource['close'];
   onerror: EventSource['onerror'];
   onmessage: EventSource['onmessage'];
@@ -285,16 +317,48 @@ export async function resolveFreshStreamToken(fallbackToken: string | null): Pro
   return useAuthStore.getState().accessToken ?? currentToken;
 }
 
-function classifyAttachStreamError(input: {
+export type AttachStreamCloseAction =
+  'open_failed' | 'cancelled' | 'silent_close' | 'reconnect_required';
+
+/**
+ * 判定 attach SSE 关闭的语义。
+ *
+ * 关键点：EventSource 对「服务端正常关闭响应（EOF）」与「网络中断」**都**只触发
+ * `onerror`，浏览器无法区分。此前实现只要 `opened` 过且不是用户停止，就一律判为
+ * `reconnect_required`，于是「网关回放完历史后立即结束响应」会被前端当成断线：
+ * 立刻弹「连接中断」，再重连、再结束，形成用户看到的「老是断开」。
+ *
+ * 这里用**是否真的收到过有效事件**来分档：
+ * - 0 事件 → `silent_close`：静默交给上层确认活跃流，不报错、不提示；
+ * - 收到过事件后断开 → `reconnect_required`：真实中断，需要提示 + 重连。
+ */
+export function classifyAttachStreamError(input: {
   opened: boolean;
+  receivedEventCount: number;
+  /**
+   * 服务端是否在结束响应前显式发过 `attach-replay-end`。
+   *
+   * 该分支的语义是「流已终止，历史重放完毕，本次 attach 到此为止」——它一定是
+   * 正常结束，哪怕重放出了若干条新事件。缺了这个判据，只要重放出过事件就会被判成
+   * 断线，进而进入封顶 30s 的指数退避重连（表现为「自动重连中 · 约 Ns 后重试」）。
+   */
+  serverEndedCleanly?: boolean;
   stopRequested: boolean;
-}): 'open_failed' | 'cancelled' | 'reconnect_required' {
+}): AttachStreamCloseAction {
   if (!input.opened) {
     return 'open_failed';
   }
 
   if (input.stopRequested) {
     return 'cancelled';
+  }
+
+  if (input.serverEndedCleanly === true) {
+    return 'silent_close';
+  }
+
+  if (input.receivedEventCount === 0) {
+    return 'silent_close';
   }
 
   return 'reconnect_required';
@@ -352,6 +416,19 @@ export function connectAttachEventSource(
   return new Promise<boolean>((resolve) => {
     let settled = false;
     let opened = false;
+    let openedAtMs = 0;
+    /** 本次 attach 真正收到的有效事件数，用于区分「正常 EOF」与「传输中断」。 */
+    let receivedEventCount = 0;
+    /**
+     * 服务端在「重放完毕」分支主动发过 `attach-replay-end`。
+     *
+     * EventSource 无法区分「服务端正常结束响应」与「网络断开」，两者都只触发
+     * `onerror`。而「流已终止 → 重放历史 → 立即 EOF」是最常见的正常路径，若仅凭
+     * 「收到过事件」就判断线，就会进入 800ms 起、封顶 30s 的指数退避重连（用户看到
+     * 「自动重连中 · 约 25.6s 后重试」），而连接本身完全正常。这个信号把该路径
+     * 明确标为正常结束。
+     */
+    let serverEndedCleanly = false;
     const deliveredEventIds = new Set<string>();
 
     const cleanup = (clearSnapshot: boolean, eventSource: AttachEventSourceLike) => {
@@ -391,6 +468,14 @@ export function connectAttachEventSource(
         );
       },
       onErrorChunk: (chunk) => {
+        // 与主链路（WS / SSE 回退）保持同一契约：流内非终态错误（如上游丢弃一次
+        // 入参畸形的工具调用）只透传提示，不结算、不断连，让后续 delta / 工具调用 /
+        // done 照常到达。按终态处理会立刻掐断 attach 传输，并把仍在后台执行的会话
+        // 结算成「已结束 + 错误横幅」，用户只能靠刷新才看到后续内容。
+        if (isNonTerminalStreamErrorCode(chunk.code)) {
+          callbacks.onEvent?.(chunk);
+          return;
+        }
         settled = true;
         cleanup(true, eventSource);
         if (isCancellationStreamCode(chunk.code)) {
@@ -410,8 +495,17 @@ export function connectAttachEventSource(
 
     eventSource.onopen = () => {
       opened = true;
+      openedAtMs = Date.now();
       resolve(true);
     };
+
+    // 具名事件：服务端「重放完毕、即将正常结束响应」的显式声明。
+    // 兼容旧网关（不发该事件）与测试替身（可能未实现 addEventListener）。
+    if (typeof eventSource.addEventListener === 'function') {
+      eventSource.addEventListener('attach-replay-end', () => {
+        serverEndedCleanly = true;
+      });
+    }
 
     eventSource.onmessage = (event) => {
       const parsed = safeParseGatewayEventData<RunEventEnvelope | StreamChunk | RunEvent>({
@@ -432,9 +526,16 @@ export function connectAttachEventSource(
         // `afterSeq` is an exclusive cursor. A reconnect can still deliver
         // the boundary row when the SSE subscription is established; do not
         // feed that row into the thinking/text accumulator a second time.
+        //
+        // 这里**必须先过滤再计数**：`receivedEventCount` 的唯一用途是让
+        // `classifyAttachStreamError` 区分「服务端回放完毕正常 EOF」与「真实传输中断」。
+        // 若把已被消费、因此原样丢弃的边界行也算进去，那么「游标已到末尾 → 网关立即
+        // EOF」这种最常见的正常结束会被误判成断线，于是前端弹「自动重连中」并按退避
+        // 无限重连——而连接本身完全正常。
         if (cursorSeq <= requestedAfterSeq) {
           return;
         }
+        receivedEventCount += 1;
         const currentActiveRequest = getCurrentActiveRequest();
         if (currentActiveRequest?.clientRequestId === activeStream.clientRequestId) {
           syncActiveRequest({
@@ -460,6 +561,8 @@ export function connectAttachEventSource(
         );
         return;
       }
+      // 裸chunk（无cursor）没有可过滤的游标，收到即视为有效投递。
+      receivedEventCount += 1;
       handleChunk(parsed);
     };
 
@@ -469,6 +572,10 @@ export function connectAttachEventSource(
       }
       const errorAction = classifyAttachStreamError({
         opened,
+        receivedEventCount,
+        // 服务端已声明「重放完毕的正常结束」：即便重放出过事件，也是正常 EOF，
+        // 不能按断线处理（否则进入指数退避重连循环）。
+        serverEndedCleanly,
         stopRequested: isStopRequested(),
       });
       if (errorAction === 'open_failed') {
@@ -484,8 +591,37 @@ export function connectAttachEventSource(
         return;
       }
 
+      const elapsedMs = openedAtMs === 0 ? 0 : Date.now() - openedAtMs;
+      // 一次性诊断（不是每帧）：下次出现「老是断开」时，这几项能直接区分
+      // 正常 EOF / 网关立即关闭 / 真实网络中断。
+      console.warn('[ATTACH] stream closed', {
+        action: errorAction,
+        elapsedMs,
+        gatewayUrl,
+        opened,
+        readyState: (eventSource as { readyState?: number }).readyState ?? null,
+        receivedEventCount,
+        sessionId,
+      });
+
       settled = true;
       cleanup(false, eventSource);
+
+      if (errorAction === 'silent_close') {
+        // 打开后 0 事件：绝大多数是「服务端回放完毕立即结束」或校验失败后立即关闭。
+        // 不报错、不弹红条，交给上层确认活跃流：仍活跃则重连，否则收敛到结束。
+        if (callbacks.onReconnectRequired) {
+          callbacks.onReconnectRequired('attach_stream_silent_close');
+          return;
+        }
+        callbacks.onError(
+          'ATTACH_STREAM_DISCONNECTED',
+          '实时流连接已断开。',
+          `SSE 打开后未收到任何事件即结束。Gateway：${gatewayUrl}；会话：${sessionId}。`,
+        );
+        return;
+      }
+
       const detail = `连接在${opened ? '流式传输过程中' : '收到 SSE 响应前'}中断。Gateway：${gatewayUrl}；会话：${sessionId}。浏览器没有提供底层失败原因。`;
       if (callbacks.onReconnectRequired) {
         callbacks.onReconnectRequired('attach_stream_disconnected', detail);
@@ -1051,6 +1187,14 @@ export function useGatewayClient(token: string | null): GatewayClient {
       // §0.153: chat-WS half-open liveness probe state (scoped to this stream).
       let livenessTimer: ReturnType<typeof setInterval> | null = null;
       let lastServerActivityAt = 0;
+      /**
+       * 服务端是否回过一次 `pong`。
+       *
+       * 只用于诊断：为空说明「心跳探针从未被服务端确认」，此时 40s 静默超时关闭
+       * 属于**误判断开**（服务端只是不会回 pong），而不是真的半开连接。下次再出现
+       * 「老是断开」时，打印这一项就能区分是网络问题还是协议对端缺失。
+       */
+      let pongReceived = false;
       const stopLivenessProbe = () => {
         if (livenessTimer) {
           clearInterval(livenessTimer);
@@ -1086,6 +1230,13 @@ export function useGatewayClient(token: string | null): GatewayClient {
           );
         },
         onErrorChunk: (chunk) => {
+          // 流内非终态错误（如单次工具调用被上游丢弃）：只透传提示，不结算、不断连，
+          // 让后续 delta / tool_call / done 照常渲染。按终态处理会把仍在后台运行的
+          // 会话误显示为「已结束」，后续内容只能靠刷新后 attach 补齐。
+          if (isNonTerminalStreamErrorCode(chunk.code)) {
+            callbacks.onEvent?.(chunk);
+            return;
+          }
           settled = true;
           cleanup();
           if (isCancellationStreamCode(chunk.code)) {
@@ -1307,6 +1458,11 @@ export function useGatewayClient(token: string | null): GatewayClient {
             if (action === 'reconnect') {
               // Server silent past tolerance → presume half-open. Closing runs
               // the onclose handler, which falls back to SSE (idempotent).
+              console.warn('[STREAM] WS liveness timeout, closing socket', {
+                msSinceLastServerActivity: Date.now() - lastServerActivityAt,
+                pongReceived,
+                sessionId,
+              });
               stopLivenessProbe();
               try {
                 ws.close();
@@ -1349,6 +1505,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
           // §0.153: swallow the liveness `pong` (it already refreshed activity
           // above) so it is never forwarded to consumers as a stream event.
           if ((chunk as { type?: unknown }).type === 'pong') {
+            pongReceived = true;
             return;
           }
           handleChunk(chunk);
@@ -1399,6 +1556,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
   return useMemo(
     () => ({
       attachToActiveStream,
+      clearActiveStreamSnapshot: () => syncActiveRequest(null),
       closeTransports,
       getActiveStreamClientRequestId,
       getActiveStreamSessionId,
@@ -1412,8 +1570,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
       getActiveStreamSessionId,
       stream,
       stopStream,
+      syncActiveRequest,
     ],
   );
 }
-
-export { classifyAttachStreamError };

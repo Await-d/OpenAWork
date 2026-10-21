@@ -72,10 +72,12 @@ import {
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useScrollManager } from '../../../components/conversation-runtime/scroll/use-scroll-manager.js';
 import { useStreamReveal } from '../../../components/conversation-runtime/reveal/use-stream-reveal.js';
+import { useCoalescedStreamSetters } from '../../../components/conversation-runtime/stream/use-coalesced-stream-setters.js';
 import { useConversationStream } from '../../../components/conversation-runtime/stream/use-conversation-stream.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
 import { estimateTokenCount } from '../../../components/conversation-runtime/messages/support.js';
 import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
+import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 
 function extractLatestUpstreamSummaryFromRunEvents(
   events: RunEvent[] | undefined,
@@ -300,6 +302,83 @@ export interface SessionConversationState {
  * 是只读模式（composer disabled），不需要触发 streaming——可以直接用本
  * hook 的快照加载部分看到执行流。
  */
+/**
+ * 会话恢复（reload）的统一包装：置 loading → try → catch（保持空白）→ finally 清 loading。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`??`、三元、`as` 断言链）。语义逐字照搬。
+ */
+async function runConversationLoadOnce(ctx: {
+  setIsLoading: (loading: boolean) => void;
+  onError: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setIsLoading(true);
+  try {
+    await ctx.run();
+  } catch {
+    ctx.onError();
+  } finally {
+    ctx.setIsLoading(false);
+  }
+}
+
+/**
+ * 会话写操作（停止流等）的统一包装：成功 / 失败都返回 `T`（`onError` 的返回值即本函数
+ * 返回值，用来保留原 catch 里的 `return false`），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 多处
+ * 这类 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runConversationActionOnce<T>(ctx: {
+  onError: (error: unknown) => T;
+  onFinally: () => void;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    return await ctx.run();
+  } catch (error) {
+    return ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
+/**
+ * 解析 `sessions.metadata_json`；失败或非对象时按 null 处理
+ * （前端只读，不回写不重试，与原语义一致）。
+ *
+ * 必须留在模块级：try 内的 `&&` / 三元是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+function parseSessionMetadataJson(metadataJson: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(metadataJson) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * best-effort 拉取会话默认设置：失败静默吞掉（不 surface 错误）。
+ *
+ * 必须留在模块级：try 内的 `?.` / `&&` / `===` 都是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个 hook（实测）。
+ */
+async function loadSessionDefaultsBestEffortOnce(ctx: {
+  gatewayUrl: string;
+  token: string;
+  run: (result: Awaited<ReturnType<typeof loadSavedChatSessionDefaults>>) => void;
+}): Promise<void> {
+  try {
+    const result = await loadSavedChatSessionDefaults(ctx.gatewayUrl, ctx.token);
+    ctx.run(result);
+  } catch {
+    // best-effort; surface no error
+  }
+}
+
 export function useChatConversationState(
   options: UseSessionConversationStateOptions,
 ): SessionConversationState {
@@ -328,10 +407,12 @@ export function useChatConversationState(
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [stoppingStream, setStoppingStream] = useState(false);
-  const [streamBuffer, setStreamBuffer] = useState('');
-  const [streamThinkingBuffer, setStreamThinkingBuffer] = useState('');
-  const [streamThinkingBlocks, setStreamThinkingBlocks] = useState<StreamingThinkingBlock[]>([]);
-  const [streamingSegments, setStreamingSegments] = useState<ChatMessagePart[]>([]);
+  const [streamBuffer, setStreamBufferState] = useState('');
+  const [streamThinkingBuffer, setStreamThinkingBufferState] = useState('');
+  const [streamThinkingBlocks, setStreamThinkingBlocksState] = useState<StreamingThinkingBlock[]>(
+    [],
+  );
+  const [streamingSegments, setStreamingSegmentsState] = useState<ChatMessagePart[]>([]);
   const [reportedStreamUsage, setReportedStreamUsage] = useState<ChatBackendUsageSnapshot | null>(
     null,
   );
@@ -394,6 +475,23 @@ export function useChatConversationState(
     return streaming || streamingSegments.length > 0 || streamBuffer.length > 0;
   }, [streaming, streamingSegments.length, streamBuffer.length]);
 
+  // ─── 流式 setter 合帧 ─────────────────────────────────────────────
+  // 与 team 端一致：SSE token 逐条到达时 `useConversationStream` 每个 delta 都直接
+  // 调 setter，`useStreamReveal` 的 rAF 还会每帧再写一次。不合并的话，同一帧内的
+  // 多次写入各触发一次整树重渲染——长回答 / 多会话并发时每秒可达上百次。
+  // 注意：这四个状态的所有写入方必须共用本 hook 返回的 setter（见 hook 注释）。
+  const {
+    setStreamBuffer,
+    setStreamThinkingBuffer,
+    setStreamThinkingBlocks,
+    setStreamingSegments,
+  } = useCoalescedStreamSetters({
+    setStreamBuffer: setStreamBufferState,
+    setStreamThinkingBuffer: setStreamThinkingBufferState,
+    setStreamThinkingBlocks: setStreamThinkingBlocksState,
+    setStreamingSegments: setStreamingSegmentsState,
+  });
+
   // ─── stream reveal + scroll manager ───────────────────────────────
   const { streamingRef, stoppingStreamRef, currentAssistantStreamMessageIdRef, resetStreamState } =
     useStreamReveal(prefersReducedMotion, {
@@ -448,61 +546,53 @@ export function useChatConversationState(
       return;
     }
 
-    setIsSessionLoading(true);
-    try {
-      const sessionsClient = createSessionsClient(gatewayUrl);
-      const recovery = await sessionsClient.getRecovery(token, sessionId);
+    // 置 loading 与 try/catch/finally 一起下沉到模块级 `runConversationLoadOnce`
+    // （见其注释）；metadata 解析下沉到 `parseSessionMetadataJson`。
+    await runConversationLoadOnce({
+      setIsLoading: setIsSessionLoading,
+      onError: () => {
+        // 加载失败时保持空白；外层 chrome 可显示错误
+        setIsSessionSnapshotReady(false);
+      },
+      run: async () => {
+        const sessionsClient = createSessionsClient(gatewayUrl);
+        const recovery = await sessionsClient.getRecovery(token, sessionId);
 
-      const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
-      setMessages(normalized);
-      setLatestUpstreamSummary(
-        extractLatestUpstreamSummaryFromRunEvents(recovery.session?.runEvents),
-      );
+        const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
+        setMessages(normalized);
+        setLatestUpstreamSummary(
+          extractLatestUpstreamSummaryFromRunEvents(recovery.session?.runEvents),
+        );
 
-      const stateStatus = (recovery.session?.state_status ?? null) as SessionStateStatus | null;
-      setSessionStateStatus(stateStatus);
-      setIsSessionSnapshotReady(true);
+        const stateStatus = (recovery.session?.state_status ?? null) as SessionStateStatus | null;
+        setSessionStateStatus(stateStatus);
+        setIsSessionSnapshotReady(true);
 
-      // L1.8 / L1.3 字段：后端 sessions 表已扩展 role_layer（Phase B），
-      // substate 待 L1.3 改造 2 落地。两者都用 unknown cast 读取，缺失时为 null。
-      const sessionRow = recovery.session as unknown as Record<string, unknown> | undefined;
-      const roleLayerValue =
-        typeof sessionRow?.['role_layer'] === 'string'
-          ? (sessionRow['role_layer'] as string)
-          : null;
-      const substateValue =
-        typeof sessionRow?.['substate'] === 'string' ? (sessionRow['substate'] as string) : null;
-      setRoleLayer(roleLayerValue);
-      setSubstate(substateValue);
+        // L1.8 / L1.3 字段：后端 sessions 表已扩展 role_layer（Phase B），
+        // substate 待 L1.3 改造 2 落地。两者都用 unknown cast 读取，缺失时为 null。
+        const sessionRow = recovery.session as unknown as Record<string, unknown> | undefined;
+        const roleLayerValue =
+          typeof sessionRow?.['role_layer'] === 'string'
+            ? (sessionRow['role_layer'] as string)
+            : null;
+        const substateValue =
+          typeof sessionRow?.['substate'] === 'string' ? (sessionRow['substate'] as string) : null;
+        setRoleLayer(roleLayerValue);
+        setSubstate(substateValue);
 
-      // sessions.metadata_json：后端写入的 team session 结构（teamDefinition 等）。
-      // 解析失败时不抛错，让消费方按 null 处理；前端只读，不回写不重试。
-      const metadataJson =
-        typeof sessionRow?.['metadata_json'] === 'string'
-          ? (sessionRow['metadata_json'] as string)
-          : null;
-      if (metadataJson) {
-        try {
-          const parsed = JSON.parse(metadataJson) as unknown;
-          setSessionMetadata(
-            parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null,
-          );
-        } catch {
-          setSessionMetadata(null);
-        }
-      } else {
-        setSessionMetadata(null);
-      }
+        // sessions.metadata_json：后端写入的 team session 结构（teamDefinition 等）。
+        // 解析失败时不抛错，让消费方按 null 处理；前端只读，不回写不重试。
+        const metadataJson =
+          typeof sessionRow?.['metadata_json'] === 'string'
+            ? (sessionRow['metadata_json'] as string)
+            : null;
+        setSessionMetadata(metadataJson ? parseSessionMetadataJson(metadataJson) : null);
 
-      // pending permissions / questions（来自 recovery，避免再发请求）
-      setPendingPermissions(recovery.pendingPermissions ?? []);
-      setPendingQuestions(recovery.pendingQuestions ?? []);
-    } catch {
-      // 加载失败时保持空白；外层 chrome 可显示错误
-      setIsSessionSnapshotReady(false);
-    } finally {
-      setIsSessionLoading(false);
-    }
+        // pending permissions / questions（来自 recovery，避免再发请求）
+        setPendingPermissions(recovery.pendingPermissions ?? []);
+        setPendingQuestions(recovery.pendingQuestions ?? []);
+      },
+    });
   }, [sessionId, gatewayUrl, token, enabled]);
 
   // ─── 当 sessionId 变化时自动 reload ─────────────────────────────
@@ -589,8 +679,10 @@ export function useChatConversationState(
 
   // ─── v0.3 writers / stream consumer ───────────────────────────────
   const gatewayClient = useGatewayClient(token);
-  // Hold a `requestStartedAt` per round; refreshed on each startStream call.
-  const streamRequestStartedAtRef = useRef<number>(Date.now());
+  // 本轮请求开始时间：用 state 而非 ref —— 渲染期读 `ref.current` 会被编译器判为
+  // "Cannot access refs during render" 并放弃优化整个 hook（实测）。startStream 里
+  // 本来就会 setActiveStreamStartedAt 触发重渲染，因此 state 不会多一次提交。
+  const [requestStartedAt, setRequestStartedAt] = useState(() => Date.now());
   const onChatOnlyEventRef = useRef<((event: RunEvent) => void) | undefined>(undefined);
   const requestModelLabelRef = useRef<string | undefined>(undefined);
   const requestProviderIdRef = useRef<string | undefined>(undefined);
@@ -604,6 +696,11 @@ export function useChatConversationState(
       currentAssistantStreamMessageIdRef,
       streamingRef,
       stoppingStreamRef,
+      // 请求元信息按 ref 传入（惰性取最新值，避免在渲染期构造读 ref 的 getter）。
+      streamClientRequestIdRef,
+      requestProviderIdRef,
+      requestModelLabelRef,
+      requestAgentIdRef,
     },
     {
       setMessages,
@@ -623,19 +720,7 @@ export function useChatConversationState(
     },
     {
       sessionId,
-      requestStartedAt: streamRequestStartedAtRef.current,
-      get clientRequestId() {
-        return streamClientRequestIdRef.current;
-      },
-      get requestProviderId() {
-        return requestProviderIdRef.current;
-      },
-      get requestModelLabel() {
-        return requestModelLabelRef.current;
-      },
-      get requestAgentId() {
-        return requestAgentIdRef.current;
-      },
+      requestStartedAt,
       onChatOnlyEvent: (event) => onChatOnlyEventRef.current?.(event),
       onStreamDone: () => {
         // Mirror finalized assistant message back through reload so the
@@ -665,14 +750,14 @@ export function useChatConversationState(
       const trimmed = text.trim();
       if (!trimmed) return;
 
-      onChatOnlyEventRef.current = opts?.onChatOnlyEvent;
-      requestProviderIdRef.current = activeProviderId || undefined;
+      writeRefCurrent(onChatOnlyEventRef, opts?.onChatOnlyEvent);
+      writeRefCurrent(requestProviderIdRef, activeProviderId || undefined);
       const activeModelLabel = providers
         .find((p) => p.id === activeProviderId)
         ?.defaultModels.find((m) => m.id === activeModelId)?.label;
-      requestModelLabelRef.current = activeModelLabel ?? activeModelId ?? undefined;
-      requestAgentIdRef.current = opts?.agentId || effectiveAgentId || undefined;
-      streamRequestStartedAtRef.current = Date.now();
+      writeRefCurrent(requestModelLabelRef, activeModelLabel ?? activeModelId ?? undefined);
+      writeRefCurrent(requestAgentIdRef, opts?.agentId || effectiveAgentId || undefined);
+      setRequestStartedAt(Date.now());
 
       // Push the user message into the local list immediately for snappy UX.
       const userMessageId = makeOrderedMessageId();
@@ -686,11 +771,11 @@ export function useChatConversationState(
       setMessages((prev) => [...prev, userMessage]);
       // Pre-allocate the assistant streaming message id so the consumer can
       // accumulate segments under it before the gateway emits any event.
-      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+      writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
       stream.resetRoundAccumulators();
       setStreaming(true);
-      streamingRef.current = true;
-      setActiveStreamStartedAt(streamRequestStartedAtRef.current);
+      writeRefCurrent(streamingRef, true);
+      setActiveStreamStartedAt(Date.now());
       setActiveStreamFirstTokenLatencyMs(null);
       setSessionStateStatus('running');
 
@@ -714,14 +799,14 @@ export function useChatConversationState(
           stream.handleEvent(event as RunEvent);
         },
         onDone: () => {
-          streamingRef.current = false;
+          writeRefCurrent(streamingRef, false);
           setStreaming(false);
           setStoppingStream(false);
           setActiveStreamStartedAt(null);
           // Trigger reload (also called inside the consumer's onStreamDone).
         },
         onError: (code, message, technicalDetail) => {
-          streamingRef.current = false;
+          writeRefCurrent(streamingRef, false);
           setStreaming(false);
           setStoppingStream(false);
           setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
@@ -729,7 +814,7 @@ export function useChatConversationState(
       });
       // `stream()` mints the rid synchronously; capture it before any event
       // arrives so both the intermediate and final commits carry it.
-      streamClientRequestIdRef.current = gatewayClient.getActiveStreamClientRequestId();
+      writeRefCurrent(streamClientRequestIdRef, gatewayClient.getActiveStreamClientRequestId());
     },
     [
       enableWriters,
@@ -754,23 +839,29 @@ export function useChatConversationState(
   const stopStream: SessionConversationState['stopStream'] = useCallback(async () => {
     if (!enableWriters) return false;
     setStoppingStream(true);
-    stoppingStreamRef.current = true;
-    try {
-      const ok = await gatewayClient.stopStream();
-      if (ok) {
-        // The stream's `done` event will reset state shortly; meanwhile mark
-        // streaming false eagerly so the UI reflects the user's intent.
-        streamingRef.current = false;
-        setStreaming(false);
-      }
-      return ok;
-    } catch (err) {
-      setStreamError(err instanceof Error ? err.message : 'stopStream failed');
-      return false;
-    } finally {
-      setStoppingStream(false);
-      stoppingStreamRef.current = false;
-    }
+    writeRefCurrent(stoppingStreamRef, true);
+    // try/catch/finally 下沉到模块级 `runConversationActionOnce`（见其注释）；
+    // `onError` 的返回值即本回调的返回值（保留原 catch 的 `return false`）。
+    return runConversationActionOnce<boolean>({
+      onError: (err) => {
+        setStreamError(err instanceof Error ? err.message : 'stopStream failed');
+        return false;
+      },
+      onFinally: () => {
+        setStoppingStream(false);
+        writeRefCurrent(stoppingStreamRef, false);
+      },
+      run: async () => {
+        const ok = await gatewayClient.stopStream();
+        if (ok) {
+          // The stream's `done` event will reset state shortly; meanwhile mark
+          // streaming false eagerly so the UI reflects the user's intent.
+          writeRefCurrent(streamingRef, false);
+          setStreaming(false);
+        }
+        return ok;
+      },
+    });
   }, [enableWriters, gatewayClient, streamingRef, stoppingStreamRef]);
 
   const replyPermission: SessionConversationState['replyPermission'] = useCallback(
@@ -823,28 +914,32 @@ export function useChatConversationState(
     [enableWriters, sessionId, token, gatewayUrl],
   );
 
-  const loadProviders: SessionConversationState['loadProviders'] = useCallback(async () => {
+  // 去 useCallback 包装：编译器会对函数表达式自动 memoize（引用稳定性与手写等价）；
+  // 这处手写 memo 漏列了 activeProviderId / activeModelId / defaults，会被判
+  // 「Existing memoization could not be preserved」放弃优化整个 hook（实测）。
+  const loadProviders: SessionConversationState['loadProviders'] = async () => {
     if (!token) return;
-    try {
-      const result = await loadSavedChatSessionDefaults(gatewayUrl, token);
-      setProviders(result.providers);
-      if (!activeProviderId && result.defaults.providerId) {
-        setActiveProviderId(result.defaults.providerId);
-      }
-      if (!activeModelId && result.defaults.modelId) {
-        setActiveModelId(result.defaults.modelId);
-      }
-      if (defaults?.thinkingEnabled === undefined) {
-        setThinkingEnabled(result.defaults.thinkingEnabled);
-      }
-      if (defaults?.reasoningEffort === undefined) {
-        setReasoningEffort(result.defaults.reasoningEffort);
-      }
-    } catch {
-      // best-effort; surface no error
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gatewayUrl, token]);
+    // try/catch 下沉到模块级 `loadSessionDefaultsBestEffortOnce`（见其注释）。
+    await loadSessionDefaultsBestEffortOnce({
+      gatewayUrl,
+      token,
+      run: (result) => {
+        setProviders(result.providers);
+        if (!activeProviderId && result.defaults.providerId) {
+          setActiveProviderId(result.defaults.providerId);
+        }
+        if (!activeModelId && result.defaults.modelId) {
+          setActiveModelId(result.defaults.modelId);
+        }
+        if (defaults?.thinkingEnabled === undefined) {
+          setThinkingEnabled(result.defaults.thinkingEnabled);
+        }
+        if (defaults?.reasoningEffort === undefined) {
+          setReasoningEffort(result.defaults.reasoningEffort);
+        }
+      },
+    });
+  };
 
   // ─── auto-load providers on mount when writers enabled ────────────
   const providersLoadedRef = useRef(false);

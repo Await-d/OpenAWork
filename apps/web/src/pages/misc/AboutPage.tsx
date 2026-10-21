@@ -248,12 +248,17 @@ function UpdateSection({
   const desktopCancelRequestedRef = useRef(false);
 
   const stopGatewayBeforeInstall = useCallback(async () => {
-    try {
-      await stopDesktopGateway();
-    } catch (stopError) {
-      const message = stopError instanceof Error ? stopError.message : String(stopError);
-      throw new UpdateError('unknown', `安装更新前停止本地网关失败：${message}`);
-    }
+    // onError 内转换错误类型后 throw —— 异常继续从 runAboutActionOnce 向外传播，
+    // 与原写法「catch 里 throw 新错误」等价（见其注释）。
+    await runAboutActionOnce({
+      onError: (stopError) => {
+        const message = stopError instanceof Error ? stopError.message : String(stopError);
+        throw new UpdateError('unknown', `安装更新前停止本地网关失败：${message}`);
+      },
+      run: async () => {
+        await stopDesktopGateway();
+      },
+    });
   }, []);
 
   const runInlineDesktopCheck = useCallback(async () => {
@@ -264,18 +269,21 @@ function UpdateSection({
     setDesktopDownloaded(0);
     setDesktopTotal(null);
     setProxyUsed(null);
-    try {
-      console.log('[about-inline-update] 开始检查更新…');
-      const result = await checkForUpdate();
-      setDesktopResult(result);
-      setReleaseNotes(result.notes);
-      setProxyUsed(result.proxyUsed);
-      setDesktopState(result.available ? 'available' : 'up-to-date');
-    } catch (error) {
-      console.error('[about-inline-update] 检查更新失败:', error);
-      setDesktopError(toUpdateError(error));
-      setDesktopState('idle');
-    }
+    await runAboutActionOnce({
+      onError: (error) => {
+        console.error('[about-inline-update] 检查更新失败:', error);
+        setDesktopError(toUpdateError(error));
+        setDesktopState('idle');
+      },
+      run: async () => {
+        console.log('[about-inline-update] 开始检查更新…');
+        const result = await checkForUpdate();
+        setDesktopResult(result);
+        setReleaseNotes(result.notes);
+        setProxyUsed(result.proxyUsed);
+        setDesktopState(result.available ? 'available' : 'up-to-date');
+      },
+    });
   }, [isTauriEnv]);
 
   // 托盘「检查更新」跳进来时自动跑一次。用 ref 保证只触发一次：父组件消费掉
@@ -298,79 +306,20 @@ function UpdateSection({
     setDesktopDownloaded(0);
     setDesktopTotal(null);
 
-    try {
-      if (!desktopResult.update) {
-        if (!desktopResult.proxyUsed) {
-          throw new UpdateError('unknown', '当前更新缺少可安装句柄。');
-        }
-        if (desktopResult.installMode === 'manual') {
-          if (!desktopResult.proxiedDownloadUrl) {
-            throw new UpdateError('unknown', '当前代理模式缺少可下载的更新地址。');
-          }
-          window.open(desktopResult.proxiedDownloadUrl, '_blank', 'noopener,noreferrer');
-          setDesktopState('done');
-          setDesktopProgress(100);
-          return;
-        }
-
-        try {
-          await stopGatewayBeforeInstall();
-          if (desktopCancelRequestedRef.current) return;
-          await downloadAndInstallProxyUpdate(
-            desktopResult.proxyUsed,
-            desktopResult.channel,
-            (progress) => {
-              if (desktopCancelRequestedRef.current) return;
-              setDesktopProgress(progress.percent);
-              setDesktopDownloaded(progress.downloaded);
-              setDesktopTotal(progress.total);
-            },
-          );
-          if (desktopCancelRequestedRef.current) return;
-        } catch (proxyInstallError) {
-          if (desktopCancelRequestedRef.current) return;
-          clearProxyCache();
-          if (desktopResult.proxiedDownloadUrl) {
-            window.open(desktopResult.proxiedDownloadUrl, '_blank', 'noopener,noreferrer');
-            setDesktopState('done');
-            setDesktopProgress(100);
-            return;
-          }
-          throw proxyInstallError;
-        }
-
-        setDesktopProgress(100);
-        setDesktopState('done');
-        return;
-      }
-
-      await downloadUpdate(
-        desktopResult.update,
-        (progress) => {
-          if (desktopCancelRequestedRef.current) return;
-          setDesktopProgress(progress.percent);
-          setDesktopDownloaded(progress.downloaded);
-          setDesktopTotal(progress.total);
-        },
-        { signal: abortController.signal },
-      );
-      if (desktopCancelRequestedRef.current || abortController.signal.aborted) return;
-      setDesktopProgress(100);
-      setDesktopState('installing');
-      await installUpdate(desktopResult.update, {
-        beforeInstall: stopGatewayBeforeInstall,
-      });
-      setDesktopState('done');
-    } catch (error) {
-      console.error('[about-inline-update] 下载/安装失败:', error);
-      if (desktopCancelRequestedRef.current || abortController.signal.aborted) return;
-      setDesktopError(toUpdateError(error));
-      setDesktopState(desktopResult.available ? 'available' : 'idle');
-    } finally {
-      if (desktopAbortControllerRef.current === abortController) {
-        desktopAbortControllerRef.current = null;
-      }
-    }
+    // 含嵌套 try/catch 与 finally 的下载安装逻辑在模块级
+    // `downloadAndInstallDesktopUpdateOnce`（见其注释）。
+    await downloadAndInstallDesktopUpdateOnce({
+      desktopResult,
+      abortController,
+      desktopAbortControllerRef,
+      desktopCancelRequestedRef,
+      setDesktopError,
+      setDesktopState,
+      setDesktopProgress,
+      setDesktopDownloaded,
+      setDesktopTotal,
+      stopGatewayBeforeInstall,
+    });
   }, [desktopResult, stopGatewayBeforeInstall]);
 
   const handleCancelDesktopDownload = useCallback(() => {
@@ -1095,6 +1044,127 @@ function UpdateSection({
 
 /* ── 主页面 ────────────────────────────────────────────────────────────── */
 
+/**
+ * 「try/catch」动作包装（无 finally 的简单场景）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try/catch 内的值块（条件 / 逻辑 /
+ * 三元），也不支持 try 内 throw，本页多处 try/catch 会让它整体脱靶（实测）。语义逐字
+ * 照搬：`run` 的全流程仍在 try 内，`onError` 自行决定「提示并吞掉」还是「转换错误
+ * 类型后抛出」——后者直接 `throw`，异常会从本函数继续向外传播。
+ */
+async function runAboutActionOnce(ctx: {
+  /** 可选：置位 / 复位的 busy 标志（如复制按钮的 `copying`）。 */
+  setBusy?: (busy: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy?.(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setBusy?.(false);
+  }
+}
+
+/**
+ * 下载并安装桌面端更新（含「代理直装」与「原生 updater」两条路径、取消检查与
+ * finally 的 AbortController 回收）。
+ *
+ * 同 `runAboutActionOnce`：整段（含**嵌套**的 try/catch 与 finally）必须留在模块级，
+ * 否则本页整体脱靶。语义逐字照搬：两条安装路径的提前 return、取消判定、
+ * 代理失败回退（清缓存 → 开浏览器 → 或重新抛出）全部保持原样。
+ */
+async function downloadAndInstallDesktopUpdateOnce(ctx: {
+  desktopResult: UpdateCheckResult;
+  abortController: AbortController;
+  desktopAbortControllerRef: { current: AbortController | null };
+  desktopCancelRequestedRef: { current: boolean };
+  setDesktopError: (error: UpdateError | null) => void;
+  setDesktopState: (state: DesktopUpdateState) => void;
+  setDesktopProgress: (value: number) => void;
+  setDesktopDownloaded: (value: number) => void;
+  setDesktopTotal: (value: number | null) => void;
+  stopGatewayBeforeInstall: () => Promise<void>;
+}): Promise<void> {
+  const { desktopResult, abortController, desktopAbortControllerRef, desktopCancelRequestedRef } =
+    ctx;
+  try {
+    if (!desktopResult.update) {
+      if (!desktopResult.proxyUsed) {
+        throw new UpdateError('unknown', '当前更新缺少可安装句柄。');
+      }
+      if (desktopResult.installMode === 'manual') {
+        if (!desktopResult.proxiedDownloadUrl) {
+          throw new UpdateError('unknown', '当前代理模式缺少可下载的更新地址。');
+        }
+        window.open(desktopResult.proxiedDownloadUrl, '_blank', 'noopener,noreferrer');
+        ctx.setDesktopState('done');
+        ctx.setDesktopProgress(100);
+        return;
+      }
+
+      try {
+        await ctx.stopGatewayBeforeInstall();
+        if (desktopCancelRequestedRef.current) return;
+        await downloadAndInstallProxyUpdate(
+          desktopResult.proxyUsed,
+          desktopResult.channel,
+          (progress) => {
+            if (desktopCancelRequestedRef.current) return;
+            ctx.setDesktopProgress(progress.percent);
+            ctx.setDesktopDownloaded(progress.downloaded);
+            ctx.setDesktopTotal(progress.total);
+          },
+        );
+        if (desktopCancelRequestedRef.current) return;
+      } catch (proxyInstallError) {
+        if (desktopCancelRequestedRef.current) return;
+        clearProxyCache();
+        if (desktopResult.proxiedDownloadUrl) {
+          window.open(desktopResult.proxiedDownloadUrl, '_blank', 'noopener,noreferrer');
+          ctx.setDesktopState('done');
+          ctx.setDesktopProgress(100);
+          return;
+        }
+        throw proxyInstallError;
+      }
+
+      ctx.setDesktopProgress(100);
+      ctx.setDesktopState('done');
+      return;
+    }
+
+    await downloadUpdate(
+      desktopResult.update,
+      (progress) => {
+        if (desktopCancelRequestedRef.current) return;
+        ctx.setDesktopProgress(progress.percent);
+        ctx.setDesktopDownloaded(progress.downloaded);
+        ctx.setDesktopTotal(progress.total);
+      },
+      { signal: abortController.signal },
+    );
+    if (desktopCancelRequestedRef.current || abortController.signal.aborted) return;
+    ctx.setDesktopProgress(100);
+    ctx.setDesktopState('installing');
+    await installUpdate(desktopResult.update, {
+      beforeInstall: ctx.stopGatewayBeforeInstall,
+    });
+    ctx.setDesktopState('done');
+  } catch (error) {
+    console.error('[about-inline-update] 下载/安装失败:', error);
+    if (desktopCancelRequestedRef.current || abortController.signal.aborted) return;
+    ctx.setDesktopError(toUpdateError(error));
+    ctx.setDesktopState(desktopResult.available ? 'available' : 'idle');
+  } finally {
+    if (desktopAbortControllerRef.current === abortController) {
+      desktopAbortControllerRef.current = null;
+    }
+  }
+}
+
 export default function AboutPage() {
   const [copying, setCopying] = useState(false);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -1197,15 +1267,16 @@ export default function AboutPage() {
     ]
       .filter(Boolean)
       .join('\n');
-    setCopying(true);
-    try {
-      await navigator.clipboard.writeText(summary);
-      toast('已复制构建信息到剪贴板', 'success');
-    } catch {
-      toast('复制失败,请手动选中文本', 'error');
-    } finally {
-      setCopying(false);
-    }
+    await runAboutActionOnce({
+      setBusy: setCopying,
+      onError: () => {
+        toast('复制失败,请手动选中文本', 'error');
+      },
+      run: async () => {
+        await navigator.clipboard.writeText(summary);
+        toast('已复制构建信息到剪贴板', 'success');
+      },
+    });
   };
 
   return (

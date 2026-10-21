@@ -720,6 +720,23 @@ export function useInstructionStackPreviewRead(input: {
     previewRef.current = preview;
   }, [preview]);
 
+  /**
+   * `previewInstructionStack` 的重试桥（trampoline）。
+   *
+   * 失败重试的 `onRetry` 里要重新发起同一请求，直接写 `previewInstructionStack(...)`
+   * 是「`const` 回调在自身初始化器内自引用」，React Compiler 判为
+   * "Cannot access variable before it is declared"（TDZ）并放弃优化整个 hook。
+   * 改为 ref 持有 + effect 同步：只在重试定时器触发时取值，渲染期不读 ref。
+   */
+  const previewInstructionStackRef = useRef<
+    (request: {
+      personaKey?: string;
+      roleLayer?: SoulRoleLayer;
+      sessionId?: string;
+      teamWorkspaceId?: string;
+    }) => void
+  >(() => undefined);
+
   const previewInstructionStack = useCallback(
     (request: {
       personaKey?: string;
@@ -750,7 +767,7 @@ export function useInstructionStackPreviewRead(input: {
             computeDelay: computeTeamPhaseASettingsRetryDelay,
             onRetry: () => {
               if (lastRequestRef.current) {
-                previewInstructionStack(lastRequestRef.current);
+                previewInstructionStackRef.current(lastRequestRef.current);
               }
             },
             retryable: result.retryable,
@@ -776,6 +793,11 @@ export function useInstructionStackPreviewRead(input: {
     },
     [input.client, input.token, resetRetry, scheduleRetry],
   );
+
+  // 与 previewInstructionStackRef 配对：重试由退避定时器触发，必然晚于挂载。
+  useEffect(() => {
+    previewInstructionStackRef.current = previewInstructionStack;
+  }, [previewInstructionStack]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

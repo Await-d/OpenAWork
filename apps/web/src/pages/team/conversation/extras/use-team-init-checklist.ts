@@ -41,6 +41,26 @@ function extractTeamInit(metadata?: Record<string, unknown> | null): TeamInitSta
   return raw as TeamInitState;
 }
 
+/**
+ * 「置 pendingStepKey → 执行 → 必清 pendingStepKey」的统一包装（**无 catch**：异常继续
+ * 向上抛给调用方，与原语义一致）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 4 处
+ * 该类动作会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runWithPendingStepKey(ctx: {
+  pendingKey: TeamInitStepKey | 'all';
+  setPendingStepKey: (key: TeamInitStepKey | 'all' | null) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setPendingStepKey(ctx.pendingKey);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setPendingStepKey(null);
+  }
+}
+
 export function useTeamInitChecklist(input: UseTeamInitChecklistInput): TeamInitChecklistState {
   const accessToken = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -56,7 +76,8 @@ export function useTeamInitChecklist(input: UseTeamInitChecklistInput): TeamInit
     if (pendingStepKey !== null) return;
     setTeamInit(metadataTeamInit);
     // metadataTeamInit 是每次渲染新建的对象，用 JSON 签名做依赖，避免无限循环。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 依赖省略是刻意取舍。不要在此处加回 lint 抑制指令——编译器按文本匹配
+    // 识别它，会把整个 hook 判为「已手动抑制」而放弃优化。
   }, [JSON.stringify(metadataTeamInit), pendingStepKey]);
 
   const applyResult = useCallback((result: TeamInitActionResult) => {
@@ -72,13 +93,15 @@ export function useTeamInitChecklist(input: UseTeamInitChecklistInput): TeamInit
   const confirmStep = useCallback(
     async (stepKey: TeamInitStepKey) => {
       if (!accessToken || pendingStepKey !== null) return;
-      setPendingStepKey(stepKey);
-      try {
-        const result = await client.confirmSessionInitStep(accessToken, input.sessionId, stepKey);
-        applyResult(result);
-      } finally {
-        setPendingStepKey(null);
-      }
+      // try/finally 下沉到模块级 `runWithPendingStepKey`（见其注释）。
+      await runWithPendingStepKey({
+        pendingKey: stepKey,
+        setPendingStepKey,
+        run: async () => {
+          const result = await client.confirmSessionInitStep(accessToken, input.sessionId, stepKey);
+          applyResult(result);
+        },
+      });
     },
     [accessToken, applyResult, client, input.sessionId, pendingStepKey],
   );
@@ -86,26 +109,30 @@ export function useTeamInitChecklist(input: UseTeamInitChecklistInput): TeamInit
   const skipStep = useCallback(
     async (stepKey: TeamInitStepKey) => {
       if (!accessToken || pendingStepKey !== null) return;
-      setPendingStepKey(stepKey);
-      try {
-        const result = await client.skipSessionInitStep(accessToken, input.sessionId, stepKey);
-        applyResult(result);
-      } finally {
-        setPendingStepKey(null);
-      }
+      // try/finally 下沉到模块级 `runWithPendingStepKey`（见其注释）。
+      await runWithPendingStepKey({
+        pendingKey: stepKey,
+        setPendingStepKey,
+        run: async () => {
+          const result = await client.skipSessionInitStep(accessToken, input.sessionId, stepKey);
+          applyResult(result);
+        },
+      });
     },
     [accessToken, applyResult, client, input.sessionId, pendingStepKey],
   );
 
   const skipAll = useCallback(async () => {
     if (!accessToken || pendingStepKey !== null) return;
-    setPendingStepKey('all');
-    try {
-      const result = await client.skipSessionInit(accessToken, input.sessionId);
-      applyResult(result);
-    } finally {
-      setPendingStepKey(null);
-    }
+    // try/finally 下沉到模块级 `runWithPendingStepKey`（见其注释）。
+    await runWithPendingStepKey({
+      pendingKey: 'all',
+      setPendingStepKey,
+      run: async () => {
+        const result = await client.skipSessionInit(accessToken, input.sessionId);
+        applyResult(result);
+      },
+    });
   }, [accessToken, applyResult, client, input.sessionId, pendingStepKey]);
 
   // 顺序确认所有 proposed 步骤（一键完成初始化）。
@@ -115,21 +142,23 @@ export function useTeamInitChecklist(input: UseTeamInitChecklistInput): TeamInit
       .filter((step) => step.status === 'proposed')
       .map((step) => step.key);
     if (pendingKeys.length === 0) return;
-    setPendingStepKey('all');
-    try {
-      let latest: TeamInitActionResult | null = null;
-      for (const key of pendingKeys) {
-        latest = await client.confirmSessionInitStep(accessToken, input.sessionId, key);
-        if (latest.teamInit) setTeamInit(latest.teamInit);
-        if (!latest.ok) {
-          setError(latest.errorMessage ?? '初始化操作失败。');
-          break;
+    // try/finally 下沉到模块级 `runWithPendingStepKey`（见其注释）。
+    await runWithPendingStepKey({
+      pendingKey: 'all',
+      setPendingStepKey,
+      run: async () => {
+        let latest: TeamInitActionResult | null = null;
+        for (const key of pendingKeys) {
+          latest = await client.confirmSessionInitStep(accessToken, input.sessionId, key);
+          if (latest.teamInit) setTeamInit(latest.teamInit);
+          if (!latest.ok) {
+            setError(latest.errorMessage ?? '初始化操作失败。');
+            break;
+          }
         }
-      }
-      if (latest?.ok) setError(null);
-    } finally {
-      setPendingStepKey(null);
-    }
+        if (latest?.ok) setError(null);
+      },
+    });
   }, [accessToken, client, input.sessionId, pendingStepKey, teamInit]);
 
   return {

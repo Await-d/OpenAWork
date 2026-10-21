@@ -18,7 +18,6 @@
  * @see docs/architecture/chat-page-split-plan.md 域 E
  */
 
-import { useCallback } from 'react';
 import type { InputImageContent, Message } from '@openAwork/shared';
 import { createSessionsClient } from '@openAwork/web-client';
 import type { RollbackReceipt } from '@openAwork/web-client';
@@ -130,7 +129,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
    * 回退（截断）成功后的可见反馈：toast + 「查看文件变更」入口。
    * 产品要求回退不得静默完成——即使没有变更，也要给出「已回退」反馈。
    */
-  const notifyRollbackApplied = useCallback(() => {
+  const notifyRollbackApplied = () => {
     toast(
       '已回退到所选消息，后续内容已清除',
       'success',
@@ -139,7 +138,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
         ? { action: { label: '查看文件变更', onClick: onOpenFileChangesPanel } }
         : undefined,
     );
-  }, [onOpenFileChangesPanel]);
+  };
 
   /**
    * truncate 期间用户切换了会话时的提示。
@@ -147,48 +146,54 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
    * 截断已在服务端生效（不可撤销），但重发必须中止：否则 sendMessage 会按
    * 当前视图所属的会话把回复写进新会话，造成跨会话串写。
    */
-  const notifyResendAbandonedBySessionSwitch = useCallback(() => {
+  const notifyResendAbandonedBySessionSwitch = () => {
     toast('已回退到所选消息；因已切换会话，本次重发已取消', 'warning');
-  }, []);
+  };
+
+  // 本 hook 的回调一律是**普通箭头函数**，不要再包 useCallback。
+  //
+  // 手写 useCallback 会让 React Compiler 报
+  // "Existing memoization could not be preserved" 并放弃优化整个 hook
+  // （实测本文件因此 1 个函数脱靶）。编译器会按真实依赖自动 memoize，
+  // 引用稳定性与原手写依赖数组等价。注意 191 行「跨 await 前钉死 targetSessionId」
+  // 的会话一致性逻辑与 memo 无关，勿顺车改动。
 
   // ── 工具回调 ──────────────────────────────────────────────────────────
-  const truncateSessionMessagesInPlace = useCallback(
-    async (sessionId: string, messageId: string, messageText?: string): Promise<Message[]> => {
-      if (!token) return [];
-      const { messages, rollback } = await createSessionsClient(gatewayUrl).truncateMessages(
-        token,
-        sessionId,
-        messageId,
-        {
-          inclusive: true,
-          ...(messageText !== undefined ? { messageText } : {}),
-        },
-      );
-      // ChatPage 也可能承载 team 会话：回执是作废窗口的载体，登记后晚到的
-      // team 事件才会在读取期被过滤（多端幂等失效）。
-      if (rollback) {
-        applyRollbackReceipt(rollback);
-      }
-      // 派生状态清理：摘掉属于被作废回合的子代理展示（子会话 / 任务 / 完成通知）。
-      onRollbackApplied?.(rollback);
-      return messages;
-    },
-    [gatewayUrl, onRollbackApplied, token],
-  );
+  const truncateSessionMessagesInPlace = async (
+    sessionId: string,
+    messageId: string,
+    messageText?: string,
+  ): Promise<Message[]> => {
+    if (!token) return [];
+    const { messages, rollback } = await createSessionsClient(gatewayUrl).truncateMessages(
+      token,
+      sessionId,
+      messageId,
+      {
+        inclusive: true,
+        ...(messageText !== undefined ? { messageText } : {}),
+      },
+    );
+    // ChatPage 也可能承载 team 会话：回执是作废窗口的载体，登记后晚到的
+    // team 事件才会在读取期被过滤（多端幂等失效）。
+    if (rollback) {
+      applyRollbackReceipt(rollback);
+    }
+    // 派生状态清理：摘掉属于被作废回合的子代理展示（子会话 / 任务 / 完成通知）。
+    onRollbackApplied?.(rollback);
+    return messages;
+  };
 
-  const trimMessagesFromSource = useCallback(
-    <TMessage extends { id: string }>(
-      sourceMessages: TMessage[],
-      sourceMessageId: string,
-    ): TMessage[] => {
-      const sourceIndex = sourceMessages.findIndex((message) => message.id === sourceMessageId);
-      return sourceIndex >= 0 ? sourceMessages.slice(0, sourceIndex) : sourceMessages;
-    },
-    [],
-  );
+  const trimMessagesFromSource = <TMessage extends { id: string }>(
+    sourceMessages: TMessage[],
+    sourceMessageId: string,
+  ): TMessage[] => {
+    const sourceIndex = sourceMessages.findIndex((message) => message.id === sourceMessageId);
+    return sourceIndex >= 0 ? sourceMessages.slice(0, sourceIndex) : sourceMessages;
+  };
 
   // ── 重试 / 编辑操作 ───────────────────────────────────────────────────
-  const handleRetryInCurrentSession = useCallback(async () => {
+  const handleRetryInCurrentSession = async () => {
     if (!retryPrompt) return;
     if (!currentSessionId || !token) return;
     // 目标会话必须在第一个 await 之前钉死：truncate / setMessages / sendMessage
@@ -234,87 +239,58 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
       forcedSessionId: targetSessionId,
     });
     setRetryPrompt(null);
-  }, [
-    currentSessionId,
-    getActiveSessionId,
-    messages,
-    notifyResendAbandonedBySessionSwitch,
-    notifyRollbackApplied,
-    resetStreamState,
-    retryPrompt,
-    sendMessage,
-    setMessages,
-    setStreamError,
-    setRetryPrompt,
-    token,
-    trimMessagesFromSource,
-    truncateSessionMessagesInPlace,
-  ]);
+  };
 
-  const handleEditResendInCurrentSession = useCallback(
-    async (text: string, sourceMessageId: string, editedInputParts?: InputImageContent[]) => {
-      if (!currentSessionId || !token) return;
-      // 同 handleRetryInCurrentSession：先钉死目标会话，再跨 await。
-      const targetSessionId = currentSessionId;
-      const sourceMessage = messages.find((message) => message.id === sourceMessageId);
-      let remainingMessages: Message[];
-      try {
-        remainingMessages = await truncateSessionMessagesInPlace(
-          targetSessionId,
-          sourceMessageId,
-          sourceMessage?.content,
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : '截断失败';
-        console.warn('[useChatRetryAndEdit] truncate failed, aborting resend:', message);
-        setStreamError(`回退失败，已取消重发：${message}`);
-        return;
-      }
-      if (getActiveSessionId() !== targetSessionId) {
-        notifyResendAbandonedBySessionSwitch();
-        return;
-      }
-      notifyRollbackApplied();
-      const normalizedRemainingMessages = filterTranscriptMessages(
-        normalizeChatMessages(remainingMessages),
+  const handleEditResendInCurrentSession = async (
+    text: string,
+    sourceMessageId: string,
+    editedInputParts?: InputImageContent[],
+  ) => {
+    if (!currentSessionId || !token) return;
+    // 同 handleRetryInCurrentSession：先钉死目标会话，再跨 await。
+    const targetSessionId = currentSessionId;
+    const sourceMessage = messages.find((message) => message.id === sourceMessageId);
+    let remainingMessages: Message[];
+    try {
+      remainingMessages = await truncateSessionMessagesInPlace(
+        targetSessionId,
+        sourceMessageId,
+        sourceMessage?.content,
       );
-      const fallbackMessages = trimMessagesFromSource(messages, sourceMessageId);
-      const sourceFoundLocally =
-        messages.findIndex((message) => message.id === sourceMessageId) >= 0;
-      const nextMessages = sourceFoundLocally
-        ? fallbackMessages
-        : normalizedRemainingMessages.length > 0
-          ? normalizedRemainingMessages
-          : fallbackMessages;
-      setMessages(nextMessages);
-      resetStreamState();
-      setStreamError(null);
-      const effectiveInputParts = editedInputParts ?? historyEditPrompt?.inputParts;
-      await sendMessage(text, {
-        ...(effectiveInputParts && effectiveInputParts.length > 0
-          ? { existingInputParts: effectiveInputParts }
-          : {}),
-        forcedSessionId: targetSessionId,
-      });
-    },
-    [
-      currentSessionId,
-      getActiveSessionId,
-      historyEditPrompt,
-      messages,
-      notifyResendAbandonedBySessionSwitch,
-      notifyRollbackApplied,
-      resetStreamState,
-      sendMessage,
-      setMessages,
-      setStreamError,
-      token,
-      trimMessagesFromSource,
-      truncateSessionMessagesInPlace,
-    ],
-  );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '截断失败';
+      console.warn('[useChatRetryAndEdit] truncate failed, aborting resend:', message);
+      setStreamError(`回退失败，已取消重发：${message}`);
+      return;
+    }
+    if (getActiveSessionId() !== targetSessionId) {
+      notifyResendAbandonedBySessionSwitch();
+      return;
+    }
+    notifyRollbackApplied();
+    const normalizedRemainingMessages = filterTranscriptMessages(
+      normalizeChatMessages(remainingMessages),
+    );
+    const fallbackMessages = trimMessagesFromSource(messages, sourceMessageId);
+    const sourceFoundLocally = messages.findIndex((message) => message.id === sourceMessageId) >= 0;
+    const nextMessages = sourceFoundLocally
+      ? fallbackMessages
+      : normalizedRemainingMessages.length > 0
+        ? normalizedRemainingMessages
+        : fallbackMessages;
+    setMessages(nextMessages);
+    resetStreamState();
+    setStreamError(null);
+    const effectiveInputParts = editedInputParts ?? historyEditPrompt?.inputParts;
+    await sendMessage(text, {
+      ...(effectiveInputParts && effectiveInputParts.length > 0
+        ? { existingInputParts: effectiveInputParts }
+        : {}),
+      forcedSessionId: targetSessionId,
+    });
+  };
 
-  const handleRetryInNewSession = useCallback(async () => {
+  const handleRetryInNewSession = async () => {
     if (!retryPrompt) return;
     if (retryPrompt.inputParts && retryPrompt.inputParts.length > 0) {
       await createBranchSessionFromMessage(
@@ -331,7 +307,7 @@ export function useChatRetryAndEdit(options: UseChatRetryAndEditOptions): ChatRe
       await sendMessage(retryPrompt.text, { forcedSessionId: branchSessionId });
     }
     setRetryPrompt(null);
-  }, [createBranchSessionFromMessage, retryPrompt, sendMessage]);
+  };
 
   return {
     handleRetryInCurrentSession,

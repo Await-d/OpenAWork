@@ -17,8 +17,9 @@
  * 关联文档：`docs/chat-conversation-reuse-plan.md` v1.5（"C + 读侧合并"决策）
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type {
+  BatchSubToolProgress,
   InputImageContent,
   RunEvent,
   StreamThinkingChunk,
@@ -27,6 +28,8 @@ import type {
 } from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
 import { formatGatewayStreamErrorMessage } from '../../../hooks/gateway/useGatewayClient.js';
+import { isNonTerminalStreamErrorCode } from '../../../hooks/gateway/stream-error-classification.js';
+import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 import {
   createPendingPermissionRequestSnapshot,
   dedupePendingPermissionRequests,
@@ -34,6 +37,7 @@ import {
 import {
   appendStreamingTextDelta,
   appendStreamingThinkingDelta,
+  applyToolProgressToStreamingSegment,
   applyToolResultToStreamingSegment,
   markStreamingReasoningSegmentEnded,
   upsertStreamingToolSegment,
@@ -89,6 +93,18 @@ export interface ConversationStreamRefs {
   currentAssistantStreamMessageIdRef: React.MutableRefObject<string | null>;
   streamingRef: React.MutableRefObject<boolean>;
   stoppingStreamRef: React.MutableRefObject<boolean>;
+  /**
+   * 本轮请求元信息（rid / provider / model / agent）。
+   *
+   * 走 refs 参数而不是 config 的取值函数：消费点在 SSE 事件回调里，必须读到「事件到达
+   * 那一刻」的最新值；而在渲染期构造「读 ref 的 getter / 箭头函数」塞进配置对象，会被判为
+   * "Handle get functions in ObjectExpression" 或 "Cannot access refs during render"，
+   * 让整个 hook 静默退出优化。直接传 ref、与既有 `streamingRef` 同一模式则不受影响。
+   */
+  streamClientRequestIdRef: React.MutableRefObject<string | null>;
+  requestProviderIdRef: React.MutableRefObject<string | undefined>;
+  requestModelLabelRef: React.MutableRefObject<string | undefined>;
+  requestAgentIdRef: React.MutableRefObject<string | undefined>;
 }
 
 export interface ConversationStreamSetters {
@@ -111,20 +127,6 @@ export interface ConversationStreamSetters {
 export interface ConversationStreamConfig {
   /** Identifier of the session this stream belongs to (for permission snapshots). */
   sessionId: string | null;
-  /** Provider id used to render the assistant message metadata. */
-  requestProviderId?: string;
-  /** Model label used to render the assistant message metadata. */
-  requestModelLabel?: string;
-  /** Agent id attached to the round. */
-  requestAgentId?: string;
-  /**
-   * Client request id that started this stream (the rid the gateway persists
-   * against). When present, every committed round is stamped with the request
-   * id the gateway stored for that same round: the raw rid for the final
-   * (`end_turn`) round, `${rid}:assistant:${round}` for intermediate rounds
-   * (see `round-request-id`). Omit / pass null when the consumer has no rid.
-   */
-  clientRequestId?: string | null;
   /** When the request originated (Date.now()) — used to compute latency. */
   requestStartedAt: number;
   /** When set, the consumer wants to receive every event (chat-only included). */
@@ -177,6 +179,12 @@ interface RoundAccumulator {
       resumedAfterApproval?: boolean;
       /** tool result 的图片附件（`computer_use` 最终截图）。 */
       attachments?: InputImageContent[];
+      /** `tool_progress` 的实时快照（运行中的 bash / batch / computer_use）。 */
+      batchProgress?: {
+        subTools: BatchSubToolProgress[];
+        completedCount: number;
+        totalCount: number;
+      };
       toolCallId: string;
       status: 'streaming' | 'completed';
       toolName: string;
@@ -246,9 +254,28 @@ export function useConversationStream(
   setters: ConversationStreamSetters,
   config: ConversationStreamConfig,
 ): ConversationStreamHandlers {
+  // `refs.currentAssistantStreamMessageIdRef` 这种「以参数对象为根的成员访问」写
+  // `.current` 时，编译器判不出它是 ref（类型来自 `ConversationStreamRefs` 接口），
+  // 会当成「修改 props / 参数派生值」→ "Mutating component props or hook arguments"，
+  // 整个 hook 退出优化。先取出成以 `Ref` 结尾的局部名（与 `props.pickerRef` 同一
+  // 盲区，见 apps/web/AGENTS.md「ref 按名字推断」；in-repo 先例：
+  // use-provider-catalog-actions.ts 解构出的 `providersRef`），**再**把赋值收进
+  // 模块函数——仅解构不足以消除诊断（实测仍报同一诊断，见 utils/ref/ref-current.ts）。
+  const {
+    currentAssistantStreamMessageIdRef,
+    requestAgentIdRef,
+    requestModelLabelRef,
+    requestProviderIdRef,
+    streamClientRequestIdRef,
+  } = refs;
   const accumulatorRef = useRef<RoundAccumulator>(makeAccumulator(config.requestStartedAt));
   const configRef = useRef(config);
-  configRef.current = config;
+  // 最新 config 的同步刻意放进 effect，而不是渲染期顶层赋值：渲染期写 ref 会被
+  // React Compiler 判定为 "Cannot access refs during render" 并放弃优化本 hook。
+  // configRef 只被 SSE/WS 的异步回调读取，effect 时序足够，不会读到过期值。
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
 
   const resetRoundAccumulators = useCallback(() => {
     const acc = accumulatorRef.current;
@@ -272,7 +299,7 @@ export function useConversationStream(
   const commitCurrentRound = useCallback(
     (timestamp: number, roundKind: 'intermediate' | 'final') => {
       const acc = accumulatorRef.current;
-      const closingMessageId = refs.currentAssistantStreamMessageIdRef.current;
+      const closingMessageId = currentAssistantStreamMessageIdRef.current;
       if (!closingMessageId) return;
       if (
         acc.liveToolCalls.size === 0 &&
@@ -282,7 +309,7 @@ export function useConversationStream(
         return;
       }
 
-      const rawClientRequestId = configRef.current.clientRequestId?.trim();
+      const rawClientRequestId = streamClientRequestIdRef.current?.trim();
       const committedClientRequestId = rawClientRequestId
         ? roundKind === 'intermediate'
           ? createRoundAssistantRequestId(rawClientRequestId, acc.currentRoundIndex)
@@ -300,7 +327,10 @@ export function useConversationStream(
         return {
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
-          input: parseToolCallInputText(tc.inputText),
+          input: {
+            ...parseToolCallInputText(tc.inputText),
+            ...(tc.batchProgress ? { _batchProgress: tc.batchProgress } : {}),
+          },
           output: tc.output,
           isError: tc.isError,
           resumedAfterApproval: tc.resumedAfterApproval,
@@ -342,9 +372,9 @@ export function useConversationStream(
               [acc.thinkingText, acc.text].filter((s) => s.trim().length > 0).join('\n\n'),
             ),
             toolCallCount: roundToolCallIds.size,
-            providerId: configRef.current.requestProviderId,
-            model: configRef.current.requestModelLabel,
-            agentId: configRef.current.requestAgentId,
+            providerId: requestProviderIdRef.current,
+            model: requestModelLabelRef.current,
+            agentId: requestAgentIdRef.current,
             ...(shouldAttachLatency && acc.firstTokenObservedAt !== null
               ? {
                   firstTokenLatencyMs:
@@ -370,13 +400,23 @@ export function useConversationStream(
       acc.startedAt = timestamp;
       // Roll the streaming message id forward so the next round occupies its
       // own slot in the message list (mirrors gateway persistence ordering).
-      refs.currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+      writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
       setters.setStreamBuffer('');
       setters.setStreamThinkingBuffer('');
       setters.setStreamThinkingBlocks([]);
       setters.setStreamingSegments([]);
     },
-    [refs, setters],
+    // deps 列具体字段而非整个 refs 对象：编译器要求 deps 能复现 memo 语义，
+    // 传入的 ref 引用本身稳定，行为不变。
+    // 补齐编译器推断出的依赖（本轮请求元信息的 ref，见 apps/web/AGENTS.md ②）。
+    [
+      currentAssistantStreamMessageIdRef,
+      requestAgentIdRef,
+      requestModelLabelRef,
+      requestProviderIdRef,
+      setters,
+      streamClientRequestIdRef,
+    ],
   );
 
   const observeFirstToken = useCallback(
@@ -426,7 +466,7 @@ export function useConversationStream(
   const handleEvent = useCallback(
     (event: RunEvent) => {
       const acc = accumulatorRef.current;
-      const closingMessageId = refs.currentAssistantStreamMessageIdRef.current;
+      const closingMessageId = currentAssistantStreamMessageIdRef.current;
       if (!closingMessageId) return;
 
       // 幂等闸：同一 `eventId` 只投递一次。缺 `eventId` 的事件无法构造稳定身份，
@@ -447,7 +487,7 @@ export function useConversationStream(
         // Without this the live view renders a `tool → text` bubble that the
         // persisted transcript later splits in two.
         closeRoundIfGatewayAdvanced();
-        const textMessageId = refs.currentAssistantStreamMessageIdRef.current ?? closingMessageId;
+        const textMessageId = currentAssistantStreamMessageIdRef.current ?? closingMessageId;
         acc.text += event.delta;
         acc.segments = appendStreamingTextDelta(acc.segments, event.delta, textMessageId);
         setters.setStreamBuffer(acc.text);
@@ -469,8 +509,7 @@ export function useConversationStream(
         // explicit `thinking_start` (or attach replays) still split rounds the
         // same way the gateway does.
         closeRoundIfGatewayAdvanced();
-        const thinkingMessageId =
-          refs.currentAssistantStreamMessageIdRef.current ?? closingMessageId;
+        const thinkingMessageId = currentAssistantStreamMessageIdRef.current ?? closingMessageId;
         const chunk = event as StreamThinkingChunk;
         acc.thinkingBlocks = appendStreamingThinkingChunk(acc.thinkingBlocks, chunk, {
           forceNewBlock: acc.segments[acc.segments.length - 1]?.type !== 'reasoning',
@@ -527,6 +566,34 @@ export function useConversationStream(
           input: parseToolCallInputText(nextInputText),
           status: 'running',
         });
+        setters.setStreamingSegments(acc.segments);
+        return;
+      }
+
+      // ─── tool_progress ────────────────────────────────────────────
+      if (event.type === 'tool_progress') {
+        const previous = acc.liveToolCalls.get(event.toolCallId);
+        if (previous?.status === 'completed') {
+          // 结果已结算（重放 / 乱序的迟到进度）不得把工具降级回 streaming。
+          return;
+        }
+        acc.liveToolCalls.set(event.toolCallId, {
+          createdAt: previous?.createdAt ?? event.occurredAt ?? Date.now(),
+          inputText: previous?.inputText ?? '',
+          output: previous?.output,
+          isError: previous?.isError,
+          resumedAfterApproval: previous?.resumedAfterApproval,
+          ...(previous?.attachments ? { attachments: previous.attachments } : {}),
+          batchProgress: {
+            subTools: event.subTools,
+            completedCount: event.completedCount,
+            totalCount: event.totalCount,
+          },
+          toolCallId: event.toolCallId,
+          status: 'streaming',
+          toolName: event.toolName,
+        });
+        acc.segments = applyToolProgressToStreamingSegment(acc.segments, event);
         setters.setStreamingSegments(acc.segments);
         return;
       }
@@ -651,6 +718,13 @@ export function useConversationStream(
           setters.setLatestUpstreamSummary(event.upstreamSummary);
           configRef.current.onUpstreamSummary?.(event.upstreamSummary);
         }
+        // 流内非终态错误（如上游丢弃一次入参畸形的工具调用）只表示「单次操作被
+        // 放弃」，整条流仍在继续：不得升级成「流式失败」横幅——错误横幅是留给
+        // 上游 / 网关级终态故障的。名单与传输层（useGatewayClient）、右侧面板状态
+        // （chat-stream-state）共用同一份，避免多处各自硬编码而漂移。
+        if (isNonTerminalStreamErrorCode(event.code)) {
+          return;
+        }
         setters.setStreamError(
           formatGatewayStreamErrorMessage(
             typeof event.code === 'string' ? event.code : 'STREAM_ERROR',
@@ -664,7 +738,13 @@ export function useConversationStream(
       // ─── chat-only events (terminal / dev / sub-agent / etc.) ────
       configRef.current.onChatOnlyEvent?.(event);
     },
-    [refs, setters, observeFirstToken, commitCurrentRound, closeRoundIfGatewayAdvanced],
+    [
+      currentAssistantStreamMessageIdRef,
+      setters,
+      observeFirstToken,
+      commitCurrentRound,
+      closeRoundIfGatewayAdvanced,
+    ],
   );
 
   const getCurrentSegments = useCallback(() => accumulatorRef.current.segments, []);

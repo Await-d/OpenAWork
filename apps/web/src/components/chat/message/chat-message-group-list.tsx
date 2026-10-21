@@ -11,6 +11,7 @@ import {
   sharedUiThemeVars,
 } from '../session/ChatPageSections.js';
 import MarkdownMessageContent from '../markdown/markdown-message-content.js';
+import { setElementScrollTop } from '../../../utils/dom/scroll.js';
 import { decideTimeDivider } from './time-divider.js';
 
 export interface ChatRenderAction {
@@ -113,6 +114,11 @@ const OVERSCAN_PX = 720;
 const GROUP_GAP_PX = 24;
 const TIME_DIVIDER_HEIGHT_PX = 28;
 const VIRTUALIZATION_GROUP_THRESHOLD = 32;
+/**
+ * 单例 ResizeObserver 的槽位键：每个组件实例各持一份缓存 Map，键只作占位。
+ */
+const RESIZE_OBSERVER_SLOT = 'viewport';
+
 const FALLBACK_VIEWPORT_HEIGHT = 720;
 // Shared bottom-spacer height — see scroll-constants.ts for rationale.
 // Importing here means the value is single-sourced; trimming it
@@ -242,12 +248,21 @@ function VirtualizedChatGroupViewport({
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_VIEWPORT_HEIGHT);
   const [scrollTop, setScrollTop] = useState(0);
   const [measuredVersion, setMeasuredVersion] = useState(0);
-  const groupHeightsRef = useRef(new Map<string, number>());
-  const groupSignaturesRef = useRef(new Map<string, string>());
+  // 布局测量缓存。**不得用 useRef 承载**：`layout` / `visibleRange` 两个 useMemo 与
+  // ref 回调工厂都必须在渲染期读取它们，而 React Compiler 一旦见到「渲染期读 ref」
+  // 就放弃优化整个组件（`Cannot access refs during render`）。
+  // `useState` 惰性初始化给出的是一个**身份恒定**的可变容器，读写时机、可变性与原
+  // ref 逐点相同——首渲染同样从空 Map 开始，只是不再经过 `ref.current` 这层被编译器
+  // 拦截的间接寻址。名称也不再以 `Ref` 结尾，否则会被编译器的「ref 按名字推断」
+  // （`enableTreatRefLikeIdentifiersAsRefs`）再次判为渲染期访问 ref。
+  const [groupHeightsCache] = useState(() => new Map<string, number>());
+  const [groupSignaturesCache] = useState(() => new Map<string, string>());
   const groupContentMetricsRef = useRef(new Map<string, GroupContentMetrics>());
-  const nodeMapRef = useRef(new Map<string, HTMLDivElement>());
-  const nodeRefCallbackMapRef = useRef(new Map<string, (element: HTMLDivElement | null) => void>());
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const [nodeCache] = useState(() => new Map<string, HTMLDivElement>());
+  const [nodeCallbackCache] = useState(
+    () => new Map<string, (element: HTMLDivElement | null) => void>(),
+  );
+  const [resizeObserverCache] = useState(() => new Map<string, ResizeObserver>());
 
   useEffect(() => {
     const scrollRegion = scrollRegionRef.current;
@@ -280,7 +295,7 @@ function VirtualizedChatGroupViewport({
       return;
     }
 
-    resizeObserverRef.current = new ResizeObserver((entries) => {
+    const observer = new ResizeObserver((entries) => {
       let changed = false;
 
       for (const entry of entries) {
@@ -290,8 +305,8 @@ function VirtualizedChatGroupViewport({
         }
 
         const nextHeight = Math.ceil(entry.contentRect.height);
-        if (nextHeight > 0 && groupHeightsRef.current.get(key) !== nextHeight) {
-          groupHeightsRef.current.set(key, nextHeight);
+        if (nextHeight > 0 && groupHeightsCache.get(key) !== nextHeight) {
+          groupHeightsCache.set(key, nextHeight);
           changed = true;
         }
       }
@@ -300,14 +315,18 @@ function VirtualizedChatGroupViewport({
         setMeasuredVersion((value) => value + 1);
       }
     });
+    // 观察器同样改由 state 缓存承载（而不是 useRef）：交给 `ref=` 的节点回调在提交期
+    // 需要它来 observe / unobserve，而编译器把「ref 属性值可达范围内的 ref 读取」判成
+    // 渲染期访问 ref，整个组件会因此退出优化。实例生命周期与原来完全一致。
+    resizeObserverCache.set(RESIZE_OBSERVER_SLOT, observer);
 
-    for (const element of nodeMapRef.current.values()) {
-      resizeObserverRef.current.observe(element);
+    for (const element of nodeCache.values()) {
+      observer.observe(element);
     }
 
     return () => {
-      resizeObserverRef.current?.disconnect();
-      resizeObserverRef.current = null;
+      observer.disconnect();
+      resizeObserverCache.delete(RESIZE_OBSERVER_SLOT);
     };
   }, []);
 
@@ -318,7 +337,7 @@ function VirtualizedChatGroupViewport({
     for (const group of groups) {
       const signature = getGroupLayoutSignature(group);
       const metrics = readGroupContentMetrics(group);
-      const previousSignature = groupSignaturesRef.current.get(group.key);
+      const previousSignature = groupSignaturesCache.get(group.key);
 
       if (previousSignature !== undefined && previousSignature !== signature) {
         const previousMetrics = groupContentMetricsRef.current.get(group.key);
@@ -330,22 +349,22 @@ function VirtualizedChatGroupViewport({
         // 内容缩水或状态跃迁（流式结束、折叠生效、编辑截断）时旧实测可能偏大，必须丢弃重测；
         // 仅内容增长时保留旧实测作为下界，供屏幕内的组继续沿用并由 RO 纠正。
         if (shrank || statusChanged) {
-          groupHeightsRef.current.delete(group.key);
+          groupHeightsCache.delete(group.key);
         }
         changed = true;
       }
 
-      groupSignaturesRef.current.set(group.key, signature);
+      groupSignaturesCache.set(group.key, signature);
       groupContentMetricsRef.current.set(group.key, metrics);
     }
 
-    for (const [key, element] of Array.from(nodeMapRef.current.entries())) {
+    for (const [key, element] of Array.from(nodeCache.entries())) {
       if (!validKeys.has(key)) {
-        resizeObserverRef.current?.unobserve(element);
-        nodeMapRef.current.delete(key);
-        nodeRefCallbackMapRef.current.delete(key);
-        groupHeightsRef.current.delete(key);
-        groupSignaturesRef.current.delete(key);
+        resizeObserverCache.get(RESIZE_OBSERVER_SLOT)?.unobserve(element);
+        nodeCache.delete(key);
+        nodeCallbackCache.delete(key);
+        groupHeightsCache.delete(key);
+        groupSignaturesCache.delete(key);
         groupContentMetricsRef.current.delete(key);
       }
     }
@@ -368,9 +387,9 @@ function VirtualizedChatGroupViewport({
       const signature = getGroupLayoutSignature(group);
       const height = resolveGroupHeight({
         estimateHeight: estimateGroupHeight(group),
-        hasObservedNode: nodeMapRef.current.has(group.key),
-        measuredHeight: groupHeightsRef.current.get(group.key),
-        signatureMatches: groupSignaturesRef.current.get(group.key) === signature,
+        hasObservedNode: nodeCache.has(group.key),
+        measuredHeight: groupHeightsCache.get(group.key),
+        signatureMatches: groupSignaturesCache.get(group.key) === signature,
       });
       totalHeight += height + dividerExtra + GROUP_GAP_PX;
     });
@@ -379,7 +398,16 @@ function VirtualizedChatGroupViewport({
       offsets,
       totalHeight: totalHeight > 0 ? totalHeight - GROUP_GAP_PX : 0,
     };
-  }, [groups, measurementVersion, dividerLabels]);
+    // 三个缓存身份恒定（useState 惰性初始化），列进依赖只为让 React Compiler 能保留
+    // 这个手写 useMemo；运行时身份不变，等价于永不额外触发重算。
+  }, [
+    groups,
+    measurementVersion,
+    dividerLabels,
+    groupSignaturesCache,
+    groupHeightsCache,
+    nodeCache,
+  ]);
 
   const visibleRange = useMemo(() => {
     const startBoundary = Math.max(0, scrollTop - OVERSCAN_PX);
@@ -393,10 +421,9 @@ function VirtualizedChatGroupViewport({
       const height = group
         ? resolveGroupHeight({
             estimateHeight: estimateGroupHeight(group),
-            hasObservedNode: key !== undefined && nodeMapRef.current.has(key),
-            measuredHeight: key === undefined ? undefined : groupHeightsRef.current.get(key),
-            signatureMatches:
-              key !== undefined && groupSignaturesRef.current.get(key) === signature,
+            hasObservedNode: key !== undefined && nodeCache.has(key),
+            measuredHeight: key === undefined ? undefined : groupHeightsCache.get(key),
+            signatureMatches: key !== undefined && groupSignaturesCache.get(key) === signature,
           })
         : 0;
       if ((layout.offsets[startIndex] ?? 0) + height >= startBoundary) {
@@ -414,44 +441,58 @@ function VirtualizedChatGroupViewport({
       endIndex: Math.min(groups.length, endIndex + 1),
       startIndex: Math.max(0, startIndex - 1),
     };
-  }, [groups, layout.offsets, scrollTop, viewportHeight]);
+  }, [
+    groups,
+    layout.offsets,
+    scrollTop,
+    viewportHeight,
+    // 同 layout：仅为编译器保留手写 memo，运行时身份恒定。
+    groupSignaturesCache,
+    groupHeightsCache,
+    nodeCache,
+  ]);
 
-  const getMeasuredNodeRef = useCallback((key: string) => {
-    const existing = nodeRefCallbackMapRef.current.get(key);
-    if (existing) {
-      return existing;
-    }
-
-    const callback = (element: HTMLDivElement | null) => {
-      const previousElement = nodeMapRef.current.get(key);
-      if (previousElement && previousElement !== element) {
-        resizeObserverRef.current?.unobserve(previousElement);
-        nodeMapRef.current.delete(key);
+  const getMeasuredNodeRef = useCallback(
+    (key: string) => {
+      const existing = nodeCallbackCache.get(key);
+      if (existing) {
+        return existing;
       }
 
-      if (!element) {
-        return;
-      }
+      const callback = (element: HTMLDivElement | null) => {
+        const previousElement = nodeCache.get(key);
+        if (previousElement && previousElement !== element) {
+          resizeObserverCache.get(RESIZE_OBSERVER_SLOT)?.unobserve(previousElement);
+          nodeCache.delete(key);
+        }
 
-      nodeMapRef.current.set(key, element);
+        if (!element) {
+          return;
+        }
 
-      // Immediately measure on mount. Relying only on ResizeObserver can leave
-      // the first paint on estimate heights — common when a long history jumps
-      // to the bottom and the top-of-list groups briefly enter the overscan
-      // window before true heights are known. That mismatch is the main cause
-      // of the occasional "first message is scrambled until refresh" bug.
-      const measuredHeight = Math.ceil(element.getBoundingClientRect().height);
-      if (measuredHeight > 0 && groupHeightsRef.current.get(key) !== measuredHeight) {
-        groupHeightsRef.current.set(key, measuredHeight);
-        setMeasuredVersion((value) => value + 1);
-      }
+        nodeCache.set(key, element);
 
-      resizeObserverRef.current?.observe(element);
-    };
+        // Immediately measure on mount. Relying only on ResizeObserver can leave
+        // the first paint on estimate heights — common when a long history jumps
+        // to the bottom and the top-of-list groups briefly enter the overscan
+        // window before true heights are known. That mismatch is the main cause
+        // of the occasional "first message is scrambled until refresh" bug.
+        const measuredHeight = Math.ceil(element.getBoundingClientRect().height);
+        if (measuredHeight > 0 && groupHeightsCache.get(key) !== measuredHeight) {
+          groupHeightsCache.set(key, measuredHeight);
+          setMeasuredVersion((value) => value + 1);
+        }
 
-    nodeRefCallbackMapRef.current.set(key, callback);
-    return callback;
-  }, []);
+        resizeObserverCache.get(RESIZE_OBSERVER_SLOT)?.observe(element);
+      };
+
+      nodeCallbackCache.set(key, callback);
+      return callback;
+      // 回调体读的缓存/观察器都是身份恒定的 state 容器，列进依赖只为让编译器
+      // 保留这个手写 useCallback（否则回调每次渲染换身份 → ref 回调反复装卸）。
+    },
+    [nodeCallbackCache, nodeCache, groupHeightsCache, resizeObserverCache],
+  );
 
   const visibleGroups = groups.slice(visibleRange.startIndex, visibleRange.endIndex);
 
@@ -481,7 +522,9 @@ function VirtualizedChatGroupViewport({
     const targetBottom = layout.offsets[targetIndex + 1] ?? layout.totalHeight;
     const desiredTop = targetTop + (targetBottom - targetTop) / 2 - scrollRegion.clientHeight / 2;
     const maxTop = Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight);
-    scrollRegion.scrollTop = Math.max(0, Math.min(desiredTop, maxTop));
+    // scrollRegion 来自 props 传入的 ref，直接写 scrollTop 会让本组件整体退出
+    // React Compiler 优化，故走收敛函数（见 utils/dom/scroll.ts）。
+    setElementScrollTop(scrollRegion, Math.max(0, Math.min(desiredTop, maxTop)));
   }, [groups, layout, pendingMessageScroll, scrollRegionRef]);
 
   return (
@@ -681,43 +724,111 @@ interface GroupContentMetrics {
   statuses: string;
 }
 
+/**
+ * 组布局签名 / 内容度量 / 单条消息高度估算的弱缓存。
+ *
+ * 虚拟化列表每帧都要为**全表**重算这三样（`layout` 与 `visibleRange` 各一遍，加上
+ * 同步签名的 effect），而组对象与消息对象在发布后都是不可变的（entries 不原地修改，
+ * 消息更新走新对象），按引用缓存安全且命中率接近 100%。
+ *
+ * 实测背景：`estimateGroupHeight` 内部会对每条消息调用 `readAssistantTracePayload`
+ * （带 parts 的消息要重建 trace、无 parts 的老消息要 `JSON.parse` 整段 content），
+ * 原实现每帧两次全表执行——长会话 + 工具输出多时，这是纯浪费的每帧线性成本。
+ */
+const groupContentMetricsCache = new WeakMap<ChatRenderGroup, GroupContentMetrics>();
+const groupLayoutSignatureCache = new WeakMap<ChatRenderGroup, string>();
+const messageHeightEstimateCache = new WeakMap<ChatRenderEntry['message'], number>();
+
 function readGroupContentMetrics(group: ChatRenderGroup): GroupContentMetrics {
+  const cached = groupContentMetricsCache.get(group);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  let metrics: GroupContentMetrics;
   if (group.kind === 'subagent-notice') {
     // 通知行是固定高度的单行，内容权重只用于高度估算的兜底。
-    return { contentWeight: 0, statuses: group.notice.state };
+    metrics = { contentWeight: 0, statuses: group.notice.state };
+  } else {
+    let contentWeight = 0;
+    const statuses: string[] = [];
+
+    for (const entry of group.entries) {
+      const message = entry.message;
+      contentWeight += message.content.length;
+      contentWeight += (message.parts?.length ?? 0) * 64;
+      contentWeight += (message.modifiedFilesSummary?.files.length ?? 0) * 16;
+      statuses.push(message.status ?? '');
+    }
+
+    metrics = { contentWeight, statuses: statuses.join('|') };
   }
 
-  let contentWeight = 0;
-  const statuses: string[] = [];
-
-  for (const entry of group.entries) {
-    const message = entry.message;
-    contentWeight += message.content.length;
-    contentWeight += (message.parts?.length ?? 0) * 64;
-    contentWeight += (message.modifiedFilesSummary?.files.length ?? 0) * 16;
-    statuses.push(message.status ?? '');
-  }
-
-  return { contentWeight, statuses: statuses.join('|') };
+  groupContentMetricsCache.set(group, metrics);
+  return metrics;
 }
 
 function getGroupLayoutSignature(group: ChatRenderGroup): string {
-  if (group.kind === 'subagent-notice') {
-    return `notice:${group.notice.id}:${group.notice.state}:${group.notice.description}`;
+  const cached = groupLayoutSignatureCache.get(group);
+  if (cached !== undefined) {
+    return cached;
   }
 
-  return group.entries
-    .map((entry) => {
-      const message = entry.message;
-      return [
-        message.id,
-        message.status ?? '',
-        message.content.length,
-        message.parts?.length ?? 0,
-        message.modifiedFilesSummary?.files.length ?? 0,
-      ].join(':');
-    })
-    .join('|');
+  let signature: string;
+  if (group.kind === 'subagent-notice') {
+    signature = `notice:${group.notice.id}:${group.notice.state}:${group.notice.description}`;
+  } else {
+    signature = group.entries
+      .map((entry) => {
+        const message = entry.message;
+        return [
+          message.id,
+          message.status ?? '',
+          message.content.length,
+          message.parts?.length ?? 0,
+          message.modifiedFilesSummary?.files.length ?? 0,
+        ].join(':');
+      })
+      .join('|');
+  }
+
+  groupLayoutSignatureCache.set(group, signature);
+  return signature;
+}
+
+function estimateMessageContentHeight(message: ChatRenderEntry['message']): number {
+  const cached = messageHeightEstimateCache.get(message);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  let height = 0;
+  // Try to parse assistant trace content for a more accurate estimate.
+  const trace = readAssistantTracePayload(message);
+  if (trace) {
+    // Text content
+    const textChars = trace.text.length;
+    height += Math.min(360, Math.max(48, Math.ceil(textChars / 90) * 18));
+
+    // Reasoning blocks — each rendered as a collapsible section
+    if (trace.reasoningBlocks) {
+      for (const block of trace.reasoningBlocks) {
+        height += Math.min(200, Math.max(40, Math.ceil(block.length / 90) * 18));
+      }
+    }
+
+    // Tool calls — each rendered as a card with header + collapsible body
+    if (trace.toolCalls.length > 0) {
+      height += trace.toolCalls.length * 120;
+    }
+  } else {
+    // Plain text content
+    const contentChars = message.content.length;
+    height += Math.min(540, Math.max(64, Math.ceil(contentChars / 90) * 18));
+  }
+
+  messageHeightEstimateCache.set(message, height);
+  return height;
 }
 
 function estimateGroupHeight(group: ChatRenderGroup): number {
@@ -731,35 +842,12 @@ function estimateGroupHeight(group: ChatRenderGroup): number {
 
   for (let entryIndex = 0; entryIndex < group.entries.length; entryIndex++) {
     const entry = group.entries[entryIndex]!;
-    const message = entry.message;
 
     if (entryIndex > 0) {
       extraHeaderHeight += 28;
     }
 
-    // Try to parse assistant trace content for a more accurate estimate.
-    const trace = readAssistantTracePayload(message);
-    if (trace) {
-      // Text content
-      const textChars = trace.text.length;
-      estimatedContentHeight += Math.min(360, Math.max(48, Math.ceil(textChars / 90) * 18));
-
-      // Reasoning blocks — each rendered as a collapsible section
-      if (trace.reasoningBlocks) {
-        for (const block of trace.reasoningBlocks) {
-          estimatedContentHeight += Math.min(200, Math.max(40, Math.ceil(block.length / 90) * 18));
-        }
-      }
-
-      // Tool calls — each rendered as a card with header + collapsible body
-      if (trace.toolCalls.length > 0) {
-        estimatedContentHeight += trace.toolCalls.length * 120;
-      }
-    } else {
-      // Plain text content
-      const contentChars = message.content.length;
-      estimatedContentHeight += Math.min(540, Math.max(64, Math.ceil(contentChars / 90) * 18));
-    }
+    estimatedContentHeight += estimateMessageContentHeight(entry.message);
   }
 
   return DEFAULT_GROUP_HEIGHT + estimatedContentHeight + extraHeaderHeight;

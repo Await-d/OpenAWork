@@ -241,6 +241,29 @@
   transform: scale(0.98);
 }
 
+/* ── Recovery 瘦身后的截断徽标 ──
+   `/recovery` 会对 tool 输出瘦身（单字段截断 + 64KB 上限），前端剥离标记后在这里
+   告知「内容不完整」，避免用户把截断当成完整输出。 */
+.tool-output-truncation-host {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-output-truncated-badge {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: help;
+}
+
 /* ── Web tool output (webfetch / websearch / google_search) ── */
 
 .tool-call-block-web-meta {

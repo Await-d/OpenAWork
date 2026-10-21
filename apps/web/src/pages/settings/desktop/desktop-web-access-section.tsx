@@ -61,6 +61,94 @@ function bindModeFor(exposeLan: boolean): DesktopGatewayBindMode {
   return exposeLan ? 'lan' : 'localhost';
 }
 
+/**
+ * 桌面 Web 访问动作的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`
+ * （不传＝异常继续向上抛，不得静默吞掉），finally 跑清理（如 `setBusy(null)`）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 6 处
+ * 带 finally 的动作会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runWebAccessActionOnce(ctx: {
+  onError?: (error: unknown) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      throw error;
+    }
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
+/**
+ * 重启本地 sidecar，并在 LAN 模式下检测到默认密码时自动降级到 localhost。
+ *
+ * 整段下沉到模块级的原因同上（含嵌套 try 与 finally）；另外 `sidecarRunning` 需要
+ * 跨「try 成功 / catch 失败」共享，放在模块函数里当普通局部量最稳。语义逐字照搬。
+ */
+async function restartLocalGatewayOnce(ctx: {
+  webPort: number;
+  webExposeLan: boolean;
+  stopGateway: () => Promise<void>;
+  startSidecar: (port: number, exposeLan: boolean) => Promise<void>;
+  refreshPasswordStatus: () => Promise<AdminPasswordStatus | null>;
+  setWebAccess: (enabled: boolean, port: number, exposeLan: boolean) => void;
+  setError: (message: string) => void;
+  setBusy: (busy: null) => void;
+}): Promise<void> {
+  // 用闭包跟踪 sidecar 实际是否在跑：每次 stop 成功 → false，start 成功 → true。
+  // 失败时根据这个值决定是否要把 store 的 webAccessEnabled 同步置 false。
+  let sidecarRunning = true;
+  try {
+    try {
+      await ctx.stopGateway();
+      sidecarRunning = false;
+    } catch (err) {
+      logger.warn('stop_gateway failed during restart', err);
+      // stop 失败时不能确定 sidecar 是否仍在跑——保守认为仍在跑（true），
+      // 后续 start 会再覆盖一次状态。
+    }
+
+    await ctx.startSidecar(ctx.webPort, ctx.webExposeLan);
+    sidecarRunning = true;
+
+    // 重启后校验 admin 密码状态。若 LAN 模式下检测到默认密码，
+    // 立即降级到 localhost 模式重启避免暴露。
+    if (ctx.webExposeLan) {
+      const status = await ctx.refreshPasswordStatus();
+      if (status?.isDefault) {
+        logger.warn(
+          'default admin password detected after restart in LAN mode, falling back to localhost',
+        );
+        await ctx.stopGateway();
+        sidecarRunning = false;
+        await ctx.startSidecar(ctx.webPort, false);
+        sidecarRunning = true;
+        // 降级成功后用 setError 而不是抛错——sidecar 已经在安全模式下运行。
+        ctx.setError(
+          '检测到 admin 仍为默认密码，已自动降级到「仅本机」模式。请在上方修改密码后再重新启用 LAN 共享。',
+        );
+      }
+    }
+  } catch (err) {
+    // sidecar 不在跑时把 webAccessEnabled 同步置 false，避免 UI 与实际状态不一致。
+    // sidecar 仍在跑时保持 webAccessEnabled=true（虽然降级失败但旧 LAN 模式仍可用，
+    // 或第一次 stop 失败但旧 sidecar 仍在跑）。
+    if (!sidecarRunning) {
+      ctx.setWebAccess(false, ctx.webPort, ctx.webExposeLan);
+    }
+    ctx.setError(err instanceof Error ? err.message : '重启本地网关失败');
+    logger.error('restart gateway failed', err);
+  } finally {
+    ctx.setBusy(null);
+  }
+}
+
 export function DesktopWebAccessSection({
   webPort,
   webAccessEnabled,
@@ -175,50 +263,60 @@ export function DesktopWebAccessSection({
     setError(null);
     if (webAccessEnabled) {
       setBusy('stopping');
-      try {
-        await stopDesktopGateway();
-        setWebAccess(false, webPort, webExposeLan);
-        setPasswordStatus(null);
-        setPasswordCheckError(null);
-        setPwdSuccess(null);
-        setPwdError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '停止本地网关失败');
-        logger.error('stopDesktopGateway failed', err);
-      } finally {
-        setBusy(null);
-      }
+      // try/catch/finally 下沉到模块级 `runWebAccessActionOnce`（见其注释）。
+      await runWebAccessActionOnce({
+        onError: (err) => {
+          setError(err instanceof Error ? err.message : '停止本地网关失败');
+          logger.error('stopDesktopGateway failed', err);
+        },
+        onFinally: () => {
+          setBusy(null);
+        },
+        run: async () => {
+          await stopDesktopGateway();
+          setWebAccess(false, webPort, webExposeLan);
+          setPasswordStatus(null);
+          setPasswordCheckError(null);
+          setPwdSuccess(null);
+          setPwdError(null);
+        },
+      });
       return;
     }
     const targetPort = parseGatewayPort(portInput, webPort || DEFAULT_GATEWAY_PORT);
     setBusy('starting');
-    try {
-      // 安全启动：不管用户选的 webExposeLan 是什么，首次启动先 bind 127.0.0.1，
-      // 拿到 admin 密码状态后再决定要不要重启到 0.0.0.0。这样默认密码从未被
-      // 暴露过 LAN，摆脱了「启动瞬间被扫到」的竞态。
-      await startSidecar(targetPort, false);
-      const status = await refreshPasswordStatus();
-      if (status?.isDefault) {
-        // sidecar 运行中（仅本机），开启状态保持，但不能升级到 LAN。
-        // 后面的 PasswordSetupCard 会提示用户修改默认密码。
-        if (webExposeLan) {
-          // 用户原本选了 LAN，但未改密前不允许，静默回退到「仅本机」。
-          setWebAccess(true, targetPort, false);
+    // try/catch/finally 下沉到模块级 `runWebAccessActionOnce`（见其注释）。
+    await runWebAccessActionOnce({
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '启动本地网关失败');
+        logger.error('startDesktopGateway failed', err);
+      },
+      onFinally: () => {
+        setBusy(null);
+      },
+      run: async () => {
+        // 安全启动：不管用户选的 webExposeLan 是什么，首次启动先 bind 127.0.0.1，
+        // 拿到 admin 密码状态后再决定要不要重启到 0.0.0.0。这样默认密码从未被
+        // 暴露过 LAN，摆脱了「启动瞬间被扫到」的竞态。
+        await startSidecar(targetPort, false);
+        const status = await refreshPasswordStatus();
+        if (status?.isDefault) {
+          // sidecar 运行中（仅本机），开启状态保持，但不能升级到 LAN。
+          // 后面的 PasswordSetupCard 会提示用户修改默认密码。
+          if (webExposeLan) {
+            // 用户原本选了 LAN，但未改密前不允许，静默回退到「仅本机」。
+            setWebAccess(true, targetPort, false);
+          }
+          return;
         }
-        return;
-      }
-      // 密码已自定义：如果用户偏好 LAN，重启 sidecar 到正确 bind 模式。
-      if (webExposeLan) {
-        setBusy('switching');
-        await stopDesktopGateway();
-        await startSidecar(targetPort, true);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '启动本地网关失败');
-      logger.error('startDesktopGateway failed', err);
-    } finally {
-      setBusy(null);
-    }
+        // 密码已自定义：如果用户偏好 LAN，重启 sidecar 到正确 bind 模式。
+        if (webExposeLan) {
+          setBusy('switching');
+          await stopDesktopGateway();
+          await startSidecar(targetPort, true);
+        }
+      },
+    });
   }, [
     interactiveDisabled,
     portInput,
@@ -248,15 +346,20 @@ export function DesktopWebAccessSection({
       }
 
       setBusy('switching');
-      try {
-        await stopDesktopGateway();
-        await startSidecar(webPort, nextExposeLan);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '切换暴露范围失败');
-        logger.error('switch expose mode failed', err);
-      } finally {
-        setBusy(null);
-      }
+      // try/catch/finally 下沉到模块级 `runWebAccessActionOnce`（见其注释）。
+      await runWebAccessActionOnce({
+        onError: (err) => {
+          setError(err instanceof Error ? err.message : '切换暴露范围失败');
+          logger.error('switch expose mode failed', err);
+        },
+        onFinally: () => {
+          setBusy(null);
+        },
+        run: async () => {
+          await stopDesktopGateway();
+          await startSidecar(webPort, nextExposeLan);
+        },
+      });
     },
     [
       interactiveDisabled,
@@ -289,22 +392,27 @@ export function DesktopWebAccessSection({
       return;
     }
     setPwdSubmitting(true);
-    try {
-      await tauriInvoke('admin_set_password', { newPassword: pwd1 });
-      // 后端作废了 refresh_tokens —— 重走一次 desktop-default 让桌面处于合法会话。
-      const url = localGatewayUrl(webPort);
-      const tokens = await authenticateDesktopGateway(url);
-      setAuth(tokens.accessToken, DESKTOP_DEFAULT_EMAIL, tokens.refreshToken, tokens.expiresIn);
-      await refreshPasswordStatus();
-      setPwd1('');
-      setPwd2('');
-      setPwdSuccess('已修改。现在可以安全地切换到同局域网访问。');
-    } catch (err) {
-      setPwdError(err instanceof Error ? err.message : '修改密码失败');
-      logger.error('admin_set_password failed', err);
-    } finally {
-      setPwdSubmitting(false);
-    }
+    // try/catch/finally 下沉到模块级 `runWebAccessActionOnce`（见其注释）。
+    await runWebAccessActionOnce({
+      onError: (err) => {
+        setPwdError(err instanceof Error ? err.message : '修改密码失败');
+        logger.error('admin_set_password failed', err);
+      },
+      onFinally: () => {
+        setPwdSubmitting(false);
+      },
+      run: async () => {
+        await tauriInvoke('admin_set_password', { newPassword: pwd1 });
+        // 后端作废了 refresh_tokens —— 重走一次 desktop-default 让桌面处于合法会话。
+        const url = localGatewayUrl(webPort);
+        const tokens = await authenticateDesktopGateway(url);
+        setAuth(tokens.accessToken, DESKTOP_DEFAULT_EMAIL, tokens.refreshToken, tokens.expiresIn);
+        await refreshPasswordStatus();
+        setPwd1('');
+        setPwd2('');
+        setPwdSuccess('已修改。现在可以安全地切换到同局域网访问。');
+      },
+    });
   }, [pwd1, pwd2, refreshPasswordStatus, setAuth, webPort]);
 
   const handleApplyPort = useCallback(async () => {
@@ -326,20 +434,25 @@ export function DesktopWebAccessSection({
     }
 
     setBusy('port');
-    try {
-      try {
-        await stopDesktopGateway();
-      } catch (err) {
-        // 停止失败不致命，继续 start。
-        logger.warn('stop_gateway failed while switching port', err);
-      }
-      await startSidecar(targetPort, webExposeLan);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '应用新端口失败');
-      logger.error('apply port failed', err);
-    } finally {
-      setBusy(null);
-    }
+    // try/catch/finally 下沉到模块级 `runWebAccessActionOnce`（见其注释）。
+    await runWebAccessActionOnce({
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : '应用新端口失败');
+        logger.error('apply port failed', err);
+      },
+      onFinally: () => {
+        setBusy(null);
+      },
+      run: async () => {
+        try {
+          await stopDesktopGateway();
+        } catch (err) {
+          // 停止失败不致命，继续 start。
+          logger.warn('stop_gateway failed while switching port', err);
+        }
+        await startSidecar(targetPort, webExposeLan);
+      },
+    });
   }, [
     interactiveDisabled,
     portInput,
@@ -368,53 +481,18 @@ export function DesktopWebAccessSection({
     if (interactiveDisabled || !webAccessEnabled) return;
     setError(null);
     setBusy('restarting');
-
-    // 用闭包跟踪 sidecar 实际是否在跑：每次 stop 成功 → false，start 成功 → true。
-    // 失败时根据这个值决定是否要把 store 的 webAccessEnabled 同步置 false。
-    let sidecarRunning = true;
-    try {
-      try {
-        await stopDesktopGateway();
-        sidecarRunning = false;
-      } catch (err) {
-        logger.warn('stop_gateway failed during restart', err);
-        // stop 失败时不能确定 sidecar 是否仍在跑——保守认为仍在跑（true），
-        // 后续 start 会再覆盖一次状态。
-      }
-
-      await startSidecar(webPort, webExposeLan);
-      sidecarRunning = true;
-
-      // 重启后校验 admin 密码状态。若 LAN 模式下检测到默认密码，
-      // 立即降级到 localhost 模式重启避免暴露。
-      if (webExposeLan) {
-        const status = await refreshPasswordStatus();
-        if (status?.isDefault) {
-          logger.warn(
-            'default admin password detected after restart in LAN mode, falling back to localhost',
-          );
-          await stopDesktopGateway();
-          sidecarRunning = false;
-          await startSidecar(webPort, false);
-          sidecarRunning = true;
-          // 降级成功后用 setError 而不是抛错——sidecar 已经在安全模式下运行。
-          setError(
-            '检测到 admin 仍为默认密码，已自动降级到「仅本机」模式。请在上方修改密码后再重新启用 LAN 共享。',
-          );
-        }
-      }
-    } catch (err) {
-      // sidecar 不在跑时把 webAccessEnabled 同步置 false，避免 UI 与实际状态不一致。
-      // sidecar 仍在跑时保持 webAccessEnabled=true（虽然降级失败但旧 LAN 模式仍可用，
-      // 或第一次 stop 失败但旧 sidecar 仍在跑）。
-      if (!sidecarRunning) {
-        setWebAccess(false, webPort, webExposeLan);
-      }
-      setError(err instanceof Error ? err.message : '重启本地网关失败');
-      logger.error('restart gateway failed', err);
-    } finally {
-      setBusy(null);
-    }
+    // 整段（含嵌套 try、finally 与跨分支共享的 sidecarRunning）下沉到模块级
+    // `restartLocalGatewayOnce`（见其注释）。
+    await restartLocalGatewayOnce({
+      webPort,
+      webExposeLan,
+      stopGateway: stopDesktopGateway,
+      startSidecar,
+      refreshPasswordStatus,
+      setWebAccess,
+      setError,
+      setBusy,
+    });
   }, [
     interactiveDisabled,
     refreshPasswordStatus,

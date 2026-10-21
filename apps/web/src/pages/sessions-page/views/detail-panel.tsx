@@ -384,6 +384,28 @@ function RestorePreviewPanel({ preview }: { preview: SessionRestorePreviewResult
   );
 }
 
+/**
+ * 会话详情加载（文件快照 / 工作区改动）的统一包装：置 loading → try → catch（含 abort 判定）
+ * → finally 清 loading。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 2 处
+ * 这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runDetailPanelLoadOnce(ctx: {
+  setLoading: (loading: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setLoading(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setLoading(false);
+  }
+}
+
 export function DetailPanel({
   selected,
   copiedId,
@@ -425,23 +447,26 @@ export function DetailPanel({
 
       setReadModelLoading(true);
       setReadModelError(null);
-      try {
-        const data = await sessionsClient.getFileChangesReadModel(token, selected.id, { signal });
-        setReadModel(data);
-        setActiveSnapshotRef((previous) => {
-          if (previous && data.turns.some((turn) => turn.snapshotRef === previous)) {
-            return previous;
+      // try/catch/finally 下沉到模块级 `runDetailPanelLoadOnce`（见其注释）。
+      await runDetailPanelLoadOnce({
+        setLoading: setReadModelLoading,
+        onError: (error) => {
+          if (!isAbortError(error)) {
+            setReadModel(null);
+            setReadModelError(getErrorMessage(error, '加载会话文件快照失败'));
           }
-          return data.sessionSummary.latestSnapshotRef ?? data.turns[0]?.snapshotRef ?? null;
-        });
-      } catch (error) {
-        if (!isAbortError(error)) {
-          setReadModel(null);
-          setReadModelError(getErrorMessage(error, '加载会话文件快照失败'));
-        }
-      } finally {
-        setReadModelLoading(false);
-      }
+        },
+        run: async () => {
+          const data = await sessionsClient.getFileChangesReadModel(token, selected.id, { signal });
+          setReadModel(data);
+          setActiveSnapshotRef((previous) => {
+            if (previous && data.turns.some((turn) => turn.snapshotRef === previous)) {
+              return previous;
+            }
+            return data.sessionSummary.latestSnapshotRef ?? data.turns[0]?.snapshotRef ?? null;
+          });
+        },
+      });
     },
     [selected.id, sessionsClient, token],
   );
@@ -457,22 +482,25 @@ export function DetailPanel({
 
       setReviewLoading(true);
       setReviewError(null);
-      try {
-        const changes = (await createWorkspaceClient(gatewayUrl).reviewStatus(
-          token,
-          selectedWorkingDirectory,
-          { signal },
-        )) as unknown as FileChange[];
-        setReviewChanges(changes ?? []);
-        setReviewDiff({});
-      } catch (error) {
-        if (!isAbortError(error)) {
-          setReviewChanges([]);
-          setReviewError('加载工作区改动失败');
-        }
-      } finally {
-        setReviewLoading(false);
-      }
+      // 同上：整段下沉到 `runDetailPanelLoadOnce`（见其注释）。
+      await runDetailPanelLoadOnce({
+        setLoading: setReviewLoading,
+        onError: (error) => {
+          if (!isAbortError(error)) {
+            setReviewChanges([]);
+            setReviewError('加载工作区改动失败');
+          }
+        },
+        run: async () => {
+          const changes = (await createWorkspaceClient(gatewayUrl).reviewStatus(
+            token,
+            selectedWorkingDirectory,
+            { signal },
+          )) as unknown as FileChange[];
+          setReviewChanges(changes ?? []);
+          setReviewDiff({});
+        },
+      });
     },
     [gatewayUrl, selectedWorkingDirectory, token],
   );
@@ -580,6 +608,9 @@ export function DetailPanel({
     }
 
     setApplyState({ message: null, snapshotRef: activeTurn.snapshotRef, status: 'loading' });
+    // `onRefreshSessions?.()` 是值块（可选链）：留在 try 内会让编译器报
+    // "Support value blocks … within a try/catch statement"，故先取好再进 try。
+    const refreshSessions = onRefreshSessions ? onRefreshSessions() : undefined;
     try {
       const result = await sessionsClient.applyRestore(token, selected.id, {
         snapshotRef: activeTurn.snapshotRef,
@@ -591,11 +622,7 @@ export function DetailPanel({
         snapshotRef: activeTurn.snapshotRef,
         status: 'success',
       });
-      await Promise.all([
-        loadReadModel(),
-        loadWorkspaceReview(),
-        Promise.resolve(onRefreshSessions?.()),
-      ]);
+      await Promise.all([loadReadModel(), loadWorkspaceReview(), Promise.resolve(refreshSessions)]);
     } catch (error) {
       if (error instanceof HttpError && isRestorePreviewResult(error.data)) {
         setPreviewState({

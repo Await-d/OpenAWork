@@ -255,6 +255,25 @@ function contextActionLabel(tab: 'artifacts' | 'health' | 'review'): string {
   return tab === 'review' ? '查看评审' : tab === 'artifacts' ? '查看任务与产物' : '查看健康详情';
 }
 
+/**
+ * 「置忙 → 执行 → 必清忙」的统一包装（**无 catch**：异常继续向上抛给调用方）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 6 处
+ * 该类动作（1 个函数 + 5 个 JSX 内联 handler）会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runWithAlertActionBusy(ctx: {
+  busyKey: string;
+  setAlertActionBusy: (key: string | null) => void;
+  run: () => Promise<unknown>;
+}): Promise<void> {
+  ctx.setAlertActionBusy(ctx.busyKey);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setAlertActionBusy(null);
+  }
+}
+
 export function HealthView({
   onCancelHandoff,
   onOpenHandoffContext,
@@ -345,15 +364,16 @@ export function HealthView({
   );
 
   const retryFailedHandoff = async (handoffId: string) => {
-    setAlertActionBusy(handoffId);
-    try {
-      await runRuntimeAlertRemediation('handoff-failure', {
-        handoffId,
-        ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
-      });
-    } finally {
-      setAlertActionBusy(null);
-    }
+    // try/finally 下沉到模块级 `runWithAlertActionBusy`（见其注释）。
+    await runWithAlertActionBusy({
+      busyKey: handoffId,
+      setAlertActionBusy,
+      run: () =>
+        runRuntimeAlertRemediation('handoff-failure', {
+          handoffId,
+          ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+        }),
+    });
   };
 
   // 失败率（最近 50 条）
@@ -635,16 +655,17 @@ export function HealthView({
                         type="button"
                         disabled={alertActionBusy === pending.handoffId}
                         onClick={async () => {
-                          setAlertActionBusy(pending.handoffId);
-                          try {
-                            await runRuntimeAlertRemediation('quality-review-pending', {
-                              force: true,
-                              handoffId: pending.handoffId,
-                              ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
-                            });
-                          } finally {
-                            setAlertActionBusy(null);
-                          }
+                          // try/finally 下沉到模块级 `runWithAlertActionBusy`（见其注释）。
+                          await runWithAlertActionBusy({
+                            busyKey: pending.handoffId,
+                            setAlertActionBusy,
+                            run: () =>
+                              runRuntimeAlertRemediation('quality-review-pending', {
+                                force: true,
+                                handoffId: pending.handoffId,
+                                ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+                              }),
+                          });
                         }}
                         style={alertActionButtonStyle('warning')}
                       >
@@ -749,14 +770,15 @@ export function HealthView({
                             type="button"
                             disabled={alertActionBusy === alert.code}
                             onClick={async () => {
-                              setAlertActionBusy(alert.code);
-                              try {
-                                await runRuntimeAlertRemediation(alert.code, {
-                                  ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
-                                });
-                              } finally {
-                                setAlertActionBusy(null);
-                              }
+                              // try/finally 下沉到模块级 `runWithAlertActionBusy`（见其注释）。
+                              await runWithAlertActionBusy({
+                                busyKey: alert.code,
+                                setAlertActionBusy,
+                                run: () =>
+                                  runRuntimeAlertRemediation(alert.code, {
+                                    ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+                                  }),
+                              });
                             }}
                             style={alertActionButtonStyle('warning')}
                           >
@@ -773,16 +795,17 @@ export function HealthView({
                           type="button"
                           disabled={alertActionBusy === alert.code}
                           onClick={async () => {
-                            setAlertActionBusy(alert.code);
-                            try {
-                              await acknowledgeRuntimeAlert(
-                                alert.code,
-                                '已确认',
-                                selectedSessionId ? { sessionId: selectedSessionId } : undefined,
-                              );
-                            } finally {
-                              setAlertActionBusy(null);
-                            }
+                            // try/finally 下沉到模块级 `runWithAlertActionBusy`（见其注释）。
+                            await runWithAlertActionBusy({
+                              busyKey: alert.code,
+                              setAlertActionBusy,
+                              run: () =>
+                                acknowledgeRuntimeAlert(
+                                  alert.code,
+                                  '已确认',
+                                  selectedSessionId ? { sessionId: selectedSessionId } : undefined,
+                                ),
+                            });
                           }}
                           style={alertActionButtonStyle('default')}
                         >
@@ -792,16 +815,17 @@ export function HealthView({
                           type="button"
                           disabled={alertActionBusy === alert.code}
                           onClick={async () => {
-                            setAlertActionBusy(alert.code);
-                            try {
-                              await suppressRuntimeAlert(alert.code, {
-                                minutes: 60,
-                                note: '静音 1 小时',
-                                ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
-                              });
-                            } finally {
-                              setAlertActionBusy(null);
-                            }
+                            // try/finally 下沉到模块级 `runWithAlertActionBusy`（见其注释）。
+                            await runWithAlertActionBusy({
+                              busyKey: alert.code,
+                              setAlertActionBusy,
+                              run: () =>
+                                suppressRuntimeAlert(alert.code, {
+                                  minutes: 60,
+                                  note: '静音 1 小时',
+                                  ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+                                }),
+                            });
                           }}
                           style={alertActionButtonStyle('warning')}
                         >
@@ -814,15 +838,16 @@ export function HealthView({
                         type="button"
                         disabled={alertActionBusy === alert.code}
                         onClick={async () => {
-                          setAlertActionBusy(alert.code);
-                          try {
-                            await clearRuntimeAlertControl(
-                              alert.code,
-                              selectedSessionId ? { sessionId: selectedSessionId } : undefined,
-                            );
-                          } finally {
-                            setAlertActionBusy(null);
-                          }
+                          // try/finally 下沉到模块级 `runWithAlertActionBusy`（见其注释）。
+                          await runWithAlertActionBusy({
+                            busyKey: alert.code,
+                            setAlertActionBusy,
+                            run: () =>
+                              clearRuntimeAlertControl(
+                                alert.code,
+                                selectedSessionId ? { sessionId: selectedSessionId } : undefined,
+                              ),
+                          });
                         }}
                         style={alertActionButtonStyle('danger')}
                       >

@@ -52,6 +52,17 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
   const connectionsRef = useRef<Map<string, ConnectionEntry>>(new Map());
   const runningSessionsRef = useRef<Set<string>>(new Set());
 
+  /**
+   * `connectSession` 的自我调度桥（trampoline）。
+   *
+   * 三条重连路径（onNoActiveStream / onError 指数退避 / onDone）都要在定时器里再次
+   * 调用 `connectSession` 本身——直接写 `connectSession(...)` 是「`const` 回调在自身
+   * 初始化器内自引用」，React Compiler 判为 "Cannot access variable before it is
+   * declared"（TDZ）并放弃优化整个 hook。统一改为 ref 持有 + effect 同步
+   * （同 use-scroll-intent.ts 的惯用法），只在定时器回调里取值，渲染期不读 ref。
+   */
+  const connectSessionRef = useRef<(sessionId: string) => void>(() => {});
+
   // P2-1 修复：不使用 useMultiAttachStore() 解构（会导致全量重渲染），
   // 改为在 callback 中通过 getState() 访问 action 函数。
   const storeGetState = useMultiAttachStore.getState;
@@ -103,7 +114,7 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
                 runningSessionsRef.current.has(sessionId) &&
                 !connectionsRef.current.has(sessionId)
               ) {
-                connectSession(sessionId);
+                connectSessionRef.current(sessionId);
               }
             }, NO_STREAM_RECONNECT_DELAY_MS);
             // Track timer in a phantom entry so cleanup can clear it.
@@ -144,7 +155,7 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
             // Close old connection and reconnect
             entry.close();
             connectionsRef.current.delete(sessionId);
-            connectSession(sessionId);
+            connectSessionRef.current(sessionId);
           }, delay);
         },
         onDone: () => {
@@ -165,7 +176,7 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
                 runningSessionsRef.current.has(sessionId) &&
                 !connectionsRef.current.has(sessionId)
               ) {
-                connectSession(sessionId);
+                connectSessionRef.current(sessionId);
               }
             }, ON_DONE_RECONNECT_DELAY_MS);
             // Track timer in a phantom entry so cleanup can clear it.
@@ -200,6 +211,11 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
     },
     [token, gatewayUrl, storeGetState],
   );
+
+  // 与 connectSessionRef 配对：定时器最早 500ms 后触发，挂载提交阶段必已同步。
+  useEffect(() => {
+    connectSessionRef.current = connectSession;
+  }, [connectSession]);
 
   // Main effect: sync connections with running sessions from layer store
   useEffect(() => {

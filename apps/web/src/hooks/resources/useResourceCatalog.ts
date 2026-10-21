@@ -28,6 +28,35 @@ const EMPTY_RESOURCE_CATALOG: ResourceCatalog = {
   mcps: [],
 };
 
+/**
+ * 资源目录变更（上传 / 删除）的统一包装：置 busy / 清 error → try → catch 归一文案并
+ * **重新抛出** → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 2 处
+ * 这类 try 会让整个 hook 脱靶（实测）。语义逐字照搬（含 catch 里的 `throw new Error(message)`）。
+ */
+async function runResourceCatalogActionOnce<T>(ctx: {
+  setBusy: (value: T) => void;
+  busyValue: T;
+  idleValue: T;
+  setError: (message: string | null) => void;
+  /** catch 的兜底文案（`reason.message` 优先）。 */
+  failureMessage: string;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(ctx.busyValue);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (reason: unknown) {
+    const message = reason instanceof Error ? reason.message : ctx.failureMessage;
+    ctx.setError(message);
+    throw new Error(message);
+  } finally {
+    ctx.setBusy(ctx.idleValue);
+  }
+}
+
 export function useResourceCatalog(): ResourceCatalogState {
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
   const accessToken = useAuthStore((state) => state.accessToken);
@@ -88,17 +117,18 @@ export function useResourceCatalog(): ResourceCatalogState {
         setError('请先登录后再上传资源。');
         throw new Error('请先登录后再上传资源。');
       }
-      setMutating(true);
-      setError(null);
-      try {
-        setResources(await client.upload(accessToken, input));
-      } catch (reason: unknown) {
-        const message = reason instanceof Error ? reason.message : '上传资源失败';
-        setError(message);
-        throw new Error(message);
-      } finally {
-        setMutating(false);
-      }
+      // 置 busy / 清 error 与 try/catch/finally 一起下沉到模块级
+      // `runResourceCatalogActionOnce`（见其注释：catch 会写 error 并重新抛出）。
+      await runResourceCatalogActionOnce<boolean>({
+        setBusy: setMutating,
+        busyValue: true,
+        idleValue: false,
+        setError,
+        failureMessage: '上传资源失败',
+        run: async () => {
+          setResources(await client.upload(accessToken, input));
+        },
+      });
     },
     [accessToken, client],
   );
@@ -109,17 +139,17 @@ export function useResourceCatalog(): ResourceCatalogState {
         setError('请先登录后再删除资源。');
         throw new Error('请先登录后再删除资源。');
       }
-      setDeletingId(resourceId);
-      setError(null);
-      try {
-        setResources(await client.remove(accessToken, resourceId));
-      } catch (reason: unknown) {
-        const message = reason instanceof Error ? reason.message : '删除资源失败';
-        setError(message);
-        throw new Error(message);
-      } finally {
-        setDeletingId(null);
-      }
+      // 同 uploadResource：整段下沉到 `runResourceCatalogActionOnce`（见其注释）。
+      await runResourceCatalogActionOnce<string | null>({
+        setBusy: setDeletingId,
+        busyValue: resourceId,
+        idleValue: null,
+        setError,
+        failureMessage: '删除资源失败',
+        run: async () => {
+          setResources(await client.remove(accessToken, resourceId));
+        },
+      });
     },
     [accessToken, client],
   );

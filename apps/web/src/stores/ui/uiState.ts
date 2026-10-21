@@ -25,6 +25,8 @@ import { isSameWorkspace, type WorkspaceIdentity } from '../../utils/session/ses
  *     `beforeunload` so a fast click → close doesn't lose state.
  */
 const FLUSH_DELAY_MS = 200;
+/** 本地持久化键名：工作台状态同步写入 / 读取快照时复用同一个键。 */
+export const UI_STATE_STORAGE_KEY = 'openAwork-ui-state';
 let pendingKey: string | null = null;
 let pendingValue: string | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -410,9 +412,20 @@ export interface UIStateStore {
    * 联合类型与 `SessionSidePanel` 的 `SidePanelTabId` 保持一致：`files` /
    * `browser` 只属于移动端底部面板，桌面端会在渲染前收敛到 `code` / `preview`；
    * `agent` 只属于桌面停靠面板，移动端渲染前收敛回 `review`。
+   *
+   * 这是**当前会话桶的镜像值**（与 `terminalPanelOpened` 同一模式）：真正的归属
+   * 在 `sidePanelActiveTabBySession`，会话切换时由 `setLastChatPath` 负责换镜。
+   * 不按会话记忆会让多会话互相串 tab——在 A 选了「代码」再切回 B，B 也被迫
+   * 停在「代码」，用户看到的就是「切会话后 tab 乱跑」。
    */
   sidePanelActiveTab: SidePanelActiveTab;
   setSidePanelActiveTab: (tab: SidePanelActiveTab) => void;
+  /**
+   * 停靠面板一级 tab 按会话分桶，键为规范化后的完整 chat path（见
+   * `terminalPanelSessionKeyFor`），无 chat path 时归入 `__default__` 桶。
+   * 桶里缺失的会话在切回时回落 `review`（面板默认视图）。
+   */
+  sidePanelActiveTabBySession: Record<string, SidePanelActiveTab>;
   /**
    * 单一浏览器互斥标记：`BuiltInBrowser` 持有网关实时会话，全应用同一时刻最多
    * 只能挂载一个实例。停靠面板的浏览器 tab 挂载时声明 'dock'，卸载时归还
@@ -664,6 +677,51 @@ export type SidePanelActiveTab = (typeof SIDE_PANEL_ACTIVE_TABS)[number];
 /** 未知 tab id 会把面板渲染成一个没有选中项的空白壳，载入期直接判非法。 */
 function isSidePanelActiveTab(value: unknown): value is SidePanelActiveTab {
   return SIDE_PANEL_ACTIVE_TABS.some((candidate) => candidate === value);
+}
+
+/** 停靠面板一级 tab 的缺省值：桶里没有记录（或值等于缺省）时都落到它。 */
+const DEFAULT_SIDE_PANEL_ACTIVE_TAB: SidePanelActiveTab = 'review';
+
+/**
+ * 写入单个会话桶。缺省值等价于「键不存在」（读取端统一 `?? review`），
+ * 因此写缺省值时删除键——否则每次切会话都会给访问过的会话留一条默认记录，
+ * 持久化数据无意义膨胀（与 `normalizeTerminalPanelOpenedBySession` 同价值观）。
+ */
+function withSidePanelActiveTab(
+  buckets: Record<string, SidePanelActiveTab>,
+  key: string,
+  tab: SidePanelActiveTab,
+): Record<string, SidePanelActiveTab> {
+  if (tab === DEFAULT_SIDE_PANEL_ACTIVE_TAB) {
+    if (!(key in buckets)) {
+      return buckets;
+    }
+    const next = { ...buckets };
+    delete next[key];
+    return next;
+  }
+  if (buckets[key] === tab) {
+    return buckets;
+  }
+  return { ...buckets, [key]: tab };
+}
+
+/**
+ * 逐桶校验 tab 成员：非法条目**整条丢弃**（该会话切回时回落 review），
+ * 与 `normalizeTerminalPanelOpenedBySession` 同口径——保留垃圾只会让持久化膨胀。
+ */
+function normalizeSidePanelActiveTabBySession(value: unknown): Record<string, SidePanelActiveTab> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const next: Record<string, SidePanelActiveTab> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (isSidePanelActiveTab(entry)) {
+      next[key] = entry;
+    }
+  }
+  return next;
 }
 
 /**
@@ -1183,8 +1241,8 @@ export const useUIStateStore = create<UIStateStore>()(
             return { lastChatPath: nextPath };
           }
 
-          // 会话切换：先把当前镜像归档回旧会话桶（保住旧会话的展开态），再把新会话
-          // 桶的值载入镜像（缺省 false，即新会话默认收起）。
+          // 会话切换：先把当前镜像归档回旧会话桶（保住旧会话的展开态与一级 tab），
+          // 再把新会话桶的值载入镜像（终端缺省收起、tab 缺省审查）。
           return {
             lastChatPath: nextPath,
             terminalPanelOpened: state.terminalPanelOpenedBySession[nextKey] ?? false,
@@ -1192,6 +1250,13 @@ export const useUIStateStore = create<UIStateStore>()(
               ...state.terminalPanelOpenedBySession,
               [previousKey]: state.terminalPanelOpened,
             },
+            sidePanelActiveTab:
+              state.sidePanelActiveTabBySession[nextKey] ?? DEFAULT_SIDE_PANEL_ACTIVE_TAB,
+            sidePanelActiveTabBySession: withSidePanelActiveTab(
+              state.sidePanelActiveTabBySession,
+              previousKey,
+              state.sidePanelActiveTab,
+            ),
           };
         }),
       tabs: [],
@@ -1757,8 +1822,17 @@ export const useUIStateStore = create<UIStateStore>()(
       fusionDockSplitPos: FUSION_DOCK_SPLIT_BOUNDS.default,
       setFusionDockSplitPos: (percent) =>
         set({ fusionDockSplitPos: clampFusionDockSplitPos(percent) }),
-      sidePanelActiveTab: 'review',
-      setSidePanelActiveTab: (tab) => set({ sidePanelActiveTab: tab }),
+      sidePanelActiveTab: DEFAULT_SIDE_PANEL_ACTIVE_TAB,
+      setSidePanelActiveTab: (tab) =>
+        set((state) => ({
+          sidePanelActiveTab: tab,
+          sidePanelActiveTabBySession: withSidePanelActiveTab(
+            state.sidePanelActiveTabBySession,
+            terminalPanelSessionKeyFor(state.lastChatPath),
+            tab,
+          ),
+        })),
+      sidePanelActiveTabBySession: {},
       browserPreviewSurface: 'editor',
       setBrowserPreviewSurface: (surface) => set({ browserPreviewSurface: surface }),
       resetBrowserPreviewView: () =>
@@ -1778,6 +1852,12 @@ export const useUIStateStore = create<UIStateStore>()(
             editorPaneTabByWorkspace,
             browserActive: false,
             sidePanelActiveTab,
+            // 桶是唯一真相源：只改镜像会让下次换镜时按旧桶把 preview 重新载回来。
+            sidePanelActiveTabBySession: withSidePanelActiveTab(
+              state.sidePanelActiveTabBySession,
+              terminalPanelSessionKeyFor(state.lastChatPath),
+              sidePanelActiveTab,
+            ),
           };
         }),
       terminalPanelOpened: false,
@@ -1866,7 +1946,7 @@ export const useUIStateStore = create<UIStateStore>()(
         }),
     }),
     {
-      name: 'openAwork-ui-state',
+      name: UI_STATE_STORAGE_KEY,
       version: 28,
       // editorMode 不持久化——每次启动默认关闭；reviewPanelOpened 现已作为布局偏好
       // 持久化（刷新后保持上次展开态，缺省与脏数据回落 false，见 merge 兜底）。
@@ -1904,6 +1984,11 @@ export const useUIStateStore = create<UIStateStore>()(
         if (!isSidePanelActiveTab(merged.sidePanelActiveTab)) {
           merged.sidePanelActiveTab = 'review';
         }
+        // 按会话分桶的 tab 同源校验：旧版本没有该键（默认空桶），同版本脏数据
+        // 里的非法条目逐条丢弃——该会话切回时按缺省回落审查。
+        merged.sidePanelActiveTabBySession = normalizeSidePanelActiveTabBySession(
+          merged.sidePanelActiveTabBySession,
+        );
         merged.editorMode = false;
         merged.closedSessionTabIds = [];
         // 瞬态身份：无论存储里出现什么（旧数据 / 手改 / 上一个标签页残留），
@@ -2286,4 +2371,59 @@ export function useLocalSavedWorkspacePaths(): string[] {
       ),
     ),
   );
+}
+
+// ── 跨设备快照（工作台状态同步）─────────────────────────────────────
+
+/**
+ * 立即把节流中的本地写入落盘。
+ *
+ * 应用远端快照前必须调用：throttledStorage 的 `getItem` 会优先返回尚未落盘的
+ * `pendingValue`，不先 flush，刚写进去的远端快照会被 200ms 内的旧值盖掉。
+ */
+export function flushPersistedUiStateNow(): void {
+  flushPending();
+}
+
+/**
+ * 读取当前持久化快照（与 `localStorage` 里的 `{ state, version }` 同形）。
+ *
+ * 直接复用 persist 的 `partialize`：同步的内容与本地持久化天然一致，新增布局字段
+ * 不需要在两处各维护一份白名单。动作函数不可序列化，这里顺手剔掉。
+ */
+export function readPersistedUiStateSnapshot(): {
+  state: Record<string, unknown>;
+  version: number;
+} {
+  const options = useUIStateStore.persist.getOptions();
+  const partialized = options.partialize
+    ? options.partialize(useUIStateStore.getState())
+    : useUIStateStore.getState();
+  const state: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(partialized as Record<string, unknown>)) {
+    if (typeof value === 'function') continue;
+    state[key] = value;
+  }
+  return { state, version: options.version ?? 0 };
+}
+
+/**
+ * 把服务端快照写回本地并重新水合。
+ *
+ * 走「写 localStorage + rehydrate」而不是直接 `setState`：持久化中间件会在水合时
+ * 跑 `migrate` 与 `merge` 兜底（瞬态字段清零、脏桶归一、版本迁移），直接 setState
+ * 会绕过全部校验。
+ */
+export async function applyPersistedUiStateSnapshot(
+  state: Record<string, unknown>,
+  version: number,
+): Promise<void> {
+  if (typeof window === 'undefined') return;
+  flushPersistedUiStateNow();
+  try {
+    window.localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify({ state, version }));
+  } catch {
+    return;
+  }
+  await useUIStateStore.persist.rehydrate();
 }

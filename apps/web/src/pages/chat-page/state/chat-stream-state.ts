@@ -8,6 +8,7 @@ import type {
   UpstreamStreamSummary,
 } from '@openAwork/shared';
 import { hasActivePendingPermissionRequest } from '../../../components/conversation-runtime/messages/support.js';
+import { isNonTerminalStreamErrorCode } from '../../../hooks/gateway/stream-error-classification.js';
 import type {
   AgentVizEvent,
   DAGNodeInfo,
@@ -288,6 +289,14 @@ export function applyChatRightPanelChunk(
         undefined,
       );
     case 'error':
+      // 流内非终态错误（如单次工具调用被上游丢弃）不得结算：整条流仍在继续，
+      // 此刻标记失败会残留假的「流式响应失败」事件与 failed 任务——`finalizeRun`
+      // 的 completed 分支只保留已标 failed 的条目，后续 done 也擦不掉。
+      // 上游摘要仍照常记录（TOOL_ERROR 当前不带 summary，`appendUpstreamSummaryEvent`
+      // 会原样返回入参 state；此处保留是为防将来网关补上摘要时被丢弃）。
+      if (isNonTerminalStreamErrorCode(chunk.code)) {
+        return appendUpstreamSummaryEvent(state, chunk);
+      }
       return finalizeRun(appendUpstreamSummaryEvent(state, chunk), 'failed', chunk.message);
   }
 
@@ -653,16 +662,32 @@ function applyToolProgressEvent(
   event: Extract<RunEvent, { type: 'tool_progress' }>,
 ): ChatRightPanelState {
   const existing = state.toolCalls.find((item) => item.toolCallId === event.toolCallId);
+  // 结果已结算后的迟到 progress 不得把工具降级回 running，也不能重新写回
+  // 半成品 batchProgress。paused 是待审批态，批准后的 progress 应恢复 running。
+  if (existing?.status === 'completed' || existing?.status === 'failed') {
+    return state;
+  }
+  const resumedFromPause = existing?.status === 'paused';
   const toolCalls = upsertById(state.toolCalls, event.toolCallId, {
     toolCallId: event.toolCallId,
     toolName: event.toolName,
     inputText: existing?.inputText ?? '',
     input: existing?.input ?? {},
-    ...(typeof event.clientRequestId === 'string' ? { requestId: event.clientRequestId } : {}),
+    ...(typeof event.clientRequestId === 'string'
+      ? { requestId: event.clientRequestId }
+      : existing?.requestId
+        ? { requestId: existing.requestId }
+        : {}),
     output: existing?.output,
     isError: existing?.isError,
     // tool_progress 可能晚于 tool_result 到达：必须保留已写入的截图附件。
     ...(existing?.attachments ? { attachments: existing.attachments } : {}),
+    ...(existing?.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
+    ...(resumedFromPause
+      ? {}
+      : existing?.pendingPermissionRequestId
+        ? { pendingPermissionRequestId: existing.pendingPermissionRequestId }
+        : {}),
     status: 'running',
     batchProgress: {
       subTools: event.subTools,
@@ -671,9 +696,29 @@ function applyToolProgressEvent(
     },
   });
 
+  // 待审批 → 运行中：把右侧计划与 DAG 节点也同步回进行中，否则面板会停在
+  // “待审批 / pending”，与工具卡片的实时输出矛盾。
+  const planTasks = resumedFromPause
+    ? upsertById(state.planTasks, event.toolCallId, {
+        id: event.toolCallId,
+        label: event.toolName,
+        status: 'in_progress' as const,
+      })
+    : state.planTasks;
+  const dagNodes = resumedFromPause
+    ? upsertById(state.dagNodes, event.toolCallId, {
+        id: event.toolCallId,
+        label: event.toolName,
+        type: 'tool' as const,
+        status: 'running' as const,
+      })
+    : state.dagNodes;
+
   return {
     ...state,
     toolCalls,
+    planTasks,
+    dagNodes,
   };
 }
 

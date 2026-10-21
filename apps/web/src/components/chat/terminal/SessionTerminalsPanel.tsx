@@ -450,6 +450,27 @@ export function computeTerminalChipPosition(input: TerminalChipPositionInput): {
   return { left, top };
 }
 
+/**
+ * 批量终止 / 批量清理的统一包装：置 batchBusy → try → finally 清 batchBusy（可附带
+ * 一次刷新）。原代码**没有 catch**（异常向上抛），保持同一语义。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件多处
+ * 这类动作会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runBatchTerminalActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setBusy(false);
+    ctx.onFinally?.();
+  }
+}
+
 export function SessionTerminalsPanel({
   open,
   onClose,
@@ -539,30 +560,32 @@ export function SessionTerminalsPanel({
   // 批量终止：对每个 id 走同一套乐观 + 服务端确认路径，让 pendingKillIds
   // 能逐个点亮，用户能看到进度而不是一个假死的"全部终止中"。
   const handleKillAllActive = async (ids: readonly string[]): Promise<void> => {
-    setBatchBusy(true);
-    try {
-      await Promise.all(ids.map((id) => onKillTerminal(id)));
-    } finally {
-      setBatchBusy(false);
-    }
+    // try/finally 下沉到模块级 `runBatchTerminalActionOnce`（见其注释）。
+    await runBatchTerminalActionOnce({
+      setBusy: setBatchBusy,
+      run: async () => {
+        await Promise.all(ids.map((id) => onKillTerminal(id)));
+      },
+    });
   };
 
   // 批量清理：删除已完成的历史记录，避免几十条 void 行长期占位。
   const handleDeleteAllClosed = async (ids: readonly string[]): Promise<void> => {
     if (!sessionId || !token) return;
-    setBatchBusy(true);
-    try {
-      await Promise.all(
-        ids.map((terminalId) =>
-          deleteSessionTerminal({ gatewayUrl, sessionId, terminalId, token }).catch(
-            () => undefined,
+    // try/finally 下沉到模块级 `runBatchTerminalActionOnce`（见其注释）。
+    await runBatchTerminalActionOnce({
+      setBusy: setBatchBusy,
+      onFinally: onReload,
+      run: async () => {
+        await Promise.all(
+          ids.map((terminalId) =>
+            deleteSessionTerminal({ gatewayUrl, sessionId, terminalId, token }).catch(
+              () => undefined,
+            ),
           ),
-        ),
-      );
-    } finally {
-      setBatchBusy(false);
-      onReload();
-    }
+        );
+      },
+    });
   };
 
   // 宿主链（CachedRouteOutlet 的路由条目）带 `contain: layout style`，CSS containment

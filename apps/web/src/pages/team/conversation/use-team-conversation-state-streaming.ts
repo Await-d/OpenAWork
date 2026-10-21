@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RunEvent, UpstreamStreamSummary } from '@openAwork/shared';
 import {
   createQuestionsClient,
@@ -18,6 +18,7 @@ import type { ChatBackendUsageSnapshot } from '../../../components/conversation-
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import type { ChatSettingsProvider } from '../../../utils/chat/chat-session-defaults.js';
 import { replyPermissionRequest } from '../../../utils/permission/permission-reply.js';
+import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 import { useLayerStore } from '../../../stores/team/team-events.js';
 import { useMultiAttachStore } from '../../../stores/team/multi-attach-store.js';
 import {
@@ -79,6 +80,27 @@ export interface UseTeamConversationStreamingResult {
   submitInbound: TeamConversationState['submitInbound'];
   replyPermission: TeamConversationState['replyPermission'];
   replyQuestion: TeamConversationState['replyQuestion'];
+}
+
+/**
+ * 流操作（停止流）的统一包装：成功 / 失败都返回 `T`（`onError` 的返回值即本函数返回值，
+ * 用来保留原 catch 里的 `return false`），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 这处 try
+ * 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runStreamActionOnce<T>(ctx: {
+  onError: (error: unknown) => T;
+  onFinally: () => void;
+  run: () => Promise<T>;
+}): Promise<T> {
+  try {
+    return await ctx.run();
+  } catch (error) {
+    return ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
 }
 
 export function useTeamConversationStreaming(
@@ -182,8 +204,10 @@ export function useTeamConversationStreaming(
   const gatewayClient = useGatewayClient(token);
   // multiAttachActiveRef 是 ref 版本，供 callback 中同步读取。
   const multiAttachActiveRef = useRef(false);
-  // Hold a `requestStartedAt` per round; refreshed on each startStream call.
-  const streamRequestStartedAtRef = useRef<number>(Date.now());
+  // 本轮请求开始时间：用 state 而非 ref —— 渲染期读 `ref.current` 会被编译器判为
+  // "Cannot access refs during render" 并放弃优化整个 hook（实测）。startStream 里
+  // 本来就会 setActiveStreamStartedAt 触发重渲染，因此 state 不会多一次提交。
+  const [requestStartedAt, setRequestStartedAt] = useState(() => Date.now());
   const onChatOnlyEventRef = useRef<((event: RunEvent) => void) | undefined>(undefined);
   const requestModelLabelRef = useRef<string | undefined>(undefined);
   const requestProviderIdRef = useRef<string | undefined>(undefined);
@@ -197,6 +221,11 @@ export function useTeamConversationStreaming(
       currentAssistantStreamMessageIdRef,
       streamingRef,
       stoppingStreamRef,
+      // 请求元信息按 ref 传入（惰性取最新值，避免在渲染期构造读 ref 的 getter）。
+      streamClientRequestIdRef,
+      requestProviderIdRef,
+      requestModelLabelRef,
+      requestAgentIdRef,
     },
     {
       setMessages,
@@ -216,19 +245,7 @@ export function useTeamConversationStreaming(
     },
     {
       sessionId,
-      requestStartedAt: streamRequestStartedAtRef.current,
-      get clientRequestId() {
-        return streamClientRequestIdRef.current;
-      },
-      get requestProviderId() {
-        return requestProviderIdRef.current;
-      },
-      get requestModelLabel() {
-        return requestModelLabelRef.current;
-      },
-      get requestAgentId() {
-        return requestAgentIdRef.current;
-      },
+      requestStartedAt,
       onChatOnlyEvent: (event) => onChatOnlyEventRef.current?.(event),
       onStreamDone: () => {
         // Mirror finalized assistant message back through reload so the
@@ -244,170 +261,162 @@ export function useTeamConversationStreaming(
 
   // multiAttachActiveRef 和 multiAttachActive 已在会话状态区域声明（使用前定义）。
 
-  const startStream: TeamConversationState['startStream'] = useCallback(
-    async (text, opts) => {
-      if (!enableWriters) {
-        throw new Error('当前会话为只读模式，无法发送消息。');
-      }
-      if (!sessionId || !token) {
-        throw new Error('当前团队会话或登录状态无效，无法开始对话。');
-      }
-      if (streamingRef.current) {
-        // 已在流式生成中：明确抛错而非静默 return。早期实现这里直接 return，
-        // 上层 handleComposerSubmit 已先清空输入框，导致这条消息被静默丢弃且
-        // 无任何反馈。改为抛错让调用方据此保留输入框内容并提示用户。
-        throw new Error('正在生成回复，请等待当前回复完成或点击停止后再发送。');
-      }
+  // 去 useCallback 包装：编译器会对函数表达式自动 memoize（引用稳定性与手写等价），
+  // 而这处手写 memo 的依赖与推断依赖不一致（多个 setter 被漏列），编译器会判
+  // 「Existing memoization could not be preserved」放弃优化整个 hook（实测）。
+  const startStream: TeamConversationState['startStream'] = async (text, opts) => {
+    if (!enableWriters) {
+      throw new Error('当前会话为只读模式，无法发送消息。');
+    }
+    if (!sessionId || !token) {
+      throw new Error('当前团队会话或登录状态无效，无法开始对话。');
+    }
+    if (streamingRef.current) {
+      // 已在流式生成中：明确抛错而非静默 return。早期实现这里直接 return，
+      // 上层 handleComposerSubmit 已先清空输入框，导致这条消息被静默丢弃且
+      // 无任何反馈。改为抛错让调用方据此保留输入框内容并提示用户。
+      throw new Error('正在生成回复，请等待当前回复完成或点击停止后再发送。');
+    }
 
-      const trimmed = text.trim();
-      if (!trimmed) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
 
-      onChatOnlyEventRef.current = opts?.onChatOnlyEvent;
-      requestProviderIdRef.current = activeProviderId || undefined;
-      const activeProvider = providers.find((provider) => provider.id === activeProviderId);
-      const activeModel = activeProvider?.defaultModels.find((model) => model.id === activeModelId);
-      const resolvedThinkingRequest = resolveChatThinkingRequest({
-        providerType: activeProvider?.type,
-        modelId: activeModel?.id ?? activeModelId,
-        declaredSupportsThinking: activeModel?.supportsThinking === true,
-        thinkingEnabled,
-        reasoningEffort,
-      });
-      const activeModelLabel = activeModel?.label;
-      requestModelLabelRef.current = activeModelLabel ?? activeModelId ?? undefined;
-      requestAgentIdRef.current = opts?.agentId || effectiveAgentId || undefined;
-      streamRequestStartedAtRef.current = Date.now();
-
-      // Push the user message into the local list immediately for snappy UX.
-      const userMessageId = makeOrderedMessageId();
-      const userMessage: ChatMessage = {
-        id: userMessageId,
-        role: 'user',
-        content: trimmed,
-        createdAt: Date.now(),
-        tokenEstimate: estimateTokenCount(trimmed),
-      };
-      setMessages((prev) => [...prev, userMessage]);
-      // Pre-allocate the assistant streaming message id so the consumer can
-      // accumulate segments under it before the gateway emits any event.
-      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-      stream.resetRoundAccumulators();
-      // Disable multi-attach handling during user-initiated stream — the
-      // WS/SSE stream from startStream provides events directly.
-      multiAttachActiveRef.current = false;
-      setMultiAttachActive(false);
-      setStreaming(true);
-      streamingRef.current = true;
-      setActiveStreamStartedAt(streamRequestStartedAtRef.current);
-      setActiveStreamFirstTokenLatencyMs(null);
-      setSessionStateStatus('running');
-
-      gatewayClient.stream(sessionId, trimmed, {
-        agentId: requestAgentIdRef.current,
-        displayMessage: opts?.displayMessage,
-        ...(opts?.inputParts ? { inputParts: opts.inputParts } : {}),
-        model: activeModelId || 'default',
-        providerId: activeProviderId || undefined,
-        thinkingEnabled: resolvedThinkingRequest.thinkingEnabled,
-        reasoningEffort: resolvedThinkingRequest.reasoningEffort,
-        // team 端不传 dialogueMode / webSearchEnabled / yoloMode：这些是
-        // chat-only 偏好，与 team 数据流无关。
-        onDelta: () => {
-          // useConversationStream consumes `text_delta` via onEvent; this
-          // legacy hook is unused but required by the StreamCallbacks shape.
-        },
-        onEvent: (event) => {
-          // GatewayStreamEvent === RunEvent for our purposes; cast through.
-          stream.handleEvent(event as RunEvent);
-        },
-        onDone: () => {
-          streamingRef.current = false;
-          setStreaming(false);
-          setStoppingStream(false);
-          setActiveStreamStartedAt(null);
-          // Re-enable multi-attach if it's still connected.
-          // We do this synchronously in onDone (rather than relying on
-          // checkAndRegister) to avoid a window where streamingRef is false
-          // but multiAttachActiveRef is also false, which could let multi-attach
-          // events leak into the old round's accumulator.
-          if (sessionId) {
-            const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
-            if (maStatus?.state === 'connected') {
-              multiAttachActiveRef.current = true;
-              setMultiAttachActive(true);
-              currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-              stream.resetRoundAccumulators();
-              setStreaming(true);
-              streamingRef.current = true;
-              setActiveStreamStartedAt(Date.now());
-              setActiveStreamFirstTokenLatencyMs(null);
-            }
-          }
-          // Trigger reload (also called inside the consumer's onStreamDone).
-        },
-        onError: (code, message, technicalDetail) => {
-          streamingRef.current = false;
-          setStreaming(false);
-          setStoppingStream(false);
-          setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
-          // Re-enable multi-attach on error too, if still connected.
-          if (sessionId) {
-            const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
-            if (maStatus?.state === 'connected') {
-              multiAttachActiveRef.current = true;
-              setMultiAttachActive(true);
-              currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-              stream.resetRoundAccumulators();
-              setStreaming(true);
-              streamingRef.current = true;
-              setActiveStreamStartedAt(Date.now());
-              setActiveStreamFirstTokenLatencyMs(null);
-            }
-          }
-        },
-      });
-      // `stream()` mints the rid synchronously; capture it before any event
-      // arrives so both the intermediate and final commits carry it.
-      streamClientRequestIdRef.current = gatewayClient.getActiveStreamClientRequestId();
-    },
-    [
-      enableWriters,
-      sessionId,
-      token,
-      activeProviderId,
-      activeModelId,
+    onChatOnlyEventRef.current = opts?.onChatOnlyEvent;
+    writeRefCurrent(requestProviderIdRef, activeProviderId || undefined);
+    const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+    const activeModel = activeProvider?.defaultModels.find((model) => model.id === activeModelId);
+    const resolvedThinkingRequest = resolveChatThinkingRequest({
+      providerType: activeProvider?.type,
+      modelId: activeModel?.id ?? activeModelId,
+      declaredSupportsThinking: activeModel?.supportsThinking === true,
       thinkingEnabled,
       reasoningEffort,
-      effectiveAgentId,
-      providers,
-      gatewayClient,
-      stream,
-      streamingRef,
-      currentAssistantStreamMessageIdRef,
-    ],
-  );
+    });
+    const activeModelLabel = activeModel?.label;
+    writeRefCurrent(requestModelLabelRef, activeModelLabel ?? activeModelId ?? undefined);
+    writeRefCurrent(requestAgentIdRef, opts?.agentId || effectiveAgentId || undefined);
+    setRequestStartedAt(Date.now());
 
-  const stopStream: TeamConversationState['stopStream'] = useCallback(async () => {
+    // Push the user message into the local list immediately for snappy UX.
+    const userMessageId = makeOrderedMessageId();
+    const userMessage: ChatMessage = {
+      id: userMessageId,
+      role: 'user',
+      content: trimmed,
+      createdAt: Date.now(),
+      tokenEstimate: estimateTokenCount(trimmed),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    // Pre-allocate the assistant streaming message id so the consumer can
+    // accumulate segments under it before the gateway emits any event.
+    writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
+    stream.resetRoundAccumulators();
+    // Disable multi-attach handling during user-initiated stream — the
+    // WS/SSE stream from startStream provides events directly.
+    writeRefCurrent(multiAttachActiveRef, false);
+    setMultiAttachActive(false);
+    setStreaming(true);
+    writeRefCurrent(streamingRef, true);
+    setActiveStreamStartedAt(Date.now());
+    setActiveStreamFirstTokenLatencyMs(null);
+    setSessionStateStatus('running');
+
+    gatewayClient.stream(sessionId, trimmed, {
+      agentId: requestAgentIdRef.current,
+      displayMessage: opts?.displayMessage,
+      ...(opts?.inputParts ? { inputParts: opts.inputParts } : {}),
+      model: activeModelId || 'default',
+      providerId: activeProviderId || undefined,
+      thinkingEnabled: resolvedThinkingRequest.thinkingEnabled,
+      reasoningEffort: resolvedThinkingRequest.reasoningEffort,
+      // team 端不传 dialogueMode / webSearchEnabled / yoloMode：这些是
+      // chat-only 偏好，与 team 数据流无关。
+      onDelta: () => {
+        // useConversationStream consumes `text_delta` via onEvent; this
+        // legacy hook is unused but required by the StreamCallbacks shape.
+      },
+      onEvent: (event) => {
+        // GatewayStreamEvent === RunEvent for our purposes; cast through.
+        stream.handleEvent(event as RunEvent);
+      },
+      onDone: () => {
+        writeRefCurrent(streamingRef, false);
+        setStreaming(false);
+        setStoppingStream(false);
+        setActiveStreamStartedAt(null);
+        // Re-enable multi-attach if it's still connected.
+        // We do this synchronously in onDone (rather than relying on
+        // checkAndRegister) to avoid a window where streamingRef is false
+        // but multiAttachActiveRef is also false, which could let multi-attach
+        // events leak into the old round's accumulator.
+        if (sessionId) {
+          const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
+          if (maStatus?.state === 'connected') {
+            writeRefCurrent(multiAttachActiveRef, true);
+            setMultiAttachActive(true);
+            writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
+            stream.resetRoundAccumulators();
+            setStreaming(true);
+            writeRefCurrent(streamingRef, true);
+            setActiveStreamStartedAt(Date.now());
+            setActiveStreamFirstTokenLatencyMs(null);
+          }
+        }
+        // Trigger reload (also called inside the consumer's onStreamDone).
+      },
+      onError: (code, message, technicalDetail) => {
+        writeRefCurrent(streamingRef, false);
+        setStreaming(false);
+        setStoppingStream(false);
+        setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
+        // Re-enable multi-attach on error too, if still connected.
+        if (sessionId) {
+          const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
+          if (maStatus?.state === 'connected') {
+            writeRefCurrent(multiAttachActiveRef, true);
+            setMultiAttachActive(true);
+            writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
+            stream.resetRoundAccumulators();
+            setStreaming(true);
+            writeRefCurrent(streamingRef, true);
+            setActiveStreamStartedAt(Date.now());
+            setActiveStreamFirstTokenLatencyMs(null);
+          }
+        }
+      },
+    });
+    // `stream()` mints the rid synchronously; capture it before any event
+    // arrives so both the intermediate and final commits carry it.
+    writeRefCurrent(streamClientRequestIdRef, gatewayClient.getActiveStreamClientRequestId());
+  };
+
+  // 同上：去手写 memo 包装，交给编译器自动 memoize。
+  const stopStream: TeamConversationState['stopStream'] = async () => {
     if (!enableWriters) return false;
     setStoppingStream(true);
-    stoppingStreamRef.current = true;
-    try {
-      const ok = await gatewayClient.stopStream();
-      if (ok) {
-        // The stream's `done` event will reset state shortly; meanwhile mark
-        // streaming false eagerly so the UI reflects the user's intent.
-        streamingRef.current = false;
-        setStreaming(false);
-      }
-      return ok;
-    } catch (err) {
-      setStreamError(err instanceof Error ? err.message : 'stopStream failed');
-      return false;
-    } finally {
-      setStoppingStream(false);
-      stoppingStreamRef.current = false;
-    }
-  }, [enableWriters, gatewayClient, streamingRef, stoppingStreamRef]);
+    writeRefCurrent(stoppingStreamRef, true);
+    // try/catch/finally 下沉到模块级 `runStreamActionOnce`（见其注释）。
+    return runStreamActionOnce<boolean>({
+      onError: (err) => {
+        setStreamError(err instanceof Error ? err.message : 'stopStream failed');
+        return false;
+      },
+      onFinally: () => {
+        setStoppingStream(false);
+        writeRefCurrent(stoppingStreamRef, false);
+      },
+      run: async () => {
+        const ok = await gatewayClient.stopStream();
+        if (ok) {
+          // The stream's `done` event will reset state shortly; meanwhile mark
+          // streaming false eagerly so the UI reflects the user's intent.
+          writeRefCurrent(streamingRef, false);
+          setStreaming(false);
+        }
+        return ok;
+      },
+    });
+  };
 
   // ─── attach to background stream ────────────────────────────────
   // reception session 走 inbound 路径后，后端通过 `runSessionInBackground`
@@ -421,130 +430,120 @@ export function useTeamConversationStreaming(
   const attachRetryCountRef = useRef(0);
   const ATTACH_MAX_RETRIES = 3;
 
-  const attachToSessionStream: TeamConversationState['attachToSessionStream'] =
-    useCallback(async () => {
-      if (!sessionId || !token) {
-        return false;
-      }
-      // 已在流式中（startStream 路径）不需要 attach。
-      if (streamingRef.current) {
-        return false;
-      }
-      // 同一 session 只尝试一次 attach，避免循环重试。
-      // 但如果上次 attach 失败（attachAttemptedSessionRef 被重置为 null），
-      // 允许重试，最多 ATTACH_MAX_RETRIES 次。
-      if (attachAttemptedSessionRef.current === sessionId) {
-        return false;
-      }
-      if (attachRetryCountRef.current >= ATTACH_MAX_RETRIES) {
-        return false;
-      }
-      attachAttemptedSessionRef.current = sessionId;
-      attachRetryCountRef.current += 1;
+  // 去 useCallback 包装：编译器自动 memoize；手写 memo 漏列了多个 setter 依赖，会被判
+  // 「Existing memoization could not be preserved」放弃优化整个 hook（实测）。
+  const attachToSessionStream: TeamConversationState['attachToSessionStream'] = async () => {
+    if (!sessionId || !token) {
+      return false;
+    }
+    // 已在流式中（startStream 路径）不需要 attach。
+    if (streamingRef.current) {
+      return false;
+    }
+    // 同一 session 只尝试一次 attach，避免循环重试。
+    // 但如果上次 attach 失败（attachAttemptedSessionRef 被重置为 null），
+    // 允许重试，最多 ATTACH_MAX_RETRIES 次。
+    if (attachAttemptedSessionRef.current === sessionId) {
+      return false;
+    }
+    if (attachRetryCountRef.current >= ATTACH_MAX_RETRIES) {
+      return false;
+    }
+    attachAttemptedSessionRef.current = sessionId;
+    attachRetryCountRef.current += 1;
 
-      // 预分配 assistant 流式消息 id，供 useConversationStream 累积 segments。
-      currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-      streamRequestStartedAtRef.current = Date.now();
-      // attach 路径下 provider/model 未知（后端使用 session 默认配置），
-      // 仅设置 agentId 以便流式消息能显示正确的角色身份。
-      requestProviderIdRef.current = activeProviderId || undefined;
-      requestModelLabelRef.current = activeModelId || undefined;
-      requestAgentIdRef.current = effectiveAgentId || undefined;
-      stream.resetRoundAccumulators();
-      setStreaming(true);
-      streamingRef.current = true;
-      setActiveStreamStartedAt(streamRequestStartedAtRef.current);
-      setActiveStreamFirstTokenLatencyMs(null);
-      setSessionStateStatus('running');
+    // 预分配 assistant 流式消息 id，供 useConversationStream 累积 segments。
+    writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
+    setRequestStartedAt(Date.now());
+    // attach 路径下 provider/model 未知（后端使用 session 默认配置），
+    // 仅设置 agentId 以便流式消息能显示正确的角色身份。
+    writeRefCurrent(requestProviderIdRef, activeProviderId || undefined);
+    writeRefCurrent(requestModelLabelRef, activeModelId || undefined);
+    writeRefCurrent(requestAgentIdRef, effectiveAgentId || undefined);
+    stream.resetRoundAccumulators();
+    setStreaming(true);
+    writeRefCurrent(streamingRef, true);
+    setActiveStreamStartedAt(Date.now());
+    setActiveStreamFirstTokenLatencyMs(null);
+    setSessionStateStatus('running');
 
-      const attachResult = await gatewayClient.attachToActiveStream(sessionId, {
-        onDelta: () => {
-          // useConversationStream consumes `text_delta` via onEvent; this
-          // legacy hook is unused but required by the StreamCallbacks shape.
-        },
-        onEvent: (event) => {
-          stream.handleEvent(event as RunEvent);
-        },
-        onDone: () => {
-          streamingRef.current = false;
-          setStreaming(false);
-          setStoppingStream(false);
-          setActiveStreamStartedAt(null);
-          // Re-enable multi-attach if it's still connected (same as startStream's onDone).
-          if (sessionId) {
-            const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
-            if (maStatus?.state === 'connected') {
-              multiAttachActiveRef.current = true;
-              setMultiAttachActive(true);
-              currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-              stream.resetRoundAccumulators();
-              setStreaming(true);
-              streamingRef.current = true;
-              setActiveStreamStartedAt(Date.now());
-              setActiveStreamFirstTokenLatencyMs(null);
-            }
-          }
-          // reload 已由 useConversationStream 的 onStreamDone 回调触发，
-          // 这里不重复调用，避免冗余请求。
-        },
-        onError: (code, message, technicalDetail) => {
-          streamingRef.current = false;
-          setStreaming(false);
-          setStoppingStream(false);
-          setActiveStreamStartedAt(null);
-          // Attach 失败不一定是错误——可能后端 direct 路径已完成或走了
-          // orchestrate 路径（无活跃流）。仅在非"无活跃流"错误时提示。
-          if (code !== 'NO_ACTIVE_STREAM' && code !== 'ATTACH_NO_ACTIVE_STREAM') {
-            setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
-          }
-          // Re-enable multi-attach on error too, if still connected.
-          if (sessionId) {
-            const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
-            if (maStatus?.state === 'connected') {
-              multiAttachActiveRef.current = true;
-              setMultiAttachActive(true);
-              currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
-              stream.resetRoundAccumulators();
-              setStreaming(true);
-              streamingRef.current = true;
-              setActiveStreamStartedAt(Date.now());
-              setActiveStreamFirstTokenLatencyMs(null);
-            }
-          }
-        },
-      });
-      // attach 成功：重置重试计数。
-      if (attachResult.status === 'attached') {
-        attachRetryCountRef.current = 0;
-        streamClientRequestIdRef.current = gatewayClient.getActiveStreamClientRequestId();
-      }
-      // attach 未成功（无活跃流等）：回滚 streaming 状态，避免 UI 卡在
-      // "streaming" 模式。onError 回调已处理错误场景的清理。
-      // 不回滚 sessionStateStatus——后端可能在短时间内将状态从 running 切到
-      // 其它值，下一次 reload() 会同步真实状态。
-      if (attachResult.status !== 'attached') {
-        streamingRef.current = false;
+    const attachResult = await gatewayClient.attachToActiveStream(sessionId, {
+      onDelta: () => {
+        // useConversationStream consumes `text_delta` via onEvent; this
+        // legacy hook is unused but required by the StreamCallbacks shape.
+      },
+      onEvent: (event) => {
+        stream.handleEvent(event as RunEvent);
+      },
+      onDone: () => {
+        writeRefCurrent(streamingRef, false);
         setStreaming(false);
+        setStoppingStream(false);
         setActiveStreamStartedAt(null);
-        // 重置 attach 标记：attach 失败可能是时序问题（后端流尚未注册），
-        // 允许自动 attach effect 在下一次 reload 检测到 running 时重试。
-        attachAttemptedSessionRef.current = null;
-        // 触发 reload 同步真实 session 状态，避免 attach 失败后状态不一致。
-        void reload();
-      }
-      return attachResult.status === 'attached';
-    }, [
-      sessionId,
-      token,
-      gatewayClient,
-      stream,
-      streamingRef,
-      currentAssistantStreamMessageIdRef,
-      reload,
-      activeProviderId,
-      activeModelId,
-      effectiveAgentId,
-    ]);
+        // Re-enable multi-attach if it's still connected (same as startStream's onDone).
+        if (sessionId) {
+          const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
+          if (maStatus?.state === 'connected') {
+            writeRefCurrent(multiAttachActiveRef, true);
+            setMultiAttachActive(true);
+            writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
+            stream.resetRoundAccumulators();
+            setStreaming(true);
+            writeRefCurrent(streamingRef, true);
+            setActiveStreamStartedAt(Date.now());
+            setActiveStreamFirstTokenLatencyMs(null);
+          }
+        }
+        // reload 已由 useConversationStream 的 onStreamDone 回调触发，
+        // 这里不重复调用，避免冗余请求。
+      },
+      onError: (code, message, technicalDetail) => {
+        writeRefCurrent(streamingRef, false);
+        setStreaming(false);
+        setStoppingStream(false);
+        setActiveStreamStartedAt(null);
+        // Attach 失败不一定是错误——可能后端 direct 路径已完成或走了
+        // orchestrate 路径（无活跃流）。仅在非"无活跃流"错误时提示。
+        if (code !== 'NO_ACTIVE_STREAM' && code !== 'ATTACH_NO_ACTIVE_STREAM') {
+          setStreamError(formatGatewayStreamErrorMessage(code, message, technicalDetail));
+        }
+        // Re-enable multi-attach on error too, if still connected.
+        if (sessionId) {
+          const maStatus = useMultiAttachStore.getState().sessions.get(sessionId);
+          if (maStatus?.state === 'connected') {
+            writeRefCurrent(multiAttachActiveRef, true);
+            setMultiAttachActive(true);
+            writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
+            stream.resetRoundAccumulators();
+            setStreaming(true);
+            writeRefCurrent(streamingRef, true);
+            setActiveStreamStartedAt(Date.now());
+            setActiveStreamFirstTokenLatencyMs(null);
+          }
+        }
+      },
+    });
+    // attach 成功：重置重试计数。
+    if (attachResult.status === 'attached') {
+      attachRetryCountRef.current = 0;
+      writeRefCurrent(streamClientRequestIdRef, gatewayClient.getActiveStreamClientRequestId());
+    }
+    // attach 未成功（无活跃流等）：回滚 streaming 状态，避免 UI 卡在
+    // "streaming" 模式。onError 回调已处理错误场景的清理。
+    // 不回滚 sessionStateStatus——后端可能在短时间内将状态从 running 切到
+    // 其它值，下一次 reload() 会同步真实状态。
+    if (attachResult.status !== 'attached') {
+      writeRefCurrent(streamingRef, false);
+      setStreaming(false);
+      setActiveStreamStartedAt(null);
+      // 重置 attach 标记：attach 失败可能是时序问题（后端流尚未注册），
+      // 允许自动 attach effect 在下一次 reload 检测到 running 时重试。
+      attachAttemptedSessionRef.current = null;
+      // 触发 reload 同步真实 session 状态，避免 attach 失败后状态不一致。
+      void reload();
+    }
+    return attachResult.status === 'attached';
+  };
 
   // 当 sessionId 变化时重置 attach 尝试标记，允许新 session 重新 attach。
   useEffect(() => {
@@ -597,25 +596,25 @@ export function useTeamConversationStreaming(
 
       if (isAttached && !streamingRef.current && !multiAttachActiveRef.current) {
         // Multi-attach is active and we're not locally streaming — register
-        multiAttachActiveRef.current = true;
+        writeRefCurrent(multiAttachActiveRef, true);
         setMultiAttachActive(true);
         // Pre-allocate assistant stream message id for accumulation
         if (!currentAssistantStreamMessageIdRef.current) {
-          currentAssistantStreamMessageIdRef.current = makeOrderedMessageId();
+          writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
         }
         stream.resetRoundAccumulators();
         if (!streamingRef.current) {
           setStreaming(true);
-          streamingRef.current = true;
+          writeRefCurrent(streamingRef, true);
           setActiveStreamStartedAt(Date.now());
           setActiveStreamFirstTokenLatencyMs(null);
         }
       } else if (!isAttached && multiAttachActiveRef.current) {
         // Multi-attach disconnected — unregister
-        multiAttachActiveRef.current = false;
+        writeRefCurrent(multiAttachActiveRef, false);
         setMultiAttachActive(false);
         if (streamingRef.current) {
-          streamingRef.current = false;
+          writeRefCurrent(streamingRef, false);
           setStreaming(false);
           setActiveStreamStartedAt(null);
         }
@@ -637,7 +636,7 @@ export function useTeamConversationStreaming(
       if (streamingRef.current && !multiAttachActiveRef.current) return;
       const multiAttachRid = meta.clientRequestId?.trim();
       if (multiAttachRid) {
-        streamClientRequestIdRef.current = multiAttachRid;
+        writeRefCurrent(streamClientRequestIdRef, multiAttachRid);
       }
       stream.handleEvent(event);
     };
@@ -649,7 +648,7 @@ export function useTeamConversationStreaming(
     return () => {
       unsubMultiAttach();
       unregisterHandler();
-      multiAttachActiveRef.current = false;
+      writeRefCurrent(multiAttachActiveRef, false);
       setMultiAttachActive(false);
     };
   }, [
@@ -747,66 +746,71 @@ export function useTeamConversationStreaming(
     };
   }, [childSessions.length, childSessions.map((c) => c.id).join(',')]);
 
-  const replyPermission: TeamConversationState['replyPermission'] = useCallback(
-    async (requestId, decision, options) => {
-      if (!sessionId || !token) {
-        throw new Error('当前团队会话或登录状态无效，无法处理权限请求。');
-      }
-      const targetSessionId = options?.targetSessionId ?? sessionId;
-      await replyPermissionRequest({
-        gatewayUrl,
-        requestId,
-        decision,
-        ...(options?.alwaysOverride ? { alwaysOverride: options.alwaysOverride } : {}),
-        ...(options?.feedback ? { feedback: options.feedback } : {}),
-        sessionId: targetSessionId,
-        token,
-      });
-      if (decision !== 'reject' && targetSessionId === sessionId) {
-        attachAttemptedSessionRef.current = null;
-        attachRetryCountRef.current = 0;
-        setSessionStateStatus('running');
-        void reload();
-      } else if (decision !== 'reject') {
-        const layerStore = useLayerStore.getState();
-        const existingNode = layerStore.nodes.get(targetSessionId);
-        if (existingNode) {
-          layerStore.updateNodeState(targetSessionId, 'running');
-        } else {
-          const childSession = childSessions.find((child) => child.id === targetSessionId);
-          const childRoleLayer = toTeamRoleLayer(childSession?.role_layer);
-          if (childRoleLayer) {
-            layerStore.addNode({
-              sessionId: targetSessionId,
-              roleLayer: childRoleLayer,
-              parentSessionId: sessionId,
-              state: 'running',
-            });
-          }
+  // 同上：去手写 memo 包装。
+  const replyPermission: TeamConversationState['replyPermission'] = async (
+    requestId,
+    decision,
+    options,
+  ) => {
+    if (!sessionId || !token) {
+      throw new Error('当前团队会话或登录状态无效，无法处理权限请求。');
+    }
+    const targetSessionId = options?.targetSessionId ?? sessionId;
+    await replyPermissionRequest({
+      gatewayUrl,
+      requestId,
+      decision,
+      ...(options?.alwaysOverride ? { alwaysOverride: options.alwaysOverride } : {}),
+      ...(options?.feedback ? { feedback: options.feedback } : {}),
+      sessionId: targetSessionId,
+      token,
+    });
+    if (decision !== 'reject' && targetSessionId === sessionId) {
+      attachAttemptedSessionRef.current = null;
+      attachRetryCountRef.current = 0;
+      setSessionStateStatus('running');
+      void reload();
+    } else if (decision !== 'reject') {
+      const layerStore = useLayerStore.getState();
+      const existingNode = layerStore.nodes.get(targetSessionId);
+      if (existingNode) {
+        layerStore.updateNodeState(targetSessionId, 'running');
+      } else {
+        const childSession = childSessions.find((child) => child.id === targetSessionId);
+        const childRoleLayer = toTeamRoleLayer(childSession?.role_layer);
+        if (childRoleLayer) {
+          layerStore.addNode({
+            sessionId: targetSessionId,
+            roleLayer: childRoleLayer,
+            parentSessionId: sessionId,
+            state: 'running',
+          });
         }
-        void reload();
       }
-      // Optimistically remove from pending list; the permission_replied event
-      // will also clear on receipt.
-      setPendingPermissions((prev) => prev.filter((p) => p.requestId !== requestId));
-    },
-    [sessionId, token, gatewayUrl, reload, childSessions],
-  );
+      void reload();
+    }
+    // Optimistically remove from pending list; the permission_replied event
+    // will also clear on receipt.
+    setPendingPermissions((prev) => prev.filter((p) => p.requestId !== requestId));
+  };
 
-  const replyQuestion: TeamConversationState['replyQuestion'] = useCallback(
-    async (requestId, status, answers, options) => {
-      if (!sessionId || !token) {
-        throw new Error('当前团队会话或登录状态无效，无法处理提问请求。');
-      }
-      await createQuestionsClient(gatewayUrl).reply(token, options?.targetSessionId ?? sessionId, {
-        requestId,
-        status,
-        ...(answers ? { answers } : {}),
-      });
-      setPendingQuestions((prev) => prev.filter((q) => q.requestId !== requestId));
-    },
-    [enableWriters, sessionId, token, gatewayUrl],
-  );
+  // 同上：去手写 memo 包装。
+  const replyQuestion: TeamConversationState['replyQuestion'] = async (
+    requestId,
+    status,
+    answers,
+    options,
+  ) => {
+    if (!sessionId || !token) {
+      throw new Error('当前团队会话或登录状态无效，无法处理提问请求。');
+    }
+    await createQuestionsClient(gatewayUrl).reply(token, options?.targetSessionId ?? sessionId, {
+      requestId,
+      status,
+      ...(answers ? { answers } : {}),
+    });
+    setPendingQuestions((prev) => prev.filter((q) => q.requestId !== requestId));
+  };
 
   return {
     startStream,

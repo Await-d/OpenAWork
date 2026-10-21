@@ -20,6 +20,15 @@
   overflow: auto;
 }
 
+/* 无预览地址时的开始页宿主：与工作区空态同一套「铺满剩余高度」规则。 */
+.fusion-side-panel__browser-start {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .fusion-side-panel__action-row {
   display: flex;
   flex-wrap: wrap;

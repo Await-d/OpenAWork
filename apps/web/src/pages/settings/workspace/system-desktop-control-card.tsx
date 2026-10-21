@@ -221,6 +221,30 @@ function CapabilityGrid({
   );
 }
 
+/**
+ * 系统桌面控制动作的统一包装：置 loading / 清结果 → try → catch 交给 `onError`
+ * → finally 清 loading。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`??`、三元、`.map(...)`）。语义逐字照搬。
+ */
+async function runDesktopControlActionOnce(ctx: {
+  setLoading: (loading: boolean) => void;
+  onStart: () => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart();
+  ctx.setLoading(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setLoading(false);
+  }
+}
+
 export function SystemDesktopControlCard({
   desktopControlEnabled,
   desktopControlStatus,
@@ -337,44 +361,52 @@ export function SystemDesktopControlCard({
     : null;
 
   async function runAction() {
-    setLoading(true);
-    setResult(null);
-    setScreenshotData(null);
-    try {
-      let actionResult: DesktopControlActionResult;
-      if (action === 'screenshot') {
-        actionResult = await onDesktopControlScreenshot(parseOptionalNumberInput(delayMs));
-        setScreenshotData(
-          readStringField(actionResult, 'data') ??
-            readStringField(actionResult, 'screenshotBase64'),
-        );
-      } else if (action === 'click') {
-        actionResult = await onDesktopControlClick(parseNumberInput(x, 0), parseNumberInput(y, 0));
-      } else if (action === 'type') {
-        actionResult = await onDesktopControlType(text);
-      } else if (action === 'key') {
-        actionResult = await onDesktopControlKey(key);
-      } else if (action === 'hotkey') {
-        actionResult = await onDesktopControlHotkey(
-          keys
-            .split(',')
-            .map((item) => item.trim())
-            .filter((item) => item.length > 0),
-        );
-      } else if (action === 'scroll') {
-        actionResult = await onDesktopControlScroll(
-          parseNumberInput(scrollX, 0),
-          parseNumberInput(scrollY, 0),
-        );
-      } else {
-        actionResult = await onDesktopControlWait(parseOptionalNumberInput(waitMs));
-      }
-      setResult({ ok: true, msg: formatResult(actionResult) });
-    } catch (error: unknown) {
-      setResult({ ok: false, msg: error instanceof Error ? error.message : '操作失败' });
-    } finally {
-      setLoading(false);
-    }
+    // 置 loading / 清结果 与 try/catch/finally 一起下沉到模块级
+    // `runDesktopControlActionOnce`（见其注释）。
+    await runDesktopControlActionOnce({
+      setLoading,
+      onStart: () => {
+        setResult(null);
+        setScreenshotData(null);
+      },
+      onError: (error) => {
+        setResult({ ok: false, msg: error instanceof Error ? error.message : '操作失败' });
+      },
+      run: async () => {
+        let actionResult: DesktopControlActionResult;
+        if (action === 'screenshot') {
+          actionResult = await onDesktopControlScreenshot(parseOptionalNumberInput(delayMs));
+          setScreenshotData(
+            readStringField(actionResult, 'data') ??
+              readStringField(actionResult, 'screenshotBase64'),
+          );
+        } else if (action === 'click') {
+          actionResult = await onDesktopControlClick(
+            parseNumberInput(x, 0),
+            parseNumberInput(y, 0),
+          );
+        } else if (action === 'type') {
+          actionResult = await onDesktopControlType(text);
+        } else if (action === 'key') {
+          actionResult = await onDesktopControlKey(key);
+        } else if (action === 'hotkey') {
+          actionResult = await onDesktopControlHotkey(
+            keys
+              .split(',')
+              .map((item) => item.trim())
+              .filter((item) => item.length > 0),
+          );
+        } else if (action === 'scroll') {
+          actionResult = await onDesktopControlScroll(
+            parseNumberInput(scrollX, 0),
+            parseNumberInput(scrollY, 0),
+          );
+        } else {
+          actionResult = await onDesktopControlWait(parseOptionalNumberInput(waitMs));
+        }
+        setResult({ ok: true, msg: formatResult(actionResult) });
+      },
+    });
   }
 
   return (

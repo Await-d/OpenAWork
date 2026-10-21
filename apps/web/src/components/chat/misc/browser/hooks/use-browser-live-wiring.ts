@@ -38,6 +38,14 @@ export interface UseBrowserLiveWiringOptions {
   appendLog: (entry: ConsoleEntry) => void;
   /** 网络阶段补丁入口（宿主按 networkId 归并到对应 tab）。 */
   upsertNetwork: (exchange: NetworkExchange) => void;
+  /**
+   * 当前可接受的最小页面代次（`null` / 缺省 = 不过滤）。
+   *
+   * 控制台 / 网络同样是「属于某个页面」的事件：快速切标签时旧页面最后几条日志会晚到，
+   * 只按「当前激活标签」归属就会记到新标签上。传 ref 而不是值，保证判定始终用最新
+   * 门槛、且不会因为门槛变化重建订阅。
+   */
+  minGenerationRef?: { current: number | null };
 }
 
 export interface BrowserLiveWiring {
@@ -52,6 +60,7 @@ export interface BrowserLiveWiring {
 export function useBrowserLiveWiring({
   appendLog,
   upsertNetwork,
+  minGenerationRef,
 }: UseBrowserLiveWiringOptions): BrowserLiveWiring {
   const session = useBrowserLiveSession();
   const { subscribe } = session;
@@ -61,14 +70,15 @@ export function useBrowserLiveWiring({
   const sequenceRef = useRef(0);
 
   // 惰性客户端：只有真正点「安装」时才需要，避免仅渲染提示条也构造连接器。
-  const lazyClientRef = useRef<{ baseUrl: string; client: BrowserLiveClient } | null>(null);
-  const installClient = useMemo((): BrowserLiveClient | null => {
-    if (!token) return null;
-    if (lazyClientRef.current?.baseUrl !== gatewayUrl) {
-      lazyClientRef.current = { baseUrl: gatewayUrl, client: createBrowserLiveClient(gatewayUrl) };
-    }
-    return lazyClientRef.current.client;
-  }, [token, gatewayUrl]);
+  //
+  // 这里刻意**不用 ref 缓存**：在 useMemo 工厂体内读写 `lazyClientRef.current` 属于
+  // 渲染期访问 ref，会被 React Compiler 判定为 "Cannot access refs during render"
+  // 并放弃优化本 hook（实测 5 个函数脱靶）。而 ref 缓存本身就是冗余的——
+  // `createBrowserLiveClient(baseUrl)` 是纯工厂（返回的方法把 token 作为参数传入、
+  // 不持有连接），`useMemo` 按 gatewayUrl 记忆化已提供同等的实例稳定性。
+  // 拆成两步是为了让 client 的引用在 token 变化时保持稳定，与原 ref 写法语义一致。
+  const liveClient = useMemo(() => createBrowserLiveClient(gatewayUrl), [gatewayUrl]);
+  const installClient = token ? liveClient : null;
 
   const availability = session.availability;
   const install = useBrowserInstall({
@@ -79,27 +89,38 @@ export function useBrowserLiveWiring({
   });
 
   useEffect(() => {
+    /**
+     * 该事件是否属于已过期的页面。
+     *
+     * 只有「事件带代次 **且** 已知门槛」时才判定——老网关两种字段都没有，退回原来的
+     * 「记到当前激活标签」行为，不会因为缺少元信息就把日志全丢掉。
+     */
+    const isStale = (generation: unknown): boolean => {
+      const minimum = minGenerationRef?.current ?? null;
+      if (typeof generation !== 'number' || minimum === null) return false;
+      return generation < minimum;
+    };
+
     return subscribe((envelope) => {
       switch (envelope.ch) {
         case 'console': {
+          const payload = envelope.payload as BrowserLiveConsolePayload;
+          if (isStale(payload.generation)) return;
           const sequence = sequenceRef.current;
           sequenceRef.current += 1;
-          appendLog(
-            consolePayloadToEntry(
-              envelope.payload as BrowserLiveConsolePayload,
-              sequence,
-              Date.now(),
-            ),
-          );
+          appendLog(consolePayloadToEntry(payload, sequence, Date.now()));
           return;
         }
         case 'network': {
-          upsertNetwork(networkPayloadToExchange(envelope.payload as BrowserLiveNetworkPayload));
+          const payload = envelope.payload as BrowserLiveNetworkPayload;
+          if (isStale(payload.generation)) return;
+          upsertNetwork(networkPayloadToExchange(payload));
           return;
         }
         case 'error': {
           // 页面异常（page_error）与协议错误都走这里：控制台面板是它们的唯一出口。
           const payload = envelope.payload as BrowserLiveErrorPayload | undefined;
+          if (isStale(payload?.generation)) return;
           const sequence = sequenceRef.current;
           sequenceRef.current += 1;
           appendLog(errorPayloadToEntry(payload, sequence, Date.now()));
@@ -109,7 +130,7 @@ export function useBrowserLiveWiring({
           return;
       }
     });
-  }, [subscribe, appendLog, upsertNetwork]);
+  }, [subscribe, appendLog, upsertNetwork, minGenerationRef]);
 
   return {
     session,

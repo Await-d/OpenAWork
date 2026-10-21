@@ -23,7 +23,7 @@
  * - `docs/team-architecture-l1-3-streaming-handoff-spec.md` §1.3
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
 import { SnapshotRestoreConfirmDialog } from '../../../components/chat/snapshot/SnapshotRestoreConfirmDialog.js';
 import { useSnapshotAwareAction } from '../../../components/chat/snapshot/useSnapshotAwareAction.js';
@@ -218,22 +218,22 @@ export function TeamConversationView({
   // 缺失时回退为空结果（@ 菜单展示空状态，不报错）。
   const mentionWorkspaceDirectory = readTeamMentionWorkspaceDirectory(state.sessionMetadata);
   const mentionSshConnectionId = readTeamMentionSshConnectionId(state.sessionMetadata);
-  const searchMentionFiles = useMemo<MentionFileSearchFn>(
-    () =>
-      createTeamMentionFileSearch({
-        workspaceDirectory: mentionWorkspaceDirectory,
-        gatewayUrl,
-        // 与 useWorkspace.searchFileIndex 同口径：未登录时按空串交给客户端。
-        token: token ?? '',
-        // team 会话一定已有 id，SSH 绑定交给网关沿父会话链解析。
-        sessionId,
-        // 兜底：会话绑定解析为 unbound 时（子会话继承远端目录但继承不到 SSH
-        // 绑定），用连接身份直读远端索引，否则 `@` 菜单会列出网关本机文件。
-        ...(mentionSshConnectionId ? { sshConnectionId: mentionSshConnectionId } : {}),
-        ...(mentionWorkspaceDirectory ? { workspaceRoot: mentionWorkspaceDirectory } : {}),
-      }),
-    [mentionWorkspaceDirectory, gatewayUrl, token, sessionId],
-  );
+  // 去 useMemo：工厂调用本身廉价，编译器按 (mentionWorkspaceDirectory, gatewayUrl,
+  // token, sessionId, mentionSshConnectionId) 自动 memo。旧手写 deps 漏了
+  // mentionSshConnectionId，而函数体读了它 —— 这是编译器报
+  // "Existing memoization could not be preserved" 的直接原因，必须修掉。
+  const searchMentionFiles: MentionFileSearchFn = createTeamMentionFileSearch({
+    workspaceDirectory: mentionWorkspaceDirectory,
+    gatewayUrl,
+    // 与 useWorkspace.searchFileIndex 同口径：未登录时按空串交给客户端。
+    token: token ?? '',
+    // team 会话一定已有 id，SSH 绑定交给网关沿父会话链解析。
+    sessionId,
+    // 兜底：会话绑定解析为 unbound 时（子会话继承远端目录但继承不到 SSH
+    // 绑定），用连接身份直读远端索引，否则 `@` 菜单会列出网关本机文件。
+    ...(mentionSshConnectionId ? { sshConnectionId: mentionSshConnectionId } : {}),
+    ...(mentionWorkspaceDirectory ? { workspaceRoot: mentionWorkspaceDirectory } : {}),
+  });
 
   // 工作区文件读取身份（瞬态 slice）：team 侧同样按 session 写入 / 卸载清空，
   // 读取消费方才能把 sessionId 带到 `/workspace/file` 上。sshConnectionId 一并
@@ -311,76 +311,78 @@ export function TeamConversationView({
 
   // 默认 placeholder：根据 roleLayer + substate 给出更贴合团队语义的占位文案。
   // 与 D26（b 直答 vs 走 c 路由）对齐——告诉用户"输入需求会被派发给团队"。
-  const effectivePlaceholder = useMemo(
-    () =>
-      resolveTeamComposerPlaceholder({
-        composerPlaceholder,
-        roleLayer: state.roleLayer,
-        streaming: state.streaming,
-        substate: state.substate,
-      }),
-    [composerPlaceholder, state.roleLayer, state.substate, state.streaming],
-  );
+  // 去 useMemo：纯分支派生（无循环、无 IO），内联后由编译器按入参自动 memo。
+  const effectivePlaceholder = resolveTeamComposerPlaceholder({
+    composerPlaceholder,
+    roleLayer: state.roleLayer,
+    streaming: state.streaming,
+    substate: state.substate,
+  });
 
   const { dispatchTeamText } = useTeamConversationViewComposerDispatch({ state });
 
-  const handleComposerSubmit = useCallback(
-    async (payload: UnifiedComposerSubmitPayload): Promise<boolean> => {
-      if (!composerEnabled) return false;
-      const text = payload.text.trim();
-      // 纯附件（无文本）也允许发送：用一个占位描述让后端/LLM 知道用户发了图片。
-      // 早期实现 `if (!text) return` 会静默丢弃纯图片提交，用户无任何反馈。
-      const hasFiles = payload.files.length > 0;
-      if (!text && !hasFiles) return false;
+  // 去 useCallback 包装：编译器对函数表达式自动 memo，依赖与原 deps 等价。
+  // 说明：函数体内有 try/catch，若本函数落地后仍脱靶，见文末「预期残留风险」。
+  const handleComposerSubmit = async (payload: UnifiedComposerSubmitPayload): Promise<boolean> => {
+    if (!composerEnabled) return false;
+    const text = payload.text.trim();
+    // 纯附件（无文本）也允许发送：用一个占位描述让后端/LLM 知道用户发了图片。
+    // 早期实现 `if (!text) return` 会静默丢弃纯图片提交，用户无任何反馈。
+    const hasFiles = payload.files.length > 0;
+    if (!text && !hasFiles) return false;
 
-      // 流式进行中直接挡掉，并保留输入框内容 + 给出明确提示，避免"清空输入框→
-      // startStream 静默 return→消息凭空消失"的旧行为（端到端健壮性 🔴#2）。
-      if (state.streaming) {
-        state.setStreamError('正在生成回复，请等待当前回复完成或点击停止后再发送。');
+    // 流式进行中直接挡掉，并保留输入框内容 + 给出明确提示，避免"清空输入框→
+    // startStream 静默 return→消息凭空消失"的旧行为（端到端健壮性 🔴#2）。
+    if (state.streaming) {
+      state.setStreamError('正在生成回复，请等待当前回复完成或点击停止后再发送。');
+      return false;
+    }
+
+    // 先把 composer 附件（图片）上传并转成 inputParts，与 chat 的发送文件能力对齐。
+    // #7 附件上传失败不再静默降级为"只发文本"——那样用户以为图片发出去了，实际
+    // 团队根本没收到。改为：报错 + 保留输入框内容（不清空）让用户重试，由用户
+    // 决定是否去掉附件再发。
+    let inputParts: InputImageContent[] | undefined;
+    // 占位文案提前算：把逻辑表达式移出 try —— 编译器对 try/catch 内的
+    // conditional / logical 语块报 "Support value blocks ... within a try/catch"
+    // 并放弃优化整个组件。值本身与原内联写法逐字等价。
+    const attachmentPlaceholderText = text || '[用户发送了附件]';
+    if (payload.files.length > 0 && gatewayUrl) {
+      try {
+        const prepared = await prepareStandardChatSendInput({
+          files: payload.files,
+          gatewayUrl,
+          sessionId,
+          text: attachmentPlaceholderText,
+          token,
+        });
+        inputParts = prepared.requestInputParts;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '附件上传失败';
+        console.warn('[TeamConversationView] attachment upload failed:', message);
+        state.setStreamError(`附件上传失败，消息未发送（请重试或移除附件后重发）：${message}`);
         return false;
       }
+    }
 
-      // 先把 composer 附件（图片）上传并转成 inputParts，与 chat 的发送文件能力对齐。
-      // #7 附件上传失败不再静默降级为"只发文本"——那样用户以为图片发出去了，实际
-      // 团队根本没收到。改为：报错 + 保留输入框内容（不清空）让用户重试，由用户
-      // 决定是否去掉附件再发。
-      let inputParts: InputImageContent[] | undefined;
-      if (payload.files.length > 0 && gatewayUrl) {
-        try {
-          const prepared = await prepareStandardChatSendInput({
-            files: payload.files,
-            gatewayUrl,
-            sessionId,
-            text: text || '[用户发送了附件]',
-            token,
-          });
-          inputParts = prepared.requestInputParts;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : '附件上传失败';
-          console.warn('[TeamConversationView] attachment upload failed:', message);
-          state.setStreamError(`附件上传失败，消息未发送（请重试或移除附件后重发）：${message}`);
-          return false;
-        }
-      }
-
-      // 只有在派发被接受后才清空输入框；若被拒绝（如竞态下流式刚开始）则保留
-      // 文本，让用户可以重试，不会丢失已输入内容。
-      // 纯附件时用占位文本让 startStream 不因 empty text 而 bail out。
-      const effectiveText = text || (hasFiles ? '[用户发送了附件]' : '');
-      const accepted = await dispatchTeamText(effectiveText, inputParts);
-      if (accepted) {
-        state.setInput('');
-      }
-      return accepted;
-    },
-    [composerEnabled, state, gatewayUrl, sessionId, token, dispatchTeamText],
-  );
+    // 只有在派发被接受后才清空输入框；若被拒绝（如竞态下流式刚开始）则保留
+    // 文本，让用户可以重试，不会丢失已输入内容。
+    // 纯附件时用占位文本让 startStream 不因 empty text 而 bail out。
+    const effectiveText = text || (hasFiles ? '[用户发送了附件]' : '');
+    const accepted = await dispatchTeamText(effectiveText, inputParts);
+    if (accepted) {
+      state.setInput('');
+    }
+    return accepted;
+  };
 
   const [changesPanelOpen, setChangesPanelOpen] = useState(false);
 
   const {
     findRetrySource,
     handleComposerModelSelect,
+    handleRefreshProviders,
+    providersRefreshing,
     handleContextWindowOverrideChange,
     handleContinueHistoryEdit,
     handleResendHistoryEdit,
@@ -417,24 +419,25 @@ export function TeamConversationView({
     },
   });
 
-  const requestRetryWithFileChoice = useCallback(() => {
+  // 去 useCallback：只在弹窗事件里调用，身份无需稳定。
+  const requestRetryWithFileChoice = () => {
     snapshotAwareAction.checkAndExecute({
       action: 'retry',
       ...(retryPrompt ? { sourceMessageId: retryPrompt.messageId } : {}),
       onProceed: handleRetryCurrent,
     });
-  }, [handleRetryCurrent, retryPrompt, snapshotAwareAction]);
+  };
 
-  const requestHistoryEditWithFileChoice = useCallback(
-    (text: string, inputParts?: InputImageContent[]) => {
-      snapshotAwareAction.checkAndExecute({
-        action: 'edit',
-        ...(historyEditPrompt ? { sourceMessageId: historyEditPrompt.messageId } : {}),
-        onProceed: () => handleResendHistoryEdit(text, inputParts),
-      });
-    },
-    [handleResendHistoryEdit, historyEditPrompt, snapshotAwareAction],
-  );
+  // 去 useCallback：本回调会作为 onResendHistoryEdit 进入 TeamConversationLayout 的
+  // groupsWithHistoryEdit useMemo deps（TeamConversationLayout.tsx:560-595）——身份漂移
+  // 只让该 memo 失效；historyEditPrompt 为空时它是 O(1) 早返回，无功能影响。
+  const requestHistoryEditWithFileChoice = (text: string, inputParts?: InputImageContent[]) => {
+    snapshotAwareAction.checkAndExecute({
+      action: 'edit',
+      ...(historyEditPrompt ? { sourceMessageId: historyEditPrompt.messageId } : {}),
+      onProceed: () => handleResendHistoryEdit(text, inputParts),
+    });
+  };
 
   const {
     activePendingQuestion,
@@ -480,20 +483,11 @@ export function TeamConversationView({
     buildEntryActions,
   });
 
-  // Provider catalog for the model picker (composer header).
-  const providerCatalog = useMemo(
-    () => buildTeamProviderCatalog(state.providers),
-    [state.providers],
-  );
-
-  const activeProvider = useMemo(
-    () => findTeamActiveProvider(state.providers, state.activeProviderId),
-    [state.activeProviderId, state.providers],
-  );
-  const activeModelOption = useMemo(
-    () => findTeamActiveModelOption(activeProvider, state.activeModelId),
-    [activeProvider, state.activeModelId],
-  );
+  // Provider catalog for the model picker (composer header)。三处都是廉价的单遍派生
+  // （provider 数量为个位数），内联后由编译器按 state.providers / state.active*Id 自动 memo。
+  const providerCatalog = buildTeamProviderCatalog(state.providers);
+  const activeProvider = findTeamActiveProvider(state.providers, state.activeProviderId);
+  const activeModelOption = findTeamActiveModelOption(activeProvider, state.activeModelId);
   const activeModelCanConfigureThinking = resolveTeamActiveModelCanConfigureThinking({
     activeModelId: state.activeModelId,
     activeModelOption,
@@ -502,14 +496,11 @@ export function TeamConversationView({
   const activeModelTooltip = buildTeamActiveModelTooltip(activeProvider, activeModelOption);
 
   // Latest finalized assistant message id —— 驱动 CollapsibleAssistantContent
-  // 的"最新一条不折叠"行为。
-  const latestAssistantMessageId = useMemo(
-    () => findTeamLatestFinalizedAssistantId(state.messages),
-    [state.messages],
-  );
+  // 的"最新一条不折叠"行为。倒序扫描命中即返回，廉价派生 → 内联。
+  const latestAssistantMessageId = findTeamLatestFinalizedAssistantId(state.messages);
 
-  // 用户输入条数 —— 驱动右侧「用户输入快捷跳转」控件（<=1 条时控件自隐）。
-  const userMessageCount = useMemo(() => countTeamUserMessages(state.messages), [state.messages]);
+  // 用户输入条数 —— 驱动右侧「用户输入快捷跳转」控件（<=1 条时控件自隐）。filter 计数 → 内联。
+  const userMessageCount = countTeamUserMessages(state.messages);
 
   // canStopCurrentSessionStream: true while the user is actively streaming
   // through THIS hook (gatewayClient runs internally) — gives the composer a
@@ -520,45 +511,25 @@ export function TeamConversationView({
     setSelectedLayer(focusedLayer);
   }, [focusedLayer, sessionId]);
 
-  const multiLayerMessages = useMemo<LayerMessages[]>(
-    () =>
-      buildTeamConversationMultiLayerMessages({
-        childSessions: state.childSessions,
-        handoffs: handoffs.values(),
-        layerNodes,
-        messages: state.messages,
-        roleLayer: state.roleLayer,
-        sessionId,
-        sessionMetadata: state.sessionMetadata,
-        soloMode,
-        streamBuffer: state.streamBuffer,
-        streamingSegments: state.streamingSegments,
-        visibleStreaming: state.visibleStreaming,
-      }),
-    [
-      sessionId,
-      layerNodes,
-      handoffs,
-      soloMode,
-      state.childSessions,
-      state.messages,
-      state.sessionMetadata,
-      state.roleLayer,
-      state.visibleStreaming,
-      state.streamBuffer,
-      state.streamingSegments,
-    ],
-  );
+  // 去 useMemo：装配函数内部只做一次 childSessions 循环 + 数组展开，属 O(消息数) 的廉价
+  // 装配（无排序/正则/深比较），内联后由编译器按同一输入集自动 memo（identity 稳定）。
+  const multiLayerMessages: LayerMessages[] = buildTeamConversationMultiLayerMessages({
+    childSessions: state.childSessions,
+    handoffs: handoffs.values(),
+    layerNodes,
+    messages: state.messages,
+    roleLayer: state.roleLayer,
+    sessionId,
+    sessionMetadata: state.sessionMetadata,
+    soloMode,
+    streamBuffer: state.streamBuffer,
+    streamingSegments: state.streamingSegments,
+    visibleStreaming: state.visibleStreaming,
+  });
 
   /** 是否有任何消息（包括当前层级自身）—— 有消息就自动展开左侧群聊汇总面板。 */
-  const hasAnyMessages = useMemo(
-    () => hasTeamConversationLayerMessages(multiLayerMessages),
-    [multiLayerMessages],
-  );
-  const defaultDetailLayer = useMemo(
-    () => resolveTeamDefaultDetailLayer(multiLayerMessages),
-    [multiLayerMessages],
-  );
+  const hasAnyMessages = hasTeamConversationLayerMessages(multiLayerMessages);
+  const defaultDetailLayer = resolveTeamDefaultDetailLayer(multiLayerMessages);
 
   useEffect(() => {
     // classic 工作台弃用 dual 多层侧栏，禁止自动切 dual
@@ -610,9 +581,10 @@ export function TeamConversationView({
     setViewMode('dual');
   }, [compact, focusedLayer, isNarrowLayout, multiLayerMessages, readOnly, viewMode]);
 
-  const handlePanelLayerSelect = useCallback((layer: string) => {
+  // 去 useCallback（原 deps 为空，只闭包同函数内 useState 的稳定 setter）。
+  const handlePanelLayerSelect = (layer: string) => {
     setSelectedLayer(layer);
-  }, []);
+  };
 
   // 左侧：用户与接待的主对话区（dual 模式下占 55%）
   // 注意：TeamConversationLayout 返回的是 fragment（topBar / 滚动区 / bar / composer
@@ -827,6 +799,8 @@ export function TeamConversationView({
               }
               onStopComposer={composerEnabled ? handleStopStream : disabledComposerAsyncAction}
               onComposerModelSelect={handleComposerModelSelect}
+              onRefreshProviders={handleRefreshProviders}
+              providersRefreshing={providersRefreshing}
               onContextWindowOverrideChange={handleContextWindowOverrideChange}
               onToggleWebSearch={disabledComposerAction}
               onThinkingEnabledChange={state.setThinkingEnabled}

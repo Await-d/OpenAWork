@@ -31,6 +31,19 @@ export function buildAttachmentFileMap(
   return filesById;
 }
 
+/**
+ * 清空 file input 的已选文件，让同一个文件能再次触发 `change`。
+ *
+ * 必须留在模块级：`fileInputRef` 是 hook 参数，在 hook 内直接写
+ * `fileInputRef.current.value` 会被 React Compiler 判为「修改 hook 参数」并放弃
+ * 优化本 hook（见 `utils/ref/ref-current.ts`）。行为逐字不变。
+ */
+function resetFileInputValue(fileInputRef: React.RefObject<HTMLInputElement | null>): void {
+  if (fileInputRef.current) {
+    fileInputRef.current.value = '';
+  }
+}
+
 export interface ComposerQueueOptions {
   input: string;
   setInput: (value: string | ((prev: string) => string)) => void;
@@ -119,7 +132,7 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     appendFiles(files);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    resetFileInputValue(fileInputRef);
   }
 
   function removeFile(index: number) {
@@ -152,7 +165,15 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
       // 返回值必须是**最终**状态，否则同步到网关的标记会与实际能力不符。
       let requiresAttachmentRebind = attachedFiles.length > 0 && !queuedComposerScope;
       const queueItem: QueuedComposerMessage = {
-        attachmentItems: attachmentItems.map((item) => ({ ...item })),
+        // 剥离 `artifactId`：入队条目一律以「无跨端副本」起步，副本由后台补传后回填。
+        // 输入框里的附件可能来自「恢复到输入框」的旧条目，其 artifactId 指向的副本
+        // 可能已被回收——直接沿用会让另一台设备水合时下载 404。
+        attachmentItems: attachmentItems.map(({ id, name, sizeBytes, type }) => ({
+          id,
+          name,
+          sizeBytes,
+          type,
+        })),
         files: [...attachedFiles],
         id: crypto.randomUUID(),
         requiresAttachmentRebind,

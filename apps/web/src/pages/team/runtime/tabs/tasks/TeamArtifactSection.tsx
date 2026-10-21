@@ -443,6 +443,25 @@ function buildSharedChangeMetricCards(fileChangesSummary: SessionFileChangesSumm
   ];
 }
 
+/**
+ * 重试 handoff 的统一包装：置 busy → try → finally 清 busy（**无 catch**：异常上抛）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，本组件
+ * 这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runRetryHandoffOnce(ctx: {
+  setBusy: (handoffId: string | null) => void;
+  handoffId: string;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(ctx.handoffId);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setBusy(null);
+  }
+}
+
 export function TeamArtifactSection({
   focusHandoffId = null,
   onClearFocus,
@@ -637,15 +656,17 @@ export function TeamArtifactSection({
     [artifactContext.pm1ArtifactSessionId, clarificationItems, supersededClarificationIds],
   );
   const retryFocusedHandoff = async (handoffId: string) => {
-    setRetryBusyHandoffId(handoffId);
-    try {
-      await runRuntimeAlertRemediation('handoff-failure', {
-        handoffId,
-        ...(reviewSessionId ? { sessionId: reviewSessionId } : {}),
-      });
-    } finally {
-      setRetryBusyHandoffId(null);
-    }
+    // try/finally 下沉到模块级 `runRetryHandoffOnce`（见其注释）。
+    await runRetryHandoffOnce({
+      setBusy: setRetryBusyHandoffId,
+      handoffId,
+      run: async () => {
+        await runRuntimeAlertRemediation('handoff-failure', {
+          handoffId,
+          ...(reviewSessionId ? { sessionId: reviewSessionId } : {}),
+        });
+      },
+    });
   };
   const constitutionWarnings = useMemo(() => {
     const pm1ResultWarnings = combinedHandoffs
@@ -663,7 +684,9 @@ export function TeamArtifactSection({
     return planArtifact?.content
       ? parseConstitutionCheck(planArtifact.content).filter((warning) => warning.status !== 'pass')
       : [];
-  }, [combinedHandoffs, planArtifact?.content]);
+    // 依赖写 `planArtifact` 而不是 `planArtifact?.content`：编译器推断的是前者
+    // （"Inferred less specific property than source"，见 apps/web/AGENTS.md ②）。
+  }, [combinedHandoffs, planArtifact]);
 
   const dispatchPackages = useMemo(() => {
     if (!artifactContext.pm2ArtifactSessionId) {

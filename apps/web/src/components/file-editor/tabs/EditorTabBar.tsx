@@ -1,6 +1,7 @@
-import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { type DragEvent, useEffect, useRef, useState } from 'react';
 import type { OpenFile } from '../../../hooks/editor/useFileEditor.js';
 import { useHorizontalWheelScroll } from '../../../hooks/use-horizontal-wheel-scroll.js';
+import { nudgeElementScrollLeft } from '../../../utils/dom/scroll.js';
 import { isContextMenuKey } from '../../common/display/context-menu-keyboard.js';
 import { FileIcon } from '../preview/FileIcon.js';
 
@@ -34,16 +35,23 @@ export function EditorTabBar({
   const autoScrollRafRef = useRef<number | null>(null);
   const autoScrollDirRef = useRef<-1 | 0 | 1>(0);
 
+  // 本组件的回调一律是**普通箭头函数**，不要再包 useCallback。
+  //
+  // 手写 useCallback 会让 React Compiler 报
+  // "Existing memoization could not be preserved" 并放弃优化整个组件
+  // （实测本文件因此 2 个函数脱靶）。编译器会按真实依赖自动 memoize，
+  // 引用稳定性与原手写依赖数组等价。
+  //
   // ─────────── Auto-scroll while dragging near edges ───────────
-  const stopAutoScroll = useCallback(() => {
+  const stopAutoScroll = () => {
     if (autoScrollRafRef.current !== null) {
       cancelAnimationFrame(autoScrollRafRef.current);
       autoScrollRafRef.current = null;
     }
     autoScrollDirRef.current = 0;
-  }, []);
+  };
 
-  const ensureAutoScrollLoop = useCallback(() => {
+  const ensureAutoScrollLoop = () => {
     if (autoScrollRafRef.current !== null) return;
     const tick = () => {
       const el = scrollRef.current;
@@ -52,97 +60,87 @@ export function EditorTabBar({
         autoScrollRafRef.current = null;
         return;
       }
-      el.scrollLeft += dir * 14;
+      // `scrollRef` 来自 useHorizontalWheelScroll 的返回值，直接写 el.scrollLeft 会被
+      // React Compiler 判为「修改函数返回值」并放弃优化本组件（见 utils/dom/scroll.ts）。
+      nudgeElementScrollLeft(el, dir * 14);
       autoScrollRafRef.current = requestAnimationFrame(tick);
     };
     autoScrollRafRef.current = requestAnimationFrame(tick);
-  }, []);
+  };
 
-  const updateAutoScrollFromClientX = useCallback(
-    (clientX: number) => {
-      const el = scrollRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const edge = 48;
-      if (clientX < rect.left + edge && el.scrollLeft > 0) {
-        autoScrollDirRef.current = -1;
-        ensureAutoScrollLoop();
-      } else if (clientX > rect.right - edge && el.scrollLeft + el.clientWidth < el.scrollWidth) {
-        autoScrollDirRef.current = 1;
-        ensureAutoScrollLoop();
-      } else {
-        autoScrollDirRef.current = 0;
-      }
-    },
-    [ensureAutoScrollLoop],
-  );
+  const updateAutoScrollFromClientX = (clientX: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const edge = 48;
+    if (clientX < rect.left + edge && el.scrollLeft > 0) {
+      autoScrollDirRef.current = -1;
+      ensureAutoScrollLoop();
+    } else if (clientX > rect.right - edge && el.scrollLeft + el.clientWidth < el.scrollWidth) {
+      autoScrollDirRef.current = 1;
+      ensureAutoScrollLoop();
+    } else {
+      autoScrollDirRef.current = 0;
+    }
+  };
 
   useEffect(() => () => stopAutoScroll(), [stopAutoScroll]);
 
   // ─────────── Drag handlers ───────────
-  const handleDragStart = useCallback(
-    (index: number) => (e: DragEvent<HTMLDivElement>) => {
-      if (!onReorder) return;
-      dragSrcIndexRef.current = index;
-      e.dataTransfer.effectAllowed = 'move';
-      // Required by Firefox to actually start a drag.
-      try {
-        e.dataTransfer.setData('text/plain', String(index));
-      } catch {
-        // Some browsers throw in restricted contexts — safe to ignore.
-      }
-    },
-    [onReorder],
-  );
+  const handleDragStart = (index: number) => (e: DragEvent<HTMLDivElement>) => {
+    if (!onReorder) return;
+    dragSrcIndexRef.current = index;
+    e.dataTransfer.effectAllowed = 'move';
+    // Required by Firefox to actually start a drag.
+    try {
+      e.dataTransfer.setData('text/plain', String(index));
+    } catch {
+      // Some browsers throw in restricted contexts — safe to ignore.
+    }
+  };
 
-  const handleDragOver = useCallback(
-    (index: number) => (e: DragEvent<HTMLDivElement>) => {
-      if (!onReorder) return;
-      if (dragSrcIndexRef.current === null) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      // Decide before/after based on cursor position within the tab.
-      const rect = e.currentTarget.getBoundingClientRect();
-      const isAfter = e.clientX > rect.left + rect.width / 2;
-      setDragOverIndex(index);
-      setDropPosition(isAfter ? 'after' : 'before');
-      updateAutoScrollFromClientX(e.clientX);
-    },
-    [onReorder, updateAutoScrollFromClientX],
-  );
+  const handleDragOver = (index: number) => (e: DragEvent<HTMLDivElement>) => {
+    if (!onReorder) return;
+    if (dragSrcIndexRef.current === null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    // Decide before/after based on cursor position within the tab.
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isAfter = e.clientX > rect.left + rect.width / 2;
+    setDragOverIndex(index);
+    setDropPosition(isAfter ? 'after' : 'before');
+    updateAutoScrollFromClientX(e.clientX);
+  };
 
-  const handleDragLeave = useCallback(() => {
+  const handleDragLeave = () => {
     // Only the leave at end-of-drag matters; intermediate leaves are
     // followed by another dragover. The dragend handler clears state.
-  }, []);
+  };
 
-  const handleDrop = useCallback(
-    (index: number) => (e: DragEvent<HTMLDivElement>) => {
-      if (!onReorder) return;
-      e.preventDefault();
-      const from = dragSrcIndexRef.current;
-      dragSrcIndexRef.current = null;
-      stopAutoScroll();
-      const wasAfter = dropPosition === 'after';
-      setDragOverIndex(null);
-      setDropPosition(null);
-      if (from === null || from === index) return;
-      // Compute the target index accounting for "before/after" hover
-      // and the fact that removing the source shifts later indices.
-      let to = wasAfter ? index + 1 : index;
-      if (from < to) to -= 1;
-      if (to === from) return;
-      onReorder(from, to);
-    },
-    [onReorder, dropPosition, stopAutoScroll],
-  );
+  const handleDrop = (index: number) => (e: DragEvent<HTMLDivElement>) => {
+    if (!onReorder) return;
+    e.preventDefault();
+    const from = dragSrcIndexRef.current;
+    dragSrcIndexRef.current = null;
+    stopAutoScroll();
+    const wasAfter = dropPosition === 'after';
+    setDragOverIndex(null);
+    setDropPosition(null);
+    if (from === null || from === index) return;
+    // Compute the target index accounting for "before/after" hover
+    // and the fact that removing the source shifts later indices.
+    let to = wasAfter ? index + 1 : index;
+    if (from < to) to -= 1;
+    if (to === from) return;
+    onReorder(from, to);
+  };
 
-  const handleDragEnd = useCallback(() => {
+  const handleDragEnd = () => {
     dragSrcIndexRef.current = null;
     setDragOverIndex(null);
     setDropPosition(null);
     stopAutoScroll();
-  }, [stopAutoScroll]);
+  };
 
   if (files.length === 0) return null;
 

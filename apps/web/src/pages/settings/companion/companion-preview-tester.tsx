@@ -37,6 +37,29 @@ interface ChatResponse {
  * 启用本地播报（voiceOutputEnabled）时回复会被 speechSynthesis 朗读，
  * 复用 Buddy 自身的 voiceRate / voiceVariant 设置。
  */
+/**
+ * 伙伴试聊的统一包装：置 submitting / 清 error → try → catch 交给 `onError` → finally 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`??`、`?.`）。语义逐字照搬。
+ */
+async function runPreviewChatOnce(ctx: {
+  setSubmitting: (submitting: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSubmitting(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSubmitting(false);
+  }
+}
+
 export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
   const accessToken = useAuthStore((state) => state.accessToken);
   const gatewayUrl = useAuthStore((state) => state.gatewayUrl);
@@ -68,33 +91,35 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
 
   const handleSend = async () => {
     if (!canSend || !accessToken) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const data = (await createSettingsClient(gatewayUrl).putCompanionChat(accessToken, {
-        message: trimmed,
-      })) as ChatResponse;
-      const reply = (data.text ?? '').trim();
-      const profileName = data.profileName ?? buddy.profile?.name ?? 'Buddy';
-      const id = ++turnIdRef.current;
-      setHistory((prev) =>
-        [{ id, message: trimmed, reply, profileName }, ...prev].slice(0, HISTORY_LIMIT),
-      );
-      setDraft('');
-      failuresRef.current = 0;
-      speakReply(reply);
-    } catch (err) {
-      failuresRef.current += 1;
-      if (failuresRef.current >= FAILURE_THRESHOLD) {
-        setCooldownUntil(Date.now() + FAILURE_COOLDOWN_MS);
-        setError('服务连续失败，已暂停 30 秒后再试。');
+    // 置 submitting / 清 error 与 try/catch/finally 一起下沉到模块级 `runPreviewChatOnce`。
+    await runPreviewChatOnce({
+      setSubmitting,
+      setError,
+      onError: (err) => {
+        failuresRef.current += 1;
+        if (failuresRef.current >= FAILURE_THRESHOLD) {
+          setCooldownUntil(Date.now() + FAILURE_COOLDOWN_MS);
+          setError('服务连续失败，已暂停 30 秒后再试。');
+          failuresRef.current = 0;
+        } else {
+          setError(err instanceof Error ? err.message : '试聊失败，请稍后再试');
+        }
+      },
+      run: async () => {
+        const data = (await createSettingsClient(gatewayUrl).putCompanionChat(accessToken, {
+          message: trimmed,
+        })) as ChatResponse;
+        const reply = (data.text ?? '').trim();
+        const profileName = data.profileName ?? buddy.profile?.name ?? 'Buddy';
+        const id = ++turnIdRef.current;
+        setHistory((prev) =>
+          [{ id, message: trimmed, reply, profileName }, ...prev].slice(0, HISTORY_LIMIT),
+        );
+        setDraft('');
         failuresRef.current = 0;
-      } else {
-        setError(err instanceof Error ? err.message : '试聊失败，请稍后再试');
-      }
-    } finally {
-      setSubmitting(false);
-    }
+        speakReply(reply);
+      },
+    });
   };
 
   return (

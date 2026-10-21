@@ -30,6 +30,30 @@ function formatLockoutHint(secs: number): string {
  */
 const DEFAULT_PIN_DIGITS = 6;
 
+/**
+ * PIN 校验的统一包装：置 verifying / 清 error → try → catch 交给 `onError` → finally 清
+ * verifying。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runUnlockVerifyOnce(ctx: {
+  setVerifying: (verifying: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setVerifying(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setVerifying(false);
+  }
+}
+
 export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -66,28 +90,31 @@ export function UnlockOverlay({ onUnlocked }: { onUnlocked: () => void }) {
   const submit = useCallback(
     async (value: string) => {
       if (verifying || lockoutSeconds > 0) return;
-      setVerifying(true);
-      setError(null);
-      try {
-        const result = await tauriInvoke<VerifyPinResult>('verify_desktop_pin', { pin: value });
-        if (result.ok) {
-          setPin('');
-          onUnlocked();
-        } else if (result.lockoutSeconds > 0) {
-          setLockoutSeconds(result.lockoutSeconds);
-          setPin('');
-          setError(`尝试次数过多，已锁定 ${formatLockoutHint(result.lockoutSeconds)}`);
-        } else {
-          setError(`PIN 不正确，还可尝试 ${result.attemptsRemaining} 次`);
-          setPin('');
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
-        logger.error('verify_desktop_pin failed', err);
-      } finally {
-        setVerifying(false);
-      }
+      // 置 verifying / 清 error 与 try/catch/finally 一起下沉到
+      // `runUnlockVerifyOnce`（见其注释）。
+      await runUnlockVerifyOnce({
+        setVerifying,
+        setError,
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          setError(msg);
+          logger.error('verify_desktop_pin failed', err);
+        },
+        run: async () => {
+          const result = await tauriInvoke<VerifyPinResult>('verify_desktop_pin', { pin: value });
+          if (result.ok) {
+            setPin('');
+            onUnlocked();
+          } else if (result.lockoutSeconds > 0) {
+            setLockoutSeconds(result.lockoutSeconds);
+            setPin('');
+            setError(`尝试次数过多，已锁定 ${formatLockoutHint(result.lockoutSeconds)}`);
+          } else {
+            setError(`PIN 不正确，还可尝试 ${result.attemptsRemaining} 次`);
+            setPin('');
+          }
+        },
+      });
     },
     [lockoutSeconds, onUnlocked, verifying],
   );

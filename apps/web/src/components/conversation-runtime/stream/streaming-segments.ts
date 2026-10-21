@@ -20,8 +20,12 @@
  * (so committed round messages also reflect that order before the gateway
  * refresh replaces them with persisted truth).
  */
-import type { InputImageContent, StreamThinkingChunk } from '@openAwork/shared';
-import type { ChatMessagePart } from '../messages/support.js';
+import type {
+  BatchSubToolProgress,
+  InputImageContent,
+  StreamThinkingChunk,
+} from '@openAwork/shared';
+import type { ChatMessagePart, ChatToolPart } from '../messages/support.js';
 import type { StreamingThinkingBlock } from './streaming-thinking.js';
 
 /**
@@ -230,6 +234,59 @@ export function upsertStreamingToolSegment(
 }
 
 /**
+ * 把 `tool_progress` 的实时快照写回对应工具段的 `input._batchProgress`。
+ *
+ * 运行中的 bash / batch / computer_use 卡片都从 `input._batchProgress` 读取
+ * 实时输出；只更新 `liveToolCalls` 不会触发渲染（streamingSegments 才是当前
+ * 流的渲染源），长命令因此会一直停在“等待输出”而看起来卡死。
+ *
+ * 找不到对应工具段（例如 replay 先到 progress）时原样返回，等 `tool_result`
+ * 或后续 `tool_call_delta` 建段后自然恢复。
+ */
+export function applyToolProgressToStreamingSegment(
+  segments: ChatMessagePart[],
+  progress: {
+    completedCount: number;
+    subTools: BatchSubToolProgress[];
+    toolCallId: string;
+    totalCount: number;
+  },
+): ChatMessagePart[] {
+  const index = segments.findIndex(
+    (segment) => segment.type === 'tool' && segment.toolCallId === progress.toolCallId,
+  );
+  if (index < 0) return segments;
+  const existing = segments[index];
+  if (!existing || existing.type !== 'tool') return segments;
+  // 已结算的工具段不再接受迟到的 progress，否则会把终态卡片重新盖回
+  // 运行中的半成品输出。paused 是待审批态，批准后的 progress 应恢复运行中。
+  if (existing.status === 'completed' || existing.status === 'failed') {
+    return segments;
+  }
+
+  const next = segments.slice();
+  const resumedFromPause = existing.status === 'paused';
+  const nextTool: ChatToolPart = {
+    ...existing,
+    ...(resumedFromPause ? { status: 'running' as const } : {}),
+    input: {
+      ...existing.input,
+      _batchProgress: {
+        subTools: progress.subTools,
+        completedCount: progress.completedCount,
+        totalCount: progress.totalCount,
+      },
+    },
+  };
+  // 审批已通过并恢复执行：不能再让卡片挂着旧的审批按钮。
+  if (resumedFromPause) {
+    delete nextTool.pendingPermissionRequestId;
+  }
+  next[index] = nextTool;
+  return next;
+}
+
+/**
  * Update an existing tool segment with a tool_result payload.
  *
  * 当同一 `toolCallId` 尚无对应工具段时（attach / 断线重连时 `tool_result`
@@ -278,8 +335,13 @@ export function applyToolResultToStreamingSegment(
   }
   const existing = next[matchIndex];
   if (existing && existing.type === 'tool') {
+    // 最终输出已经到达，实时进度快照必须清掉；否则 batch 卡片会继续
+    // 优先渲染旧的 `_batchProgress`，而不是 tool_result 的权威结果。
+    const nextInput = { ...existing.input };
+    delete nextInput['_batchProgress'];
     next[matchIndex] = {
       ...existing,
+      input: nextInput,
       ...(toolResult.output !== undefined ? { output: toolResult.output } : {}),
       ...(toolResult.isError !== undefined ? { isError: toolResult.isError } : {}),
       ...(toolResult.status ? { status: toolResult.status } : {}),

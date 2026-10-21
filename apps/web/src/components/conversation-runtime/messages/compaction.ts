@@ -80,7 +80,23 @@ function parseCompactionTranscriptContent(content: string): CompactionTranscript
   return null;
 }
 
-export function readCompactionTranscriptState(
+/**
+ * 压缩状态 / 上下文 token 的按消息缓存。
+ *
+ * 这两个解析都会被「`messages` 每变化一次」的全表路径反复调用：
+ * - `deduplicateCompactionMessages`、`shouldPreferHistoricalContextEstimate`、
+ *   `shouldShowMessageInTranscript` 走 `readCompactionTranscriptState`；
+ * - `messageInputTokens` 走 `estimateContextMessageTokens`。
+ *
+ * 其中 `parseAssistantTraceContent` / `JSON.parse` 作用在整段 content 上（含全部
+ * 工具输出）。工具每执行完一条（`tool_result`）`messages` 就换一次引用，于是这些
+ * 解析会对**整段历史**重跑一遍——长会话 + bash 长输出时，每次命令结束都是一次
+ * 可感知的长任务。消息对象不可变（更新走新对象），因此按引用缓存安全。
+ */
+const compactionStateCache = new WeakMap<object, CompactionTranscriptState | null>();
+const contextTokenCache = new WeakMap<object, number>();
+
+function computeCompactionTranscriptState(
   message: Pick<ChatMessage, 'content' | 'role'>,
 ): CompactionTranscriptState | null {
   if (message.role !== 'assistant') {
@@ -98,6 +114,19 @@ export function readCompactionTranscriptState(
   }
 
   return null;
+}
+
+export function readCompactionTranscriptState(
+  message: Pick<ChatMessage, 'content' | 'role'>,
+): CompactionTranscriptState | null {
+  const cached = compactionStateCache.get(message);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const state = computeCompactionTranscriptState(message);
+  compactionStateCache.set(message, state);
+  return state;
 }
 
 /**
@@ -219,6 +248,17 @@ export function filterChatMessagesForContext(messages: ChatMessage[]): ChatMessa
 }
 
 export function estimateContextMessageTokens(message: ChatMessage): number {
+  const cached = contextTokenCache.get(message);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const tokens = computeContextMessageTokens(message);
+  contextTokenCache.set(message, tokens);
+  return tokens;
+}
+
+function computeContextMessageTokens(message: ChatMessage): number {
   const compaction = readCompactionTranscriptState(message);
   if (compaction) {
     if (compaction.phase !== 'completed') {

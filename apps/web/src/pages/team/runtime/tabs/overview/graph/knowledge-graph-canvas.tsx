@@ -434,12 +434,12 @@ export function KnowledgeGraphCanvas({
         return;
       }
       suppressViewportRef.current = true;
-      try {
-        await applyViewport(instance, { pan, zoom });
-        lastViewportRef.current = { pan: { x: pan.x, y: pan.y }, zoom };
-      } finally {
+      // 用 `promise.finally()` 取代 try/finally：编译器不支持 finally 子句（会让整个组件
+      // 脱靶）。语义一致——无论成功 / 失败都复位抑制标记，异常照旧向上抛。
+      await applyViewport(instance, { pan, zoom }).finally(() => {
         suppressViewportRef.current = false;
-      }
+      });
+      lastViewportRef.current = { pan: { x: pan.x, y: pan.y }, zoom };
     };
     void run().catch((error: unknown) => {
       logger.warn('knowledge graph viewport sync failed', error);
@@ -468,12 +468,11 @@ export function KnowledgeGraphCanvas({
         return;
       }
       suppressViewportRef.current = true;
-      try {
-        await applyViewport(instance, RESET_VIEWPORT);
-        lastViewportRef.current = RESET_VIEWPORT;
-      } finally {
+      // 同上：改用 `promise.finally()` 取代 try/finally（编译器不支持 finally 子句）。
+      await applyViewport(instance, RESET_VIEWPORT).finally(() => {
         suppressViewportRef.current = false;
-      }
+      });
+      lastViewportRef.current = RESET_VIEWPORT;
     };
     void run().catch((error: unknown) => {
       logger.warn('knowledge graph viewport reset failed', error);

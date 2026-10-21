@@ -11,6 +11,7 @@
  *  - showSessionSwitchSkeleton → 骨架屏
  *  - composerDisabled / composerDisabledHint → 禁用提示替代 composer
  *  - streamError → 错误栏、remoteSessionBusyState → 运行状态条
+ *  - staleRunningResync / onStaleRunningResync → 状态条「重新同步」按钮
  *  - welcomeScreen / emptyContent → 空态分支
  *
  * 不变量：不触碰 fold-policy 的 data-collapsed 语义，也不依赖虚拟列表
@@ -379,6 +380,51 @@ describe('ChatConversationView — 消息列表与空态', () => {
     expect(screen.getByTestId('chat-session-skeleton')).not.toBeNull();
     expect(screen.queryByText('切换前的旧消息')).toBeNull();
   });
+
+  it('骨架 → 内容时内容列获得交接淡入类，下一轮切换可重播', () => {
+    const message = makeMessage({ content: '切换后的新消息' });
+    const props = createViewProps({
+      messages: [message],
+      groupedMessageEntries: [makeGroup(message)],
+      showSessionSwitchSkeleton: true,
+    });
+    const { rerender } = render(<ChatConversationView {...props} />);
+
+    // 骨架阶段：不播交接动画。
+    expect(screen.getByTestId('chat-content-column').className).not.toContain(
+      'omo-content-handoff-in',
+    );
+
+    // 骨架消失（真实内容就位，下降沿）→ 播一次交接淡入。
+    rerender(<ChatConversationView {...props} showSessionSwitchSkeleton={false} />);
+    expect(screen.getByTestId('chat-content-column').className).toContain('omo-content-handoff-in');
+
+    // 新一轮切换：骨架再次出现（上升沿）→ 类复位，保证下一次下降沿必定重播。
+    rerender(<ChatConversationView {...props} showSessionSwitchSkeleton={true} />);
+    expect(screen.getByTestId('chat-content-column').className).not.toContain(
+      'omo-content-handoff-in',
+    );
+
+    // 第二次下降沿 → 类重新加上（动画在真实浏览器中随之重播）。
+    rerender(<ChatConversationView {...props} showSessionSwitchSkeleton={false} />);
+    expect(screen.getByTestId('chat-content-column').className).toContain('omo-content-handoff-in');
+  });
+
+  it('未经历骨架（缓存命中 / 首屏即有内容）不播交接淡入', () => {
+    const message = makeMessage({ content: '缓存命中的消息' });
+    render(
+      <ChatConversationView
+        {...createViewProps({
+          messages: [message],
+          groupedMessageEntries: [makeGroup(message)],
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-content-column').className).not.toContain(
+      'omo-content-handoff-in',
+    );
+  });
 });
 
 describe('ChatConversationView — 状态条 / 错误栏 / composer 分支', () => {
@@ -405,6 +451,22 @@ describe('ChatConversationView — 状态条 / 错误栏 / composer 分支', () 
   it('remoteSessionBusyState 非空时渲染会话运行状态条', () => {
     render(<ChatConversationView {...createViewProps({ remoteSessionBusyState: 'paused' })} />);
     expect(screen.getByTestId('chat-session-runtime-status')).not.toBeNull();
+  });
+
+  it('staleRunningResync 时状态条展示「重新同步」并透传点击回调', () => {
+    const onStaleRunningResync = vi.fn();
+    render(
+      <ChatConversationView
+        {...createViewProps({
+          remoteSessionBusyState: 'running',
+          staleRunningResync: true,
+          onStaleRunningResync,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '重新同步' }));
+    expect(onStaleRunningResync).toHaveBeenCalledTimes(1);
   });
 
   it('composerDisabled + hint 时用禁用提示替代 composer', () => {

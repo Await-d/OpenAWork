@@ -177,6 +177,30 @@ function buildRows(installed: InstalledSkillDto[], effective: EffectiveSkillDto[
   return rows;
 }
 
+/**
+ * 技能选择页动作（刷新 / 保存）的统一包装：置 busy / 清 error → try → catch 交给 `onError`
+ * → finally 清 busy。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`a || b`、`...(cond ? … : {})`）。语义逐字照搬。
+ */
+async function runSkillSelectionActionOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export default function SkillSelectionPage(): React.ReactElement {
   const { gatewayUrl, accessToken } = useAuthStore();
   const [workspacePath, setWorkspacePath] = useState<string>(() => readWorkspacePath());
@@ -191,21 +215,26 @@ export default function SkillSelectionPage(): React.ReactElement {
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
-    try {
-      const client = createSkillsClient(gatewayUrl);
-      const tokenStr = accessToken ?? '';
-      const [selection, installed] = await Promise.all([
-        client.getSelection(tokenStr, {
-          ...(workspacePath.trim().length > 0 ? { workspacePath: workspacePath.trim() } : {}),
-        }) as Promise<SelectionGetResponse>,
-        client.listInstalled(tokenStr) as Promise<{ skills: InstalledSkillDto[] }>,
-      ]);
-      setRows(buildRows(installed.skills, selection.effective));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
+    // 置 loading / 清 error 与 try/catch/finally 一起下沉到模块级
+    // `runSkillSelectionActionOnce`（见其注释）。
+    await runSkillSelectionActionOnce({
+      setBusy: setLoading,
+      setError,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : String(err));
+      },
+      run: async () => {
+        const client = createSkillsClient(gatewayUrl);
+        const tokenStr = accessToken ?? '';
+        const [selection, installed] = await Promise.all([
+          client.getSelection(tokenStr, {
+            ...(workspacePath.trim().length > 0 ? { workspacePath: workspacePath.trim() } : {}),
+          }) as Promise<SelectionGetResponse>,
+          client.listInstalled(tokenStr) as Promise<{ skills: InstalledSkillDto[] }>,
+        ]);
+        setRows(buildRows(installed.skills, selection.effective));
+      },
+    });
   }, [gatewayUrl, accessToken, workspacePath]);
 
   useEffect(() => {
@@ -218,29 +247,31 @@ export default function SkillSelectionPage(): React.ReactElement {
   };
 
   const save = useCallback(async (): Promise<void> => {
-    setSaving(true);
-    setError(null);
+    // 同刷新：整段下沉到 `runSkillSelectionActionOnce`（见其注释）。
     setHint(null);
-    try {
-      const items = rows
-        .filter((row) => !row.isBuiltin && row.isInstalled)
-        .map((row) => ({
-          skillId: row.skillId,
-          enabled: row.enabled,
-          pinned: row.pinned,
-          reason: row.reason,
-        }));
-      await createSkillsClient(gatewayUrl).putSelection(accessToken ?? '', {
-        workspacePath: workspacePath.trim() || null,
-        items,
-      });
-      setHint('已保存。下次新建会话生效。');
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
+    await runSkillSelectionActionOnce({
+      setBusy: setSaving,
+      setError,
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : String(err));
+      },
+      run: async () => {
+        const items = rows
+          .filter((row) => !row.isBuiltin && row.isInstalled)
+          .map((row) => ({
+            skillId: row.skillId,
+            enabled: row.enabled,
+            pinned: row.pinned,
+            reason: row.reason,
+          }));
+        await createSkillsClient(gatewayUrl).putSelection(accessToken ?? '', {
+          workspacePath: workspacePath.trim() || null,
+          items,
+        });
+        setHint('已保存。下次新建会话生效。');
+        await refresh();
+      },
+    });
   }, [gatewayUrl, accessToken, refresh, rows, workspacePath]);
 
   const tokenEstimate = useMemo<PinnedTokenEstimate>(

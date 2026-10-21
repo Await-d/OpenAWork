@@ -131,10 +131,15 @@ export function useTeamSidebarSessions(): UseTeamSidebarSessionsResult {
   const listScopeRef = useRef('');
 
   const listScope = `${accessToken ?? ''}:${gatewayUrl}`;
-  if (listScopeRef.current !== listScope) {
+  // 刻意放进 effect，而不是渲染期顶层直接写 ref：渲染期读写 ref 会被 React Compiler
+  // 判定为 "Cannot access refs during render" 并放弃优化本 hook（实测 3 个函数脱靶）。
+  // effect 按声明顺序执行，本 effect 排在下方取数 effect 之前，因此取数时读到的
+  // scope / 签名一定是重置后的值，行为与原写法等价。
+  useEffect(() => {
+    if (listScopeRef.current === listScope) return;
     listScopeRef.current = listScope;
     listSignatureRef.current = '';
-  }
+  }, [listScope]);
 
   const refresh = useCallback(() => {
     setRefreshTick((value) => value + 1);

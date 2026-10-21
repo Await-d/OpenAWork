@@ -63,6 +63,14 @@ export function InteractiveTerminalView({
     menuItems,
   });
 
+  // containerRef 刻意先取出再用，不要「简化」回 `ref={session.containerRef}`。
+  //
+  // React Compiler 默认开启 `enableTreatRefLikeIdentifiersAsRefs`，会把名字以
+  // `Ref` 结尾的成员访问一律当作「渲染期访问 ref」，进而放弃优化整个组件
+  // （报 Cannot access refs during render）。解构后按普通局部变量传递即可正常编译，
+  // 行为完全等价——本组件只把 ref 对象交给 `ref=`，从不读取 `.current`。
+  const { containerRef } = session;
+
   const streamHint =
     session.streamStatus === 'reconnecting'
       ? '输出流中断 · 正在重连'
@@ -79,7 +87,7 @@ export function InteractiveTerminalView({
   return (
     <div className="terminal-root" data-testid={`terminal-view-${terminal.terminalId}`}>
       <div
-        ref={session.containerRef}
+        ref={containerRef}
         className="terminal-surface"
         data-testid="terminal-surface"
         tabIndex={0}

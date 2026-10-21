@@ -131,6 +131,28 @@ export interface FailureFlowIndicatorProps {
   onActionComplete?: (result: HandoffReviewActionResult) => void;
 }
 
+/**
+ * 评审动作的统一包装：`onStart` 置忙 → try → catch 交给 `onError` → `onFinally` 清忙。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`??`、三元）。语义逐字照搬。
+ */
+async function runReviewActionOnce(ctx: {
+  onStart: () => void;
+  onError: (error: unknown) => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart();
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function FailureFlowIndicator({
   action,
   reason,
@@ -152,22 +174,29 @@ export function FailureFlowIndicator({
       return;
     }
     const client = createTeamHandoffsClient(gatewayUrl);
-    setBusyAction(nextAction);
-    setActionError(null);
-    try {
-      const result = await client.runReviewAction(accessToken, pm2HandoffId, nextAction);
-      if (!result.ok) {
-        setActionError(result.errorMessage ?? '评审动作执行失败。');
-        return;
-      }
-      setActionError(null);
-      onActionComplete?.(result);
-    } catch (err) {
-      console.error('[FailureFlowIndicator] review action failed', err);
-      setActionError(err instanceof Error ? err.message : '评审动作执行失败。');
-    } finally {
-      setBusyAction(null);
-    }
+    // try/catch/finally 下沉到模块级 `runReviewActionOnce`（见其注释）。
+    await runReviewActionOnce({
+      onStart: () => {
+        setBusyAction(nextAction);
+        setActionError(null);
+      },
+      onError: (err) => {
+        console.error('[FailureFlowIndicator] review action failed', err);
+        setActionError(err instanceof Error ? err.message : '评审动作执行失败。');
+      },
+      onFinally: () => {
+        setBusyAction(null);
+      },
+      run: async () => {
+        const result = await client.runReviewAction(accessToken, pm2HandoffId, nextAction);
+        if (!result.ok) {
+          setActionError(result.errorMessage ?? '评审动作执行失败。');
+          return;
+        }
+        setActionError(null);
+        onActionComplete?.(result);
+      },
+    });
   };
 
   return (

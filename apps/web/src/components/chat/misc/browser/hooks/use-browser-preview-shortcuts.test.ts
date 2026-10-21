@@ -21,6 +21,7 @@ import {
   isPreviewSurfaceFocused,
   isTypingTarget,
   matchBrowserPreviewShortcut,
+  PREVIEW_IME_ATTRIBUTE,
   useBrowserPreviewShortcuts,
 } from './use-browser-preview-shortcuts.js';
 import { useBrowserPreviewShortcutsWiring } from './use-browser-preview-shortcuts-wiring.js';
@@ -361,6 +362,16 @@ describe('useBrowserPreviewShortcuts', () => {
     for (const target of [notEditable, plain, null]) {
       expect(isTypingTarget(target)).toBe(false);
     }
+  });
+
+  /**
+   * 预览自己的透明 IME 输入框是 textarea，但它不是「用户在别处打字」：焦点落在
+   * 它上面时预览快捷键必须继续生效，否则 CDP 画面一聚焦，Ctrl+R / Ctrl+= 全部静默。
+   */
+  it('预览 IME 输入框不参与输入豁免', () => {
+    const ime = document.createElement('textarea');
+    ime.setAttribute(PREVIEW_IME_ATTRIBUTE, 'true');
+    expect(isTypingTarget(ime)).toBe(false);
   });
 });
 

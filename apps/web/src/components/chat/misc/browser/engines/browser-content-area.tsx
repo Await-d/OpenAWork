@@ -6,7 +6,7 @@
  * 组件持有；宿主只提供 URL、刷新信号与日志上报回调。
  */
 
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { BrowserReadinessBar } from '../BrowserReadinessBar.js';
 import { injectConsoleProxy } from '../console-proxy.js';
 import { isLocalhostUrl } from '../browser-storage.js';
@@ -50,8 +50,39 @@ interface BrowserContentAreaProps {
   onPickPoint?: (point: { x: number; y: number }) => void;
   /** 设备预设 id：iframe 回退分支按它给容器定尺寸（自适应 = 铺满面板）。 */
   devicePresetId: string;
+  /** 画质档位 id：只影响实时画面（iframe 分支由浏览器自己合成，无所谓）。 */
+  qualityPresetId: string;
   /** 纯前端缩放档位（1 = 100%）。 */
   zoom: number;
+  /** 实时画面持续低帧率时，用户可一键切到原生渲染（iframe）。 */
+  onRequestNativeRender?: () => void;
+  /** 页面代次门槛（与控制台 / 网络的事件过滤共用同一份）。 */
+  minGenerationRef?: RefObject<number | null>;
+  /**
+   * 新标签页（占位地址）用开始页顶替白板。
+   *
+   * 传 `undefined` 表示当前地址是真实页面。开始页绝对定位铺满内容区，
+   * 底层 iframe / 实时画面保持挂载（切回真实页面时不必重建）。
+   */
+  startPage?: ReactNode;
+}
+
+/**
+ * 往 iframe 注入控制台代理；跨域等异常返回 false（由调用方补一条日志）。
+ *
+ * 必须留在模块级：try 内的 `?.` 是值块，会让编译器报
+ * "Support value blocks ... within a try/catch statement" 并放弃优化整个组件（实测）。
+ */
+function injectConsoleProxyOnce(iframe: HTMLIFrameElement | null): boolean {
+  try {
+    const iframeWindow = iframe?.contentWindow;
+    if (iframeWindow) {
+      injectConsoleProxy(iframeWindow);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function BrowserContentArea({
@@ -77,7 +108,11 @@ export function BrowserContentArea({
   pickIntent,
   onPickPoint,
   devicePresetId,
+  qualityPresetId,
   zoom,
+  onRequestNativeRender,
+  minGenerationRef,
+  startPage,
 }: BrowserContentAreaProps) {
   /**
    * 记录"iframe 已经成功加载过哪个 URL"。页面就绪探测成功后据此判断
@@ -165,6 +200,7 @@ export function BrowserContentArea({
         <CdpLiveEngine
           session={liveSession}
           url={activeUrl}
+          tabId={activeTabId}
           hidden={hidden}
           pickArmed={pickArmed}
           onPickConsumed={onPickConsumed}
@@ -173,7 +209,10 @@ export function BrowserContentArea({
           onPickPoint={onPickPoint}
           refreshKey={refreshKey}
           devicePresetId={devicePresetId}
+          qualityPresetId={qualityPresetId}
           zoom={zoom}
+          {...(onRequestNativeRender !== undefined ? { onRequestNativeRender } : {})}
+          {...(minGenerationRef !== undefined ? { minGenerationRef } : {})}
         />
       ) : (
         <>
@@ -221,12 +260,8 @@ export function BrowserContentArea({
                 }}
                 onLoad={() => {
                   iframeLoadedUrlRef.current = activeUrl;
-                  try {
-                    const iframeWindow = iframeRef.current?.contentWindow;
-                    if (iframeWindow) {
-                      injectConsoleProxy(iframeWindow);
-                    }
-                  } catch {
+                  // 注入（含 try/catch 与 `?.`）下沉到模块级 `injectConsoleProxyOnce`。
+                  if (!injectConsoleProxyOnce(iframeRef.current)) {
                     appendLogToActiveTab({
                       id: `${Date.now()}-info`,
                       level: 'info',
@@ -248,7 +283,7 @@ export function BrowserContentArea({
               />
             </div>
           </div>
-          {activeUrl && !isLocalhostUrl(activeUrl) && !consoleOpen && (
+          {activeUrl && !isLocalhostUrl(activeUrl) && !consoleOpen && startPage === undefined && (
             <div
               style={{
                 position: 'absolute',
@@ -270,6 +305,20 @@ export function BrowserContentArea({
             </div>
           )}
         </>
+      )}
+      {startPage !== undefined && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 2,
+            display: 'flex',
+            minWidth: 0,
+            minHeight: 0,
+          }}
+        >
+          {startPage}
+        </div>
       )}
     </div>
   );

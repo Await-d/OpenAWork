@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createWorkspaceClient, type WorkspaceFileReadOptions } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
@@ -106,6 +106,23 @@ export interface WorkspaceFileTreePanelProps {
  *
  * 可在侧边栏、编辑器面板等任何需要文件浏览的位置复用。
  */
+/**
+ * 文件树条目创建的统一包装：try → catch 交给 `onError`（window.alert 提示）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try 内的值块（`...(cond ? … : {})`、三元），
+ * 本组件这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runFileTreeEntryActionOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  }
+}
+
 export function WorkspaceFileTreePanel({
   onOpenFile,
   fetchTree,
@@ -121,7 +138,10 @@ export function WorkspaceFileTreePanel({
 }: WorkspaceFileTreePanelProps) {
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
   const accessToken = useAuthStore((s) => s.accessToken);
-  const workspaceClient = useMemo(() => createWorkspaceClient(gatewayUrl), [gatewayUrl]);
+  // 去 useMemo：createWorkspaceClient 本身是轻量工厂；编译器会对结果按
+  // (gatewayUrl) 自动 memo。保留手写 memo 会让编译器报
+  // 「Existing memoization could not be preserved」而放弃优化整个组件。
+  const workspaceClient = createWorkspaceClient(gatewayUrl);
 
   const {
     fileTreeRootPath: storeFileTreeRootPath,
@@ -143,14 +163,11 @@ export function WorkspaceFileTreePanel({
       fileTreeRootPath && fileTreeRootPath.trim().length > 0 ? fileTreeRootPath : '__default__'
     ] ?? null;
 
-  const expandedDirs = useMemo(() => new Set(expandedDirsArr), [expandedDirsArr]);
-  const setExpandedDirs = useCallback(
-    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-      const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
-      setExpandedDirsForSession(expandedDirsSessionKey, Array.from(next));
-    },
-    [expandedDirsArr, expandedDirsSessionKey, setExpandedDirsForSession],
-  );
+  const expandedDirs = new Set(expandedDirsArr);
+  const setExpandedDirs = (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    const next = typeof updater === 'function' ? updater(new Set(expandedDirsArr)) : updater;
+    setExpandedDirsForSession(expandedDirsSessionKey, Array.from(next));
+  };
 
   const [fileTreeFilter, setFileTreeFilter] = useState('');
   const [fileTreeContextMenu, setFileTreeContextMenu] = useState<FileTreeContextMenuState | null>(
@@ -173,14 +190,12 @@ export function WorkspaceFileTreePanel({
    * 与回退判据（仅「跨主机路径不兼容」才换身份重试），因此侧边栏树与点击预览
    * 的行为一致：SSH 会话读远端树，本地会话的请求参数与改动前逐字节相同。
    */
-  const fetchTreeWithIdentity = useMemo(() => {
-    return async (path: string, depth?: number): Promise<FileTreeNode[]> => {
-      const attempts = buildPreviewReadAttempts(fileTreeRootPath, readIdentity);
-      return runWithReadIdentityFallback(attempts, (readOptions) =>
-        fetchTree(path, depth, readOptions),
-      );
-    };
-  }, [fetchTree, fileTreeRootPath, readIdentity]);
+  const fetchTreeWithIdentity = async (path: string, depth?: number): Promise<FileTreeNode[]> => {
+    const attempts = buildPreviewReadAttempts(fileTreeRootPath, readIdentity);
+    return runWithReadIdentityFallback(attempts, (readOptions) =>
+      fetchTree(path, depth, readOptions),
+    );
+  };
 
   const {
     applyCreatedEntry,
@@ -210,16 +225,13 @@ export function WorkspaceFileTreePanel({
     setFileTreeContextMenu(null);
   }, [fileTreeRootPath]);
 
-  const refreshDirectoryWithVersion = useCallback(
-    async (directoryPath: string): Promise<boolean> => {
-      const refreshed = await refreshDirectory(directoryPath);
-      if (refreshed) {
-        bumpWorkspaceTreeVersion();
-      }
-      return refreshed;
-    },
-    [bumpWorkspaceTreeVersion, refreshDirectory],
-  );
+  const refreshDirectoryWithVersion = async (directoryPath: string): Promise<boolean> => {
+    const refreshed = await refreshDirectory(directoryPath);
+    if (refreshed) {
+      bumpWorkspaceTreeVersion();
+    }
+    return refreshed;
+  };
 
   /**
    * 写操作的 SSH 读取身份。
@@ -228,65 +240,63 @@ export function WorkspaceFileTreePanel({
    * 路径写入，SSH 远端工作区下会「假成功」——远端并没有该条目，但 UI 仍把它
    * 插进了树。
    */
-  const writeIdentity = useMemo(() => {
-    // 面板的 `sessionId` prop 与 store 里的 readIdentity 可能不一致（例如面板
-    // 复用为只读浏览时），优先用 readIdentity 的会话身份。
-    const identitySessionId = readIdentity.sessionId ?? (sessionId ? String(sessionId) : null);
-    const sshConnectionId = readIdentity.sshConnectionId;
-    return {
-      ...(identitySessionId ? { sessionId: identitySessionId } : {}),
-      ...(!identitySessionId && sshConnectionId ? { sshConnectionId } : {}),
-      ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
-    };
-  }, [readIdentity.sessionId, readIdentity.sshConnectionId, fileTreeRootPath, sessionId]);
+  // 面板的 `sessionId` prop 与 store 里的 readIdentity 可能不一致（例如面板
+  // 复用为只读浏览时），优先用 readIdentity 的会话身份。
+  const identitySessionId = readIdentity.sessionId ?? (sessionId ? String(sessionId) : null);
+  const sshConnectionId = readIdentity.sshConnectionId;
+  const writeIdentity = {
+    ...(identitySessionId ? { sessionId: identitySessionId } : {}),
+    ...(!identitySessionId && sshConnectionId ? { sshConnectionId } : {}),
+    ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
+  };
 
-  const createWorkspaceFile = useCallback(
-    async (path: string): Promise<void> => {
-      try {
-        await workspaceClient.createFile(accessToken ?? '', path, '', writeIdentity);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : '新建文件失败';
-        throw new Error(message);
-      }
-    },
-    [accessToken, writeIdentity, workspaceClient],
-  );
+  // 把 try/catch（含 try 内 `throw`）改成 `.catch()` 链：编译器对「try 内 throw」会放弃优化
+  // 整个组件；`.catch` 里重抛的语义与原来逐字一致（错误文案归一后抛出）。
+  const createWorkspaceFile = async (path: string): Promise<void> => {
+    await workspaceClient
+      .createFile(accessToken ?? '', path, '', writeIdentity)
+      .catch((err: unknown) => {
+        throw new Error(err instanceof Error ? err.message : '新建文件失败');
+      });
+  };
 
-  const createWorkspaceDirectory = useCallback(
-    async (path: string): Promise<void> => {
-      try {
-        await workspaceClient.createDirectory(accessToken ?? '', path, writeIdentity);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : '新建文件夹失败';
-        throw new Error(message);
-      }
-    },
-    [accessToken, writeIdentity, workspaceClient],
-  );
+  const createWorkspaceDirectory = async (path: string): Promise<void> => {
+    await workspaceClient
+      .createDirectory(accessToken ?? '', path, writeIdentity)
+      .catch((err: unknown) => {
+        throw new Error(err instanceof Error ? err.message : '新建文件夹失败');
+      });
+  };
 
-  const handleCreateEntry = useCallback(
-    async (entryType: 'file' | 'directory', directoryPath: string, locationLabel: string) => {
-      const defaultName = entryType === 'file' ? 'untitled.ts' : 'new-folder';
-      const input = window.prompt(
-        entryType === 'file'
-          ? `在“${locationLabel}”中新建文件`
-          : `在“${locationLabel}”中新建文件夹`,
-        defaultName,
-      );
+  const handleCreateEntry = async (
+    entryType: 'file' | 'directory',
+    directoryPath: string,
+    locationLabel: string,
+  ) => {
+    const defaultName = entryType === 'file' ? 'untitled.ts' : 'new-folder';
+    const input = window.prompt(
+      entryType === 'file' ? `在“${locationLabel}”中新建文件` : `在“${locationLabel}”中新建文件夹`,
+      defaultName,
+    );
 
-      if (input === null) {
-        return;
-      }
+    if (input === null) {
+      return;
+    }
 
-      const entryName = input.trim();
-      if (!isValidFileTreeEntryName(entryName)) {
-        window.alert('名称不能为空、不能包含 / 或 \\，且不能使用受系统隐藏规则影响的目录名');
-        return;
-      }
+    const entryName = input.trim();
+    if (!isValidFileTreeEntryName(entryName)) {
+      window.alert('名称不能为空、不能包含 / 或 \\，且不能使用受系统隐藏规则影响的目录名');
+      return;
+    }
 
-      const nextPath = joinFileTreePath(directoryPath, entryName);
+    const nextPath = joinFileTreePath(directoryPath, entryName);
 
-      try {
+    // try/catch 下沉到模块级 `runFileTreeEntryActionOnce`（见其注释）。
+    await runFileTreeEntryActionOnce({
+      onError: (error) => {
+        window.alert(error instanceof Error ? error.message : '创建失败');
+      },
+      run: async () => {
         setFileTreeError(null);
         if (entryType === 'file') {
           await createWorkspaceFile(nextPath);
@@ -314,80 +324,61 @@ export function WorkspaceFileTreePanel({
         if (entryType === 'file') {
           onOpenFile?.(nextPath);
         }
-      } catch (error) {
-        window.alert(error instanceof Error ? error.message : '创建失败');
+      },
+    });
+  };
+
+  const handleCreateRootEntry = (entryType: 'file' | 'directory') => {
+    void (async () => {
+      const rootPath = await ensureRootPath();
+      if (!rootPath) {
+        return;
       }
-    },
-    [
-      bumpWorkspaceTreeVersion,
-      applyCreatedEntry,
-      createWorkspaceDirectory,
-      createWorkspaceFile,
-      onOpenFile,
-      refreshDirectoryWithVersion,
-    ],
-  );
+      await handleCreateEntry(entryType, rootPath, '工作区根目录');
+    })();
+  };
 
-  const handleCreateRootEntry = useCallback(
-    (entryType: 'file' | 'directory') => {
-      void (async () => {
-        const rootPath = await ensureRootPath();
-        if (!rootPath) {
-          return;
-        }
-        await handleCreateEntry(entryType, rootPath, '工作区根目录');
-      })();
-    },
-    [ensureRootPath, handleCreateEntry],
-  );
-
-  const handleCopyFileTreePath = useCallback((path: string, label: string) => {
+  const handleCopyFileTreePath = (path: string, label: string) => {
     void copyTextToClipboard(path)
       .then(() => toast(`已复制${label}`, 'success'))
       .catch((error: unknown) => {
         toast(error instanceof Error ? error.message : '复制失败', 'error');
       });
-  }, []);
+  };
 
-  const handleReferenceFileTreeTarget = useCallback(
-    (target: FileTreeContextMenuState) => {
-      const relativePath = getFileTreeRelativePath(fileTreeRootPath, target.path);
-      const referencePath = relativePath ?? target.path;
-      const targetKind = target.targetType === 'file' ? '文件' : '目录';
-      dispatchComposerReference(`@${referencePath} `);
-      toast(`已引用${targetKind}到输入框`, 'success');
-    },
-    [fileTreeRootPath],
-  );
+  const handleReferenceFileTreeTarget = (target: FileTreeContextMenuState) => {
+    const relativePath = getFileTreeRelativePath(fileTreeRootPath, target.path);
+    const referencePath = relativePath ?? target.path;
+    const targetKind = target.targetType === 'file' ? '文件' : '目录';
+    dispatchComposerReference(`@${referencePath} `);
+    toast(`已引用${targetKind}到输入框`, 'success');
+  };
 
-  const handleOpenRootContextMenu = useCallback(
-    (event: React.MouseEvent<HTMLElement>) => {
-      event.preventDefault();
-      const x = event.clientX;
-      const y = event.clientY;
+  const handleOpenRootContextMenu = (event: React.MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    const x = event.clientX;
+    const y = event.clientY;
 
-      void (async () => {
-        const rootPath = await ensureRootPath();
-        if (!rootPath) {
-          return;
-        }
-        setFileTreeContextMenu({
-          path: rootPath,
-          name: '工作区根目录',
-          type: 'directory',
-          targetType: 'root',
-          directoryPath: rootPath,
-          x,
-          y,
-        });
-      })();
-    },
-    [ensureRootPath],
-  );
+    void (async () => {
+      const rootPath = await ensureRootPath();
+      if (!rootPath) {
+        return;
+      }
+      setFileTreeContextMenu({
+        path: rootPath,
+        name: '工作区根目录',
+        type: 'directory',
+        targetType: 'root',
+        directoryPath: rootPath,
+        x,
+        y,
+      });
+    })();
+  };
 
-  const handleNodeContextMenu = useCallback((target: FileTreeContextTarget) => {
+  const handleNodeContextMenu = (target: FileTreeContextTarget) => {
     setFileTreeContextMenu({ ...target, targetType: target.type });
-  }, []);
+  };
 
   // ── Variant-driven styles ──────────────────────────────────────────
   const isEmbedded = variant === 'embedded';
@@ -861,20 +852,24 @@ export function WorkspaceFileTreePanel({
                         : `确定要删除文件「${targetName}」吗？此操作不可撤销。`;
                     if (!window.confirm(confirmMsg)) return;
                     void (async () => {
-                      try {
-                        if (!accessToken) return;
-                        await workspaceClient.deleteEntry(accessToken, targetPath, {
-                          ...(sessionId ? { sessionId } : {}),
-                          ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
-                        });
-                        applyDeletedEntry(targetPath);
-                        toast(`已删除: ${targetName}`, 'success');
-                        void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
-                        bumpWorkspaceTreeVersion();
-                      } catch (err) {
-                        const msg = err instanceof Error ? err.message : '删除失败';
-                        toast(msg, 'error');
-                      }
+                      // try/catch 下沉到模块级 `runFileTreeEntryActionOnce`（见其注释）。
+                      await runFileTreeEntryActionOnce({
+                        onError: (err) => {
+                          const msg = err instanceof Error ? err.message : '删除失败';
+                          toast(msg, 'error');
+                        },
+                        run: async () => {
+                          if (!accessToken) return;
+                          await workspaceClient.deleteEntry(accessToken, targetPath, {
+                            ...(sessionId ? { sessionId } : {}),
+                            ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
+                          });
+                          applyDeletedEntry(targetPath);
+                          toast(`已删除: ${targetName}`, 'success');
+                          void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
+                          bumpWorkspaceTreeVersion();
+                        },
+                      });
                     })();
                   }
                 : undefined
@@ -891,29 +886,33 @@ export function WorkspaceFileTreePanel({
                       return;
                     }
                     void (async () => {
-                      try {
-                        if (!accessToken) return;
-                        const parentDir = fileTreeContextMenu.directoryPath;
-                        const newPath = joinFileTreePath(
-                          parentDir === targetPath ? getParentDir(targetPath) : parentDir,
-                          newName.trim(),
-                        );
-                        await workspaceClient.renameEntry(accessToken, targetPath, newPath, {
-                          ...(sessionId ? { sessionId } : {}),
-                          ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
-                        });
-                        applyRenamedEntry({
-                          oldPath: targetPath,
-                          newPath,
-                          newName: newName.trim(),
-                        });
-                        toast(`已重命名为: ${newName.trim()}`, 'success');
-                        void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
-                        bumpWorkspaceTreeVersion();
-                      } catch (err) {
-                        const msg = err instanceof Error ? err.message : '重命名失败';
-                        toast(msg, 'error');
-                      }
+                      // 同上：整段下沉到 `runFileTreeEntryActionOnce`（见其注释）。
+                      await runFileTreeEntryActionOnce({
+                        onError: (err) => {
+                          const msg = err instanceof Error ? err.message : '重命名失败';
+                          toast(msg, 'error');
+                        },
+                        run: async () => {
+                          if (!accessToken) return;
+                          const parentDir = fileTreeContextMenu.directoryPath;
+                          const newPath = joinFileTreePath(
+                            parentDir === targetPath ? getParentDir(targetPath) : parentDir,
+                            newName.trim(),
+                          );
+                          await workspaceClient.renameEntry(accessToken, targetPath, newPath, {
+                            ...(sessionId ? { sessionId } : {}),
+                            ...(fileTreeRootPath ? { workspaceRoot: fileTreeRootPath } : {}),
+                          });
+                          applyRenamedEntry({
+                            oldPath: targetPath,
+                            newPath,
+                            newName: newName.trim(),
+                          });
+                          toast(`已重命名为: ${newName.trim()}`, 'success');
+                          void refreshDirectoryWithVersion(fileTreeContextMenu.directoryPath);
+                          bumpWorkspaceTreeVersion();
+                        },
+                      });
                     })();
                   }
                 : undefined

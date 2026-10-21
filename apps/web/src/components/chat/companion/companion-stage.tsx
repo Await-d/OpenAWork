@@ -21,6 +21,15 @@ import { useAuthStore } from '../../../stores/auth/auth.js';
 
 export interface CompanionStageProps extends CompanionActivitySnapshot {
   agentId?: string;
+  /**
+   * 仅在输入框出现 `/buddy` 时才是**原文**，否则为 `null`。
+   *
+   * 刻意不直接收 `input` 原文：那个值每敲一键就变，会让本组件（sprite 动画 +
+   * portal 面板 + 9 个 effect + 语音合成）随每一次按键整体重渲染——这正是打字
+   * 卡顿的主因。`/buddy` 触发只需要「出现的那一刻的文本」，用 `null` 表达常态即可
+   * 让上游编译器的自动 memo 真正生效。
+   */
+  buddyTriggerText: string | null;
   editorMode: boolean;
   panelOpenSignal?: number;
   prefersReducedMotion: boolean;
@@ -307,13 +316,71 @@ function CompanionOutputRow({
   );
 }
 
+/**
+ * 读取会话的伙伴输出历史（localStorage）。
+ *
+ * 必须留在模块级：try 内的 `??` 是值块，会让编译器报
+ * "Support value blocks … within a try/catch statement" 并放弃优化整个组件（实测）。
+ * 语义逐字照搬（无 window / 解析失败都回落到空数组）。
+ */
+function readCompanionOutputHistory(sessionId: string | null | undefined): CompanionOutputEntry[] {
+  try {
+    const raw = globalThis.window.localStorage.getItem(
+      `openawork-buddy-output:${sessionId ?? 'home'}`,
+    );
+    if (!raw) return [];
+    return JSON.parse(raw) as CompanionOutputEntry[];
+  } catch {
+    return [];
+  }
+}
+
+/** 写入伙伴输出历史（localStorage 不可用时静默忽略）。理由同上：try 内含 `??` 值块。 */
+function writeCompanionOutputHistory(
+  sessionId: string | null | undefined,
+  history: CompanionOutputEntry[],
+): void {
+  try {
+    globalThis.window.localStorage.setItem(
+      `openawork-buddy-output:${sessionId ?? 'home'}`,
+      JSON.stringify(history),
+    );
+  } catch {
+    // localStorage may be unavailable
+  }
+}
+
+/**
+ * 伙伴聊天请求的统一包装：`onStart` 置忙 → try → catch（静默失败，伙伴聊天非关键路径）
+ * → `onFinally` 清忙。必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally
+ * 子句，本组件这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runBuddyChatOnce(ctx: {
+  onStart: () => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.onStart();
+  try {
+    await ctx.run();
+  } catch {
+    // Silently fail - buddy chat is non-critical
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function CompanionStage({
   agentId,
   attachedCount,
+  buddyTriggerText,
   currentUserEmail,
   hasStreamError,
   idleSeconds,
-  input,
+  inputHasMention,
+  inputIsLong,
+  inputMentionsBuddy,
+  inputStartsWithSlash,
   lastToolName,
   panelOpenSignal = 0,
   pendingPermissionCount,
@@ -331,20 +398,9 @@ export function CompanionStage({
   const [panelOpen, setPanelOpen] = useState(false);
   const [liveOutputId, setLiveOutputId] = useState<string | null>(null);
   const [fadingOutputId, setFadingOutputId] = useState<string | null>(null);
-  const [outputHistory, setOutputHistory] = useState<CompanionOutputEntry[]>(() => {
-    if (typeof globalThis.window === 'undefined') {
-      return [];
-    }
-    try {
-      const raw = globalThis.window.localStorage.getItem(
-        `openawork-buddy-output:${sessionId ?? 'home'}`,
-      );
-      if (!raw) return [];
-      return JSON.parse(raw) as CompanionOutputEntry[];
-    } catch {
-      return [];
-    }
-  });
+  const [outputHistory, setOutputHistory] = useState<CompanionOutputEntry[]>(() =>
+    typeof globalThis.window === 'undefined' ? [] : readCompanionOutputHistory(sessionId),
+  );
   const [petNonce, setPetNonce] = useState(0);
   const lastIntroKeyRef = useRef<string | null>(null);
   const lastOutputKeyRef = useRef<string | null>(null);
@@ -364,7 +420,10 @@ export function CompanionStage({
       currentUserEmail,
       hasStreamError,
       idleSeconds,
-      input,
+      inputHasMention,
+      inputIsLong,
+      inputMentionsBuddy,
+      inputStartsWithSlash,
       lastToolName,
       pendingPermissionCount,
       queuedCount,
@@ -382,7 +441,10 @@ export function CompanionStage({
       currentUserEmail,
       hasStreamError,
       idleSeconds,
-      input,
+      inputHasMention,
+      inputIsLong,
+      inputMentionsBuddy,
+      inputStartsWithSlash,
       lastToolName,
       pendingPermissionCount,
       queuedCount,
@@ -434,7 +496,7 @@ export function CompanionStage({
     [profile.sprite.rarity],
   );
   const effectiveReducedMotion = prefersReducedMotion || reducedMotion;
-  const buddyTriggerActive = input.includes('/buddy');
+  const buddyTriggerActive = inputMentionsBuddy;
   const introOutputPolicy = useMemo(
     () =>
       deriveCompanionOutputPolicy(
@@ -475,14 +537,8 @@ export function CompanionStage({
     if (typeof globalThis.window === 'undefined' || outputHistory.length === 0) {
       return;
     }
-    try {
-      globalThis.window.localStorage.setItem(
-        `openawork-buddy-output:${sessionId ?? 'home'}`,
-        JSON.stringify(outputHistory),
-      );
-    } catch {
-      // localStorage may be unavailable
-    }
+    // 写入（含 try/catch 与值块）下沉到模块级 `writeCompanionOutputHistory`。
+    writeCompanionOutputHistory(sessionId, outputHistory);
   }, [outputHistory, sessionId]);
 
   useEffect(() => {
@@ -688,44 +744,48 @@ export function CompanionStage({
         return;
       }
 
-      setBuddyChatBusy(true);
-      try {
-        const data = (await createSettingsClient(gatewayUrl).putCompanionChat(accessToken, {
-          message: userMessage,
-          context: {
-            attachedCount,
-            hasStreamError,
-            idleSeconds,
-            lastToolName,
-            sessionBusy: sessionBusyState === 'running',
-            pendingApprovals: pendingPermissionCount,
-            pendingQuestions: pendingPermissionCount,
-            queuedCount,
-            runningTasks: toolCallCount,
-            streamErrorMessage,
-            toolCallCount,
-            todoCount,
-          },
-          agentId,
-        })) as {
-          text: string;
-          profileName: string;
-          profileSpecies: string;
-          tone: string;
-        };
+      // try/catch/finally 下沉到模块级 `runBuddyChatOnce`（见其注释）。
+      await runBuddyChatOnce({
+        onStart: () => {
+          setBuddyChatBusy(true);
+        },
+        onFinally: () => {
+          setBuddyChatBusy(false);
+        },
+        run: async () => {
+          const data = (await createSettingsClient(gatewayUrl).putCompanionChat(accessToken, {
+            message: userMessage,
+            context: {
+              attachedCount,
+              hasStreamError,
+              idleSeconds,
+              lastToolName,
+              sessionBusy: sessionBusyState === 'running',
+              pendingApprovals: pendingPermissionCount,
+              pendingQuestions: pendingPermissionCount,
+              queuedCount,
+              runningTasks: toolCallCount,
+              streamErrorMessage,
+              toolCallCount,
+              todoCount,
+            },
+            agentId,
+          })) as {
+            text: string;
+            profileName: string;
+            profileSpecies: string;
+            tone: string;
+          };
 
-        if (data.text) {
-          pushOutput(
-            { badge: data.profileName, text: data.text, tone: 'chat' },
-            !muted && !quietMode,
-          );
-          recordInteraction('chat', data.text);
-        }
-      } catch {
-        // Silently fail - buddy chat is non-critical
-      } finally {
-        setBuddyChatBusy(false);
-      }
+          if (data.text) {
+            pushOutput(
+              { badge: data.profileName, text: data.text, tone: 'chat' },
+              !muted && !quietMode,
+            );
+            recordInteraction('chat', data.text);
+          }
+        },
+      });
     },
     [
       accessToken,
@@ -750,17 +810,19 @@ export function CompanionStage({
   );
 
   useEffect(() => {
-    const mentionsBuddy = input.includes('/buddy');
+    // 触发判据来自 `buddyTriggerText`（上游只在出现 `/buddy` 时给原文，否则 null）:
+    // 因此本组件不再依赖 `input` 原文，整棵树得以跳过逐键重渲染。
+    const mentionsBuddy = buddyTriggerText !== null;
     if (mentionsBuddy && !buddyMentionActiveRef.current) {
       setPetNonce((current) => current + 1);
       setPanelOpen(true);
-      recordInteraction('trigger', input);
+      recordInteraction('trigger', buddyTriggerText);
 
-      const buddyMessage = input.replace(/\/buddy/g, '').trim() || '嘿';
+      const buddyMessage = buddyTriggerText.replace(/\/buddy/g, '').trim() || '嘿';
       void requestBuddyChat(buddyMessage);
     }
     buddyMentionActiveRef.current = mentionsBuddy;
-  }, [input, recordInteraction, requestBuddyChat]);
+  }, [buddyTriggerText, recordInteraction, requestBuddyChat]);
 
   useEffect(() => {
     if (panelOpenSignal === lastPanelOpenSignalRef.current) {

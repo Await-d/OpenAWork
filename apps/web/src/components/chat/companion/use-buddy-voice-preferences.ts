@@ -165,6 +165,27 @@ function readStoredVoicePreferences(scope: string): BuddyVoicePreferencesState {
   }
 }
 
+/**
+ * 远端伙伴设置加载的统一包装：置 loading → try → catch（置 error）→ finally 收尾。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 这处 try
+ * 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runBuddyVoiceLoadOnce(ctx: {
+  setSyncStatus: (status: 'loading' | 'error') => void;
+  onFinally: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSyncStatus('loading');
+  try {
+    await ctx.run();
+  } catch {
+    ctx.setSyncStatus('error');
+  } finally {
+    ctx.onFinally();
+  }
+}
+
 export function useBuddyVoicePreferences(
   scopeInput: string,
   agentIdInput?: string,
@@ -405,44 +426,47 @@ export function useBuddyVoicePreferences(
         return;
       }
 
-      setSyncStatus('loading');
-      try {
-        const rawData = await createSettingsClient(gatewayUrl).getCompanion(accessToken, {
-          ...(signal ? { signal } : {}),
-          ...(agentId ? { agentId } : {}),
-        });
-        const data = rawData as CompanionSettingsResponse;
-        const remotePreferences: BuddyVoicePreferencesState = {
-          enabled: data.preferences?.enabled !== false,
-          injectionMode: normalizeInjectionMode(data.preferences?.injectionMode),
-          muted: data.preferences?.muted === true,
-          quietMode: data.preferences?.verbosity === 'minimal',
-          reducedMotion: data.preferences?.reducedMotion === true,
-          themeVariant: normalizeThemeVariant(data.preferences?.themeVariant),
-          voiceOutputEnabled: data.preferences?.voiceOutputEnabled === true,
-          voiceOutputMode: normalizeVoiceOutputMode(data.preferences?.voiceOutputMode),
-          voiceRate: clampVoiceRate(data.preferences?.voiceRate),
-          voiceVariant: normalizeVoiceVariant(data.preferences?.voiceVariant),
-        };
-        remoteValueRef.current = serializeRemotePreferences(remotePreferences);
-        setActiveBinding(data.activeBinding);
-        setBindings(normalizeBuddyBindings(data.bindings));
-        setCompanionFeatureMode(
-          data.feature?.mode ?? (data.feature?.enabled === false ? 'off' : 'beta'),
-        );
-        setProfile(data.profile ?? null);
-        remoteLoadSucceededRef.current = true;
-        if (!hasLocalOverrideRef.current) {
-          setPreferences(remotePreferences);
-        }
-        setSyncStatus('synced');
-      } catch {
-        setSyncStatus('error');
-      } finally {
-        if (!signal?.aborted) {
-          setHasRemoteHydrated(true);
-        }
-      }
+      // 置 loading / catch 置 error / finally 收尾 一起下沉到模块级
+      // `runBuddyVoiceLoadOnce`（见其注释）。
+      await runBuddyVoiceLoadOnce({
+        setSyncStatus,
+        onFinally: () => {
+          if (!signal?.aborted) {
+            setHasRemoteHydrated(true);
+          }
+        },
+        run: async () => {
+          const rawData = await createSettingsClient(gatewayUrl).getCompanion(accessToken, {
+            ...(signal ? { signal } : {}),
+            ...(agentId ? { agentId } : {}),
+          });
+          const data = rawData as CompanionSettingsResponse;
+          const remotePreferences: BuddyVoicePreferencesState = {
+            enabled: data.preferences?.enabled !== false,
+            injectionMode: normalizeInjectionMode(data.preferences?.injectionMode),
+            muted: data.preferences?.muted === true,
+            quietMode: data.preferences?.verbosity === 'minimal',
+            reducedMotion: data.preferences?.reducedMotion === true,
+            themeVariant: normalizeThemeVariant(data.preferences?.themeVariant),
+            voiceOutputEnabled: data.preferences?.voiceOutputEnabled === true,
+            voiceOutputMode: normalizeVoiceOutputMode(data.preferences?.voiceOutputMode),
+            voiceRate: clampVoiceRate(data.preferences?.voiceRate),
+            voiceVariant: normalizeVoiceVariant(data.preferences?.voiceVariant),
+          };
+          remoteValueRef.current = serializeRemotePreferences(remotePreferences);
+          setActiveBinding(data.activeBinding);
+          setBindings(normalizeBuddyBindings(data.bindings));
+          setCompanionFeatureMode(
+            data.feature?.mode ?? (data.feature?.enabled === false ? 'off' : 'beta'),
+          );
+          setProfile(data.profile ?? null);
+          remoteLoadSucceededRef.current = true;
+          if (!hasLocalOverrideRef.current) {
+            setPreferences(remotePreferences);
+          }
+          setSyncStatus('synced');
+        },
+      });
     },
     [accessToken, agentId, gatewayUrl, serializeRemotePreferences],
   );

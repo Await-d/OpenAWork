@@ -108,6 +108,30 @@ function isImmutableWorkspaceError(err: unknown): boolean {
   return Boolean(data && typeof data === 'object');
 }
 
+/**
+ * 工作区切换提交的统一包装：置 submitting / 清 error → try → catch 交给 `onError`
+ * → finally 清 submitting。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，也不支持 try 内
+ * 的值块（`...(cond ? … : {})`、`&&`）。语义逐字照搬。
+ */
+async function runWorkspaceWarpOnce(ctx: {
+  setSubmitting: (submitting: boolean) => void;
+  setError: (message: string | null) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSubmitting(true);
+  ctx.setError(null);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSubmitting(false);
+  }
+}
+
 export function WorkspaceWarpDialog({
   isOpen,
   onClose,
@@ -157,36 +181,38 @@ export function WorkspaceWarpDialog({
       setError('请输入绝对路径（以 / 开头）');
       return;
     }
-    setSubmitting(true);
-    setError(null);
-    try {
-      await sessionsClient.warpWorkspace(token, sessionId, {
-        workingDirectory: willClear ? null : trimmedDraft,
-        // Always send force when the session already has a workspace
-        // and the path is changing — otherwise the gateway returns
-        // 409. The checkbox below is a UX speed bump for the user
-        // to acknowledge it; we don't auto-fall-through to force
-        // without that explicit click.
-        ...(requiresForce && force ? { force: true } : {}),
-      });
-      onComplete();
-      onClose();
-    } catch (err) {
-      if (isImmutableWorkspaceError(err) && requiresForce && !force) {
-        // Surface the lock as a structured warning so the user can
-        // tick the force checkbox and retry — we keep the dialog
-        // open instead of bouncing them back to the detail panel.
-        setError('该会话已绑定原工作区。要切换到新路径，请勾选下方“强制切换”后重试。');
-      } else if (err instanceof HttpError && err.status === 403) {
-        setError('该路径不允许（被工作区安全策略拒绝）');
-      } else if (err instanceof HttpError && err.status === 404) {
-        setError('会话不存在或不属于当前用户');
-      } else {
-        setError(`切换失败：${err instanceof Error ? err.message : String(err)}`);
-      }
-    } finally {
-      setSubmitting(false);
-    }
+    // 置 submitting / 清 error 与 try/catch/finally 一起下沉到模块级 `runWorkspaceWarpOnce`。
+    await runWorkspaceWarpOnce({
+      setSubmitting,
+      setError,
+      onError: (err) => {
+        if (isImmutableWorkspaceError(err) && requiresForce && !force) {
+          // Surface the lock as a structured warning so the user can
+          // tick the force checkbox and retry — we keep the dialog
+          // open instead of bouncing them back to the detail panel.
+          setError('该会话已绑定原工作区。要切换到新路径，请勾选下方“强制切换”后重试。');
+        } else if (err instanceof HttpError && err.status === 403) {
+          setError('该路径不允许（被工作区安全策略拒绝）');
+        } else if (err instanceof HttpError && err.status === 404) {
+          setError('会话不存在或不属于当前用户');
+        } else {
+          setError(`切换失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+      },
+      run: async () => {
+        await sessionsClient.warpWorkspace(token, sessionId, {
+          workingDirectory: willClear ? null : trimmedDraft,
+          // Always send force when the session already has a workspace
+          // and the path is changing — otherwise the gateway returns
+          // 409. The checkbox below is a UX speed bump for the user
+          // to acknowledge it; we don't auto-fall-through to force
+          // without that explicit click.
+          ...(requiresForce && force ? { force: true } : {}),
+        });
+        onComplete();
+        onClose();
+      },
+    });
   }
 
   return (

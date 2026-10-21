@@ -79,7 +79,7 @@ export function FileContentPreview({
   const [showAllLines, setShowAllLines] = useState(false);
   const isInsideExpandedCard = useIsInsideExpandedToolCard();
   const effectiveExpanded = expanded || isInsideExpandedCard;
-  const fileEditorRef = useFileEditorContext();
+  const { openRef, isAvailable } = useFileEditorContext();
   const lines = useMemo(() => data.content.split('\n'), [data.content]);
   const start = data.lineStart ?? 1;
   const showingAll = isInsideExpandedCard ? showAllLines : expanded;
@@ -113,9 +113,11 @@ export function FileContentPreview({
   // line window this read actually returned — not line 1. Only wired when a
   // FileEditorContext is present (chat page with the editor pane available);
   // elsewhere the path stays a passive label.
-  const canOpen = fileEditorRef?.current != null;
+  // 可用性走响应式布尔，不在渲染期读 ref —— 渲染期读 `.current` 会让 React Compiler
+  // 放弃优化本组件（"Cannot access refs during render"）。
+  const canOpen = isAvailable;
   const openAtRange = () => {
-    const open = fileEditorRef?.current;
+    const open = openRef.current;
     if (!open) return;
     open(
       data.path,
@@ -211,7 +213,7 @@ export function FileContentPreview({
                   title={`打开并跳转到第 ${lineNum} 行`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    const open = fileEditorRef?.current;
+                    const open = openRef.current;
                     if (open) open(data.path, { line: lineNum });
                   }}
                 >

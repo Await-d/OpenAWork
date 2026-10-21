@@ -205,6 +205,30 @@ function mergeServerSnapshot(
   return next;
 }
 
+/**
+ * 终端同步 / 终止动作的统一包装：`run` 全流程留在 try 内，catch 交给 `onError`
+ * （不传＝异常继续向上抛），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本 hook 2 处
+ * 这类 try 会让整个 hook 脱靶（实测）。语义逐字照搬。
+ */
+async function runTerminalsActionOnce(ctx: {
+  onError?: (error: unknown) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (err) {
+    if (!ctx.onError) {
+      throw err;
+    }
+    ctx.onError(err);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
 export function useSessionTerminals(
   options: UseSessionTerminalsOptions,
 ): UseSessionTerminalsResult {
@@ -217,7 +241,6 @@ export function useSessionTerminals(
    * 最新值即可；只有「有没有令牌」的变化才需要重置 / 重拉。
    */
   const tokenRef = useRef(token);
-  tokenRef.current = token;
   const hasToken = token !== null;
   const [terminalsById, setTerminalsById] = useState<Record<string, SessionTerminalView>>({});
   const [loading, setLoading] = useState(false);
@@ -235,7 +258,13 @@ export function useSessionTerminals(
   // Mirrors `pendingKills` for use inside async callbacks without adding a
   // dependency that would re-create `runSync` (and restart the loop).
   const pendingKillsRef = useRef<Set<string>>(pendingKills);
-  pendingKillsRef.current = pendingKills;
+  // 渲染期直接写 ref 会被 React Compiler 判为 "Cannot access refs during render" 并放弃
+  // 优化整个 hook；读取点全在异步回调里（至少晚于提交），故改为 effect 同步。
+  useEffect(() => {
+    tokenRef.current = token;
+    pendingKillsRef.current = pendingKills;
+  }, [pendingKills, token]);
+
   const failureCountRef = useRef(0);
   // Last `reloadNonce` handled by the reload effect below. Lets the effect
   // tell "an imperative reload was requested" apart from "the identity
@@ -326,39 +355,44 @@ export function useSessionTerminals(
       if (mode === 'initial') setLoading(true);
       else setSyncing(true);
 
-      try {
-        const payload = await listSessionTerminals({
-          gatewayUrl,
-          sessionId: currentSessionId,
-          token: currentToken,
-          limit: 50,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        setTerminalsById((previous) =>
-          mergeServerSnapshot(
-            previous,
-            payload.terminals,
-            currentSessionId,
-            pendingKillsRef.current,
-            Date.now(),
-          ),
-        );
-        setError(null);
-        failureCountRef.current = 0;
-        setLastSyncedAtMs(Date.now());
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        setError(err instanceof Error ? err.message : String(err));
-        failureCountRef.current += 1;
-      } finally {
-        if (!controller.signal.aborted) {
-          if (mode === 'initial') setLoading(false);
-          else setSyncing(false);
-        }
-        setSyncTick((prev) => prev + 1);
-      }
+      // try/catch/finally 下沉到模块级 `runTerminalsActionOnce`（见其注释）。
+      await runTerminalsActionOnce({
+        onError: (err) => {
+          if (controller.signal.aborted) return;
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          setError(err instanceof Error ? err.message : String(err));
+          failureCountRef.current += 1;
+        },
+        onFinally: () => {
+          if (!controller.signal.aborted) {
+            if (mode === 'initial') setLoading(false);
+            else setSyncing(false);
+          }
+          setSyncTick((prev) => prev + 1);
+        },
+        run: async () => {
+          const payload = await listSessionTerminals({
+            gatewayUrl,
+            sessionId: currentSessionId,
+            token: currentToken,
+            limit: 50,
+            signal: controller.signal,
+          });
+          if (controller.signal.aborted) return;
+          setTerminalsById((previous) =>
+            mergeServerSnapshot(
+              previous,
+              payload.terminals,
+              currentSessionId,
+              pendingKillsRef.current,
+              Date.now(),
+            ),
+          );
+          setError(null);
+          failureCountRef.current = 0;
+          setLastSyncedAtMs(Date.now());
+        },
+      });
     },
     [currentSessionId, gatewayUrl],
   );
@@ -552,28 +586,33 @@ export function useSessionTerminals(
           [terminalId]: { ...existing, status: 'killed' as SessionTerminalStatus },
         };
       });
-      try {
-        const response = await killSessionTerminal({
-          gatewayUrl,
-          sessionId: currentSessionId,
-          terminalId,
-          token: currentToken,
-        });
-        if (response.terminal) {
-          setTerminalsById((previous) => ({
-            ...previous,
-            [terminalId]: response.terminal as SessionTerminalView,
-          }));
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setPendingKills((prev) => {
-          const next = new Set(prev);
-          next.delete(terminalId);
-          return next;
-        });
-      }
+      // try/catch/finally 下沉到模块级 `runTerminalsActionOnce`（见其注释）。
+      await runTerminalsActionOnce({
+        onError: (err) => {
+          setError(err instanceof Error ? err.message : String(err));
+        },
+        onFinally: () => {
+          setPendingKills((prev) => {
+            const next = new Set(prev);
+            next.delete(terminalId);
+            return next;
+          });
+        },
+        run: async () => {
+          const response = await killSessionTerminal({
+            gatewayUrl,
+            sessionId: currentSessionId,
+            terminalId,
+            token: currentToken,
+          });
+          if (response.terminal) {
+            setTerminalsById((previous) => ({
+              ...previous,
+              [terminalId]: response.terminal as SessionTerminalView,
+            }));
+          }
+        },
+      });
     },
     [currentSessionId, gatewayUrl],
   );
@@ -633,7 +672,10 @@ export function useSessionTerminals(
 
   const dismissTerminal = useCallback((terminalId: string) => {
     setTerminalsById((previous) => {
-      const { [terminalId]: _removed, ...rest } = previous;
+      // 同 QuickTerminalPanel：编译器不支持 computed key 解构，改用「浅拷贝 +
+      // delete」，语义等价（不动 `previous`，返回不含该键的新对象）。
+      const rest = { ...previous };
+      delete rest[terminalId];
       return rest;
     });
   }, []);

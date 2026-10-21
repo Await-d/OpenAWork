@@ -42,6 +42,38 @@ export interface TeamRuntimeReferenceActionsInput {
   teamClient: TeamClient;
 }
 
+/**
+ * 统一的「busy + try/catch/finally」团队会话动作包装。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（条件 / 逻辑 / 三元），本文件 10 处 try/catch/finally 会让整个 hook
+ * 脱靶（实测 10 处同一诊断）。语义逐字照搬：`run` 的全流程仍在 try 内，catch 只做
+ * 错误文案映射，finally 无条件清 busy；成功返回 `run` 的值、失败返回 `failureValue`
+ * ——与原写法「catch 里 return X」完全一致。
+ */
+async function runTeamSessionActionOnce<T>(ctx: {
+  setSessionActionBusy: (busy: boolean) => void;
+  setLocalFeedback: (feedback: TeamActionFeedback) => void;
+  /** catch 的兜底文案（`reason.message` 优先）。 */
+  failureMessage: string;
+  /** catch 时的返回值（按原样给出：null / false）。 */
+  failureValue: T;
+  run: () => Promise<T>;
+}): Promise<T> {
+  ctx.setSessionActionBusy(true);
+  try {
+    return await ctx.run();
+  } catch (reason) {
+    ctx.setLocalFeedback({
+      message: reason instanceof Error ? reason.message : ctx.failureMessage,
+      tone: 'error',
+    });
+    return ctx.failureValue;
+  } finally {
+    ctx.setSessionActionBusy(false);
+  }
+}
+
 export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceActionsInput) {
   const {
     accessToken,
@@ -58,6 +90,28 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
     teamClient,
   } = input;
 
+  // 把 collaboration 上的成员全部取成局部量：`collaboration.xxx(...)` 这种「hook 返回
+  // 对象上的方法 / 属性访问」会让编译器把依赖推断成整个 collaboration 对象，与源码里
+  // 写的具体字段不匹配 → "Existing memoization could not be preserved"、整个 hook 退出
+  // 优化。取局部量后 body 与 deps 都用它，推断与源码一致（AGENTS.md「PreserveManualMemo」①）。
+  // `createTask` 解构后要与下方同名 useCallback 区分，故取别名。
+  const {
+    applyRuntimeDiagnosticsPreview,
+    createMessage,
+    createSharedSessionComment: createSharedSessionCommentAction,
+    createTask: createTeamTask,
+    members,
+    refresh,
+    replySharedQuestion,
+    replySharedSessionPermission,
+    setSelectedSharedSessionId,
+    tasks,
+    updateTask,
+  } = collaboration;
+  // 同 ①：`options.onWorkspacesChanged?.()` 这种「对象上的可选方法调用」会让编译器把
+  // 依赖推断成整个 options 对象，与源码写的 `options.onWorkspacesChanged` 不匹配。
+  const { onWorkspacesChanged } = options;
+
   const selectTeam = useCallback(
     (teamId: string) => {
       const isSharedSession = effectiveSharedSessions.some(
@@ -67,9 +121,9 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
       if (!isSharedSession && !isSession) {
         return;
       }
-      collaboration.setSelectedSharedSessionId(isSharedSession ? teamId : null);
+      setSelectedSharedSessionId(isSharedSession ? teamId : null);
     },
-    [collaboration.setSelectedSharedSessionId, effectiveSessions, effectiveSharedSessions],
+    [setSelectedSharedSessionId, effectiveSessions, effectiveSharedSessions],
   );
 
   const sendMessage = useCallback(
@@ -85,16 +139,16 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         return false;
       }
 
-      return collaboration.createMessage({
+      return createMessage({
         content,
         recipientMemberId: input.recipientMemberId ?? null,
         replyToMessageId: input.replyToMessageId ?? null,
-        senderId: collaboration.members[0]?.id,
+        senderId: members[0]?.id,
         sessionId: input.sessionId ?? selectedRuntimeScopeSessionId,
         type: input.type ?? 'update',
       });
     },
-    [collaboration.createMessage, collaboration.members, selectedRuntimeScopeSessionId],
+    [createMessage, members, selectedRuntimeScopeSessionId],
   );
 
   const createSession = useCallback(
@@ -127,39 +181,48 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         };
       }
 
-      setSessionActionBusy(true);
-      try {
-        const session = await teamClient.createSession(accessToken, targetWorkspace.id, payload);
-        if (!session.id) {
-          setLocalFeedback({
-            message: '创建团队会话失败，请稍后重试',
-            tone: 'error',
+      // 含 try/catch/finally 的动作体已下沉到模块级 `runTeamSessionActionOnce`（见其注释）。
+      return runTeamSessionActionOnce<string | null>({
+        setSessionActionBusy,
+        setLocalFeedback,
+        failureMessage: '创建团队会话失败',
+        failureValue: null,
+        run: async () => {
+          const session = await teamClient.createSession(accessToken, targetWorkspace.id, payload);
+          if (!session.id) {
+            setLocalFeedback({
+              message: '创建团队会话失败，请稍后重试',
+              tone: 'error',
+            });
+            return null;
+          }
+          setCreatedSessionInfo({
+            id: session.id,
+            title: session.title ?? (draft.title.trim() || null),
           });
-          return null;
-        }
-        setCreatedSessionInfo({
-          id: session.id,
-          title: session.title ?? (draft.title.trim() || null),
-        });
-        const refreshed = await collaboration.refresh();
-        setLocalFeedback({
-          message: refreshed
-            ? '已创建团队会话'
-            : '已创建团队会话，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return session.id;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '创建团队会话失败',
-          tone: 'error',
-        });
-        return null;
-      } finally {
-        setSessionActionBusy(false);
-      }
+          const refreshed = await refresh();
+          setLocalFeedback({
+            message: refreshed
+              ? '已创建团队会话'
+              : '已创建团队会话，但最新运行时快照暂未刷新，系统会自动重试。',
+            tone: 'success',
+          });
+          return session.id;
+        },
+      });
     },
-    [accessToken, activeWorkspace, collaboration, options.workspaces, teamClient],
+    // run 回调里用到 setLocalFeedback / setCreatedSessionInfo，必须列入依赖
+    // （AGENTS.md「PreserveManualMemo」②：setter 身份稳定，补上不改变触发节奏）。
+    [
+      accessToken,
+      activeWorkspace,
+      options.workspaces,
+      refresh,
+      setCreatedSessionInfo,
+      setLocalFeedback,
+      setSessionActionBusy,
+      teamClient,
+    ],
   );
 
   const createWorkspace = useCallback(
@@ -172,33 +235,30 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         return null;
       }
 
-      setSessionActionBusy(true);
-      try {
-        const created = await teamClient.createWorkspace(accessToken, {
-          name: input.name,
-          description: input.description ?? null,
-          defaultWorkingRoot: input.defaultWorkingRoot ?? null,
-        });
-        const refreshed = await collaboration.refresh();
-        options.onWorkspacesChanged?.();
-        setLocalFeedback({
-          message: refreshed
-            ? '已创建工作区'
-            : '已创建工作区，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return created.id;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '创建工作区失败',
-          tone: 'error',
-        });
-        return null;
-      } finally {
-        setSessionActionBusy(false);
-      }
+      return runTeamSessionActionOnce<string | null>({
+        setSessionActionBusy,
+        setLocalFeedback,
+        failureMessage: '创建工作区失败',
+        failureValue: null,
+        run: async () => {
+          const created = await teamClient.createWorkspace(accessToken, {
+            name: input.name,
+            description: input.description ?? null,
+            defaultWorkingRoot: input.defaultWorkingRoot ?? null,
+          });
+          const refreshed = await refresh();
+          onWorkspacesChanged?.();
+          setLocalFeedback({
+            message: refreshed
+              ? '已创建工作区'
+              : '已创建工作区，但最新运行时快照暂未刷新，系统会自动重试。',
+            tone: 'success',
+          });
+          return created.id;
+        },
+      });
     },
-    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
+    [accessToken, onWorkspacesChanged, refresh, setLocalFeedback, setSessionActionBusy, teamClient],
   );
 
   const renameWorkspace = useCallback(
@@ -206,29 +266,26 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
       if (!accessToken || !workspaceId || !name.trim()) {
         return false;
       }
-      setSessionActionBusy(true);
-      try {
-        await teamClient.updateWorkspace(accessToken, workspaceId, { name: name.trim() });
-        const refreshed = await collaboration.refresh();
-        options.onWorkspacesChanged?.();
-        setLocalFeedback({
-          message: refreshed
-            ? '已重命名工作区'
-            : '已重命名工作区，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '重命名工作区失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
+      return runTeamSessionActionOnce<boolean>({
+        setSessionActionBusy,
+        setLocalFeedback,
+        failureMessage: '重命名工作区失败',
+        failureValue: false,
+        run: async () => {
+          await teamClient.updateWorkspace(accessToken, workspaceId, { name: name.trim() });
+          const refreshed = await refresh();
+          onWorkspacesChanged?.();
+          setLocalFeedback({
+            message: refreshed
+              ? '已重命名工作区'
+              : '已重命名工作区，但最新运行时快照暂未刷新，系统会自动重试。',
+            tone: 'success',
+          });
+          return true;
+        },
+      });
     },
-    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
+    [accessToken, onWorkspacesChanged, refresh, setLocalFeedback, setSessionActionBusy, teamClient],
   );
 
   const deleteWorkspace = useCallback(
@@ -240,29 +297,26 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         });
         return false;
       }
-      setSessionActionBusy(true);
-      try {
-        await teamClient.deleteWorkspace(accessToken, workspaceId);
-        const refreshed = await collaboration.refresh();
-        options.onWorkspacesChanged?.();
-        setLocalFeedback({
-          message: refreshed
-            ? '已删除工作区'
-            : '已删除工作区，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '删除工作区失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
+      return runTeamSessionActionOnce<boolean>({
+        setSessionActionBusy,
+        setLocalFeedback,
+        failureMessage: '删除工作区失败',
+        failureValue: false,
+        run: async () => {
+          await teamClient.deleteWorkspace(accessToken, workspaceId);
+          const refreshed = await refresh();
+          onWorkspacesChanged?.();
+          setLocalFeedback({
+            message: refreshed
+              ? '已删除工作区'
+              : '已删除工作区，但最新运行时快照暂未刷新，系统会自动重试。',
+            tone: 'success',
+          });
+          return true;
+        },
+      });
     },
-    [accessToken, collaboration, options.onWorkspacesChanged, teamClient],
+    [accessToken, onWorkspacesChanged, refresh, setLocalFeedback, setSessionActionBusy, teamClient],
   );
 
   const createTask = useCallback(
@@ -271,8 +325,8 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         return false;
       }
 
-      return collaboration.createTask({
-        assigneeId: collaboration.members[0]?.id,
+      return createTeamTask({
+        assigneeId: members[0]?.id,
         priority: input.priority,
         status:
           input.status === 'completed'
@@ -283,7 +337,7 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         title: input.title.trim(),
       });
     },
-    [collaboration.createTask, collaboration.members],
+    [createTeamTask, members],
   );
 
   const acknowledgeRuntimeAlert = useCallback(
@@ -295,35 +349,40 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
       if (!accessToken) {
         return false;
       }
-      setSessionActionBusy(true);
-      try {
-        const result = await teamClient.acknowledgeRuntimeAlert(accessToken, alertCode, {
-          ...(note ? { note } : {}),
-          ...(callOptions?.sessionId ? { sessionId: callOptions.sessionId } : {}),
-          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-        });
-        const refreshed = await collaboration.refresh();
-        if (!refreshed && result.runtime?.diagnostics) {
-          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-        }
-        setLocalFeedback({
-          message: refreshed
-            ? '已确认当前告警'
-            : '已确认当前告警，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '确认告警失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
+      return runTeamSessionActionOnce<boolean>({
+        setSessionActionBusy,
+        setLocalFeedback,
+        failureMessage: '确认告警失败',
+        failureValue: false,
+        run: async () => {
+          const result = await teamClient.acknowledgeRuntimeAlert(accessToken, alertCode, {
+            ...(note ? { note } : {}),
+            ...(callOptions?.sessionId ? { sessionId: callOptions.sessionId } : {}),
+            ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+          });
+          const refreshed = await refresh();
+          if (!refreshed && result.runtime?.diagnostics) {
+            applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+          }
+          setLocalFeedback({
+            message: refreshed
+              ? '已确认当前告警'
+              : '已确认当前告警，但最新运行时快照暂未刷新，系统会自动重试。',
+            tone: 'success',
+          });
+          return true;
+        },
+      });
     },
-    [accessToken, collaboration, teamClient],
+    [
+      accessToken,
+      applyRuntimeDiagnosticsPreview,
+      options.teamWorkspaceId,
+      refresh,
+      setLocalFeedback,
+      setSessionActionBusy,
+      teamClient,
+    ],
   );
 
   const clearRuntimeAlertControl = useCallback(
@@ -334,34 +393,39 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
       if (!accessToken) {
         return false;
       }
-      setSessionActionBusy(true);
-      try {
-        const result = await teamClient.clearRuntimeAlertControl(accessToken, alertCode, {
-          ...(callOptions?.sessionId ? { sessionId: callOptions.sessionId } : {}),
-          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-        });
-        const refreshed = await collaboration.refresh();
-        if (!refreshed && result.runtime?.diagnostics) {
-          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-        }
-        setLocalFeedback({
-          message: refreshed
-            ? '已清除告警控制'
-            : '已清除告警控制，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '清除告警控制失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
+      return runTeamSessionActionOnce<boolean>({
+        setSessionActionBusy,
+        setLocalFeedback,
+        failureMessage: '清除告警控制失败',
+        failureValue: false,
+        run: async () => {
+          const result = await teamClient.clearRuntimeAlertControl(accessToken, alertCode, {
+            ...(callOptions?.sessionId ? { sessionId: callOptions.sessionId } : {}),
+            ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+          });
+          const refreshed = await refresh();
+          if (!refreshed && result.runtime?.diagnostics) {
+            applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+          }
+          setLocalFeedback({
+            message: refreshed
+              ? '已清除告警控制'
+              : '已清除告警控制，但最新运行时快照暂未刷新，系统会自动重试。',
+            tone: 'success',
+          });
+          return true;
+        },
+      });
     },
-    [accessToken, collaboration, teamClient],
+    [
+      accessToken,
+      applyRuntimeDiagnosticsPreview,
+      options.teamWorkspaceId,
+      refresh,
+      setLocalFeedback,
+      setSessionActionBusy,
+      teamClient,
+    ],
   );
 
   const suppressRuntimeAlert = useCallback(
@@ -372,97 +436,112 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
       if (!accessToken) {
         return false;
       }
-      setSessionActionBusy(true);
-      try {
-        const result = await teamClient.suppressRuntimeAlert(accessToken, alertCode, {
-          ...input,
-          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-        });
-        const refreshed = await collaboration.refresh();
-        if (!refreshed && result.runtime?.diagnostics) {
-          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-        }
-        setLocalFeedback({
-          message: refreshed
-            ? '已静音当前告警'
-            : '已静音当前告警，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '静音告警失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
+      return runTeamSessionActionOnce<boolean>({
+        setSessionActionBusy,
+        setLocalFeedback,
+        failureMessage: '静音告警失败',
+        failureValue: false,
+        run: async () => {
+          const result = await teamClient.suppressRuntimeAlert(accessToken, alertCode, {
+            ...input,
+            ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+          });
+          const refreshed = await refresh();
+          if (!refreshed && result.runtime?.diagnostics) {
+            applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+          }
+          setLocalFeedback({
+            message: refreshed
+              ? '已静音当前告警'
+              : '已静音当前告警，但最新运行时快照暂未刷新，系统会自动重试。',
+            tone: 'success',
+          });
+          return true;
+        },
+      });
     },
-    [accessToken, collaboration, teamClient],
+    [
+      accessToken,
+      applyRuntimeDiagnosticsPreview,
+      options.teamWorkspaceId,
+      refresh,
+      setLocalFeedback,
+      setSessionActionBusy,
+      teamClient,
+    ],
   );
 
   const reconcileStaleRuntimeThreads = useCallback(async () => {
     if (!accessToken) {
       return false;
     }
-    setSessionActionBusy(true);
-    try {
-      const result = await teamClient.reconcileStaleRuntimeThreads(accessToken, {
-        ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-      });
-      const refreshed = await collaboration.refresh();
-      if (!refreshed && result.runtime?.diagnostics) {
-        collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-      }
-      setLocalFeedback({
-        message: refreshed
-          ? '已发起线程修复'
-          : '已发起线程修复，但最新运行时快照暂未刷新，系统会自动重试。',
-        tone: 'success',
-      });
-      return true;
-    } catch (reason) {
-      setLocalFeedback({
-        message: reason instanceof Error ? reason.message : '线程修复失败',
-        tone: 'error',
-      });
-      return false;
-    } finally {
-      setSessionActionBusy(false);
-    }
-  }, [accessToken, collaboration, options.teamWorkspaceId, teamClient]);
+    return runTeamSessionActionOnce<boolean>({
+      setSessionActionBusy,
+      setLocalFeedback,
+      failureMessage: '线程修复失败',
+      failureValue: false,
+      run: async () => {
+        const result = await teamClient.reconcileStaleRuntimeThreads(accessToken, {
+          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+        });
+        const refreshed = await refresh();
+        if (!refreshed && result.runtime?.diagnostics) {
+          applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+        }
+        setLocalFeedback({
+          message: refreshed
+            ? '已发起线程修复'
+            : '已发起线程修复，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
+        return true;
+      },
+    });
+  }, [
+    accessToken,
+    applyRuntimeDiagnosticsPreview,
+    options.teamWorkspaceId,
+    refresh,
+    setLocalFeedback,
+    setSessionActionBusy,
+    teamClient,
+  ]);
 
   const reconcileStaleDecisions = useCallback(async () => {
     if (!accessToken) {
       return false;
     }
-    setSessionActionBusy(true);
-    try {
-      const result = await teamClient.reconcileStaleDecisions(accessToken, {
-        ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-      });
-      const refreshed = await collaboration.refresh();
-      if (!refreshed && result.runtime?.diagnostics) {
-        collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-      }
-      setLocalFeedback({
-        message: refreshed
-          ? '已释放超时交互'
-          : '已释放超时交互，但最新运行时快照暂未刷新，系统会自动重试。',
-        tone: 'success',
-      });
-      return true;
-    } catch (reason) {
-      setLocalFeedback({
-        message: reason instanceof Error ? reason.message : '释放超时交互失败',
-        tone: 'error',
-      });
-      return false;
-    } finally {
-      setSessionActionBusy(false);
-    }
-  }, [accessToken, collaboration, options.teamWorkspaceId, teamClient]);
+    return runTeamSessionActionOnce<boolean>({
+      setSessionActionBusy,
+      setLocalFeedback,
+      failureMessage: '释放超时交互失败',
+      failureValue: false,
+      run: async () => {
+        const result = await teamClient.reconcileStaleDecisions(accessToken, {
+          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+        });
+        const refreshed = await refresh();
+        if (!refreshed && result.runtime?.diagnostics) {
+          applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+        }
+        setLocalFeedback({
+          message: refreshed
+            ? '已释放超时交互'
+            : '已释放超时交互，但最新运行时快照暂未刷新，系统会自动重试。',
+          tone: 'success',
+        });
+        return true;
+      },
+    });
+  }, [
+    accessToken,
+    applyRuntimeDiagnosticsPreview,
+    options.teamWorkspaceId,
+    refresh,
+    setLocalFeedback,
+    setSessionActionBusy,
+    teamClient,
+  ]);
 
   const runRuntimeAlertRemediation = useCallback(
     async (
@@ -472,41 +551,46 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
       if (!accessToken) {
         return false;
       }
-      setSessionActionBusy(true);
-      try {
-        const result = await teamClient.runRuntimeAlertRemediation(accessToken, alertCode, {
-          ...(remediationOptions?.force ? { force: remediationOptions.force } : {}),
-          ...(remediationOptions?.handoffId ? { handoffId: remediationOptions.handoffId } : {}),
-          ...(remediationOptions?.sessionId ? { sessionId: remediationOptions.sessionId } : {}),
-          ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
-        });
-        const refreshed = await collaboration.refresh();
-        if (!refreshed && result.runtime?.diagnostics) {
-          collaboration.applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
-        }
-        setLocalFeedback({
-          message: refreshed
-            ? '已触发运行修复'
-            : '已触发运行修复，但最新运行时快照暂未刷新，系统会自动重试。',
-          tone: 'success',
-        });
-        return true;
-      } catch (reason) {
-        setLocalFeedback({
-          message: reason instanceof Error ? reason.message : '运行修复失败',
-          tone: 'error',
-        });
-        return false;
-      } finally {
-        setSessionActionBusy(false);
-      }
+      return runTeamSessionActionOnce<boolean>({
+        setSessionActionBusy,
+        setLocalFeedback,
+        failureMessage: '运行修复失败',
+        failureValue: false,
+        run: async () => {
+          const result = await teamClient.runRuntimeAlertRemediation(accessToken, alertCode, {
+            ...(remediationOptions?.force ? { force: remediationOptions.force } : {}),
+            ...(remediationOptions?.handoffId ? { handoffId: remediationOptions.handoffId } : {}),
+            ...(remediationOptions?.sessionId ? { sessionId: remediationOptions.sessionId } : {}),
+            ...(options.teamWorkspaceId ? { teamWorkspaceId: options.teamWorkspaceId } : {}),
+          });
+          const refreshed = await refresh();
+          if (!refreshed && result.runtime?.diagnostics) {
+            applyRuntimeDiagnosticsPreview(result.runtime.diagnostics);
+          }
+          setLocalFeedback({
+            message: refreshed
+              ? '已触发运行修复'
+              : '已触发运行修复，但最新运行时快照暂未刷新，系统会自动重试。',
+            tone: 'success',
+          });
+          return true;
+        },
+      });
     },
-    [accessToken, collaboration, options.teamWorkspaceId, teamClient],
+    [
+      accessToken,
+      applyRuntimeDiagnosticsPreview,
+      options.teamWorkspaceId,
+      refresh,
+      setLocalFeedback,
+      setSessionActionBusy,
+      teamClient,
+    ],
   );
 
   const moveTask = useCallback(
     async (taskId: string, direction: 'left' | 'right') => {
-      const currentTask = collaboration.tasks.find((task) => task.id === taskId);
+      const currentTask = tasks.find((task) => task.id === taskId);
       if (!currentTask) {
         return false;
       }
@@ -516,9 +600,9 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         return false;
       }
 
-      return collaboration.updateTask(taskId, { status: nextStatus });
+      return updateTask(taskId, { status: nextStatus });
     },
-    [collaboration.tasks, collaboration.updateTask],
+    [tasks, updateTask],
   );
 
   const replyReview = useCallback(
@@ -537,7 +621,7 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
           permissionRequest.scope,
           permissionRequest.always,
         );
-        return collaboration.replySharedSessionPermission(sessionId, {
+        return replySharedSessionPermission(sessionId, {
           ...(status === 'approved' && scopeLevel ? { alwaysOverride: [scopeLevel.pattern] } : {}),
           decision: status === 'approved' ? 'session' : 'reject',
           requestId: permissionRequest.requestId,
@@ -548,7 +632,7 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
         (request) => `question-${request.requestId}` === cardId,
       );
       if (questionRequest) {
-        return collaboration.replySharedQuestion(sessionId, {
+        return replySharedQuestion(sessionId, {
           answers: status === 'approved' ? [['已在 Team 页面完成处理。']] : undefined,
           requestId: questionRequest.requestId,
           status: status === 'approved' ? 'answered' : 'dismissed',
@@ -557,11 +641,7 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
 
       return false;
     },
-    [
-      activeSharedSession,
-      collaboration.replySharedSessionPermission,
-      collaboration.replySharedQuestion,
-    ],
+    [activeSharedSession, replySharedQuestion, replySharedSessionPermission],
   );
 
   const submitReviewComment = useCallback(
@@ -571,11 +651,11 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
       if (!sessionId || !trimmed) {
         return false;
       }
-      return collaboration.createSharedSessionComment(sessionId, {
+      return createSharedSessionCommentAction(sessionId, {
         content: `[${cardId}] ${trimmed}`,
       });
     },
-    [activeSharedSession, collaboration.createSharedSessionComment],
+    [activeSharedSession, createSharedSessionCommentAction],
   );
 
   const createSharedSessionComment = useCallback(
@@ -585,11 +665,11 @@ export function useTeamRuntimeReferenceActions(input: TeamRuntimeReferenceAction
       if (!sessionId || !trimmed) {
         return false;
       }
-      return collaboration.createSharedSessionComment(sessionId, {
+      return createSharedSessionCommentAction(sessionId, {
         content: trimmed,
       });
     },
-    [activeSharedSession, collaboration.createSharedSessionComment],
+    [activeSharedSession, createSharedSessionCommentAction],
   );
 
   return {

@@ -190,6 +190,43 @@ function duplicateSlot(slot: TeamMemberSlotInput): TeamMemberSlotInput {
   };
 }
 
+/**
+ * 默认固定团队保存的统一包装：try → catch 交给 `onError`（**无 finally**）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 try 内的值块（三元、`?.`），本组件这处 try
+ * 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runRosterSaveOnce(ctx: {
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  }
+}
+
+/**
+ * 存为模板的统一包装：置 saving → try → catch 交给 `onError` → finally 清 saving。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句（实测）。
+ */
+async function runRosterTemplateSaveOnce(ctx: {
+  setSaving: (saving: boolean) => void;
+  onError: (error: unknown) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setSaving(true);
+  try {
+    await ctx.run();
+  } catch (error) {
+    ctx.onError(error);
+  } finally {
+    ctx.setSaving(false);
+  }
+}
+
 export function TeamDefaultRosterSection({
   gatewayUrl,
   onSaved,
@@ -277,26 +314,30 @@ export function TeamDefaultRosterSection({
     if (!teamWorkspaceId) return;
     const rosterToSave = draftRoster.length > 0 ? draftRoster : cloneDefaultRoster();
     setFeedback({ kind: 'saving', message: '正在保存默认固定团队…' });
-    try {
-      const next = await client.updateWorkspace(token, teamWorkspaceId, {
-        defaultTeamRoster: rosterToSave,
-      });
-      const nextRoster = next.defaultTeamRoster.length
-        ? next.defaultTeamRoster
-        : cloneDefaultRoster();
-      applyWorkspace(next);
-      setWorkspaceName(next.name);
-      setDraftRoster(cloneRoster(nextRoster));
-      setBaseline(serializeRoster(nextRoster));
-      lastHydratedWorkspaceKeyRef.current = `${next.id}:${next.updatedAt}`;
-      setFeedback({ kind: 'success', message: `已保存 ${nextRoster.length} 个默认成员` });
-      onSaved?.();
-    } catch (err) {
-      setFeedback({
-        kind: 'error',
-        message: err instanceof Error ? err.message : '保存默认固定团队失败',
-      });
-    }
+    // try/catch 下沉到模块级 `runRosterSaveOnce`（见其注释）。
+    await runRosterSaveOnce({
+      onError: (err) => {
+        setFeedback({
+          kind: 'error',
+          message: err instanceof Error ? err.message : '保存默认固定团队失败',
+        });
+      },
+      run: async () => {
+        const next = await client.updateWorkspace(token, teamWorkspaceId, {
+          defaultTeamRoster: rosterToSave,
+        });
+        const nextRoster = next.defaultTeamRoster.length
+          ? next.defaultTeamRoster
+          : cloneDefaultRoster();
+        applyWorkspace(next);
+        setWorkspaceName(next.name);
+        setDraftRoster(cloneRoster(nextRoster));
+        setBaseline(serializeRoster(nextRoster));
+        lastHydratedWorkspaceKeyRef.current = `${next.id}:${next.updatedAt}`;
+        setFeedback({ kind: 'success', message: `已保存 ${nextRoster.length} 个默认成员` });
+        onSaved?.();
+      },
+    });
   };
 
   const handleSaveAsTemplate = async () => {
@@ -308,28 +349,30 @@ export function TeamDefaultRosterSection({
         : defaultName;
     if (name === null) return; // 用户取消
     const trimmed = name.trim() || defaultName;
-    setSavingTemplate(true);
     setFeedback({ kind: 'saving', message: '正在存为模板…' });
-    try {
-      const ok = await createTemplate({
-        name: trimmed,
-        provider: '',
-        optionalAgentIds: [],
-        memberSlots: rosterToSave,
-      });
-      setFeedback(
-        ok
-          ? { kind: 'success', message: `已存为模板「${trimmed}」，可在团队模板页编辑复用` }
-          : { kind: 'error', message: '存为模板失败' },
-      );
-    } catch (err) {
-      setFeedback({
-        kind: 'error',
-        message: err instanceof Error ? err.message : '存为模板失败',
-      });
-    } finally {
-      setSavingTemplate(false);
-    }
+    // 置 saving 与 try/catch/finally 一起下沉到模块级 `runRosterTemplateSaveOnce`（见其注释）。
+    await runRosterTemplateSaveOnce({
+      setSaving: setSavingTemplate,
+      onError: (err) => {
+        setFeedback({
+          kind: 'error',
+          message: err instanceof Error ? err.message : '存为模板失败',
+        });
+      },
+      run: async () => {
+        const ok = await createTemplate({
+          name: trimmed,
+          provider: '',
+          optionalAgentIds: [],
+          memberSlots: rosterToSave,
+        });
+        setFeedback(
+          ok
+            ? { kind: 'success', message: `已存为模板「${trimmed}」，可在团队模板页编辑复用` }
+            : { kind: 'error', message: '存为模板失败' },
+        );
+      },
+    });
   };
 
   if (!teamWorkspaceId) {

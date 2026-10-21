@@ -70,6 +70,25 @@ const TAB_BTN_ACTIVE_STYLE: CSSProperties = {
 
 type ShareTab = 'outgoing' | 'incoming';
 
+/**
+ * 「置 busyShareId → 执行 → 必清」的统一包装（**无 catch**：异常继续向上抛给调用方）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 3 处
+ * 该类动作会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runShareActionOnce(ctx: {
+  shareKey: string;
+  setBusyShareId: (key: string | null) => void;
+  run: () => Promise<unknown>;
+}): Promise<void> {
+  ctx.setBusyShareId(ctx.shareKey);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setBusyShareId(null);
+  }
+}
+
 export function SharesView() {
   const {
     canManageSessionEntries,
@@ -153,24 +172,24 @@ export function SharesView() {
     if (!canManageSessionEntries) {
       return;
     }
-    setBusyShareId(shareId);
-    try {
-      await updateSessionShare(shareId, { permission });
-    } finally {
-      setBusyShareId(null);
-    }
+    // try/finally 下沉到模块级 `runShareActionOnce`（见其注释）。
+    await runShareActionOnce({
+      shareKey: shareId,
+      setBusyShareId,
+      run: () => updateSessionShare(shareId, { permission }),
+    });
   };
 
   const handleDeleteShare = async (shareId: string) => {
     if (!canManageSessionEntries) {
       return;
     }
-    setBusyShareId(shareId);
-    try {
-      await deleteSessionShare(shareId);
-    } finally {
-      setBusyShareId(null);
-    }
+    // try/finally 下沉到模块级 `runShareActionOnce`（见其注释）。
+    await runShareActionOnce({
+      shareKey: shareId,
+      setBusyShareId,
+      run: () => deleteSessionShare(shareId),
+    });
   };
 
   const handleCreateShare = async () => {
@@ -180,22 +199,23 @@ export function SharesView() {
     if (!newShareMemberId || !newShareSessionId) {
       return;
     }
-    const shareKey = `create:${newShareSessionId}:${newShareMemberId}`;
-    setBusyShareId(shareKey);
-    try {
-      const ok = await createSessionShare({
-        sessionId: newShareSessionId,
-        memberId: newShareMemberId,
-        permission: newSharePermission,
-      });
-      if (ok) {
-        setNewShareMemberId('');
-        setNewShareSessionId('');
-        setNewSharePermission('view');
-      }
-    } finally {
-      setBusyShareId(null);
-    }
+    // try/finally 下沉到模块级 `runShareActionOnce`（见其注释）。
+    await runShareActionOnce({
+      shareKey: `create:${newShareSessionId}:${newShareMemberId}`,
+      setBusyShareId,
+      run: async () => {
+        const ok = await createSessionShare({
+          sessionId: newShareSessionId,
+          memberId: newShareMemberId,
+          permission: newSharePermission,
+        });
+        if (ok) {
+          setNewShareMemberId('');
+          setNewShareSessionId('');
+          setNewSharePermission('view');
+        }
+      },
+    });
   };
 
   return (

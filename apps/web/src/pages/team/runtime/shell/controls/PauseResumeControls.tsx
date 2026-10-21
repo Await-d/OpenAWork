@@ -122,15 +122,34 @@ export interface CancelHandoffButtonProps {
   disabled?: boolean;
 }
 
+/**
+ * 取消 handoff 的统一包装：置忙 → try → finally 清忙（**无 catch**：异常上抛）。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持「无 catch 的 try」与 finally 子句，本组件
+ * 这处 try 会让整个组件脱靶（实测）。语义逐字照搬。
+ */
+async function runCancelHandoffOnce(ctx: {
+  setBusy: (busy: boolean) => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  ctx.setBusy(true);
+  try {
+    await ctx.run();
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export function CancelHandoffButton({ handoffId, onCancel, disabled }: CancelHandoffButtonProps) {
   const [busy, setBusy] = useState(false);
   const handleClick = async () => {
-    setBusy(true);
-    try {
-      await onCancel(handoffId);
-    } finally {
-      setBusy(false);
-    }
+    // try/finally 下沉到模块级 `runCancelHandoffOnce`（见其注释）。
+    await runCancelHandoffOnce({
+      setBusy,
+      run: async () => {
+        await onCancel(handoffId);
+      },
+    });
   };
   return (
     <button

@@ -287,12 +287,16 @@ export function LayerRoleCard({
               ...STATUS_DOT_STYLE,
               background: tone.color,
               ...(tone.pulse
-                ? {
+                ? ({
                     animation: 'team-flow-node-pulse 1.8s ease-in-out infinite',
                     // team-flow-node-pulse 读取这两个变量（见 team-runtime-flow-animations.css）。
-                    ['--team-flow-glow' as string]: `color-mix(in srgb, ${identity.color} 45%, transparent)`,
-                    ['--team-flow-glow-mid' as string]: identity.color,
-                  }
+                    //
+                    // CSS 变量不在 CSSProperties 已知属性里，断言必须放在整个对象上：
+                    // key 位置写 `as string` 会让 React Compiler 报
+                    // "TSAsExpression key in ObjectExpression" 并放弃优化本组件。
+                    '--team-flow-glow': `color-mix(in srgb, ${identity.color} 45%, transparent)`,
+                    '--team-flow-glow-mid': identity.color,
+                  } as CSSProperties)
                 : null),
             }}
           />

@@ -152,7 +152,9 @@ function BatchSubCallRow({
     shouldAutoExpand: shouldExpandByDefault,
     shouldExpandByDefault,
   });
-  const summary = useMemo(() => batchSubInputSummary(tool, input), [tool, input]);
+  // 去手写 memo，交由编译器自动 memoize（保留 useMemo 会让编译器报
+  // 「Existing memoization could not be preserved」而放弃优化整个组件）。
+  const summary = batchSubInputSummary(tool, input);
   const childStatus: ToolCallCardProps['status'] =
     visualState === 'running' ? 'running' : 'completed';
   const childIsError = visualState === 'failed';
@@ -162,18 +164,16 @@ function BatchSubCallRow({
   //   - running + bash w/ partial: synthetic BashExecutionResult so the
   //     terminal card renders streaming stdout
   //   - running + no partial: undefined → BlockToolCall shows a spinner
-  const effectiveOutput = useMemo(() => {
-    if (output !== undefined) return output;
-    if (
-      visualState === 'running' &&
-      tool.trim().toLowerCase() === 'bash' &&
-      typeof result?.partialOutput === 'string' &&
-      result.partialOutput.length > 0
-    ) {
-      return buildPartialBashOutput(input, result.partialOutput);
-    }
-    return output;
-  }, [output, visualState, tool, result?.partialOutput, input]);
+  let effectiveOutput = output;
+  if (
+    output === undefined &&
+    visualState === 'running' &&
+    tool.trim().toLowerCase() === 'bash' &&
+    typeof result?.partialOutput === 'string' &&
+    result.partialOutput.length > 0
+  ) {
+    effectiveOutput = buildPartialBashOutput(input, result.partialOutput);
+  }
 
   return (
     <div className="tool-call-batch-child" data-batch-sub-status={visualState}>

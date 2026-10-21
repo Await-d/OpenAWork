@@ -70,6 +70,7 @@ interface WorkspaceTabContentProps {
   onAddSshConnection: (entry: Omit<SSHConnectionEntry, 'id' | 'status'>) => void;
   onConnectSsh: (id: string) => void;
   onDisconnectSsh: (id: string) => void;
+  onDeleteSshConnection: (id: string) => void;
   onBrowseSshPath: (path: string) => void;
   onUploadSshFile: (file: File) => void;
   githubTriggers: Array<{ repo: string; events: string[] }>;
@@ -265,6 +266,30 @@ const AUTOMATION_ACTION_OPTIONS: ReadonlyArray<SettingsSegmentedOption<Automatio
   { value: 'screenshot', label: '截图' },
 ];
 
+/**
+ * 工作区页动作（保存 Git 触发器 / 浏览器自动化）的统一包装：`run` 全流程留在 try 内，
+ * catch 交给 `onError`（不传＝异常继续向上抛），finally 跑清理。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句与「无 catch 的
+ * try」，也不支持 try 内的值块（`a || b`、三元）。语义逐字照搬。
+ */
+async function runWorkspaceActionOnce(ctx: {
+  onError?: (error: unknown) => void;
+  onFinally?: () => void;
+  run: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await ctx.run();
+  } catch (error) {
+    if (!ctx.onError) {
+      throw error;
+    }
+    ctx.onError(error);
+  } finally {
+    ctx.onFinally?.();
+  }
+}
+
 export function WorkspaceTabContent({
   filePatterns,
   setFilePatterns,
@@ -284,6 +309,7 @@ export function WorkspaceTabContent({
   onAddSshConnection,
   onConnectSsh,
   onDisconnectSsh,
+  onDeleteSshConnection,
   onBrowseSshPath,
   onUploadSshFile,
   githubTriggers,
@@ -337,51 +363,61 @@ export function WorkspaceTabContent({
   async function handleSaveTrigger() {
     if (!triggerForm.repo || !triggerForm.appId) return;
     setIsSubmittingTrigger(true);
-    try {
-      await onSaveGitHubTrigger({
-        appId: triggerForm.appId,
-        privateKeyPem: triggerForm.privateKeyPem,
-        webhookSecretForHmacVerification: triggerForm.webhookSecret,
-        repoFullNameOwnerSlashRepo: triggerForm.repo,
-        events: triggerForm.events,
-        agentPromptTemplate: triggerForm.agentPromptTemplate,
-        autoApproveWithoutUserConfirmation: triggerForm.autoApprove,
-      });
-      setTriggerForm(EMPTY_TRIGGER_FORM);
-      setShowTriggerForm(false);
-    } finally {
-      setIsSubmittingTrigger(false);
-    }
+    // try/finally 下沉到模块级 `runWorkspaceActionOnce`（见其注释）；
+    // 原代码此处**没有 catch**（异常向上抛），故不传 onError。
+    await runWorkspaceActionOnce({
+      onFinally: () => {
+        setIsSubmittingTrigger(false);
+      },
+      run: async () => {
+        await onSaveGitHubTrigger({
+          appId: triggerForm.appId,
+          privateKeyPem: triggerForm.privateKeyPem,
+          webhookSecretForHmacVerification: triggerForm.webhookSecret,
+          repoFullNameOwnerSlashRepo: triggerForm.repo,
+          events: triggerForm.events,
+          agentPromptTemplate: triggerForm.agentPromptTemplate,
+          autoApproveWithoutUserConfirmation: triggerForm.autoApprove,
+        });
+        setTriggerForm(EMPTY_TRIGGER_FORM);
+        setShowTriggerForm(false);
+      },
+    });
   }
 
   async function handleAutomationRun() {
     setAutomationLoading(true);
     setAutomationResult(null);
     setScreenshotData(null);
-    try {
-      if (automationAction === 'open') {
-        await onDesktopAutomationStart(automationUrl || undefined);
-        setAutomationResult({ ok: true, msg: '已启动' });
-      } else if (automationAction === 'goto') {
-        await onDesktopAutomationGoto(automationUrl);
-        setAutomationResult({ ok: true, msg: '已跳转' });
-      } else if (automationAction === 'click') {
-        await onDesktopAutomationClick(automationSelector);
-        setAutomationResult({ ok: true, msg: '已点击' });
-      } else if (automationAction === 'type') {
-        await onDesktopAutomationType(automationSelector, automationText);
-        setAutomationResult({ ok: true, msg: '已输入' });
-      } else if (automationAction === 'screenshot') {
-        const base64 = await onDesktopAutomationScreenshot();
-        setScreenshotData(base64);
-        setAutomationResult({ ok: true, msg: '截图成功' });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '操作失败';
-      setAutomationResult({ ok: false, msg });
-    } finally {
-      setAutomationLoading(false);
-    }
+    // try/catch/finally 下沉到模块级 `runWorkspaceActionOnce`（见其注释）。
+    await runWorkspaceActionOnce({
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : '操作失败';
+        setAutomationResult({ ok: false, msg });
+      },
+      onFinally: () => {
+        setAutomationLoading(false);
+      },
+      run: async () => {
+        if (automationAction === 'open') {
+          await onDesktopAutomationStart(automationUrl || undefined);
+          setAutomationResult({ ok: true, msg: '已启动' });
+        } else if (automationAction === 'goto') {
+          await onDesktopAutomationGoto(automationUrl);
+          setAutomationResult({ ok: true, msg: '已跳转' });
+        } else if (automationAction === 'click') {
+          await onDesktopAutomationClick(automationSelector);
+          setAutomationResult({ ok: true, msg: '已点击' });
+        } else if (automationAction === 'type') {
+          await onDesktopAutomationType(automationSelector, automationText);
+          setAutomationResult({ ok: true, msg: '已输入' });
+        } else if (automationAction === 'screenshot') {
+          const base64 = await onDesktopAutomationScreenshot();
+          setScreenshotData(base64);
+          setAutomationResult({ ok: true, msg: '截图成功' });
+        }
+      },
+    });
   }
 
   return (
@@ -1006,6 +1042,19 @@ export function WorkspaceTabContent({
                     连接
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      globalThis.window.confirm(`确认删除 SSH 连接 ${conn.host}:${conn.port} 吗？`)
+                    ) {
+                      onDeleteSshConnection(conn.id);
+                    }
+                  }}
+                  style={WORKSPACE_GHOST_BTN}
+                >
+                  删除
+                </button>
               </div>
             ))}
           </div>

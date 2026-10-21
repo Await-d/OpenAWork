@@ -19,6 +19,7 @@ import {
   upsertPermissionEventMessage,
 } from './permission-merge.js';
 import { createAssistantEventCardContent, parseAssistantEventContent } from './card-codec.js';
+import { makeOrderedMessageId } from './ordered-id.js';
 import type { ChatMessage, ChatMessagePart } from './message-model.js';
 import type { AssistantTraceToolCall, RunEvent } from '@openAwork/shared';
 import {
@@ -381,14 +382,48 @@ describe('upsertPermissionEventMessage', () => {
     expect(next).toHaveLength(2);
     expect(next[0]).toBe(user);
     expect(next[1]?.role).toBe('assistant');
-    expect(next[1]?.id).toEqual(expect.any(String));
-    expect(next[1]?.id.length).toBeGreaterThan(0);
+    expect(next[1]?.id).toMatch(/^msg_[0-9a-f]{12}/);
     expect(next[1]?.createdAt).toBe(1_234);
     expect(next[1]?.status).toBe('completed');
     expect(parseAssistantEventContent(next[1]?.content ?? '')).toMatchObject({
       kind: 'permission',
       requestId: 'req-1',
     });
+  });
+
+  it('新卡片按发生时间插到正确的位置，而不是一律追加到末尾', () => {
+    const earlierId = makeOrderedMessageId(1_000);
+    const laterId = makeOrderedMessageId(3_000);
+    const earlier: ChatMessage = {
+      id: earlierId,
+      role: 'assistant',
+      content: '先发生的轮次',
+      createdAt: 1_000,
+    };
+    const later: ChatMessage = {
+      id: laterId,
+      role: 'assistant',
+      content: '后发生的轮次',
+      createdAt: 3_000,
+    };
+
+    const next = upsertPermissionEventMessage([earlier, later], {
+      type: 'permission_asked',
+      requestId: 'req-1',
+      toolName: 'Bash',
+      scope: 'session',
+      reason: '需要执行命令',
+      riskLevel: 'high',
+      occurredAt: 2_000,
+    });
+
+    expect(next).toHaveLength(3);
+    expect(next[0]).toBe(earlier);
+    expect(next[2]).toBe(later);
+    expect(next[1]?.createdAt).toBe(2_000);
+    // 有序 id 的词序必须与位置一致，否则基于 id 的插入判定会把它当成末尾元素。
+    expect(next[1]!.id > earlierId).toBe(true);
+    expect(next[1]!.id < laterId).toBe(true);
   });
 
   it('命中原卡片时原位替换并保留 id 与 createdAt', () => {

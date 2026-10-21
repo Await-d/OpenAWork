@@ -45,6 +45,32 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * 统一的「busy + try/catch/finally」插件市场动作包装。
+ *
+ * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句、也不支持
+ * try 内的值块（条件 / 逻辑 / 三元），本 hook 5 处 try/catch/finally 会让它整体脱靶
+ * （实测）。语义逐字照搬：`run` 的全流程仍在 try 内，catch 只做状态提示并返回
+ * `failureValue`，finally 无条件清 busy。
+ */
+async function runMarketActionOnce<T>(ctx: {
+  setBusy: (busy: boolean) => void;
+  /** catch 时的返回值（void 动作传 undefined，布尔动作传 false）。 */
+  failureValue: T;
+  onError: (error: unknown) => void;
+  run: () => Promise<T>;
+}): Promise<T> {
+  ctx.setBusy(true);
+  try {
+    return await ctx.run();
+  } catch (err) {
+    ctx.onError(err);
+    return ctx.failureValue;
+  } finally {
+    ctx.setBusy(false);
+  }
+}
+
 export function usePluginMarket({ gatewayUrl, token }: UsePluginMarketArgs): UsePluginMarketResult {
   const [sources, setSources] = useState<PluginMarketSource[]>([]);
   const [entries, setEntries] = useState<PluginMarketEntry[]>([]);
@@ -63,20 +89,23 @@ export function usePluginMarket({ gatewayUrl, token }: UsePluginMarketArgs): Use
         return;
       }
       const client = createPluginsClient(gatewayUrl);
-      try {
-        const [sourceList, listing] = await Promise.all([
-          client.listMarketSources(token),
-          client.searchMarket(token, query === undefined ? {} : { query }),
-        ]);
-        setSources(sourceList);
-        setEntries(listing.entries);
-        setFailedSources(listing.failedSources ?? []);
-        setError(null);
-      } catch (err) {
-        setError(errorMessage(err));
-      } finally {
-        setLoading(false);
-      }
+      await runMarketActionOnce<void>({
+        setBusy: setLoading,
+        failureValue: undefined,
+        onError: (err) => {
+          setError(errorMessage(err));
+        },
+        run: async () => {
+          const [sourceList, listing] = await Promise.all([
+            client.listMarketSources(token),
+            client.searchMarket(token, query === undefined ? {} : { query }),
+          ]);
+          setSources(sourceList);
+          setEntries(listing.entries);
+          setFailedSources(listing.failedSources ?? []);
+          setError(null);
+        },
+      });
     },
     [gatewayUrl, token],
   );
@@ -87,18 +116,20 @@ export function usePluginMarket({ gatewayUrl, token }: UsePluginMarketArgs): Use
 
   async function openEntry(entry: PluginMarketEntry): Promise<void> {
     if (!token) return;
-    setDetailLoading(true);
-    try {
-      const result = await createPluginsClient(gatewayUrl).getMarketEntry(token, {
-        sourceId: entry.sourceId,
-        name: entry.name,
-      });
-      setDetail(result);
-    } catch (err) {
-      setStatusMessage(`读取详情失败：${errorMessage(err)}`);
-    } finally {
-      setDetailLoading(false);
-    }
+    await runMarketActionOnce<void>({
+      setBusy: setDetailLoading,
+      failureValue: undefined,
+      onError: (err) => {
+        setStatusMessage(`读取详情失败：${errorMessage(err)}`);
+      },
+      run: async () => {
+        const result = await createPluginsClient(gatewayUrl).getMarketEntry(token, {
+          sourceId: entry.sourceId,
+          name: entry.name,
+        });
+        setDetail(result);
+      },
+    });
   }
 
   function closeDetail(): void {
@@ -107,61 +138,66 @@ export function usePluginMarket({ gatewayUrl, token }: UsePluginMarketArgs): Use
 
   async function installEntry(entry: PluginMarketEntry): Promise<void> {
     if (!token) return;
-    setBusy(true);
-    try {
-      const result = await createPluginsClient(gatewayUrl).installFromGithub(token, {
-        repo: entry.repo,
-        ...(entry.ref === undefined ? {} : { ref: entry.ref }),
-        ...(entry.path.length > 0 ? { path: entry.path } : {}),
-        name: entry.name,
-      });
-      const state = result.plugin?.state;
-      setStatusMessage(
-        state === undefined || state === null
-          ? `已安装 ${entry.name}。`
-          : state.status === 'active'
-            ? `已安装并激活 ${entry.name}；可在「已安装插件」中管理。`
-            : `已安装 ${entry.name}，但激活失败：${state.error ?? '未知错误'}`,
-      );
-      closeDetail();
-    } catch (err) {
-      setStatusMessage(`安装失败：${errorMessage(err)}`);
-    } finally {
-      setBusy(false);
-    }
+    await runMarketActionOnce<void>({
+      setBusy,
+      failureValue: undefined,
+      onError: (err) => {
+        setStatusMessage(`安装失败：${errorMessage(err)}`);
+      },
+      run: async () => {
+        const result = await createPluginsClient(gatewayUrl).installFromGithub(token, {
+          repo: entry.repo,
+          ...(entry.ref === undefined ? {} : { ref: entry.ref }),
+          ...(entry.path.length > 0 ? { path: entry.path } : {}),
+          name: entry.name,
+        });
+        const state = result.plugin?.state;
+        setStatusMessage(
+          state === undefined || state === null
+            ? `已安装 ${entry.name}。`
+            : state.status === 'active'
+              ? `已安装并激活 ${entry.name}；可在「已安装插件」中管理。`
+              : `已安装 ${entry.name}，但激活失败：${state.error ?? '未知错误'}`,
+        );
+        closeDetail();
+      },
+    });
   }
 
   async function addSource(repo: string, ref?: string): Promise<boolean> {
     if (!token) return false;
-    setBusy(true);
-    try {
-      const source = await createPluginsClient(gatewayUrl).addMarketSource(token, {
-        repo,
-        ...(ref === undefined || ref.trim().length === 0 ? {} : { ref: ref.trim() }),
-      });
-      setStatusMessage(`已添加源 ${source.id}。`);
-      await refresh();
-      return true;
-    } catch (err) {
-      setStatusMessage(`添加源失败：${errorMessage(err)}`);
-      return false;
-    } finally {
-      setBusy(false);
-    }
+    return runMarketActionOnce<boolean>({
+      setBusy,
+      failureValue: false,
+      onError: (err) => {
+        setStatusMessage(`添加源失败：${errorMessage(err)}`);
+      },
+      run: async () => {
+        const source = await createPluginsClient(gatewayUrl).addMarketSource(token, {
+          repo,
+          ...(ref === undefined || ref.trim().length === 0 ? {} : { ref: ref.trim() }),
+        });
+        setStatusMessage(`已添加源 ${source.id}。`);
+        await refresh();
+        return true;
+      },
+    });
   }
 
   async function removeSource(sourceId: string): Promise<void> {
     if (!token) return;
-    setBusy(true);
-    try {
-      await createPluginsClient(gatewayUrl).removeMarketSource(token, sourceId);
-      setStatusMessage(`已移除源 ${sourceId}。`);
-      await refresh();
-    } catch (err) {
-      setStatusMessage(`移除源失败：${errorMessage(err)}`);
-    } finally {
-      setBusy(false);
-    }
+    await runMarketActionOnce<void>({
+      setBusy,
+      failureValue: undefined,
+      onError: (err) => {
+        setStatusMessage(`移除源失败：${errorMessage(err)}`);
+      },
+      run: async () => {
+        await createPluginsClient(gatewayUrl).removeMarketSource(token, sourceId);
+        setStatusMessage(`已移除源 ${sourceId}。`);
+        await refresh();
+      },
+    });
   }
 
   return {
