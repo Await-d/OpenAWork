@@ -129,6 +129,75 @@ describe('SSHConnectionManagerImpl SFTP channel lifecycle', () => {
   });
 });
 
+/**
+ * 回归（2026-10-16 排障包）：远端 sshd 未启用 sftp 子系统时，每次文件操作都会重新
+ * `client.sftp()` 并吃一次拒绝往返——同一根因在 read/write 上重复命中 6 次。该失败
+ * 由远端配置决定、重试不恢复，故记住后直接返回同语义错误。
+ */
+describe('SFTP 子系统缺失的连接级记忆', () => {
+  function makeSubsystemMissingClient() {
+    let sftpOpenCount = 0;
+    const handlers: Record<string, () => void> = {};
+    const client = {
+      on(event: string, cb: () => void) {
+        handlers[event] = cb;
+        return client;
+      },
+      connect() {
+        // connect() 必须触发 ready，否则重连分支会一直等握手。
+        queueMicrotask(() => handlers['ready']?.());
+        return client;
+      },
+      exec() {},
+      sftp(cb: (err: Error | undefined, s?: unknown) => void) {
+        sftpOpenCount += 1;
+        cb(new Error('Unable to start subsystem: sftp'));
+      },
+      end() {},
+    };
+    return { client, sftpOpenCount: () => sftpOpenCount };
+  }
+
+  it('首次失败后不再重复探测，但仍返回同语义错误类型', async () => {
+    const fake = makeSubsystemMissingClient();
+    const mgr = new SSHConnectionManagerImpl({
+      clients: new Map([['miss', fake.client as never]]),
+    });
+    mgr.addConnection(conn('miss'));
+
+    await expect(mgr.readFile('miss', '/etc/hosts')).rejects.toMatchObject({
+      name: 'SshSftpUnavailableError',
+    });
+    await expect(mgr.listFiles('miss', '/etc')).rejects.toMatchObject({
+      name: 'SshSftpUnavailableError',
+    });
+    await expect(mgr.writeFile('miss', '/etc/hosts', 'x')).rejects.toMatchObject({
+      name: 'SshSftpUnavailableError',
+    });
+
+    // 三次文件操作只探测一次，其余两次直接被记忆短路。
+    expect(fake.sftpOpenCount()).toBe(1);
+  });
+
+  it('断开重连后重新探测（远端 sshd 配置可能已被修复）', async () => {
+    const fake = makeSubsystemMissingClient();
+    const mgr = new SSHConnectionManagerImpl({
+      clients: new Map([['miss-reconnect', fake.client as never]]),
+      clientFactory: () => Promise.resolve(fake.client as never),
+    });
+    mgr.addConnection(conn('miss-reconnect'));
+
+    await expect(mgr.readFile('miss-reconnect', '/etc/hosts')).rejects.toThrow();
+    expect(fake.sftpOpenCount()).toBe(1);
+
+    await mgr.disconnect('miss-reconnect');
+    await mgr.connect('miss-reconnect');
+    await expect(mgr.readFile('miss-reconnect', '/etc/hosts')).rejects.toThrow();
+
+    expect(fake.sftpOpenCount()).toBe(2);
+  });
+});
+
 describe('SFTP 子通道恢复', () => {
   it.each(['close', 'error'])('%s 后重开通道且忽略旧通道的迟发事件', async (event) => {
     const channels: EventEmitter[] = [];

@@ -9,7 +9,7 @@
  * 1. 抓取被服务的脚本，定位 inline（data: base64）或 external（相对脚本 URL 解析）
  *    形式的 source map；
  * 2. 用 Node 24 内置的 `module.SourceMap` 把 `{line, column}` 映射回原始位置；
- * 3. 返回 `sourcesContent` 支撑的原始源码文本。
+ * 3. 只返回位置与文件名——**不下发源码全文**，理由见 `ResolvedStackFrame`。
  *
  * **零新增依赖**：只用 `node:module` 的 `SourceMap`（Node 24 提供），不引入任何第三方包。
  *
@@ -39,15 +39,18 @@ export interface RawStackFrame {
  * - `line` / `column`：原始（生成后）位置，0-based，原样回传；
  * - `sourceLine` / `sourceColumn`：映射出的原始源码位置，0-based；
  * - `sourceName`：原始源码路径（map 的 `sources[i]`）；无法解析时为 `null`；
- * - `source`：该原始源码的 `sourcesContent` 文本；map 未内联源码时为 `null`；
  * - `mapped`：是否真正命中了一条映射。
+ *
+ * **刻意不携带 `sourcesContent` 源码全文**：一条 console 事件最多 12 帧，每帧都带
+ * 一份源文件就意味着单条日志可能几十 KB，而这些字节要经 CDP → 网关 → WS 全链路
+ * serialize / 传输，正是「页面一打日志画面就卡」的来源。展示层只需要位置（文件名 +
+ * 行列），源码按需另取。
  */
 export interface ResolvedStackFrame {
   url: string;
   line: number;
   column: number;
   functionName?: string;
-  source: string | null;
   sourceLine: number | null;
   sourceColumn: number | null;
   sourceName: string | null;
@@ -72,7 +75,6 @@ export const SOURCE_MAP_CACHE_LIMIT = 32;
 interface LoadedSourceMap {
   map: SourceMap;
   sources: string[];
-  sourcesContent: Array<string | null>;
 }
 
 /**
@@ -121,7 +123,6 @@ function buildBaseFrame(frame: RawStackFrame): ResolvedStackFrame {
     line: frame.line,
     column: frame.column,
     ...(frame.functionName !== undefined ? { functionName: frame.functionName } : {}),
-    source: null,
     sourceLine: null,
     sourceColumn: null,
     sourceName: null,
@@ -160,12 +161,8 @@ async function resolveFrame(
       return base;
     }
 
-    const sourceIndex = loaded.sources.indexOf(entry.originalSource);
-    const sourceContent = sourceIndex >= 0 ? (loaded.sourcesContent[sourceIndex] ?? null) : null;
-
     return {
       ...base,
-      source: sourceContent,
       sourceLine: entry.originalLine,
       sourceColumn: entry.originalColumn,
       sourceName: entry.originalSource.length > 0 ? entry.originalSource : null,
@@ -309,7 +306,9 @@ function buildSourceMap(raw: string): LoadedSourceMap | null {
   };
 
   try {
-    return { map: new SourceMap(payload), sources, sourcesContent };
+    // `sources` 之外不保留任何副本：源码全文只留在 `SourceMap` 实例内部（缓存上限 32 条），
+    // 不再被逐帧拷进事件对象和 WS 载荷。
+    return { map: new SourceMap(payload), sources };
   } catch {
     return null;
   }

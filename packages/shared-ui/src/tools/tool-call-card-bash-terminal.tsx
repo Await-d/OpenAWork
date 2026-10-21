@@ -586,20 +586,55 @@ export function resolveBashTerminalView(
   };
 }
 
+/** 运行中的终端只解析尾部这么长的内容（见 `ShellTextPane` 的 `live` 说明）。 */
+const LIVE_PARSE_MAX_CHARS = 32_000;
+/**
+ * 已结束的终端解析上限。
+ *
+ * 命令输出可能是几 MB 的构建 / 测试日志；ANSI 解析 + 行切分是 O(长度)，一次解析
+ * 全文会形成可感知的长任务。超过上限时同样只渲染尾部，完整内容仍可通过复制按钮
+ * 拿到（复制用的是原始 `content`，不受裁剪切影响）。
+ */
+const FINISHED_PARSE_MAX_CHARS = 200_000;
+
 function ShellTextPane({
   compact = false,
   content,
   expanded = false,
+  live = false,
   tone,
 }: {
   compact?: boolean;
   content: string;
   expanded?: boolean;
+  /**
+   * 工具仍在运行（`tool_progress` 高频刷新）。
+   *
+   * 每次进度事件带来的都是**完整累积** stdout，而 ANSI 解析 + 行切分是 O(长度)；
+   * 长命令（构建 / 测试日志）下每次事件都重解析全文，频率高时直接把主线程占满——
+   * 这是「执行 bash 时卡顿非常明显」的主因。运行中只解析尾部窗口（用户此刻关心的
+   * 就是最新输出）；工具结束后 `live` 转 false，一次性解析全文（内容不再变化，
+   * useMemo 命中，不再重复）。
+   */
+  live?: boolean;
   tone: 'danger' | 'default';
 }) {
-  const parsedLines = useMemo(() => splitSegmentsIntoLines(parseAnsiSegments(content)), [content]);
+  const parseSource = useMemo(() => {
+    const maxChars = live ? LIVE_PARSE_MAX_CHARS : FINISHED_PARSE_MAX_CHARS;
+    if (content.length <= maxChars) {
+      return content;
+    }
+    const slice = content.slice(content.length - maxChars);
+    // 按行边界对齐，避免从半个 ANSI 转义序列中间开始解析。
+    const boundary = slice.indexOf('\n');
+    return boundary >= 0 ? slice.slice(boundary + 1) : slice;
+  }, [content, live]);
+  const parsedLines = useMemo(
+    () => splitSegmentsIntoLines(parseAnsiSegments(parseSource)),
+    [parseSource],
+  );
   const plainCharCount = useMemo(() => countPlainCharacters(parsedLines), [parsedLines]);
-  const lineCount = useMemo(() => countTerminalLines(content), [content]);
+  const lineCount = useMemo(() => countTerminalLines(parseSource), [parseSource]);
   const isLong = lineCount > 18 || plainCharCount > 1600;
   const collapsed = useMemo(
     () => truncateSegments(parsedLines, compact ? 5 : 18, compact ? 420 : 1600),
@@ -642,6 +677,14 @@ function ShellTextPane({
           wordBreak: 'break-word',
         }}
       >
+        {parseSource !== content && (
+          <div
+            data-tool-card-terminal-trimmed="true"
+            style={{ color: tokens.color.muted, fontSize: 11, lineHeight: '18px' }}
+          >
+            … 已省略较早输出（复制可获取完整内容）
+          </div>
+        )}
         {renderTerminalLines(
           visibleLines,
           `${isDanger ? 'stderr' : 'stdout'}-${compact ? 'compact' : 'full'}`,
@@ -669,7 +712,12 @@ export function BashTerminalCard({
   const hasStderr = typeof view.stderr === 'string' && view.stderr.length > 0;
   const hasOutput = typeof view.output === 'string' && view.output.length > 0;
   const hasFailure = (view.exitCode !== undefined && view.exitCode !== 0) || hasStderr;
-  const combinedText = [view.stderr, view.stdout ?? view.output].filter(Boolean).join('\n\n');
+  // 拼接结果只用于「是否有内容」判断与复制：每次渲染都 `join` 一次会把几百 KB 的
+  // 输出重新复制一遍（流式刷新时每帧一次），这里按三个来源字符串 memo。
+  const combinedText = useMemo(
+    () => [view.stderr, view.stdout ?? view.output].filter(Boolean).join('\n\n'),
+    [view.stderr, view.stdout, view.output],
+  );
   // 展开态默认显示全部内容（参考实现的终端观感：命令 + 结果 + 滚动）；
   // compact（折叠摘要）时由 ShellTextPane 自行收尾。
   const expanded = !compact;
@@ -817,6 +865,7 @@ export function BashTerminalCard({
                   compact={compact}
                   content={view.stderr!}
                   expanded={expanded || (!compact && hasFailure)}
+                  live={running}
                   tone="danger"
                 />
               )}
@@ -826,6 +875,7 @@ export function BashTerminalCard({
                   compact={compact}
                   content={view.stdout!}
                   expanded={expanded}
+                  live={running}
                   tone="default"
                 />
               ) : hasOutput ? (
@@ -833,6 +883,7 @@ export function BashTerminalCard({
                   compact={compact}
                   content={view.output!}
                   expanded={expanded}
+                  live={running}
                   tone="default"
                 />
               ) : null}

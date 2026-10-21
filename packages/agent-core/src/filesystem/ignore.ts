@@ -44,6 +44,19 @@ const SAFE_ENV_TEMPLATE_BASENAMES = new Set([
 
 const BUILTIN_ENV_TEMPLATE_PATTERN = '.env.*';
 
+/**
+ * 工具自身落盘产物的精确豁免前缀（斜杠分隔的相对路径）。
+ *
+ * bash 超限输出会写到 `<workspace>/.openAwork/tool-output/bash_*.txt`，落盘提示
+ * 明确教模型用 Read/Grep 读回全文；但仓库 `.gitignore` 里的 `.openAwork/` 会把
+ * 同一路径判成 ignore —— 结果读与 grep 全被 agentignore 拦截，模型唯一能取回
+ * 超限输出的通道被自家守卫焊死（2026-10-18 排障）。这些文件是工具刚生成的产物
+ * 而非用户敏感数据，在**其它判定之前**整类放行；用户仍可用 `.agentignore` /
+ * runtime 规则在路径上做更细的排除（negate 命中即还原为 ignore）。
+ */
+const TOOL_OUTPUT_DIR_RELATIVE = '.openAwork/tool-output';
+const TOOL_OUTPUT_FILE_PATTERN = /^bash_[A-Za-z0-9_-]+\.txt$/;
+
 export interface IgnoreRuleSet {
   gitignorePatterns: string[];
   agentignorePatterns: string[];
@@ -208,6 +221,24 @@ export function createAgentIgnoreManager(): AgentIgnoreManager {
     const normalized = filePath.replace(/\\/g, '/');
     const rel = projectRoot ? relative(projectRoot, filePath).replace(/\\/g, '/') : normalized;
     const base = normalized.split('/').pop() ?? '';
+
+    // 工具落盘产物（见 TOOL_OUTPUT_DIR_RELATIVE 注释）：bash 超限输出的
+    // `bash_*.txt` 跳过 builtin 与 `.gitignore` 两层（仓库的 `.openAwork/` 规则
+    // 正是拦掉它们的元凶），只由显式 agent 策略决定 —— 默认放行，用户仍可在
+    // `.agentignore` / 全局 / runtime 里显式写 ignore 规则覆盖本豁免。
+    // 目录下其它文件不豁免，照常走完整判定（内置 `.env` 等硬拒绝不得被绕过）。
+    if (rel.startsWith(`${TOOL_OUTPUT_DIR_RELATIVE}/`) && TOOL_OUTPUT_FILE_PATTERN.test(base)) {
+      let decision = false;
+      for (const pattern of [
+        ...rules.agentignorePatterns,
+        ...rules.userGlobalPatterns,
+        ...runtimePatterns,
+      ]) {
+        const { regex, negate } = parseIgnorePattern(pattern);
+        if (regex && matchesIgnorePattern(regex, rel, base)) decision = !negate;
+      }
+      return decision;
+    }
 
     // Security invariant: every builtin except `.env.*` hard-denies on match
     // and can never be re-included by any user rule. `.env.*` is only a

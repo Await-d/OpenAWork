@@ -525,6 +525,7 @@ export * from './cli/index.js';
 
 export {
   SSHConnectionManagerImpl,
+  SSH_SFTP_UNAVAILABLE_MESSAGE,
   SshRemotePathError,
   SshSftpUnavailableError,
   type SSHConnection,

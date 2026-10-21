@@ -44,6 +44,23 @@ export interface SymbolResult {
 export interface ArtifactManager {
   list(sessionId: string): Promise<RunArtifact[]>;
   add(artifact: Omit<RunArtifact, 'id' | 'createdAt'>): RunArtifact;
+  /** 按 id 精确查询；不存在时返回 undefined（不抛错）。 */
+  get(artifactId: string): RunArtifact | undefined;
+  /**
+   * 删除索引条目并尽力删除其磁盘文件。
+   *
+   * 返回是否确实存在过该条目：文件删除失败（权限、已被手工清理）不影响索引一致性，
+   * 只记警告——否则调用方会因为「文件删不掉」而误判条目还在，进而放弃队列清理。
+   */
+  remove(artifactId: string): boolean;
+  /**
+   * 批量删除（单次索引落盘）。
+   *
+   * `remove` 每删一条都会把整个索引重写一遍——清理一批（如待发队列清空、会话删除）
+   * 时逐个调用会退化成 O(n²) 的写放大。批量入口只落盘一次，语义与逐条 `remove` 相同：
+   * 返回实际删掉的条数，磁盘文件仍按条 best-effort 处理。
+   */
+  removeMany(artifactIds: Iterable<string>): number;
   open(artifactId: string): Promise<void>;
   download(artifactId: string, dest: string): Promise<void>;
   share(artifactId: string): Promise<string>;

@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer';
 
+import type { BrowserLiveScreencastOptions } from './live-session-types.js';
+
 /**
  * 设备指标覆写后的 screencast 收敛控制器。
  *
@@ -22,7 +24,22 @@ export interface ScreencastFrameDimensions {
 export interface ScreencastConvergenceTarget {
   width: number;
   height: number;
+  /**
+   * 起流时的位图缩放上限（`Page.startScreencast` 的 `maxWidth` / `maxHeight`；0 /
+   * 缺省 = 该轴不限制）。设了上限后位图会等比缩到盒子里，**不再等于视口尺寸**——
+   * 判定必须按同一规则推算期望尺寸，否则每次设备覆写都会空转到预算耗尽。
+   */
+  bitmapBounds?: ScreencastBitmapBounds;
 }
+
+/** 帧位图的缩放上限，与起流参数共用同一份定义，避免两处漂移。 */
+export type ScreencastBitmapBounds = Pick<BrowserLiveScreencastOptions, 'maxWidth' | 'maxHeight'>;
+
+/**
+ * 位图尺寸的判定容差（像素）。CDP 只承诺「缩放到盒子里」，边界取整方式不属于协议
+ * 契约；真正的陈旧帧差距远大于此（如 1280×800 vs 768×480），不会被容差放过。
+ */
+const BITMAP_SIZE_TOLERANCE_PX = 2;
 
 export interface ScreencastConvergenceOptions {
   target: ScreencastConvergenceTarget;
@@ -87,6 +104,34 @@ export function readJpegDimensions(base64: string): { width: number; height: num
   return null;
 }
 
+/**
+ * 期望的帧位图尺寸：把目标视口按 `bitmapBounds` 等比缩进盒子里（与 CDP 的同一条
+ * 规则：只缩不放、取两轴中最小的缩放比）。
+ *
+ * 没有上限时就是视口尺寸本身，且不放宽容差——保持原来的精确判定语义。
+ */
+function resolveExpectedBitmapSize(target: ScreencastConvergenceTarget): {
+  width: number;
+  height: number;
+  tolerance: number;
+} {
+  const maxWidth = target.bitmapBounds?.maxWidth ?? 0;
+  const maxHeight = target.bitmapBounds?.maxHeight ?? 0;
+  const scale = Math.min(
+    1,
+    maxWidth > 0 ? maxWidth / target.width : 1,
+    maxHeight > 0 ? maxHeight / target.height : 1,
+  );
+  if (!Number.isFinite(scale) || scale >= 1) {
+    return { width: target.width, height: target.height, tolerance: 0 };
+  }
+  return {
+    width: Math.round(target.width * scale),
+    height: Math.round(target.height * scale),
+    tolerance: BITMAP_SIZE_TOLERANCE_PX,
+  };
+}
+
 export class ScreencastConvergence {
   private readonly options: ScreencastConvergenceOptions;
   private readonly maxAttempts: number;
@@ -123,17 +168,28 @@ export class ScreencastConvergence {
     this.schedule(this.retryDelayMs);
   }
 
+  /** 是否已结束（收敛成功 / 预算耗尽 / 会话不再活跃）。 */
+  isSettled(): boolean {
+    return this.stopped;
+  }
+
   dispose(): void {
     this.stop();
   }
 
   private matchesTarget(dimensions: ScreencastFrameDimensions): boolean {
     const { width, height } = this.options.target;
+    if (dimensions.metadataWidth !== width || dimensions.metadataHeight !== height) {
+      return false;
+    }
+    const { bitmapWidth, bitmapHeight } = dimensions;
+    if (bitmapWidth === null || bitmapHeight === null) {
+      return false;
+    }
+    const expected = resolveExpectedBitmapSize(this.options.target);
     return (
-      dimensions.metadataWidth === width &&
-      dimensions.metadataHeight === height &&
-      dimensions.bitmapWidth === width &&
-      dimensions.bitmapHeight === height
+      Math.abs(bitmapWidth - expected.width) <= expected.tolerance &&
+      Math.abs(bitmapHeight - expected.height) <= expected.tolerance
     );
   }
 

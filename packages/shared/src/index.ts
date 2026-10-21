@@ -67,8 +67,12 @@ export type {
 } from './subagent-results.js';
 export type {
   ImageGenerationBackground,
+  ImageGenerationModelCapability,
+  ImageGenerationModeration,
   ImageGenerationOutputFormat,
   ImageGenerationQuality,
+  ImageGenerationQualityOption,
+  ImageGenerationQualityTier,
   ImageGenerationSizeAspect,
   ImageGenerationSizePreset,
   ImageGenerationSizePresetGroup,
@@ -76,18 +80,28 @@ export type {
   ImageGenerationSizePresetTier,
 } from './image-generation.js';
 export {
+  clampImageGenerationQuality,
   DEFAULT_IMAGE_GENERATION_SIZE,
   downgradeImageGenerationSizeFrom4K,
+  getImageGenerationQualityOptions,
   getImageGenerationSizeTier,
+  IMAGE_GENERATION_COUNT_RANGE,
+  IMAGE_GENERATION_OUTPUT_COMPRESSION_RANGE,
+  IMAGE_GENERATION_PARTIAL_IMAGES_RANGE,
+  IMAGE_GENERATION_QUALITY_OPTIONS,
+  IMAGE_GENERATION_SIZE_AUTO,
   IMAGE_GENERATION_SIZE_PRESET_GROUPS,
   IMAGE_GENERATION_SIZE_PRESETS,
   IMAGE_GENERATION_TIMEOUT_MS_BY_TIER,
   normalizeImageGenerationSize,
   parseImageGenerationSize,
   requiresHighQualityForSize,
+  resolveImageGenerationModelCapability,
   resolveImageGenerationSizePresetId,
   resolveImageGenerationTimeoutMs,
+  shouldLiftQualityToHigh,
   sizeForPreset,
+  validateImageGenerationBackgroundCombination,
   validateImageGenerationSize,
 } from './image-generation.js';
 export type {
@@ -1320,6 +1334,35 @@ export interface StreamErrorChunk {
   upstreamSummary?: UpstreamStreamSummary;
 }
 
+/**
+ * 「流内非终态」错误码清单 —— 网关与客户端**必须共用这一份**。
+ *
+ * 这类 error chunk 只表示「单次操作被放弃」，整条流仍在继续（例如上游把一次入参
+ * 畸形 JSON 的工具调用丢弃后，模型会继续生成，后续工具调用与最终 `done` 都会照常
+ * 到达）。两侧各存一份名单已经出过一次事故：
+ *
+ * - 客户端按非终态处理：只透传提示、不结算、不断连；
+ * - 网关却按 `deriveRunEventBookend` 的通用语义（任何 `error` 都是 `run_failed`
+ *   → `terminal: true`）把 attach 订阅当场收尾。
+ *
+ * 于是每出现一次这种错误，SSE 就被服务端正常 EOF 掉，而客户端收到的是一段没有
+ * `done` 的普通错误 chunk——它只能把这次 EOF 判成「连接在流式传输中中断」，随后
+ * 走重连退避；`/stream/active` 又始终报告活跃流（run 真的还在跑），重连永远收敛
+ * 不了。观测到的症状就是「attach 成功 → 几秒后断开 → 自动重连 → 再断开」无限循环。
+ *
+ * 新增非终态发送点时必须同步登记到这里，否则该错误会退化成「流被截断」。
+ */
+export const NON_TERMINAL_STREAM_ERROR_CODES = ['TOOL_ERROR'] as const;
+
+const NON_TERMINAL_STREAM_ERROR_CODE_SET: ReadonlySet<string> = new Set(
+  NON_TERMINAL_STREAM_ERROR_CODES,
+);
+
+/** 该错误码是否只表示单次操作失败、不结束整条流。 */
+export function isNonTerminalStreamErrorCode(code: string): boolean {
+  return NON_TERMINAL_STREAM_ERROR_CODE_SET.has(code.trim());
+}
+
 export interface StreamToolResultChunk {
   type: 'tool_result';
   toolCallId: string;
@@ -1740,6 +1783,7 @@ export type {
   BrowserLiveA11yPayload,
   BrowserLiveChannel,
   BrowserLiveClientMessage,
+  BrowserLiveClipboardPayload,
   BrowserLiveConsoleLevel,
   BrowserLiveConsolePayload,
   BrowserLiveControlMessage,
@@ -1748,7 +1792,9 @@ export type {
   BrowserLiveDomNode,
   BrowserLiveDomPayload,
   BrowserLiveEnvelope,
+  BrowserLiveBinaryFramePayload,
   BrowserLiveErrorPayload,
+  BrowserLiveFrameBinaryHeader,
   BrowserLiveFramePayload,
   BrowserLiveHelloPayload,
   BrowserLiveInputMessage,
@@ -1756,10 +1802,21 @@ export type {
   BrowserLiveNetworkPayload,
   BrowserLiveNodePayload,
   BrowserLiveScreenshotPayload,
+  BrowserLiveScrollPayload,
 } from './browser-live.js';
 export {
+  BROWSER_LIVE_BINARY_FRAME_KIND,
   BROWSER_LIVE_HIGH_WATER_FRAMES,
   BROWSER_LIVE_MAX_FRAME_BYTES,
   BROWSER_LIVE_REST_PREFIX,
   BROWSER_LIVE_WS_PATH,
 } from './browser-live.js';
+export {
+  TOOL_OUTPUT_TRUNCATION_MARKER_PREFIX,
+  TOOL_OUTPUT_TRUNCATION_MARKER_SUFFIX,
+  findToolOutputTruncation,
+  findToolOutputTruncationDeep,
+  formatToolOutputTruncationMarker,
+  stripToolOutputTruncation,
+  stripToolOutputTruncationDeep,
+} from './tool-output-truncation.js';

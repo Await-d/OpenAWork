@@ -148,6 +148,48 @@ describe.skipIf(!chromiumAvailable)('BrowserLiveSession chromium 集成测试', 
     await session.close();
   }, 60_000);
 
+  it('target=_blank 的新页面接回当前预览，弹窗不留在后台', async () => {
+    const session = new BrowserLiveSession({ engine: 'chromium' });
+    try {
+      await session.start();
+      await withHtmlServer(
+        '<!doctype html><html><body><a id="blank" href="/next-a" target="_blank">new</a></body></html>',
+        async (url) => {
+          await session.goto(url);
+          const page = session.getCurrentPage();
+          await page.click('#blank');
+          await page.waitForURL((target) => target.pathname === '/next-a', { timeout: 10_000 });
+
+          await expect(session.currentUrl()).resolves.toBe(`${url}next-a`);
+          // 弹窗必须被关掉：内置预览没有标签栏，留着只会变成不可见的内存占用。
+          expect(page.context().pages()).toHaveLength(1);
+        },
+      );
+    } finally {
+      await session.close();
+    }
+  }, 60_000);
+
+  it('window.open 打开的新页面同样接回当前预览', async () => {
+    const session = new BrowserLiveSession({ engine: 'chromium' });
+    try {
+      await session.start();
+      await withHtmlServer('<!doctype html><html><body>popup</body></html>', async (url) => {
+        await session.goto(url);
+        const page = session.getCurrentPage();
+        await page.evaluate(() => {
+          window.open('/next-b');
+        });
+        await page.waitForURL((target) => target.pathname === '/next-b', { timeout: 10_000 });
+
+        await expect(session.currentUrl()).resolves.toBe(`${url}next-b`);
+        expect(page.context().pages()).toHaveLength(1);
+      });
+    } finally {
+      await session.close();
+    }
+  }, 60_000);
+
   describe('已启动会话', () => {
     let session: BrowserLiveSession;
 
@@ -173,6 +215,23 @@ describe.skipIf(!chromiumAvailable)('BrowserLiveSession chromium 集成测试', 
       expect((await session.currentUrl()).startsWith('data:text/html')).toBe(true);
       await session.reload();
       expect(await session.currentTitle()).toBe('live-title');
+    }, 30_000);
+
+    it('scrollMetrics / scrollTo 读取并驱动主文档滚动', async () => {
+      await session.goto(
+        dataUrl('<html><body style="margin:0"><div style="height:3000px">tall</div></body></html>'),
+      );
+
+      const before = await session.scrollMetrics();
+      expect(before.scrollY).toBe(0);
+      expect(before.contentHeight).toBeGreaterThan(before.viewportHeight);
+      expect(before.maxScrollY).toBeGreaterThan(0);
+
+      await session.scrollTo(480);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const after = await session.scrollMetrics();
+      expect(after.scrollY).toBe(480);
     }, 30_000);
 
     it('导航后发出携带标题的 nav 事件', async () => {

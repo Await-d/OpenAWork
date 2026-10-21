@@ -101,6 +101,15 @@ export class SshSftpUnavailableError extends Error {
 }
 
 /**
+ * 远端 sshd 未启用 sftp 子系统时对使用者的统一说明。HTTP 路由（`GET /ssh/files`
+ * → 501）与工具出口（`formatSshSftpUnavailableToolMessage`）共用同一份文案：
+ * 同一个根因若在两个出口各写一套，必然随版本漂移。工具出口另需补充「换哪个
+ * 工具」，故由调用方拼接。
+ */
+export const SSH_SFTP_UNAVAILABLE_MESSAGE =
+  '远端服务器未启用 SFTP 子系统，无法进行文件操作。请在远端 sshd 配置中启用 sftp（Subsystem sftp ...），或改用「远端命令」完成该操作。';
+
+/**
  * 识别 ssh2 的「Unable to start subsystem」错误。ssh2 在这条路径上只给
  * 裸 message（无 `code`），因此只能按文案匹配；大小写与后方子系统名在不同
  * ssh2 版本间略有差异，故只匹配前缀片段。
@@ -411,6 +420,14 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
    * over a single channel, so open once and reuse.
    */
   private sftps = new Map<string, Promise<SFTPWrapper>>();
+  /**
+   * 已确认「远端未启用 SFTP 子系统」的连接。
+   *
+   * 该失败由远端 sshd 配置决定，重试不会恢复，但每次文件操作都会重新 `client.sftp()`
+   * 并吃一次拒绝往返——排障包（2026-10-16）里同一根因在 read/write 上重复命中 6 次。
+   * 记住后直接返回同语义错误，不再白开通道；传输重建 / 断开时清除（远端配置可能已修好）。
+   */
+  private readonly sftpUnavailable = new Set<string>();
   private readonly pending = new Map<
     string,
     { controller: AbortController; promise: Promise<void> }
@@ -943,6 +960,8 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
     this.channelFailures.delete(id);
     this.lastSelfHealAt.delete(id);
     this.selfHeals.delete(id);
+    // 断开 / 重建后必须重新探测：远端 sshd 配置可能已被修复。
+    this.sftpUnavailable.delete(id);
   }
 
   /**
@@ -1016,6 +1035,11 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
   }
 
   private getSftp(id: string): Promise<SFTPWrapper> {
+    // 已知远端未启用 sftp 子系统：不再探测，直接给同语义错误（调用方文案不变）。
+    if (this.sftpUnavailable.has(id)) {
+      return Promise.reject(new SshSftpUnavailableError());
+    }
+
     const cached = this.sftps.get(id);
     if (cached) return cached;
 
@@ -1074,12 +1098,18 @@ export class SSHConnectionManagerImpl implements SSHConnectionManager {
           // 远端未启用 sftp 子系统时 ssh2 只给裸英文文案；归一后路由才能
           // 映射成「非 500 的可操作提示」。注意这条错误不匹配
           // isChannelOpenFailure，因此不会触发无意义的传输重建自愈。
-          reject(normalizeSftpChannelError(err));
+          const normalized = normalizeSftpChannelError(err);
+          // 能力缺失是连接级事实（远端 sshd 配置），记住后不再重复白开通道。
+          if (normalized instanceof SshSftpUnavailableError) {
+            this.sftpUnavailable.add(id);
+          }
+          reject(normalized);
           return;
         }
         // Channel opened successfully; reset the consecutive counter so a
         // transient blip does not accumulate toward a rebuild.
         this.channelFailures.delete(id);
+        this.sftpUnavailable.delete(id);
         track(sftp);
         resolve(sftp);
       });

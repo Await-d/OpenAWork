@@ -28,6 +28,7 @@ import type {
   BrowserLiveNodeAtPointOptions,
   BrowserLiveNodeInfo,
   BrowserLiveScreencastOptions,
+  BrowserLiveScrollMetrics,
   BrowserLiveSelectorStrategy,
   BrowserLiveSessionOptions,
 } from './live-session-types.js';
@@ -71,6 +72,48 @@ const CDP_EXCEPTION_FIFO_LIMIT = 16;
  */
 const CORRELATION_RETRY_LIMIT = 3;
 const CORRELATION_RETRY_DELAY_MS = 10;
+
+/** 「不可滚动」的兜底指标：读取失败 / 页面还没有文档时返回。 */
+const EMPTY_SCROLL_METRICS: BrowserLiveScrollMetrics = {
+  scrollY: 0,
+  maxScrollY: 0,
+  viewportHeight: 0,
+  contentHeight: 0,
+};
+
+/**
+ * 一次求值取回全部滚动几何。
+ *
+ * `document.scrollingElement` 在标准模式下是 `<html>`、quirk 模式下是 `<body>`，
+ * 单取任一个都会在部分页面上得到 0；两个 `scrollHeight` 取最大值最稳。数字统一取整
+ * 并夹到非负，避免 NaN / Infinity 经 WS 传给前端后把滚动条几何算成 NaN。
+ */
+const READ_SCROLL_METRICS_EXPRESSION = `(() => {
+  const root = document.scrollingElement || document.documentElement;
+  const body = document.body;
+  const viewportHeight = Math.max(1, Math.round(window.innerHeight));
+  const contentHeight = Math.max(
+    viewportHeight,
+    Math.round(Math.max(root ? root.scrollHeight : 0, body ? body.scrollHeight : 0)),
+  );
+  return {
+    scrollY: Math.max(0, Math.round(window.scrollY || (root ? root.scrollTop : 0))),
+    viewportHeight,
+    contentHeight,
+    maxScrollY: Math.max(0, contentHeight - viewportHeight),
+  };
+})()`;
+
+/**
+ * 哪些 console 级别值得付 source map 的解析成本。
+ *
+ * 只保留 `error`：用户会为了定位报错去展开调用栈，而 `log` / `info` / `debug` 通常
+ * 只关心输出内容、不看位置。日志密集的页面（dev server 首屏动辄上千条）省下这部分，
+ * 实时画面的帧通道才不会被日志挤掉。
+ */
+function shouldResolveSourceMap(level: BrowserLiveConsoleLevel): boolean {
+  return level === 'error';
+}
 
 function isNavigationContextError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -471,6 +514,8 @@ export class BrowserLiveSession {
   private requestIdCounter = 0;
   private navigationGeneration = 0;
   private navigationSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 弹窗接管串行化：连点多个链接时按出现顺序导航，避免互相打断。 */
+  private popupChain: Promise<void> = Promise.resolve();
 
   private readonly cdpConsoleFifo: CdpConsoleSample[] = [];
   private readonly cdpExceptionFifo: Array<RawStackFrame[] | null> = [];
@@ -503,6 +548,7 @@ export class BrowserLiveSession {
       this.page = page;
       this.cdp = cdp;
       this.attachPageListeners(page);
+      this.attachContextListeners(page);
       this.attachCdpListeners(cdp);
       await cdp.send('Runtime.enable');
     } catch (error) {
@@ -550,6 +596,71 @@ export class BrowserLiveSession {
     await this.requirePage().reload();
   }
 
+  /** 浏览器历史后退（保留 SPA state，与 `goto` 重新加载语义不同）。 */
+  async goBack(): Promise<void> {
+    await this.requirePage().goBack();
+  }
+
+  async goForward(): Promise<void> {
+    await this.requirePage().goForward();
+  }
+
+  /**
+   * 读取页面当前选中文本（`control.copySelection` 用）。
+   *
+   * 实时画面里的选区在远端页面，前端拿不到；这里用一次 `Runtime.evaluate` 取回
+   * 纯文本。任何失败都返回空串——复制失败不该让整条控制通道报错。
+   */
+  async selectedText(): Promise<string> {
+    try {
+      const cdp = this.requireCdp();
+      const evaluation = (await cdp.send('Runtime.evaluate', {
+        expression: 'window.getSelection()?.toString() ?? ""',
+        returnByValue: true,
+      })) as { result?: { value?: unknown } };
+      const value = evaluation.result?.value;
+      return typeof value === 'string' ? value : '';
+    } catch (error) {
+      console.warn('[browser-live-session] failed to read selection', error);
+      return '';
+    }
+  }
+
+  /**
+   * 读取主文档滚动几何（`control.scroll.metrics` 用）。
+   *
+   * 实时画面不渲染浏览器滚动条，前端需要这些数字才能画出一条按比例、可拖动的
+   * 滚动条。任何失败都归一成「不可滚动」，不打断控制通道。
+   */
+  async scrollMetrics(): Promise<BrowserLiveScrollMetrics> {
+    try {
+      const cdp = this.requireCdp();
+      const evaluation = (await cdp.send('Runtime.evaluate', {
+        expression: READ_SCROLL_METRICS_EXPRESSION,
+        returnByValue: true,
+      })) as { result?: { value?: unknown } };
+      return normalizeScrollMetrics(evaluation.result?.value);
+    } catch (error) {
+      console.warn('[browser-live-session] failed to read scroll metrics', error);
+      return EMPTY_SCROLL_METRICS;
+    }
+  }
+
+  /**
+   * 把主文档滚动到指定位置（`control.scrollTo` 用）。
+   *
+   * 用 `behavior: 'instant'` 覆盖页面可能设置的 `scroll-behavior: smooth`：拖滚动条
+   * 需要的是「拖到哪就停在哪」，平滑滚动会让拖拽手感变成追尾。
+   */
+  async scrollTo(y: number): Promise<void> {
+    const cdp = this.requireCdp();
+    const top = Number.isFinite(y) ? Math.max(0, Math.round(y)) : 0;
+    await cdp.send('Runtime.evaluate', {
+      expression: `window.scrollTo({ top: ${top}, left: window.scrollX, behavior: 'instant' })`,
+      returnByValue: true,
+    });
+  }
+
   async currentUrl(): Promise<string> {
     return this.requirePage().url();
   }
@@ -566,8 +677,10 @@ export class BrowserLiveSession {
     }
     const cdp = this.requireCdp();
     await cdp.send('Page.startScreencast', {
-      format: 'jpeg',
-      quality: options.quality,
+      format: options.format ?? 'jpeg',
+      ...(options.format !== 'png' && options.quality !== undefined
+        ? { quality: options.quality }
+        : {}),
       maxWidth: options.maxWidth,
       maxHeight: options.maxHeight,
       everyNthFrame: options.everyNthFrame,
@@ -606,7 +719,7 @@ export class BrowserLiveSession {
 
   async clearDeviceMetricsOverride(): Promise<void> {
     await this.requireCdp().send('Emulation.clearDeviceMetricsOverride');
-    await this.rearmScreencastAfterDeviceChange();
+    await this.rearmScreencast();
   }
 
   /**
@@ -621,7 +734,13 @@ export class BrowserLiveSession {
     if (!this.screencastActive) return;
 
     const convergence = new ScreencastConvergence({
-      target: { width: Math.round(metrics.width), height: Math.round(metrics.height) },
+      target: {
+        width: Math.round(metrics.width),
+        height: Math.round(metrics.height),
+        // 只有 maxWidth / maxHeight 参与期望位图推算：起流盒子由调用方定档，
+        // 判定必须与它一致，否则位图会「永远不等于目标尺寸」而空转到预算耗尽。
+        bitmapBounds: this.screencastOptions,
+      },
       rearm: () => this.startScreencast(this.screencastOptions),
       isActive: () => this.screencastActive && this.isStarted(),
     });
@@ -642,7 +761,14 @@ export class BrowserLiveSession {
    * damage，画面就永远停在覆写前的旧尺寸。`Page.startScreencast` 是幂等的，重发会
    * 立即按当前（新）视口推一帧并恢复后续产帧。
    */
-  private async rearmScreencastAfterDeviceChange(): Promise<void> {
+  /**
+   * 重新武装 screencast（沿用当前帧盒 / 质量），**立即产出一帧**。
+   *
+   * `Page.startScreencast` 幂等；重发会按当前视口立刻推一帧，因此这是「静态页面
+   * 不再产生 damage」时唯一能主动补帧的手段。设备覆写与客户端的 `screencast.refresh`
+   * 共用这一份实现。
+   */
+  async rearmScreencast(): Promise<void> {
     if (!this.screencastActive) return;
     await this.startScreencast(this.screencastOptions);
   }
@@ -690,7 +816,19 @@ export class BrowserLiveSession {
           ...(event.windowsVirtualKeyCode !== undefined
             ? { windowsVirtualKeyCode: event.windowsVirtualKeyCode }
             : {}),
+          // 修饰键位掩码：缺了它，`Shift+Enter` / `Shift+方向键` 到页面就变味了。
+          ...(event.modifiers !== undefined ? { modifiers: event.modifiers } : {}),
+          // 编辑命令（selectAll / undo / redo / cut）：CDP 不会因为按键自动执行
+          // 浏览器原生编辑行为，必须显式带上。
+          ...(event.commands !== undefined && event.commands.length > 0
+            ? { commands: event.commands }
+            : {}),
         });
+        return;
+      }
+      case 'text': {
+        // 输入法组合结果 / 粘贴：一条完整插入，避免逐字符 `char` 把词拆散。
+        await cdp.send('Input.insertText', { text: event.text });
         return;
       }
       default: {
@@ -847,6 +985,39 @@ export class BrowserLiveSession {
     await automation.close();
   }
 
+  /**
+   * 监听上下文级的新页面：`target=_blank` 链接与 `window.open` 都会在这里出现。
+   *
+   * 实时画面只绑定一个 `Page` + 一个 CDP session，新 target 不会自动进入画面——
+   * 用户看到的就是「点了没反应」。内置预览没有标签栏，因此把弹窗的 URL 接回
+   * 当前页面（等价于「在当前标签打开」），再关闭弹窗，避免后台堆积。
+   */
+  private attachContextListeners(page: Page): void {
+    const context = page.context();
+    const onPage = (popup: Page): void => {
+      // `context.newPage()`（自动化主动开页）没有 opener，不能当用户弹窗处理。
+      if (popup.opener() === null) return;
+      this.popupChain = this.popupChain
+        .then(() => this.adoptPopup(popup))
+        .catch((error: unknown) => {
+          console.warn('[browser-live-session] failed to adopt popup', error);
+        });
+    };
+    context.on('page', onPage);
+    this.detachers.push(() => context.off('page', onPage));
+  }
+
+  /** 把弹窗导航接回当前预览页；串行执行（见 `popupChain`）。 */
+  private async adoptPopup(popup: Page): Promise<void> {
+    const url = await waitForPopupUrl(popup);
+    await popup.close().catch(() => undefined);
+    if (url === null) return;
+    const current = this.page;
+    if (!current || current.isClosed()) return;
+    if (current.url() === url) return;
+    await current.goto(url, { waitUntil: 'load' }).catch(() => undefined);
+  }
+
   private attachPageListeners(page: Page): void {
     const onConsole = (message: ConsoleMessage): void => {
       this.pendingConsoleEvents.push({
@@ -901,13 +1072,19 @@ export class BrowserLiveSession {
     const onScreencastFrame = (payload: ScreencastFramePayload): void => {
       const convergence = this.deviceConvergence;
       if (convergence) {
-        const bitmap = readJpegDimensions(payload.data);
-        convergence.noteFrame({
-          metadataWidth: payload.metadata.deviceWidth,
-          metadataHeight: payload.metadata.deviceHeight,
-          bitmapWidth: bitmap?.width ?? null,
-          bitmapHeight: bitmap?.height ?? null,
-        });
+        if (convergence.isSettled()) {
+          // 收敛结束后立刻摘掉控制器：`readJpegDimensions` 要对整帧 base64 做一次
+          // Buffer 解码（O(帧大小)），每帧都跑纯属浪费，帧越大越伤。
+          this.deviceConvergence = null;
+        } else {
+          const bitmap = readJpegDimensions(payload.data);
+          convergence.noteFrame({
+            metadataWidth: payload.metadata.deviceWidth,
+            metadataHeight: payload.metadata.deviceHeight,
+            bitmapWidth: bitmap?.width ?? null,
+            bitmapHeight: bitmap?.height ?? null,
+          });
+        }
       }
 
       this.emit({
@@ -921,6 +1098,8 @@ export class BrowserLiveSession {
         scrollOffsetY: payload.metadata.scrollOffsetY,
         frameSessionId: payload.sessionId,
         timestamp: payload.metadata.timestamp ?? Date.now(),
+        // 带上产出这一帧时的页面代次：客户端据此丢弃「属于旧文档」的迟到帧。
+        generation: this.navigationGeneration,
       });
     };
     cdp.on('Page.screencastFrame', onScreencastFrame);
@@ -1099,6 +1278,14 @@ export class BrowserLiveSession {
     }
   }
 
+  /**
+   * 构造 console 事件。
+   *
+   * source map **只对 error 级别**解析：解析要抓脚本、抓 map、跑 `SourceMap.findEntry`，
+   * 一次最多 12 帧；而 `log` / `info` / `debug` 在真实页面上是成百上千条的量级，
+   * 每条都解析会让网关 CPU 与 WS 带宽一起被日志吃掉，实时画面的帧率随之掉下来。
+   * 错误日志才是用户真正会展开看位置的那一档，其余保留 CDP 原始栈。
+   */
   private async buildConsoleEvent(
     pending: PendingConsoleEvent,
     stack: RawStackFrame[] | null | undefined,
@@ -1108,10 +1295,14 @@ export class BrowserLiveSession {
       level: pending.level,
       text: pending.text,
       timestamp: pending.timestamp,
+      // 带上产出这条日志时的页面代次：客户端据此丢弃「属于上一个页面」的迟到日志。
+      generation: this.navigationGeneration,
     };
     if (stack && stack.length > 0) {
       event.stack = stack;
-      event.sourceMappedStack = await resolveStackFrames(stack);
+      if (shouldResolveSourceMap(pending.level)) {
+        event.sourceMappedStack = await resolveStackFrames(stack);
+      }
     }
     return event;
   }
@@ -1169,6 +1360,7 @@ export class BrowserLiveSession {
       url: request.url(),
       resourceType: request.resourceType(),
       requestHeadersSanitized: sanitizeHeaders(request.headers()),
+      generation: this.navigationGeneration,
     });
   }
 
@@ -1200,6 +1392,7 @@ export class BrowserLiveSession {
       resourceType: request.resourceType(),
       durationMs: startedAt === undefined ? undefined : Date.now() - startedAt,
       ...(failure ? { errorText: failure.errorText } : {}),
+      generation: this.navigationGeneration,
     });
   }
 
@@ -1234,7 +1427,9 @@ export class BrowserLiveSession {
     const title = await this.readTitleAfterNavigation(page);
 
     if (generation !== this.navigationGeneration) return;
-    this.emit({ type: 'nav', url, title, timestamp: Date.now() });
+    // 带上**精确**代次：客户端据此设置可接受门槛，不必靠「上一代 + 1」猜测
+    // （猜高了会把后续所有帧拒收，画面永久空白）。
+    this.emit({ type: 'nav', url, title, timestamp: Date.now(), generation });
   }
 
   private async readTitleAfterNavigation(page: Page): Promise<string> {
@@ -1364,4 +1559,47 @@ async function closeQuietly(automation: DesktopBrowserAutomation): Promise<void>
   } catch (error) {
     console.warn('[browser-live-session] failed to close automation after start failure', error);
   }
+}
+
+/**
+ * 等弹窗拿到真实 URL。
+ *
+ * `window.open()` 刚创建时往往还是 `about:blank`，目标地址要等一次导航才出现。
+ * 轮询 `page.url()` 比等 `framenavigated` 更稳：同步 `window.open(url)` 时事件
+ * 可能在我们挂上监听之前就已经发生了。
+ */
+/** 把 JS 求值结果归一成合法的滚动指标（字段缺失 / 非数字一律按 0 处理）。 */
+function normalizeScrollMetrics(value: unknown): BrowserLiveScrollMetrics {
+  if (typeof value !== 'object' || value === null) {
+    return EMPTY_SCROLL_METRICS;
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    scrollY: readNonNegativeNumber(record['scrollY']),
+    maxScrollY: readNonNegativeNumber(record['maxScrollY']),
+    viewportHeight: readNonNegativeNumber(record['viewportHeight']),
+    contentHeight: readNonNegativeNumber(record['contentHeight']),
+  };
+}
+
+function readNonNegativeNumber(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.round(value));
+}
+
+async function waitForPopupUrl(page: Page, timeoutMs = 3_000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const url = page.url();
+      if (url.length > 0 && url !== 'about:blank') {
+        return url;
+      }
+    } catch {
+      // 页面在等待期间被关闭：下面的 sleep 会继续到超时，最终返回 null。
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return null;
 }

@@ -190,6 +190,42 @@ describe('AgentIgnoreManager 安全模板与否定规则', () => {
     expect(manager.shouldIgnore(join(root, 'sub', '.git', 'config'))).toBe(true);
     expect(manager.shouldIgnore(join(root, '.git', 'config'))).toBe(true);
   });
+
+  it('bash 超限输出的落盘文件被豁免（.gitignore 命中 .openAwork/ 也不拦截）', async () => {
+    // 模拟本仓库 `.gitignore` 的 `.openAwork/` 规则。
+    const manager = await createManager({ gitignore: ['.openAwork/'] });
+    expect(
+      manager.shouldIgnore(
+        join(root, '.openAwork', 'tool-output', 'bash_1792301799506_mix9n4.txt'),
+      ),
+    ).toBe(false);
+    expect(manager.shouldIgnore(join(root, '.openAwork', 'other-state.json'))).toBe(true);
+  });
+
+  it('tool-output 豁免只针对 bash_*.txt 命名，且不绕过内置敏感规则', async () => {
+    // 目录被 `.gitignore` 忽略（本仓库的真实形态）时，只有 bash 落盘文件逃逸出去。
+    const manager = await createManager({ gitignore: ['.openAwork/'] });
+    expect(manager.shouldIgnore(join(root, '.openAwork', 'tool-output', 'bash_1_ab12cd.txt'))).toBe(
+      false,
+    );
+    // 非该命名模式的文件不豁免：目录不应整类放行，避免敏感文件借目录绕过守卫。
+    expect(manager.shouldIgnore(join(root, '.openAwork', 'tool-output', 'notes.txt'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, '.openAwork', 'tool-output', '.env'))).toBe(true);
+    expect(manager.shouldIgnore(join(root, '.openAwork', 'tool-output', 'app.db'))).toBe(true);
+  });
+
+  it('agentignore 显式规则可对 tool-output 内的 bash 落盘文件恢复忽略', async () => {
+    const manager = await createManager({
+      gitignore: ['.openAwork/'],
+      agentignore: ['tool-output/bash_too-noisy.txt'],
+    });
+    expect(manager.shouldIgnore(join(root, '.openAwork', 'tool-output', 'bash_ok.txt'))).toBe(
+      false,
+    );
+    expect(
+      manager.shouldIgnore(join(root, '.openAwork', 'tool-output', 'bash_too-noisy.txt')),
+    ).toBe(true);
+  });
 });
 
 describe('忽略模式编译：尾部斜杠、globstar 与字符类', () => {

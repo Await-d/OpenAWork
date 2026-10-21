@@ -199,6 +199,20 @@ export const CATALOG_DEFAULT_MODELS: Record<CatalogProviderType, AIModelConfig[]
       outputPricePerMillion: 0.6,
     },
     {
+      id: 'gpt-image-2.5-flare',
+      label: 'GPT Image 2.5 Flare',
+      enabled: true,
+      supportsImageGeneration: true,
+      supportsImageGeneration4K: false,
+    },
+    {
+      id: 'gpt-image-2.5-sunburst',
+      label: 'GPT Image 2.5 Sunburst',
+      enabled: true,
+      supportsImageGeneration: true,
+      supportsImageGeneration4K: false,
+    },
+    {
       id: 'gpt-image-2',
       label: 'GPT Image 2',
       enabled: true,

@@ -1,5 +1,6 @@
 import { Component, useState, type ErrorInfo, type ReactNode } from 'react';
 import { color, font, radius, spacing } from '../tokens.js';
+import { isDynamicImportFailure } from './dynamic-import-failure.js';
 
 export interface AppErrorBoundaryProps {
   children: ReactNode;
@@ -116,6 +117,16 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
   }
 
   private handleRetry = (): void => {
+    // 懒加载失败时「重试」必须走整页刷新：`React.lazy` 把 rejected promise 缓存在
+    // 组件实例里，重挂载子树拿到的仍是同一个错误，按钮点了等于没点。而整页刷新
+    // 会重新拉取模块图，Vite 依赖重建 / 发布换 chunk 造成的失败都能自愈。
+    if (this.state.error && isDynamicImportFailure(this.state.error)) {
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+        return;
+      }
+    }
+
     this.setState((prev) => ({
       error: null,
       componentStack: null,

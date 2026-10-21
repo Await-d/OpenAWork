@@ -3,10 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ScreencastConvergence,
   readJpegDimensions,
+  type ScreencastConvergenceTarget,
   type ScreencastFrameDimensions,
 } from './screencast-convergence.js';
 
 const TARGET = { width: 1280, height: 800 };
+
+/** 起流时设了位图缩放上限的目标：1920×1080 的视口 + 最长边 1280 的盒子。 */
+const SCALED_TARGET: ScreencastConvergenceTarget = {
+  width: 1920,
+  height: 1080,
+  bitmapBounds: { maxWidth: 1280, maxHeight: 1280 },
+};
 
 function convergedFrame(): ScreencastFrameDimensions {
   return { metadataWidth: 1280, metadataHeight: 800, bitmapWidth: 1280, bitmapHeight: 800 };
@@ -22,11 +30,17 @@ function staleFrame(): ScreencastFrameDimensions {
   return { metadataWidth: 768, metadataHeight: 1024, bitmapWidth: 768, bitmapHeight: 1024 };
 }
 
-function createHarness(options: { active?: boolean; rearm?: () => Promise<void> } = {}) {
+function createHarness(
+  options: {
+    active?: boolean;
+    rearm?: () => Promise<void>;
+    target?: ScreencastConvergenceTarget;
+  } = {},
+) {
   const rearm = vi.fn(options.rearm ?? (() => Promise.resolve()));
   let active = options.active ?? true;
   const convergence = new ScreencastConvergence({
-    target: TARGET,
+    target: options.target ?? TARGET,
     rearm,
     isActive: () => active,
   });
@@ -154,6 +168,54 @@ describe('ScreencastConvergence', () => {
     convergence.dispose();
     convergence.noteFrame(bitmapLaggingFrame());
     await vi.advanceTimersByTimeAsync(5_000);
+    expect(rearm).toHaveBeenCalledTimes(1);
+  });
+
+  it('设了位图缩放上限时，缩进盒子里的帧即视为收敛', async () => {
+    const { convergence, rearm } = createHarness({ target: SCALED_TARGET });
+    convergence.start();
+    expect(rearm).toHaveBeenCalledTimes(1);
+
+    // 1920×1080 在 1280×1280 的盒子里等比缩到 1280×720（只缩不放）。
+    convergence.noteFrame({
+      metadataWidth: 1920,
+      metadataHeight: 1080,
+      bitmapWidth: 1280,
+      bitmapHeight: 720,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(rearm).toHaveBeenCalledTimes(1);
+  });
+
+  it('设了位图缩放上限时，仍按视口原尺寸来的位图判为未收敛', async () => {
+    const { convergence, rearm } = createHarness({ target: SCALED_TARGET });
+    convergence.start();
+
+    convergence.noteFrame({
+      metadataWidth: 1920,
+      metadataHeight: 1080,
+      bitmapWidth: 1920,
+      bitmapHeight: 1080,
+    });
+    await vi.advanceTimersByTimeAsync(150);
+    expect(rearm).toHaveBeenCalledTimes(2);
+    convergence.dispose();
+  });
+
+  it('缩放边界取整有 1px 出入时仍按收敛处理', async () => {
+    const { convergence, rearm } = createHarness({
+      target: { width: 1280, height: 800, bitmapBounds: { maxWidth: 1280, maxHeight: 720 } },
+    });
+    convergence.start();
+
+    // 期望位图 1152×720；Chromium 侧落地取整与推算可能差 1px。
+    convergence.noteFrame({
+      metadataWidth: 1280,
+      metadataHeight: 800,
+      bitmapWidth: 1151,
+      bitmapHeight: 720,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(rearm).toHaveBeenCalledTimes(1);
   });
 });

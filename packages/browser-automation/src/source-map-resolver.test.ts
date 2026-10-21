@@ -82,7 +82,7 @@ beforeEach(() => {
 });
 
 describe('resolveStackFrames', () => {
-  it('resolves an external source map and exposes sourcesContent-backed source', async () => {
+  it('resolves an external source map to source positions (no source text on the wire)', async () => {
     const sourcesContent = ['export const a = 1;\nconsole.error("two");\n'];
     const map = {
       version: 3,
@@ -113,7 +113,8 @@ describe('resolveStackFrames', () => {
     expect(frame?.sourceName).toBe('orig.ts');
     expect(frame?.sourceLine).toBe(1);
     expect(frame?.sourceColumn).toBe(0);
-    expect(frame?.source).toBe(sourcesContent[0]);
+    // 源码全文**不下发**：一条日志最多 12 帧，每帧带一份源文件会把 WS 带宽与主线程吃光。
+    expect(frame).not.toHaveProperty('source');
     // 外部 map 路径相对脚本 URL（`/assets/bundle.js`）解析。
     expect(requestCounts.get('/assets/bundle.js.map')).toBe(1);
   });
@@ -142,7 +143,7 @@ describe('resolveStackFrames', () => {
     expect(frame?.sourceName).toBe('inline.ts');
     expect(frame?.sourceLine).toBe(0);
     expect(frame?.sourceColumn).toBe(0);
-    expect(frame?.source).toBe(sourcesContent[0]);
+    expect(frame).not.toHaveProperty('source');
   });
 
   it('falls back to mapped:false when the script has no source map', async () => {
@@ -155,7 +156,7 @@ describe('resolveStackFrames', () => {
 
     const frame = resolved[0];
     expect(frame?.mapped).toBe(false);
-    expect(frame?.source).toBeNull();
+    expect(frame).not.toHaveProperty('source');
     expect(frame?.sourceLine).toBeNull();
     expect(frame?.sourceColumn).toBeNull();
     expect(frame?.sourceName).toBeNull();
@@ -172,7 +173,7 @@ describe('resolveStackFrames', () => {
     expect(resolved).toHaveLength(4);
     for (const frame of resolved) {
       expect(frame.mapped).toBe(false);
-      expect(frame.source).toBeNull();
+      expect(frame).not.toHaveProperty('source');
     }
     expect(totalRequests()).toBe(0);
   });
@@ -203,7 +204,7 @@ describe('resolveStackFrames', () => {
     );
 
     expect(resolved[0]?.mapped).toBe(false);
-    expect(resolved[0]?.source).toBeNull();
+    expect(resolved[0]).not.toHaveProperty('source');
   });
 
   it('degrades gracefully on timeout', async () => {
@@ -213,7 +214,7 @@ describe('resolveStackFrames', () => {
     );
 
     expect(resolved[0]?.mapped).toBe(false);
-    expect(resolved[0]?.source).toBeNull();
+    expect(resolved[0]).not.toHaveProperty('source');
     expect(requestCounts.get(HANG_PATH)).toBe(1);
   });
 

@@ -17,6 +17,8 @@ export type BrowserLiveEvent =
       stack?: RawStackFrame[];
       /** 套用 dev server source map 后的栈；仅在拿到原始栈时出现。 */
       sourceMappedStack?: ResolvedStackFrame[];
+      /** 产出该日志时的页面代次（主文档导航自增），供客户端丢弃过期页面的日志。 */
+      generation?: number;
     }
   | {
       type: 'pageerror';
@@ -26,6 +28,8 @@ export type BrowserLiveEvent =
       stack?: RawStackFrame[];
       /** 套用 source map 后的异常栈；仅在拿到原始栈时出现。 */
       sourceMappedStack?: ResolvedStackFrame[];
+      /** 产出该异常时的页面代次（同 console 的 `generation`）。 */
+      generation?: number;
     }
   | {
       type: 'network';
@@ -40,8 +44,10 @@ export type BrowserLiveEvent =
       errorText?: string;
       requestHeadersSanitized?: Record<string, string>;
       responseHeadersSanitized?: Record<string, string>;
+      /** 该请求所属的页面代次（同 console 的 `generation`）。 */
+      generation?: number;
     }
-  | { type: 'nav'; url: string; title: string; timestamp: number }
+  | { type: 'nav'; url: string; title: string; timestamp: number; generation: number }
   | {
       type: 'screencastFrame';
       data: string;
@@ -53,6 +59,8 @@ export type BrowserLiveEvent =
       scrollOffsetY: number;
       frameSessionId: number;
       timestamp: number;
+      /** 该帧所属页面代次（主文档导航时自增），供客户端丢弃过期页面的帧。 */
+      generation: number;
     }
   | { type: 'screencastEnd' };
 
@@ -136,6 +144,20 @@ export type BrowserLiveInputEvent =
       text?: string;
       code?: string;
       windowsVirtualKeyCode?: number;
+      /** CDP 修饰键位掩码：Alt=1、Ctrl=2、Meta=4、Shift=8。 */
+      modifiers?: number;
+      /**
+       * Blink 级编辑命令（`selectAll` / `undo` / `redo` / `cut` …）。
+       *
+       * CDP 的 `dispatchKeyEvent` 只负责把按键交给页面，浏览器原生编辑行为
+       * （全选、撤销栈、剪切）不会因此发生，必须通过 `commands` 显式触发。
+       */
+      commands?: string[];
+    }
+  | {
+      /** 输入法组合结果 / 粘贴：一条完整文本插入（`Input.insertText`）。 */
+      kind: 'text';
+      text: string;
     };
 
 export interface BrowserLiveSessionOptions {
@@ -149,7 +171,21 @@ export interface BrowserLiveScreencastOptions {
   quality?: number;
   maxWidth?: number;
   maxHeight?: number;
+  format?: 'jpeg' | 'png';
   everyNthFrame?: number;
+}
+
+/**
+ * 主文档滚动几何（`control.scroll.metrics` 的回包）。
+ *
+ * 实时画面是位图，浏览器自己的滚动条不会出现在截图里；客户端靠这份数据在本地画
+ * 一条按比例、可拖动的滚动条。`maxScrollY` 为 0 表示页面不可滚动。
+ */
+export interface BrowserLiveScrollMetrics {
+  scrollY: number;
+  maxScrollY: number;
+  viewportHeight: number;
+  contentHeight: number;
 }
 
 export interface BrowserLiveDeviceMetrics {

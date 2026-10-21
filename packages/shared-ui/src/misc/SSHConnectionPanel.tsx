@@ -24,6 +24,7 @@ export interface SSHConnectionPanelProps {
   onAdd?: (entry: Omit<SSHConnectionEntry, 'id' | 'status'>) => void;
   onConnect?: (id: string) => void;
   onDisconnect?: (id: string) => void;
+  onDelete?: (id: string) => void;
   onBindSession?: (connectionId: string, sessionId: string) => void;
   activeSessionId?: string;
 }
@@ -52,6 +53,7 @@ export function SSHConnectionPanel({
   onAdd,
   onConnect,
   onDisconnect,
+  onDelete,
   onBindSession,
   activeSessionId,
 }: SSHConnectionPanelProps) {
@@ -374,6 +376,28 @@ export function SSHConnectionPanel({
                 }}
               >
                 绑定
+              </button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                aria-label={`删除 ${conn.name}`}
+                onClick={() => {
+                  if (globalThis.window.confirm(`确认删除 SSH 连接 ${conn.name} 吗？`)) {
+                    onDelete(conn.id);
+                  }
+                }}
+                style={{
+                  fontSize: 11,
+                  padding: '2px 7px',
+                  border: '1px solid color-mix(in srgb, var(--danger, #f87171) 40%, transparent)',
+                  color: 'var(--danger, #f87171)',
+                  background: 'none',
+                  borderRadius: 3,
+                  cursor: 'pointer',
+                }}
+              >
+                删除
               </button>
             )}
           </div>

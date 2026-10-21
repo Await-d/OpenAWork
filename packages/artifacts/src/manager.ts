@@ -38,6 +38,55 @@ export class ArtifactManagerImpl implements ArtifactManager {
     return full;
   }
 
+  get(artifactId: string): RunArtifact | undefined {
+    return this.store.get(artifactId);
+  }
+
+  remove(artifactId: string): boolean {
+    return this.removeMany([artifactId]) > 0;
+  }
+
+  removeMany(artifactIds: Iterable<string>): number {
+    const removedPaths: string[] = [];
+    let removed = 0;
+    for (const artifactId of artifactIds) {
+      const artifact = this.store.get(artifactId);
+      if (!artifact) {
+        continue;
+      }
+      this.store.delete(artifactId);
+      removed += 1;
+      if (artifact.path) {
+        removedPaths.push(artifact.path);
+      }
+    }
+    if (removed === 0) {
+      return 0;
+    }
+    // 索引是唯一真相源，且一次删除只落盘一次——批量清理（队列清空 / 会话删除）逐个
+    // 调 `remove` 会退化成 O(n²) 的全量重写。落盘失败会抛出，交由调用方决定重试策略；
+    // 此时内存里已删、磁盘未更新，重启后会「复活」，因此不应吞掉这个错误。
+    this.persistArtifacts();
+    // 磁盘文件删除是**尽力而为**：索引已先行更新，文件残留只是存储浪费，不该反向把
+    // 删除判为失败——否则调用方（如待发队列附件回收）会重试一个永远不会成功的删除。
+    // ENOENT（文件已被手工清掉）同样按成功处理。
+    for (const path of removedPaths) {
+      try {
+        unlinkSync(path);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') {
+          console.warn(
+            `[artifacts] 删除产物文件失败（索引已清理）：${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+    }
+    return removed;
+  }
+
   async open(artifactId: string): Promise<void> {
     const artifact = this.store.get(artifactId);
     if (!artifact?.path) {
