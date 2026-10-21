@@ -1,6 +1,6 @@
 {
   "name": "@openAwork/desktop",
-  "version": "1.2.9",
+  "version": "1.3.0",
   "private": true,
   "scripts": {
     "dev": "bun run tauri dev",
