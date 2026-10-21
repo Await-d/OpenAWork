@@ -24,46 +24,63 @@ import {
   withTempEnv,
 } from './task-verification-helpers.js';
 
-function extractUpstreamReasoningEffort(body: unknown): string | null {
+/** 档位 → 思考预算基准值（与 `extractUpstreamReasoningEffort` 的映射同源）。 */
+const THINKING_BUDGET_BY_LEVEL = {
+  minimal: 1_024,
+  low: 4_096,
+  medium: 8_192,
+  high: 16_000,
+  xhigh: 31_999,
+} as const;
+
+/** Anthropic 协议允许的最小思考预算（`MIN_THINKING_BUDGET`）。 */
+const MIN_THINKING_BUDGET = 1_024;
+
+/** 读上游请求体里实际下发的思考预算；未下发思考时为 null。 */
+function readUpstreamThinkingBudget(body: unknown): number | null {
   if (!body || typeof body !== 'object') {
     return null;
   }
 
-  const record = body as Record<string, unknown>;
-  if (typeof record['reasoning_effort'] === 'string') {
-    return record['reasoning_effort'];
-  }
-
-  const reasoning = record['reasoning'];
-  if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning)) {
-    const thinking = record['thinking'];
-    if (!thinking || typeof thinking !== 'object' || Array.isArray(thinking)) {
-      return null;
-    }
-
-    const budgetTokens = (thinking as Record<string, unknown>)['budget_tokens'];
-    if (budgetTokens === 1024) {
-      return 'minimal';
-    }
-    if (budgetTokens === 4096) {
-      return 'low';
-    }
-    if (budgetTokens === 8192) {
-      return 'medium';
-    }
-    if (budgetTokens === 16000 || budgetTokens === 16384) {
-      return 'high';
-    }
-    if (budgetTokens === 31999) {
-      return 'xhigh';
-    }
-
+  const thinking = (body as Record<string, unknown>)['thinking'];
+  if (!thinking || typeof thinking !== 'object' || Array.isArray(thinking)) {
     return null;
   }
 
-  return typeof (reasoning as Record<string, unknown>)['effort'] === 'string'
-    ? ((reasoning as Record<string, unknown>)['effort'] as string)
-    : null;
+  const budget = (thinking as Record<string, unknown>)['budget_tokens'];
+  return typeof budget === 'number' ? budget : null;
+}
+
+/**
+ * 断言子会话落下的思考档位。
+ *
+ * 思考预算必须 ≤ 输出上限的一半（`fitThinkingBudget`），而子会话继承的输出上限
+ * 常常只有几百到几千 token——此时**任何**档位都会被压到下半区的钳制值。直接比
+ * 档位名会把「钳制」误判成「档位丢失」，让整条 verification 在低上限配置下永久
+ * 红灯。因此这里按同一规则换算期望预算，再与实际上发的值比对。
+ *
+ * 副作用要说清：上限很小时不同档位会收敛到同一个钳制值，断言只再保证「思考
+ * 配置存在且预算合法」，无法区分档位高低——这是输出上限的物理约束，不是实现问题。
+ */
+function assertThinkingLevel(
+  body: unknown,
+  level: keyof typeof THINKING_BUDGET_BY_LEVEL,
+  message: string,
+): void {
+  const maxTokens =
+    body && typeof body === 'object'
+      ? ((body as Record<string, unknown>)['max_tokens'] as number | undefined)
+      : undefined;
+  const budget = THINKING_BUDGET_BY_LEVEL[level];
+  const expectedBudget =
+    typeof maxTokens !== 'number' || budget <= maxTokens / 2
+      ? budget
+      : Math.max(MIN_THINKING_BUDGET, Math.floor(maxTokens / 2));
+
+  assert(
+    readUpstreamThinkingBudget(body) === expectedBudget,
+    `${message}（期望预算 ${expectedBudget}，实际 ${String(readUpstreamThinkingBudget(body))}）`,
+  );
 }
 
 async function main(): Promise<void> {
@@ -295,8 +312,9 @@ async function main(): Promise<void> {
               const upstreamBody = JSON.parse(fetchCalls[0] ?? '{}') as {
                 tools?: Array<{ function?: { name?: string } }>;
               };
-              assert(
-                extractUpstreamReasoningEffort(upstreamBody) === 'medium',
+              assertThinkingLevel(
+                upstreamBody,
+                'medium',
                 'delegated child session should always carry a valid default thinking level',
               );
               const visibleToolNames = Array.isArray(upstreamBody.tools)
@@ -612,8 +630,9 @@ async function main(): Promise<void> {
               }, 'delegated child task with explicit thinking should complete automatically');
 
               const preservedUpstreamBody = JSON.parse(fetchCalls[2] ?? '{}');
-              assert(
-                extractUpstreamReasoningEffort(preservedUpstreamBody) === 'medium',
+              assertThinkingLevel(
+                preservedUpstreamBody,
+                'medium',
                 'delegated child session should derive its thinking level independently of the parent',
               );
 
@@ -656,8 +675,9 @@ async function main(): Promise<void> {
                 const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
                 return graph.tasks[disabledThinkingOutput.taskId]?.status === 'completed';
               }, 'delegated child task should complete when the parent disabled thinking');
-              assert(
-                extractUpstreamReasoningEffort(JSON.parse(fetchCalls[3] ?? '{}')) === 'medium',
+              assertThinkingLevel(
+                JSON.parse(fetchCalls[3] ?? '{}'),
+                'medium',
                 'delegated child session should still carry a valid thinking level when the parent disabled thinking',
               );
 
@@ -685,8 +705,9 @@ async function main(): Promise<void> {
                 const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
                 return graph.tasks[categoryOutput.taskId]?.status === 'completed';
               }, 'delegated child task should complete for a category run');
-              assert(
-                extractUpstreamReasoningEffort(JSON.parse(fetchCalls[4] ?? '{}')) === 'high',
+              assertThinkingLevel(
+                JSON.parse(fetchCalls[4] ?? '{}'),
+                'high',
                 'delegated child session should derive its thinking level from the task category intensity',
               );
 
@@ -717,8 +738,9 @@ async function main(): Promise<void> {
                 const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
                 return graph.tasks[unmatchedCategoryOutput.taskId]?.status === 'completed';
               }, 'delegated child task should complete for an unmatched category');
-              assert(
-                extractUpstreamReasoningEffort(JSON.parse(fetchCalls[5] ?? '{}')) === 'medium',
+              assertThinkingLevel(
+                JSON.parse(fetchCalls[5] ?? '{}'),
+                'medium',
                 'delegated child session should fall back to a default thinking level for an unmatched category',
               );
 
