@@ -91,17 +91,56 @@ export function desktopGatewayModeForUrl(gatewayUrl: string): DesktopGatewayMode
   return isLocalGatewayUrl(gatewayUrl) ? 'local' : 'remote';
 }
 
+/**
+ * 最近一次本地原生探测的失败原因。
+ *
+ * 原生命令只回 `bool` 时，「IPC 没就绪 / 被代理拦截 / 返回非 2xx / 连接被拒」
+ * 全都塌缩成一个 `false`，失败文案只能写「健康检查未通过」，排查全靠猜。把原因
+ * 留下来，供调用方拼进错误提示。
+ */
+let lastLocalProbeError: string | null = null;
+
+export function readLastLocalGatewayProbeError(): string | null {
+  return lastLocalProbeError;
+}
+
 export async function isGatewayHealthy(gatewayUrl: string): Promise<boolean> {
   try {
     const url = normalizeGatewayUrl(gatewayUrl);
     if (isTauriRuntime() && isLocalGatewayUrl(url)) {
-      return await invokeTauri<boolean>('check_local_gateway_health', {
-        port: readGatewayPortFromUrl(url),
-      });
+      const port = readGatewayPortFromUrl(url);
+      try {
+        const nativeHealthy = await invokeTauri<boolean>('check_local_gateway_health', { port });
+        if (nativeHealthy) {
+          lastLocalProbeError = null;
+          return true;
+        }
+        lastLocalProbeError = '原生探测判定网关不健康';
+      } catch (error) {
+        lastLocalProbeError = error instanceof Error ? error.message : String(error);
+      }
+
+      // 原生通道没给出「健康」时，再用 HTTP 探一次。两条通道指向同一个
+      // `/health`，任一成功即说明网关确实在服务：原生侧可能因为 IPC 未就绪、
+      // 旧二进制仍带系统代理、或 Rust 侧探测实现差异而误判，不该让用户因此进不去。
+      let httpHealthy = false;
+      try {
+        httpHealthy = await gatewayHealthCheck(url, { timeoutMs: 2500 });
+      } catch (_error) {
+        // HTTP 探测自己抛错时保留原生侧原因：更贴近「IPC/代理」这类真因。
+        httpHealthy = false;
+      }
+      if (httpHealthy) {
+        lastLocalProbeError = null;
+      } else if (lastLocalProbeError === null) {
+        lastLocalProbeError = '原生探测与 HTTP 探测均失败';
+      }
+      return httpHealthy;
     }
 
     return await gatewayHealthCheck(url, { timeoutMs: 2500 });
-  } catch (_error) {
+  } catch (error) {
+    lastLocalProbeError = error instanceof Error ? error.message : String(error);
     return false;
   }
 }

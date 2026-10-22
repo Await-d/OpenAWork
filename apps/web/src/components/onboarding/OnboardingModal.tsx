@@ -16,6 +16,7 @@ import {
   parseGatewayPort,
   readDesktopGatewayMode,
   readGatewayPortFromUrl,
+  readLastLocalGatewayProbeError,
   startDesktopGateway,
   stopDesktopGateway,
   waitForGatewayHealth,
@@ -47,11 +48,14 @@ async function startLocalDesktopGatewayWithHealthCheck(
 ): Promise<void> {
   await startDesktopGateway(port);
   if (!(await waitForGatewayHealth(url, { startedAt }))) {
-    // 提示必须覆盖两条真实成因：端口被占用（换端口）与探活被代理劫持
-    // （浏览器默认绕过 localhost，桌面端的本地探测不会，两者症状完全一样）。
+    // 提示必须覆盖两条真实成因：端口被占用（换端口）与探活被代理 / IPC 异常劫持
+    // （浏览器默认绕过 localhost，桌面端的原生探测不会，两者症状完全一样）。
+    // 再附上原生探测留下的具体原因，避免用户和排查者只能对着「未通过」猜。
+    const probeError = readLastLocalGatewayProbeError();
     throw new Error(
       `本地网关健康检查未通过（${url.replace(/^https?:\/\//, '')}/health 无响应）。` +
-        '请确认该端口未被其他程序占用；若开启了代理软件，请把 127.0.0.1 / localhost 加入排除列表后重试。',
+        '请确认该端口未被其他程序占用；若开启了代理软件，请把 127.0.0.1 / localhost 加入排除列表后重试。' +
+        (probeError ? ` 原生探测失败原因：${probeError}` : ''),
     );
   }
 

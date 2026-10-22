@@ -2,12 +2,69 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   authenticateDesktopGateway,
   gatewayBindHost,
+  isGatewayHealthy,
   pickDesktopFolder,
+  readLastLocalGatewayProbeError,
   waitForGatewayHealth,
 } from './desktop-gateway.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('isGatewayHealthy(本地双通道)', () => {
+  function stubTauriInvoke(invoke: () => Promise<unknown>): void {
+    vi.stubGlobal('window', {
+      __TAURI__: { core: { invoke } },
+    } as unknown as Window & typeof globalThis);
+  }
+
+  it('原生探测抛错时回退 HTTP 探测,成功仍判定健康', async () => {
+    // 复现「网关在服务、但 IPC 未就绪」：原先这里直接 catch 成 false，
+    // 用户只能看到「健康检查未通过」，而浏览器同地址却能打开。
+    stubTauriInvoke(async () => {
+      throw new Error('Tauri IPC 尚未就绪。');
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true }) as Response),
+    );
+
+    await expect(isGatewayHealthy('http://127.0.0.1:12000')).resolves.toBe(true);
+    expect(readLastLocalGatewayProbeError()).toBeNull();
+  });
+
+  it('原生探测返回 false 时同样回退 HTTP 探测', async () => {
+    stubTauriInvoke(async () => false);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true }) as Response),
+    );
+
+    await expect(isGatewayHealthy('http://127.0.0.1:12000')).resolves.toBe(true);
+  });
+
+  it('两条通道都失败时判定不健康,并留下原生侧原因', async () => {
+    stubTauriInvoke(async () => {
+      throw new Error('Tauri IPC 尚未就绪。');
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false }) as Response),
+    );
+
+    await expect(isGatewayHealthy('http://127.0.0.1:12000')).resolves.toBe(false);
+    expect(readLastLocalGatewayProbeError()).toBe('Tauri IPC 尚未就绪。');
+  });
+
+  it('原生探测健康时不再发起 HTTP 探测', async () => {
+    stubTauriInvoke(async () => true);
+    const fetchMock = vi.fn(async () => ({ ok: true }) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(isGatewayHealthy('http://127.0.0.1:12000')).resolves.toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('gatewayBindHost', () => {

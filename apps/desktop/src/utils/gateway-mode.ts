@@ -84,15 +84,55 @@ export function writeDesktopGatewayMode(mode: DesktopGatewayMode): void {
   localStorage.setItem(DESKTOP_GATEWAY_MODE_KEY, mode);
 }
 
+/**
+ * 最近一次本地原生探测的失败原因，供失败文案展示。
+ *
+ * 原生命令只回 `bool` 时，「IPC 未就绪 / 被代理拦截 / 返回非 2xx / 连接被拒」
+ * 全都塌缩成一个 `false`，用户只能看到「健康检查未通过」，排查全靠猜。
+ */
+let lastLocalProbeError: string | null = null;
+
+export function readLastLocalGatewayProbeError(): string | null {
+  return lastLocalProbeError;
+}
+
 export async function isGatewayHealthy(gatewayUrl: string): Promise<boolean> {
   try {
     const url = normalizeGatewayUrl(gatewayUrl);
     if (isLocalGatewayUrl(url)) {
-      return await isLocalDesktopGatewayHealthy(readGatewayPortFromUrl(url));
+      const port = readGatewayPortFromUrl(url);
+      try {
+        const nativeHealthy = await isLocalDesktopGatewayHealthy(port);
+        if (nativeHealthy) {
+          lastLocalProbeError = null;
+          return true;
+        }
+        lastLocalProbeError = '原生探测判定网关不健康';
+      } catch (error) {
+        lastLocalProbeError = error instanceof Error ? error.message : String(error);
+      }
+
+      // 原生通道没给出「健康」时再用 HTTP 探一次：两条通道指向同一个 `/health`，
+      // 任一成功即说明网关在服务。原生侧可能因 IPC 未就绪、旧二进制仍带系统代理
+      // 等原因误判，不该让用户因此进不了工作台。
+      let httpHealthy = false;
+      try {
+        httpHealthy = await gatewayHealthCheck(url, { timeoutMs: 2500 });
+      } catch (_error) {
+        // HTTP 探测自己抛错时保留原生侧原因：更贴近「IPC / 代理」这类真因。
+        httpHealthy = false;
+      }
+      if (httpHealthy) {
+        lastLocalProbeError = null;
+      } else if (lastLocalProbeError === null) {
+        lastLocalProbeError = '原生探测与 HTTP 探测均失败';
+      }
+      return httpHealthy;
     }
 
     return await gatewayHealthCheck(url, { timeoutMs: 2500 });
-  } catch (_error) {
+  } catch (error) {
+    lastLocalProbeError = error instanceof Error ? error.message : String(error);
     return false;
   }
 }

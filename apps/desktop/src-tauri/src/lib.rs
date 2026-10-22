@@ -874,16 +874,31 @@ fn loopback_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-async fn is_local_gateway_healthy(port: u16) -> bool {
-    match loopback_client()
+/// 探测本机网关，成功返回 `Ok(())`，失败返回可读原因。
+///
+/// 之所以返回原因而不是 `bool`：`bool` 会把「连接被拒 / 被代理拦截 / 返回非 2xx /
+/// 超时」全部塌缩成一个 `false`，前端只能显示「健康检查未通过」，排查全靠猜。
+async fn probe_local_gateway(port: u16) -> Result<(), String> {
+    let response = loopback_client()
         .get(format!("http://127.0.0.1:{port}/health"))
         .timeout(Duration::from_secs(2))
         .send()
         .await
-    {
-        Ok(response) => response.status().is_success(),
-        Err(_) => false,
+        .map_err(|error| format!("GET http://127.0.0.1:{port}/health 失败：{error}"))?;
+
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
     }
+
+    Err(format!(
+        "GET http://127.0.0.1:{port}/health 返回 HTTP {}",
+        status.as_u16()
+    ))
+}
+
+async fn is_local_gateway_healthy(port: u16) -> bool {
+    probe_local_gateway(port).await.is_ok()
 }
 
 /// 请求 sidecar 通过 `/__internal/shutdown` 端点优雅退出。
@@ -923,7 +938,9 @@ async fn wait_for_port_released(port: u16, timeout: Duration) -> bool {
 
 #[tauri::command]
 async fn check_local_gateway_health(port: u16) -> Result<bool, String> {
-    Ok(is_local_gateway_healthy(port).await)
+    // 探测失败时把原因作为 `Err` 回传，让前端的失败文案能显示真实成因
+    // （前端已做 HTTP 兜底，这条原因只用于诊断，不影响是否放行）。
+    probe_local_gateway(port).await.map(|()| true)
 }
 
 /// 应用真正退出时清理本桌面端实例**自己启动**的 gateway sidecar 子进程。
