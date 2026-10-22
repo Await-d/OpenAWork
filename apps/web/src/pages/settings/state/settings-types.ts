@@ -128,6 +128,10 @@ export interface DevtoolsChannelAuditRecord {
   channelId: string | null;
   code: string | null;
   createdAt: string;
+  /** 技术详情：上游真实错误 / HTTP 状态 / 恢复建议；与 `message` 可能相同。 */
+  channelDetail: string | null;
+  /** 上游错误码（如 `V2_TRANSIENT_5XX`）。 */
+  errorCode: string | null;
   message: string;
   sessionId: string | null;
   source: string | null;

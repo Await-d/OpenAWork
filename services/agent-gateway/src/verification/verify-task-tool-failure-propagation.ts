@@ -17,7 +17,11 @@ import {
   withTempEnv,
 } from './task-verification-helpers.js';
 
-const EXPECTED_USER_FACING_ERROR = '模型服务内部错误，请稍后重试';
+/**
+ * 失败摘要必须带**具体原因**（HTTP 状态 / 上游原话），而不是笼统的
+ * 「模型服务内部错误，请稍后重试」—— 后者会让父子会话与排障面板同时失去线索。
+ */
+const EXPECTED_CHILD_ERROR_HINT = 'HTTP 500';
 
 async function main(): Promise<void> {
   await withTempEnv(
@@ -118,7 +122,7 @@ async function main(): Promise<void> {
             const task = graph.tasks[taskOutput.taskId];
             assert(task?.status === 'failed', 'parent task should become failed');
             assert(
-              task.errorMessage?.includes(EXPECTED_USER_FACING_ERROR) === true,
+              task.errorMessage?.includes(EXPECTED_CHILD_ERROR_HINT) === true,
               'parent task should store the user-facing child error summary',
             );
 
@@ -143,7 +147,7 @@ async function main(): Promise<void> {
             const errorMessage =
               typeof toolOutput['errorMessage'] === 'string' ? toolOutput['errorMessage'] : '';
             assert(
-              errorMessage.includes(EXPECTED_USER_FACING_ERROR),
+              errorMessage.includes(EXPECTED_CHILD_ERROR_HINT),
               'parent tool_result should expose the user-facing child error summary',
             );
 
@@ -151,7 +155,7 @@ async function main(): Promise<void> {
               parentNotice as { content: Array<{ type: string; text?: string }> },
             );
             assert(
-              noticeText.includes(EXPECTED_USER_FACING_ERROR),
+              noticeText.includes(EXPECTED_CHILD_ERROR_HINT),
               'failure notice should include the user-facing error summary',
             );
             assert(

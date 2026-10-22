@@ -180,6 +180,7 @@ import {
   NOTEPAD_DIRECTIVE,
 } from '../session/sisyphus-junior-notepad.js';
 import { runModelRound, MAX_CONTINUATION_ROUNDS } from './stream-model-round.js';
+import { resolveStreamFailureMessages } from './stream-failure-messages.js';
 
 export const STREAM_ERROR_MESSAGES = {
   inputImageMissingSource: 'input_image 必须提供 artifactId、fileId 或 imageUrl 其中之一。',
@@ -3243,11 +3244,22 @@ export async function handleStreamRequest(input: {
           } catch (error: unknown) {
             logGatewayWarn('memory auto extraction failed after stream completion', error);
           }
+          // 失败轮次必须带上上游真实原因：`errorSummary` 会一路流到 IM 回复、
+          // `sessions.last_error` 与渠道审计行，硬编码通用文案会让这三处同时失去
+          // 排障价值。技术详情单独走 `errorDetail`，只给审计/诊断面板用。
+          const failureMessages =
+            result.stopReason === 'error'
+              ? resolveStreamFailureMessages({
+                  upstreamError: result.upstreamError,
+                  statusCode: result.statusCode,
+                })
+              : null;
           return {
-            errorSummary:
-              result.stopReason === 'error'
-                ? '模型服务内部错误，请稍后重试'
-                : (result.upstreamError?.message ?? result.upstreamError?.technicalDetail),
+            errorSummary: failureMessages
+              ? failureMessages.summary
+              : (result.upstreamError?.message ?? result.upstreamError?.technicalDetail),
+            ...(failureMessages?.detail ? { errorDetail: failureMessages.detail } : {}),
+            ...(failureMessages?.code ? { errorCode: failureMessages.code } : {}),
             statusCode: result.statusCode,
             stopReason: toStreamStopReason(result.stopReason),
           };

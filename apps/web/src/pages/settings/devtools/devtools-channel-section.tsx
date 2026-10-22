@@ -88,7 +88,15 @@ function matchesChannelQuery(channel: DevtoolsChannelRecord, query: string): boo
 function matchesAuditQuery(log: DevtoolsChannelAuditRecord, query: string): boolean {
   const normalized = query.trim().toLowerCase();
   if (normalized.length === 0) return true;
-  return [log.channelId ?? '', log.code ?? '', log.message, log.source ?? '', log.toolName]
+  return [
+    log.channelId ?? '',
+    log.code ?? '',
+    log.errorCode ?? '',
+    log.message,
+    log.channelDetail ?? '',
+    log.source ?? '',
+    log.toolName,
+  ]
     .join(' ')
     .toLowerCase()
     .includes(normalized);
@@ -441,6 +449,9 @@ function ChannelAuditRow({ log }: { log: DevtoolsChannelAuditRecord }) {
         <span style={{ ...BADGE, color: 'var(--danger)', fontSize: 10 }}>
           {log.code ?? 'UNKNOWN'}
         </span>
+        {log.errorCode !== null && (
+          <span style={{ ...BADGE, color: 'var(--warning)', fontSize: 10 }}>{log.errorCode}</span>
+        )}
         <span style={{ ...BADGE, color: 'var(--fg-muted)', fontSize: 10 }}>
           {formatSource(log.source)}
         </span>
@@ -474,6 +485,27 @@ function ChannelAuditRow({ log }: { log: DevtoolsChannelAuditRecord }) {
       <div style={{ fontSize: 12, color: 'var(--fg-strong)', wordBreak: 'break-word' }}>
         {log.message}
       </div>
+      {/*
+        技术详情独立成块：`message` 是单行摘要，真正能定位问题的上游原话（HTTP 状态码、
+        上游返回体、恢复建议）只在这里。与摘要相同时不重复渲染。
+      */}
+      {log.channelDetail !== null && log.channelDetail !== log.message && (
+        <div
+          style={{
+            ...CODE_BLOCK,
+            margin: 0,
+            padding: '6px 8px',
+            fontSize: 11,
+            color: 'var(--fg-muted)',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            maxHeight: 220,
+            overflow: 'auto',
+          }}
+        >
+          {log.channelDetail}
+        </div>
+      )}
       {log.stack !== null && (
         <details style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
           <summary style={{ cursor: 'pointer' }}>展开调用栈</summary>

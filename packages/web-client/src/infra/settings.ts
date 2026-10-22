@@ -60,6 +60,13 @@ export interface ChannelErrorAuditRecord {
   readonly code: string | null;
   readonly createdAt: string;
   readonly message: string;
+  /**
+   * 技术详情（上游错误码 / HTTP 状态 / 原始错误 / 恢复建议）。
+   * 早期网关只在审计行写 `message`，排障页因此只能看到一句通用文案。
+   */
+  readonly channelDetail?: string | null;
+  /** 上游错误码（如 `V2_TRANSIENT_5XX`），与渠道侧的 `code` 并存。 */
+  readonly errorCode?: string | null;
   /** 可空：没有会话的频道级故障（启停 / 队列 / 投递）无法按会话归属。 */
   readonly sessionId: string | null;
   readonly source: string | null;

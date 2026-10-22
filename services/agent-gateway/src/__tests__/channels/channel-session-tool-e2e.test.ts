@@ -391,6 +391,67 @@ describe('channel session tool e2e', () => {
     }
   });
 
+  it('Given the kernel throws instead of returning an error result When auto-reply fails Then the audit keeps the technical detail', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes('/getUpdates')) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, result: [] })));
+      }
+      if (url.includes('/sendMessage')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true, result: { message_id: 88 } })),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const streamRuntime = await import('../../routes/stream-runtime.js');
+    // 内核抛异常（而不是返回 `stopReason: 'error'`）这一路径，原先完全不留痕。
+    vi.mocked(streamRuntime.runSessionInBackground).mockRejectedValueOnce(
+      new Error('workspace 初始化失败：EACCES /workspace/chat-eacces'),
+    );
+
+    const app = await buildApp();
+    try {
+      const startResponse = await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/start`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(startResponse.statusCode).toBe(200);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/inbound`,
+        headers: { 'x-openawork-channel-secret': 'relay-secret' },
+        payload: {
+          chatId: 'chat-1',
+          senderId: 'sender-1',
+          senderName: 'Sender',
+          content: '触发异常路径',
+          messageId: 'message-exception',
+        },
+      });
+      expect(response.statusCode).toBe(202);
+
+      const readLatestAudit = () =>
+        dbModule.sqliteGet<{ output_json: string }>(
+          `SELECT output_json FROM audit_logs
+           WHERE tool_name = 'channel:CHANNEL_RUN_FAILED'
+           ORDER BY id DESC LIMIT 1`,
+        );
+
+      await vi.waitFor(() => {
+        expect(readLatestAudit()?.output_json ?? '').toContain('EACCES');
+      });
+
+      const output = JSON.parse(readLatestAudit()?.output_json ?? '{}') as Record<string, unknown>;
+      expect(output['channelDetail']).toContain('workspace 初始化失败');
+      expect(output['errorCode']).toBe('STREAM_ERROR');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('Given two inbound messages for the same channel chat When auto-reply runs Then it reuses one session and preserves multi-turn history', async () => {
     const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
       if (url.includes('/getUpdates')) {

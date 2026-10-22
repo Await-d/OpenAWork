@@ -30,7 +30,7 @@ import {
 import { isMicrocompactEnabled, microcompactMessages } from '../compaction/microcompact.js';
 import { boundInlineImages } from '../message/image-request-budget.js';
 import { stripMediaPayloadsForEstimate } from '../compaction/media-payload-estimate.js';
-import { classifyUpstreamError } from '../provider/retry-classify.js';
+import { classifyUpstreamError, describeUpstreamErrorForUser } from '../provider/retry-classify.js';
 import {
   toModelMessages,
   filterCompacted,
@@ -149,6 +149,12 @@ export async function waitForPendingSnapshotTreeCaptures(): Promise<void> {
 type UpstreamErrorDescriptor = {
   code: string;
   message: string;
+  /**
+   * 中文「原因 / 上游返回 / 建议」说明（`describeUpstreamErrorForUser`）。
+   * 上层的失败摘要优先用它 —— `message` 是分类短句（可能是英文占位），
+   * 用户与排障面板都无法据此定位问题。
+   */
+  userMessage?: string;
   technicalDetail?: string;
   /**
    * Suggested wait time before the next attempt, in ms. Populated
@@ -1891,10 +1897,13 @@ export async function runModelRound(input: {
               streamedContextLimitError = parseContextLimitError({
                 message: chunkWithMeta.message,
               });
+              // 流内 error 事件已带 `technicalDetail` 时以它为准：`message` 是给
+              // 用户看的短句，真正的上游原因只在这份技术详情里。
               streamedUpstreamError = {
                 code: `V2_${chunkWithMeta.code}`,
                 message: chunkWithMeta.message,
-                technicalDetail: chunkWithMeta.message,
+                userMessage: chunkWithMeta.technicalDetail ?? chunkWithMeta.message,
+                technicalDetail: chunkWithMeta.technicalDetail ?? chunkWithMeta.message,
               };
               markFailedRequestScopeMessages();
             }
@@ -1984,6 +1993,7 @@ export async function runModelRound(input: {
         upstreamError: {
           code: `V2_${classification.category.toUpperCase()}`,
           message: classification.message ?? message,
+          userMessage: describeUpstreamErrorForUser(err).message,
           technicalDetail: message,
           ...(classification.retryAfterMs !== undefined
             ? { retryAfterMs: classification.retryAfterMs }
@@ -2180,6 +2190,7 @@ export async function runModelRound(input: {
       upstreamError: {
         code: `STREAM_${classification.category.toUpperCase()}`,
         message: classification.message ?? message,
+        userMessage: describeUpstreamErrorForUser(err).message,
         technicalDetail: message,
         ...(classification.retryAfterMs !== undefined
           ? { retryAfterMs: classification.retryAfterMs }

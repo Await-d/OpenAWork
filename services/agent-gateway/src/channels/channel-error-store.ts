@@ -128,6 +128,8 @@ export interface ChannelRunFailureInput {
   readonly clientRequestId: string;
   /** 错误码，与 `[错误: CODE]` 前缀一同落库，供 UI 还原错误卡片。 */
   readonly code: string;
+  /** 上游错误码（`V2_*` / `STREAM_*`）；缺省时不写该字段。 */
+  readonly errorCode?: string | undefined;
   readonly message: string;
   readonly stack?: string | undefined;
   /** 原始入站文本；缺失时不补写 user 消息（如仅图片附件）。 */
@@ -179,6 +181,8 @@ function writeChannelErrorAudit(input: {
   readonly channelId: string;
   readonly channelType?: string | undefined;
   readonly code: string;
+  /** 上游错误码（如 `V2_TRANSIENT_5XX`），与渠道侧的 `CHANNEL_RUN_FAILED` 并存。 */
+  readonly errorCode?: string | undefined;
   readonly message: string;
   readonly output?: Record<string, unknown>;
   readonly requestId: string;
@@ -200,6 +204,7 @@ function writeChannelErrorAudit(input: {
     output: {
       message: input.message,
       code: input.code,
+      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
       // `channelId` / `source` 同时冗余进 output：它们是排障的两个主检索维度，
       // 而排障页只解析 `output_json` 一列（`input_json` 承载的是写入上下文，
       // 字段会随实现演进，不能作为稳定契约）。
@@ -495,7 +500,10 @@ export function recordChannelRunFailure(input: ChannelRunFailureInput): ChannelF
     requestId: input.clientRequestId,
     sessionId: input.sessionId,
     source: 'channel_run',
-    ...(input.detail ? { output: { channelDetail: input.detail } } : {}),
+    ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+    // 技术详情是排障页唯一能看到「上游到底报了什么」的字段；它比 `message`
+    // 长得多，因此与摘要共用同一截断上限，避免单行审计无限膨胀。
+    ...(input.detail ? { output: { channelDetail: truncateErrorSummary(input.detail) } } : {}),
     ...(input.stack ? { stack: input.stack } : {}),
   });
 
@@ -538,6 +546,10 @@ export interface ChannelErrorAuditRecord {
   readonly source: string | null;
   readonly message: string;
   readonly code: string | null;
+  /** 技术详情（`output_json.channelDetail`）：上游原始错误 / HTTP 状态 / 恢复建议。 */
+  readonly channelDetail: string | null;
+  /** 上游错误码（`output_json.errorCode`，如 `V2_TRANSIENT_5XX`）。 */
+  readonly errorCode: string | null;
   readonly stack: string | null;
   /** ISO 8601 UTC（含 `Z`）；来源非标准形态时原样透传。 */
   readonly createdAt: string;
@@ -588,6 +600,8 @@ export function listChannelErrorAuditLogs(
       source: output.source,
       message: output.message,
       code: output.code,
+      channelDetail: output.channelDetail,
+      errorCode: output.errorCode,
       stack: output.stack,
       createdAt: toIsoUtc(row.created_at),
     };
@@ -659,6 +673,8 @@ function parseChannelAuditOutput(outputJson: string | null): {
   source: string | null;
   message: string;
   code: string | null;
+  channelDetail: string | null;
+  errorCode: string | null;
   stack: string | null;
 } {
   const fallback = {
@@ -666,6 +682,8 @@ function parseChannelAuditOutput(outputJson: string | null): {
     source: null,
     message: '（审计输出缺失，无法解析）',
     code: null,
+    channelDetail: null,
+    errorCode: null,
     stack: null,
   };
   if (!outputJson) {
@@ -695,6 +713,8 @@ function parseChannelAuditOutput(outputJson: string | null): {
     source: readString('source'),
     message: readString('message') ?? fallback.message,
     code: readString('code'),
+    channelDetail: readString('channelDetail')?.slice(0, CHANNEL_ERROR_SUMMARY_MAX) ?? null,
+    errorCode: readString('errorCode'),
     stack: readString('stack')?.slice(0, CHANNEL_ERROR_STACK_MAX) ?? null,
   };
 }

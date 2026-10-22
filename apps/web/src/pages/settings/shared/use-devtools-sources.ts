@@ -362,6 +362,8 @@ export function useDevtoolsSources({ gatewayUrl, token }: UseDevtoolsSourcesOpti
           code: log.code ?? null,
           createdAt: log.createdAt,
           message: log.message,
+          channelDetail: log.channelDetail ?? null,
+          errorCode: log.errorCode ?? null,
           sessionId: log.sessionId ?? null,
           source: log.source ?? null,
           toolName: log.toolName,

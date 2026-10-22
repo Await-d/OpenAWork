@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { describeError } from '../infra/gateway-logger.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { extractMessageText } from '../session/session-message-store.js';
@@ -173,34 +174,71 @@ const autoReply = new AutoReplyPipeline({
       },
     });
 
-    const result = await runSessionInBackground({
-      sessionId,
-      userId: channel.ownerUserId,
-      requestData: {
-        clientRequestId,
-        displayMessage: message,
-        ...(inputParts && inputParts.length > 0 ? { inputParts } : {}),
-        message,
-      },
-      writeChunk: (chunk) => {
-        if (chunk.type !== 'text_delta') {
-          return;
-        }
+    let result: Awaited<ReturnType<typeof runSessionInBackground>>;
+    try {
+      result = await runSessionInBackground({
+        sessionId,
+        userId: channel.ownerUserId,
+        requestData: {
+          clientRequestId,
+          displayMessage: message,
+          ...(inputParts && inputParts.length > 0 ? { inputParts } : {}),
+          message,
+        },
+        writeChunk: (chunk) => {
+          if (chunk.type !== 'text_delta') {
+            return;
+          }
 
-        partialText += chunk.delta;
-        partialUpdates.push(partialText);
-      },
-    });
+          partialText += chunk.delta;
+          partialUpdates.push(partialText);
+        },
+      });
+    } catch (error) {
+      // 内核以**抛异常**（而非返回 `stopReason: 'error'`）结束：基础设施 / 未预期故障。
+      // 这条路径此前只被 auto-reply 打一行 warn + 回一条 IM —— 排障页完全看不到，
+      // 重启后连「这条消息为什么没回」都无从回答。与返回值分支同策略：先落库再抛。
+      // 用户主动停止不算故障，不落错误留痕。
+      const isCancellation = error instanceof Error && error.name === 'AbortError';
+      if (!isCancellation) {
+        const described = describeError(error);
+        const failureMessage = described.errorMessage.trim() || '模型服务内部错误，请稍后重试';
+        recordChannelRunFailure({
+          channelId: pluginId,
+          clientRequestId,
+          code: 'CHANNEL_RUN_FAILED',
+          errorCode: 'STREAM_ERROR',
+          message: failureMessage,
+          detail: `错误类型：${described.errorName}\n错误信息：${failureMessage}`,
+          sessionId,
+          userId: channel.ownerUserId,
+          userMessageText: message,
+          ...(described.errorStack ? { stack: described.errorStack } : {}),
+        });
+      }
+      throw error;
+    }
 
     await partialUpdates.flush();
 
     if (result.statusCode >= 400 || result.stopReason === 'error') {
       const errorSummary = result.errorSummary?.trim() || '';
+      // `errorDetail` 是内核给的技术详情（上游错误码 / HTTP 状态 / 原始错误）；
+      // `errorSummary` 可能只是面向用户的单行摘要，两者都要留，缺一不可。
+      const errorDetail = result.errorDetail?.trim() || '';
       // 错误码对齐内核 `STREAM_ERROR_MESSAGES` / `createStreamErrorChunk` 的词表，
       // 让落库后的 `[错误: CODE]` 前缀能被同一个解析器还原成错误卡片。
       const code = result.statusCode === 409 ? 'SESSION_ALREADY_RUNNING' : 'CHANNEL_RUN_FAILED';
       const errorMessage =
         errorSummary || `Channel session ${sessionId} failed (${result.statusCode})`;
+      // 内核连摘要都没给（early-return / 基础设施失败）时，至少留下状态码与终态，
+      // 否则审计行会退化成一条「没有原因」的记录。
+      const resolvedDetail =
+        errorDetail ||
+        errorSummary ||
+        `HTTP 状态：${result.statusCode}${
+          result.stopReason ? `；stopReason：${result.stopReason}` : ''
+        }`;
       // 先落库再抛：抛错只是把失败转成 IM 回复，落库才是给排查留的证据。
       // 内核已在用户消息落库之后失败的，消息由内核写；在此之前 early-return 的
       // （会话占用 409、模型绑定不可用），user + error 消息由这里补齐。
@@ -211,7 +249,8 @@ const autoReply = new AutoReplyPipeline({
         message: errorMessage,
         sessionId,
         userId: channel.ownerUserId,
-        ...(errorSummary ? { detail: errorSummary } : {}),
+        detail: resolvedDetail,
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
         userMessageText: message,
       });
       throw new Error(errorMessage);

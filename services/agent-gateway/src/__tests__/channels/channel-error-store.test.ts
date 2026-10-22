@@ -16,6 +16,7 @@ import {
   CHANNEL_INBOUND_PERSIST_THROTTLE_MS,
   clearChannelHealthIssue,
   getChannelHealthRecord,
+  listChannelErrorAuditLogs,
   listChannelHealthRecords,
   markChannelSessionHealthy,
   persistChannelInboundDiagnostic,
@@ -213,6 +214,36 @@ describe('recordChannelRunFailure', () => {
     expect(auditRows).toHaveLength(1);
     expect(auditRows[0]?.tool_name).toBe('channel:CHANNEL_RUN_FAILED');
     expect(auditRows[0]?.is_error).toBe(1);
+  });
+
+  it('Given a failure with technical detail Then the audit row keeps the upstream reason', () => {
+    const sessionId = seedSession();
+    recordChannelRunFailure({
+      channelId: CHANNEL_ID,
+      clientRequestId: 'req-detail',
+      code: 'CHANNEL_RUN_FAILED',
+      errorCode: 'V2_TRANSIENT_5XX',
+      message: '上游模型服务异常（HTTP 503）',
+      detail: '上游错误码：V2_TRANSIENT_5XX\nHTTP 状态：503\n技术详情：upstream returned 503',
+      sessionId,
+      userId: USER_ID,
+    });
+
+    const rows = dbModule.sqliteAll<{ output_json: string }>(
+      `SELECT output_json FROM audit_logs
+       WHERE session_id = ? AND tool_name = 'channel:CHANNEL_RUN_FAILED'`,
+      [sessionId],
+    );
+    const output = JSON.parse(rows[0]?.output_json ?? '{}') as Record<string, unknown>;
+    // 排障页只解析 output_json：摘要之外必须同时留下技术详情与上游错误码。
+    expect(output['channelDetail']).toContain('upstream returned 503');
+    expect(output['errorCode']).toBe('V2_TRANSIENT_5XX');
+
+    const record = listChannelErrorAuditLogs(USER_ID).find(
+      (entry) => entry.requestId === 'req-detail',
+    );
+    expect(record?.channelDetail).toContain('HTTP 状态：503');
+    expect(record?.errorCode).toBe('V2_TRANSIENT_5XX');
   });
 });
 
