@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-23-provider-catalog-expansion-design.md`
 
+> **执行状态：✅ 已完成（2026-10-26 回填）**。代码核实：11 个平台均已进入 `PROVIDER_CATALOG`（mistral / zhipu / doubao / groq / siliconflow / azure / xai / minimax / baichuan / hunyuan / qianfan）；`models-dev-discover.ts` + `GET /settings/providers/discover` + `POST /settings/providers/import-from-models-dev`、web-client 方法、Settings UI 发现面板与 `catalog.test.ts` / `models-dev-discover.test.ts` 均已落地；下方勾选框为执行后回填。
+
 ## Global Constraints
 
 - 新平台一律 `enabledByDefault: false`
@@ -56,7 +58,7 @@
   （保留原有类型 + `custom`）
 - Produces: `PROVIDER_CATALOG` 增加 11 条；`getCatalogEntry` / presets 自动覆盖
 
-- [ ] **Step 1: 写失败测试（新 type 存在于 catalog）**
+- [x] **Step 1: 写失败测试（新 type 存在于 catalog）**
 
 在 `catalog.test.ts` 末尾追加：
 
@@ -108,7 +110,7 @@ describe('provider catalog expansion (2026-07-23)', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run:
 
@@ -118,7 +120,7 @@ cd /home/await/project/OpenAWork && pnpm --filter @openAwork/agent-core test -- 
 
 Expected: FAIL（`getCatalogEntry('mistral')` 等为 undefined）
 
-- [ ] **Step 3: 扩展 `ProviderType`**
+- [x] **Step 3: 扩展 `ProviderType`**
 
 `packages/agent-core/src/provider/types.ts` 改为：
 
@@ -147,7 +149,7 @@ export type ProviderType =
   | 'custom';
 ```
 
-- [ ] **Step 4: 在 `PROVIDER_CATALOG` 追加 11 个条目**
+- [x] **Step 4: 在 `PROVIDER_CATALOG` 追加 11 个条目**
 
 在 `catalog.ts` 的 `mimo` 条目之后、`]` 之前插入（保持现有条目风格）。每个条目字段齐全：`type/displayName/enabledByDefault/apiKeyEnv?/hostnames?/ui/upstreams/thinkingStyle/defaultModels`。
 
@@ -246,11 +248,11 @@ export type ProviderType =
 
 每个条目 `enabledByDefault: false`。`ui.logoUrl` 仅在文件真实存在时填写；否则只靠 `fallbackGlyph`。
 
-- [ ] **Step 5: 更新 AGENTS.md 中的 ProviderType 列表**
+- [x] **Step 5: 更新 AGENTS.md 中的 ProviderType 列表**
 
 `packages/agent-core/AGENTS.md` 里写死的联合类型字符串改为包含全部新 type。
 
-- [ ] **Step 6: 跑测试通过**
+- [x] **Step 6: 跑测试通过**
 
 ```bash
 pnpm --filter @openAwork/agent-core test -- src/provider/catalog.test.ts
@@ -258,7 +260,7 @@ pnpm --filter @openAwork/agent-core test -- src/provider/catalog.test.ts
 
 Expected: PASS（含原有 + 新增用例）
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/agent-core/src/provider/types.ts \
@@ -288,7 +290,7 @@ EOF
 - Consumes: `resolveThinkingStyle(providerType, modelId?)`
 - Produces: `siliconflow` + 已知前缀 modelId → 真实厂商 style
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 it('siliconflow 按 modelId 前缀推断 thinking 风格', () => {
@@ -300,13 +302,13 @@ it('siliconflow 按 modelId 前缀推断 thinking 风格', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测确认失败**
+- [x] **Step 2: 跑测确认失败**
 
 ```bash
 pnpm --filter @openAwork/agent-core test -- src/provider/catalog.test.ts
 ```
 
-- [ ] **Step 3: 实现推断**
+- [x] **Step 3: 实现推断**
 
 在 `resolveThinkingStyle` 中，把：
 
@@ -337,7 +339,7 @@ normalizedProviderType === 'openai' || normalizedProviderType === 'custom';
 
 若该分支负责 body flatten / thinking 下发入口，同步加入 `siliconflow`，否则 siliconflow 有 style 也下发不出去。
 
-- [ ] **Step 4: 跑测通过**
+- [x] **Step 4: 跑测通过**
 
 ```bash
 pnpm --filter @openAwork/agent-core test -- src/provider/catalog.test.ts
@@ -345,7 +347,7 @@ pnpm --filter @openAwork/agent-core test -- src/provider/catalog.test.ts
 pnpm --filter agent-gateway test:unit -- src/v2-runtime 2>/dev/null || true
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/agent-core/src/provider/catalog.ts \
@@ -372,7 +374,7 @@ EOF
 - Produces: `getProviderUiList()` 含 mistral 与全部新 type（hydrate 前兜底）
 - Produces: 不再过滤 `mistral`
 
-- [ ] **Step 1: 调整 `getProviderUiList` 过滤**
+- [x] **Step 1: 调整 `getProviderUiList` 过滤**
 
 把：
 
@@ -389,13 +391,13 @@ return catalogEntries.filter((entry) => entry.type !== 'claude');
 
 注意：原注释把 mistral 当「历史 UI 兜底、不在 catalog」。Task 1 后 mistral 在 catalog 中，必须能出现在类型下拉。
 
-- [ ] **Step 2: 扩展 STATIC_FALLBACK**
+- [x] **Step 2: 扩展 STATIC_FALLBACK**
 
 为 11 个新 type 各加一条（至少 `type/displayName/fallbackGlyph`，有 logo 则 `logoUrl`，有 aliases/prefixes 则带上），与 catalog 元数据一致。保留现有 anthropic/openai/… 条目。
 
 `mistral` 条目已存在则更新 aliases；删除「Mistral 不在内置 catalog」的过时注释。
 
-- [ ] **Step 3: 手动/单测确认列表**
+- [x] **Step 3: 手动/单测确认列表**
 
 若 shared-ui 无现成单测，可在 agent-core 已有 `getProviderCatalogUi` 测试外，加一个极小 shared-ui 测或临时 node 脚本；最低要求：
 
@@ -406,7 +408,7 @@ pnpm --filter @openAwork/agent-core test -- src/provider/catalog.test.ts
 
 Expected: PASS / passWithNoTests
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/shared-ui/src/models/provider-catalog-ui.ts
@@ -431,7 +433,7 @@ EOF
 - Consumes: `ProviderEditData`
 - Produces: 提交前校验；custom 引导 UI
 
-- [ ] **Step 1: 在 `ProviderForm` 增加本地错误状态与校验函数**
+- [x] **Step 1: 在 `ProviderForm` 增加本地错误状态与校验函数**
 
 在 `ProviderForm` 内：
 
@@ -479,7 +481,7 @@ function handleSubmit() {
 
 把保存按钮 `onClick={() => onSubmit(form)}` 改为 `onClick={handleSubmit}`。
 
-- [ ] **Step 2: custom 引导文案 + placeholder**
+- [x] **Step 2: custom 引导文案 + placeholder**
 
 当 `form.type === 'custom'`（或 `azure`）时，在表单顶部或 Base URL 下显示短说明：
 
@@ -491,7 +493,7 @@ function handleSubmit() {
 - custom name: `例如：公司中转 / LM Studio`
 - azure baseUrl: `https://{resource}.openai.azure.com` 或带 `/openai/v1` 的实际可用形态（与网关现有兼容行为一致；若不确定，用资源根 URL 并在说明中提示可按代理文档调整）
 
-- [ ] **Step 3: 显示 formError**
+- [x] **Step 3: 显示 formError**
 
 在按钮行上方：
 
@@ -503,11 +505,11 @@ function handleSubmit() {
 }
 ```
 
-- [ ] **Step 4: 类型切换时清空错误**
+- [x] **Step 4: 类型切换时清空错误**
 
 在 type `onChange` 里 `setFormError(null)`。
 
-- [ ] **Step 5: 冒烟**
+- [x] **Step 5: 冒烟**
 
 ```bash
 pnpm --filter @openAwork/shared-ui test
@@ -515,7 +517,7 @@ pnpm --filter @openAwork/shared-ui test
 pnpm --filter @openAwork/shared-ui exec tsc --noEmit -p tsconfig.json 2>/dev/null || true
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/shared-ui/src/models/ProviderSettings.tsx
@@ -561,7 +563,7 @@ export function buildCustomProviderFromModelsDev(
 ): AIProvider; // throws Error with code-friendly message if missing
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -623,7 +625,7 @@ describe('models-dev-discover', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测确认失败**
+- [x] **Step 2: 跑测确认失败**
 
 ```bash
 pnpm --filter agent-gateway test:unit -- src/__tests__/provider/models-dev-discover.test.ts
@@ -631,7 +633,7 @@ pnpm --filter agent-gateway test:unit -- src/__tests__/provider/models-dev-disco
 
 Expected: FAIL module not found
 
-- [ ] **Step 3: 实现 `models-dev-discover.ts`**
+- [x] **Step 3: 实现 `models-dev-discover.ts`**
 
 要点：
 
@@ -744,13 +746,13 @@ export function buildCustomProviderFromModelsDev(
 
 修正 `buildCustomProviderFromModelsDev`：**不要**设置 `apiKeyEnv`。
 
-- [ ] **Step 4: 跑测通过**
+- [x] **Step 4: 跑测通过**
 
 ```bash
 pnpm --filter agent-gateway test:unit -- src/__tests__/provider/models-dev-discover.test.ts
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/agent-gateway/src/provider/models-dev-discover.ts \
@@ -780,7 +782,7 @@ EOF
   → `{ provider: AIProvider; providers: AIProvider[]; activeSelection: ... }`  
   （返回完整列表便于前端一次刷新）
 
-- [ ] **Step 1: 注册 GET discover**
+- [x] **Step 1: 注册 GET discover**
 
 在现有 `POST /settings/providers/sync` 附近增加：
 
@@ -814,7 +816,7 @@ import {
 
 （以 package 实际 export 名为准：`get as getModelsDevData` 已在 agent-core index 导出。）
 
-- [ ] **Step 2: 注册 POST import**
+- [x] **Step 2: 注册 POST import**
 
 ```ts
 app.post(
@@ -887,14 +889,14 @@ app.post(
 
 复用文件内已有 `parseStoredJson` / `materializeProviderConfig` / `invalidateCatalog` / `sqliteGet` / `sqliteRun`。
 
-- [ ] **Step 3: 手工或单测路由（若有 route 测试框架则补；否则靠 discover 单元 + 类型检查）**
+- [x] **Step 3: 手工或单测路由（若有 route 测试框架则补；否则靠 discover 单元 + 类型检查）**
 
 ```bash
 pnpm --filter agent-gateway test:unit -- src/__tests__/provider/models-dev-discover.test.ts
 pnpm --filter agent-gateway exec tsc --noEmit -p tsconfig.json 2>/dev/null | tail -20
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add services/agent-gateway/src/routes/settings.ts
@@ -927,7 +929,7 @@ importProviderFromModelsDev(
 ): Promise<unknown>;
 ```
 
-- [ ] **Step 1: 在接口与实现中增加方法**
+- [x] **Step 1: 在接口与实现中增加方法**
 
 ```ts
 async discoverProviders(token, options) {
@@ -955,17 +957,17 @@ async importProviderFromModelsDev(token, payload, options) {
 },
 ```
 
-- [ ] **Step 2: 补 settings.test.ts 用例（mock fetch）**
+- [x] **Step 2: 补 settings.test.ts 用例（mock fetch）**
 
 仿照现有 `putProviders` 测试：assert URL/method/body。
 
-- [ ] **Step 3: 跑测**
+- [x] **Step 3: 跑测**
 
 ```bash
 pnpm --filter @openAwork/web-client test -- src/infra/settings.test.ts
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/web-client/src/infra/settings.ts packages/web-client/src/infra/settings.test.ts
@@ -1001,7 +1003,7 @@ onDiscoverProviders?: () => Promise<{
 onImportDiscoveredProvider?: (modelsDevProviderId: string) => Promise<void>;
 ```
 
-- [ ] **Step 1: UI 状态**
+- [x] **Step 1: UI 状态**
 
 在 `ProviderSettings` 组件内：
 
@@ -1016,7 +1018,7 @@ const [importingId, setImportingId] = useState<string | null>(null);
 const [discoverQuery, setDiscoverQuery] = useState('');
 ```
 
-- [ ] **Step 2: 「发现更多平台」按钮**
+- [x] **Step 2: 「发现更多平台」按钮**
 
 放在提供商列表标题旁 / 「新增提供商」旁；仅当 `onDiscoverProviders` 存在时渲染。
 
@@ -1039,7 +1041,7 @@ async function openDiscover() {
 }
 ```
 
-- [ ] **Step 3: 面板内容**
+- [x] **Step 3: 面板内容**
 
 - 搜索 input 过滤 name/id
 - 列表：name、modelCount、api 截断
@@ -1048,7 +1050,7 @@ async function openDiscover() {
 
 样式沿用现有 `var(--bg-raised)` / border / accent，不引入新设计系统。
 
-- [ ] **Step 4: SettingsPage / connection-tab 接线**
+- [x] **Step 4: SettingsPage / connection-tab 接线**
 
 ```ts
 onDiscoverProviders={async () => {
@@ -1074,14 +1076,14 @@ onImportDiscoveredProvider={async (modelsDevProviderId) => {
 
 把 props 传到 `connection-tab-content` → `ProviderSettings`。
 
-- [ ] **Step 5: typecheck / 相关测试**
+- [x] **Step 5: typecheck / 相关测试**
 
 ```bash
 pnpm --filter @openAwork/shared-ui test
 pnpm --filter @openAwork/web-client test -- src/infra/settings.test.ts
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/shared-ui/src/models/ProviderSettings.tsx \
@@ -1104,7 +1106,7 @@ EOF
 - Modify: `docs/superpowers/specs/2026-07-23-provider-catalog-expansion-design.md`（状态改为 Implemented / 附实现日期，可选）
 - 可选: README 模型平台列表若有硬编码则更新
 
-- [ ] **Step 1: 跑核心测试套件**
+- [x] **Step 1: 跑核心测试套件**
 
 ```bash
 pnpm --filter @openAwork/agent-core test -- src/provider/catalog.test.ts
@@ -1115,7 +1117,7 @@ pnpm --filter @openAwork/shared-ui test
 
 Expected: 全部 PASS
 
-- [ ] **Step 2: 手动验收清单（实现者勾选）**
+- [x] **Step 2: 手动验收清单（实现者勾选）**
 
 1. 设置 → 模型：类型下拉可见 mistral/zhipu/…/qianfan/custom
 2. 选 custom 不填 baseUrl → 无法保存并有中文错误
@@ -1124,7 +1126,7 @@ Expected: 全部 PASS
 5. 「发现更多平台」列出非内置项；导入 together（或当前 models.dev 上存在的某 id）后列表出现 custom-md-…
 6. 原有 anthropic/openai 会话不受影响
 
-- [ ] **Step 3: Commit 收尾（若有文档/小修）**
+- [x] **Step 3: Commit 收尾（若有文档/小修）**
 
 ```bash
 git add -A docs/superpowers packages/agent-core/AGENTS.md

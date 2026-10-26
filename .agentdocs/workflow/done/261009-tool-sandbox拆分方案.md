@@ -1,5 +1,7 @@
 # 261009-tool-sandbox 拆分方案
 
+> **归档：2026-10-26 移入 `workflow/done/`**（P0/P1/P2/P4 全部完成；Phase 3 派发器按触发条件「Phase 2 后单文件 >1500 行」未触发，非遗留）。`tool-sandbox.ts` **7540 → 1312 行**（拆分完成时；2026-10-26 实测 1328，后续 +16）；`tools/sandbox/` 8 个公共模块 + `handlers/` 14 个域全部落地，公共导出面零变化。
+
 ## Task Overview
 
 把 `services/agent-gateway/src/tools/tool-sandbox.ts`(**7540 行**,超 AGENTS.md 1500 行硬上限

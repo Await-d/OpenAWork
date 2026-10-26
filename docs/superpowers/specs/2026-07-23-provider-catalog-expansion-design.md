@@ -1,7 +1,7 @@
 # Provider Catalog 扩展与自定义入口强化设计
 
 **日期**: 2026-07-23  
-**状态**: Draft for user review  
+**状态**: ✅ Implemented（2026-10-26 回填；代码已落地，执行记录见 `docs/superpowers/plans/2026-07-23-provider-catalog-expansion.md`）  
 **范围**: 内置模型平台扩展 + 自定义提供商表单强化 + models.dev 自动发现导入  
 **推荐方案**: B（一等公民 catalog + models.dev 发现层）
 

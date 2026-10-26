@@ -2,6 +2,30 @@
 
 ## 已完成的任务
 
+### ✅ 261013-opencode-llm 对齐上游 packages/ai - 从 v1 线 packages/llm 追平 v2.0.28（方案 A 全量）
+
+**状态**: ✅ **已完成并归档**（2026-10-14 完成 / 2026-10-26 归档）；master_plan **46 ✅ / 3 ⚪ 登记分歧 / 0 遗留**
+**归档位置**: [workflow/done/261013-opencode-llm对齐packages-ai.md](workflow/done/261013-opencode-llm对齐packages-ai.md)
+**落地**: `packages/opencode-llm` 对齐上游 `packages/ai@v2.0.28`，区间增量 100% 处置（移植 / 登记分歧 / 明确排除）；新增 `protocols/venice-chat.ts` + `providers/venice.ts`（T-45）、`StreamOptions` 请求中间件（T-44）、供应商探测端点表 9→19（T-43）。
+**验证**: 包 `tsc` 0 / 串行测试 **64 文件 724 用例全绿** / build 0 / prettier 全通过 / 网关 `tsc` 0 + 全量 642 通过 / 仓库级 lint 0 error。
+**已登记偏差**: D-5 文本类全量实际执行 4.8%（104 文件仅移植 4 个，因网关生产可达面仅 3 条、其余无消费方）；D-4 Responses 拆分落地 2/6；对账口径改为「区间新增导出符号覆盖率」（真实待移植项 = 0）。
+
+### ✅ 261009-tool-sandbox 拆分 - 7540 行单文件降为「薄门面 + 按域模块」
+
+**状态**: ✅ **已交付并归档**（2026-10-09 完成 / 2026-10-26 归档）；P0/P1/P2/P4 全部完成，Phase 3 派发器按触发条件未触发
+**归档位置**: [workflow/done/261009-tool-sandbox拆分方案.md](workflow/done/261009-tool-sandbox拆分方案.md)
+**落地**: `tool-sandbox.ts` **7540 → 1312 行（−82.6%，拆分完成时；当前 1328 行，后续 +16）**；新增 `tools/sandbox/` 公共模块 8 个 + `sandbox/handlers/` 14 个（均 ≤1000 行）；33 个生产消费方 import 路径不变；63 项派发条件顺序逐字一致。
+**验证**: typecheck / ESLint / Prettier 全绿；`__tests__/tools/` 84 文件 685 用例；delegation 专项 87 文件 628 用例（625 passed / 3 skipped）。
+**说明**: Phase 3（保序 if 链收成有序表）触发条件为「Phase 2 后单文件 >1500 行」，实测 1312 未触发；未达 Gate 0 ≤1200 目标（当前 1328），如需达标再单独立项。
+
+### ✅ 261009-桌面端灵动岛 - Tauri 多窗口浮窗实时展示 Agent 状态与网关健康
+
+**状态**: ✅ **已交付并归档**（2026-10-09 完成 / 2026-10-26 归档）；T-01~T-13 完成 + 两轮复核修复；**遗留：T-14 三端真机手工验证待执行**
+**归档位置**: [workflow/done/261009-desktop-dynamic-island.md](workflow/done/261009-desktop-dynamic-island.md)
+**落地**: Rust 侧 island 窗口（创建/定位/补间/拖动/快捷键/位置校正）+ 前端 11 文件（IslandApp/pill/store/reporter/window-mode）+ 设置页开关 + 23 个单测；10-10 B2 改版（尺寸/贴顶/拖动/品牌图标）；10-12 修复 WebKitGTK 透明窗口整帧丢弃（移除 `filter`/`backdrop-filter`、`opacity: 0`→`0.01`、独立 `island.html` 入口 + `kickRepaint`）。
+**验证**: `island-types` / `island-store` 31 测试通过；`tsc` 通过；WebKitGTK 最小复现程序 8 次像素统计 64.3% 稳定（修复前 0.0%）。
+**遗留**: T-14 三端（macOS/Windows/Linux）真机走查：置顶居中、hover 展开、点击跳转、设置开关、`Alt+Shift+I`、网关异常红点、Linux 拖动后回位——本机无 cargo/三端桌面环境，需在目标机器执行（第一步 `cargo check`）。
+
 ### ✅ 260924-AI插件管理工具（plugin_manage）- 模型在审批下安装/卸载/启停插件与市场管理
 
 **状态**: ✅ **全部交付并归档**（2026-09-24，Full orchestration score +5，Mode B 串行）
@@ -774,45 +798,6 @@
 
 > 本节仅保留**真实未完成 / 阻塞 / 在途**任务；已完成条目一律登记于上方「已完成的任务」区与「归档全量索引」（2026-10-09 清理整理完成归位，原「（明细）」章节取消）。
 
-### 🟡 261013-opencode-llm 对齐 packages/ai - 由 v1 线 packages/llm 基线追平 v2 线 v2.0.28
-**状态**: ⏸️ **等待 Gate 0 决策与批准**（2026-10-13 规划完成，未开工）
-**复杂度**: Full orchestration（score +7；38 个任务簇、四条子域需串行验证、单文件重写 2000+ 行、存在在途改动冲突）
-**开始日期**: 2026-10-13（规划）
-**方案文档**: [workflow/261013-opencode-llm对齐packages-ai.md](workflow/261013-opencode-llm对齐packages-ai.md)
-**运行计划**: [runtime/261013-opencode-llm对齐packages-ai/master_plan.md](runtime/261013-opencode-llm对齐packages-ai/master_plan.md)
-**目标**: 把 `packages/opencode-llm`（移植自上游 v1 线 `packages/llm`）对齐到上游 v2 线 `packages/ai@v2.0.28`；用户已选定**方案 A 全量对齐**。
-**差距基线（2026-10-13 实测）**: 57 个可对应文件归一化差异 **13,870 行** + Responses 拆分新增 901 行；未移植文本类 104 文件/9,243 行、媒体类 37 文件/5,911 行（**排除**）。分层占比：协议层 61%、契约层 16%、路由层 16%、providers 7%。
-**关键前提（已实测纠正）**: ① SSE 的裸 `null` / `: keepalive` 过滤**本地已实现**（`protocols/shared.ts`），勿重复当待办；② 本地命名 `Model*` 对应 v1 线，v2 线已改名 `LanguageModel*`；③ 上游 `route/*` 用 `effect/http`（Effect 4.0.1），本地是 `effect/unstable/http`（rc.117）；④ 网关协议可达面仅 `chat_completions | responses | anthropic_messages`，`gemini.ts` / `bedrock-converse.ts` **未接线**故后置。
-**待用户决策**: D-1 基线 tag / D-2 命名策略 / D-3 Effect 版本 / D-4 Responses 是否采纳上游拆分 / D-5 覆盖范围 / D-6 自研层处置。
-**阻塞**: 工作区非干净——`packages/opencode-llm/src/error/*` 与 `src/index.ts` 共 7 文件 `+504/-258` 未提交，归属待确认。
-
-### 🟢 261009-tool-sandbox 拆分 - 7540 行单文件降为「薄门面 + 按域模块」
-**状态**: ✅ **已交付**（2026-10-09；P0 tripwire + P1 公共模块 + P2 全量 handler 抽取（批一~批四）+ P4 `delegation` 全部完成；P3 派发器按条件未触发）
-**复杂度**: Full orchestration(score +5;跨 5 个子域、单一热点文件串行接线、最高风险块需专门验证门)
-**开始日期**: 2026-10-09
-**方案文档**: [workflow/261009-tool-sandbox拆分方案.md](workflow/261009-tool-sandbox拆分方案.md)
-**目标**: `tool-sandbox.ts`(超 1500 行硬上限 5.0 倍)拆为薄门面 ≤1200 行 + 按域模块各 ≤1000 行,**零行为变更、公共导出面完全不变**。
-**约束**: 不在本轮拆 `tool-definitions.ts` / `db.ts` / 双网关;不改权限阶梯语义与派发顺序;不引入新依赖。
-**已交付**:
-- P0 `__tests__/tools/tool-sandbox-dispatch-coverage.test.ts` 派发覆盖率 tripwire(漏分支即红)。
-- P1 `src/tools/sandbox/` 公共模块 8 个：`whitelist`(337) / `context`(268，含 `SandboxHandlerContext`) / `session-context`(248) / `permission-ladder`(582) / `child-session`(542) / `task-reference`(159) / `task-background`(921) / `create-default-sandbox`(206)；门面 import + 再导出，33 个生产消费方 import 路径不变。
-- P2+P4 `src/tools/sandbox/handlers/` 14 个域：todo 124 / desktop 245 / media 281 / session 478 / task-graph 107 / workspace 122 / mcp 235 / admin 289 / edit 287 / batch 225 / interactive 280 / background 345 / bash 211 / delegation 880（61 个 `handleXxxTool(handlerContext)` 调用点 ↔ 61 个 handler 导出，双向无孤儿）。
-- **`tool-sandbox.ts` 7540 → 1312 行（−82.6%）**；派发仍是保序 if 链，63 项条件顺序逐字一致，`isTaskToolName` 谓词块与 `workspace_*` 前置重写位置零变化。
-**门禁**: typecheck / eslint / prettier / `__tests__/tools/`（84 文件 685 用例）/ delegation 专项 `__tests__/task/` + `__tests__/session/`（87 文件 628 用例：625 passed / 3 skipped）全绿。
-**未完成（非阻塞）**: Phase 3 派发器（触发条件为「Phase 2 后 >1500 行」，实测 1312 未触发）；门面 1312 行较 Gate 0 D-5 的 ≤1200 差 112 行，如需达标须启动 Phase 3。
-**踩坑**: ① 禁止用 sed 按原始行号连续删块（行号漂移会误删），改为一次性按区间过滤重建；② 禁止并发编辑同一文件（read-modify-write 覆盖）；③ 子模块反向 import 门面会造成运行时循环，常量与类型须下沉到子模块；④ handler 从主文件复制导入块时，src 级模块必须 `../../../<dir>/x.js`（层级写错会一次性报上百个 TS2307）；⑤ 搬迁后必须跑 `bunx organize-imports-cli <改动文件>`，否则 lint 会累积上千个 `no-unused-vars`（本轮清理 1786 处）。
-
-### 🟢 261009-桌面端灵动岛 - Tauri 多窗口浮窗实时展示 Agent 状态与网关健康
-**状态**: ✅ **已交付**（2026-10-09；T-01~T-13 完成 + **第二轮独立复核修复 5 处真实缺口**；T-14 三端手工验证待真机执行）
-**复杂度**: Full orchestration（score +6；Rust 窗口架构成型 + 前端入口分流 + 跨窗口状态同步三层，串行执行）
-**开始日期**: 2026-10-09（规划）
-**方案文档**: [workflow/261009-desktop-dynamic-island.md](workflow/261009-desktop-dynamic-island.md)
-**运行计划**: [runtime/261009-desktop-dynamic-island/master_plan.md](runtime/261009-desktop-dynamic-island/master_plan.md)
-**目标**: 主显示器顶部中央新增 `island` 浮窗（pill 164×28，置顶 / 无边框 / 透明 / 不抢焦点），实时展示 Agent 状态脉冲与网关健康；hover 展开为卡片（380×92）显示会话标题 + 最后消息预览 + 「打开会话」；设置页可开关，`Alt+Shift+I` 全局快捷键切换。
-**关键约束**: Windows 透明窗口需前端 `border-radius` 模拟 pill 形状；跨窗口 Zustand 不共享 → 全部走 Tauri `emit`/`listen`；island WebView 未就绪前 emit 会丢 → 就绪标记 + 缓存补发。
-**交付**: T-01~T-13 全部完成（Rust 窗口/命令/快捷键 + island 前端入口/store/组件 + 设置页 + 23 个单测）；第二轮复核补齐：① `Alt+Shift+I` 此前**没有接线**（只有注册，handler 无分支）已补；② 方案承诺的 **Linux 每 10s 位置校正**此前缺失，已补（仅 Linux、窗口可见才校正、隐藏/退出清理、`Arc<AtomicBool>` 停止信号）；③ 定位改用 `Monitor::work_area()`（原用整块显示器，macOS 菜单栏会遮挡）；④ `tauri-plugin-window-state` 加 `with_denylist(["island"])`（否则插件回写尺寸/位置，跨重启会出现「窗口 380×92 但状态折叠」）；⑤ host-ready 前上报的 Agent 状态此前被直接丢弃，改为缓存 + 就绪补发。
-**验证**: 本机复跑 `apps/web` / `apps/desktop` tsc 与 `src/island` 单测（23 用例）全绿；**本机无 cargo/rustc**，Rust 改动未经编译验证（已对照 docs.rs 核对 `work_area` / `with_denylist` / `inner_size(f64,f64)` / `position(f64,f64)` 签名，与 tauri 2.11.5 / 插件 2.4.1 一致）；真机第一步应先 `cargo check`。T-14 手工验证清单保留（macOS / Windows / Linux：置顶居中、脉冲变色、hover 展开、点击跳转、设置开关、Alt+Shift+I、网关异常红点、Linux 拖动后 10s 自动回位）。
-
 ### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口
 **状态**: 🟢 **Phase 1/2 已交付并验证**（2026-09-21，多并发实施）；**Phase 3（CodeMode）未开始**
 **复杂度**: Full orchestration（score +6）
@@ -857,8 +842,16 @@
 
 **范围边界**: 不含本轮已单独交付的 `openai-chat.ts` 空 assistant 报文兼容修复；不照抄上游的权限 defect 隧道与 tree-sitter shell 解析（语义/依赖差异，属独立议题）。
 
+### 🟡 261020-浏览器实时诊断 - 浏览器实时预览低帧率链路诊断
+**状态**: 🟡 **部分完成**（T-01~T-05 已交付并验证；T-06 真实对照实验、T-07 架构决策未完成，依赖运行环境）
+**开始日期**: 2026-10-20
+**方案文档**: [workflow/261020-浏览器实时诊断.md](workflow/261020-浏览器实时诊断.md)
+**运行计划**: `.agentdocs/runtime/261020-browser-live-diagnostics/master_plan.md`
+**已完成**: 客户端暴露真实位图尺寸与分阶段处理耗时、角标展示、Hook/解码测试；网关补充产帧/发送/ack RTT/丢帧指标（`OPENAWORK_BROWSER_LIVE_DIAGNOSTICS=1`）；验证：网关 Hub 29 项、web-client 23 项、Web 浏览器相关 72 项通过，typecheck 通过。
+**未完成**: T-06 使用持续动画空白页对比 Agent 流、工具、索引与部署形态；T-07 根据数据决定进程隔离、客户端 Worker 或原生渲染默认策略。
+
 ### 🟡 260921-ChatPage组装层瘦身方案 - 把 7347 行的 ChatPage 降到 1500 硬上限内
-**状态**: 🏁 **阶段性收尾（用户决定，2026-09-21）** — P0…P4c 全部提交；ChatPage **7347 → 3973（−45.9%）**，零行为变更；**未达 <1500 目标**（仍 4203 行），原因与后续路径见方案文档「阶段性收尾」节
+**状态**: 🏁 **阶段性收尾（用户决定，2026-09-21）** — P0…P4c 全部提交；ChatPage **7347 → 3973（−45.9%）**，零行为变更；2026-10-23 复核降至 3744，**2026-10-26 实测 3703 行**；**未达 <1500 目标**，原因与后续路径见方案文档「阶段性收尾」节（下一步「数据流重构」未开始）
 **复杂度**: Full orchestration（score +6）
 **开始日期**: 2026-09-21
 **方案文档**: [workflow/260921-ChatPage组装层瘦身方案.md](workflow/260921-ChatPage组装层瘦身方案.md)
@@ -1045,10 +1038,13 @@
 - [260924-自定义Agent管理工具](workflow/done/260924-自定义Agent管理工具.md)
 - [260924-记忆管理工具](workflow/done/260924-记忆管理工具.md)
 
-### 2026-10（2）
+### 2026-10（5）
 
 - [261009-agentdocs清理整理](workflow/done/261009-agentdocs清理整理.md)
 - [261009-agentdocs清理整理.tasks-cleanup-list](workflow/done/261009-agentdocs清理整理.tasks-cleanup-list.md)
+- [261009-desktop-dynamic-island](workflow/done/261009-desktop-dynamic-island.md)
+- [261009-tool-sandbox拆分方案](workflow/done/261009-tool-sandbox拆分方案.md)
+- [261013-opencode-llm对齐packages-ai](workflow/done/261013-opencode-llm对齐packages-ai.md)
 
 ## 项目记忆
 
@@ -1345,3 +1341,4 @@
 - 2026-09-24: **插件/技能/MCP 管理界面重构（已交付）沉淀记忆**——「架构决策」新增 1 条（管理面重构三条硬约束：单一数据 hook / shared-ui props 先兼容后重写 / 配置+状态合并单列表）；「已知陷阱补充」新增 3 条（harness 容器必须 `minmax(0, 1fr)`、`:focus-visible` 断言需先建立键盘模态、同名按钮导致选择器歧义）。方案与三视口验收见 `workflow/done/260924-插件技能MCP管理界面重构.md` + `apps/web/harness/verify-plugin-manager-3viewports.ts`（52 断言 × 3 视口）。
 - 2026-10-09: **归档同步与 runtime 清理**——① 渠道收尾清理第五批最终版入档（覆盖 `done/` 旧版，T-05/T-06 已勾选）；② 四域总览文档更新最终状态（Phase 2/3/4 全部交付）并移入 `done/`；③ 清理 5 个已完成/终止任务的 runtime 残留（260706 / 260921-GUI / 260921-多模态 / 260923-后台任务常驻入口 / 260923-后台任务统一管理面板）；保留 260922（含记忆同步 final_output）、260915/260916（index 活链接）与全部活跃任务 runtime（opencode-v2 / 移动端图片查看器 / desktop-dynamic-island）。
 - 2026-10-09: **清理整理（续；接手并发会话剩余）**——① `260921-多模态媒体引用通路`（已终止）与 `260922-pnpm全量迁移bun`（已交付）归档 `done/`；② 新增「归档全量索引（workflow/done/）」：**全量 118 条**一行一条，修复原 67 条无检索入口；③ 「未完成与近期收口任务」区 8 条已完成/已终止条目归位至「已完成的任务」区（章节去掉「（明细）」）；④ `.agentdocs/tasks/` 旧账清理：删除全终态且 >14 天未更新的 **156** 个文件（532 → 376），清单备档 `done/261009-agentdocs清理整理.tasks-cleanup-list.md`；⑤ runtime 保留决定维持（260915 / 260916 / 260922 不迁不删）；⑥ 本清理方案归档 `done/261009-agentdocs清理整理.md`。
+- 2026-10-26: **方案归档与文档修复**——① `261013-opencode-llm`（46✅/3⚪/0 遗留）、`261009-tool-sandbox`（7540→1328 行）、`261009-desktop-dynamic-island`（T-14 真机验证遗留）归档 `done/`，并归位「已完成的任务」区；② 从 `8f819037^` 恢复被误删的 `260921-ChatPage组装层瘦身方案.md` 与 `260921-移动端图片查看器方案.md`（二者仍活跃：前者未达 1500 行、数据流重构未开始；后者代码完成待真机 T-13/T-17）；③ 未完成区登记 `261020-浏览器实时诊断`（T-06/T-07 未完成）；④ 回填 `docs/superpowers/plans/2026-07-23-provider-catalog-expansion.md` 全部勾选（代码核实 11 平台 + discover/import + UI + 测试已落地）；⑤ 归档索引 **121 条 = `done/` 121 文件**，index 相对链接 **0 悬空**。
