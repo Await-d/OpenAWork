@@ -229,6 +229,7 @@ cd packages/agent-core && bunx vitest
 - `REDIS_URL` — **可选，未接入**：网关不连接真实 Redis（`services/agent-gateway/src/infra/db.ts` 的 `redis` 是进程内 Map 桩，TTL 被忽略），该变量仅用于终端面板「监听端口」列表的端口过滤（默认 6379）；多实例部署前需先实现真正的 Redis 适配
 - `AI_API_KEY`、`AI_API_BASE_URL`、`AI_DEFAULT_MODEL`
 - `GATEWAY_PORT`（默认 3000）、`GATEWAY_HOST`
+- `OPENAWORK_CRON_MAX_CONCURRENT` — 定时任务全局并发上限（默认 3，硬上限 50）。每个并发都是一条完整 agent 会话；超过上限的**到点**触发会跳过并每任务每分钟最多落一条 `skipped` 执行记录（手动「立即运行」改为直接返回 409 并带原因）
 
 Docker：`docker-compose up` 启动网关 + Web，并把 Gateway durable 数据挂到 `gateway_data` 卷（不含 Redis，理由见上）。
 

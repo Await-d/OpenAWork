@@ -200,6 +200,7 @@ bun run --filter @openAwork/agent-core test -t "测试名称关键字"
 - `REDIS_URL` — **可选，未接入**：网关不连接真实 Redis（`services/agent-gateway/src/infra/db.ts` 的 `redis` 是进程内 Map 桩），该变量仅用于终端面板端口过滤
 - `AI_API_KEY`、`AI_API_BASE_URL`、`AI_DEFAULT_MODEL`
 - `GATEWAY_PORT`（默认 3000）、`GATEWAY_HOST`
+- `OPENAWORK_CRON_MAX_CONCURRENT` — 定时任务全局并发上限（默认 3，最大 50）；被挡下的到点触发会落 `skipped` 记录
 
 ## 核心禁止事项
 
