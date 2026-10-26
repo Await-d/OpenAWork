@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 import { computeChannelRetryDelayMs } from './channel-http.js';
 import { ChannelRelay } from './channel-relay.js';
+import { inlineRemoteImages } from './inbound-image.js';
 import {
   clearChannelHealthIssue,
   getChannelHealthRecord,
@@ -296,17 +297,20 @@ export class ChannelManager {
       // service 抛错时告警并原样投递，绝不因媒体下载失败丢消息。
       enrich: async (message) => {
         const service = this.services.get(instance.id);
+        // 与 HTTP 入站路由同口径：service enrich 之后再过一层通用内联兜底，
+        // 确保任何漏网的远程图片地址都不会带进模型上下文（幂等，零额外开销）。
+        const inline = (value: typeof message) => inlineRemoteImages(value, { tag: instance.type });
         if (!service?.enrichInboundMessage) {
-          return message;
+          return inline(message);
         }
         try {
-          return await service.enrichInboundMessage(message);
+          return await inline(await service.enrichInboundMessage(message));
         } catch (error) {
           channelLogWarn('relay inbound media enrich failed', {
             channelId: instance.id,
             error: error instanceof Error ? error.message : String(error),
           });
-          return message;
+          return inline(message);
         }
       },
     });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -236,6 +236,45 @@ describe('split 视图高亮 / 超长 diff 渲染上限', () => {
     expect(container.querySelectorAll('[class*="hljs-keyword"]').length).toBeGreaterThan(0);
   });
 
+  it('split 模式的 hunk 分隔条与 unified 同一文案（不铺原始 @@）', () => {
+    const diff = [
+      'diff --git a/a.ts b/a.ts',
+      '--- a/a.ts',
+      '+++ b/a.ts',
+      '@@ -1,2 +1,2 @@',
+      '-old',
+      '+new',
+      ' same',
+      '@@ -40,2 +40,2 @@',
+      '-old2',
+      '+new2',
+      ' tail',
+    ].join('\n');
+
+    const { container } = render(
+      <UnifiedCodeDiff diffText={diff} filePath="a.ts" viewMode="split" />,
+    );
+
+    const hunks = Array.from(container.querySelectorAll('[data-diff-row="hunk"]')).map((el) =>
+      (el.textContent ?? '').trim(),
+    );
+    expect(hunks).toEqual(['⋯ 第 1 行起', '⋯ 37 行未变更']);
+  });
+
+  it('split 模式的单元格保留行语义（added / removed / empty）', () => {
+    const { container } = render(
+      <UnifiedCodeDiff
+        beforeText={BEFORE_TEXT}
+        afterText={AFTER_TEXT}
+        filePath="a.ts"
+        viewMode="split"
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-diff-row="removed"]').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[data-diff-row="added"]').length).toBeGreaterThan(0);
+  });
+
   it('超过 600 行时先渲染上限 + 展开入口，点击后放开全部', () => {
     const count = 320; // 320 组替换 → 640 行（刚好越过上限，测试保持轻量）
     const before = Array.from({ length: count }, (_, i) => `const v${i} = ${i};`).join('\n');
@@ -252,5 +291,93 @@ describe('split 视图高亮 / 超长 diff 渲染上限', () => {
     fireEvent.click(expand);
     expect(container.querySelectorAll('[data-diff-row]')).toHaveLength(640);
     expect(container.querySelector('[data-diff-expand="true"]')).toBeNull();
+  });
+});
+
+describe('viewMode="auto" 按容器宽度自动切换布局', () => {
+  function stubContainerWidth(width: number): void {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ): DOMRect {
+      return new DOMRect(0, 0, width, 0);
+    });
+  }
+
+  function readViewMode(container: HTMLElement): string | null {
+    return container.firstElementChild?.getAttribute('data-diff-view-mode') ?? null;
+  }
+
+  it('宽容器用左右双栏，并渲染「修改前 / 修改后」列头', () => {
+    stubContainerWidth(900);
+
+    const { container, getByText } = render(
+      <UnifiedCodeDiff
+        afterText={AFTER_TEXT}
+        beforeText={BEFORE_TEXT}
+        filePath="src/a.ts"
+        viewMode="auto"
+      />,
+    );
+
+    expect(readViewMode(container)).toBe('split');
+    expect(getByText('修改前')).toBeTruthy();
+    expect(getByText('修改后')).toBeTruthy();
+  });
+
+  it('窄容器保持上下单栏（不出现左右列头）', () => {
+    stubContainerWidth(480);
+
+    const { container, queryByText } = render(
+      <UnifiedCodeDiff
+        afterText={AFTER_TEXT}
+        beforeText={BEFORE_TEXT}
+        filePath="src/a.ts"
+        viewMode="auto"
+      />,
+    );
+
+    expect(readViewMode(container)).toBe('unified');
+    expect(queryByText('修改前')).toBeNull();
+  });
+
+  it('容器宽度跨过阈值时跟随切换（ResizeObserver）', () => {
+    stubContainerWidth(900);
+    let emitWidth: ((width: number) => void) | undefined;
+    class ResizeObserverStub {
+      constructor(callback: ResizeObserverCallback) {
+        emitWidth = (width) => {
+          callback(
+            [{ contentRect: { width } } as unknown as ResizeObserverEntry],
+            this as unknown as ResizeObserver,
+          );
+        };
+      }
+      observe(): void {
+        // 组件只使用构造时注册的回调，observe 无需记录目标
+      }
+      unobserve(): void {
+        // 同上
+      }
+      disconnect(): void {
+        // 同上
+      }
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+
+    const { container } = render(
+      <UnifiedCodeDiff
+        afterText={AFTER_TEXT}
+        beforeText={BEFORE_TEXT}
+        filePath="src/a.ts"
+        viewMode="auto"
+      />,
+    );
+    expect(readViewMode(container)).toBe('split');
+
+    act(() => emitWidth?.(480));
+    expect(readViewMode(container)).toBe('unified');
+
+    act(() => emitWidth?.(1200));
+    expect(readViewMode(container)).toBe('split');
   });
 });

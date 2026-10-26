@@ -150,6 +150,7 @@ describe('ChatMessageGroupList', () => {
       noticeGroups: buildSubagentNoticeGroups([
         {
           id: 'n-1',
+          source: 'subagent',
           agent: 'scout',
           state: 'done',
           description: '国际时事最新新闻',
@@ -186,6 +187,7 @@ describe('ChatMessageGroupList', () => {
     const groups = buildSubagentNoticeGroups([
       {
         id: 'n-md',
+        source: 'subagent',
         agent: 'explore',
         state: 'done',
         description: '结构梳理',
@@ -220,11 +222,12 @@ describe('ChatMessageGroupList', () => {
     const groups = buildSubagentNoticeGroups([
       {
         id: 'n-click',
+        source: 'subagent',
         agent: 'web-researcher',
         state: 'done',
         description: '请联网检索科技行业新动态',
         text: '<subagent sessionID="child-1" state="completed">子代理已完成</subagent>',
-        childSessionId: 'child-1',
+        targetSessionId: 'child-1',
         createdAt: 1_000,
       },
     ]);
@@ -252,11 +255,12 @@ describe('ChatMessageGroupList', () => {
     const groups = buildSubagentNoticeGroups([
       {
         id: 'n-no-click',
+        source: 'subagent',
         agent: 'web-researcher',
         state: 'done',
         description: '请联网检索科技行业新动态',
         text: '<subagent sessionID="child-1" state="completed">子代理已完成</subagent>',
-        childSessionId: 'child-1',
+        targetSessionId: 'child-1',
         createdAt: 1_000,
       },
     ]);

@@ -1156,11 +1156,13 @@ function RightPanelTerminalsContent({
   );
 }
 
-const TOOL_FILTER_LSP_PREFIXES = ['lsp_', 'ast_grep'];
+// `mcp__lsp__*` 排在 `mcp_` 之前判定：虚拟 LSP MCP 属于语言服务，不该落进「网络」。
+const TOOL_FILTER_LSP_PREFIXES = ['lsp_', 'mcp__lsp__', 'ast_grep'];
 const TOOL_FILTER_FILE_PREFIXES = ['read', 'write', 'edit', 'glob', 'multi_edit', 'workspace_'];
 const TOOL_FILTER_NETWORK_PREFIXES = [
   'webfetch',
   'websearch',
+  'web_search',
   'google_search',
   'playwright',
   'mcp_',

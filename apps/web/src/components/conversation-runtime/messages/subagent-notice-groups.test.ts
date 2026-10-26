@@ -13,6 +13,7 @@ import {
 function notice(id: string, createdAt: number): SubagentNotice {
   return {
     id,
+    source: 'subagent',
     agent: 'explore',
     state: 'done',
     description: `任务 ${id}`,

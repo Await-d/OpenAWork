@@ -205,6 +205,7 @@ export function getToolCategory(toolName: string): string | undefined {
   // Reasoning / language-server / skill
   if (
     n.startsWith('lsp_') ||
+    n.startsWith('mcp__lsp__') ||
     n === 'skill' ||
     n === 'skill_mcp' ||
     n === 'question' ||
@@ -215,7 +216,7 @@ export function getToolCategory(toolName: string): string | undefined {
     return 'think';
   }
   // Network
-  if (n === 'webfetch' || n === 'websearch' || n === 'google_search') {
+  if (n === 'webfetch' || n === 'websearch' || n === 'web_search' || n === 'google_search') {
     return 'net';
   }
   // Persistent state (todos / tasks / sessions / mcp)

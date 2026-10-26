@@ -26,6 +26,9 @@ vi.mock('../cards/computer-use-tool-card.js', () => ({
     <div data-testid="computer-use-card" data-attachment-count={attachments?.length ?? 0} />
   ),
 }));
+vi.mock('../cards/desktop-tool-card.js', () => ({
+  DesktopToolCard: () => <div data-testid="desktop-tool-card" />,
+}));
 vi.mock('./inline-tool-call.js', () => ({
   InlineToolCall: () => <div data-testid="inline-tool-call" />,
 }));
@@ -68,6 +71,18 @@ describe('ToolCallDisplay 路由', () => {
     expect(screen.queryByTestId('computer-use-card')).toBeNull();
   });
 
+  it('虚拟 LSP MCP 与内置 lsp_* 一样走 InlineToolCall', () => {
+    render(
+      <ToolCallDisplay
+        toolName="mcp__lsp__find_references"
+        input={{ filePath: 'src/a.ts', line: 3, character: 1 }}
+      />,
+    );
+
+    expect(screen.getByTestId('inline-tool-call')).toBeTruthy();
+    expect(screen.queryByTestId('block-tool-call')).toBeNull();
+  });
+
   it('未登记的工具仍走 BlockToolCall 兜底', () => {
     render(<ToolCallDisplay toolName="bash" input={{ command: 'ls' }} />);
 
@@ -98,7 +113,7 @@ describe('ToolCallDisplay 路由', () => {
     ];
 
     render(<ToolCallDisplay toolName="desktop_control" input={{}} attachments={attachments} />);
-    expect(screen.getByTestId('block-tool-call')).toBeTruthy();
+    expect(screen.getByTestId('desktop-tool-card')).toBeTruthy();
     expect(screen.queryByTestId('computer-use-card')).toBeNull();
 
     cleanup();
@@ -108,5 +123,17 @@ describe('ToolCallDisplay 路由', () => {
     );
     expect(screen.getByTestId('inline-tool-call')).toBeTruthy();
     expect(screen.queryByTestId('computer-use-card')).toBeNull();
+  });
+
+  it('desktop_automation / desktop_control → DesktopToolCard，不走 BlockToolCall', () => {
+    render(<ToolCallDisplay toolName="desktop_automation" input={{ action: 'status' }} />);
+    expect(screen.getByTestId('desktop-tool-card')).toBeTruthy();
+    expect(screen.queryByTestId('block-tool-call')).toBeNull();
+
+    cleanup();
+
+    render(<ToolCallDisplay toolName="desktop_control" input={{ action: 'screenshot' }} />);
+    expect(screen.getByTestId('desktop-tool-card')).toBeTruthy();
+    expect(screen.queryByTestId('block-tool-call')).toBeNull();
   });
 });

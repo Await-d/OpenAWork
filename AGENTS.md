@@ -71,7 +71,7 @@ OpenAWork/
 ## 架构说明
 
 - **桌面端复用 Web 页面**：`apps/desktop/src/App.tsx` 直接从 `../../web/src/pages/` 和 `../../web/src/stores/` 相对导入——非构建产物依赖，是直接 TS 导入。
-- **网关作为桌面端 Sidecar**：通过 `bun build --compile` 编译为二进制，嵌入 Tauri 应用，路径为 `apps/desktop/src-tauri/sidecars/agent-gateway/`。
+- **网关作为桌面端 Sidecar**：通过 `bun build --compile` 编译为单文件可执行程序（产物名 `openawork-gateway`），由 `apps/desktop/src-tauri/scripts/bundle-sidecar.mjs` 暂存到 `apps/desktop/src-tauri/binaries/openawork-gateway-<target-triple>`。
 - **流式输出**：网关通过 SSE（`/stream` 路由）+ WebSocket 实现实时 Agent 输出。
 - **消息渠道**：Telegram、Discord、飞书、钉钉、Slack 各自实现 `MessagingChannelService` 接口，位于 `services/agent-gateway/src/channels/`。
 - **哈希锚定编辑**：自定义文件编辑工具（`packages/agent-core/src/tools/hash-edit.ts`）使用 SHA-256 行哈希替代行号，防止编辑漂移。
@@ -242,6 +242,8 @@ Docker：`docker-compose up` 启动网关 + Web，并把 Gateway durable 数据�
   - 数据获取 / 副作用 → 独立 hook（`use*.ts`）
   - 纯计算 / 格式化 → `utils/` 工具函数
   - 常量 / 枚举 → `constants/` 或同级 `*.constants.ts`
+- **体积例外登记（不是豁免）**：文件若已按职责完成域抽取、且剩余部分经**量化验证**确认属于「装配层」（逐块实测「拆文件净减」均低于 10%），须在 `docs/architecture/<name>-split-plan.md` 登记：当前行数、已拆域清单、每块的净减实测、后续**数据流重构**方案与前置条件。登记不改变「1500 行是目标」这一结论，仅用于标明当前阻塞点已不在文件拆分；每季度复核一次，且不得新增同类登记（新文件一律先按规则拆分）。
+  - 当前登记项：`apps/web/src/pages/chat-page/ChatPage.tsx`（见 `docs/architecture/chat-page-split-plan.md` 第十节）。
 
 ### 组件提取原则
 

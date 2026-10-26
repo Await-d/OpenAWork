@@ -9,7 +9,7 @@
     "core:event:deny-emit-to",
     {
       "identifier": "shell:allow-execute",
-      "allow": [{ "name": "agent-gateway", "sidecar": true }]
+      "allow": [{ "name": "openawork-gateway", "sidecar": true }]
     },
     "shell:allow-kill",
     "opener:allow-open-path",

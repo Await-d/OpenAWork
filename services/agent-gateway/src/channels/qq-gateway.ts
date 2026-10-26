@@ -1,4 +1,6 @@
+import { hasRemoteImages } from './inbound-image.js';
 import { parseQQInboundMessage } from './inbound-parsers/qq.js';
+import { attachQQInboundImages } from './qq-media.js';
 import type { QQApiClient } from './qq-api.js';
 import {
   clearQQGatewaySession,
@@ -318,7 +320,10 @@ export class QQGatewayClient {
     if (message) {
       this.lastMessageAt = Date.now();
       this.lastMessageChatId = message.chatId;
-      this.safeNotify({ type: 'message', pluginId: this.pluginId, message });
+      // 附件 `url` 是带 rkey 的临时直链，必须下载成 base64 才能进模型上下文；
+      // 纯文本消息保持同步派发（不额外让出微任务）。
+      const enriched = hasRemoteImages(message) ? await attachQQInboundImages(message) : message;
+      this.safeNotify({ type: 'message', pluginId: this.pluginId, message: enriched });
       return;
     }
 

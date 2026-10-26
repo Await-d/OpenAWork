@@ -168,8 +168,22 @@ export interface UnifiedCodeDiffProps {
    */
   maxHeight?: number | 'fill';
   revealFirstChange?: boolean;
-  viewMode?: 'split' | 'unified';
+  /**
+   * 布局模式。
+   * - `unified`：上下单栏（默认，窄屏友好）
+   * - `split`：左右双栏
+   * - `auto`：按容器宽度自动选择——足够宽用左右双栏，窄屏退回上下单栏
+   */
+  viewMode?: 'auto' | 'split' | 'unified';
 }
+
+/**
+ * `viewMode="auto"` 切到左右双栏所需的最小容器宽度。
+ *
+ * 双栏内容的最小宽度是 720px（每侧 360px：行号 44 + 标记 18 + 文本区），阈值取
+ * 760 留出内边距与滚动条余量——刚过阈值就横向滚动，比上下单栏更难读。
+ */
+const SPLIT_MIN_CONTAINER_WIDTH = 760;
 
 function createEmptySide(): DiffSide {
   return { kind: 'empty', text: '' };
@@ -427,6 +441,37 @@ interface UnifiedDisplayRow {
   text: string;
 }
 
+/**
+ * 把 hunk 头折算成交付给用户的「⋯ N 行未变更 / ⋯ 第 N 行起」文案。
+ *
+ * unified 与 split 共用：参考实现（pierre）不会把原始 `@@ -a,b +c,d @@` 铺出来，
+ * 两种布局必须给出同一句话，否则只是切换布局就会让同一次变更「说法不一致」。
+ */
+function computeHunkLabels(rows: readonly DiffRow[]): Map<string, string> {
+  const labels = new Map<string, string>();
+  let previousNewEnd = 0;
+  let hasPreviousHunk = false;
+
+  for (const row of rows) {
+    if (row.type !== 'hunk') {
+      continue;
+    }
+    const range = parseHunkRange(row.left.text);
+    let text = row.left.text;
+    if (range) {
+      const hidden = hasPreviousHunk
+        ? Math.max(0, range.newStart - previousNewEnd)
+        : Math.max(0, range.newStart - 1);
+      text = hidden > 0 ? `⋯ ${hidden} 行未变更` : `⋯ 第 ${range.newStart} 行起`;
+      previousNewEnd = range.newStart + range.newCount;
+      hasPreviousHunk = true;
+    }
+    labels.set(row.key, text);
+  }
+
+  return labels;
+}
+
 export function toUnifiedDisplayRows(rows: DiffRow[]): Array<{
   key: string;
   kind: DiffSideKind | 'hunk';
@@ -437,22 +482,11 @@ export function toUnifiedDisplayRows(rows: DiffRow[]): Array<{
   const display: UnifiedDisplayRow[] = [];
   // 参考实现（pierre）把 hunk 之间的未变更行折叠成一个「N 行未变更」分隔条；
   // 这里用 new 侧行号区间重算同一个信息，而不是把原始 `@@ … @@` 直接铺出来。
-  let previousNewEnd = 0;
-  let hasPreviousHunk = false;
+  const hunkLabels = computeHunkLabels(rows);
 
   for (const row of rows) {
     if (row.type === 'hunk') {
-      const range = parseHunkRange(row.left.text);
-      let text = row.left.text;
-      if (range) {
-        const hidden = hasPreviousHunk
-          ? Math.max(0, range.newStart - previousNewEnd)
-          : Math.max(0, range.newStart - 1);
-        text = hidden > 0 ? `⋯ ${hidden} 行未变更` : `⋯ 第 ${range.newStart} 行起`;
-        previousNewEnd = range.newStart + range.newCount;
-        hasPreviousHunk = true;
-      }
-      display.push({ key: row.key, kind: 'hunk', text });
+      display.push({ key: row.key, kind: 'hunk', text: hunkLabels.get(row.key) ?? row.left.text });
       continue;
     }
 
@@ -651,6 +685,9 @@ function DiffSideCell({
 }) {
   return (
     <div
+      // 单元格自带行语义（added / removed / context / empty）：与 unified 的
+      // `UnifiedRowCell` 对齐，布局切换不影响「哪一行是新增/删除」的可查询性。
+      data-diff-row={side.kind}
       style={{
         display: 'grid',
         gridTemplateColumns: '44px 18px minmax(0, 1fr)',
@@ -720,8 +757,43 @@ export function UnifiedCodeDiff({
   revealFirstChange = false,
   viewMode = 'unified',
 }: UnifiedCodeDiffProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [showAllRows, setShowAllRows] = useState(false);
+  // `auto` 模式的宽度判定结果。首帧按窄屏（unified）兜底：测量在 layout effect
+  // 里同步完成，React 会在绘制前重渲染，用户看不到「先上下、再左右」的跳动。
+  const [autoSplit, setAutoSplit] = useState(false);
+
+  useLayoutEffect(() => {
+    if (viewMode !== 'auto') {
+      return;
+    }
+    const element = containerRef.current;
+    if (!element) {
+      return;
+    }
+
+    const measure = (width: number): void => {
+      const next = width >= SPLIT_MIN_CONTAINER_WIDTH;
+      setAutoSplit((previous) => (previous === next ? previous : next));
+    };
+
+    measure(element.getBoundingClientRect().width);
+    // jsdom / SSR 没有 ResizeObserver：保留初始测量结果即可（通常退回 unified）。
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      measure(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [viewMode]);
+
+  const resolvedViewMode: 'split' | 'unified' =
+    viewMode === 'auto' ? (autoSplit ? 'split' : 'unified') : viewMode;
   const isMinimalChrome = chrome === 'minimal';
   const fillsHeight = maxHeight === 'fill';
   const usingSnapshot = typeof beforeText === 'string' || typeof afterText === 'string';
@@ -736,16 +808,25 @@ export function UnifiedCodeDiff({
       summary: usingSnapshot
         ? summarizeSnapshotDiff(normalizedBefore, normalizedAfter)
         : summarizeUnifiedDiff(diffText ?? ''),
-      unifiedRows: viewMode === 'split' ? null : toUnifiedDisplayRows(parsedRows),
+      unifiedRows: resolvedViewMode === 'split' ? null : toUnifiedDisplayRows(parsedRows),
     };
-  }, [diffText, normalizedAfter, normalizedBefore, usingSnapshot, viewMode]);
+  }, [diffText, normalizedAfter, normalizedBefore, usingSnapshot, resolvedViewMode]);
   const { rows, summary, unifiedRows } = derived;
+  // split 与 unified 共用同一份 hunk 文案（见 `computeHunkLabels`）：左右布局下
+  // 分隔条也必须说「⋯ N 行未变更」，不能退回原始 `@@ … @@`。unified 分支的文案
+  // 已由 `toUnifiedDisplayRows` 算好，这里只在 split 下额外计算，避免重复遍历。
+  const hunkLabels = useMemo(
+    () => (resolvedViewMode === 'split' ? computeHunkLabels(rows) : null),
+    [resolvedViewMode, rows],
+  );
   const firstChangeIndex =
-    viewMode === 'split'
+    resolvedViewMode === 'split'
       ? findFirstChangedRowIndex(rows)
       : (unifiedRows?.findIndex((row) => row.kind === 'added' || row.kind === 'removed') ?? -1);
   const anchorKey =
-    viewMode === 'split' ? rows[firstChangeIndex]?.key : unifiedRows?.[firstChangeIndex]?.key;
+    resolvedViewMode === 'split'
+      ? rows[firstChangeIndex]?.key
+      : unifiedRows?.[firstChangeIndex]?.key;
   const anchorIndex = revealFirstChange ? firstChangeIndex : -1;
 
   // 语法高亮：snapshot 路径按行号取 before/after 的高亮行（多行结构由整段高亮保证）；
@@ -866,6 +947,8 @@ export function UnifiedCodeDiff({
 
   return (
     <div
+      ref={containerRef}
+      data-diff-view-mode={resolvedViewMode}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -927,7 +1010,7 @@ export function UnifiedCodeDiff({
       {/* minimal（工具卡内嵌）不渲染列头：参考实现的 diff 没有「旧/新/±/内容」表头，
           文件卡头已经说明这是哪个文件的变更。 */}
       {!isMinimalChrome &&
-        (viewMode === 'split' ? (
+        (resolvedViewMode === 'split' ? (
           <div
             style={{
               display: 'grid',
@@ -979,8 +1062,8 @@ export function UnifiedCodeDiff({
           ...(fillsHeight ? { flex: '1 1 auto', minHeight: 0 } : {}),
         }}
       >
-        <div style={{ minWidth: viewMode === 'split' ? 720 : undefined }}>
-          {viewMode === 'split'
+        <div style={{ minWidth: resolvedViewMode === 'split' ? 720 : undefined }}>
+          {resolvedViewMode === 'split'
             ? visibleRows.map((row, index) => {
                 if (row.type === 'hunk') {
                   return (
@@ -998,7 +1081,7 @@ export function UnifiedCodeDiff({
                           'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
                       }}
                     >
-                      {row.left.text}
+                      {hunkLabels?.get(row.key) ?? row.left.text}
                     </div>
                   );
                 }

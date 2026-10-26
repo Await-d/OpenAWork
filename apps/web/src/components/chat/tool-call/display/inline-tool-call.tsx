@@ -5,6 +5,11 @@ import { useToolCallExpandState } from '../shared/use-tool-call-expand-state.js'
 import { ToolIcon } from './tool-icon';
 import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
 import { extractErrorSummary } from '../shared/extract-error-summary.js';
+import {
+  parseMaybeJsonPayload,
+  resolveLspMcpToolName,
+  resolveMcpLspPayload,
+} from '../shared/lsp-mcp-view.js';
 import { buildLspInlineSummary } from '../shared/lsp-summary.js';
 import { naturalLanguageSummary } from '../shared/natural-language-summary.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
@@ -52,37 +57,37 @@ export function InlineToolCall({
     status,
   });
 
-  // LSP tools render as a single-line, non-expandable pill — outputs are
-  // short structured payloads (one location, hover blurb, diagnostics map)
-  // that can be summarised in ~60 chars without losing useful info. The
-  // lsp_* contract is enforced by buildLspInlineSummary (`shared/lsp-summary.ts`).
-  const isLsp = normalized.startsWith('lsp_');
+  // LSP tools 仍以单行摘要为主（位置 + 状态，见 `shared/lsp-summary.ts`），但展开
+  // 能力必须保留：摘要只说「0 个引用」「诊断 3 个问题」时，用户需要能点开看到
+  // 具体位置与诊断内容，否则这条调用等于不可查证。
+  //
+  // 虚拟 LSP MCP（`mcp__lsp__find_references`）映射回内置名 `lsp_find_references`，
+  // 这样位置描述与状态汇总直接复用同一套纯函数，不会出现两套文案口径。
+  const lspMcpInner = resolveLspMcpToolName(toolName, input);
+  const lspToolName = lspMcpInner ? `lsp_${lspMcpInner}` : toolName;
+  const isLsp = lspToolName.trim().toLowerCase().startsWith('lsp_');
 
   const summary = useMemo(() => {
     if (isLsp) {
+      // MCP 通道的 output 是 `{ content: [{ type: 'text', text }] }` 包装，摘要函数
+      // 认的是内层载荷（`path:line:col` 文本 / 诊断 map），否则只会显示「✓ 完成」。
+      const lspOutput = lspMcpInner ? parseMaybeJsonPayload(resolveMcpLspPayload(output)) : output;
       return buildLspInlineSummary({
-        toolName,
+        toolName: lspToolName,
         input,
-        output,
+        output: lspOutput,
         visualState,
         ...(isError !== undefined ? { isError } : {}),
       });
     }
     return naturalLanguageSummary(toolName, input, output);
-  }, [isLsp, toolName, input, output, visualState, isError]);
+  }, [isLsp, lspMcpInner, lspToolName, toolName, input, output, visualState, isError]);
 
-  // Every inline tool is expandable so the user can always inspect both the
-  // raw input parameters and any output. Previously this was gated on a
-  // tiny allow-list (`read` + `lsp_*`), which left todowrite/subtodowrite/
-  // skill/question card cells with no way to drill into details — exactly
-  // the problem the user flagged after the JSON-leak fix.
-  //
-  // LSP tools are the deliberate exception: per user request, they render
-  // as a non-expandable single-line pill since the summary already encodes
-  // the position + a status suffix (✓ N 个引用 / ✗ 失败 / …).
+  // 所有 inline 工具都可展开，保证用户总能查看原始入参与输出。LSP 也不例外：
+  // 摘要里的位置与状态只是入口，真正的定义 / 引用 / 诊断内容在展开体里。
   const hasInput = Object.keys(input).length > 0;
   const hasOutput = output !== undefined;
-  const canExpand = !isLsp && (hasInput || hasOutput);
+  const canExpand = hasInput || hasOutput;
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
   const [expanded, toggleExpanded] = useToolCallExpandState({
     canExpand,
@@ -126,8 +131,10 @@ export function InlineToolCall({
   const showOutputPanel = embedded || (expanded && canExpand);
   // 查看类（read）/ 提问类（question）：内容本体（文件预览 / 问答对）已经把入参
   // 表达出来，展开区不再出现「参数」等分区标签（用户口径：不要多余的分区提示）。
+  // LSP 也归入「摘要已表达入参」：`file:line:char → "newName"` 就在标题里，
+  // 展开区再铺一遍参数只会把输出区推得更远。
   const hideParams =
-    normalized === 'read' || normalized === 'question' || normalized === 'askuserquestion';
+    normalized === 'read' || normalized === 'question' || normalized === 'askuserquestion' || isLsp;
   // read 展开态：路径 + 行区间已经在预览的 meta 行里（带「点击预览」），摘要不再
   // 重复展示同一个路径（用户口径：两处合成一处，且保留 meta 的点击预览）。
   const summaryText =
@@ -182,7 +189,7 @@ export function InlineToolCall({
                 )}
                 {hasOutput && (
                   <div className="tool-call-inline-section">
-                    <ToolOutputPreview toolName={toolName} output={output} />
+                    <ToolOutputPreview toolName={toolName} output={output} input={input} />
                   </div>
                 )}
               </>

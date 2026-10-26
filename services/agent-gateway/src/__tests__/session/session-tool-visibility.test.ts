@@ -193,7 +193,7 @@ describe('schedule_manage 会话可见性', () => {
     ).toBe(true);
   });
 
-  it('cron / team / channel / clarify 均不可见', () => {
+  it('cron / team / clarify 不可见', () => {
     expect(
       isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, { source: 'cron' }),
     ).toBe(false);
@@ -208,13 +208,43 @@ describe('schedule_manage 会话可见性', () => {
       }),
     ).toBe(false);
     expect(
-      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, { source: 'channel' }),
-    ).toBe(false);
-    expect(
       isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, {
         dialogueMode: 'clarify',
       }),
     ).toBe(false);
+  });
+
+  it('渠道会话放通（启用过 LLM 工具时）', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, {
+        source: 'channel',
+        channelLlmToolsEnabled: true,
+      }),
+    ).toBe(true);
+    // 未启用 LLM 工具的渠道会话仍不可见（与其它渠道工具同一道闸）。
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, { source: 'channel' }),
+    ).toBe(false);
+  });
+
+  it('渠道白名单仍然生效：限缩过的渠道不因放通而额外获得该工具', () => {
+    const base = { source: 'channel', channelLlmToolsEnabled: true };
+    // 显式只留渠道回发工具 → schedule_manage 不在白名单内，不可见。
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, {
+        ...base,
+        channelToolAllowlist: ['PluginSendMessage'],
+      }),
+    ).toBe(false);
+    // 通配 / all / 显式列名 → 可见（与其它渠道工具的 allowlist 语义一致）。
+    for (const allowlist of [['*'], ['all'], [SCHEDULE_MANAGE_TOOL_NAME]]) {
+      expect(
+        isGatewayToolEnabledForSessionMetadata(SCHEDULE_MANAGE_TOOL_NAME, {
+          ...base,
+          channelToolAllowlist: allowlist,
+        }),
+      ).toBe(true);
+    }
   });
 });
 

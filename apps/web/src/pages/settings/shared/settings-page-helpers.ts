@@ -429,3 +429,25 @@ export function resolveSshDialogRestore(
 
   return null;
 }
+
+// ─── SSH 预览错误分类 ───────────────────────────────────────────────────────
+
+/**
+ * 网关 `GET /ssh/file` 对「路径其实是目录」的固定文案。
+ *
+ * 与 `services/agent-gateway/src/routes/ssh.ts` 的 `SshRemotePathError('directory')`
+ * 分支逐字一致，改动时两侧必须同步。
+ */
+export const SSH_REMOTE_DIRECTORY_ERROR_MESSAGE = '远端路径是目录，无法作为文件预览。';
+
+/**
+ * 判断 SSH 预览失败是否只是因为「目标其实是目录」。
+ *
+ * `/ssh/files` 用 readdir 的 lstat 结果分类，指向目录的符号链接会以
+ * `kind: 'file'` 下发；点开（或进入目录时自动预览第一个文件）才会由
+ * SFTP stat 跟随软链并判定为目录，网关据此返回 400。这类失败可以直接
+ * 转为「进入该目录」，不是真正的错误。
+ */
+export function isSshDirectoryPreviewError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(SSH_REMOTE_DIRECTORY_ERROR_MESSAGE);
+}

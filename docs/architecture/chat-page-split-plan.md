@@ -283,3 +283,59 @@
 ---
 
 **下一步（2026-09-21 复核更新）**：域 D → A → C → B → E 的 5 个 PR **已全部落地**（见文末矩阵 5/5）；本计划的域抽取阶段**已结束**。文件仍 7347 行（超硬上限 4.9 倍），后续需另立一份以「**组装层瘦身 + 主组件状态下移**」为目标的新方案（目标：把 35 个 `useState` 按域下沉、跨域协调收敛为少量组合 hook），不再沿用本计划的任务序列。
+
+---
+
+## 十、2026-10-23 复核（组装层瘦身 · 第一轮已完成）
+
+### 现状
+
+`ChatPage.tsx` 实测 **3744 行**（2026-09-21 为 7347 行，**−3603 / −49%**）。本轮新增的归属模块（全部为「正文逐字迁移 + 依赖显式化」，未改行为）：
+
+| 模块                                           | 职责                                                                                                                                   |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `hooks/use-chat-page-core-state.ts`            | 页面的核心状态层：会话生命周期 / 流式状态 / 待处理交互 / 本地 UI state 与 ref 镜像（入参只有 `gatewayUrl`、`routeSessionId`、`token`） |
+| `hooks/use-chat-session-runtime-view.ts`       | 运行态派生：忙碌态、停止能力、实时气泡投影、轮询门控                                                                                   |
+| `hooks/use-chat-scroll-settle-effects.ts`      | 「首次快照就绪 / 页面重新激活」两个贴底时机与 ref 镜像                                                                                 |
+| `hooks/use-history-scroll-anchor.ts`           | 头部插入历史消息的锚点捕获 / 武装 / 恢复                                                                                               |
+| `hooks/use-session-recovery-polling.ts`        | 两档轮询（空闲补拉 / 远端运行中，含「流在飞走轻量 `/status`」判定）                                                                    |
+| `hooks/use-session-metadata-persist.ts`        | 会话元数据持久化与 `modelSelectionSource` 回写                                                                                         |
+| `hooks/use-chat-composer-shortcuts.ts`         | 输入框写入、新建会话、上一条重试/编辑                                                                                                  |
+| `hooks/use-render-message-actions.ts`          | 消息 hover actions（收藏 / 多选）                                                                                                      |
+| `hooks/use-mcp-server-retry.ts`                | MCP server 重连反馈                                                                                                                    |
+| `hooks/use-provider-fast-mode.ts`              | OpenAI fast mode 切换                                                                                                                  |
+| `hooks/use-append-image-generation-summary.ts` | 图片生成结果追加为助手消息                                                                                                             |
+| `hooks/use-rollback-derived-cleanup.ts`        | 回退后清理子代理派生状态                                                                                                               |
+| `hooks/use-ensure-message-visible.ts`          | 历史跳转的分页扩窗                                                                                                                     |
+| `hooks/use-model-context-override.ts`          | 上下文窗口挡位写回                                                                                                                     |
+| `history/scroll-user-message.ts`               | 上/下一条用户消息的视口跳转（纯 DOM）                                                                                                  |
+
+### 剩余 3744 行的构成与「拆文件净减」实测
+
+| 区块                                                                                                                                         | 行数 | 拆文件净减 | 原因                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---------- | ------------------------------------------------------------------------------------------- |
+| `useChatConversationViewProps` 入参                                                                                                          | 331  | **0**      | 该 hook 为纯透传（`(input) => ({...view, chrome})`），331 行是对象字面量，搬到哪都是 331 行 |
+| 5 个装配型 hook 调用（`useScrollManager` / `useStaleRunningResync` / `useChatRetryAndEdit` / `useChatPageDerivations` / `useChatUiActions`） | ~500 | **0**      | 均为 `(deps) => ...` 透传，入参即父组件状态                                                 |
+| JSX → 独立组件                                                                                                                               | 348  | **≈18**    | JSX 引用 110 个变量，props + 类型 + 调用点合计 330 行                                       |
+| `runSessionAttachEffect` 装配                                                                                                                | 108  | **≈28**    | 80 个入参 + 30 个 deps                                                                      |
+| 解构块（156 字段）+ import                                                                                                                   | ~350 | ≈10        | 解构已是「一行一项」形态                                                                    |
+
+**结论**：剩余部分不存在「等价文件拆分」方案。装配必须发生在持有状态的组件内，把 props 列表搬进子组件只是把「一行一个同名简写」换成「一行一个解构」，总量不变。
+
+### 下一步：数据流重构（未开始）
+
+唯一能把该文件压到 1500 行内的路径是**让子组件就近取数**，而非层层传参：
+
+1. `ChatSessionPane`：自行调用 `useChatConversationViewProps` / `useChatRenderData`；
+2. `ChatComposerPane`：自行订阅 composer / 队列 / scope；
+3. `ChatSidePanelPane`：右侧面板、终端、编辑器、搜索各自取数；
+4. `ChatPage` 只保留路由、核心状态与布局。
+
+前置条件与代价：
+
+- 需要修改 `ChatRightPanel` 等 **20+ 组件签名**，并调整 `useChatRenderData` 等共享 hook 的调用位置；
+- 需确认「同一派生被多处调用」不会造成重复请求或状态分叉（当前 `useChatRenderData` 为纯派生，重复调用只是重复计算，但必须在真实会话上验证流式帧率）；
+- 必须做聊天页整体回归（发送 / 流式 / attach / 回退 / 队列 / 多端互斥）；
+- 预计 2–3 个工作日，分 3–4 个 PR。
+
+在此之前，本文件按 AGENTS.md 的「体积例外登记」条款保持登记状态。

@@ -150,6 +150,32 @@ describe('resolveToolCallImageSource — desktop_automation / desktop_control', 
     ).toBeNull();
   });
 
+  it('desktop_automation 的 screenshotBase64 → inline PNG（不落产物）', () => {
+    const base64 = 'A'.repeat(200);
+
+    expect(
+      resolveToolCallImageSource(
+        'desktop_automation',
+        { action: 'screenshot' },
+        JSON.stringify({ screenshotBase64: base64 }),
+      ),
+    ).toEqual({ kind: 'inline', src: `data:image/png;base64,${base64}`, alt: '桌面截图' });
+  });
+
+  it('screenshotBase64 已是 data URL 时原样透传', () => {
+    const dataUrl = `data:image/png;base64,${'B'.repeat(160)}`;
+
+    expect(
+      resolveToolCallImageSource('desktop_automation', {}, { screenshotBase64: dataUrl }),
+    ).toEqual({ kind: 'inline', src: dataUrl, alt: '桌面截图' });
+  });
+
+  it('screenshotBase64 过短时不当成图片', () => {
+    expect(
+      resolveToolCallImageSource('desktop_automation', {}, { screenshotBase64: 'abc' }),
+    ).toBeNull();
+  });
+
   it('output 非 JSON 字符串 / 为空 → 安全忽略并返回 null', () => {
     expect(
       resolveToolCallImageSource('desktop_automation', {}, '桌面截图失败：连接超时'),

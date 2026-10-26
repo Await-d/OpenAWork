@@ -22,10 +22,11 @@
     "test:scripts": "node --test scripts/build/vite-plugin-file-icons.test.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "preflight": "bun run format:check && bun run lint && bun run typecheck && bun run check:fastify-alignment && bun run check:docker-versions",
+    "preflight": "bun run format:check && bun run lint && bun run typecheck && bun run check:fastify-alignment && bun run check:docker-versions && bun run check:gateway-binary",
     "check:fastify-alignment": "node scripts/check-fastify-dependency-alignment.mjs",
     "check:docker-versions": "node scripts/check-docker-version-alignment.mjs",
     "check:desktop-native": "node scripts/check-desktop-native.mjs",
+    "check:gateway-binary": "node scripts/check-gateway-binary-name-alignment.mjs",
     "check:react-compiler": "node scripts/check-react-compiler-bailout.mjs",
     "typecheck": "bun run --workspaces --if-present typecheck",
     "test": "bun run --workspaces --if-present test",
@@ -79,6 +80,9 @@
     ],
     "{.bun-version,services/agent-gateway/Dockerfile,apps/web/Dockerfile,docker-compose.yml}": [
       "node scripts/check-docker-version-alignment.mjs"
+    ],
+    "{apps/desktop/src-tauri/**,services/agent-gateway/package.json}": [
+      "node scripts/check-gateway-binary-name-alignment.mjs"
     ],
     "packages/**/*.{ts,tsx}": [
       "eslint --no-warn-ignored",

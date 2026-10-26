@@ -2,10 +2,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  isSshDirectoryPreviewError,
   normalizeSubagentLimits,
   normalizeSubagentModelPolicy,
   parseBoundedIntegerInput,
   resolveSshDialogRestore,
+  SSH_REMOTE_DIRECTORY_ERROR_MESSAGE,
   tauriInvoke,
 } from './settings-page-helpers.js';
 
@@ -177,5 +179,24 @@ describe('resolveSshDialogRestore', () => {
     const connections = [{ id: 'c1', status: 'disconnected' }];
 
     expect(resolveSshDialogRestore([], connections)).toBeNull();
+  });
+});
+
+describe('isSshDirectoryPreviewError', () => {
+  // 文案锚点：与网关 `routes/ssh.ts` 的 directory 分支逐字一致。网关改了文案
+  // 而这里没跟，客户端会退化成「预览失败但列表保留」——本断言用于尽早暴露漂移。
+  it('常量与网关文案逐字一致', () => {
+    expect(SSH_REMOTE_DIRECTORY_ERROR_MESSAGE).toBe('远端路径是目录，无法作为文件预览。');
+  });
+
+  it('命中网关的目录文案（软链目录被 /ssh/files 标成 file 后预览）', () => {
+    expect(isSshDirectoryPreviewError(new Error('远端路径是目录，无法作为文件预览。'))).toBe(true);
+  });
+
+  it('其它预览失败不误判', () => {
+    expect(isSshDirectoryPreviewError(new Error('远端文件不存在。'))).toBe(false);
+    expect(isSshDirectoryPreviewError(new Error('SSH 操作超时,请稍后重试。'))).toBe(false);
+    expect(isSshDirectoryPreviewError('远端路径是目录，无法作为文件预览。')).toBe(false);
+    expect(isSshDirectoryPreviewError(undefined)).toBe(false);
   });
 });

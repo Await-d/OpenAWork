@@ -128,6 +128,7 @@ import {
 } from './team-page-v2-runtime-resume-notice.js';
 import { resolveMatchedSharedSessionDetail } from '../runtime/data/team-runtime-shared-context.js';
 import { TeamPageV2RuntimeNotices } from './TeamPageV2RuntimeNotices.js';
+import { useTeamRuntimePauseControl } from './use-team-runtime-pause-control.js';
 import { TeamPageMiddleArea } from './TeamPageMiddleArea.js';
 import { TeamPageOfficeScene } from './TeamPageOfficeScene.js';
 import { TeamFusionSuperbarSummary } from './TeamFusionSuperbarSummary.js';
@@ -198,30 +199,6 @@ const MAIN_GRID_BASE_STYLE: CSSProperties = {
 };
 
 // ───── 入口组件 ─────
-
-/**
- * 运行树控制（暂停 / 恢复全部）的统一包装：置 busy / 清 error → try → catch 交给 `onError`
- * → finally 清 busy。
- *
- * 必须留在模块级：React Compiler 1.0.0 不支持 `try/catch` 的 finally 子句，本组件 2 处
- * 这类 try 会让整个组件脱靶（实测）。语义逐字照搬。
- */
-async function runTeamRuntimeControlOnce(ctx: {
-  setBusy: (busy: boolean) => void;
-  setError: (message: string | null) => void;
-  onError: (error: unknown) => void;
-  run: () => Promise<void>;
-}): Promise<void> {
-  ctx.setBusy(true);
-  ctx.setError(null);
-  try {
-    await ctx.run();
-  } catch (error) {
-    ctx.onError(error);
-  } finally {
-    ctx.setBusy(false);
-  }
-}
 
 export default function TeamPageV2() {
   const { teamWorkspaceId } = useParams<{ teamWorkspaceId?: string }>();
@@ -345,11 +322,6 @@ export default function TeamPageV2() {
   // officeSceneState 同时供中间区与全屏视图共享。
   const officeScene = useTeamOfficeScene({ viewState });
   const teamClient = useMemo(() => createTeamClient(gatewayUrl), [gatewayUrl]);
-  const [pauseResumeBusy, setPauseResumeBusy] = useState(false);
-  const [runtimeControlError, setRuntimeControlError] = useState<string | null>(null);
-  const [runtimeResumeNotice, setRuntimeResumeNotice] = useState<RuntimeResumeNotice | null>(null);
-  const [showPauseConfirm, setShowPauseConfirm] = useState(false);
-  const [showResumeStale, setShowResumeStale] = useState(false);
 
   const data = useResolvedTeamRuntimeReferenceData({
     activeWorkspace: workspaceState.activeWorkspace,
@@ -786,93 +758,32 @@ export default function TeamPageV2() {
     refreshWorkspaceSnapshot();
   }, [refreshWorkspaceSnapshot, refreshWorkspaces]);
 
-  const handlePauseAll = useCallback(() => {
-    if (!canManageSelectedRuntimeTree || isSelectedTeamPaused || pauseResumeBusy) {
-      return;
-    }
-    setShowPauseConfirm(true);
-  }, [canManageSelectedRuntimeTree, isSelectedTeamPaused, pauseResumeBusy]);
-
-  const handleConfirmPauseAll = useCallback(async () => {
-    setShowPauseConfirm(false);
-    if (
-      !accessToken ||
-      !teamClient ||
-      !selectedTeamId ||
-      isSelectedSharedSession ||
-      pauseResumeBusy
-    ) {
-      return;
-    }
-    setRuntimeResumeNotice(null);
-    // 置 busy / 清 error 与 try/catch/finally 一起下沉到模块级
-    // `runTeamRuntimeControlOnce`（见其注释）。
-    await runTeamRuntimeControlOnce({
-      setBusy: setPauseResumeBusy,
-      setError: setRuntimeControlError,
-      onError: (error) => {
-        setRuntimeControlError(error instanceof Error ? error.message : '暂停运行树失败');
-      },
-      run: async () => {
-        await teamClient.pauseAllRuntimeSessions(accessToken, selectedTeamId, {
-          reason: 'team-page-v2-pause-all',
-        });
-        refreshWorkspaceSnapshot();
-      },
-    });
-  }, [
-    accessToken,
-    isSelectedSharedSession,
+  /**
+   * 暂停 / 恢复运行树的控制域（确认弹窗、busy、错误与提示文案）
+   * — 抽到 useTeamRuntimePauseControl。
+   */
+  const {
     pauseResumeBusy,
-    refreshWorkspaceSnapshot,
-    selectedTeamId,
-    teamClient,
-  ]);
-
-  const handleResumeAll = useCallback(async () => {
-    setShowResumeStale(false);
-    if (
-      !accessToken ||
-      !teamClient ||
-      !selectedTeamId ||
-      isSelectedSharedSession ||
-      !isSelectedTeamPaused ||
-      pauseResumeBusy
-    ) {
-      return;
-    }
-    setRuntimeResumeNotice(buildRuntimeResumeResumingNotice());
-    // 同暂停：整段下沉到 `runTeamRuntimeControlOnce`（见其注释）。
-    await runTeamRuntimeControlOnce({
-      setBusy: setPauseResumeBusy,
-      setError: setRuntimeControlError,
-      onError: (error) => {
-        setRuntimeResumeNotice(null);
-        setRuntimeControlError(error instanceof Error ? error.message : '恢复运行树失败');
-      },
-      run: async () => {
-        const result = await teamClient.resumeAllRuntimeSessions(accessToken, selectedTeamId);
-        setRuntimeResumeNotice(buildRuntimeResumeSubmittedNotice(result));
-        refreshWorkspaceSnapshot();
-      },
-    });
-  }, [
+    runtimeControlError,
+    runtimeResumeNotice,
+    showPauseConfirm,
+    showResumeStale,
+    handlePauseAll,
+    handleConfirmPauseAll,
+    handleResumeAll,
+    handleRequestResumeAll,
+    closePauseConfirm,
+    closeResumeStale,
+  } = useTeamRuntimePauseControl({
     accessToken,
+    teamClient,
+    selectedTeamId,
     isSelectedSharedSession,
     isSelectedTeamPaused,
-    pauseResumeBusy,
+    staleHandoffCount,
+    canManageSelectedRuntimeTree,
     refreshWorkspaceSnapshot,
-    selectedTeamId,
-    teamClient,
-  ]);
-
-  const handleRequestResumeAll = useCallback(() => {
-    if (staleHandoffCount > 0) {
-      setShowResumeStale(true);
-      return;
-    }
-    void handleResumeAll();
-  }, [handleResumeAll, staleHandoffCount]);
+  });
 
   const handleSelectLayerSession = useCallback(() => {
     // classic 弃用底部「层级对话」抽屉
@@ -1492,13 +1403,13 @@ export default function TeamPageV2() {
             open={showPauseConfirm}
             activeCount={activeHandoffCount}
             onConfirm={() => void handleConfirmPauseAll()}
-            onCancel={() => setShowPauseConfirm(false)}
+            onCancel={closePauseConfirm}
           />
           <ResumeStaleDialog
             open={showResumeStale}
             staleCount={staleHandoffCount}
             onResumeAll={() => void handleResumeAll()}
-            onDismiss={() => setShowResumeStale(false)}
+            onDismiss={closeResumeStale}
           />
           {showNewSessionModal && resolvedTeamWorkspaceId ? (
             <NewTeamSessionModal

@@ -16,7 +16,8 @@ export interface ToolDiffCollectionProps {
   files: ToolDiffFileView[];
   maxHeight?: number;
   onActivePathChange?: (path: string) => void;
-  viewMode?: 'split' | 'unified';
+  /** 透传给 `UnifiedCodeDiff`：`auto` 会按容器宽度自动在左右 / 上下布局间切换。 */
+  viewMode?: 'auto' | 'split' | 'unified';
 }
 
 function trimFilePath(value: string): string {

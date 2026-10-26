@@ -14,6 +14,8 @@
  */
 
 import { extractTextFromOutput } from './extract-text.js';
+import { parseLspLocations } from './lsp-location-view.js';
+import { parseLspSymbols } from './lsp-symbol-view.js';
 
 export type LspVisualState =
   'running' | 'completed' | 'failed' | 'paused' | 'pending' | 'cancelled' | 'idle';
@@ -111,11 +113,37 @@ export function lspSuccessSummary(toolName: string, output: unknown): string {
     }
   }
 
+  // 网关注入的位置类 / 符号类输出是**格式化文本**（每行 `path:line:col`）。不在这里
+  // 汇总的话会落到下面的 generic fallback，把输出首行再拼到摘要里 —— 摘要变成
+  // 「path:41:6 · path:41:6 …」，同一条路径重复两遍还带省略号。
+  if (
+    normalized === 'lsp_find_references' ||
+    normalized === 'lsp_goto_definition' ||
+    normalized === 'lsp_goto_implementation'
+  ) {
+    if (typeof output === 'string') {
+      const locations = parseLspLocations(output);
+      if (locations) {
+        return normalized === 'lsp_find_references'
+          ? `${locations.length} 个引用`
+          : `${locations.length} 个位置`;
+      }
+      if (/^No\s+\w+\s+found\.?$/i.test(output.trim())) return '未找到';
+      return '';
+    }
+  }
+
   if (normalized === 'lsp_symbols') {
     if (Array.isArray(output)) return `${output.length} 个符号`;
     if (output && typeof output === 'object') {
       const rec = output as Record<string, unknown>;
       if (Array.isArray(rec.symbols)) return `${rec.symbols.length} 个符号`;
+    }
+    if (typeof output === 'string') {
+      const symbols = parseLspSymbols(output);
+      if (symbols) return `${symbols.length} 个符号`;
+      if (/^No symbols found\.?$/i.test(output.trim())) return '未找到';
+      return '';
     }
   }
 

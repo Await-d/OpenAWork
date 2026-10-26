@@ -95,6 +95,9 @@ jobs:
       - name: Check Docker version alignment
         run: bun run check:docker-versions
 
+      - name: Check gateway sidecar binary name alignment
+        run: bun run check:gateway-binary
+
       - name: Build OpenCode LLM dependency
         run: bun run --filter "@openAwork/opencode-llm" build
 

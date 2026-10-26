@@ -1,3 +1,5 @@
+import { attachDiscordInboundImages } from './discord-media.js';
+import { hasRemoteImages } from './inbound-image.js';
 import { parseDiscordInboundMessage } from './inbound-parsers/discord.js';
 import type { ChannelEvent, ChannelInstance } from './types.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
@@ -153,7 +155,13 @@ export class DiscordGatewayClient {
       botId: this.selfUserId,
     });
     if (message) {
-      this.safeNotify({ type: 'message', pluginId: this.pluginId, message });
+      // CDN 附件 URL 必须先下载成 base64：多模态协议层不接受远程地址，
+      // 直通会让整轮请求被拒（见 discord-media.ts 的注释）。纯文本消息走
+      // 同步路径，保持「解析完立即派发」的既有语义。
+      const enriched = hasRemoteImages(message)
+        ? await attachDiscordInboundImages(message)
+        : message;
+      this.safeNotify({ type: 'message', pluginId: this.pluginId, message: enriched });
     }
   }
 

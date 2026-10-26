@@ -26,8 +26,11 @@ export interface SubagentNoticeRowProps {
   notice: SubagentNotice;
   /** 与相邻通知合组时收紧上间距。 */
   grouped?: boolean;
-  /** 传入且通知带子会话 id 时，标题行可点击/可聚焦跳转。 */
-  onOpenChild?: (childSessionId: string) => void;
+  /**
+   * 传入且通知带跳转目标（`notice.targetSessionId`）时，标题行可点击/可聚焦跳转。
+   * 目标是子会话（子代理通知）或投递会话（定时任务通知）。
+   */
+  onOpenChild?: (targetSessionId: string) => void;
   /** 结果卡片正文渲染器注入点（如 Markdown）；未注入时正文按纯文本渲染。 */
   renderBody?: SubagentResultBodyRenderer;
 }
@@ -54,8 +57,8 @@ export function SubagentNoticeRow({
   const [focused, setFocused] = useState(false);
 
   const presentation = STATE_PRESENTATION[notice.state];
-  const childSessionId = notice.childSessionId;
-  const interactive = Boolean(childSessionId && onOpenChild);
+  const targetSessionId = notice.targetSessionId;
+  const interactive = Boolean(targetSessionId && onOpenChild);
   // 可交互时 hover 提到常规文字色（对齐上游 hover → text.base）。
   const headingColor = interactive && hovered ? color.fgDefault : presentation.accent;
   const labelColor = interactive && hovered ? color.fgMuted : presentation.accent;
@@ -136,8 +139,8 @@ export function SubagentNoticeRow({
         data-subagent-notice-heading="true"
         title={hoverSummary}
         onClick={() => {
-          if (childSessionId) {
-            onOpenChild?.(childSessionId);
+          if (targetSessionId) {
+            onOpenChild?.(targetSessionId);
           }
         }}
         onMouseEnter={() => setHovered(true)}

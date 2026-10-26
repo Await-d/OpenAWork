@@ -65,7 +65,7 @@ export interface UnifiedCodeDiffProps {
   diffText?: string;
   filePath?: string;
   maxHeight?: number;
-  viewMode?: 'split' | 'unified';
+  viewMode?: 'auto' | 'split' | 'unified';
 }
 
 export function UnifiedCodeDiff(props: UnifiedCodeDiffProps): ReactElement {

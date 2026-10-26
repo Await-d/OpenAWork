@@ -285,6 +285,322 @@ try {
       path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-write.png`,
     });
 
+    // ── 桌面 / 浏览器自动化：动作语义卡（不再刷 {ok:true} 字段表）────────────
+    const desktopAckCase = page.locator('[data-case="desktop-ack"]');
+    await ensureExpanded(desktopAckCase.locator('.tool-call-block-header').first());
+    const desktopAck = await desktopAckCase.evaluate((section) => ({
+      title: (section.querySelector('.tool-call-block-title')?.textContent ?? '').trim(),
+      summary: (
+        section.querySelector('.tool-call-block-collapsed-summary')?.textContent ?? ''
+      ).trim(),
+      hasStructured: section.querySelector('.structured-output') !== null,
+      sectionScrollWidth: section.scrollWidth,
+      sectionClientWidth: section.clientWidth,
+    }));
+    check(
+      `[${width}] 桌面卡片 = 标题 + 动作摘要`,
+      desktopAck.title === '桌面控制' && desktopAck.summary.startsWith('点击'),
+      JSON.stringify(desktopAck),
+    );
+    check(
+      `[${width}] 确认型动作不再渲染 {ok:true} 字段表`,
+      !desktopAck.hasStructured,
+      JSON.stringify({ hasStructured: desktopAck.hasStructured }),
+    );
+    check(
+      `[${width}] 长选择器不撑破桌面卡片`,
+      desktopAck.sectionScrollWidth <= desktopAck.sectionClientWidth,
+      `${desktopAck.sectionScrollWidth} > ${desktopAck.sectionClientWidth}`,
+    );
+    await desktopAckCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-desktop-ack.png`,
+    });
+
+    const desktopDataCase = page.locator('[data-case="desktop-data"]');
+    await ensureExpanded(desktopDataCase.locator('.tool-call-block-header').first());
+    const desktopData = await desktopDataCase.evaluate((section) => ({
+      title: (section.querySelector('.tool-call-block-title')?.textContent ?? '').trim(),
+      text: (section.textContent ?? '').replace(/\s+/g, ' '),
+    }));
+    check(
+      `[${width}] 读取型动作用专用视图展示返回`,
+      desktopData.title === '浏览器自动化' && desktopData.text.includes('已启动'),
+      JSON.stringify({ title: desktopData.title, hasStatus: desktopData.text.includes('已启动') }),
+    );
+    await desktopDataCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-desktop-data.png`,
+    });
+
+    const desktopConsoleCase = page.locator('[data-case="desktop-console"]');
+    await ensureExpanded(desktopConsoleCase.locator('.tool-call-block-header').first());
+    const desktopConsole = await desktopConsoleCase.evaluate((section) => {
+      const text = (section.textContent ?? '').replace(/\s+/g, ' ');
+      return {
+        text,
+        hasErrorRow: text.includes('页面错误'),
+        sectionScrollWidth: section.scrollWidth,
+        sectionClientWidth: section.clientWidth,
+      };
+    });
+    check(
+      `[${width}] 控制台视图 = 消息 + 页面错误行`,
+      desktopConsole.text.includes('slow network') && desktopConsole.hasErrorRow,
+      JSON.stringify({ hasErrorRow: desktopConsole.hasErrorRow }),
+    );
+    check(
+      `[${width}] 控制台截断提示可见`,
+      desktopConsole.text.includes('已按上限截断'),
+      JSON.stringify({ truncated: desktopConsole.text.includes('已按上限截断') }),
+    );
+    check(
+      `[${width}] 控制台长消息不撑破卡片`,
+      desktopConsole.sectionScrollWidth <= desktopConsole.sectionClientWidth,
+      `${desktopConsole.sectionScrollWidth} > ${desktopConsole.sectionClientWidth}`,
+    );
+    await desktopConsoleCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-desktop-console.png`,
+    });
+
+    // ── LSP 诊断：摘要一行 → 可展开查看具体诊断 ─────────────────────────────
+    const lspCase = page.locator('[data-case="lsp-diagnostics"]');
+    await lspCase.locator('.tool-call-inline').first().click();
+    await lspCase.locator('.tool-call-inline-output').first().waitFor({ timeout: 5_000 });
+    const lsp = await lspCase.evaluate((section) => {
+      const text = (section.textContent ?? '').replace(/\s+/g, ' ');
+      return {
+        summary: (section.querySelector('.tool-call-inline-summary')?.textContent ?? '').trim(),
+        hasChevron: section.querySelector('.tool-call-inline-chevron') !== null,
+        hasDiagnostics: text.includes('does not exist on type'),
+        hasSeverity: text.includes('错误') && text.includes('警告'),
+        hasParams: section.querySelector('[data-inline-row="true"]') !== null,
+        sectionScrollWidth: section.scrollWidth,
+        sectionClientWidth: section.clientWidth,
+      };
+    });
+    check(
+      `[${width}] LSP 摘要 = 位置 + 状态，且可展开`,
+      lsp.summary.includes('1 个文件') && lsp.hasChevron,
+      JSON.stringify({ summary: lsp.summary, hasChevron: lsp.hasChevron }),
+    );
+    check(
+      `[${width}] LSP 展开后可见诊断内容与严重度`,
+      lsp.hasDiagnostics && lsp.hasSeverity,
+      JSON.stringify({ hasDiagnostics: lsp.hasDiagnostics, hasSeverity: lsp.hasSeverity }),
+    );
+    check(`[${width}] LSP 展开体不重复参数区`, !lsp.hasParams);
+    check(
+      `[${width}] LSP 诊断长消息不撑破卡片`,
+      lsp.sectionScrollWidth <= lsp.sectionClientWidth,
+      `${lsp.sectionScrollWidth} > ${lsp.sectionClientWidth}`,
+    );
+    await lspCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-lsp.png`,
+    });
+
+    // ── LSP 引用：位置列表 + 公共前缀 ───────────────────────────────────────
+    const lspRefsCase = page.locator('[data-case="lsp-references"]');
+    await lspRefsCase.locator('.tool-call-inline').first().click();
+    await lspRefsCase.locator('.tool-call-inline-output').first().waitFor({ timeout: 5_000 });
+    const lspRefs = await lspRefsCase.evaluate((section) => {
+      const text = (section.textContent ?? '').replace(/\s+/g, ' ');
+      return {
+        rows: section.querySelectorAll('.tool-call-inline-output li').length,
+        hasPrefix: section.querySelector('.styled-path-prefix') !== null,
+        hasLocation: text.includes('41:6'),
+        sectionScrollWidth: section.scrollWidth,
+        sectionClientWidth: section.clientWidth,
+      };
+    });
+    check(
+      `[${width}] LSP 引用列表逐行可读`,
+      lspRefs.rows === 3 && lspRefs.hasLocation,
+      JSON.stringify({ rows: lspRefs.rows, hasLocation: lspRefs.hasLocation }),
+    );
+    check(`[${width}] LSP 引用提到公共目录前缀`, lspRefs.hasPrefix);
+    check(
+      `[${width}] LSP 引用长路径不撑破卡片`,
+      lspRefs.sectionScrollWidth <= lspRefs.sectionClientWidth,
+      `${lspRefs.sectionScrollWidth} > ${lspRefs.sectionClientWidth}`,
+    );
+    await lspRefsCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-lsp-refs.png`,
+    });
+
+    // ── web_search：纯文本结果 → 搜索结果卡 ─────────────────────────────────
+    const webSearchCase = page.locator('[data-case="web-search"]');
+    await ensureExpanded(webSearchCase.locator('.tool-call-block-header').first());
+    const webSearch = await webSearchCase.evaluate((section) => {
+      const text = (section.textContent ?? '').replace(/\s+/g, ' ');
+      return {
+        title: (section.querySelector('.tool-call-block-title')?.textContent ?? '').trim(),
+        itemCount: section.querySelectorAll('.tool-call-block-search-item').length,
+        hasUrl: text.includes('https://example.com/ts'),
+        sectionScrollWidth: section.scrollWidth,
+        sectionClientWidth: section.clientWidth,
+      };
+    });
+    check(
+      `[${width}] web_search 渲染为搜索结果卡`,
+      webSearch.itemCount === 2 && webSearch.hasUrl,
+      JSON.stringify({ itemCount: webSearch.itemCount, hasUrl: webSearch.hasUrl }),
+    );
+    check(
+      `[${width}] web_search 标题为中文动作`,
+      webSearch.title === '已搜索了网络',
+      JSON.stringify({ title: webSearch.title }),
+    );
+    check(
+      `[${width}] web_search 长 URL 不撑破卡片`,
+      webSearch.sectionScrollWidth <= webSearch.sectionClientWidth,
+      `${webSearch.sectionScrollWidth} > ${webSearch.sectionClientWidth}`,
+    );
+    await webSearchCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-web-search.png`,
+    });
+
+    // ── MCP LSP：与内置 lsp_* 同一套 pill + 位置列表 ────────────────────────
+    const mcpLspCase = page.locator('[data-case="mcp-lsp-refs"]');
+    const mcpLspInline = await mcpLspCase.evaluate((section) => {
+      const inline = section.querySelector('.tool-call-inline');
+      return {
+        isInline: inline !== null,
+        summary: (section.querySelector('.tool-call-inline-summary')?.textContent ?? '')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      };
+    });
+    await mcpLspCase.locator('.tool-call-inline').first().click();
+    await mcpLspCase.locator('.tool-call-inline-output').first().waitFor({ timeout: 5_000 });
+    const mcpLsp = await mcpLspCase.evaluate((section) => {
+      const text = (section.textContent ?? '').replace(/\s+/g, ' ');
+      return {
+        rows: section.querySelectorAll('.tool-call-inline-output li').length,
+        hasLocation: text.includes('41:6'),
+        sectionScrollWidth: section.scrollWidth,
+        sectionClientWidth: section.clientWidth,
+      };
+    });
+    check(
+      `[${width}] MCP LSP 走单行 pill，摘要为位置 + 引用数`,
+      mcpLspInline.isInline && mcpLspInline.summary.includes('2 个引用'),
+      JSON.stringify(mcpLspInline),
+    );
+    check(
+      `[${width}] MCP LSP 展开为位置列表`,
+      mcpLsp.rows === 2 && mcpLsp.hasLocation,
+      JSON.stringify({ rows: mcpLsp.rows, hasLocation: mcpLsp.hasLocation }),
+    );
+    check(
+      `[${width}] MCP LSP 长路径不撑破卡片`,
+      mcpLsp.sectionScrollWidth <= mcpLsp.sectionClientWidth,
+      `${mcpLsp.sectionScrollWidth} > ${mcpLsp.sectionClientWidth}`,
+    );
+    await mcpLspCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-mcp-lsp.png`,
+    });
+
+    // ── session_list：Markdown 表格 → 会话卡 ───────────────────────────────
+    const sessionListCase = page.locator('[data-case="session-list"]');
+    await ensureExpanded(sessionListCase.locator('.tool-call-block-header').first());
+    const sessionList = await sessionListCase.evaluate((section) => {
+      const text = (section.textContent ?? '').replace(/\s+/g, ' ');
+      return {
+        hasCard: section.querySelector('.session-list-preview') !== null,
+        items: section.querySelectorAll('.session-list-item').length,
+        hasSummary: text.includes('共 2 个会话'),
+        hasTitle: text.includes('修复登录'),
+        hasMessageCount: text.includes('12 条消息'),
+        hasPipe: text.includes('| Session ID |'),
+        sectionScrollWidth: section.scrollWidth,
+        sectionClientWidth: section.clientWidth,
+      };
+    });
+    check(
+      `[${width}] session_list 渲染为会话卡（不再是原始表格）`,
+      sessionList.hasCard && sessionList.hasSummary && sessionList.hasTitle && !sessionList.hasPipe,
+      JSON.stringify(sessionList),
+    );
+    check(
+      `[${width}] session_list 会话卡展示条目与消息数`,
+      sessionList.items === 2 && sessionList.hasMessageCount,
+      JSON.stringify({ items: sessionList.items, hasMessageCount: sessionList.hasMessageCount }),
+    );
+    check(
+      `[${width}] session_list 不横向溢出`,
+      sessionList.sectionScrollWidth <= sessionList.sectionClientWidth,
+      `${sessionList.sectionScrollWidth} > ${sessionList.sectionClientWidth}`,
+    );
+    await sessionListCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-session-list.png`,
+    });
+
+    // ── ast_grep_search：文本 → 匹配列表（路径 + 行号 + 片段） ──────────────
+    const astGrepCase = page.locator('[data-case="ast-grep"]');
+    await ensureExpanded(astGrepCase.locator('.tool-call-block-header').first());
+    const astGrep = await astGrepCase.evaluate((section) => {
+      const text = (section.textContent ?? '').replace(/\s+/g, ' ');
+      return {
+        rows: section.querySelectorAll('[data-ast-grep-match]').length,
+        hasLocation: text.includes('41:6'),
+        hasSnippet: text.includes('useSomething'),
+        hasPrefix: section.querySelector('.styled-path-prefix') !== null,
+        sectionScrollWidth: section.scrollWidth,
+        sectionClientWidth: section.clientWidth,
+      };
+    });
+    check(
+      `[${width}] ast_grep 渲染为匹配列表`,
+      astGrep.rows === 2 && astGrep.hasLocation && astGrep.hasSnippet,
+      JSON.stringify({ rows: astGrep.rows, hasLocation: astGrep.hasLocation }),
+    );
+    check(
+      `[${width}] ast_grep 提取公共目录前缀`,
+      astGrep.hasPrefix,
+      JSON.stringify({ hasPrefix: astGrep.hasPrefix }),
+    );
+    check(
+      `[${width}] ast_grep 片段不撑破卡片`,
+      astGrep.sectionScrollWidth <= astGrep.sectionClientWidth,
+      `${astGrep.sectionScrollWidth} > ${astGrep.sectionClientWidth}`,
+    );
+    await astGrepCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-ast-grep.png`,
+    });
+
+    // ── LSP 调用层次：符号 + 两组列表 ───────────────────────────────────────
+    const callHierarchyCase = page.locator('[data-case="lsp-call-hierarchy"]');
+    await callHierarchyCase.locator('.tool-call-inline').first().click();
+    await callHierarchyCase.locator('.tool-call-inline-output').first().waitFor({ timeout: 5_000 });
+    const callHierarchy = await callHierarchyCase.evaluate((section) => {
+      const text = (section.textContent ?? '').replace(/\s+/g, ' ');
+      return {
+        hasIncoming: text.includes('↑ 调用方（2）'),
+        hasOutgoing: text.includes('↓ 被调用（1）'),
+        hasSymbol: text.includes('runQuery'),
+        hasRawHeader: text.includes('Incoming calls:'),
+        sectionScrollWidth: section.scrollWidth,
+        sectionClientWidth: section.clientWidth,
+      };
+    });
+    check(
+      `[${width}] 调用层次按调用方 / 被调用方分组`,
+      callHierarchy.hasIncoming && callHierarchy.hasOutgoing && callHierarchy.hasSymbol,
+      JSON.stringify(callHierarchy),
+    );
+    check(
+      `[${width}] 调用层次不再铺原始段落标题`,
+      !callHierarchy.hasRawHeader,
+      JSON.stringify({ hasRawHeader: callHierarchy.hasRawHeader }),
+    );
+    check(
+      `[${width}] 调用层次长路径不撑破卡片`,
+      callHierarchy.sectionScrollWidth <= callHierarchy.sectionClientWidth,
+      `${callHierarchy.sectionScrollWidth} > ${callHierarchy.sectionClientWidth}`,
+    );
+    await callHierarchyCase.screenshot({
+      path: `/tmp/opencode/tool-expansion${SHOT_SUFFIX}-${width}-lsp-call-hierarchy.png`,
+    });
+
     // ── split diff：并排两侧语法高亮 ────────────────────────────────────────
     const splitCase = page.locator('[data-case="split-diff"]');
     await splitCase.locator('[data-diff-row]').first().waitFor({ timeout: 5_000 });

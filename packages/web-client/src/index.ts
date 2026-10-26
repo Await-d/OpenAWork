@@ -343,7 +343,15 @@ export type {
 } from './infra/usage.js';
 
 export { createCronClient } from './infra/cron.js';
-export type { CronClient, CronJobRecord, CronJobsResponse } from './infra/cron.js';
+export type {
+  CreateCronJobInput,
+  CronClient,
+  CronExecutionRecord,
+  CronJobRecord,
+  CronJobsResponse,
+  CronJobStatus,
+  CronScheduleKind,
+} from './infra/cron.js';
 
 export { createPluginsClient } from './infra/plugins.js';
 export type {

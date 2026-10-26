@@ -952,9 +952,10 @@ async fn check_local_gateway_health(port: u16) -> Result<bool, String> {
 ///   而**复用**了，没有接管所有权），则**不会**kill 那个网关，让它继续为
 ///   其他桌面端会话或独立工具提供服务。
 ///
-/// 为什么必须保留 kill 自己 child 的逻辑：dev 模式下若不 kill，残留 node
-/// 进程会持有 `sidecars/agent-gateway` 下的文件，导致下次 `bun run dev` 时
-/// bundle-sidecar 的 `rm -rf` 触发 EBUSY、Tauri build 复制资源 PermissionDenied。
+/// 为什么必须保留 kill 自己 child 的逻辑：dev 模式下若不 kill，残留的网关
+/// sidecar 进程会持有 `binaries/openawork-gateway-*` 与 `target/<profile>/sidecars/`
+/// 下的文件，导致下次 `bun run dev` 时 bundle-sidecar 清理旧产物触发 EBUSY、
+/// Tauri build 复制资源 PermissionDenied。
 fn shutdown_gateway_child(app: &tauri::AppHandle) {
     let gateway_state = app.state::<GatewayProcess>().0.clone();
     shutdown_gateway_child_from_state(&gateway_state);
@@ -1228,7 +1229,7 @@ async fn spawn_gateway_sidecar(
         std::thread::sleep(Duration::from_millis(250));
     }
 
-    // gateway 已编译为独立 Bun 二进制（binaries/agent-gateway-<triple>），
+    // gateway 已编译为独立 Bun 二进制（binaries/openawork-gateway-<triple>），
     // 无需传 entry 路径，也不依赖 node_modules，直接启动即可。
     //
     // OPENAWORK_APP_VERSION：必须显式从 Tauri `package_info` 注入，否则在
@@ -1252,7 +1253,7 @@ async fn spawn_gateway_sidecar(
 
     let mut command = app
         .shell()
-        .sidecar("agent-gateway")
+        .sidecar("openawork-gateway")
         .map_err(|e| e.to_string())?
         .current_dir(sidecar_cwd)
         .env("GATEWAY_PORT", port.to_string())

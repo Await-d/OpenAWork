@@ -110,6 +110,7 @@ import {
 import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
 import { deleteSessionWithMalformedRecovery } from '../session/session-delete-recovery.js';
 import { purgeComposerQueueAttachments } from '../session/composer-queue-artifact-purge.js';
+import { purgeSessionDiskArtifactsForSessions } from '../session/session-disk-artifact-purge.js';
 import { listComposerQueueItems } from '../session/composer-queue-store.js';
 import {
   buildSessionFileChangesProjection,
@@ -1403,6 +1404,10 @@ async function deleteSessionTree(input: {
   userId: string;
 }): Promise<void> {
   const backupStoragePaths: string[] = [];
+  // 已成功删除 DB 行的会话：磁盘产物统一在 finally 里一次批量回收。
+  // `removeMany` 每次都会全量重写 `artifacts-index.json`，会话树（父 + 多个
+  // 子会话）逐会话调用会把写放大变成 O(会话数)。
+  const deletedSessionIds: string[] = [];
 
   try {
     for (const session of input.sessionsToDelete) {
@@ -1428,6 +1433,13 @@ async function deleteSessionTree(input: {
 
       try {
         sqliteTransaction(() => {
+          // `event_log` 没有指向 sessions 的外键（aggregate_id 只是文本），
+          // 级联不会带走它：不删的话每个已删除会话都会留下**全量事件**，
+          // 而 part 创建事件携带完整 part（含 base64 图片），既占空间也会把
+          // event_log 的全局 50k 行配额挤占掉。`event_sequences` 同理，
+          // 每个会话一行、无回收路径。
+          sqliteRun('DELETE FROM event_log WHERE aggregate_id = ?', [session.id]);
+          sqliteRun('DELETE FROM event_sequences WHERE aggregate_id = ?', [session.id]);
           sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [
             session.id,
             input.userId,
@@ -1445,6 +1457,12 @@ async function deleteSessionTree(input: {
       // not resolve a stale user_id through the owner cache.
       invalidateSessionOwnerCache(session.id);
 
+      // 磁盘型产物（artifacts-index.json + 文件）同样不随 FK 级联消失：
+      // DB 行删除后它们再无消费者。收集起来，循环结束后一次批量回收——
+      // 放在 finally 里可保证「中途某个会话的任务图删除失败」时，已删会话
+      // 的产物仍被回收。
+      deletedSessionIds.push(session.id);
+
       // 工具输出 spill 目录（超限结果的全文落盘）随会话树一起清理。
       deleteSpilledToolOutputsForSession(session.id);
 
@@ -1456,6 +1474,7 @@ async function deleteSessionTree(input: {
       }
     }
   } finally {
+    await purgeSessionDiskArtifactsForSessions({ sessionIds: deletedSessionIds });
     await garbageCollectBackupStoragePaths(backupStoragePaths);
   }
 }

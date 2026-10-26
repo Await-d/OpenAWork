@@ -830,7 +830,9 @@ const scheduleManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
             ? '启用'
             : action === 'disable'
               ? '停用'
-              : action;
+              : action === 'run'
+                ? '立即执行'
+                : action;
   const previewAction = `${verb}定时任务 ${jobId || '(新建)'}${
     kind ? ` [${kind}${scheduleDetail ? ` ${scheduleDetail}` : ''}${tz ? ` ${tz}` : ''}]` : ''
   }${promptSnippet ? `：${promptSnippet}` : ''}${

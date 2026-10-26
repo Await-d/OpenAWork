@@ -36,6 +36,13 @@ export {
   detectLanguage,
   highlightCodeLines,
 } from '../../../../../packages/shared-ui/src/tools/UnifiedCodeDiff.js';
+
+// 工具视觉状态判定是纯函数（只依赖入参），ToolGlyph 是纯内联 SVG：一并转发真实
+// 实现，避免未手写 mock 的测试文件在 import 时拿到 undefined（渲染期直接崩掉）。
+export {
+  resolveToolVisualStatus,
+  ToolGlyph,
+} from '../../../../../packages/shared-ui/src/tools/tool-visual-meta.js';
 export type { DiffToken } from '../../../../../packages/shared-ui/src/tools/UnifiedCodeDiff.js';
 
 // 思考档位权重与排序是纯常量 / 纯函数(无副作用):转发真实实现,

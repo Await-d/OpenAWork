@@ -1,5 +1,5 @@
 import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -10,6 +10,24 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(scriptDir, '../../../..');
 const gatewayDir = resolve(root, 'services/agent-gateway');
 const binariesDir = resolve(root, 'apps/desktop/src-tauri/binaries');
+// 打包后网关可执行文件的基础名。必须与以下位置保持一致（改名时一处处同步）：
+//   - tauri.conf.json            bundle.externalBin
+//   - capabilities/default.json  shell:allow-execute 的 sidecar name
+//   - src/lib.rs                 shell().sidecar("<name>")
+//   - tauri.linux.conf.json      binaries/<name>-*.gz 资源映射
+//   - release-desktop.yml        冒烟测试的二进制路径
+//   - scripts/check-desktop-native.mjs 陈旧产物清理前缀
+const GATEWAY_BINARY_NAME = 'openawork-gateway';
+// Windows 可执行文件的资源（图标 / 文件属性 / 任务管理器「描述」）默认由 Bun 运行时
+// 提供，打包后进程会显示成「bun」。这里统一覆盖为产品信息——缺了它，用户看到的
+// 仍是 Bun 的图标与 "Bun" 描述，容易被误认成陌生进程甚至被安全软件标记。
+const WINDOWS_ICON_PATH = resolve(root, 'apps/desktop/src-tauri/icons/icon.ico');
+const WINDOWS_EXE_METADATA = {
+  productName: 'OpenAWork',
+  fileDescription: 'OpenAWork Gateway',
+  companyName: 'OpenAWork',
+  copyright: 'Copyright © OpenAWork',
+};
 // 注意：`bun run <script>` 默认仍用 Node 执行脚本（process.versions.bun 为空），
 // 但 bun 会把 npm_execpath 指向 bun 可执行文件、npm_config_user_agent 设为 "bun/<版本>"。
 // 三种信号都要看：能复用调用者用的那个 bun 时最稳（不依赖 PATH），
@@ -260,6 +278,25 @@ function isWindowsTriple(targetTriple) {
   return String(targetTriple || '').includes('windows');
 }
 
+/**
+ * 把仓库 semver（如 `1.3.2` / `1.3.2-beta.1`）转成 Windows 版本资源要求的四段数字。
+ * bun 的 `--windows-version` 只接受数字段，预发布后缀会被截断，缺失段补 0。
+ */
+function windowsFileVersion() {
+  const rawVersion = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version;
+  const segments = String(rawVersion)
+    .replace(/^v/, '')
+    .split('.')
+    .slice(0, 3)
+    .map((segment) => Number.parseInt(segment, 10))
+    .filter((value) => Number.isFinite(value));
+
+  while (segments.length < 4) {
+    segments.push(0);
+  }
+  return segments.slice(0, 4).join('.');
+}
+
 function isLinuxTriple(targetTriple) {
   return String(targetTriple || '').includes('linux');
 }
@@ -267,7 +304,7 @@ function isLinuxTriple(targetTriple) {
 async function removeStaleGatewayBinaries() {
   await mkdir(binariesDir, { recursive: true });
   for (const entry of await readdir(binariesDir)) {
-    if (entry.startsWith('agent-gateway-')) {
+    if (entry.startsWith(`${GATEWAY_BINARY_NAME}-`)) {
       await rm(resolve(binariesDir, entry), { force: true });
     }
   }
@@ -285,7 +322,7 @@ payload_name=${shellSingleQuote(payloadName)}
 payload_hash=${shellSingleQuote(payloadHash)}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 cache_root="\${XDG_CACHE_HOME:-\${HOME:-/tmp}/.cache}/openawork/sidecars"
-target="$cache_root/agent-gateway-$payload_hash"
+target="$cache_root/${GATEWAY_BINARY_NAME}-$payload_hash"
 
 # 诊断日志：写入 cache_root 同级目录，方便排查 AppImage 启动失败。
 log_dir="\${XDG_CACHE_HOME:-\${HOME:-/tmp}/.cache}/openawork"
@@ -381,8 +418,8 @@ find_payload() {
 }
 
 payload=$(find_payload) || {
-  log "FATAL: Cannot locate bundled agent-gateway payload: $payload_name"
-  echo "Cannot locate bundled agent-gateway payload: $payload_name" >&2
+  log "FATAL: Cannot locate bundled gateway payload: $payload_name"
+  echo "Cannot locate bundled gateway payload: $payload_name" >&2
   echo "Diagnostics written to: $log_file" >&2
   exit 127
 }
@@ -399,8 +436,8 @@ if [ ! -x "$target" ]; then
     # 并发启动：另一个进程可能已完成解压，mv 失败不致命。
     rm -f "$tmp" 2>/dev/null || true
     if [ ! -x "$target" ]; then
-      log "FATAL: Failed to stage agent-gateway binary to $target"
-      echo "Failed to stage agent-gateway binary to $target" >&2
+      log "FATAL: Failed to stage gateway binary to $target"
+      echo "Failed to stage gateway binary to $target" >&2
       exit 1
     fi
   }
@@ -418,7 +455,7 @@ exec "$target" "$@"
 run(bunCommand, createBunArgs('run', 'build'), { cwd: gatewayDir });
 
 // Step 2: 用 Bun 将 gateway 编译为独立可执行文件（含所有依赖）。
-// 这一步产出 dist/agent-gateway[.exe]，无需 node_modules，彻底消除
+// 这一步产出 dist/openawork-gateway[.exe]，无需 node_modules，彻底消除
 // Windows 上 node_modules 硬链接/联接（历史方案 pnpm deploy 会产生 NTFS junction）
 // 导致 tauri-build 资源打包失败的问题。
 //
@@ -435,7 +472,7 @@ const bunArgs = [
   'src/index.ts',
   '--compile',
   '--outfile',
-  'dist/agent-gateway',
+  `dist/${GATEWAY_BINARY_NAME}`,
   '--external',
   'chromium-bidi',
   '--external',
@@ -449,6 +486,35 @@ if (bunTarget) {
   bunArgs.push('--target', bunTarget);
   console.log(`Cross-compiling gateway sidecar with bun --target=${bunTarget} (triple=${targetTriple})`);
   prefetchBunRuntime(bunTarget);
+}
+
+// Windows 专属：把 Bun 默认资源（图标 + 文件属性——任务管理器里显示成「bun」）替换成
+// 产品资源。两重判断缺一不可：
+// - target 必须是 Windows，否则 flag 无意义；
+// - host 必须是 Windows，bun 明确限制 `--windows-*` 仅在 Windows 主机上可用
+//   （在 Linux/macOS 上交叉编译 Windows 目标会直接报错，故降级为警告）。
+if (isWindowsTriple(targetTriple)) {
+  if (process.platform === 'win32') {
+    if (!existsSync(WINDOWS_ICON_PATH)) {
+      throw new Error(
+        `Windows icon not found: ${WINDOWS_ICON_PATH}. ` +
+          'Without it the sidecar keeps the default Bun icon in Task Manager.',
+      );
+    }
+    bunArgs.push(
+      `--windows-icon=${WINDOWS_ICON_PATH}`,
+      `--windows-title=${WINDOWS_EXE_METADATA.productName}`,
+      `--windows-description=${WINDOWS_EXE_METADATA.fileDescription}`,
+      `--windows-publisher=${WINDOWS_EXE_METADATA.companyName}`,
+      `--windows-copyright=${WINDOWS_EXE_METADATA.copyright}`,
+      `--windows-version=${windowsFileVersion()}`,
+    );
+  } else {
+    console.warn(
+      '[bundle-sidecar] 交叉编译 Windows 目标时无法写入 exe 图标/文件属性' +
+        '（bun 的 --windows-* 仅支持 Windows 主机），产物将沿用 Bun 默认资源。',
+    );
+  }
 }
 
 // Windows ARM64：bun-pty 的 npm 包只带 x64 的 rust_pty.dll（ARM64 进程无法加载），
@@ -473,8 +539,11 @@ runBunCompileWithRetry(bunArgs, { cwd: gatewayDir }, 3);
 // Step 3: 把 gateway 可执行文件复制到 binaries/ 并加上 Tauri 要求的目标三元组后缀。
 // 扩展名按目标 triple 判断，而不是按当前 host OS（支持交叉编译）。
 const executableExtension = isWindowsTriple(targetTriple) ? '.exe' : '';
-const gatewaySrc = resolve(gatewayDir, `dist/agent-gateway${executableExtension}`);
-const gatewayDest = resolve(binariesDir, `agent-gateway-${targetTriple}${executableExtension}`);
+const gatewaySrc = resolve(gatewayDir, `dist/${GATEWAY_BINARY_NAME}${executableExtension}`);
+const gatewayDest = resolve(
+  binariesDir,
+  `${GATEWAY_BINARY_NAME}-${targetTriple}${executableExtension}`,
+);
 
 await removeStaleGatewayBinaries();
 if (isLinuxTriple(targetTriple)) {

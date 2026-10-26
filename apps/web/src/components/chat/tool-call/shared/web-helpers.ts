@@ -4,6 +4,24 @@
  * search-engine response bodies.
  */
 
+/**
+ * web 类工具名判定：共用「网页摘要 / 搜索结果」渲染分支。
+ *
+ * 四个入口都要算进来，否则同类工具会出现两套观感：
+ * - `webfetch`（网关抓取）、`websearch` / `google_search`（网关搜索别名）；
+ * - `web_search`（agent-core 内置搜索）—— 输出是 `1. 标题 / 摘要 / URL` 文本，
+ *   `extractWebSummary` 的纯文本分支能直接解析成搜索结果列表。
+ */
+export function isWebToolName(toolName: string): boolean {
+  const normalized = toolName.trim().toLowerCase();
+  return (
+    normalized === 'webfetch' ||
+    normalized === 'websearch' ||
+    normalized === 'web_search' ||
+    normalized === 'google_search'
+  );
+}
+
 export function cleanWebContent(raw: string): string {
   let text = raw;
   text = text.replace(/\/\/<!\[CDATA\[[\s\S]*?\/\/\]\]>/g, '');

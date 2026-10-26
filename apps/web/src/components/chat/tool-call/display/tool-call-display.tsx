@@ -4,6 +4,8 @@ import type { ToolCallCardProps } from '@openAwork/shared-ui';
 import { BatchToolCallCard } from '../cards/batch-tool-call-card.js';
 import { BlockToolCall } from './block-tool-call.js';
 import { ComputerUseToolCard } from '../cards/computer-use-tool-card.js';
+import { DesktopToolCard } from '../cards/desktop-tool-card.js';
+import { isDesktopTool } from '../shared/desktop-tool-view.js';
 import { GenerateImageToolCard } from '../cards/generate-image-tool-card.js';
 import { ConvertMediaToolCard } from '../cards/convert-media-tool-card.js';
 import { GenerateAudioToolCard } from '../cards/generate-audio-tool-card.js';
@@ -121,6 +123,24 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
         durationMs={props.durationMs}
         kind={props.kind}
         pendingPermissionRequestId={props.pendingPermissionRequestId}
+      />
+    );
+  }
+
+  // 桌面 / 浏览器自动化：动作语义在入参里，通用输出只能给出 `{ok:true}` 的字段表，
+  // 因此单独成卡（动作 + 目标 + 截图 + 读取类动作的真实返回）。
+  if (isDesktopTool(normalized)) {
+    return (
+      <DesktopToolCard
+        approvalActions={props.approvalActions}
+        pendingPermissionRequestId={props.pendingPermissionRequestId}
+        kind={props.kind}
+        toolName={props.toolName}
+        input={props.input}
+        output={props.output}
+        status={props.status}
+        isError={props.isError}
+        durationMs={props.durationMs}
       />
     );
   }

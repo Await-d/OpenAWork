@@ -40,6 +40,9 @@ vi.mock('../../infra/db.js', () => ({
   WORKSPACE_ACCESS_RESTRICTED: false,
   WORKSPACE_ROOTS: [],
   sqliteGet: mocks.sqliteGet,
+  // 会话级图片预算（inline-image-retention）会查该会话的图片 part 行；
+  // 返回空集即「无需淘汰」，不影响本文件对落库内容的断言。
+  sqliteAll: () => [],
   // 用户消息落库被合并进一个事务（见 stream-session-title 的注释），桩必须提供它。
   // 真实实现的嵌套语义是「已在事务内则直接执行」，这里同理。
   sqliteTransaction: <T>(fn: () => T): T => fn(),
@@ -101,6 +104,8 @@ describe('persistStreamUserMessage', () => {
   beforeEach(() => {
     mocks.appendSessionEvent.mockClear();
     mocks.appendSessionMessage.mockClear();
+    // 真实实现返回已落库的消息；图片预算用它作为 `excludeMessageId`。
+    mocks.appendSessionMessage.mockReturnValue({ id: 'msg-persisted-user' });
     mocks.generateSessionTitleLlm.mockClear();
     mocks.getSessionMessageByRequestId.mockReset();
     mocks.isFirstUserMessage.mockReturnValue(false);

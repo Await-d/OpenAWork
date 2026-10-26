@@ -121,8 +121,9 @@ export function parseDiscordInboundMessage(
 
   const chatId = readString(message, 'channel_id');
   const rawContent = readString(message, 'content');
-  // Discord CDN 附件 URL 自带签名有效期约 24h；这里直接映射 URL 而不下载图片，
-  // 避免 base64 入库导致消息体积膨胀。
+  // Discord CDN 附件 URL 自带签名有效期约 24h；parser 只做纯函数式的 URL 映射，
+  // 下载与 base64 内联在投递前的 `attachDiscordInboundImages` 完成（远程地址
+  // 直通多模态协议层会让整轮请求被拒，见 discord-media.ts）。
   const images = readDiscordImageAttachments(message, DISCORD_MAX_IMAGE_ATTACHMENTS);
   if (!chatId || (!rawContent && images.length === 0)) {
     return null;

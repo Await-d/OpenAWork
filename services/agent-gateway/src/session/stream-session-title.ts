@@ -13,6 +13,7 @@ import { sqliteGet, sqliteTransaction } from '../infra/db.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 import { isGatewayInternalRequestKey } from '../handoff/store/handoff-store.js';
 import { appendSessionEvent } from './session-entry-store.js';
+import { maybePruneSessionInlineImages } from './inline-image-retention.js';
 import { makeSessionEventId } from './session-event.js';
 import {
   buildSyntheticRequestContextBlock,
@@ -167,16 +168,17 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
   // 直接执行），所以包裹 `appendSessionMessage` 不会改变其内部逐 part 投影的语义。
   // 标题生成是 fire-and-forget，刻意留在事务外以免把上游调用纳入写事务。
   sqliteTransaction(() => {
-    appendSessionMessage({
+    const content = resolvePersistedUserContent(
+      input.sessionId,
+      input.content,
+      text,
+      input.syntheticContext,
+    );
+    const persisted = appendSessionMessage({
       sessionId: input.sessionId,
       userId: input.userId,
       role: 'user',
-      content: resolvePersistedUserContent(
-        input.sessionId,
-        input.content,
-        text,
-        input.syntheticContext,
-      ),
+      content,
       clientRequestId: input.clientRequestId,
     });
     appendSessionEvent({
@@ -191,6 +193,18 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
       },
     });
     maybeAutoTitle({ sessionId: input.sessionId, userId: input.userId, text });
+    // 会话级图片预算：base64 图片落库后会线性增长，超过阈值时最旧优先淘汰。
+    // 只在本次落库带**内联**图片时检查——纯文本轮次不扫 part 行（长会话数千行
+    // 的开销）；仅带 artifactId（无 data URL）的图片也不产生内联字节。
+    // 与消息落库共享同一事务，`PartRemoved` 事件不会二次抢写锁。
+    // `excludeMessageId` 保证本轮刚发的图不会被立刻淘汰（单轮即超预算时）。
+    maybePruneSessionInlineImages({
+      sessionId: input.sessionId,
+      hasInlineImage: content.some(
+        (part) => part.type === 'input_image' && (part.imageUrl ?? '').startsWith('data:'),
+      ),
+      excludeMessageId: persisted.id,
+    });
   });
 
   const sessionRow = sqliteGet<{ metadata_json: string }>(

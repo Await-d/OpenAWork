@@ -1,10 +1,9 @@
 import type { InputImageContent, SubagentNotice, WorkflowRuntimeState } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
-import type { RollbackReceipt, Session, SessionTask } from '@openAwork/web-client';
+import type { Session, SessionTask } from '@openAwork/web-client';
 import {
   createQuestionsClient,
   createSessionsClient,
-  createSettingsClient,
   createSshClient,
 } from '@openAwork/web-client';
 import type { CSSProperties } from 'react';
@@ -12,7 +11,6 @@ import React, {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -24,23 +22,33 @@ import { usePageActivation } from '../../components/common/routing/CachedRouteOu
 
 import { ChatImageGenerationResultStrip } from '../../components/chat/image/ChatImageGenerationResultStrip.js';
 import { sharedUiThemeVars } from '../../components/chat/session/ChatPageSections.js';
-import { type UnifiedComposerActivity } from '../../components/chat/composer/UnifiedComposer.js';
 import type { MentionFileSearchFn } from '../../components/chat/composer/use-mention-file-search.js';
 import {
   ComposerWorkspaceMenu,
   type ComposerSshConnectionSummary,
 } from '../../components/chat/composer/ComposerWorkspaceMenu.js';
 import type { WorkspaceBindingChipState } from '../../components/chat/session/ChatTopBar.js';
-import type { ComposerPermissionMode } from '../../components/chat/composer/ComposerPermissionModeSelect.js';
 import { LatestAssistantMessageContext } from '../../components/chat/message/collapsible-assistant-content.js';
 import { QuickTerminalPanel } from '../../components/chat/terminal/QuickTerminalPanel.js';
 
 import { useChatSearch } from '../../components/chat/search/chat-search-overlay.js';
 
 import { CompanionStage } from '../../components/chat/companion/companion-stage.js';
-import { deriveCompanionInputFlags } from '../../components/chat/companion/companion-display-model.js';
-import { useBuddyIdleDetector } from '../../components/chat/companion/use-buddy-idle-detector.js';
-import { InlineQuestionPanel } from '../../components/chat/misc/InlineQuestionPanel.js';
+import { scrollToNextUserMessage, scrollToPrevUserMessage } from './history/scroll-user-message.js';
+import { useAppendImageGenerationSummary } from './hooks/use-append-image-generation-summary.js';
+import { useChatComposerShortcuts } from './hooks/use-chat-composer-shortcuts.js';
+import { useChatPageCoreState } from './hooks/use-chat-page-core-state.js';
+import { useSessionMetadataPersist } from './hooks/use-session-metadata-persist.js';
+import { useSessionRecoveryPolling } from './hooks/use-session-recovery-polling.js';
+import { useChatScrollSettleEffects } from './hooks/use-chat-scroll-settle-effects.js';
+import { useChatSessionRuntimeView } from './hooks/use-chat-session-runtime-view.js';
+import { useHistoryScrollAnchor } from './hooks/use-history-scroll-anchor.js';
+import { useRollbackDerivedCleanup } from './hooks/use-rollback-derived-cleanup.js';
+import { useMcpServerRetry } from './hooks/use-mcp-server-retry.js';
+import { useProviderFastMode } from './hooks/use-provider-fast-mode.js';
+import { useRenderMessageActions } from './hooks/use-render-message-actions.js';
+import { useEnsureMessageVisible } from './hooks/use-ensure-message-visible.js';
+import { useModelContextOverride } from './hooks/use-model-context-override.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
 import SshWorkspacePickerModal from '../../components/common/modal/SshWorkspacePickerModal.js';
@@ -52,16 +60,12 @@ import { useFileEditor } from '../../hooks/editor/useFileEditor.js';
 import { useGatewayClient } from '../../hooks/gateway/useGatewayClient.js';
 import { usePrefersReducedMotion } from '../../hooks/ui/usePrefersReducedMotion.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
-import { useCurrentUserDisplayName } from '../../stores/user-profile/current-user-profile.js';
 import {
   resolveEffectiveTerminalPanelPosition,
   useLocalSavedWorkspacePaths,
   useUIStateStore,
 } from '../../stores/ui/uiState.js';
-import {
-  type ChatSettingsProvider,
-  loadSavedChatSessionDefaults,
-} from '../../utils/chat/chat-session-defaults.js';
+import { loadSavedChatSessionDefaults } from '../../utils/chat/chat-session-defaults.js';
 import {
   COMPOSER_REFERENCE_EVENT_NAME,
   isComposerReferenceEvent,
@@ -81,7 +85,6 @@ import {
   SESSION_RECOVERY_MESSAGE_LIMIT,
   fetchSessionRecoveryOnce,
 } from '../../utils/session/session-recovery-flight.js';
-import { resolveNewSessionWorkspace } from '../../utils/session/new-session-workspace.js';
 import { getPathBasename } from '../../utils/workspace-path.js';
 import { useLinkPreviewRequest } from '../../utils/preview/use-link-preview-request.js';
 import { isTauriRuntime, pickDesktopFolder } from '../../utils/gateway/desktop-gateway.js';
@@ -95,34 +98,15 @@ import { WorkspaceFileTreePanel } from '../../components/layout/sidebar/Workspac
 import {
   buildQueuedComposerScopeKey,
   buildRightPanelStateFromSessionSnapshot,
-  createSessionMetadataSnapshot,
-  isImmediatelyRenderableStructuredContent,
   prepareSessionRecoveryState,
-  REMOTE_STREAM_RECOVERY_POLL_MS,
 } from './conversation/render/chat-page-utils.js';
 import { ChatRightPanel } from './panels/chat-right-panel.js';
 import { useBackgroundTaskPanel } from './panels/use-background-task-panel.js';
 
-import { makeOrderedMessageId } from '../../components/conversation-runtime/messages/ordered-id.js';
 import { collectSubagentNotices } from '../../components/conversation-runtime/messages/subagent-notices.js';
 
-import { startSequentialPolling } from '../../components/conversation-runtime/session/sequential-polling.js';
+import { type SessionTodoItem } from '../../components/conversation-runtime/session/session-runtime.js';
 
-import {
-  type SessionStateStatus,
-  type SessionTodoItem,
-  resolveSessionStopCapability,
-  shouldPollSessionRuntime,
-} from '../../components/conversation-runtime/session/session-runtime.js';
-
-import { type ChatBackendUsageSnapshot } from '../../components/conversation-runtime/stream/stream-usage.js';
-import { recoveredStreamHasVisibleContent } from '../../components/conversation-runtime/stream/stream-recovery.js';
-
-import {
-  extractStreamingThinkingTexts,
-  joinStreamingThinkingTexts,
-  type StreamingThinkingBlock,
-} from '../../components/conversation-runtime/stream/streaming-thinking.js';
 import {
   buildSubAgentRunItems,
   isActiveStatus,
@@ -136,11 +120,7 @@ import {
   UserHistoryJumpList,
 } from './history/user-history-jump-list.js';
 import {
-  type ChatMessage,
-  type ChatMessagePart,
-  estimateTokenCount,
   MENTION_SEARCH_LIMIT,
-  type ReasoningEffort,
   reconcileSnapshotChatMessages,
   type WorkspaceFileMentionItem,
 } from '../../components/conversation-runtime/messages/support.js';
@@ -156,7 +136,6 @@ import {
 import { useChatTodoController } from '../../components/conversation-runtime/views/todo-bar.js';
 
 import { useAssistantMessageProcessing } from './conversation/snapshot/use-assistant-message-processing.js';
-import { resolveRollbackDerivedState } from './conversation/snapshot/rollback-derived-state.js';
 import { useChatDataLoaders } from './conversation/data/use-chat-data-loaders.js';
 
 import { useChatImageGeneration } from './hooks/use-chat-image-generation.js';
@@ -169,37 +148,25 @@ import {
 import { useChatBranchSession } from './hooks/use-chat-branch-session.js';
 import { useChatRenderData } from './conversation/render/use-chat-render-data.js';
 
-import { useChatPendingActions } from './hooks/use-chat-pending-actions.js';
 import { useChatRetryAndEdit } from './hooks/use-chat-retry-and-edit.js';
-import { useChatSessionLifecycle } from './hooks/use-chat-session-lifecycle.js';
 import { useChatStopActiveMessage } from './hooks/use-chat-stop-active-message.js';
 import { useChatStopChildSessions } from './hooks/use-chat-stop-child-sessions.js';
 import { useChildSessionSelection } from './hooks/use-child-session-selection.js';
 import { runEnsureSession } from './hooks/run-ensure-session.js';
 import { runSendMessage } from './hooks/run-send-message.js';
 import { useChatPageDerivations } from './hooks/use-chat-page-derivations.js';
-import {
-  createInitialAttachProgressState,
-  runSessionAttachEffect,
-  type AttachProgressState,
-} from './hooks/run-session-attach-effect.js';
+import { runSessionAttachEffect } from './hooks/run-session-attach-effect.js';
 import { runChatSessionSwitchEffect } from './hooks/run-chat-session-switch-effect.js';
 import { useChatUiActions } from './hooks/use-chat-ui-actions.js';
 import { resolveChatUiWorkspaceScope, useChatUiState } from './hooks/use-chat-ui-state.js';
-import { useModelPrices } from './conversation/settings/use-model-prices.js';
 import { useProviderModelInfo } from './conversation/settings/use-provider-model-info.js';
 import { useScrollManager } from '../../components/conversation-runtime/scroll/use-scroll-manager.js';
-import {
-  captureScrollAnchor,
-  restoreScrollAnchor,
-  type ScrollAnchorSnapshot,
-} from '../../components/conversation-runtime/scroll/scroll-anchor.js';
+import {} from '../../components/conversation-runtime/scroll/scroll-anchor.js';
 import { useSessionContentArtifacts } from './conversation/snapshot/use-session-content-artifacts.js';
 import { useSessionTerminals } from '../../components/conversation-runtime/terminals/use-session-terminals.js';
 
 import { useSessionSettingsCallbacks } from './conversation/settings/use-session-settings-callbacks.js';
 import {
-  resolveModelSelectionSourceFromMetadata,
   shouldAdoptSessionModelSelectionDefaults,
   type ModelSelectionSource,
 } from './conversation/settings/model-selection-source.js';
@@ -209,11 +176,7 @@ import { useStaleRunningResync } from './conversation/snapshot/use-stale-running
 
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
 import { normalizeChatThinkingState } from './conversation/settings/resolve-chat-thinking-request.js';
-import {
-  type ChatRightPanelState,
-  createInitialChatRightPanelState,
-  getToolCallCards,
-} from './state/chat-stream-state.js';
+import { createInitialChatRightPanelState, getToolCallCards } from './state/chat-stream-state.js';
 import {
   DIALOGUE_MODE_OPTIONS,
   type DialogueMode,
@@ -221,8 +184,6 @@ import {
 } from './mode/dialogue-mode.js';
 import { useDialogueModeSwitch } from './mode/use-dialogue-mode-switch.js';
 import { useDisplayPreferencesStore } from '../../stores/settings/display-preferences.js';
-import { useChatStreaming } from './conversation/render/use-chat-streaming.js';
-import { usePersistedStreamError } from './hooks/use-persisted-stream-error.js';
 
 import { CommandPalette, useCommandPalette } from '../../components/chat/misc/command-palette.js';
 import { PromptTemplatePanel } from '../../components/chat/misc/prompt-template-panel.js';
@@ -247,7 +208,6 @@ import { useFusionWorkspaceBrowserSurface } from './panels/use-fusion-workspace-
 import { useOpenFusionBrowserPreview } from './hooks/use-fusion-browser-preview.js';
 
 const DEFAULT_VISIBLE_MESSAGE_COUNT = 20;
-const LOAD_MORE_MESSAGE_INCREMENT = 20;
 
 type SplitStyle = {
   readonly flex: number;
@@ -290,305 +250,154 @@ export default function ChatPage() {
   const isPageActive = pageActivation;
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
-  /**
-   * `token` 的 ref 镜像，专供「会话切换」大 effect 读取（见下方依赖数组）。
-   *
-   * 该 effect 的职责是「会话身份变化时重建会话视图」：它会重置快照就绪标记、
-   * 挂骨架屏、重拉一次全量 recovery。而 access token 轮换（每 ~13 分钟一次，
-   * 见 `stores/auth/auth.ts` 的到期检查）与「用户切到了哪个会话」毫无关系——
-   * 把 token 放进依赖，等于让一个**停止状态的会话**定期整体重载一遍：状态条归零、
-   * 骨架屏闪一下、消息列表被服务端快照重排，表现为「放着不动界面自己刷新了」。
-   *
-   * 因此 token 走 ref：effect 只在会话身份（或显式刷新信号）变化时重跑，而它
-   * 发起请求时读到的一定是最新 token（ref 由下面这个 effect 在提交后同步）。
-   */
-  const sessionSwitchTokenRef = useRef<string | null>(token);
-  useEffect(() => {
-    writeRefCurrent(sessionSwitchTokenRef, token);
-  }, [token]);
-  /**
-   * 「是否已拿到访问令牌」的布尔镜像，**替代** token 值进入会话切换 effect 的依赖。
-   *
-   * 只用 `token` 的 ref 还不够：令牌从「没有」变成「有」时，该 effect 必须重跑一次
-   * （否则鉴权就绪后会话永远不会加载）。而令牌在非空区间内的**轮换**绝不能触发重跑。
-   * 一个布尔量正好把这两种情况区分开。
-   */
-  const hasSessionToken = token !== null;
-
-  // ─── 会话生命周期域 — 抽到 useChatSessionLifecycle。
-  // 参见 docs/architecture/chat-page-split-plan.md 域 A。
-  const sessionLifecycle = useChatSessionLifecycle({
-    routeSessionId: sessionId,
-    gatewayUrl,
-    token,
-    defaultVisibleMessageCount: DEFAULT_VISIBLE_MESSAGE_COUNT,
-  });
   const {
-    currentSessionId,
-    setCurrentSessionId,
-    messages,
-    setMessages,
-    messageRatings,
-    setMessageRatings,
-    sessionReloadNonce,
-    setSessionReloadNonce,
-    hasPendingFollowContent,
-    setHasPendingFollowContent,
-    isSessionLoading,
-    setIsSessionLoading,
-    visibleMessageCount,
-    setVisibleMessageCount,
-    serverTotalTurnCount,
-    setServerTotalTurnCount,
-    messagesRef,
-    activeSessionRef,
-    currentLoadedSessionIdRef,
-    sessionViewEpochRef,
-    currentSessionViewRef,
-    pendingBootstrapSessionRef,
-    previousRouteSessionIdRef,
-    pendingSessionNormalizeTimeoutRef,
-    workspace,
-    sessionViewCache,
     activateSessionView,
-    isCurrentSessionView,
-    isCurrentSessionRequest,
-    handleToggleMessageRating,
-  } = sessionLifecycle;
-  const [activeProviderId, setActiveProviderId] = useState<string>('');
-  const [activeModelId, setActiveModelId] = useState<string>('');
-  const currentUserEmail = useAuthStore((s) => s.email) ?? '';
-  const currentUserDisplayName = useCurrentUserDisplayName();
-  const [providers, setProviders] = useState<ChatSettingsProvider[]>([]);
-  const [providersRefreshing, setProvidersRefreshing] = useState(false);
-  const [input, setInput] = useState('');
-  const [companionComposerActivity, setCompanionComposerActivity] =
-    useState<UnifiedComposerActivity>({
-      attachedCount: 0,
-      queuedCount: 0,
-      showVoice: false,
-    });
-  const idleSeconds = useBuddyIdleDetector({ input });
-  /**
-   * Buddy（CompanionStage）的输入派生量。
-   *
-   * **不要把 `input` 原文传给它**：`input` 每敲一键就变一次，而那棵树含 sprite 动画、
-   * `createPortal` 面板、9 个 effect 与语音合成——逐键整体重渲染正是打字卡顿的主因。
-   * 这里只把「真正影响它行为」的 4 个布尔量 + 「`/buddy` 触发时的文本」筛出来，
-   * 于是绝大多数按键下这些 prop 引用不变，上游编译器的自动 memo 能真正生效。
-   */
-  const companionInputFlags = useMemo(() => deriveCompanionInputFlags(input), [input]);
-  const companionBuddyTriggerText = useMemo(
-    () => (companionInputFlags.inputMentionsBuddy ? input : null),
-    [companionInputFlags.inputMentionsBuddy, input],
-  );
-  const lastParentTaskSyncMarkerRef = useRef<string | null>(null);
-  const hasAppliedSavedImageDefaultsRef = useRef(false);
-  const savedChatDefaultsRef = useRef<{
-    modelId: string;
-    providerId: string;
-    reasoningEffort: ReasoningEffort;
-    thinkingEnabled: boolean;
-  } | null>(null);
-
-  const [dialogueMode, setDialogueMode] = useState<DialogueMode>(
-    () => useDisplayPreferencesStore.getState().defaultDialogueMode,
-  );
-  const [manualAgentId, setManualAgentId] = useState('');
-  /**
-   * 头部插入旧消息（加载更多历史 / 跳转到更早消息）的滚动锚点快照：
-   * 非 null 时「恢复视口」effect 会在下一帧把加载前的阅读位置恢复回去。
-   */
-  const [pendingHistoryAnchor, setPendingHistoryAnchor] = useState<ScrollAnchorSnapshot | null>(
-    null,
-  );
-  const lastAnchorMessageIdRef = useRef<string | null>(null);
-  // 可见窗口第一条消息 id 的 ref 镜像（在 `useChatRenderData` 返回后同步）：
-  // 头部加载锚点捕获的回调定义在更早的位置，需要在任意时刻读到最新值。
-  const firstVisibleMessageIdRef = useRef<string | null>(null);
-  // armHistoryAnchor 的实际实现在下方 `useChatRenderData` 之后；此处用 ref
-  // 转发，让 `ensureMessageVisible`（本文件更早位置）稳定调用同一实现。
-  // 更正:上面两行的描述已过时——`ensureMessageVisible` 不再武装滚动锚点。
-  // 该转发现在只服务「加载更早」(手动按钮 / 上滑 onNearTop);历史跳转与搜索
-  // 改走 `pendingMessageScroll` 的一次性粗滚动(见虚拟视口的同名 effect)。
-  // 两者不能同时生效:锚点恢复会把视口拉回加载前的阅读位置,从而覆盖跳转的目标位。
-  const armHistoryAnchorImplRef = useRef<(() => void) | null>(null);
-  const armHistoryAnchor = useCallback((): void => {
-    armHistoryAnchorImplRef.current?.();
-  }, []);
-  /**
-   * 悬挂的锚点恢复 rAF 取消句柄。**不能**由恢复 effect 的 cleanup 返回：
-   * 该 effect 内部会 `setPendingHistoryAnchor(null)`，重渲染时 cleanup 若取消
-   * rAF，恢复就永远不会落地。改为手动管理，只在重新武装 / 会话切换 / 卸载时取消。
-   */
-  const historyAnchorRestoreCancelRef = useRef<(() => void) | null>(null);
-  /**
-   * 一次性「滚动到指定历史消息」请求（虚拟化下用于先把目标组挂载出来）。
-   * 历史跳转 / 搜索走 `ensureMessageVisible` 扩窗后，若目标在虚拟视口挂载
-   * 窗口外，DOM 里查不到节点，调用方的 `scrollIntoView` 就会静默失效；
-   * 这条请求让虚拟视口按目标组偏移先粗滚动一次，目标挂载后调用方再精确居中。
-   */
-  const [pendingMessageScroll, setPendingMessageScroll] = useState<{
-    messageId: string;
-    nonce: number;
-  } | null>(null);
-  const pendingMessageScrollNonceRef = useRef(0);
-  const requestMessageScroll = useCallback((messageId: string): void => {
-    pendingMessageScrollNonceRef.current += 1;
-    setPendingMessageScroll({ messageId, nonce: pendingMessageScrollNonceRef.current });
-  }, []);
-  // 加载更多历史消息的实际实现在下方 `conversationViewProps` 附近定义；此处
-  // ref 转发，让更早位置的 `useScrollManager` 上滑触发（onNearTop）能调用它。
-  const loadEarlierMessagesRef = useRef<(() => void) | null>(null);
-  // 隐藏（未加载）历史消息数的 ref 镜像：`hiddenMessageCount` 在下方
-  // `useChatRenderData` 才派生，onNearTop 门控需任意时刻可读。
-  const hiddenMessageCountRef = useRef(0);
-  const [permissionMode, setPermissionMode] = useState<ComposerPermissionMode>('ask');
-  // 档位是唯一事实来源；布尔 yoloMode 是派生投影，供顶栏 / 命令面板 / 流式请求等旧读者消费。
-  const yoloMode = permissionMode === 'yolo';
-  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
-  const [thinkingEnabled, setThinkingEnabled] = useState(false);
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
-  const [streamError, setStreamError] = usePersistedStreamError(currentSessionId);
-  const modelPrices = useModelPrices(gatewayUrl, token);
-  const [rightPanelState, setRightPanelState] = useState(() => createInitialChatRightPanelState());
-  const streamingState = useChatStreaming();
-  const {
-    streaming,
-    setStreaming,
-    stoppingStream,
-    setStoppingStream,
-    streamBuffer,
-    setStreamBuffer,
-    streamThinkingBuffer,
-    setStreamThinkingBuffer,
-    streamThinkingBlocks,
-    setStreamThinkingBlocks,
-    streamingSegments,
-    setStreamingSegments,
-    reportedStreamUsage,
-    setReportedStreamUsage,
-    recoveryActiveStream,
-    setRecoveryActiveStream,
-    recoveredStreamSnapshot,
-    setRecoveredStreamSnapshot,
-    activeStreamStartedAt,
-    setActiveStreamStartedAt,
-    activeStreamRoundStartedAt,
-    setActiveStreamRoundStartedAt,
-    activeStreamFirstTokenLatencyMs,
-    setActiveStreamFirstTokenLatencyMs,
-    latestUpstreamSummary,
-    setLatestUpstreamSummary,
-    streamingRef,
-    stoppingStreamRef,
-    currentAssistantStreamMessageIdRef,
-    pendingStreamRevealFrameRef,
-    streamRevealTargetRef,
-    streamRevealVisibleRef,
-    streamRevealTargetCodePointsRef,
-    streamRevealVisibleCodePointCountRef,
-    streamRevealNextAllowedAtRef,
-    resetStreamState,
-    scheduleStreamReveal,
-    isImmediatelyRenderableStructuredContent,
-  } = streamingState;
-  // Live refs that mirror streaming/right-panel state so that effects (especially
-  // session-switch cleanup) can read the latest values without depending on them.
-  const streamBufferRef = useRef('');
-  const streamThinkingBlocksRef = useRef<StreamingThinkingBlock[]>([]);
-  const streamingSegmentsRef = useRef<ChatMessagePart[]>([]);
-  const reportedStreamUsageRef = useRef<ChatBackendUsageSnapshot | null>(null);
-  const activeStreamStartedAtRef = useRef<number | null>(null);
-  const rightPanelStateRef = useRef<ChatRightPanelState>(rightPanelState);
-  /**
-   * 六个镜像的同步刻意放进无依赖 effect，而非渲染期顶层 `xxxRef.current = value`：
-   * 渲染期写 ref 会被 React Compiler 判定为 "Cannot access refs during render" 并
-   * 放弃优化整个 ChatPage。无依赖数组 = 每次渲染跑一次，与原来的逐帧赋值严格等价
-   * （同 `use-terminal-session.ts` / `use-chat-session-lifecycle.ts` 的收口写法）。
-   * 读取点全部是下方 effect（会话切换 effect、attach effect 等），本 effect 声明在
-   * 它们之前，passive effect 按注册顺序执行，因此同一提交内「镜像先写、读取方后读」，
-   * 读到的仍是本次提交的最新值。
-   */
-  useEffect(() => {
-    streamBufferRef.current = streamBuffer;
-    streamThinkingBlocksRef.current = streamThinkingBlocks;
-    streamingSegmentsRef.current = streamingSegments;
-    reportedStreamUsageRef.current = reportedStreamUsage;
-    activeStreamStartedAtRef.current = activeStreamStartedAt;
-    rightPanelStateRef.current = rightPanelState;
-  });
-  const lastAttachAttemptTimestampRef = useRef<number>(0);
-  /**
-   * attach 重连风暴熔断窗口（`{ startedAt, count }`）。
-   *
-   * attach 成功、断线重连、权限回复都会清空 `attachAttemptedSessionRef` 并重新
-   * attach。如果新传输建立后立刻再次断开（网关侧 activeStream 指向已结束的流、
-   * 代理断链、订阅被顶掉），这条链路会形成「attach → 断开 → 重置 → 再 attach」的
-   * 无限循环：每轮都关闭并重建传输、重放事件，几秒内就能把主线程占满，页面卡死到
-   * 无法操作（刷新也只是重新开始循环）。
-   *
-   * 这里在固定窗口内限制自动 attach 次数，超过即熔断并提示用户，把「无限循环」
-   * 降级为「有界重试 + 明确错误」。窗口的读写都在 `runSessionAttachEffect` 内。
-   */
-  const attachAttemptWindowRef = useRef<{
-    startedAt: number;
-    count: number;
-    /** 窗口归属的会话：换会话必须重置，否则 A 的熔断会惩罚 B。 */
-    sessionId: string | null;
-  }>({
-    startedAt: 0,
-    count: 0,
-    sessionId: null,
-  });
-  /**
-   * attach 的「无进展」检测：网关可能长期返回一个**已僵死**的活跃流快照
-   * （`lastSeq` 不再前进），此时 SSE 打开即结束，单靠「确认有没有活跃流」永远
-   * 收敛不了。连续多次重连时 `lastSeq` 完全相同，就说明没有新事件可推，应停止重连。
-   */
-  const attachProgressRef = useRef<AttachProgressState>(createInitialAttachProgressState());
-  /**
-   * 已做过「终态收尾」的会话 id，避免 attach effect 每次重跑都做一次全量快照加载。
-   */
-  const attachTerminalReloadRef = useRef<string | null>(null);
-  const [reviewRefreshRevision, setReviewRefreshRevision] = useState(0);
-  const previousStreamingRef = useRef(streaming);
-  useEffect(() => {
-    if (previousStreamingRef.current && !streaming) {
-      setReviewRefreshRevision((revision) => revision + 1);
-    }
-    previousStreamingRef.current = streaming;
-  }, [streaming]);
-
-  const [sessionStateStatus, setSessionStateStatus] = useState<SessionStateStatus | null>(null);
-
-  // ─── 待处理操作域 — 抽到 useChatPendingActions。
-  // 参见 docs/architecture/chat-page-split-plan.md 域 C。
-  const pendingActions = useChatPendingActions({
-    gatewayUrl,
-    token,
-    currentSessionId,
-    setMessages,
-    setRightPanelState,
-    setSessionStateStatus,
-    setStreamError,
-  });
-  const {
-    pendingPermissions,
-    setPendingPermissions,
-    pendingQuestions,
-    setPendingQuestions,
+    activeModelId,
     activePendingQuestion,
+    activeProviderId,
+    activeSessionRef,
+    activeStreamFirstTokenLatencyMs,
+    activeStreamRoundStartedAt,
+    activeStreamStartedAt,
+    activeStreamStartedAtRef,
+    armHistoryAnchor,
+    armHistoryAnchorImplRef,
+    attachAttemptWindowRef,
+    attachProgressRef,
+    attachTerminalReloadRef,
+    companionBuddyTriggerText,
+    companionComposerActivity,
+    companionInputFlags,
+    currentAssistantStreamMessageIdRef,
+    currentLoadedSessionIdRef,
+    currentSessionId,
+    currentSessionViewRef,
+    currentUserDisplayName,
+    currentUserEmail,
+    dialogueMode,
+    firstVisibleMessageIdRef,
+    handleInlineQuestionCustomInput,
+    handleToggleMessageRating,
+    hasAppliedSavedImageDefaultsRef,
+    hasPendingFollowContent,
+    hasSessionToken,
+    hiddenMessageCountRef,
+    historyAnchorRestoreCancelRef,
+    idleSeconds,
+    inlinePermissionPendingDecision,
     inlineQuestionAnswers,
     inlineQuestionCustomInputs,
-    inlineQuestionReplyStatus,
     inlineQuestionReplyError,
-    inlinePermissionPendingDecision,
-    toggleInlineQuestionOption,
-    handleInlineQuestionCustomInput,
+    inlineQuestionReplyStatus,
+    input,
+    isCurrentSessionRequest,
+    isCurrentSessionView,
+    isSessionLoading,
+    lastAnchorMessageIdRef,
+    lastAttachAttemptTimestampRef,
+    lastParentTaskSyncMarkerRef,
+    latestUpstreamSummary,
+    loadEarlierMessagesRef,
+    manualAgentId,
+    messageRatings,
+    messages,
+    messagesRef,
+    modelPrices,
+    pendingBootstrapSessionRef,
+    pendingHistoryAnchor,
+    pendingMessageScroll,
+    pendingPermissions,
+    pendingQuestions,
+    pendingSessionNormalizeTimeoutRef,
+    pendingStreamRevealFrameRef,
+    permissionMode,
+    previousRouteSessionIdRef,
+    providers,
+    providersRefreshing,
+    reasoningEffort,
+    recoveredStreamSnapshot,
+    recoveryActiveStream,
     replyInlineQuestion,
+    reportedStreamUsage,
+    reportedStreamUsageRef,
+    requestMessageScroll,
+    resetStreamState,
     resolveInlinePermissionActions,
-  } = pendingActions;
+    reviewRefreshRevision,
+    rightPanelState,
+    rightPanelStateRef,
+    savedChatDefaultsRef,
+    scheduleStreamReveal,
+    serverTotalTurnCount,
+    sessionReloadNonce,
+    sessionStateStatus,
+    sessionSwitchTokenRef,
+    sessionViewCache,
+    setActiveModelId,
+    setActiveProviderId,
+    setActiveStreamFirstTokenLatencyMs,
+    setActiveStreamRoundStartedAt,
+    setActiveStreamStartedAt,
+    setCompanionComposerActivity,
+    setCurrentSessionId,
+    setDialogueMode,
+    setHasPendingFollowContent,
+    setInput,
+    setIsSessionLoading,
+    setLatestUpstreamSummary,
+    setManualAgentId,
+    setMessageRatings,
+    setMessages,
+    setPendingHistoryAnchor,
+    setPendingMessageScroll,
+    setPendingPermissions,
+    setPendingQuestions,
+    setPermissionMode,
+    setProviders,
+    setProvidersRefreshing,
+    setReasoningEffort,
+    setRecoveredStreamSnapshot,
+    setRecoveryActiveStream,
+    setReportedStreamUsage,
+    setReviewRefreshRevision,
+    setRightPanelState,
+    setServerTotalTurnCount,
+    setSessionReloadNonce,
+    setSessionStateStatus,
+    setStoppingStream,
+    setStreamBuffer,
+    setStreamError,
+    setStreaming,
+    setStreamingSegments,
+    setStreamThinkingBlocks,
+    setStreamThinkingBuffer,
+    setThinkingEnabled,
+    setVisibleMessageCount,
+    setWebSearchEnabled,
+    stoppingStream,
+    stoppingStreamRef,
+    streamBuffer,
+    streamBufferRef,
+    streamError,
+    streaming,
+    streamingRef,
+    streamingSegments,
+    streamingSegmentsRef,
+    streamRevealNextAllowedAtRef,
+    streamRevealTargetCodePointsRef,
+    streamRevealTargetRef,
+    streamRevealVisibleCodePointCountRef,
+    streamRevealVisibleRef,
+    streamThinkingBlocks,
+    streamThinkingBlocksRef,
+    streamThinkingBuffer,
+    thinkingEnabled,
+    toggleInlineQuestionOption,
+    visibleMessageCount,
+    webSearchEnabled,
+    workspace,
+    yoloMode,
+  } = useChatPageCoreState({ gatewayUrl, routeSessionId: sessionId, token });
 
   // When a `question_asked` event arrives mid-stream, the stream chunk only
   // carries `requestId`/`toolName`/`title` — not the full `questions` array
@@ -861,8 +670,6 @@ export default function ChatPage() {
     handleToggleYolo,
     handlePermissionModeChange,
     handleToggleWebSearch: rawHandleToggleWebSearch,
-    handleThinkingEnabledChange,
-    handleReasoningEffortChange,
     handleManualAgentChange,
     handleClearManualAgentId,
   } = useSessionSettingsCallbacks(
@@ -1197,7 +1004,10 @@ export default function ChatPage() {
   // task marker 误导新会话的 polling 比较),但 marker 本身属任务同步域,
   // 留在父组件管理。useChatSessionLifecycle 负责其它 ref 的镜像。
   useEffect(() => {
-    lastParentTaskSyncMarkerRef.current = null;
+    // `lastParentTaskSyncMarkerRef` 来自 hook 返回值（属「函数返回值」），直接赋值
+    // 会被 React Compiler 判为 "Mutating a variable that React considers immutable"
+    // 并让整个 ChatPage 静默退出优化。写入收进模块函数，时机与语义不变。
+    writeRefCurrent(lastParentTaskSyncMarkerRef, null);
   }, [currentSessionId, sessionId]);
 
   useEffect(() => {
@@ -1486,7 +1296,7 @@ export default function ChatPage() {
       imageDefaults,
       providers: loadedProviders,
     } = await loadSavedChatSessionDefaults(gatewayUrl, token);
-    savedChatDefaultsRef.current = defaults;
+    writeRefCurrent(savedChatDefaultsRef, defaults);
 
     return {
       defaults,
@@ -1528,36 +1338,13 @@ export default function ChatPage() {
     });
   }, [loadSavedChatDefaults, providersRefreshing, token]);
 
-  const handleContextWindowOverrideChange = useCallback(
-    async (value: number | undefined) => {
-      if (!token || !activeProviderId || !activeModelId) {
-        throw new Error('当前模型尚未准备好，无法保存上下文挡位。');
-      }
-
-      const result = await createSettingsClient(gatewayUrl).putModelContext(token, {
-        providerId: activeProviderId,
-        modelId: activeModelId,
-        contextWindowOverride: value ?? null,
-      });
-      setProviders((previous) =>
-        previous.map((provider) => {
-          if (provider.id !== result.providerId) return provider;
-          return {
-            ...provider,
-            defaultModels: provider.defaultModels.map((model) => {
-              if (model.id !== result.modelId) return model;
-              if (result.contextWindowOverride === null) {
-                const { contextWindowOverride: _removed, ...rest } = model;
-                return rest;
-              }
-              return { ...model, contextWindowOverride: result.contextWindowOverride };
-            }),
-          };
-        }),
-      );
-    },
-    [activeModelId, activeProviderId, gatewayUrl, token],
-  );
+  const handleContextWindowOverrideChange = useModelContextOverride({
+    activeModelId,
+    activeProviderId,
+    gatewayUrl,
+    setProviders,
+    token,
+  });
 
   useEffect(() => {
     if (!token) return;
@@ -1584,7 +1371,7 @@ export default function ChatPage() {
         // size/quality/format/background the user just adjusted in the composer.
         if (!hasAppliedSavedImageDefaultsRef.current) {
           applySavedImageDefaults(imageDefaults);
-          hasAppliedSavedImageDefaultsRef.current = true;
+          writeRefCurrent(hasAppliedSavedImageDefaultsRef, true);
         }
 
         if (!routeSessionIdRef.current) {
@@ -1656,271 +1443,64 @@ export default function ChatPage() {
    * 依赖数组会在初始化时读取尚未声明的 `loadCurrentSessionSnapshot`
    * 触发 TDZ 错误。
    */
-  const ensureMessageVisible = useCallback(
-    async (messageId: string) => {
-      if (!messageId) return;
-      // 先在本地完整列表里找。如果在,但被分页裁掉了 → 把窗口拉到包含它。
-      const localIndex = messages.findIndex((m) => m.id === messageId);
-      if (localIndex >= 0) {
-        // visibleMessageCount === undefined 表示「全部展开」,本就可见。
-        if (visibleMessageCount !== undefined) {
-          // 渲染的是 `slice(-visibleMessageCount)`,所以可见区间是
-          // [messages.length - visibleMessageCount, messages.length)。
-          // 把窗口扩到能覆盖目标的位置。多加 5 条作为上下文 buffer。
-          const requiredCount = messages.length - localIndex + 5;
-          if (requiredCount > visibleMessageCount) {
-            // 扩窗会把旧消息插到渲染列表头部:目标节点此前没挂载,调用方的
-            // scrollIntoView 会静默失效。这里请求虚拟视口先按目标组偏移粗滚动
-            // 一次,把目标挂载出来,再由调用方精确居中。
-            requestMessageScroll(messageId);
-            setVisibleMessageCount(requiredCount);
-          }
-        }
-        return;
-      }
-      // 本地数组里也没有 → 服务端可能还没拉过来,触发一次 snapshot
-      // 重载并把窗口扩到全部新消息可见。
-      if (currentSessionId) {
-        requestMessageScroll(messageId);
-        try {
-          await loadCurrentSessionSnapshot(currentSessionId, { replaceMessages: true });
-          setServerTotalTurnCount(null);
-          // 拉一个足够大的值,使 `slice(-visibleMessageCount)` 等同于全部。
-          // useChatRenderData 会在 visibleMessageCount >= 总长时返回完整列表,
-          // 不会真的展示 9999 条空 slot。
-          setVisibleMessageCount(9_999);
-        } catch {
-          /* swallow — caller will fall through to its own missing-target branch */
-        }
-      }
-    },
-    [
-      messages,
-      visibleMessageCount,
-      currentSessionId,
-      loadCurrentSessionSnapshot,
-      setVisibleMessageCount,
-      setServerTotalTurnCount,
-      requestMessageScroll,
-    ],
-  );
-
-  const remoteSessionBusyState = useMemo<Extract<
-    SessionStateStatus,
-    'running' | 'paused'
-  > | null>(() => {
-    if (streaming) {
-      return null;
-    }
-
-    // 如果刚发送消息（5秒内），不显示"正在重新接入"提示
-    // 这是正常的发送流程，不是远程流恢复场景
-    const timeSinceStreamStart =
-      activeStreamStartedAt !== null ? Date.now() - activeStreamStartedAt : Infinity;
-    if (timeSinceStreamStart < 5000) {
-      return null;
-    }
-
-    // 有待处理交互（权限/提问）时，会话实质处于 paused；必须在这里返回，
-    // 否则下面的 idle 提前返回会让 remoteSessionBusyState 变成 null，
-    // 进而关闭 /recovery 轮询（见下方 useEffect 的门控），前端就再也学不到
-    // 服务端的 paused 状态，只能整页刷新。
-    if (pendingPermissions.length > 0 || pendingQuestions.length > 0) {
-      return 'paused';
-    }
-
-    // 如果会话状态是 idle 且没有 active stream，不应该显示忙碌状态
-    if (sessionStateStatus === 'idle' && recoveryActiveStream === null) {
-      return null;
-    }
-
-    if (sessionStateStatus === 'running' || sessionStateStatus === 'paused') {
-      return sessionStateStatus;
-    }
-
-    if (recoveryActiveStream !== null) {
-      return 'running';
-    }
-
-    return null;
-  }, [
-    activeStreamStartedAt,
-    pendingPermissions,
-    pendingQuestions,
-    recoveryActiveStream,
-    sessionStateStatus,
-    streaming,
-  ]);
-  /**
-   * composer 专用的占用态：只回答「现在能不能发消息」，与上面的展示态分离。
-   *
-   * `remoteSessionBusyState` 在有待办交互时**无条件**收敛成 `'paused'`，即使
-   * `sessionStateStatus` 仍是 `'running'`（批量审批续跑中 / 另一端发起了新一轮，都是
-   * 真实存在的瞬态——见 `resolveSessionStopCapability` 的同款注释）。
-   *
-   * 那种双轨态下网关**确实**持有单飞锁，硬发必被拒成 SESSION_ALREADY_RUNNING：用户消息
-   * 只有乐观气泡、不会落库，等于白丢一条。所以这里把「paused 且 running」升级回
-   * `'running'` 交回禁用/排队语义。
-   *
-   * 展示侧不跟着变：状态条要继续说「等待审批 / 等待回答」，而不是「持续运行中」。
-   */
-  const composerSessionBusyState = useMemo<'running' | 'paused' | null>(() => {
-    // 回复问题 / 权限的 HTTP 请求尚未完成时，后台续跑即将启动。
-    // 先按 running 处理，避免用户在状态刷新竞态窗口里抢发消息。
-    if (inlineQuestionReplyStatus !== null || inlinePermissionPendingDecision !== null) {
-      return 'running';
-    }
-
-    if (remoteSessionBusyState === 'paused' && sessionStateStatus === 'running') {
-      return 'running';
-    }
-    return remoteSessionBusyState;
-  }, [
-    inlinePermissionPendingDecision,
-    inlineQuestionReplyStatus,
-    remoteSessionBusyState,
-    sessionStateStatus,
-  ]);
-  // 有 attach 重试待触发且归属当前会话 = 客户端正在重新接入；用于状态条显示「恢复中」。
-  const sessionReconnecting =
-    currentSessionId !== null &&
-    attachRetryScheduledSessionId !== null &&
-    attachRetryScheduledSessionId === currentSessionId;
-  const activeGatewayStreamClientRequestId = client.getActiveStreamClientRequestId();
-  const activeGatewayStreamSessionId = client.getActiveStreamSessionId();
-  const isCurrentSessionRunning = sessionStateStatus === 'running';
-  const canStopCurrentSessionStream = Boolean(
-    currentSessionId &&
-    activeGatewayStreamSessionId === currentSessionId &&
-    (streaming || isCurrentSessionRunning),
-  );
-  const stopCapability = useMemo<'none' | 'precise' | 'best_effort' | 'observe_only'>(() => {
-    return resolveSessionStopCapability({
-      canStopCurrentSessionStream,
-      currentSessionId,
-      remoteSessionBusyState,
-      sessionStateStatus,
-      streaming,
-    });
-  }, [
-    canStopCurrentSessionStream,
+  const ensureMessageVisible = useEnsureMessageVisible({
     currentSessionId,
-    remoteSessionBusyState,
-    sessionStateStatus,
-    streaming,
-  ]);
-  // `visibleStreaming` 保持「**流式态**」语义（滚动跟随 / 输入框形态 / 停止按钮都用它）：
-  // 只要本端在流式，或网关还有活跃流快照，就仍算流式。
-  const visibleStreaming = streaming || recoveredStreamSnapshot !== null;
-  /**
-   * 是否应该渲染**实时气泡**。
-   *
-   * 与 `visibleStreaming` 分开：恢复快照在「上一轮已落库、下一轮还没开始」时是空的
-   * （只带 `usage` / `upstreamSummary`）。若拿它撑起实时气泡，渲染层会造一条
-   * `status: 'streaming'` 的空消息，`mergeStreamingEntryIntoHistoricalEntries` 再按
-   * `clientRequestId` 精确匹配到历史上刚结束的那一轮并**用它替换** —— 内容是瞬间消失的。
-   * 所以气泡是否出现必须以快照里**有没有可见内容**为准，而流式态不受影响。
-   */
-  const visibleStreamRenderable =
-    streaming ||
-    (recoveredStreamSnapshot !== null && recoveredStreamHasVisibleContent(recoveredStreamSnapshot));
-  const visibleStreamBuffer = streaming ? streamBuffer : (recoveredStreamSnapshot?.text ?? '');
-  const visibleStreamThinkingBlocks = streaming
-    ? extractStreamingThinkingTexts(streamThinkingBlocks)
-    : extractStreamingThinkingTexts(recoveredStreamSnapshot?.thinkingBlocks ?? []);
-  const visibleStreamThinkingBuffer = streaming
-    ? streamThinkingBuffer
-    : joinStreamingThinkingTexts(recoveredStreamSnapshot?.thinkingBlocks ?? []);
-  const visibleStreamStartedAt = streaming
-    ? activeStreamStartedAt
-    : (recoveredStreamSnapshot?.startedAt ?? null);
-  // 实时气泡的 createdAt 必须落在**本轮**（网关按轮持久化），否则同请求内已提交的
-  // 轮次时间戳更晚，排序会把实时气泡顶到最上面。恢复快照的 startedAt 就是本轮起点。
-  const activeStreamRoundStart =
-    streaming && activeStreamRoundStartedAt !== null
-      ? activeStreamRoundStartedAt
-      : visibleStreamStartedAt;
-  const visibleReportedStreamUsage = reportedStreamUsage ?? recoveredStreamSnapshot?.usage ?? null;
-  const visibleLatestUpstreamSummary =
-    latestUpstreamSummary ?? recoveredStreamSnapshot?.upstreamSummary ?? null;
-  // Surfaces the wire-faithful ordered parts during an active stream so the
-  // live render reflects gateway event order. During recovery (before the
-  // live attach completes) the real segment list is still empty, so we
-  // synthesize ordered parts from the snapshot's thinking blocks + text.
-  // This preserves `startedAt` / `endedAt` on reasoning parts so the UI
-  // correctly marks ended thinking blocks instead of showing an infinite
-  // streaming cursor.
-  const visibleStreamingSegments = streaming
-    ? streamingSegments
-    : recoveredStreamSnapshot
-      ? recoveredStreamSnapshot.parts
-      : [];
-  /**
-   * 实时助手占位消息 id。真源是 `currentAssistantStreamMessageIdRef`（由
-   * `start-standard-chat-stream` / `commit-streaming-round` / attach effect 在异步
-   * 回调里改写），但渲染期（`useChatRenderData` 的 id 与排序判定）需要它的值，
-   * 而渲染期读 ref 会被 React Compiler 判定为 "Cannot access refs during render"
-   * 并放弃优化整个 ChatPage。故镜像到 state：layout effect 无依赖、每次提交后同步
-   * 读取 ref，值变化时才 setState——值变化必定伴随一次渲染，而下一次渲染由
-   * layout effect 在**绘制前**同步冲刷，因此首帧可见输出与改前一致。
-   *
-   * 用**先比对、再 setState**而不是只依赖同值 updater 兜底：
-   * `setState(prev => prev === next ? prev : next)` 在同值时的确会被 React 的 eager
-   * bailout 丢弃（已实测：把本 effect 与一个无界自增 effect 放一起，抛错时的自增次数
-   * 与「只有自增 effect」完全一致，说明同值 dispatch 对嵌套更新计数零贡献）。
-   * 但那次比较本身仍有成本，且依赖 bailout 生效的**前提**（fiber 无待办 lane）在
-   * 并发渲染下不显然；先比对能直接省掉这次 dispatch，属于纯收益。
-   *
-   * **注意**：本 effect 只是「占位消息 id」的镜像，量级上不可能自持成环——实测
-   * `Maximum update depth exceeded` 的抛点是「该次提交里**第一个真实入队**的
-   * dispatcher」，而非循环的成因（把无界自增 effect 声明在本 effect 之前/之后，
-   * 抛点会随之在两者间移动）。若再次看到报错落在这里，应当去别处找真正的驱动方。
-   *
-   * 比对基准取「本次渲染的 state」而非另一个镜像 ref：layout effect 只在**已提交**的
-   * 渲染后执行，无依赖数组 ⇒ 闭包里的 state 就是本帧真实渲染值，天然自愈（不会出现
-   * 「ref 已前移、state 因丢弃渲染而没跟上」导致后续永久跳过同步的形态）。
-   */
-  const [activeStreamMessageId, setActiveStreamMessageId] = useState<string | null>(null);
-  useLayoutEffect(() => {
-    const nextActiveStreamMessageId =
-      currentAssistantStreamMessageIdRef.current ?? recoveredStreamSnapshot?.messageId ?? null;
-    if (activeStreamMessageId === nextActiveStreamMessageId) {
-      return;
-    }
-    setActiveStreamMessageId(nextActiveStreamMessageId);
+    loadCurrentSessionSnapshot,
+    messages,
+    requestMessageScroll,
+    setServerTotalTurnCount,
+    setVisibleMessageCount,
+    visibleMessageCount,
   });
 
-  const shouldPollSessionSubresources = useMemo(
-    () =>
-      Boolean(
-        currentSessionId &&
-        token &&
-        isPageActive &&
-        isSessionSnapshotReady &&
-        !isSessionLoading &&
-        remoteSessionBusyState === null &&
-        sessionModesHydrated &&
-        shouldPollSessionRuntime({
-          pendingPermissions,
-          sessionStateStatus,
-          sessionTasks,
-          streaming,
-        }),
-      ),
-    [
-      currentSessionId,
-      isPageActive,
-      isSessionLoading,
-      isSessionSnapshotReady,
-      pendingPermissions,
-      remoteSessionBusyState,
-      sessionModesHydrated,
-      sessionStateStatus,
-      sessionTasks,
-      streaming,
-      token,
-    ],
-  );
+  const {
+    activeStreamMessageId,
+    activeStreamRoundStart,
+    canStopCurrentSessionStream,
+    composerSessionBusyState,
+    remoteSessionBusyState,
+    sessionReconnecting,
+    shouldPollSessionSubresources,
+    stopCapability,
+    visibleLatestUpstreamSummary,
+    visibleReportedStreamUsage,
+    visibleStreamBuffer,
+    visibleStreamRenderable,
+    visibleStreamStartedAt,
+    visibleStreamThinkingBlocks,
+    visibleStreamThinkingBuffer,
+    visibleStreaming,
+    visibleStreamingSegments,
+  } = useChatSessionRuntimeView({
+    activeStreamRoundStartedAt,
+    activeStreamStartedAt,
+    attachRetryScheduledSessionId,
+    client,
+    currentAssistantStreamMessageIdRef,
+    currentSessionId,
+    inlinePermissionPendingDecision,
+    inlineQuestionReplyStatus,
+    isPageActive,
+    isSessionLoading,
+    isSessionSnapshotReady,
+    latestUpstreamSummary,
+    pendingPermissions,
+    pendingQuestions,
+    recoveredStreamSnapshot,
+    recoveryActiveStream,
+    reportedStreamUsage,
+    sessionModesHydrated,
+    sessionStateStatus,
+    sessionTasks,
+    streamBuffer,
+    streamThinkingBlocks,
+    streamThinkingBuffer,
+    streaming,
+    streamingSegments,
+    token,
+  });
+  const activeGatewayStreamClientRequestId = client.getActiveStreamClientRequestId();
+  const activeGatewayStreamSessionId = client.getActiveStreamSessionId();
 
   useEffect(() => {
     if (!currentSessionId || !token) {
@@ -1942,7 +1522,7 @@ export default function ChatPage() {
 
     const nextMarker = buildTerminalTaskSyncMarker(sessionTasks);
     if (lastParentTaskSyncMarkerRef.current === null) {
-      lastParentTaskSyncMarkerRef.current = nextMarker;
+      writeRefCurrent(lastParentTaskSyncMarkerRef, nextMarker);
       return;
     }
 
@@ -1975,7 +1555,7 @@ export default function ChatPage() {
         }
 
         const prepared = prepareSessionRecoveryState(session);
-        lastParentTaskSyncMarkerRef.current = nextMarker;
+        writeRefCurrent(lastParentTaskSyncMarkerRef, nextMarker);
         // Recovery commit involves a full message-list re-render incl.
         // markdown / reasoning / tool cards — keep it non-urgent so React
         // can split work across frames instead of blocking the main thread.
@@ -2210,32 +1790,22 @@ export default function ChatPage() {
     setMcpServers,
   });
 
-  useEffect(() => {
-    if (!currentSessionId || !token || !shouldPollSessionSubresources) {
-      return;
-    }
-
-    const targetSessionId = currentSessionId;
-    const expectedSessionViewEpoch = currentSessionViewRef.current.epoch;
-
-    const polling = startSequentialPolling({
-      initialDelayMs: streaming ? 0 : 3000,
-      intervalMs: 3000,
-      run: async (signal) => {
-        await loadSessionRuntimeSnapshot(targetSessionId, signal, expectedSessionViewEpoch);
-      },
-    });
-
-    return () => {
-      polling.cancel();
-    };
-  }, [
+  useSessionRecoveryPolling({
+    attachRetryScheduledSessionId,
     currentSessionId,
+    currentSessionViewRef,
+    isPageActive,
+    isSessionSnapshotReady,
+    loadCurrentSessionSnapshot,
     loadSessionRuntimeSnapshot,
+    recoveryActiveStream,
+    remoteSessionBusyState,
+    sessionModesHydrated,
     shouldPollSessionSubresources,
     streaming,
+    streamingRef,
     token,
-  ]);
+  });
 
   // 「running 但持续无活跃流」检测与恢复入口（"批准后卡住"的客户端兜底）：
   // 网关侧 resume 早期失败若未把会话状态收敛回 idle，会话会永远停在 running 却
@@ -2269,284 +1839,91 @@ export default function ChatPage() {
     status: remoteSessionBusyState,
   });
 
-  useEffect(() => {
-    if (
-      !currentSessionId ||
-      !token ||
-      !remoteSessionBusyState ||
-      !isPageActive ||
-      !isSessionSnapshotReady ||
-      !sessionModesHydrated
-    ) {
-      return;
-    }
+  // 下面三个写入器把「改父组件 ref」收回到组件内：hook 内直接写 ref 会被
+  // React Compiler 判为 mutating hook arguments，从而放弃编译整个 ChatPage。
+  const markSessionCacheRestoreConsumed = useCallback((): void => {
+    sessionRestoredFromCacheRef.current = false;
+  }, [sessionRestoredFromCacheRef]);
 
-    const targetSessionId = currentSessionId;
-    const expectedSessionViewEpoch = currentSessionViewRef.current.epoch;
-    const polling = startSequentialPolling({
-      initialDelayMs: REMOTE_STREAM_RECOVERY_POLL_MS,
-      intervalMs: REMOTE_STREAM_RECOVERY_POLL_MS,
-      run: async (signal) => {
-        // During active streaming, messages arrive via SSE in real-time.
-        // Use lightweight /status endpoint instead of full /recovery to
-        // avoid redundant full-message queries and serialization.
-        //
-        // 判定必须用「本轮运行是否结束」，而不是只看 `streamingRef`：
-        // attach 断开进入重连时 `handleInterruptedAttachStream` 会把 streaming
-        // 置 false（内容转存到 recoveredStreamSnapshot 继续渲染），但**流并没有
-        // 结束**。此时若按「非流式」走全量 `/recovery`，就会在重连等待期内每秒
-        // 序列化整段会话——实测单会话 362 消息 / 363 parts ≈ 1.6MB，退避到 30s
-        // 时就是连续 30 次，主线程直接被打满（「能动能但非常卡」）。
-        // 网关仍报活跃流（`recoveryActiveStream`）或正在等待 attach 重试时，
-        // 一律走轻量 `/status`：消息内容由重连后的 run event 重放补齐。
-        const isStreamInFlight =
-          streamingRef.current ||
-          recoveryActiveStream !== null ||
-          (attachRetryScheduledSessionId !== null &&
-            attachRetryScheduledSessionId === targetSessionId);
-        if (isStreamInFlight) {
-          await loadSessionRuntimeSnapshot(targetSessionId, signal, expectedSessionViewEpoch);
-        } else {
-          await loadCurrentSessionSnapshot(targetSessionId, {
-            expectedSessionViewEpoch,
-            // 远端运行中的这条 1s 轮询是全程唯一会「反复」拉取活跃 scope 的调用方：
-            // run event 走增量续读，单拍成本从 O(本轮已产生事件数) 降到 O(新增事件数)，
-            // 下游累加 reduce 拿到的仍是完整序列（拼接由 loader 内的前缀缓冲完成）。
-            incrementalRunEvents: true,
-            messageLimit: INITIAL_TURN_LIMIT,
-            signal,
-          });
-        }
-      },
-    });
+  const setLastAnchorMessageId = useCallback(
+    (id: string | null): void => {
+      // `lastAnchorMessageIdRef` 来自 hook 返回值，直接写会被 React Compiler
+      // 判为不可变值的变更并放弃优化整个 ChatPage。
+      writeRefCurrent(lastAnchorMessageIdRef, id);
+    },
+    [lastAnchorMessageIdRef],
+  );
 
-    return () => {
-      polling.cancel();
-    };
-  }, [
-    attachRetryScheduledSessionId,
-    currentSessionId,
-    isPageActive,
-    isSessionSnapshotReady,
-    loadCurrentSessionSnapshot,
-    loadSessionRuntimeSnapshot,
-    recoveryActiveStream,
-    remoteSessionBusyState,
-    sessionModesHydrated,
-    token,
-  ]);
-
-  useEffect(() => {
-    if (!currentSessionId || !token || !sessionModesHydrated || !sessionMetadataDirty) return;
-
-    // 从 providers 列表中查找当前选中模型的 label
-    const currentProvider = providers.find((p) => p.id === activeProviderId);
-    const currentModel = currentProvider?.defaultModels.find((m) => m.id === activeModelId);
-    const modelLabel = currentModel?.label;
-
-    const nextMetadata = buildSessionMetadata(modelLabel ? { modelLabel } : {});
-    const nextSnapshot = createSessionMetadataSnapshot(nextMetadata);
-    const targetSessionId = currentSessionId;
-
-    if (lastPersistedSessionMetadataSnapshotRef.current === nextSnapshot) {
-      clearSessionMetadataDirty();
-      return;
-    }
-
-    void createSessionsClient(gatewayUrl)
-      .updateMetadata(token, targetSessionId, nextMetadata)
-      .then(() => {
-        if (activeSessionRef.current !== targetSessionId) {
-          return;
-        }
-        writeRefCurrent(lastPersistedSessionMetadataSnapshotRef, nextSnapshot);
-        sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
-          modelSelectionSource:
-            typeof nextMetadata['modelSelectionSource'] === 'string'
-              ? nextMetadata['modelSelectionSource']
-              : undefined,
-          providerId:
-            typeof nextMetadata['providerId'] === 'string' ? nextMetadata['providerId'] : undefined,
-          modelId:
-            typeof nextMetadata['modelId'] === 'string' ? nextMetadata['modelId'] : undefined,
-        });
-        clearSessionMetadataDirty();
-        requestSessionListRefresh();
-      })
-      .catch(() => undefined);
-  }, [
+  const setModelSelectionSource = useCallback(
+    (
+      source: Parameters<
+        Parameters<typeof useSessionMetadataPersist>[0]['setModelSelectionSource']
+      >[0],
+    ): void => {
+      sessionModelSelectionSourceRef.current = source;
+    },
+    [sessionModelSelectionSourceRef],
+  );
+  useSessionMetadataPersist({
     activeModelId,
     activeProviderId,
+    activeSessionRef,
     buildSessionMetadata,
     clearSessionMetadataDirty,
     currentSessionId,
     gatewayUrl,
+    lastPersistedSessionMetadataSnapshotRef,
     providers,
+    requestSessionListRefresh,
     sessionMetadataDirty,
     sessionModesHydrated,
+    sessionModelSelectionSourceRef,
+    setModelSelectionSource,
     token,
-  ]);
-
-  const prevSnapshotReadyRef = useRef(false);
-  const prevPageActiveRef = useRef(isPageActive);
-  // When true, the next scroll-to-latest trigger (Effect A or B) should be
-  // suppressed because the cache-restore path already set scrollTop.
-  const suppressNextScrollRef = useRef(false);
-
-  // Refs mirroring reactive state for use inside effects that must NOT
-  // re-run when these values change (to avoid canceling an in-progress
-  // settleObserver via cleanup).
-  // 镜像写下沉到 **layout** effect：渲染期写 ref 会让 React Compiler 放弃优化整个
-  // ChatPage；而下方 Effect A / Effect B 同为 layout effect，layout effect 按声明
-  // 顺序执行，本 effect 声明在它们之前，因此它们读到的仍是本次提交的最新值。
-  // （若改成 passive effect，Effect A 会先于镜像执行并读到上一帧的值。）
-  const isSessionSnapshotReadyRef = useRef(isSessionSnapshotReady);
-  const messagesLengthRef = useRef(messages.length);
-  useLayoutEffect(() => {
-    isSessionSnapshotReadyRef.current = isSessionSnapshotReady;
-    messagesLengthRef.current = messages.length;
   });
 
-  // ── Effect A: First snapshot ready → scroll to bottom ────────────────
-  // Triggers when `isSessionSnapshotReady` transitions to `true` for the
-  // first time after a session switch (prevSnapshotReadyRef guards against
-  // re-triggering on every messages.length change).
-  //
-  // IMPORTANT: Only depends on `isSessionSnapshotReady` and the stable
-  // `forceFollowToLatest` callback.  `messages.length` is read via ref so
-  // streaming updates don't cause cleanup to cancel the settle loop.
-  //
-  // 用 layout effect 而非 passive effect：`forceFollowToLatest` 的同步首帧会在
-  // 本帧绘制前贴底；放到 passive effect（绘制之后才跑）时，长历史会话打开后的
-  // 第一帧会画在旧位置（用户先看到最旧的消息），慢机 / 后台标签页下该窗口可达数秒。
-  useLayoutEffect(() => {
-    if (!prevSnapshotReadyRef.current && isSessionSnapshotReady && messagesLengthRef.current > 0) {
-      // When restored from cache, scroll was already set — skip the forced scroll-to-bottom
-      if (sessionRestoredFromCacheRef.current) {
-        sessionRestoredFromCacheRef.current = false;
-        suppressNextScrollRef.current = true;
-        prevSnapshotReadyRef.current = isSessionSnapshotReady;
-        return;
-      }
-      suppressNextScrollRef.current = false;
-      const cleanup = forceFollowToLatest('auto');
-      prevSnapshotReadyRef.current = isSessionSnapshotReady;
-      return cleanup;
-    }
-    prevSnapshotReadyRef.current = isSessionSnapshotReady;
-  }, [isSessionSnapshotReady, forceFollowToLatest, sessionRestoredFromCacheRef]);
+  useChatScrollSettleEffects({
+    forceFollowToLatest,
+    isFollowEngaged,
+    isPageActive,
+    isSessionSnapshotReady,
+    markSessionCacheRestoreConsumed,
+    messagesLength: messages.length,
+    sessionRestoredFromCacheRef,
+  });
 
-  useEffect(() => {
-    if (!isSessionSnapshotReady) {
-      prevSnapshotReadyRef.current = false;
-    }
-  }, [isSessionSnapshotReady]);
+  const {
+    handleCopyMessage,
+    handleCopyMessageGroup,
+    handleEditRetryMessage,
+    handleRetryMessage,
+    buildMessageActions,
+  } = useChatMessageActions({
+    messages,
+    messageRatings,
+    onToggleMessageRating: handleToggleMessageRating,
+    setHistoryEditPrompt,
+    setRetryPrompt,
+  });
 
-  // ── Effect B: Page reactivation → scroll to bottom ───────────────────
-  // In classic layout, CachedRouteOutlet keeps ChatPage mounted but toggles
-  // `display: none / flex` on the wrapper.  When the user navigates away
-  // (e.g. to Settings) and back, `isPageActive` goes false → true.  Since
-  // `isSessionSnapshotReady` never changed, Effect A won't re-fire.  This
-  // effect bridges the gap: when the page becomes active again and there
-  // are messages, force a scroll to the latest message.
-  //
-  // 产品决策：页面重新激活**不**无条件把用户拉回底部。跟随仅在启用
-  // （用户没有明确离开 latest）时才重新贴底；正在翻历史的用户保持原位。
-  //
-  // IMPORTANT: This effect only depends on `isPageActive` (and the stable
-  // `forceFollowToLatest` / `isFollowEngaged` callbacks).  We deliberately
-  // exclude `isSessionSnapshotReady` and `messages.length` from the dep array
-  // so streaming updates (which change messages.length) don't cause the
-  // cleanup to cancel an in-progress smooth scroll.  Those values are read
-  // via refs instead.
-  //
-  // 与 Effect A 同理用 layout effect：面板从 `display: none` 恢复时，同步首帧
-  // 贴底才能保证重新显示的第一帧就在最新处。
-  useLayoutEffect(() => {
-    const wasActive = prevPageActiveRef.current;
-    prevPageActiveRef.current = isPageActive;
-    if (
-      !wasActive &&
-      isPageActive &&
-      isSessionSnapshotReadyRef.current &&
-      messagesLengthRef.current > 0 &&
-      isFollowEngaged()
-    ) {
-      // If Effect A just ran a cache-restore skip, don't override the
-      // restored scrollTop with a forced scroll-to-bottom.
-      if (suppressNextScrollRef.current) {
-        suppressNextScrollRef.current = false;
-        return;
-      }
-      const cleanup = forceFollowToLatest('auto');
-      return cleanup;
-    }
-  }, [isPageActive, forceFollowToLatest, isFollowEngaged]);
-
-  const focusComposerWithText = useCallback(
-    (text: string) => {
-      setInput(text);
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return;
-        textareaRef.current.focus();
-        const caret = text.length;
-        textareaRef.current.setSelectionRange(caret, caret);
-      });
-      // 把 textareaRef（useChatUiState 返回的 ref）列入依赖：编译器要求 memo 内
-      // 用到的 ref 在依赖里可查；ref 身份稳定，行为不变。
-    },
-    [textareaRef],
-  );
-
-  /**
-   * 欢迎页「新建会话」：把当前视图复位为空白草稿并聚焦输入框，不立即在服务端
-   * 创建空会话——真正的会话在首条消息发出时才落库，因此连续点击不会堆积空对话。
-   *
-   * 草稿工作区按「点击来源」继承当前上下文：已有会话取 store 里已解析的工作区
-   * 绑定（含父会话链 / SSH，与 useWorkspace 同源），尚未解析时回落当前全局选中值
-   * （不能把「未知」当成「未绑定」而误清）；草稿态沿用当前草稿工作区。
-   */
-  const handleStartNewSession = useCallback(() => {
-    setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
-    focusComposerWithText('');
-    const resolvedWorkspace = resolveNewSessionWorkspace({
-      contextSessionId: currentSessionId,
-      activeSessionWorkspace: useUIStateStore.getState().activeSessionWorkspace,
-      fallbackWorkspacePath: selectedWorkspacePath,
-      // 全局选中工作区的「路径 + 连接」是成对的，路径回落时连接必须一起回落：
-      // 在远端工作区里点 ⌘N 时漏掉这一步，新会话会以裸路径落库。
-      fallbackSshConnectionId: selectedSshConnectionId,
-    });
-    useUIStateStore
-      .getState()
-      .openDraftSession(resolvedWorkspace.workspacePath, resolvedWorkspace.sshConnectionId);
-    if (currentSessionId) {
-      void navigate('/chat');
-    }
-  }, [
-    currentSessionId,
+  const {
+    appendTextToComposer,
     focusComposerWithText,
+    handleEditPreviousUserMessage,
+    handleRetryLastFailedTurn,
+    handleStartNewSession,
+  } = useChatComposerShortcuts({
+    currentSessionId,
+    handleEditRetryMessage,
+    handleRetryMessage,
+    messages,
     navigate,
     selectedSshConnectionId,
     selectedWorkspacePath,
-  ]);
-
-  const appendTextToComposer = useCallback(
-    (text: string) => {
-      setInput((previous) => {
-        const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
-        return `${previous}${separator}${text}`;
-      });
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return;
-        textareaRef.current.focus();
-        const caret = textareaRef.current.value.length;
-        textareaRef.current.setSelectionRange(caret, caret);
-      });
-      // 同上:textareaRef 列入依赖,满足编译器对既有 memo 的依赖校验。
-    },
-    [textareaRef],
-  );
+    setDialogueMode,
+    setInput,
+    textareaRef,
+  });
 
   useEffect(() => {
     const handleComposerReference = (event: Event) => {
@@ -2562,55 +1939,6 @@ export default function ChatPage() {
       window.removeEventListener(COMPOSER_REFERENCE_EVENT_NAME, handleComposerReference);
     };
   }, [appendTextToComposer]);
-
-  const {
-    getCopyableMessageText,
-    handleCopyMessage,
-    handleCopyMessageGroup,
-    handleEditRetryMessage,
-    handleRetryMessage,
-    findRetrySource,
-    isHistoricalUserMessage,
-    containsCodeMarkers,
-    buildMessageActions,
-  } = useChatMessageActions({
-    messages,
-    messageRatings,
-    onToggleMessageRating: handleToggleMessageRating,
-    setHistoryEditPrompt,
-    setRetryPrompt,
-  });
-
-  const handleEditPreviousUserMessage = useCallback(() => {
-    const previousUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-    if (!previousUserMessage) {
-      return;
-    }
-    handleEditRetryMessage(previousUserMessage);
-  }, [handleEditRetryMessage, messages]);
-
-  const handleRetryLastFailedTurn = useCallback(() => {
-    // Prefer the most recent assistant error / cancelled message as the
-    // retry target; fall back to the latest user turn.
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (!message) continue;
-      if (
-        message.role === 'assistant' &&
-        (message.status === 'error' ||
-          message.status === 'cancelled' ||
-          message.stopReason === 'error' ||
-          message.stopReason === 'cancelled')
-      ) {
-        handleRetryMessage(message.id);
-        return;
-      }
-    }
-    const lastUser = [...messages].reverse().find((message) => message.role === 'user');
-    if (lastUser) {
-      handleRetryMessage(lastUser.id);
-    }
-  }, [handleRetryMessage, messages]);
 
   const { createBranchSessionFromMessage } = useChatBranchSession({
     token,
@@ -2668,40 +1996,7 @@ export default function ChatPage() {
     });
   }
 
-  const appendImageGenerationSummaryMessage = useCallback(
-    (input: {
-      artifactTitle: string;
-      messageSummary: string;
-      modelId: string;
-      providerId: string;
-      revisedPrompt: string | null;
-      sourcePrompt: string;
-    }) => {
-      const revisedPromptText = input.revisedPrompt?.trim();
-      const content =
-        revisedPromptText && revisedPromptText !== input.sourcePrompt.trim()
-          ? `${input.messageSummary}\n结果：${input.artifactTitle}\n提示词改写：${revisedPromptText}\n已写入产物工作区。`
-          : `${input.messageSummary}\n结果：${input.artifactTitle}\n已写入产物工作区。`;
-      const createdAt = Date.now();
-
-      setMessages((previous) => [
-        ...previous,
-        {
-          id: makeOrderedMessageId(createdAt),
-          role: 'assistant',
-          content,
-          createdAt,
-          model: input.modelId,
-          providerId: input.providerId,
-          status: 'completed',
-          tokenEstimate: estimateTokenCount(content),
-        },
-      ]);
-      // setMessages（会话状态 hook 的 setter，身份稳定）列入依赖：原 deps 为空，
-      // 编译器校验既有 memo 时要求补上，行为不变。
-    },
-    [setMessages],
-  );
+  const appendImageGenerationSummaryMessage = useAppendImageGenerationSummary({ setMessages });
 
   // 提交单飞闩：从点击到 `startStandardChatStream` 置位 streaming 之间存在异步窗口
   // （新建会话、上传附件都可能有秒级延迟），期间 streaming / streamingRef 都还是
@@ -2882,75 +2177,7 @@ export default function ChatPage() {
     token,
   });
 
-  const handleRetryMcpServer = useCallback(
-    (serverId: string) => {
-      if (!token) return;
-      setMcpServers((prev) =>
-        prev.map((server) =>
-          server.id === serverId
-            ? { ...server, retryFeedback: { kind: 'pending' as const } }
-            : server,
-        ),
-      );
-
-      void (async () => {
-        try {
-          const data = (await createSettingsClient(gatewayUrl).retryMcpServer(token, serverId)) as {
-            status: 'connected' | 'error' | 'disabled';
-            toolCount: number;
-            durationMs: number;
-            error?: string;
-          };
-          setMcpServers((prev) =>
-            prev.map((server) => {
-              if (server.id !== serverId) return server;
-              if (data.status === 'connected') {
-                return {
-                  ...server,
-                  status: 'connected' as const,
-                  toolCount: data.toolCount,
-                  retryFeedback: {
-                    kind: 'ok' as const,
-                    toolCount: data.toolCount,
-                    durationMs: data.durationMs,
-                  },
-                };
-              }
-              if (data.status === 'error') {
-                return {
-                  ...server,
-                  status: 'error' as const,
-                  retryFeedback: {
-                    kind: 'fail' as const,
-                    error: data.error ?? '未知错误',
-                  },
-                };
-              }
-              return {
-                ...server,
-                status: 'disabled' as const,
-                retryFeedback: undefined,
-              };
-            }),
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          setMcpServers((prev) =>
-            prev.map((server) =>
-              server.id === serverId
-                ? {
-                    ...server,
-                    status: 'error' as const,
-                    retryFeedback: { kind: 'fail' as const, error: message },
-                  }
-                : server,
-            ),
-          );
-        }
-      })();
-    },
-    [gatewayUrl, setMcpServers, token],
-  );
+  const handleRetryMcpServer = useMcpServerRetry({ gatewayUrl, setMcpServers, token });
 
   // ─── 统一工作区面板（Fusion 桌面）────────────────────────────────────────
   // 编辑器 / 浏览器预览在 Fusion 桌面的唯一入口是会话面板的「代码 / 预览」一级
@@ -3053,35 +2280,15 @@ export default function ChatPage() {
 
   // ─── 重试与历史编辑域 — 抽到 useChatRetryAndEdit。
   // 参见 docs/architecture/chat-page-split-plan.md 域 E。
-  /**
-   * 回退（截断生效）后清理「子代理派生状态」：后端只删该回合的派生物（任务图节点 /
-   * run events / 团队记录…），**子会话本身保留**；这里把属于被作废回合的子会话、
-   * 任务与完成通知从展示中摘掉，避免回退后子代理信息仍挂在页面上。
-   */
-  const handleRollbackApplied = useCallback(
-    (receipt: RollbackReceipt | null) => {
-      const next = resolveRollbackDerivedState({
-        receipt,
-        childSessions,
-        subagentNotices,
-        sessionTasks,
-      });
-      const changed =
-        next.childSessions.length !== childSessions.length ||
-        next.sessionTasks.length !== sessionTasks.length ||
-        next.subagentNotices.length !== subagentNotices.length;
-      if (!changed) {
-        return;
-      }
-      setChildSessions(next.childSessions);
-      setSessionTasks(next.sessionTasks);
-      setSubagentNotices(next.subagentNotices);
-      setSelectedChildSessionId((previous) =>
-        previous && next.removedChildSessionIds.includes(previous) ? null : previous,
-      );
-    },
-    [childSessions, sessionTasks, subagentNotices],
-  );
+  const handleRollbackApplied = useRollbackDerivedCleanup({
+    childSessions,
+    sessionTasks,
+    setChildSessions,
+    setSelectedChildSessionId,
+    setSessionTasks,
+    setSubagentNotices,
+    subagentNotices,
+  });
 
   const { handleRetryInCurrentSession, handleEditResendInCurrentSession, handleRetryInNewSession } =
     useChatRetryAndEdit({
@@ -3499,26 +2706,13 @@ export default function ChatPage() {
         />
       </>
     ) : null;
-  const handleFastModeToggle = useCallback(
-    async (enabled: boolean): Promise<void> => {
-      if (!token || !effectiveProviderId || activeProvider?.type !== 'openai') {
-        throw new Error('当前没有可配置的 OpenAI Provider。');
-      }
-
-      await createSettingsClient(gatewayUrl).putProviderFastMode(token, {
-        providerId: effectiveProviderId,
-        enabled,
-      });
-      setProviders((current) =>
-        current.map((provider) =>
-          provider.id === effectiveProviderId
-            ? { ...provider, openaiFastMode: enabled ? true : undefined }
-            : provider,
-        ),
-      );
-    },
-    [activeProvider?.type, effectiveProviderId, gatewayUrl, token],
-  );
+  const handleFastModeToggle = useProviderFastMode({
+    activeProviderType: activeProvider?.type,
+    effectiveProviderId,
+    gatewayUrl,
+    setProviders,
+    token,
+  });
 
   useEffect(() => {
     const normalizedThinkingState = normalizeChatThinkingState({
@@ -3559,60 +2753,17 @@ export default function ChatPage() {
     multiSelect: messageMultiSelectState,
   } = multiSelect;
   const messageMultiSelectEnabled = messageMultiSelectState.enabled;
-  const buildRenderMessageActions = useCallback(
-    (message: ChatMessage) => {
-      const baseActions = buildMessageActions(message);
-      const isBookmarked = bookmarkStore.isBookmarked(message.id);
-
-      // 对于压缩消息，只返回基础操作（复制），不添加收藏和选择按钮
-      const isCompaction = baseActions.length === 1 && baseActions[0]?.id === 'copy';
-      if (isCompaction) {
-        return baseActions;
-      }
-
-      return [
-        ...baseActions,
-        {
-          id: 'bookmark',
-          label: isBookmarked ? '⭐ 已收藏' : '☆ 收藏',
-          onClick: () => {
-            if (isBookmarked) {
-              bookmarkStore.removeBookmark(message.id);
-            } else {
-              bookmarkStore.addBookmark({
-                messageId: message.id,
-                sessionId: currentSessionId ?? '',
-                content: message.content.slice(0, 200),
-                role: message.role,
-              });
-            }
-          },
-        },
-        ...(messageMultiSelectEnabled
-          ? [
-              {
-                id: 'select',
-                label: isMessageSelected(message.id) ? '☑ 已选' : '☐ 选择',
-                onClick: () => toggleMessageSelection(message.id),
-              },
-            ]
-          : []),
-      ];
-    },
-    [
-      bookmarkStore,
-      buildMessageActions,
-      currentSessionId,
-      isMessageSelected,
-      messageMultiSelectEnabled,
-      toggleMessageSelection,
-    ],
-  );
+  const buildRenderMessageActions = useRenderMessageActions({
+    bookmarkStore,
+    buildMessageActions,
+    currentSessionId,
+    isMessageSelected,
+    messageMultiSelectEnabled,
+    toggleMessageSelection,
+  });
 
   const {
     assistantUsageDetails,
-    messageInputTokens,
-    streamingOutputTokens,
     effectiveReportedStreamUsage,
     streamingUsageDetails,
     contextUsageSnapshot,
@@ -3620,9 +2771,6 @@ export default function ChatPage() {
     sanitizedHistoricalMessages,
     hiddenMessageCount,
     firstVisibleMessageId,
-    historicalRenderedMessageEntries,
-    streamingRenderedMessageEntry,
-    historicalGroupedMessageEntries,
     groupedMessageEntries,
   } = useChatRenderData({
     messages,
@@ -3671,123 +2819,38 @@ export default function ChatPage() {
   // `captureHistoryScrollAnchor` / `armHistoryAnchorImpl`（按钮点击），均发生在本次
   // 提交的 effect 之后，读到的仍是本次提交的值。
   useEffect(() => {
-    firstVisibleMessageIdRef.current = firstVisibleMessageId;
-    hiddenMessageCountRef.current = hiddenMessageCount;
+    writeRefCurrent(firstVisibleMessageIdRef, firstVisibleMessageId);
+    writeRefCurrent(hiddenMessageCountRef, hiddenMessageCount);
   });
 
-  /** 捕获当前滚动锚点：视口内最靠上的一条可见消息 + 滚动区几何。 */
-  const captureHistoryScrollAnchor = useCallback((): ScrollAnchorSnapshot => {
-    const region = scrollRegionRef.current;
-    const messageId = firstVisibleMessageIdRef.current;
-    const anchorElement =
-      messageId !== null && region !== null
-        ? region.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`)
-        : null;
-    return captureScrollAnchor(region, anchorElement);
-  }, [scrollRegionRef]);
-
-  /**
-   * 武装头部插入锚点：记录加载前的阅读位置快照。旧消息插入渲染列表头部后，
-   * 「恢复视口」 effect 会把视口恢复到该位置。实现同时挂到
-   * `armHistoryAnchorImplRef`，让文件更早位置定义的 `ensureMessageVisible`
-   * 也能通过 `armHistoryAnchor` 稳定引用（ref 转发，无 TDZ 问题）。
-   */
-  const armHistoryAnchorImpl = useCallback((): void => {
-    // 目前只有「加载更早」两条路径调用(按钮 / onNearTop)。历史跳转与搜索走
-    // `pendingMessageScroll` 粗滚动,不再武装锚点,否则会互相覆盖。
-    lastAnchorMessageIdRef.current = firstVisibleMessageIdRef.current;
-    setPendingHistoryAnchor(captureHistoryScrollAnchor());
-  }, [captureHistoryScrollAnchor]);
-  useEffect(() => {
-    armHistoryAnchorImplRef.current = armHistoryAnchorImpl;
-  }, [armHistoryAnchorImpl]);
-
-  /**
-   * 加载更多历史消息（手动「加载更早」按钮 与 上滑 onNearTop 共用）：
-   * 本地窗口还有隐藏消息时直接扩窗口，否则拉一次服务端快照。
-   * 两条路径都会往渲染列表**头部**插入旧消息，因此先武装滚动锚点。
-   */
-  const handleLoadEarlierMessages = useCallback((): void => {
-    const localHidden =
-      sanitizedHistoricalMessages.length -
-      (visibleMessageCount ?? sanitizedHistoricalMessages.length);
-    if (localHidden > 0) {
-      armHistoryAnchor();
-      setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
-      return;
-    }
-    if (!currentSessionId) return;
-    armHistoryAnchor();
-    void loadCurrentSessionSnapshot(currentSessionId, {
-      replaceMessages: true,
-    })
-      .then(() => {
-        setServerTotalTurnCount(null);
-        setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
-      })
-      .catch(() => undefined);
-  }, [
+  const { handleLoadEarlierMessages } = useHistoryScrollAnchor({
     armHistoryAnchor,
+    armHistoryAnchorImplRef,
     currentSessionId,
+    firstVisibleMessageId,
+    firstVisibleMessageIdRef,
+    historyAnchorRestoreCancelRef,
+    lastAnchorMessageIdRef,
+    setLastAnchorMessageId,
     loadCurrentSessionSnapshot,
-    sanitizedHistoricalMessages.length,
+    pendingHistoryAnchor,
+    sanitizedHistoricalMessagesLength: sanitizedHistoricalMessages.length,
+    scrollRegionRef,
+    setPendingHistoryAnchor,
+    setPendingMessageScroll,
     setServerTotalTurnCount,
     setVisibleMessageCount,
     visibleMessageCount,
-  ]);
+  });
   useEffect(() => {
-    loadEarlierMessagesRef.current = handleLoadEarlierMessages;
-  }, [handleLoadEarlierMessages]);
-
-  // 会话切换：旧会话的待恢复锚点必须丢弃，不能落到新会话的滚动区上。
-  useEffect(() => {
-    historyAnchorRestoreCancelRef.current?.();
-    historyAnchorRestoreCancelRef.current = null;
-    setPendingHistoryAnchor(null);
-    setPendingMessageScroll(null);
-    lastAnchorMessageIdRef.current = null;
-  }, [currentSessionId]);
-
-  // 卸载时清理悬挂的恢复 rAF。
-  useEffect(() => {
-    return () => {
-      historyAnchorRestoreCancelRef.current?.();
-      historyAnchorRestoreCancelRef.current = null;
-    };
-  }, []);
-
-  // 「恢复视口」：旧消息落入窗口后（`firstVisibleMessageId` 相对锚点时刻变化），
-  // 在下一帧把视口恢复到加载前的阅读位置。layout effect 保证恢复先于绘制落地。
-  useLayoutEffect(() => {
-    if (pendingHistoryAnchor === null) return;
-    if (firstVisibleMessageId === lastAnchorMessageIdRef.current) return;
-
-    const anchorSnapshot = pendingHistoryAnchor;
-    // 先取消上一次仍未落地的恢复，再排新的；**不能**把 cancel 作为 effect 的
-    // 返回值——下方 setState 会触发重渲染，cleanup 会在 rAF 落地前把它取消掉。
-    historyAnchorRestoreCancelRef.current?.();
-    historyAnchorRestoreCancelRef.current = restoreScrollAnchor(
-      scrollRegionRef.current,
-      anchorSnapshot,
-      (): Element | null => {
-        const messageRegion = scrollRegionRef.current;
-        if (messageRegion === null || lastAnchorMessageIdRef.current === null) return null;
-        return messageRegion.querySelector<HTMLElement>(
-          `[data-message-id="${lastAnchorMessageIdRef.current}"]`,
-        );
-      },
-    );
-    setPendingHistoryAnchor(null);
-  }, [firstVisibleMessageId, pendingHistoryAnchor, scrollRegionRef]);
+    writeRefCurrent(loadEarlierMessagesRef, handleLoadEarlierMessages);
+  }, [handleLoadEarlierMessages, loadEarlierMessagesRef]);
 
   const chatSearch = useChatSearch({ messages, scrollRegionRef, ensureMessageVisible });
 
   // ─── 输入框下方统计栏数据 ──────────────────────────────────────────────
   const {
     composerStatsData,
-    handleFusionContextCompactSession,
-    handleFusionContextOpenRecoveryStrategy,
-    fusionContextSessionStateStatus,
     fusionContextOverview,
     handleOpenFusionEditorFile,
     handleShowFusionEditor,
@@ -3883,33 +2946,8 @@ export default function ChatPage() {
         }
       },
       onOpenTemplates: () => setShowTemplatePanel(true),
-      onScrollToNextUser: () => {
-        const region = scrollRegionRef.current;
-        if (!region) return;
-        const userMessages = region.querySelectorAll<HTMLElement>('[data-role="user"]');
-        const regionRect = region.getBoundingClientRect();
-        for (const el of Array.from(userMessages)) {
-          const rect = el.getBoundingClientRect();
-          if (rect.top > regionRect.top + 60) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            break;
-          }
-        }
-      },
-      onScrollToPrevUser: () => {
-        const region = scrollRegionRef.current;
-        if (!region) return;
-        const userMessages = region.querySelectorAll<HTMLElement>('[data-role="user"]');
-        const regionRect = region.getBoundingClientRect();
-        const arr = Array.from(userMessages).reverse();
-        for (const el of arr) {
-          const rect = el.getBoundingClientRect();
-          if (rect.bottom < regionRect.top + 60) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            break;
-          }
-        }
-      },
+      onScrollToNextUser: () => scrollToNextUserMessage(scrollRegionRef.current),
+      onScrollToPrevUser: () => scrollToPrevUserMessage(scrollRegionRef.current),
       onToggleSidebar: () => {
         useUIStateStore.getState().toggleLeftSidebar();
       },

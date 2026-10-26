@@ -161,6 +161,35 @@ describe('naturalLanguageSummary — question（提问工具）', () => {
   });
 });
 
+describe('naturalLanguageSummary — 桌面 / 浏览器自动化', () => {
+  it('带上动作名（两条通道同一口径）', () => {
+    expect(naturalLanguageSummary('desktop_automation', { action: 'click' })).toBe(
+      '已执行了桌面操作 · click',
+    );
+    expect(naturalLanguageSummary('desktop_control', { action: 'screenshot' })).toBe(
+      '已执行了桌面操作 · screenshot',
+    );
+  });
+
+  it('缺少 action 时保持旧文案', () => {
+    expect(naturalLanguageSummary('desktop_automation', {})).toBe('已执行了桌面操作');
+  });
+});
+
+describe('naturalLanguageSummary — web 工具', () => {
+  it('web_search 与其它搜索入口同一文案（不透传英文工具名）', () => {
+    expect(naturalLanguageSummary('web_search', { query: 'typescript 5.7' })).toBe('已搜索了网络');
+  });
+});
+
+describe('naturalLanguageSummary — 会话 / LSP touch 确认型动作', () => {
+  it('给出中文动作，不透传英文工具名', () => {
+    expect(naturalLanguageSummary('session_rename', {})).toBe('已重命名了会话');
+    expect(naturalLanguageSummary('session_move', {})).toBe('已移动了会话');
+    expect(naturalLanguageSummary('lsp_touch', {})).toBe('已同步 LSP 文件状态');
+  });
+});
+
 describe('naturalLanguageSummary — read 展开态省略路径', () => {
   it('omitPath=true 时只给动作（路径由预览 meta 承载）', () => {
     expect(

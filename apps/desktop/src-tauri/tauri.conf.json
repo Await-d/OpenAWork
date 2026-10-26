@@ -38,7 +38,7 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
-    "externalBin": ["binaries/agent-gateway"],
+    "externalBin": ["binaries/openawork-gateway"],
     "resources": {
       "../../web/dist/": "web-dist/",
       "../../../packages/resources/resources/": "gateway-resources/"

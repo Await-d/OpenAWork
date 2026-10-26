@@ -133,7 +133,7 @@ try {
   const binariesDir = resolve(REPO_ROOT, 'apps/desktop/src-tauri/binaries');
   if (existsSync(binariesDir)) {
     for (const entry of readdirSync(binariesDir)) {
-      if (entry.startsWith('agent-gateway-')) {
+      if (entry.startsWith('openawork-gateway-')) {
         rmSync(resolve(binariesDir, entry), { force: true, recursive: true });
       }
     }

@@ -68,6 +68,38 @@ function currentSessionId(): string {
   return row.id;
 }
 
+function countEventLogRows(sessionId: string): number {
+  const row = dbModule.sqliteGet<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM event_log WHERE aggregate_id = ?',
+    [sessionId],
+  );
+  return row?.count ?? 0;
+}
+
+function countEventSequenceRows(sessionId: string): number {
+  const row = dbModule.sqliteGet<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM event_sequences WHERE aggregate_id = ?',
+    [sessionId],
+  );
+  return row?.count ?? 0;
+}
+
+function countSessionEntryRows(sessionId: string): number {
+  const row = dbModule.sqliteGet<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM session_entry WHERE session_id = ?',
+    [sessionId],
+  );
+  return row?.count ?? 0;
+}
+
+function countSearchRows(sessionId: string): number {
+  const row = dbModule.sqliteGet<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM session_messages_fts WHERE session_id = ?',
+    [sessionId],
+  );
+  return row?.count ?? 0;
+}
+
 function currentSessionMetadata(): Record<string, unknown> {
   const row = dbModule.sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
@@ -400,6 +432,11 @@ describe('channel session commands', () => {
   it('/new 清空当前 channel conversation 的消息历史', () => {
     appendUserMessage(1);
     appendAssistantMessage(1);
+    const sessionId = currentSessionId();
+    // 消息写入会 emit 事件（part 快照里含 base64 图片）并写搜索索引。
+    expect(countEventLogRows(sessionId)).toBeGreaterThan(0);
+    expect(countEventSequenceRows(sessionId)).toBeGreaterThan(0);
+    const sessionEntryRowsBefore = countSessionEntryRows(sessionId);
 
     const result = channelSessions.resetChannelConversation({
       channel: makeChannel(),
@@ -413,6 +450,14 @@ describe('channel session commands', () => {
     expect(result.content).toContain('**新对话**');
     expect(result.content).toContain('- 状态：`已清空当前会话`');
     expect(messages).toHaveLength(0);
+    // 清除内容必须连带清理：无 FK 的事件日志、FTS 搜索索引。
+    expect(countEventLogRows(sessionId)).toBe(0);
+    expect(countSearchRows(sessionId)).toBe(0);
+    // seq 必须单调前进：`event_sequences` 与 `session_entry` 刻意保留。
+    // 后者的 seq 由 `MAX(seq)+1` 现算，删行会让重连补齐（`seq > afterSeq`）
+    // 永久跳过 reset 之后的新事件。
+    expect(countEventSequenceRows(sessionId)).toBeGreaterThan(0);
+    expect(countSessionEntryRows(sessionId)).toBe(sessionEntryRowsBefore);
   });
 
   it('英文回复语言下 /new 返回英文文案', () => {

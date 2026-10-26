@@ -662,10 +662,11 @@ describe('extractFilePathListFromOutput', () => {
 });
 
 /**
- * LSP tools render as a non-expandable single-line pill: `<position> · <status>`.
- * These tests pin the contract for all 10 lsp_* tools across running /
- * completed / failed states. Critical: the summary string must NEVER
- * contain raw JSON brackets (the same bug class we guarded against for
+ * LSP tools keep a single-line summary `<position> · <status>` as the entry point
+ * and are now expandable, so the real output (locations / hover / diagnostics)
+ * stays inspectable. These tests pin the summary contract for all 10 lsp_* tools
+ * across running / completed / failed states. Critical: the summary string must
+ * NEVER contain raw JSON brackets (the same bug class we guarded against for
  * batch / todowrite above).
  */
 describe('lspInputDescription', () => {
@@ -767,6 +768,19 @@ describe('lspSuccessSummary', () => {
 
   it('counts symbols for lsp_symbols', () => {
     expect(lspSuccessSummary('lsp_symbols', [{ name: 'a' }, { name: 'b' }])).toBe('2 个符号');
+  });
+
+  it('位置类字符串输出汇总为数量，不把首行重复拼进摘要', () => {
+    expect(lspSuccessSummary('lsp_find_references', 'a.ts:1:0\nb.ts:2:0')).toBe('2 个引用');
+    expect(lspSuccessSummary('lsp_goto_definition', 'a.ts:1:0')).toBe('1 个位置');
+    expect(lspSuccessSummary('lsp_goto_implementation', 'No definition found')).toBe('未找到');
+  });
+
+  it('符号类字符串输出汇总为数量', () => {
+    expect(lspSuccessSummary('lsp_symbols', 'A (kind 5) - line 1\nB (kind 6) - line 2')).toBe(
+      '2 个符号',
+    );
+    expect(lspSuccessSummary('lsp_symbols', 'No symbols found')).toBe('未找到');
   });
 
   it('formats "未找到" / first match for lsp_goto_definition', () => {

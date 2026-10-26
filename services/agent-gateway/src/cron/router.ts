@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../infra/auth.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
+import { parseQuery } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { runCronAgentJob } from './agent-handler.js';
 import {
@@ -10,6 +12,9 @@ import {
   upsertCronJob,
 } from './cron-store.js';
 import { CronScheduler, type CronSchedulerPersistence } from './scheduler.js';
+import { isValidCronExpression } from './cron-expression.js';
+import { attachExecutionPreviews } from './delivery.js';
+import { toCronJobView, type CronJobView } from './schedule-display.js';
 import type { CronJobRecord } from './types.js';
 
 /**
@@ -30,12 +35,53 @@ export const cronScheduler = new CronScheduler(
   cronPersistence,
 );
 
+/**
+ * 建臂失败（表达式非法 / 搜索窗口内无解）上报为一条 failed 执行记录。
+ *
+ * 否则坏任务只会静默 return、既不触发也不报错，用户侧完全看不出「这个任务已经
+ * 不会再跑了」；落一条历史后，界面与 `history` 动作都能看到原因。
+ */
+cronScheduler.setScheduleErrorListener((jobId, message) => {
+  const job = cronScheduler.getJob(jobId);
+  if (!job) return;
+  const now = Date.now();
+  recordCronExecution(job.user_id, {
+    id: crypto.randomUUID(),
+    job_id: jobId,
+    started_at: now,
+    finished_at: now,
+    status: 'failed',
+    error: `调度建臂失败：${message}`,
+  });
+});
+
+/**
+ * 持久化失败的观测出口。
+ *
+ * 调度器把 `upsertJob` / `recordExecution` 的异常吞掉（见 `persistSafely`），
+ * 以免 SQLite 故障把 `inFlightJobs` / `runningCount` 泄漏成「任务永久停摆」。
+ * 但吞掉必须留下痕迹——否则「执行历史突然不再更新」会变成无解的悬案。
+ */
+cronScheduler.setPersistenceErrorListener((label, error) => {
+  logGatewayWarn(`[cron] 持久化失败（${label}），调度状态不受影响`, {
+    label,
+    error: error instanceof Error ? error.message : String(error),
+  });
+});
+
 const jobSchema = z.object({
   name: z.string().min(1),
   schedule_kind: z.enum(['at', 'every', 'cron']),
   schedule_at: z.number().optional().nullable().default(null),
-  schedule_every: z.number().optional().nullable().default(null),
-  schedule_expr: z.string().optional().nullable().default(null),
+  schedule_every: z.number().int().positive().optional().nullable().default(null),
+  schedule_expr: z
+    .string()
+    .optional()
+    .nullable()
+    .default(null)
+    .refine((value) => value === null || value === undefined || isValidCronExpression(value), {
+      message: 'schedule_expr 必须是合法的 5 段 cron 表达式（分 时 日 月 周）。',
+    }),
   schedule_tz: z.string().default('UTC'),
   prompt: z.string().min(1),
   agent_id: z.string().optional().nullable().default(null),
@@ -83,6 +129,14 @@ function parseAuthUser(request: FastifyRequest): z.infer<typeof authUserSchema> 
   return authUserSchema.parse(request.user);
 }
 
+/** 原始记录 → 视图模型（补 `scheduleDisplay` / `status` / `fireCount` / `nextFireAt`）。 */
+function toView(job: CronJobRecord): CronJobView {
+  return toCronJobView(job, {
+    nextFireAt: cronScheduler.getNextFireAt(job.id),
+    running: cronScheduler.getExecutionHistory(job.id).some((exec) => exec.status === 'running'),
+  });
+}
+
 export async function cronRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/cron/jobs',
@@ -91,7 +145,10 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'cron.job.list');
       const readStep = child('read');
       const user = parseAuthUser(request);
-      const jobs = cronScheduler.listJobs().filter((job) => job.user_id === user.sub);
+      const jobs = cronScheduler
+        .listJobs()
+        .filter((job) => job.user_id === user.sub)
+        .map(toView);
       readStep.succeed(undefined, { count: jobs.length });
       step.succeed(undefined, { count: jobs.length });
       return reply.send({ jobs });
@@ -142,7 +199,7 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
         scheduleKind: job.schedule_kind,
       });
 
-      return reply.status(201).send({ job });
+      return reply.status(201).send({ job: toView(job) });
     },
   );
 
@@ -187,7 +244,36 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       readbackStep.succeed(undefined, { found: updatedJob !== undefined });
       step.succeed(undefined, { jobId: id });
 
-      return reply.send({ job: updatedJob });
+      return reply.send({ job: updatedJob ? toView(updatedJob) : null });
+    },
+  );
+
+  // 「立即运行」：手动触发一次，与到点触发走同一条 handler / 并发 / 历史路径。
+  // Web 端此前只能 logger.info 占位，用户点了没有任何反应。
+  app.post(
+    '/cron/jobs/:id/run',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = request.params as { id: string };
+      const { step, child } = startRequestWorkflow(request, 'cron.job.run', undefined, {
+        jobId: id,
+      });
+      const lookupStep = child('lookup', undefined, { jobId: id });
+      const user = parseAuthUser(request);
+      const job = getUserCronJob(id, user.sub);
+      if (!job) {
+        lookupStep.fail('job not found');
+        step.fail('job not found');
+        return reply.status(404).send(cronRouteErrorPayload('cron_job_not_found'));
+      }
+      lookupStep.succeed();
+
+      const runStep = child('run', undefined, { jobId: id });
+      // 触发后立即返回（handler 可能跑很久）；结果看 `/history`。
+      void cronScheduler.runJobNow(id).catch(() => undefined);
+      runStep.succeed();
+      step.succeed(undefined, { jobId: id });
+      return reply.status(202).send({ ok: true, jobId: id });
     },
   );
 
@@ -233,9 +319,36 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send(cronRouteErrorPayload('cron_job_not_found'));
       }
       lookupStep.succeed();
+      const query = parseQuery(
+        z.object({
+          limit: z.coerce.number().min(1).max(100).default(100),
+          // 摘要要逐条读执行会话的消息（`listMessagesWithParts` 默认全量），
+          // 成本远高于查执行表。列表页刷新会对每个任务调一次本接口、只取最新一条
+          // 判「上次是否失败」，必须能显式关掉摘要，否则任务数 × 5 次全量会话读取。
+          //
+          // **不能用 `z.coerce.boolean()`**：它走 `Boolean(value)`，而 `Boolean('0')`
+          // 与 `Boolean('false')` 都是 `true`——`?preview=0` 会静默失效、摘要照旧生成。
+          // 这里显式解析字符串。
+          preview: z
+            .union([z.boolean(), z.string()])
+            .optional()
+            .transform((value) => {
+              if (value === undefined) return true;
+              if (typeof value === 'boolean') return value;
+              return value !== '0' && value.toLowerCase() !== 'false';
+            }),
+        }),
+        (request as FastifyRequest & { query: unknown }).query,
+      );
+
       const historyStep = child('read', undefined, { jobId: id });
       // 读持久化历史（重启后仍可查）；调度器内存 ring 仅作运行期内部状态。
-      const history = listCronExecutionsForJob(id);
+      // 补齐产出摘要与执行会话 id：`delivery_mode: 'none'` 的任务不会主动投递，
+      // 用户只能靠这两样东西找到「这次跑了什么」（摘要直读 / session_id 跳现场）。
+      const executions = listCronExecutionsForJob(id, query.limit);
+      const history = query.preview
+        ? attachExecutionPreviews({ userId: user.sub, executions })
+        : executions;
       historyStep.succeed(undefined, { entries: history.length, jobId: id });
       step.succeed(undefined, { entries: history.length, jobId: id });
       return reply.send({ history });
@@ -263,7 +376,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       cronScheduler.updateJob(id, { enabled: true });
       applyStep.succeed();
       step.succeed(undefined, { jobId: id });
-      return reply.send({ ok: true });
+      const enabledJob = cronScheduler.getJob(id);
+      return reply.send({ ok: true, job: enabledJob ? toView(enabledJob) : null });
     },
   );
 
@@ -288,7 +402,8 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       cronScheduler.updateJob(id, { enabled: false });
       applyStep.succeed();
       step.succeed(undefined, { jobId: id });
-      return reply.send({ ok: true });
+      const disabledJob = cronScheduler.getJob(id);
+      return reply.send({ ok: true, job: disabledJob ? toView(disabledJob) : null });
     },
   );
 }

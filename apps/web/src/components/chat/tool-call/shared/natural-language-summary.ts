@@ -192,12 +192,17 @@ export function naturalLanguageSummary(
     return state ? `${base}（${state}）` : base;
   }
   if (n === 'background_cancel') return '已取消了后台任务';
-  if (n === 'desktop_automation') return '已执行了桌面操作';
+  if (n === 'desktop_automation' || n === 'desktop_control') {
+    // 动作名是这条调用里信息量最大的部分（点击 / 截图 / 读取控制台…），带上它比
+    // 统一的「已执行了桌面操作」更有辨识度；缺省时保持旧文案。
+    const action = typeof input.action === 'string' ? input.action.trim() : '';
+    return action.length > 0 ? `已执行了桌面操作 · ${action}` : '已执行了桌面操作';
+  }
   if (n === 'look_at') return '已查看了图像';
 
   // ── 网络 ──
   if (n === 'webfetch') return '已抓取了网页';
-  if (n === 'websearch' || n === 'google_search') return '已搜索了网络';
+  if (n === 'websearch' || n === 'google_search' || n === 'web_search') return '已搜索了网络';
 
   // ── MCP / Skill ──
   if (n === 'mcp_call' || n === 'mcp' || n.startsWith('mcp_')) {
@@ -241,7 +246,13 @@ export function naturalLanguageSummary(
   if (n === 'session_info') return '已获取了会话信息';
 
   // ── LSP ──
-  if (n.startsWith('lsp_')) return '已执行了语言服务操作';
+  // 会话标题 / 工作目录变更：输出是 `{ ok, ... }` 确认对象，摘要给一句动作即可。
+  if (n === 'session_rename') return '已重命名了会话';
+  if (n === 'session_move') return '已移动了会话';
+  if (n === 'lsp_touch') return '已同步 LSP 文件状态';
+
+  // 虚拟 LSP MCP 与内置 lsp_* 是同一批能力：摘要用同一句话，不暴露 MCP 工具名。
+  if (n.startsWith('lsp_') || n.startsWith('mcp__lsp__')) return '已执行了语言服务操作';
 
   // ── 仓库 ──
   if (n === 'repo_clone') return '已克隆了仓库';

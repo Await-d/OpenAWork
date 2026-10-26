@@ -231,7 +231,7 @@ bun run --filter @openAwork/agent-core test -t "测试名称关键字"
 
 ### 网关作为桌面端 Sidecar
 
-通过 `bun build --compile` 编译为二进制，嵌入 Tauri 应用，路径为 `apps/desktop/src-tauri/sidecars/agent-gateway/`。
+通过 `bun build --compile` 编译为单文件可执行程序（产物名 `openawork-gateway`），由 `apps/desktop/src-tauri/scripts/bundle-sidecar.mjs` 暂存到 `apps/desktop/src-tauri/binaries/openawork-gateway-<target-triple>`。
 
 ### 流式输出
 

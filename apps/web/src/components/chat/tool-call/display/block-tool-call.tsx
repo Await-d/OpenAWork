@@ -20,7 +20,7 @@ import { formatElapsed } from '../shared/format.js';
 import { naturalLanguageSummary } from '../shared/natural-language-summary.js';
 import { SearchStateBadge, type SearchVisualState } from '../shared/search-state-badge.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
-import { extractWebSummary } from '../shared/web-helpers.js';
+import { extractWebSummary, isWebToolName } from '../shared/web-helpers.js';
 import { resolveToolCallImageSource } from '../shared/tool-call-image-source.js';
 import { ToolCallImagePreview } from '../io/ToolCallImagePreview.js';
 import { ToolInputPreview } from '../io/tool-input-preview.js';
@@ -87,8 +87,7 @@ export function BlockToolCall({
     output,
     status,
   });
-  const isWebTool =
-    normalized === 'webfetch' || normalized === 'websearch' || normalized === 'google_search';
+  const isWebTool = isWebToolName(normalized);
   // `interactive_bash` shares bash's input contract (`{command, ...}`) and
   // emits the same shell stdout/stderr/exitCode envelope, so reuse the
   // BashTerminalCard renderer instead of falling through to the generic
@@ -268,6 +267,7 @@ export function BlockToolCall({
                           hideHeader
                           filePath={file.filePath}
                           maxHeight={240}
+                          viewMode="auto"
                         />
                       </div>
                     ))}
@@ -286,6 +286,7 @@ export function BlockToolCall({
                       diffText={displayData.diffView?.diffText}
                       filePath={displayData.diffView?.filePath}
                       maxHeight={320}
+                      viewMode="auto"
                     />
                   </>
                 )}
@@ -421,7 +422,7 @@ export function BlockToolCall({
             {/* Generic output fallback */}
             {!hasDiff && !hasBashOutput && !isWebTool && output !== undefined && (
               <div className="tool-call-block-output">
-                <ToolOutputPreview toolName={toolName} output={output} />
+                <ToolOutputPreview toolName={toolName} output={output} input={input} />
               </div>
             )}
 

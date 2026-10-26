@@ -27,6 +27,9 @@ process.env['AI_API_BASE_URL'] = '';
 process.env['AI_API_KEY'] = '';
 process.env['AI_DEFAULT_MODEL'] = '';
 process.env['DATABASE_URL'] = ':memory:';
+// 会话删除会按 sessionId 回收磁盘型产物（artifacts-index.json）：必须把数据目录
+// 指到临时目录，避免测试读到 / 写真实用户的产物索引。
+process.env['OPENAWORK_DATA_DIR'] = workspaceRoot;
 process.env['JWT_SECRET'] = 'session-delete-fts-test-secret-1234567890';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 process.env['WORKSPACE_ACCESS_MODE'] = 'restricted';
@@ -137,6 +140,22 @@ function countShadowContentRowsForSession(sessionId: string): number {
   return row?.count ?? 0;
 }
 
+function countEventLogRowsForAggregate(aggregateId: string): number {
+  const row = dbModule.sqliteGet<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM event_log WHERE aggregate_id = ?',
+    [aggregateId],
+  );
+  return row?.count ?? 0;
+}
+
+function countEventSequencesForAggregate(aggregateId: string): number {
+  const row = dbModule.sqliteGet<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM event_sequences WHERE aggregate_id = ?',
+    [aggregateId],
+  );
+  return row?.count ?? 0;
+}
+
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.connectDb();
@@ -151,6 +170,9 @@ beforeEach(() => {
   // `session_messages_fts` has no FK, so wiping `users` does not clear it.
   dbModule.sqliteRun('DELETE FROM session_messages_fts', []);
   dbModule.sqliteRun('DELETE FROM team_workspaces', []);
+  // event_log / event_sequences 没有指向 sessions 的外键，也不会被上面的清理带走。
+  dbModule.sqliteRun('DELETE FROM event_log', []);
+  dbModule.sqliteRun('DELETE FROM event_sequences', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser();
@@ -170,6 +192,9 @@ describe('session deletion keeps the search index consistent', () => {
     await appendIndexedMessage('sess-delete-survivor', 'survivor-message');
 
     expect(countSearchRowsForSession('sess-delete-root')).toBe(2);
+    // 消息写入会 emit 事件（`message.part.created` 携带完整 part），先确认确有事件行。
+    expect(countEventLogRowsForAggregate('sess-delete-root')).toBeGreaterThan(0);
+    expect(countEventSequencesForAggregate('sess-delete-root')).toBeGreaterThan(0);
 
     const app = await buildApp();
     try {
@@ -191,9 +216,14 @@ describe('session deletion keeps the search index consistent', () => {
     expect(countLegacyMessagesForSession('sess-delete-root')).toBe(0);
     expect(countSearchRowsForSession('sess-delete-root')).toBe(0);
     expect(countShadowContentRowsForSession('sess-delete-root')).toBe(0);
+    // event_log / event_sequences 无 FK 级联，必须由删除流程显式清理。
+    expect(countEventLogRowsForAggregate('sess-delete-root')).toBe(0);
+    expect(countEventSequencesForAggregate('sess-delete-root')).toBe(0);
     // The surviving session must keep every one of its index rows.
     expect(countSearchRowsForSession('sess-delete-survivor')).toBe(1);
     expect(countShadowContentRowsForSession('sess-delete-survivor')).toBe(1);
+    expect(countEventLogRowsForAggregate('sess-delete-survivor')).toBeGreaterThan(0);
+    expect(countEventSequencesForAggregate('sess-delete-survivor')).toBeGreaterThan(0);
   });
 
   it('DELETE /sessions/:sessionId purges the index of every cascaded descendant session', async () => {

@@ -37,6 +37,29 @@ import {
 import { extractTodosFromOutput, TodoListPreview } from '../previews/todo-list-preview.js';
 import { extractTreeNodesFromOutput, TreeNodesPreview } from '../previews/tree-nodes-preview.js';
 import { extractMcpResult, McpResultPreview } from '../previews/mcp-result-preview.js';
+import {
+  extractLspDiagnostics,
+  LspDiagnosticsPreview,
+} from '../previews/lsp-diagnostics-preview.js';
+import { LspCallHierarchyPreview } from '../previews/lsp-call-hierarchy-preview.js';
+import { LspHoverPreview } from '../previews/lsp-hover-preview.js';
+import { LspLocationPreview } from '../previews/lsp-location-preview.js';
+import { LspPrepareRenamePreview } from '../previews/lsp-prepare-rename-preview.js';
+import { SessionSearchPreview } from '../previews/session-search-preview.js';
+import { MarkdownTextPreview } from '../previews/markdown-text-preview.js';
+import { MediaInfoPreview } from '../previews/media-info-preview.js';
+import { extractMediaInfo } from '../shared/media-info-view.js';
+import { LspSymbolPreview } from '../previews/lsp-symbol-preview.js';
+import { parseLspCallHierarchy } from '../shared/lsp-call-hierarchy-view.js';
+import { parseLspLocations } from '../shared/lsp-location-view.js';
+import { parseLspPrepareRename } from '../shared/lsp-prepare-rename-view.js';
+import { parseSessionSearchHits } from '../shared/session-search-view.js';
+import {
+  parseMaybeJsonPayload,
+  resolveLspMcpToolName,
+  resolveMcpLspPayload,
+} from '../shared/lsp-mcp-view.js';
+import { parseLspSymbols } from '../shared/lsp-symbol-view.js';
 import { extractMcpToolList, McpToolListPreview } from '../previews/mcp-tool-list-preview.js';
 import {
   BackgroundTerminalPreview,
@@ -59,7 +82,11 @@ import {
   extractQuestionAnswers,
   QuestionAnswerPreview,
 } from '../previews/question-answer-preview.js';
+import { AstGrepPreview } from '../previews/ast-grep-preview.js';
+import { SessionInfoPreview } from '../previews/session-info-preview.js';
+import { parseAstGrepMatches } from '../shared/ast-grep-view.js';
 import { extractSkillContent, SkillContentPreview } from '../previews/skill-content-preview.js';
+import { parseSessionInfoText, parseSessionListTable } from '../shared/session-text-view.js';
 import { StructuredOutputPreview } from '../previews/structured-output-preview.js';
 import { ExpandableOutput } from '../shared/expandable-output.js';
 import { extractTextFromOutput } from '../shared/extract-text.js';
@@ -70,22 +97,24 @@ import { stripToolOutputTruncationDeep } from '@openAwork/shared';
  * Render a tool's output expansion panel. Tries domain-aware paths in order:
  *   1. todo-family → TodoListPreview from metadata.todos
  *   2. read → FileContentPreview
- *   3. grep → GrepContentHitsPreview / GrepCountsPreview / FilePathListPreview
- *   4. glob → FilePathListPreview
- *   5. list → TreeNodesPreview
- *   6. workspace_review_status → ReviewStatusPreview
- *   7. workspace_create_directory / workspace_review_revert → SuccessConfirmPreview
- *   8. mcp_list_tools → McpToolListPreview
- *   9. run_bash_in_background / bash_output / bash_kill → BackgroundTerminalPreview
- *  10. read_tool_output → ToolOutputReadPreview
- *  11. background_output → BackgroundOutputPreview
- *  12. codegraph_* → CodegraphResultPreview
- *  13. skill → SkillContentPreview (unwraps `<skill_content>`)
- *  14. question / askuserquestion → QuestionAnswerPreview
- *  15. MCP/shape-matched envelope → McpResultPreview
- *  16. envelope `{output|content|text|message|result: string}` → text
+ *   3. lsp_diagnostics → LspDiagnosticsPreview（按文件分组）
+ *   4. grep → GrepContentHitsPreview / GrepCountsPreview / FilePathListPreview
+ *   5. glob → FilePathListPreview
+ *   6. list → TreeNodesPreview
+ *   7. workspace_review_status → ReviewStatusPreview
+ *   8. workspace_create_directory / workspace_review_revert /
+ *      session_rename / session_move / lsp_touch → SuccessConfirmPreview
+ *   9. mcp_list_tools → McpToolListPreview
+ *  10. run_bash_in_background / bash_output / bash_kill → BackgroundTerminalPreview
+ *  11. read_tool_output → ToolOutputReadPreview
+ *  12. background_output → BackgroundOutputPreview
+ *  13. codegraph_* → CodegraphResultPreview
+ *  14. skill → SkillContentPreview (unwraps `<skill_content>`)
+ *  15. question / askuserquestion → QuestionAnswerPreview
+ *  16. MCP/shape-matched envelope → McpResultPreview
+ *  17. envelope `{output|content|text|message|result: string}` → text
  *      + DiagnosticsPreview if `diagnostics` array is present
- *  17. fallback → StructuredOutputPreview (objects) / ArrayOutputPreview (arrays) / text
+ *  18. fallback → StructuredOutputPreview (objects) / ArrayOutputPreview (arrays) / text
  *
  * Order matters: the shape-matched MCP and skill/question branches must run
  * before the generic text/JSON fallbacks or those envelopes get dumped raw.
@@ -110,9 +139,12 @@ function parseJsonOutputOnce(output: string): { ok: boolean; value: unknown } {
 export function ToolOutputPreview({
   toolName,
   output: rawOutput,
+  input,
 }: {
   toolName: string;
   output: unknown;
+  /** 部分预览需要入参补全上下文（如 `lsp_symbols` 的 document 模式没有逐行路径）。 */
+  input?: Record<string, unknown>;
 }) {
   const normalized = toolName.trim().toLowerCase();
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
@@ -124,7 +156,7 @@ export function ToolOutputPreview({
   // 输出内容本身；而「内容其实不完整」这个信息又确实需要告知。
   const truncation = useMemo(() => stripToolOutputTruncationDeep(output), [output]);
   const previewOutput = truncation ? truncation.value : output;
-  const body = renderToolOutputBody({ normalized, previewOutput, shouldExpandByDefault });
+  const body = renderToolOutputBody({ normalized, previewOutput, shouldExpandByDefault, input });
   if (!truncation) {
     return body;
   }
@@ -143,10 +175,12 @@ function renderToolOutputBody({
   normalized,
   previewOutput,
   shouldExpandByDefault,
+  input,
 }: {
   normalized: string;
   previewOutput: unknown;
   shouldExpandByDefault: boolean;
+  input?: Record<string, unknown>;
 }): ReactNode {
   const toolName = normalized;
   const isTodoFamily =
@@ -162,6 +196,131 @@ function renderToolOutputBody({
         return <div className="tool-call-inline-empty">（暂无待办项）</div>;
       }
       return <TodoListPreview todos={todos} />;
+    }
+  }
+
+  // 虚拟 LSP MCP（`mcp__lsp__*` / legacy `mcp_call` + serverId=lsp）：输出被 MCP
+  // 包成 text 块，剥壳后复用内置 `lsp_*` 的专用视图 —— 否则同一能力会出现
+  // 「内置是位置列表、MCP 是一坨 JSON」的两套观感。
+  const lspMcpTool = resolveLspMcpToolName(toolName, input);
+  if (lspMcpTool) {
+    const payload = parseMaybeJsonPayload(resolveMcpLspPayload(previewOutput));
+    if (payload !== null) {
+      if (lspMcpTool === 'diagnostics') {
+        const entries = extractLspDiagnostics(payload);
+        if (entries) return <LspDiagnosticsPreview entries={entries} />;
+      }
+      if (
+        lspMcpTool === 'goto_definition' ||
+        lspMcpTool === 'goto_implementation' ||
+        lspMcpTool === 'find_references'
+      ) {
+        const locations = parseLspLocations(payload);
+        if (locations) return <LspLocationPreview entries={locations} />;
+      }
+      if (lspMcpTool === 'symbols') {
+        const symbols = parseLspSymbols(payload);
+        if (symbols) {
+          // legacy `mcp_call` 把真实参数放在 `input.arguments` 里；扁平 MCP 工具
+          // 才是平平的 `input.filePath`。两者都认，document 模式才能拿到路径。
+          const flatPath = input?.['filePath'];
+          const args = input?.['arguments'];
+          const nestedPath =
+            args !== null && typeof args === 'object'
+              ? (args as Record<string, unknown>)['filePath']
+              : undefined;
+          const candidate = typeof flatPath === 'string' ? flatPath : nestedPath;
+          const filePath =
+            typeof candidate === 'string' && candidate.trim().length > 0
+              ? candidate.trim()
+              : undefined;
+          return <LspSymbolPreview entries={symbols} {...(filePath ? { filePath } : {})} />;
+        }
+      }
+      if (lspMcpTool === 'hover' && typeof payload === 'string') {
+        return <LspHoverPreview text={payload} />;
+      }
+      if (lspMcpTool === 'call_hierarchy') {
+        const view = parseLspCallHierarchy(payload);
+        if (view) return <LspCallHierarchyPreview view={view} />;
+      }
+      if (lspMcpTool === 'touch') {
+        // 内置 `lsp_touch` 已有确认行，MCP 通道也要一致（不然同一个动作两套观感）。
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          const record = payload as Record<string, unknown>;
+          if (record['ok'] === true) {
+            return <SuccessConfirmPreview toolName="lsp_touch" output={record} />;
+          }
+        }
+      }
+      if (lspMcpTool === 'prepare_rename') {
+        const view = parseLspPrepareRename(payload);
+        if (view) return <LspPrepareRenamePreview view={view} />;
+      }
+    }
+  }
+
+  if (normalized === 'lsp_diagnostics') {
+    const entries = extractLspDiagnostics(previewOutput);
+    if (entries) return <LspDiagnosticsPreview entries={entries} />;
+  }
+
+  // 位置类（定义 / 实现 / 引用）：网关输出是每行一条 `path:line:col`，解析成
+  // 可点击列表；认不出形状时（`No references found` 等提示）回退文本。
+  if (
+    normalized === 'lsp_goto_definition' ||
+    normalized === 'lsp_goto_implementation' ||
+    normalized === 'lsp_find_references'
+  ) {
+    const locations = parseLspLocations(previewOutput);
+    if (locations) return <LspLocationPreview entries={locations} />;
+  }
+
+  if (normalized === 'lsp_symbols') {
+    const symbols = parseLspSymbols(previewOutput);
+    if (symbols) {
+      const inputPath = input?.['filePath'];
+      const filePath =
+        typeof inputPath === 'string' && inputPath.trim().length > 0 ? inputPath.trim() : undefined;
+      return <LspSymbolPreview entries={symbols} {...(filePath ? { filePath } : {})} />;
+    }
+  }
+
+  if (normalized === 'lsp_hover') {
+    const hoverText = extractTextFromOutput(previewOutput)?.text;
+    if (hoverText && hoverText.trim().length > 0) return <LspHoverPreview text={hoverText} />;
+  }
+
+  if (normalized === 'lsp_call_hierarchy') {
+    const view = parseLspCallHierarchy(previewOutput);
+    if (view) return <LspCallHierarchyPreview view={view} />;
+  }
+
+  if (normalized === 'lsp_prepare_rename') {
+    const view = parseLspPrepareRename(previewOutput);
+    if (view) return <LspPrepareRenamePreview view={view} />;
+  }
+
+  // 媒体信息：网关返回 JSON（`{type, mimeType, duration, width, height, codec…}`），
+  // 字段表会把「时长 / 分辨率 / 编码」摊成原始键值。
+  if (normalized === 'extract_media_info') {
+    const data = extractMediaInfo(previewOutput);
+    if (data) return <MediaInfoPreview data={data} />;
+  }
+
+  // 代码搜索：Exa 返回的是 Markdown 片段（代码围栏 + 说明），按 Markdown 渲染。
+  if (normalized === 'codesearch') {
+    const text = extractTextFromOutput(previewOutput)?.text;
+    if (text && text.trim().length > 0) return <MarkdownTextPreview text={text} />;
+  }
+
+  // AST 搜索 / 替换：网关输出是 `path:line:column` + 代码片段文本，按位置还原成
+  // 「文件 + 行号 + 片段」列表；替换的空结果保留原文（「无任何替换被应用」比
+  // 「未找到匹配」更准确）。
+  if (normalized === 'ast_grep_search' || normalized === 'ast_grep_replace') {
+    const matches = parseAstGrepMatches(previewOutput);
+    if (matches && (matches.length > 0 || normalized === 'ast_grep_search')) {
+      return <AstGrepPreview matches={matches} />;
     }
   }
 
@@ -199,16 +358,37 @@ function renderToolOutputBody({
     if (data) return <ReviewStatusPreview data={data} />;
   }
 
-  // Task tools
-  if (normalized === 'task_list' || normalized === 'task_get') {
+  // Task tools：create / update 也返回 `{ task }`，与 list / get 共用任务卡，
+  // 避免同一族工具里「列表是卡片、单条是字段表」的割裂。
+  if (
+    normalized === 'task_list' ||
+    normalized === 'task_get' ||
+    normalized === 'task_create' ||
+    normalized === 'task_update'
+  ) {
     const tasks = extractTaskListFromOutput(previewOutput);
     if (tasks) return <TaskListPreview tasks={tasks} />;
   }
 
-  // Session tools
-  if (normalized === 'session_list' || normalized === 'session_info') {
+  // Session tools：网关返回的是 Markdown 表格 / `Key: Value` 文本（对模型友好，
+  // 对人是满屏管道符）。先按文本解析成结构化视图，解析失败再走对象兜底。
+  if (normalized === 'session_list') {
+    const tableSessions = parseSessionListTable(previewOutput);
+    if (tableSessions) return <SessionListPreview sessions={tableSessions} />;
     const sessions = extractSessionListFromOutput(previewOutput);
     if (sessions) return <SessionListPreview sessions={sessions} />;
+  }
+
+  if (normalized === 'session_info') {
+    const info = parseSessionInfoText(previewOutput);
+    if (info) return <SessionInfoPreview data={info} />;
+    const sessions = extractSessionListFromOutput(previewOutput);
+    if (sessions) return <SessionListPreview sessions={sessions} />;
+  }
+
+  if (normalized === 'session_search') {
+    const hits = parseSessionSearchHits(previewOutput);
+    if (hits) return <SessionSearchPreview hits={hits} />;
   }
 
   // P1-SCOUT: structured cards for the repo_clone / repo_overview
@@ -229,6 +409,26 @@ function renderToolOutputBody({
       const record = previewOutput as Record<string, unknown>;
       // 失败信封也带 filePath/path，直接渲染会显示「✓ 成功」。判定口径与
       // repo_clone 预览保持一致：出现 error 文本或 ok/success 为 false 都不算成功。
+      const errorText = record['error'];
+      const failed =
+        (typeof errorText === 'string' && errorText.trim().length > 0) ||
+        record['ok'] === false ||
+        record['success'] === false;
+      if (!failed) {
+        return <SuccessConfirmPreview toolName={toolName} output={record} />;
+      }
+    }
+  }
+
+  // 会话重命名 / 移动 / LSP touch：成功只给一行确认；失败（带 error / ok:false）
+  // 回退字段表，避免把失败原因藏进「✓ 成功」。
+  if (
+    normalized === 'session_rename' ||
+    normalized === 'session_move' ||
+    normalized === 'lsp_touch'
+  ) {
+    if (previewOutput && typeof previewOutput === 'object' && !Array.isArray(previewOutput)) {
+      const record = previewOutput as Record<string, unknown>;
       const errorText = record['error'];
       const failed =
         (typeof errorText === 'string' && errorText.trim().length > 0) ||

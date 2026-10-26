@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@openAwork/shared';
-import { parseSubagentNotice } from './subagent-notice.js';
+import { parseSubagentNotice, parseSyntheticNotice } from './subagent-notice.js';
 
 function buildMessage(overrides: Partial<Message>): Message {
   return {
@@ -28,7 +28,7 @@ describe('parseSubagentNotice', () => {
       agent: 'explore',
       state: 'done',
       description: '审计会话唤醒原语',
-      childSessionId: 'child-1',
+      targetSessionId: 'child-1',
     });
     expect(notice?.text).toBe('子代理已完成 · 审计会话唤醒原语');
   });
@@ -85,7 +85,7 @@ describe('parseSubagentNotice', () => {
     expect(notice).not.toBeNull();
     expect(notice?.state).toBe('failed');
     expect(notice?.description).toBe('');
-    expect(notice?.childSessionId).toBe('child-9');
+    expect(notice?.targetSessionId).toBe('child-9');
   });
 
   it('agent 与 childID 缺失时回退为中性占位且不可跳转', () => {
@@ -94,7 +94,7 @@ describe('parseSubagentNotice', () => {
     );
 
     expect(notice?.agent).toBe('子代理');
-    expect(notice?.childSessionId).toBeUndefined();
+    expect(notice?.targetSessionId).toBeUndefined();
   });
 
   it('拼接多个 text part 作为正文，并忽略非 text part', () => {
@@ -133,5 +133,49 @@ describe('parseSubagentNotice', () => {
   it('无包裹时正文保持原样（兼容存量消息）', () => {
     const notice = parseSubagentNotice(buildMessage({}));
     expect(notice?.text).toBe('子代理已完成 · 审计会话唤醒原语');
+  });
+});
+
+describe('parseSyntheticNotice · 定时任务结果投递', () => {
+  function cronMessage(): Message {
+    return buildMessage({
+      id: 'cron-msg-1',
+      content: [
+        {
+          type: 'text',
+          text: ['<cron sessionID="exec-1" job="每日新闻">', '今天有三条要闻。', '</cron>'].join(
+            '\n',
+          ),
+        },
+      ],
+      description: '定时任务',
+      metadata: {
+        source: 'cron',
+        childID: 'exec-1',
+        agent: '每日新闻',
+        state: 'done',
+      },
+    });
+  }
+
+  it('识别 source cron，并汇出 source / targetSessionId', () => {
+    const notice = parseSyntheticNotice(cronMessage());
+    expect(notice).toMatchObject({
+      source: 'cron',
+      agent: '每日新闻',
+      state: 'done',
+      description: '定时任务',
+      targetSessionId: 'exec-1',
+    });
+  });
+
+  it('剥离 <cron> 包裹（否则原始标签会漏到正文里）', () => {
+    // 回归：`stripSubagentNoticeWrapper` 最初只匹配 `<subagent>`，
+    // cron 正文会带着 `<cron sessionID=…>` 原样显示给用户。
+    expect(parseSyntheticNotice(cronMessage())?.text).toBe('今天有三条要闻。');
+  });
+
+  it('旧的 parseSubagentNotice 会丢弃 cron 通知（故调用方须用新函数）', () => {
+    expect(parseSubagentNotice(cronMessage())).toBeNull();
   });
 });

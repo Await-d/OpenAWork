@@ -1555,6 +1555,14 @@ export async function migrate(): Promise<void> {
 
   migrateSyncEventTables();
 
+  // `event_log` 的「按会话 + 事件类型」定位：删除消息 / 会话时只需扫该会话的
+  // part 快照事件（`message.part.created` / `message.part.updated`），而不是
+  // 把该会话全部 `message.part.delta`（每 token 一行，占绝大多数）都读出来。
+  // 无此索引时删除一条带图消息会退化成「解析该会话上万行 JSON」。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_event_log_aggregate_type ON event_log(aggregate_id, type)',
+  );
+
   // ─── V1 → V2 Data Migration ───
   migrateV1MessagesToV2();
   repairLegacyMigratedPartOrder();

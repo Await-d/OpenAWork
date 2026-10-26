@@ -43,8 +43,11 @@
 
 /* 不跟随描边刻度的功能线（值随主题自动变化，只在这里定义一次） */
 :root {
-  --scrollbar-thumb: color-mix(in srgb, var(--fg-muted) 40%, transparent);
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--fg-muted) 70%, transparent);
+  /* 百分比按 8 主题 × 明暗共 16 块、且叠在 base / raised / overlay 三种表面上实测：
+     静息 60% 时对比度收敛在 2.2–3.0:1，低于 40% 时 carbon / sunset 暗色上几乎看不见；
+     hover 升到 80% 为 3.1–4.6:1。改这里前务必按全部主题复算，不要只看当前主题。 */
+  --scrollbar-thumb: color-mix(in srgb, var(--fg-muted) 60%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--fg-muted) 80%, transparent);
   --switch-track-off: var(--border-strong);
 }
 

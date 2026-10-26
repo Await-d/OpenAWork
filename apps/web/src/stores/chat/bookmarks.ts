@@ -10,7 +10,7 @@ export interface MessageBookmark {
   createdAt: number;
 }
 
-interface BookmarkStore {
+export interface BookmarkStore {
   bookmarks: MessageBookmark[];
   addBookmark: (bookmark: Omit<MessageBookmark, 'createdAt'>) => void;
   removeBookmark: (messageId: string) => void;

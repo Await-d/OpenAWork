@@ -64,7 +64,15 @@ describe('message-v2 projectors — Removed', () => {
     // V2 main tables PLUS the legacy mirror + FTS — the regression we
     // are guarding against is the projector forgetting to clean
     // session_messages and session_messages_fts.
-    expect(tables).toEqual(['part_v2', 'message_v2', 'session_messages', 'session_messages_fts']);
+    // `event_log` 也必须在列：part 快照事件（含 base64 图片）不随消息删除，
+    // 会一直占 event_log 的全局 50k 行配额。
+    expect(tables).toEqual([
+      'part_v2',
+      'message_v2',
+      'session_messages',
+      'session_messages_fts',
+      'event_log',
+    ]);
   });
 
   it('keys all DELETEs by the messageID payload', () => {
@@ -76,6 +84,13 @@ describe('message-v2 projectors — Removed', () => {
 
     const deleteRows = recordedSql.filter((row) => row.sql.startsWith('DELETE FROM '));
     for (const row of deleteRows) {
+      if (row.sql.includes('FROM event_log')) {
+        // event_log 以 `aggregate_id`（会话）定位，再用 JSON 提取出的
+        // `$.part.messageID` 精确过滤，因此首参是会话、末参才是消息。
+        expect(row.params[0]).toBe('session-B');
+        expect(row.params.at(-1)).toBe('msg-B');
+        continue;
+      }
       // session_messages_fts uses message_id; v2 tables use id; either
       // way the first parameter must be the messageID we emitted.
       expect(row.params[0]).toBe('msg-B');

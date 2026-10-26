@@ -183,6 +183,117 @@ const PATCH_OUTPUT = {
   ].join('\n'),
 };
 
+/**
+ * 桌面 / 浏览器自动化用例。
+ *
+ * 两个场景分别钉住「确认型动作不刷字段表」与「读取型动作保留返回」；选择器给到
+ * 真实页面里常见的长形态，用来验证卡片头与展开体在窄视口下不横向溢出。
+ */
+const DESKTOP_LONG_SELECTOR =
+  'div[data-testid="workspace-panel"] > section.toolbar > button.primary-action[aria-label="保存并关闭"]';
+
+const DESKTOP_ACK_OUTPUT = JSON.stringify({ ok: true });
+const DESKTOP_STATUS_OUTPUT = JSON.stringify({ enabled: true, started: true });
+
+/** 控制台读取：长消息 + 页面错误 + 截断标记，验证换行与语义色。 */
+const DESKTOP_CONSOLE_OUTPUT = JSON.stringify({
+  messages: [
+    { level: 'log', text: 'ready: 页面脚本已加载', timestamp: 1 },
+    { level: 'warn', text: 'slow network: /api/items 耗时 1.8s', timestamp: 2 },
+    {
+      level: 'error',
+      text: 'Failed to load resource: the server responded with a status of 500 (Internal Server Error)',
+      timestamp: 3,
+    },
+  ],
+  errors: [
+    {
+      message: 'Uncaught TypeError: cannot read properties of undefined (reading "map")',
+      timestamp: 4,
+    },
+  ],
+  truncated: true,
+});
+
+/** LSP 诊断：单行摘要 + 展开后的按文件诊断列表（验证可展开 + 无参数区）。 */
+const LSP_DIAGNOSTICS_OUTPUT = {
+  'apps/web/src/pages/chat-page/ChatPage.tsx': [
+    {
+      message: "Property 'foo' does not exist on type 'ChatPageProps'.",
+      severity: 1,
+      range: { start: { line: 41, character: 4 }, end: { line: 41, character: 7 } },
+      source: 'ts',
+    },
+    {
+      message: 'Unused variable: legacyValue',
+      severity: 2,
+      range: { start: { line: 88, character: 8 } },
+      source: 'eslint',
+    },
+  ],
+};
+
+/** 引用列表：多文件位置，验证公共前缀徽标与逐行位置。 */
+const LSP_REFERENCES_OUTPUT = [
+  'apps/web/src/pages/chat-page/ChatPage.tsx:41:6',
+  'apps/web/src/pages/chat-page/ChatPage.tsx:88:10',
+  'apps/web/src/components/chat/session/ChatPageSections.tsx:120:8',
+].join('\n');
+
+/** web_search：agent-core 内置搜索的纯文本结果，验证「搜索结果卡」解析。 */
+const WEB_SEARCH_OUTPUT = [
+  '1. TypeScript 5.7 发布',
+  '   新增对 import attributes 的支持',
+  '   https://example.com/ts',
+  '2. Bun 1.2',
+  '   更快的测试运行器',
+  '   https://example.com/bun',
+].join('\n');
+
+/** 虚拟 LSP MCP：与内置 `lsp_*` 同观感（单行 pill + 位置列表）。 */
+const LSP_MCP_REFERENCES_OUTPUT = {
+  content: [
+    {
+      type: 'text',
+      text: [
+        'apps/web/src/pages/chat-page/ChatPage.tsx:41:6',
+        'apps/web/src/pages/chat-page/ChatPage.tsx:88:10',
+      ].join('\n'),
+    },
+  ],
+};
+
+/** session_list：网关返回 Markdown 表格，验证还原成会话卡（不再是满屏管道符）。 */
+const SESSION_LIST_TABLE = [
+  '| Session ID | Messages | First | Last | Status | Title |',
+  '| --- | --- | --- | --- | --- | --- |',
+  '| ses_a | 12 | 2026-10-01T00:00:00.000Z | 2026-10-02T00:00:00.000Z | active | 修复登录 |',
+  '| ses_b | 3 | 2026-10-03T00:00:00.000Z | 2026-10-03T01:00:00.000Z | completed | 重构 diff |',
+].join('\n');
+
+/** ast_grep_search：`path:line:col` + 片段文本，验证还原成匹配列表。 */
+const AST_GREP_OUTPUT = [
+  '找到 2 处匹配（上下文=1）：',
+  '',
+  'apps/web/src/pages/chat-page/ChatPage.tsx:41:6',
+  "  const value = useSomething('粗体片段');",
+  '',
+  'apps/web/src/components/chat/session/ChatPageSections.tsx:120:8',
+  '  <ToolCallDisplay />',
+].join('\n');
+
+/** lsp_call_hierarchy：符号 + 调用方 / 被调用方两组。 */
+const LSP_CALL_HIERARCHY_OUTPUT = [
+  'Symbol: runQuery (detail) - apps/web/src/pages/chat-page/ChatPage.tsx:41:6',
+  '',
+  'Incoming calls:',
+  '  onSend - apps/web/src/pages/chat-page/ChatPage.tsx:88:10',
+  '  onRetry (handler) - apps/web/src/pages/chat-page/ChatPage.tsx:120:4',
+  '',
+  'Outgoing calls:',
+  '  fetchSession - apps/web/src/api/sessions.ts:30:0',
+].join('\n');
+
 const BATCH_INPUT = {
   tool_calls: [
     { tool: 'bash', parameters: { command: 'bun run --filter @openAwork/web typecheck' } },
@@ -293,6 +404,119 @@ function HarnessApp() {
           output={{ filePath: WRITE_FILE, before: '', after: WRITE_CONTENT }}
           status="completed"
           durationMs={210}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="desktop-ack" title="桌面控制（确认型动作 · 不再刷字段表）">
+        <ToolCallDisplay
+          toolName="desktop_control"
+          input={{ action: 'click', selector: DESKTOP_LONG_SELECTOR, button: 'left' }}
+          output={DESKTOP_ACK_OUTPUT}
+          status="completed"
+          durationMs={120}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="desktop-data" title="浏览器自动化（读取型动作 · 展示返回）">
+        <ToolCallDisplay
+          toolName="desktop_automation"
+          input={{ action: 'status' }}
+          output={DESKTOP_STATUS_OUTPUT}
+          status="completed"
+          durationMs={40}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="desktop-console" title="浏览器自动化（控制台视图 · 错误行 + 截断）">
+        <ToolCallDisplay
+          toolName="desktop_automation"
+          input={{ action: 'console', limit: 50 }}
+          output={DESKTOP_CONSOLE_OUTPUT}
+          status="completed"
+          durationMs={35}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="lsp-diagnostics" title="LSP 诊断（单行摘要 + 可展开）">
+        <ToolCallDisplay
+          toolName="lsp_diagnostics"
+          input={{ filePath: 'apps/web/src/pages/chat-page/ChatPage.tsx' }}
+          output={LSP_DIAGNOSTICS_OUTPUT}
+          status="completed"
+          durationMs={85}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="lsp-references" title="LSP 引用（位置列表 + 公共前缀）">
+        <ToolCallDisplay
+          toolName="lsp_find_references"
+          input={{
+            filePath: 'apps/web/src/pages/chat-page/ChatPage.tsx',
+            line: 41,
+            character: 6,
+          }}
+          output={LSP_REFERENCES_OUTPUT}
+          status="completed"
+          durationMs={64}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="web-search" title="web_search（搜索结果卡）">
+        <ToolCallDisplay
+          toolName="web_search"
+          input={{ query: 'typescript 5.7 release' }}
+          output={WEB_SEARCH_OUTPUT}
+          status="completed"
+          durationMs={420}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="mcp-lsp-refs" title="MCP LSP 引用（单行 pill + 位置列表）">
+        <ToolCallDisplay
+          toolName="mcp__lsp__find_references"
+          input={{
+            filePath: 'apps/web/src/pages/chat-page/ChatPage.tsx',
+            line: 41,
+            character: 6,
+          }}
+          output={LSP_MCP_REFERENCES_OUTPUT}
+          status="completed"
+          durationMs={70}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="session-list" title="session_list（Markdown 表格 → 会话卡）">
+        <ToolCallDisplay
+          toolName="session_list"
+          input={{ limit: 20 }}
+          output={SESSION_LIST_TABLE}
+          status="completed"
+          durationMs={95}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="ast-grep" title="ast_grep_search（匹配列表 + 片段）">
+        <ToolCallDisplay
+          toolName="ast_grep_search"
+          input={{ pattern: 'useSomething($A)', lang: 'tsx', context: 1 }}
+          output={AST_GREP_OUTPUT}
+          status="completed"
+          durationMs={180}
+        />
+      </HarnessCase>
+
+      <HarnessCase id="lsp-call-hierarchy" title="LSP 调用层次（调用方 / 被调用方）">
+        <ToolCallDisplay
+          toolName="lsp_call_hierarchy"
+          input={{
+            filePath: 'apps/web/src/pages/chat-page/ChatPage.tsx',
+            line: 41,
+            character: 6,
+            direction: 'both',
+          }}
+          output={LSP_CALL_HIERARCHY_OUTPUT}
+          status="completed"
+          durationMs={110}
         />
       </HarnessCase>
 

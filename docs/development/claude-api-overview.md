@@ -153,7 +153,7 @@ console.log(response);
 本项目（OpenAWork）已集成 Claude Code SDK 作为 AI 代理网关的核心组件：
 
 - **位置**：`temp/claude-code/` 目录下包含 Claude Code 运行时
-- **网关集成**：通过 `apps/desktop/src-tauri/sidecars/agent-gateway/` 将 Claude Code 作为 sidecar 运行
+- **网关集成**：网关自身由 `bun build --compile` 编译为单文件可执行程序（`openawork-gateway`），由 `apps/desktop/src-tauri/scripts/bundle-sidecar.mjs` 暂存到 `apps/desktop/src-tauri/binaries/openawork-gateway-<target-triple>`，再作为 Tauri sidecar 启动
 - **扩展方式**：通过 MCP 服务器扩展工具能力（参考 `docs/chat/omo-mcp-adapter-architecture.md`）
 
 ---

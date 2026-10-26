@@ -1,7 +1,7 @@
 {
   "bundle": {
     "resources": {
-      "binaries/agent-gateway-*.gz": "binaries/"
+      "binaries/openawork-gateway-*.gz": "binaries/"
     }
   }
 }

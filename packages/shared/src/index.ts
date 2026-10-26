@@ -48,7 +48,15 @@ export {
   partsFromAssistantTrace,
   readAssistantTracePayloadFromParts,
 } from './assistant-trace.js';
-export { parseSubagentNotice, SUBAGENT_NOTICE_DEFAULT_AGENT } from './subagent-notice.js';
+export {
+  parseSyntheticNotice,
+  /**
+   * @deprecated 用 `parseSyntheticNotice`：旧函数只认 `source: 'subagent'`，
+   * 会把定时任务结果投递（`source: 'cron'`）静默丢弃。
+   */
+  parseSubagentNotice,
+  SUBAGENT_NOTICE_DEFAULT_AGENT,
+} from './subagent-notice.js';
 export type { SubagentNotice } from './subagent-notice.js';
 export {
   hasSubagentResultBlocks,

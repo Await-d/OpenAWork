@@ -1,7 +1,23 @@
 import { channelFetch } from './channel-http.js';
 import { channelLogInfo } from './channel-log.js';
+import { DEFAULT_INBOUND_IMAGE_MAX_BYTES, inlineRemoteImages } from './inbound-image.js';
 import { parseJsonObject, readString } from './qq-api-utils.js';
 import type { QQChatTarget } from './qq-target.js';
+import type { ChannelMessage } from './types.js';
+
+/** QQ 入站图片上限（4 MiB）。 */
+export const QQ_INBOUND_IMAGE_MAX_BYTES = DEFAULT_INBOUND_IMAGE_MAX_BYTES;
+
+/**
+ * 把 `message.images` 里的 QQ CDN 地址下载成 base64。
+ *
+ * `attachments[].url` 是带 `rkey` 的临时直链，语义与企业微信 `PicUrl`、
+ * Discord CDN 一致：直通多模态协议层会被当成 base64 拒绝整轮请求，因此必须在
+ * 投递前下载；全部失败则移除 `images`，正文占位符仍在。
+ */
+export async function attachQQInboundImages(message: ChannelMessage): Promise<ChannelMessage> {
+  return inlineRemoteImages(message, { tag: 'qq', maxBytes: QQ_INBOUND_IMAGE_MAX_BYTES });
+}
 
 export interface QQMediaApiContext {
   readonly apiBase: string;

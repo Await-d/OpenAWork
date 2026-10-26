@@ -1,16 +1,20 @@
-import { parseSubagentNotice } from '@openAwork/shared';
+import { parseSyntheticNotice } from '@openAwork/shared';
 import type { Message, MessageRole, SubagentNotice } from '@openAwork/shared';
 import { getComparableCreatedAt } from './message-coercion.js';
 
 /**
- * 从网关返回的原始会话行中收集「子代理完成通知」。
+ * 从网关返回的原始会话行中收集「网关注入通知」（子代理完成 / 定时任务结果）。
  *
- * 语义（visible 规则、状态回落、agent 兜底）**不在本文件实现**——这里只做
- * 「原始行 → Message 形状」的适配，然后委托 `@openAwork/shared-ui` 的
- * `parseSubagentNotice`，以保证 Web / 桌面 / 未来消费方共用同一份 SSOT。
+ * 语义（visible 规则、状态回落、来源兜底）**不在本文件实现**——这里只做
+ * 「原始行 → Message 形状」的适配，然后委托 `@openAwork/shared` 的
+ * `parseSyntheticNotice`，以保证 Web / 桌面 / 未来消费方共用同一份 SSOT。
  *
  * 注意：`normalizeChatMessages` 会把 `role: 'synthetic'` 排除在 transcript 之外
  * （它不是用户输入，不得渲染为聊天气泡），因此通知必须走这条独立通道。
+ *
+ * 必须用 `parseSyntheticNotice` 而非旧的 `parseSubagentNotice`：后者只认
+ * `source: 'subagent'`，会把定时任务结果投递（`source: 'cron'`）静默丢弃——
+ * 任务明明投递成功了，用户却什么都看不到。
  */
 
 const MESSAGE_ROLES: readonly MessageRole[] = ['user', 'assistant', 'tool', 'system', 'synthetic'];
@@ -71,7 +75,7 @@ export function collectSubagentNotices(rawMessages: unknown): SubagentNotice[] {
     if (!message) {
       continue;
     }
-    const notice = parseSubagentNotice(message);
+    const notice = parseSyntheticNotice(message);
     if (notice) {
       notices.push(notice);
     }

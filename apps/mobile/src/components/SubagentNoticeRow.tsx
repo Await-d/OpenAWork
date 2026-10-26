@@ -28,8 +28,8 @@ export interface SubagentNoticeRowProps {
   notice: MobileSubagentNotice;
   /** 与相邻通知合组时收紧上间距。 */
   grouped?: boolean;
-  /** 传入且通知带子会话 id 时，标题行可点击跳转。 */
-  onOpenChild?: (childSessionId: string) => void;
+  /** 传入且通知带跳转目标（`notice.targetSessionId`）时，标题行可点击跳转。 */
+  onOpenChild?: (targetSessionId: string) => void;
 }
 
 function buildNoticeAccessibilityLabel(notice: MobileSubagentNotice): string {
@@ -58,8 +58,8 @@ export function SubagentNoticeRow({
   onOpenChild,
 }: SubagentNoticeRowProps) {
   const presentation = STATE_PRESENTATION[notice.state];
-  const childSessionId = notice.childSessionId;
-  const interactive = Boolean(childSessionId && onOpenChild);
+  const targetSessionId = notice.targetSessionId;
+  const interactive = Boolean(targetSessionId && onOpenChild);
   const accessibilityLabel = useMemo(() => buildNoticeAccessibilityLabel(notice), [notice]);
 
   const resultSections = useMemo(() => parseSubagentResultBlocks(notice.text), [notice.text]);
@@ -99,8 +99,8 @@ export function SubagentNoticeRow({
         hitSlop={spacing[2]}
         style={({ pressed }) => [styles.headingPressable, pressed && styles.pressed]}
         onPress={() => {
-          if (childSessionId && onOpenChild) {
-            onOpenChild(childSessionId);
+          if (targetSessionId && onOpenChild) {
+            onOpenChild(targetSessionId);
           }
         }}
       >
@@ -113,7 +113,7 @@ export function SubagentNoticeRow({
 
 export interface SubagentNoticeListProps {
   notices: readonly MobileSubagentNotice[];
-  onOpenChild?: (childSessionId: string) => void;
+  onOpenChild?: (targetSessionId: string) => void;
 }
 
 /** 会话尾部的通知组：首个通知留出上间距，其余合组紧凑排布。 */

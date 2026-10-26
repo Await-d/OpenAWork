@@ -187,7 +187,15 @@ export async function handleScheduleManageTool(
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: await runScheduleManageTool({ userId, sessionId, input: parsed.data }),
+      output: await runScheduleManageTool({
+        userId,
+        sessionId,
+        input: parsed.data,
+        // 渠道会话已放通该工具，而渠道里创建的任务会在**渠道会话内**执行，
+        // 此时仅凭 metadata.source 无法区分「用户发的」与「cron 发的」——
+        // 请求键是唯一可用的判据（守卫据此封堵无人值守的自我复制）。
+        clientRequestId: ctx.executionContext?.clientRequestId ?? null,
+      }),
       isError: false,
       durationMs: 0,
     };

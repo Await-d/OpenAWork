@@ -20,6 +20,8 @@ const SESSION_ID = 's-schedule-manage';
 const TEAM_SESSION_ID = 's-schedule-team';
 const CRON_SESSION_ID = 's-schedule-cron';
 const CHANNEL_SESSION_ID = 's-schedule-channel';
+const OTHER_CHANNEL_SESSION_ID = 's-schedule-channel-b';
+const BROKEN_CHANNEL_SESSION_ID = 's-schedule-channel-broken';
 const WORKSPACE_DIR = `${tmpdir()}/openawork-cron-manage-ws`;
 const OUTSIDE_DIR = `${tmpdir()}/openawork-cron-manage-outside`;
 
@@ -61,10 +63,39 @@ beforeEach(() => {
      VALUES (?, ?, 'cron', '{"source":"cron"}', 'idle')`,
     [CRON_SESSION_ID, USER_ID],
   );
+  // 渠道会话：带完整作用域元数据（`channel.id` + `channelChatId`）。
   dbModule.sqliteRun(
     `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
-     VALUES (?, ?, 'channel', '{"source":"channel"}', 'idle')`,
-    [CHANNEL_SESSION_ID, USER_ID],
+     VALUES (?, ?, 'channel', ?, 'idle')`,
+    [
+      CHANNEL_SESSION_ID,
+      USER_ID,
+      JSON.stringify({
+        source: 'channel',
+        channelChatId: 'chat-a',
+        channel: { id: 'plugin-a', type: 'qq' },
+      }),
+    ],
+  );
+  // 同渠道不同会话：用来验证作用域隔离（看不到/删不掉别人的任务）。
+  dbModule.sqliteRun(
+    `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+     VALUES (?, ?, 'channel-b', ?, 'idle')`,
+    [
+      OTHER_CHANNEL_SESSION_ID,
+      USER_ID,
+      JSON.stringify({
+        source: 'channel',
+        channelChatId: 'chat-b',
+        channel: { id: 'plugin-a', type: 'qq' },
+      }),
+    ],
+  );
+  // 渠道元数据不完整的会话：fail-closed。
+  dbModule.sqliteRun(
+    `INSERT INTO sessions (id, user_id, title, metadata_json, state_status)
+     VALUES (?, ?, 'channel-broken', '{"source":"channel"}', 'idle')`,
+    [BROKEN_CHANNEL_SESSION_ID, USER_ID],
   );
 });
 
@@ -283,11 +314,159 @@ describe('schedule_manage · add / list / update / remove', () => {
   });
 });
 
+describe('schedule_manage · 渠道会话作用域', () => {
+  it('渠道会话可建任务，且投稿目标被钉回当前渠道 + 当前会话', async () => {
+    const output = await run(
+      {
+        action: 'add',
+        job: {
+          name: '每日群报',
+          schedule_kind: 'every',
+          schedule_every: 3_600_000,
+          prompt: '报进度',
+        },
+      },
+      CHANNEL_SESSION_ID,
+    );
+    const parsed = JSON.parse(output) as { ok: boolean; job: { id: string } };
+    expect(parsed.ok).toBe(true);
+
+    // `plugin_id` + `plugin_chat_id` 是渠道回发的唯一依据；`delivery_mode` 保持
+    // `none`——填 `session` + chatId 会让 `prepareCronSession` 拿 chatId 去查
+    // sessions 表并抛错（任务到点必失败）。
+    const stored = cronScheduler.getJob(parsed.job.id);
+    expect(stored).toMatchObject({
+      plugin_id: 'plugin-a',
+      plugin_chat_id: 'chat-a',
+      delivery_mode: 'none',
+      delivery_target: null,
+    });
+  });
+
+  it('渠道会话只能看到本会话的任务', async () => {
+    await run(
+      {
+        action: 'add',
+        job: {
+          name: 'chat-a 的任务',
+          schedule_kind: 'every',
+          schedule_every: 3_600_000,
+          prompt: 'p',
+        },
+      },
+      CHANNEL_SESSION_ID,
+    );
+    await run(
+      {
+        action: 'add',
+        job: {
+          name: 'chat-b 的任务',
+          schedule_kind: 'every',
+          schedule_every: 3_600_000,
+          prompt: 'p',
+        },
+      },
+      OTHER_CHANNEL_SESSION_ID,
+    );
+
+    const listA = JSON.parse(await run({ action: 'list' }, CHANNEL_SESSION_ID)) as {
+      count: number;
+      jobs: Array<{ name: string }>;
+    };
+    expect(listA.count).toBe(1);
+    expect(listA.jobs[0]?.name).toBe('chat-a 的任务');
+  });
+
+  it('渠道会话删不掉别的渠道会话的任务（按未找到处理）', async () => {
+    const other = JSON.parse(
+      await run(
+        {
+          action: 'add',
+          job: {
+            name: 'chat-b 的任务',
+            schedule_kind: 'every',
+            schedule_every: 3_600_000,
+            prompt: 'p',
+          },
+        },
+        OTHER_CHANNEL_SESSION_ID,
+      ),
+    ) as { job: { id: string } };
+
+    await expect(
+      run({ action: 'remove', jobId: other.job.id }, CHANNEL_SESSION_ID),
+    ).rejects.toThrow(/未找到/);
+    expect(cronScheduler.getJob(other.job.id)).toBeDefined();
+  });
+
+  it('渠道会话不能把任务归属到别的渠道', async () => {
+    await expect(
+      run(
+        {
+          action: 'add',
+          job: {
+            name: '逃逸',
+            schedule_kind: 'every',
+            schedule_every: 3_600_000,
+            prompt: 'p',
+            plugin_id: 'plugin-other',
+          },
+        },
+        CHANNEL_SESSION_ID,
+      ),
+    ).rejects.toThrow(/当前渠道/);
+  });
+
+  it('渠道元数据不完整时 fail-closed', async () => {
+    await expect(run({ action: 'list' }, BROKEN_CHANNEL_SESSION_ID)).rejects.toThrow(/渠道标识/);
+  });
+
+  it('渠道会话放通后，定时任务派发的运行仍禁止再管理定时任务（防自我复制旁路）', async () => {
+    // 渠道任务执行时会**复用渠道会话**（`prepareCronSession`），此时
+    // metadata.source 仍是 'channel'。只按 source 判定会放过
+    // 「定时任务 → 继续建定时任务」这条无人值守路径。
+    const cronDispatched = {
+      userId: USER_ID,
+      sessionId: CHANNEL_SESSION_ID,
+      input: admin.scheduleManageInputSchema.parse({ action: 'list' }),
+      clientRequestId: `cron-${'job-1'}-00000000-0000-4000-8000-000000000000`,
+    };
+    await expect(admin.runScheduleManageTool(cronDispatched)).rejects.toThrow(/禁止自我复制/);
+
+    // 同一渠道会话里用户自己发的回合（外部随机键）仍然可用。
+    await expect(
+      admin.runScheduleManageTool({
+        ...cronDispatched,
+        clientRequestId: '00000000-0000-4000-8000-000000000000',
+      }),
+    ).resolves.toBeTypeOf('string');
+  });
+
+  it('run 立即执行一次并写入执行历史', async () => {
+    const added = JSON.parse(
+      await run(
+        {
+          action: 'add',
+          job: { name: '手动', schedule_kind: 'every', schedule_every: 3_600_000, prompt: 'p' },
+        },
+        SESSION_ID,
+      ),
+    ) as { job: { id: string } };
+
+    const output = JSON.parse(await run({ action: 'run', jobId: added.job.id })) as {
+      ok: boolean;
+      started: boolean;
+    };
+    expect(output).toMatchObject({ ok: true, started: true });
+  });
+});
+
 describe('schedule_manage · 会话守卫', () => {
-  it('cron / team / channel 会话拒绝所有动作', async () => {
+  it('cron / team 会话拒绝所有动作；渠道会话放通', async () => {
     await expect(run({ action: 'list' }, CRON_SESSION_ID)).rejects.toThrow(/禁止自我复制/);
     await expect(run({ action: 'list' }, TEAM_SESSION_ID)).rejects.toThrow(/团队会话/);
-    await expect(run({ action: 'list' }, CHANNEL_SESSION_ID)).rejects.toThrow(/消息渠道/);
+    // 渠道会话已放通（作用域收敛由上面的作用域用例覆盖）。
+    await expect(run({ action: 'list' }, CHANNEL_SESSION_ID)).resolves.toBeTypeOf('string');
   });
 
   it('resolveScheduleManageSessionDenial：cron 优先 / team 元数据 / 普通会话 / 缺行', () => {
@@ -316,5 +495,25 @@ describe('schedule_manage · 会话守卫', () => {
       }),
     ).toBeNull();
     expect(admin.resolveScheduleManageSessionDenial(null)).toContain('已拒绝');
+  });
+
+  it('渠道作用域解析：完整元数据可得，缺失时为 null（fail-closed）', () => {
+    expect(
+      admin.resolveScheduleManageChannelScope({
+        source: 'channel',
+        channelChatId: 'chat-a',
+        channel: { id: 'plugin-a' },
+      }),
+    ).toEqual({ pluginId: 'plugin-a', chatId: 'chat-a' });
+
+    expect(admin.resolveScheduleManageChannelScope({ source: 'channel' })).toBeNull();
+    expect(
+      admin.resolveScheduleManageChannelScope({
+        source: 'channel',
+        channel: { id: 'plugin-a' },
+      }),
+    ).toBeNull();
+    // 非渠道会话没有作用域限制。
+    expect(admin.resolveScheduleManageChannelScope({ source: 'desktop' })).toBeNull();
   });
 });

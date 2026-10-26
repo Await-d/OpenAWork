@@ -70,11 +70,38 @@ const openAIReasoningMetadata = (
     : { [reasoning.providerMetadataKey ?? 'openai']: metadata };
 };
 
+/** 与协议层 `validateMedia` 同形态的 base64 校验（只做形态判定，不解码）。 */
+const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/**
+ * 只有内联图片（base64 编码的 `data:` URL 或裸 base64）能作为 `media` part 下发。
+ *
+ * 远程 `http(s)://` / `blob:` 地址、相对 / 绝对文件路径都不是 base64，直接塞进
+ * `data` 会让多模态协议层在校验阶段拒绝**整个请求**（2026-10-22 排障包：
+ * `ProviderShared.request: OpenAI Chat media must contain valid base64`，
+ * 单条历史里的远程图片地址即可打死整轮对话）。这类图片应由渠道 enrich 阶段
+ * 下载成 base64（见 `channels/wecom-media.ts`）；漏网时在此跳过，退化为
+ * 「本轮看不到这张图」，而不是让对话无法继续。
+ */
+const isInlineImageSource = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return false;
+  if (/^data:/i.test(trimmed)) {
+    // `data:image/svg+xml,<svg…>` 这类文本编码的 data URL 同样会校验失败。
+    return /^data:[^;,]+;base64,/i.test(trimmed);
+  }
+  // 任何带 scheme 的值（http/blob/file/...）都不是内联 payload。
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return false;
+  // 裸串必须是合法 base64 形态，否则 `/abs/a.png` 这类工具返回的文件路径
+  // 会被当成 base64 送上游（字节解码成功，但内容是垃圾）。
+  return trimmed.length % 4 === 0 && BASE64_PATTERN.test(trimmed);
+};
+
 const userMessage = (message: UserMessageUnified): Message => {
   const parts: ContentPart[] = [];
   if (message.content.length > 0) parts.push({ type: 'text', text: message.content });
   for (const image of message.images ?? []) {
-    if (typeof image.imageUrl !== 'string' || image.imageUrl.length === 0) continue;
+    if (typeof image.imageUrl !== 'string' || !isInlineImageSource(image.imageUrl)) continue;
     parts.push({ type: 'media', mediaType: mediaType(image.mimeType), data: image.imageUrl });
   }
   return Message.make({

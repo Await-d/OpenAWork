@@ -229,9 +229,9 @@ export function buildAdminParameters(name: string): ToolParameters | undefined {
         properties: {
           action: {
             type: 'string',
-            enum: ['list', 'add', 'update', 'remove', 'enable', 'disable', 'history'],
+            enum: ['list', 'add', 'update', 'remove', 'enable', 'disable', 'run', 'history'],
             description:
-              '管理动作：list 列举；add 新建；update 修改；remove 删除；enable/disable 启停；history 执行历史。',
+              '管理动作：list 列举；add 新建；update 修改；remove 删除；enable/disable 启停；run 立即执行一次；history 执行历史。',
           },
           jobId: { type: 'string', description: 'list 之外的目标任务 id。' },
           job: {

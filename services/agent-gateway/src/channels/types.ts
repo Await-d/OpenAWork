@@ -203,7 +203,11 @@ export interface MessagingChannelService {
   /**
    * 入站消息媒体补全：HTTP 入站路由在 parser 之后、notify 之前调用。
    * 实现方应从 message.raw 提取媒体引用并下载，返回可能带 images 的新消息。
-   * 契约：失败时必须原样返回入参消息（不得抛错、不得阻塞投递）；无媒体时原样返回。
+   *
+   * 契约：不得抛错、不得阻塞投递；无媒体时原样返回。
+   * 取回失败时可以降级——**允许**剥离无法内联的远程地址（例如企业微信的
+   * 短期 `PicUrl`），因为把远程 URL 留在 `images[].imageUrl` 会被多模态协议层
+   * 当成 base64 校验并拒绝整轮请求（2026-10-22 排障包）。
    */
   enrichInboundMessage?(message: ChannelMessage): Promise<ChannelMessage>;
   getGroupMessages(chatId: string, count?: number): Promise<ChannelMessage[]>;

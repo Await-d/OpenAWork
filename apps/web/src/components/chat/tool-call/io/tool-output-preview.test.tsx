@@ -449,3 +449,432 @@ describe('ToolOutputPreview — 存储形态（JSON 字符串）还原', () => {
     expect(container.textContent).toContain('{not json');
   });
 });
+
+describe('lsp_diagnostics 走诊断列表', () => {
+  it('对象 map 输出按文件分组渲染，而不是字段表', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="lsp_diagnostics"
+        output={{ 'src/a.ts': [{ message: 'boom', severity: 1, line: 3, column: 1 }] }}
+      />,
+    );
+
+    expect(container.textContent).toContain('boom');
+    expect(container.textContent).toContain('src/a.ts');
+    expect(container.textContent).toContain('3:1');
+    expect(container.textContent).toContain('错误');
+    expect(container.querySelector('.structured-output')).toBeNull();
+  });
+
+  it('空对象给出「没有诊断信息」', () => {
+    const { container } = render(<ToolOutputPreview toolName="lsp_diagnostics" output={{}} />);
+
+    expect(container.textContent).toContain('（没有诊断信息）');
+  });
+});
+
+describe('LSP 位置 / 符号 / hover 的输出视图', () => {
+  it('引用位置列表解析为多行位置', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="lsp_find_references"
+        output={'/repo/src/a.ts:12:4\n/repo/src/b.ts:3:0'}
+      />,
+    );
+
+    expect(container.textContent).toContain('a.ts');
+    expect(container.textContent).toContain('12:4');
+    expect(container.textContent).toContain('3:0');
+    expect(container.querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('位置解析失败时回退文本（No references found）', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="lsp_find_references" output="No references found" />,
+    );
+
+    expect(container.textContent).toContain('No references found');
+  });
+
+  it('符号列表用入参 filePath 补全 document 模式', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="lsp_symbols"
+        input={{ filePath: '/repo/src/a.ts' }}
+        output={'ChatPage (kind 12) - line 10'}
+      />,
+    );
+
+    expect(container.textContent).toContain('ChatPage');
+    expect(container.textContent).toContain('函数');
+  });
+
+  it('hover 按 Markdown 渲染', () => {
+    const { container } = render(<ToolOutputPreview toolName="lsp_hover" output={'**bold**'} />);
+
+    expect(container.querySelector('strong')?.textContent).toBe('bold');
+  });
+});
+
+describe('task_create / update / get 复用任务卡', () => {
+  it('task_create 的 { task } 包装渲染为单任务卡', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="task_create"
+        output={{ task: { id: 't1', subject: '写测试', status: 'pending' }, reused: false }}
+      />,
+    );
+
+    expect(container.querySelector('.task-list-preview')).not.toBeNull();
+    expect(container.textContent).toContain('写测试');
+    expect(container.querySelector('.structured-output')).toBeNull();
+  });
+
+  it('task_update 的成功返回同样走任务卡', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="task_update"
+        output={{ task: { id: 't1', subject: 'A', status: 'completed' } }}
+      />,
+    );
+
+    expect(container.querySelector('.task-list-preview')).not.toBeNull();
+  });
+
+  it('错误 / 版本冲突时回退通用字段表（不吞掉 error）', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="task_update"
+        output={{
+          error: 'revision_conflict',
+          currentRevision: 3,
+          task: { id: 't1', subject: 'A' },
+        }}
+      />,
+    );
+
+    expect(container.querySelector('.task-list-preview')).toBeNull();
+    expect(container.textContent).toContain('revision_conflict');
+  });
+
+  it('task_get 的 { task: null } 不渲染空任务卡', () => {
+    const { container } = render(<ToolOutputPreview toolName="task_get" output={{ task: null }} />);
+
+    expect(container.querySelector('.task-list-preview')).toBeNull();
+  });
+});
+
+describe('MCP LSP 工具复用 LSP 专用视图', () => {
+  it('mcp__lsp__find_references 的文本块解析为位置列表', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="mcp__lsp__find_references"
+        output={{
+          content: [{ type: 'text', text: '/repo/src/a.ts:12:4\n/repo/src/b.ts:3:0' }],
+        }}
+      />,
+    );
+
+    expect(container.textContent).toContain('a.ts');
+    expect(container.textContent).toContain('12:4');
+    expect(container.querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('mcp__lsp__diagnostics 的 JSON 文本还原为按文件分组诊断', () => {
+    const payload = JSON.stringify({
+      'src/a.ts': [{ message: 'boom', severity: 1, line: 3, column: 1 }],
+    });
+
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="mcp__lsp__diagnostics"
+        output={{ content: [{ type: 'text', text: payload }] }}
+      />,
+    );
+
+    expect(container.textContent).toContain('boom');
+    expect(container.textContent).toContain('3:1');
+    expect(container.querySelector('.structured-output')).toBeNull();
+  });
+
+  it('legacy mcp_call + serverId=lsp 的 symbols 复用符号列表', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="mcp_call"
+        input={{
+          serverId: 'lsp',
+          toolName: 'symbols',
+          arguments: { filePath: '/repo/src/a.ts' },
+        }}
+        output={{ content: [{ type: 'text', text: 'ChatPage (kind 12) - line 10' }] }}
+      />,
+    );
+
+    expect(container.textContent).toContain('ChatPage');
+    expect(container.textContent).toContain('函数');
+    expect(container.textContent).toContain('line 10');
+  });
+
+  it('非 lsp 的 MCP 工具仍走通用 MCP 预览', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="mcp__github__create_issue"
+        output={{ content: [{ type: 'text', text: 'created #1' }] }}
+      />,
+    );
+
+    expect(container.textContent).toContain('created #1');
+    expect(container.querySelector('.task-list-preview')).toBeNull();
+  });
+});
+
+describe('session_list / session_info 的文本输出还原为卡片', () => {
+  const table = [
+    '| Session ID | Messages | First | Last | Status | Title |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| ses_a | 12 | 2026-10-01T00:00:00.000Z | 2026-10-02T00:00:00.000Z | active | 修复登录 |',
+    '| ses_b | 3 | 2026-10-03T00:00:00.000Z | 2026-10-03T01:00:00.000Z | completed | 重构 diff |',
+  ].join('\n');
+
+  it('session_list 的 Markdown 表格渲染为会话卡', () => {
+    const { container } = render(<ToolOutputPreview toolName="session_list" output={table} />);
+
+    expect(container.querySelector('.session-list-preview')).not.toBeNull();
+    expect(container.textContent).toContain('共 2 个会话');
+    expect(container.textContent).toContain('修复登录');
+    expect(container.textContent).toContain('12 条消息');
+  });
+
+  it('session_list 空表给出空态', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="session_list" output="No sessions found." />,
+    );
+
+    expect(container.textContent).toContain('没有会话');
+  });
+
+  it('session_info 的 Key: Value 渲染为详情卡', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="session_info"
+        output={'Session ID: ses_a\nMessages: 12\nStatus: active\nHas Todos: Yes (3 items)'}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="session-info-preview"]')).not.toBeNull();
+    expect(container.textContent).toContain('消息数');
+    expect(container.textContent).toContain('待办');
+  });
+
+  it('无法解析时回退原文本（不吞内容）', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="session_info" output="unexpected output" />,
+    );
+
+    expect(container.textContent).toContain('unexpected output');
+  });
+});
+
+describe('确认型工具（会话重命名 / 移动 / LSP touch）', () => {
+  it('session_rename 成功显示确认行 + 新标题', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="session_rename"
+        output={{ ok: true, sessionID: 'ses_a', title: '修复登录' }}
+      />,
+    );
+
+    expect(container.querySelector('.tool-call-confirm')).not.toBeNull();
+    expect(container.textContent).toContain('已重命名了会话');
+    expect(container.textContent).toContain('修复登录');
+  });
+
+  it('session_move 失败回退字段表（错误原因可见）', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="session_move"
+        output={{ ok: false, error: '目标会话不存在。' }}
+      />,
+    );
+
+    expect(container.querySelector('.tool-call-confirm')).toBeNull();
+    expect(container.textContent).toContain('目标会话不存在');
+  });
+
+  it('lsp_touch 成功显示确认行', () => {
+    const { container } = render(<ToolOutputPreview toolName="lsp_touch" output={{ ok: true }} />);
+
+    expect(container.querySelector('.tool-call-confirm')).not.toBeNull();
+    expect(container.textContent).toContain('已同步 LSP 文件状态');
+  });
+});
+
+describe('ast_grep 结果结构化', () => {
+  const output = [
+    '找到 2 处匹配：',
+    '',
+    'src/a.ts:12:5',
+    'const a = 1;',
+    '',
+    'src/b.ts:40:1',
+    'const b = 2;',
+  ].join('\n');
+
+  it('ast_grep_search 的文本结果解析为匹配列表', () => {
+    const { container } = render(<ToolOutputPreview toolName="ast_grep_search" output={output} />);
+
+    expect(container.querySelectorAll('[data-ast-grep-match]')).toHaveLength(2);
+    expect(container.textContent).toContain('12:5');
+    expect(container.textContent).toContain('const a = 1;');
+  });
+
+  it('未找到匹配时给出空态而不是原始文本', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="ast_grep_search" output="未找到匹配。" />,
+    );
+
+    expect(container.textContent).toContain('（未找到匹配）');
+  });
+
+  it('ast_grep_replace 的空结果回退原文（保留「无任何替换被应用」）', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="ast_grep_replace" output="无任何替换被应用。" />,
+    );
+
+    expect(container.textContent).toContain('无任何替换被应用');
+  });
+});
+
+describe('lsp_call_hierarchy 走层次视图', () => {
+  const output = [
+    'Symbol: run - /repo/src/a.ts:12:4',
+    '',
+    'Incoming calls:',
+    '  caller - /repo/src/b.ts:8:2',
+    '',
+    'Outgoing calls:',
+    'No outgoing calls found',
+  ].join('\n');
+
+  it('内置 lsp_call_hierarchy 渲染为两组列表', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="lsp_call_hierarchy" output={output} />,
+    );
+
+    expect(container.textContent).toContain('↑ 调用方（1）');
+    expect(container.textContent).toContain('caller');
+    expect(container.textContent).toContain('没有调用其它符号');
+  });
+
+  it('MCP 通道的 call_hierarchy 复用同一视图', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="mcp__lsp__call_hierarchy"
+        output={{ content: [{ type: 'text', text: output }] }}
+      />,
+    );
+
+    expect(container.textContent).toContain('↑ 调用方（1）');
+    // 仍应是层次视图，而不是把 MCP 文本原样铺开。
+    expect(container.textContent).not.toContain('Incoming calls:');
+  });
+
+  it('无法解析时回退原文本', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="lsp_call_hierarchy" output="No call hierarchy found" />,
+    );
+
+    expect(container.textContent).toContain('No call hierarchy found');
+  });
+});
+
+describe('extract_media_info / codesearch 专用渲染', () => {
+  it('媒体信息 JSON 渲染为信息卡（不再是字段表）', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="extract_media_info"
+        output={JSON.stringify({
+          success: true,
+          type: 'video',
+          duration: 754,
+          width: 1920,
+          height: 1080,
+          videoCodec: 'h264',
+        })}
+      />,
+    );
+
+    expect(container.textContent).toContain('12:34');
+    expect(container.textContent).toContain('1920×1080');
+    expect(container.textContent).toContain('h264');
+    expect(container.querySelector('.structured-output')).toBeNull();
+  });
+
+  it('媒体信息失败时回退字段表（错误可见）', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="extract_media_info"
+        output={{ success: false, error: 'ffprobe not found' }}
+      />,
+    );
+
+    expect(container.textContent).toContain('ffprobe not found');
+    expect(container.querySelector('.structured-output')).not.toBeNull();
+  });
+
+  it('codesearch 的 Markdown 片段按 Markdown 渲染', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="codesearch" output={'```ts\nconst a = 1;\n```'} />,
+    );
+
+    expect(container.querySelector('pre code')?.textContent).toContain('const a = 1;');
+  });
+});
+
+describe('session_search / prepare_rename / MCP touch 的专用渲染', () => {
+  it('session_search 渲染为匹配列表', () => {
+    const output = [
+      'Found 1 matches:',
+      '',
+      '[ses_a] Message msg_1 (user)',
+      '包含 build pipeline 的片段',
+    ].join('\n');
+
+    const { container } = render(<ToolOutputPreview toolName="session_search" output={output} />);
+
+    expect(container.textContent).toContain('找到 1 条匹配');
+    expect(container.textContent).toContain('包含 build pipeline 的片段');
+  });
+
+  it('lsp_prepare_rename 渲染为可重命名判定', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="lsp_prepare_rename" output="Rename available at 12:5-12:9" />,
+    );
+
+    expect(container.textContent).toContain('可重命名');
+    expect(container.textContent).toContain('12:5-12:9');
+  });
+
+  it('MCP 通道的 touch 成功显示确认行', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="mcp__lsp__touch"
+        output={{ content: [{ type: 'text', text: JSON.stringify({ ok: true }) }] }}
+      />,
+    );
+
+    expect(container.querySelector('.tool-call-confirm')).not.toBeNull();
+    expect(container.textContent).toContain('已同步 LSP 文件状态');
+  });
+
+  it('MCP 通道的 prepare_rename 复用同一判定视图', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="mcp__lsp__prepare_rename"
+        output={{ content: [{ type: 'text', text: 'Cannot rename at this position' }] }}
+      />,
+    );
+
+    expect(container.textContent).toContain('不可重命名');
+  });
+});

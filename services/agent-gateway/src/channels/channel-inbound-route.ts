@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { ChannelEvent, ChannelInstance, ChannelMessage } from './types.js';
+import { inlineRemoteImages } from './inbound-image.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
 import {
   getQQBotSecret,
@@ -143,6 +144,10 @@ function parseInboundQuery(
 /**
  * 入站媒体补全的调用侧兜底：enrich 是「尽力而为」的装饰步骤，任何失败都必须
  * 回退到原始消息，绝不能因为下载失败丢掉一条已经解析成功的入站消息。
+ *
+ * 末尾的 `inlineRemoteImages` 是**最后一层保险**：多模态协议层只接受 base64，
+ * 任何通道（含第三方自定义 webhook 的通用 envelope、未来新增通道）漏掉的远程
+ * 图片地址都在此处下载成附件；通道已下载时它是幂等的，零网络开销。
  */
 async function enrichInboundMessageOrFallback(
   deps: ChannelInboundRouteDeps,
@@ -150,16 +155,17 @@ async function enrichInboundMessageOrFallback(
   message: ChannelMessage,
 ): Promise<ChannelMessage> {
   if (!deps.enrichInboundMessage) {
-    return message;
+    return inlineRemoteImages(message, { tag: channel.type });
   }
   try {
-    return await deps.enrichInboundMessage({ channel, message });
+    const enriched = await deps.enrichInboundMessage({ channel, message });
+    return await inlineRemoteImages(enriched, { tag: channel.type });
   } catch (error) {
     logGatewayWarn('[channels] inbound media enrich failed', {
       channelId: channel.id,
       error: error instanceof Error ? error.message : String(error),
     });
-    return message;
+    return inlineRemoteImages(message, { tag: channel.type });
   }
 }
 

@@ -20,7 +20,9 @@ import {
 } from './terminal-preferences.js';
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  // 不要在这里 `vi.unstubAllGlobals()`：setup.ts 用 `vi.stubGlobal` 给整个测试环境
+  // 装了内存版 localStorage，一旦移除，后续用例拿到的就是 undefined（jsdom 不保证
+  // 提供可用的 localStorage）。需要临时改全局的用例自行 try/finally 复原。
   globalThis.localStorage?.clear();
 });
 
@@ -86,9 +88,14 @@ describe('terminal preferences', () => {
   });
 
   it('localStorage 不可用时读写都不抛错', () => {
+    const originalStorage = globalThis.localStorage;
     vi.stubGlobal('localStorage', undefined);
-
-    expect(() => writeTerminalPreference('pasteGuardDisabled', true)).not.toThrow();
-    expect(readTerminalPreference('pasteGuardDisabled')).toBe(false);
+    try {
+      expect(() => writeTerminalPreference('pasteGuardDisabled', true)).not.toThrow();
+      expect(readTerminalPreference('pasteGuardDisabled')).toBe(false);
+    } finally {
+      // 必须复原为 setup.ts 注入的内存 storage，否则同文件后续用例会拿到 undefined。
+      vi.stubGlobal('localStorage', originalStorage);
+    }
   });
 });

@@ -1,11 +1,15 @@
 /**
  * `schedule_manage` —— 会话内模型在用户审批下管理定时任务（cron）。
  *
- * 设计边界（对齐 260924-AI自助管理扩展四域 域三 / 方案 B）：
+ * 设计边界（对齐 260924-AI自助管理扩展四域 域三 / 方案 B；渠道放通见下）：
  * - 复用 `cronScheduler`（与 HTTP `/cron/jobs` 同一实例）：任务定义持久化在
  *   `cron_jobs`，网关重启后由 `restoreCronJobsFromStore` 恢复；执行历史在
  *   `cron_job_executions`（重启后可查）。
- * - **cron 会话禁止管理定时任务**（防自我复制 / 无人扩权）；team / channel 同样拒绝。
+ * - **cron 会话禁止管理定时任务**（防自我复制 / 无人扩权）；**team 会话同样拒绝**。
+ * - **渠道会话放通，但作用域收敛**（`resolveScheduleManageChannelScope`）：只能管理
+ *   本渠道本会话创建的任务，新建时渠道投递字段钉回当前会话。放通后必须同时堵住
+ *   两条旁路：① 渠道任务在渠道会话内执行时的自我复制（按 `cron-` 请求键识别）；
+ *   ② 渠道级工具白名单（`channelToolAllowlist`）不得被绕过。
  * - 变更类动作默认 ask；list / history 只读免审批；审批预览展示调度表达式、
  *   时区、prompt 片段与投递目标。
  */
@@ -15,6 +19,8 @@ import { z } from 'zod';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { sqliteGet } from '../infra/db.js';
 import { listCronExecutionsForJob } from './cron-store.js';
+import { isValidCronExpression } from './cron-expression.js';
+import { attachExecutionPreviews } from './delivery.js';
 import { SCHEDULE_MANAGE_TOOL_NAME } from './schedule-manage-tool-name.js';
 import type { CronScheduler } from './scheduler.js';
 import type { CronJobRecord } from './types.js';
@@ -72,7 +78,7 @@ export type ScheduleJobDraft = z.infer<typeof scheduleJobDraftSchema>;
 
 export const scheduleManageInputSchema = z
   .object({
-    action: z.enum(['list', 'add', 'update', 'remove', 'enable', 'disable', 'history']),
+    action: z.enum(['list', 'add', 'update', 'remove', 'enable', 'disable', 'run', 'history']),
     jobId: z.string().trim().min(1).max(200).optional(),
     job: scheduleJobDraftSchema.optional(),
   })
@@ -146,9 +152,10 @@ export const scheduleManageToolDefinition: ToolDefinition<
 > = {
   name: SCHEDULE_MANAGE_TOOL_NAME,
   description:
-    '管理当前用户的定时任务。action=list 列举；add 新建；update 修改；remove 删除；enable/disable 启停；history 查看执行历史。' +
+    '管理当前用户的定时任务。action=list 列举；add 新建；update 修改；remove 删除；enable/disable 启停；run 立即执行一次；history 查看执行历史。' +
     '变更类操作需要用户批准；任务定义与执行历史均持久化（网关重启后仍保留）。' +
-    'cron 表达式使用 5 段格式（分 时 日 月 周）；时区默认 UTC，可用 schedule_tz 指定。',
+    'cron 表达式使用 5 段格式（分 时 日 月 周）；时区默认 UTC，可用 schedule_tz 指定。' +
+    '在消息渠道会话中，只能管理本会话创建的定时任务，且结果自动投递回本会话。',
   inputSchema: scheduleManageInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -170,13 +177,66 @@ export interface ScheduleManageSessionRow {
 
 const TEAM_ROLE_LAYERS = new Set(['pm1', 'pm2', 'executor', 'reviewer', 'reception']);
 
-/** 返回拒绝原因；`null` 表示允许进入正常权限门控。 */
-export function resolveScheduleManageSessionDenial(
-  row: ScheduleManageSessionRow | null,
-): string | null {
-  if (!row) {
-    return '当前会话不存在或无法解析，已拒绝定时任务变更。';
+/**
+ * 渠道会话的定时任务作用域：`{ pluginId, chatId }`。
+ *
+ * 渠道会话（消息频道）此前被**整体拒绝**管理定时任务，于是「消息频道里既建不了
+ * 也删不掉任务」，而 schema / `runCronAgentJob` 又完整支持 `plugin_id` +
+ * `plugin_chat_id` 投递——那条分支成了不可达代码。现在放通，但把可见范围收敛到
+ * **当前渠道会话自己创建的任务**（同一个 plugin + 同一个 chat）：
+ *   - 群聊 A 删不掉群聊 B 的任务，也看不到别的会话的任务；
+ *   - 新建任务时强制把 `plugin_id` / `plugin_chat_id` 钉成当前渠道，投递才能回到
+ *     这个会话（此前渠道侧建的任务因缺这两个字段只会落进一个孤儿 cron 会话）。
+ *
+ * 渠道元数据由服务端写入（`buildChannelSessionMetadata`），客户端无法伪造。
+ */
+export interface ScheduleManageChannelScope {
+  readonly pluginId: string;
+  readonly chatId: string;
+}
+
+export function resolveScheduleManageChannelScope(
+  metadata: Record<string, unknown>,
+): ScheduleManageChannelScope | null {
+  if (metadata['source'] !== 'channel') {
+    return null;
   }
+  const chatId =
+    typeof metadata['channelChatId'] === 'string' ? metadata['channelChatId'].trim() : '';
+  const channel = metadata['channel'];
+  const pluginId =
+    channel && typeof channel === 'object' && !Array.isArray(channel)
+      ? typeof (channel as Record<string, unknown>)['id'] === 'string'
+        ? ((channel as Record<string, unknown>)['id'] as string).trim()
+        : ''
+      : '';
+  if (pluginId.length === 0 || chatId.length === 0) {
+    return null;
+  }
+  return { pluginId, chatId };
+}
+
+/** 任务是否属于该渠道会话的作用域。 */
+export function isJobInChannelScope(
+  job: CronJobRecord,
+  scope: ScheduleManageChannelScope,
+): boolean {
+  return job.plugin_id === scope.pluginId && job.plugin_chat_id === scope.chatId;
+}
+
+/**
+ * 本回合是否由定时任务派发。
+ *
+ * 前缀 `cron-` 由 `cron/agent-handler.ts` 的
+ * `` `cron-${job.id}-${randomUUID()}` `` 生成，并已在网关内部请求键注册表登记
+ * （`handoff/store/handoff-store.ts`）；此处只做前缀判定，注册表仍是唯一真相源
+ * （若前缀变更，`verify-team-turn-rollback-internal-keys` 守卫会先失败）。
+ */
+function isCronDispatchedTurn(clientRequestId: string | null | undefined): boolean {
+  return typeof clientRequestId === 'string' && clientRequestId.startsWith('cron-');
+}
+
+function parseSessionMetadata(row: ScheduleManageSessionRow): Record<string, unknown> {
   let metadata: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(row.metadata_json);
@@ -186,11 +246,33 @@ export function resolveScheduleManageSessionDenial(
   } catch {
     // 坏 metadata 不阻止守卫判定，按无 metadata 处理。
   }
+  return metadata;
+}
+
+/** 返回拒绝原因；`null` 表示允许进入正常权限门控。 */
+export function resolveScheduleManageSessionDenial(
+  row: ScheduleManageSessionRow | null,
+  options?: { readonly clientRequestId?: string | null },
+): string | null {
+  if (!row) {
+    return '当前会话不存在或无法解析，已拒绝定时任务变更。';
+  }
+  const metadata = parseSessionMetadata(row);
 
   const source = typeof metadata['source'] === 'string' ? metadata['source'] : '';
   // cron 会话优先判定：定时任务自己创建定时任务 = 无人扩权 / 自我复制。
   if (source === 'cron') {
     return '定时任务会话不允许管理定时任务（禁止自我复制与无人扩权）。';
+  }
+
+  // 渠道会话放通后新增的旁路：渠道里创建的定时任务在**渠道会话内**执行
+  // （`prepareCronSession` 复用渠道会话），此时 `source` 仍是 `'channel'`。
+  // 只按 source 判定会放过「定时任务 → 继续建定时任务」这条无人值守的自我复制
+  // 路径（原设计对 `source === 'cron'` 明确封堵的正是这一类）。
+  // cron 派发的回合键前缀 `cron-` 已在网关内部请求键注册表登记
+  // （`handoff-store.ts` 的 `GATEWAY_INTERNAL_REQUEST_KEY_SHAPES`），据此识别。
+  if (isCronDispatchedTurn(options?.clientRequestId)) {
+    return '定时任务触发的运行不允许管理定时任务（禁止自我复制与无人扩权）。';
   }
 
   const roleLayer = typeof row.role_layer === 'string' ? row.role_layer.trim() : '';
@@ -203,8 +285,10 @@ export function resolveScheduleManageSessionDenial(
     return '团队会话不允许管理定时任务，请回到个人会话操作。';
   }
 
-  if (source === 'channel') {
-    return '消息渠道会话不允许管理定时任务，请在设置页或桌面端操作。';
+  // 渠道会话：允许，但必须能解析出作用域；解析不出（元数据缺失）时 fail-closed，
+  // 否则作用域为空会把「限制在当前会话」退化成「可以操作全部任务」。
+  if (source === 'channel' && !resolveScheduleManageChannelScope(metadata)) {
+    return '消息渠道会话缺少渠道标识，已拒绝定时任务操作。';
   }
 
   return null;
@@ -258,9 +342,15 @@ function findOwnedJob(
   scheduler: CronSchedulerInstance,
   userId: string,
   jobId: string,
+  channelScope: ScheduleManageChannelScope | null = null,
 ): CronJobRecord {
   const job = scheduler.getJob(jobId);
   if (!job || job.user_id !== userId) {
+    throw new Error(`未找到定时任务 ${jobId}。`);
+  }
+  // 渠道会话只能触碰「本渠道本会话」创建的任务（越界一律按未找到处理，
+  // 不泄露其他会话的任务是否存在）。
+  if (channelScope && !isJobInChannelScope(job, channelScope)) {
     throw new Error(`未找到定时任务 ${jobId}。`);
   }
   return job;
@@ -319,18 +409,29 @@ function assertScheduleConsistent(input: {
   if (!input.scheduleExpr) {
     throw new Error('cron 调度必须提供 schedule_expr（5 段表达式）。');
   }
+  // 表达式必须真的能算出下次触发：坏表达式在调度层只会被静默跳过
+  // （任务「永不触发」而用户以为已建好）。
+  if (!isValidCronExpression(input.scheduleExpr)) {
+    throw new Error(
+      `schedule_expr "${input.scheduleExpr}" 不是合法的 5 段 cron 表达式（分 时 日 月 周）。`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
 // 动作实现
 // ---------------------------------------------------------------------------
 
-async function listJobsForTool(userId: string): Promise<string> {
+async function listJobsForTool(
+  userId: string,
+  channelScope: ScheduleManageChannelScope | null,
+): Promise<string> {
   const scheduler = await getCronScheduler();
   const jobs = scheduler
     .listJobs()
     .filter((job) => job.user_id === userId)
-    .map(toJobSummary);
+    .filter((job) => channelScope === null || isJobInChannelScope(job, channelScope))
+    .map((job) => ({ ...toJobSummary(job), nextFireAt: scheduler.getNextFireAt(job.id) }));
   return JSON.stringify({ ok: true, action: 'list', count: jobs.length, jobs }, null, 2);
 }
 
@@ -338,6 +439,7 @@ async function addJobForTool(
   userId: string,
   sessionId: string,
   input: z.infer<typeof scheduleManageInputSchema>,
+  channelScope: ScheduleManageChannelScope | null,
 ): Promise<string> {
   const draft = input.job;
   if (!draft?.name || !draft.schedule_kind || !draft.prompt) {
@@ -349,6 +451,17 @@ async function addJobForTool(
     scheduleEvery: draft.schedule_every ?? null,
     scheduleExpr: draft.schedule_expr ?? null,
   });
+  if (channelScope) {
+    // 渠道会话建的任务必须钉在当前渠道 + 当前会话上，否则结果回不到这里
+    // （会退化成一个用户看不见的孤儿 cron 会话）。
+    if (
+      draft.plugin_id !== undefined &&
+      draft.plugin_id !== null &&
+      draft.plugin_id !== channelScope.pluginId
+    ) {
+      throw new Error('渠道会话只能为当前渠道创建定时任务。');
+    }
+  }
   assertWorkingFolderAllowed(sessionId, draft.working_folder);
   const now = Date.now();
   const job: CronJobRecord = {
@@ -365,10 +478,15 @@ async function addJobForTool(
     model: draft.model ?? null,
     working_folder: draft.working_folder ?? null,
     session_id: draft.session_id ?? null,
-    delivery_mode: draft.delivery_mode ?? 'none',
-    delivery_target: draft.delivery_target ?? null,
-    plugin_id: draft.plugin_id ?? null,
-    plugin_chat_id: draft.plugin_chat_id ?? null,
+    // 渠道会话：投递由 `plugin_id` + `plugin_chat_id` 承载
+    // （`prepareCronSession` 命中该分支即复用渠道会话并回发）。
+    // `delivery_mode: 'session'` + `delivery_target` 走的是「把 target 当**会话 id**
+    // 查 sessions 表」的另一条路径，填 chatId 会在执行期直接抛错，故渠道任务固定
+    // `none` + 空 target，避免把一个能建的任务变成到点必失败。
+    delivery_mode: channelScope ? 'none' : (draft.delivery_mode ?? 'none'),
+    delivery_target: channelScope ? null : (draft.delivery_target ?? null),
+    plugin_id: channelScope ? channelScope.pluginId : (draft.plugin_id ?? null),
+    plugin_chat_id: channelScope ? channelScope.chatId : (draft.plugin_chat_id ?? null),
     enabled: draft.enabled ?? true,
     delete_after_run: draft.delete_after_run ?? false,
     max_iterations: draft.max_iterations ?? 10,
@@ -380,17 +498,26 @@ async function addJobForTool(
 
   const scheduler = await getCronScheduler();
   scheduler.addJob(job);
-  return JSON.stringify({ ok: true, action: 'add', job: toJobSummary(job) }, null, 2);
+  return JSON.stringify(
+    {
+      ok: true,
+      action: 'add',
+      job: { ...toJobSummary(job), nextFireAt: scheduler.getNextFireAt(job.id) },
+    },
+    null,
+    2,
+  );
 }
 
 async function updateJobForTool(
   userId: string,
   sessionId: string,
   input: z.infer<typeof scheduleManageInputSchema>,
+  channelScope: ScheduleManageChannelScope | null,
 ): Promise<string> {
   const scheduler = await getCronScheduler();
   const jobId = requireJobId(input.jobId);
-  const existing = findOwnedJob(scheduler, userId, jobId);
+  const existing = findOwnedJob(scheduler, userId, jobId, channelScope);
   const draft: ScheduleJobDraft = input.job ?? {};
   if (Object.keys(draft).length === 0) {
     throw new Error('update 至少需要一个要修改的字段。');
@@ -441,7 +568,13 @@ async function updateJobForTool(
 
   const updated = scheduler.getJob(jobId);
   return JSON.stringify(
-    { ok: true, action: 'update', job: updated ? toJobSummary(updated) : null },
+    {
+      ok: true,
+      action: 'update',
+      job: updated
+        ? { ...toJobSummary(updated), nextFireAt: scheduler.getNextFireAt(jobId) }
+        : null,
+    },
     null,
     2,
   );
@@ -450,10 +583,11 @@ async function updateJobForTool(
 async function removeJobForTool(
   userId: string,
   input: z.infer<typeof scheduleManageInputSchema>,
+  channelScope: ScheduleManageChannelScope | null,
 ): Promise<string> {
   const scheduler = await getCronScheduler();
   const jobId = requireJobId(input.jobId);
-  findOwnedJob(scheduler, userId, jobId);
+  findOwnedJob(scheduler, userId, jobId, channelScope);
   scheduler.removeJob(jobId);
   return JSON.stringify({ ok: true, action: 'remove', jobId, removed: true }, null, 2);
 }
@@ -462,31 +596,54 @@ async function setJobEnabledForTool(
   userId: string,
   input: z.infer<typeof scheduleManageInputSchema>,
   enabled: boolean,
+  channelScope: ScheduleManageChannelScope | null,
 ): Promise<string> {
   const scheduler = await getCronScheduler();
   const jobId = requireJobId(input.jobId);
-  findOwnedJob(scheduler, userId, jobId);
+  findOwnedJob(scheduler, userId, jobId, channelScope);
   scheduler.updateJob(jobId, { enabled });
   const updated = scheduler.getJob(jobId);
   return JSON.stringify(
     {
       ok: true,
       action: enabled ? 'enable' : 'disable',
-      job: updated ? toJobSummary(updated) : null,
+      job: updated
+        ? { ...toJobSummary(updated), nextFireAt: scheduler.getNextFireAt(jobId) }
+        : null,
     },
     null,
     2,
   );
 }
 
-async function historyForTool(
+/** `run`：手动立即触发一次（与到点触发同路径）；只返回是否已入队。 */
+async function runJobForTool(
   userId: string,
   input: z.infer<typeof scheduleManageInputSchema>,
+  channelScope: ScheduleManageChannelScope | null,
 ): Promise<string> {
   const scheduler = await getCronScheduler();
   const jobId = requireJobId(input.jobId);
-  findOwnedJob(scheduler, userId, jobId);
-  const history = listCronExecutionsForJob(jobId, HISTORY_LIMIT);
+  findOwnedJob(scheduler, userId, jobId, channelScope);
+  // 不 await handler（可能跑很久）；执行结果经 `history` 动作查看。
+  void scheduler.runJobNow(jobId).catch(() => undefined);
+  return JSON.stringify({ ok: true, action: 'run', jobId, started: true }, null, 2);
+}
+
+async function historyForTool(
+  userId: string,
+  input: z.infer<typeof scheduleManageInputSchema>,
+  channelScope: ScheduleManageChannelScope | null,
+): Promise<string> {
+  const scheduler = await getCronScheduler();
+  const jobId = requireJobId(input.jobId);
+  findOwnedJob(scheduler, userId, jobId, channelScope);
+  // 与 HTTP 端点同口径：带上产出摘要与执行会话 id，让模型也能把「这次跑了什么」
+  // 转述给用户（`delivery_mode: 'none'` 时这是唯一的内容来源）。
+  const history = attachExecutionPreviews({
+    userId,
+    executions: listCronExecutionsForJob(jobId, HISTORY_LIMIT),
+  });
   return JSON.stringify(
     { ok: true, action: 'history', jobId, count: history.length, history },
     null,
@@ -502,30 +659,38 @@ export interface RunScheduleManageInput {
   userId: string;
   sessionId: string;
   input: z.infer<typeof scheduleManageInputSchema>;
+  /** 本回合的请求键；用于识别「定时任务触发的无人值守运行」（见守卫说明）。 */
+  clientRequestId?: string | null;
 }
 
 export async function runScheduleManageTool(params: RunScheduleManageInput): Promise<string> {
-  const denial = resolveScheduleManageSessionDenial(readScheduleManageSessionRow(params.sessionId));
+  const row = readScheduleManageSessionRow(params.sessionId);
+  const denial = resolveScheduleManageSessionDenial(row, {
+    clientRequestId: params.clientRequestId ?? null,
+  });
   if (denial) {
     throw new Error(denial);
   }
+  const channelScope = row ? resolveScheduleManageChannelScope(parseSessionMetadata(row)) : null;
 
   const { userId, input } = params;
   switch (input.action) {
     case 'list':
-      return await listJobsForTool(userId);
+      return await listJobsForTool(userId, channelScope);
     case 'add':
-      return await addJobForTool(userId, params.sessionId, input);
+      return await addJobForTool(userId, params.sessionId, input, channelScope);
     case 'update':
-      return await updateJobForTool(userId, params.sessionId, input);
+      return await updateJobForTool(userId, params.sessionId, input, channelScope);
     case 'remove':
-      return await removeJobForTool(userId, input);
+      return await removeJobForTool(userId, input, channelScope);
     case 'enable':
-      return await setJobEnabledForTool(userId, input, true);
+      return await setJobEnabledForTool(userId, input, true, channelScope);
     case 'disable':
-      return await setJobEnabledForTool(userId, input, false);
+      return await setJobEnabledForTool(userId, input, false, channelScope);
+    case 'run':
+      return await runJobForTool(userId, input, channelScope);
     case 'history':
-      return await historyForTool(userId, input);
+      return await historyForTool(userId, input, channelScope);
     default: {
       const exhaustive: never = input.action;
       throw new Error(`不支持的 action: ${String(exhaustive)}`);

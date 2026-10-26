@@ -298,7 +298,7 @@ jobs:
           else
             TARGET_TRIPLE="$(rustc -Vv | sed -n 's/^host: //p')"
           fi
-          BINARY="apps/desktop/src-tauri/binaries/agent-gateway-${TARGET_TRIPLE}"
+          BINARY="apps/desktop/src-tauri/binaries/openawork-gateway-${TARGET_TRIPLE}"
           case "${TARGET_TRIPLE}" in
             *windows*) BINARY="${BINARY}.exe" ;;
           esac
@@ -334,6 +334,41 @@ jobs:
             }
             console.log(`browser plan OK: ${parsed.targets.length} target(s) on ${parsed.platform}-${parsed.arch}`);
           ' "${PLAN_LOG}"
+
+      # 任务管理器里显示成「bun」的根因是 exe 资源继承了 Bun 运行时（图标 + 文件属性）。
+      # bun 的 --windows-* 只能在本机 Windows 上生效，Linux 上无法验证，故在真实产物上断言。
+      - name: Verify Windows sidecar metadata
+        if: startsWith(matrix.runner, 'windows-')
+        shell: pwsh
+        run: |
+          $binary = Get-ChildItem apps/desktop/src-tauri/binaries/openawork-gateway-*.exe |
+            Select-Object -First 1
+          if (-not $binary) {
+            throw 'gateway sidecar binary not found under binaries/'
+          }
+
+          $info = $binary.VersionInfo
+          $expected = @{
+            FileDescription = 'OpenAWork Gateway'
+            ProductName     = 'OpenAWork'
+            CompanyName     = 'OpenAWork'
+          }
+
+          $failures = @()
+          foreach ($key in $expected.Keys) {
+            if ($info.$key -ne $expected[$key]) {
+              $failures += "$key='$($info.$key)' (expected '$($expected[$key])')"
+            }
+          }
+          if ($info.FileVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+            $failures += "FileVersion='$($info.FileVersion)' (expected 4 numeric segments)"
+          }
+
+          if ($failures.Count -gt 0) {
+            $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
+            exit 1
+          }
+          Write-Host "Sidecar metadata OK: $($info.FileDescription) / $($info.ProductName) / $($info.FileVersion)"
 
       - name: Import macOS signing cert
         if: startsWith(matrix.runner, 'macos-') && env.MACOS_CODESIGN_READY == 'true'

@@ -49,6 +49,17 @@ export const SESSION_DELETE_RECOVERY_STATEMENTS: ReadonlyArray<SessionDeleteReco
     sql: 'DELETE FROM session_entry WHERE session_id = ? AND user_id = ?',
     params: ({ sessionId, userId }) => [sessionId, userId],
   },
+  // `event_log` / `event_sequences` 没有指向 sessions 的外键（`aggregate_id`
+  // 只是文本），FK 开 / 关都不会被级联带走；不显式删就会永久残留，且
+  // `message.part.created` 事件携带完整 part（含 base64 图片）。
+  {
+    sql: 'DELETE FROM event_log WHERE aggregate_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'DELETE FROM event_sequences WHERE aggregate_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
   {
     sql: 'DELETE FROM session_messages_fts WHERE session_id = ?',
     params: ({ sessionId }) => [sessionId],

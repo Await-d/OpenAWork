@@ -25,18 +25,30 @@ export type MessageRole = 'user' | 'assistant' | 'tool' | 'system' | 'synthetic'
 export type SubagentNoticeState = 'done' | 'failed' | 'cancelled';
 
 /**
- * Notice contract for `role: 'synthetic'` messages whose
- * `metadata.source === 'subagent'`.
+ * `role: 'synthetic'` 通知的**来源判别字段**。
+ *
+ * 网关会注入两类合成通知，共用同一条渲染通道但语义不同：
+ *   - `'subagent'`：子代理完成通知（`task-job-delivery`），可跳转到子会话；
+ *   - `'cron'`：定时任务执行结果投递（`cron/agent-handler`），可跳转到目标会话
+ *     或该任务的执行现场。
+ *
+ * 客户端必须按本字段分流：新增来源时同步扩这里与各端解析器，
+ * 否则新来源会被误当作子代理通知渲染（文案与跳转目标都会错）。
+ */
+export type SyntheticNoticeSource = 'subagent' | 'cron';
+
+/**
+ * Notice contract for `role: 'synthetic'` messages injected by the gateway.
  *
  * Mirrors opencode's `SubagentCompletion.deliver` metadata
  * (`packages/core/src/session/subagent-completion.ts`). Clients render it as a
- * compact notice row that links to the child session — never as user input.
+ * compact notice row — never as user input.
  */
 export type SubagentNoticeMetadata = {
-  source: 'subagent';
-  /** Child session id; presence makes the notice navigable. */
+  source: SyntheticNoticeSource;
+  /** 跳转目标会话 id（子代理是子会话，cron 是投递目标会话）；存在则通知可点击。 */
   childID?: string;
-  /** Subagent name (e.g. `explore`). */
+  /** 来源名（子代理名 / 定时任务名）。 */
   agent?: string;
   state?: SubagentNoticeState;
 };

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { resolveToolCallCardDisplayData } from './ToolCallCard.js';
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { resolveToolCallCardDisplayData, ToolCallCard } from './ToolCallCard.js';
+
+afterEach(cleanup);
 
 /**
  * `patch` (and write/edit/multi_edit) outputs are object envelopes
@@ -274,5 +279,82 @@ describe('resolveToolCallCardDisplayData diffView（截断输出的补闭合修�
     expect(data.diffView?.truncated).toBeUndefined();
     expect(data.diffView?.summary).not.toContain('输出可能不完整');
     expect(data.diffView?.filePath).toBe('/repo/a.md');
+  });
+});
+
+describe('ToolCallCard 右栏：已有 diff 视图时不重复贴原始输出', () => {
+  const OUTPUT = JSON.stringify({
+    filePath: '/repo/src/a.ts',
+    before: 'const a = 1;',
+    after: 'const a = 2;',
+  });
+
+  function renderExpanded(options?: { isError?: boolean }): HTMLElement {
+    const { container } = render(
+      <ToolCallCard
+        toolName="edit"
+        input={{ filePath: '/repo/src/a.ts' }}
+        output={OUTPUT}
+        status="completed"
+        {...options}
+      />,
+    );
+
+    const toggle = container.querySelector('[data-tool-card-toggle="true"]');
+    if (!toggle) throw new Error('未渲染展开按钮');
+    fireEvent.click(toggle);
+    return container;
+  }
+
+  it('正常结束时不再渲染整个 output 的 JSON（diff 已表达变更）', () => {
+    const container = renderExpanded();
+
+    expect(container.textContent).not.toContain('"before"');
+    expect(container.textContent).not.toContain('"after"');
+  });
+
+  it('失败时保留「错误输出」以便定位原因', () => {
+    const container = renderExpanded({ isError: true });
+
+    expect(container.textContent).toContain('错误输出');
+  });
+});
+
+describe('右栏：仅 {ok:true} 的确认型输出折叠为「✓ 成功」', () => {
+  function renderOutput(output: unknown, isError = false): HTMLElement {
+    const { container } = render(
+      <ToolCallCard
+        toolName="desktop_control"
+        input={{ action: 'click' }}
+        output={output}
+        status="completed"
+        isError={isError}
+      />,
+    );
+
+    const toggle = container.querySelector('[data-tool-card-toggle="true"]');
+    if (!toggle) throw new Error('未渲染展开按钮');
+    fireEvent.click(toggle);
+    return container;
+  }
+
+  it('JSON 字符串形态不再显示「ok true」字段', () => {
+    const container = renderOutput(JSON.stringify({ ok: true }));
+
+    expect(container.textContent).toContain('✓ 成功');
+    expect(container.textContent).not.toContain('"ok"');
+  });
+
+  it('对象形态同样折叠', () => {
+    const container = renderOutput({ ok: true });
+
+    expect(container.textContent).toContain('✓ 成功');
+  });
+
+  it('失败或多字段输出保持原样（错误原因不丢）', () => {
+    const container = renderOutput({ ok: false, error: '目标会话不存在。' }, true);
+
+    expect(container.textContent).toContain('目标会话不存在');
+    expect(container.textContent).not.toContain('✓ 成功');
   });
 });

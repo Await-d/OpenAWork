@@ -9,6 +9,7 @@ import type {
 } from './types.js';
 import { channelFetch } from './channel-http.js';
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
+import { attachWeComInboundImages } from './wecom-media.js';
 
 /** 媒体上传超时：上传比普通消息慢，与飞书文件上传一致给 60s。 */
 const WECOM_MEDIA_UPLOAD_TIMEOUT_MS = 60_000;
@@ -52,6 +53,17 @@ export class WeComChannelService implements MessagingChannelService {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * 服务层入站 enrich：企业微信图片消息只带 `PicUrl`（远程临时地址），需在
+   * 通用路由派发前下载为 base64 附件，供多模态输入消费。
+   *
+   * 失败只降级（丢弃远程地址、保留占位符文案），绝不上抛——`PicUrl` 原样
+   * 下发会被上游协议当成 base64 拒绝整轮请求（2026-10-22 排障包）。
+   */
+  async enrichInboundMessage(message: ChannelMessage): Promise<ChannelMessage> {
+    return attachWeComInboundImages(message);
   }
 
   async sendMessage(chatId: string, content: string): Promise<{ messageId: string }> {

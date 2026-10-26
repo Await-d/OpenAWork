@@ -25,5 +25,8 @@ export function isInlineTool(toolName: string): boolean {
   const normalized = toolName.trim().toLowerCase();
   if (INLINE_TOOLS.has(normalized)) return true;
   if (normalized.startsWith('lsp_')) return true;
+  // 虚拟 LSP MCP（`mcp__lsp__find_references` 等）与内置 `lsp_*` 是同一批能力，
+  // 同样用单行 pill + 可展开的输出视图，避免同一个动作出现两种卡片形态。
+  if (normalized.startsWith('mcp__lsp__')) return true;
   return false;
 }

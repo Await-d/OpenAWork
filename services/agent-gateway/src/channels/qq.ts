@@ -11,7 +11,9 @@ import type {
 import { listRecentChannelGroups, listRecentChannelMessages } from './channel-message-cache.js';
 import { QQApiClient } from './qq-api.js';
 import { QQGatewayClient } from './qq-gateway.js';
+import { hasRemoteImages } from './inbound-image.js';
 import { parseQQInboundMessage } from './inbound-parsers/qq.js';
+import { attachQQInboundImages } from './qq-media.js';
 import { parseQQChatId } from './qq-target.js';
 import { channelLogInfo, summarizeChannelMessage } from './channel-log.js';
 import { markQQWakeupSent, resolveQQWakeupEligibility } from './qq-wakeup-store.js';
@@ -327,16 +329,19 @@ export class QQChannelService implements MessagingChannelService {
     return result;
   }
 
-  handleWebhookEvent(body: unknown, signature?: string): void {
+  async handleWebhookEvent(body: unknown, signature?: string): Promise<void> {
     void signature;
     const message = parseQQInboundMessage(body);
-    if (message) {
-      channelLogInfo('qq webhook message parsed', {
-        pluginId: this.pluginId,
-        ...summarizeChannelMessage(message),
-      });
-      this.safeNotify({ type: 'message', pluginId: this.pluginId, message });
+    if (!message) {
+      return;
     }
+    channelLogInfo('qq webhook message parsed', {
+      pluginId: this.pluginId,
+      ...summarizeChannelMessage(message),
+    });
+    // 与企业微信 / Discord 同源：CDN 直链必须内联成 base64 才能进模型上下文。
+    const enriched = hasRemoteImages(message) ? await attachQQInboundImages(message) : message;
+    this.safeNotify({ type: 'message', pluginId: this.pluginId, message: enriched });
   }
 
   async getGroupMessages(_chatId: string, _count?: number): Promise<ChannelMessage[]> {

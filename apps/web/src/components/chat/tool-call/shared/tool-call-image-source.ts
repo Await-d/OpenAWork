@@ -106,10 +106,34 @@ function normalizeOutputRecord(output: unknown): Record<string, unknown> | null 
   }
 }
 
-/** 桌面截图类工具：从 output 里取 artifactId + image/* 的 mimeType。 */
+/**
+ * 桌面截图类工具：两种落点。
+ *
+ * - `desktop_control`：截图存成产物，output 里是 `artifactId` + `image/*` 的 mimeType；
+ * - `desktop_automation`：`screenshot` 动作直接把 base64 写进 output
+ *   （`{ screenshotBase64: "..." }`，见网关 `runDesktopAutomationTool`），
+ *   没有 artifactId —— 只认 artifact 的话该动作的截图永远不显示。
+ */
 function resolveDesktopScreenshotSource(output: unknown): ToolCallImageSource | null {
   const record = normalizeOutputRecord(output);
   if (!record) return null;
+
+  const base64 = record['screenshotBase64'];
+  if (typeof base64 === 'string') {
+    const trimmed = base64.trim();
+    if (INLINE_DATA_URL_PATTERN.test(trimmed)) {
+      return { kind: 'inline', src: trimmed, alt: DESKTOP_SCREENSHOT_ALT };
+    }
+    // 网关的 screenshot 固定按 PNG 编码（`manager.screenshot()` 无 format 参数时默认 png）。
+    const compact = trimmed.replace(/\s+/g, '');
+    if (compact.length > BARE_BASE64_MIN_LENGTH && BARE_BASE64_PATTERN.test(compact)) {
+      return {
+        kind: 'inline',
+        src: `data:image/png;base64,${compact}`,
+        alt: DESKTOP_SCREENSHOT_ALT,
+      };
+    }
+  }
 
   const artifactId = record['artifactId'];
   if (typeof artifactId !== 'string' || artifactId.trim().length === 0) {

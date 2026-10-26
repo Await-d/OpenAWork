@@ -1,4 +1,4 @@
-import { parseSubagentNotice, SUBAGENT_NOTICE_DEFAULT_AGENT } from '@openAwork/shared';
+import { parseSyntheticNotice, SUBAGENT_NOTICE_DEFAULT_AGENT } from '@openAwork/shared';
 import type { Message, SubagentNotice, SubagentNoticeState } from '@openAwork/shared';
 
 export interface MobileChatMessage {
@@ -96,7 +96,7 @@ function toSubagentNoticeMessage(record: Record<string, unknown>, id: string): M
  * 从网关返回的原始会话行解析「子代理完成通知」；不是通知时返回 `null`。
  *
  * **语义不在本文件实现**：只做「原始行 → `Message` 形状」适配，然后委托
- * `@openAwork/shared` 的 `parseSubagentNotice`（Web / 桌面 / 移动三端同一份 SSOT），
+ * `@openAwork/shared` 的 `parseSyntheticNotice`（Web / 桌面 / 移动三端同一份 SSOT），
  * 避免可见性规则在三端漂移。
  *
  * 测试环境通过 `apps/mobile/vitest.config.ts` 把 `@openAwork/shared` 别名到源码，
@@ -118,8 +118,10 @@ export function parseMobileSubagentNotice(rawMessage: unknown): MobileSubagentNo
   }
 
   // 语义（可见性规则、状态回落、agent 兜底）统一由 `@openAwork/shared` 的
-  // `parseSubagentNotice` 决定，移动端只做输入形状适配，避免三端语义漂移。
-  return parseSubagentNotice(toSubagentNoticeMessage(record, id));
+  // `parseSyntheticNotice` 决定，移动端只做输入形状适配，避免三端语义漂移。
+  // 必须用新函数：旧 `parseSubagentNotice` 只认 `source: 'subagent'`，会把
+  // 定时任务结果投递（`source: 'cron'`）判为「非通知」而静默丢弃。
+  return parseSyntheticNotice(toSubagentNoticeMessage(record, id));
 }
 
 /** 按出现顺序收集子代理完成通知；非通知行被忽略。 */

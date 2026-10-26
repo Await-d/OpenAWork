@@ -3,7 +3,7 @@ import {
   COMPACTION_SETTINGS_KEY,
   readCompactionSettings,
 } from '../compaction/compaction-policy.js';
-import { sqliteGet, sqliteRun } from '../infra/db.js';
+import { sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import {
   getCompactionProviderConfig,
@@ -22,6 +22,7 @@ import {
 } from './channel-localization.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 import { buildChannelSessionKey, upsertChannelSession } from './channel-session-store.js';
+import { deleteSessionMessageSearchDocumentsForSession } from '../session/session-search-store.js';
 import type { ChannelInstance, ChannelReplyLanguage } from './types.js';
 
 interface SessionMetadataRow {
@@ -111,18 +112,36 @@ export function resetChannelConversation(
     sessionKey: buildChannelSessionKey(input.channel.id, input.chatId),
     userId: input.channel.ownerUserId,
   });
-  sqliteRun('DELETE FROM part_v2 WHERE session_id = ? AND user_id = ?', [
-    sessionId,
-    input.channel.ownerUserId,
-  ]);
-  sqliteRun('DELETE FROM message_v2 WHERE session_id = ? AND user_id = ?', [
-    sessionId,
-    input.channel.ownerUserId,
-  ]);
-  sqliteRun(
-    "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
-    [sessionId, input.channel.ownerUserId],
-  );
+  // 四条写操作必须原子：中途失败会留下「消息已删但搜索索引还在」这类
+  // 不可见的不一致（reset 没有后续补偿路径）。
+  sqliteTransaction(() => {
+    sqliteRun('DELETE FROM part_v2 WHERE session_id = ? AND user_id = ?', [
+      sessionId,
+      input.channel.ownerUserId,
+    ]);
+    sqliteRun('DELETE FROM message_v2 WHERE session_id = ? AND user_id = ?', [
+      sessionId,
+      input.channel.ownerUserId,
+    ]);
+    // `/reset` 清的是会话内容，但 event_log 没有指向 sessions 的外键，
+    // 不显式删就会把每次 reset 前的全量事件（含 part 快照里的 base64 图片）
+    // 永久留在库里，只靠全局 50k 行配额回收。`event_sequences` 刻意保留：
+    // `allocateNextSeq` 以它为游标，删掉会让重置后的 seq 回退。
+    //
+    // `session_entry`（typed 事件流）**刻意不删**：它的 seq 由
+    // `MAX(seq) + 1` 现算（`session-entry-store.ts` 的 `nextSeq`），删行会让
+    // seq 从 1 重新开始，而重连补齐按 `seq > afterSeq` 过滤——持有旧游标的
+    // 客户端将永远看不到 reset 之后的流式事件。它的行随会话最终删除时由
+    // FK 级联清理，不构成泄漏。
+    sqliteRun('DELETE FROM event_log WHERE aggregate_id = ?', [sessionId]);
+    // 搜索索引（FTS5 虚拟表）没有触发器同步，删除消息必须显式清，
+    // 否则 reset 之后仍能搜到已删内容。
+    deleteSessionMessageSearchDocumentsForSession(sessionId);
+    sqliteRun(
+      "UPDATE sessions SET state_status = 'idle', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
+      [sessionId, input.channel.ownerUserId],
+    );
+  });
   return { content: buildResetConversationMessage(language) };
 }
 

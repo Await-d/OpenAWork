@@ -181,7 +181,8 @@ function toQQImageAttachment(attachment: Record<string, unknown>): ChannelImageA
   };
 }
 
-// QQ CDN 附件 URL 直映射为 imageUrl（与 Discord 同款取舍：不下载、不转 base64，避免消息体积膨胀）。
+// QQ CDN 附件 URL 直映射为 imageUrl；下载与 base64 内联在投递前的
+// `attachQQInboundImages` 完成（parser 保持纯函数、不发网络请求）。
 function readQQImageAttachments(
   event: Record<string, unknown>,
   maxCount: number,

@@ -35,6 +35,18 @@ export function extractTaskListFromOutput(output: unknown): TaskLike[] | null {
   if (Array.isArray(r.tasks)) {
     return r.tasks as TaskLike[];
   }
+
+  // 单任务包装：`task_create` / `task_update` / `task_get` 都返回 `{ task }`
+  // （create 另带 `reused`）。错误 / 版本冲突时同时带 `error`，此时回退通用字段表，
+  // 否则冲突原因会被单任务卡片盖掉。
+  if (typeof r.error === 'string' && r.error.length > 0) {
+    return null;
+  }
+  const single = r.task;
+  if (single && typeof single === 'object' && !Array.isArray(single)) {
+    return [single as TaskLike];
+  }
+
   if (Array.isArray(output)) {
     // 检查第一个元素是否像任务
     const first: unknown = output[0];

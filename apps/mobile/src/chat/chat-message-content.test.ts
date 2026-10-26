@@ -137,7 +137,7 @@ describe('parseMobileSubagentNotice', () => {
     expect(notice).not.toBeNull();
     expect(notice?.state).toBe('failed');
     expect(notice?.description).toBe('');
-    expect(notice?.childSessionId).toBe('child-9');
+    expect(notice?.targetSessionId).toBe('child-9');
   });
 
   it('done / cancelled 空 description 不可见', () => {
@@ -167,7 +167,7 @@ describe('parseMobileSubagentNotice', () => {
     const notice = parseMobileSubagentNotice(buildRawNotice({ metadata: { source: 'subagent' } }));
 
     expect(notice?.agent).toBe('子代理');
-    expect(notice?.childSessionId).toBeUndefined();
+    expect(notice?.targetSessionId).toBeUndefined();
   });
 
   it('description 两端空白被裁剪', () => {
@@ -239,6 +239,7 @@ function buildNotice(
 ): MobileSubagentNotice {
   return {
     id,
+    source: 'subagent',
     agent: 'explore',
     state: 'done',
     description: `任务 ${id}`,

@@ -26,10 +26,11 @@ const EXPLORE_RESULTS = `<results>
 function buildNotice(overrides: Partial<SubagentNotice> = {}): SubagentNotice {
   return {
     id: 'notice-1',
+    source: 'subagent',
     agent: 'explore',
     state: 'done',
     description: '审计会话唤醒原语',
-    childSessionId: 'child-1',
+    targetSessionId: 'child-1',
     text: '子代理已完成 · 审计会话唤醒原语',
     createdAt: 1_700_000_000_000,
     ...overrides,
@@ -87,7 +88,7 @@ describe('SubagentNoticeRow', () => {
     const onOpenChild = vi.fn();
     render(
       <SubagentNoticeRow
-        notice={buildNotice({ childSessionId: undefined })}
+        notice={buildNotice({ targetSessionId: undefined })}
         onOpenChild={onOpenChild}
       />,
     );

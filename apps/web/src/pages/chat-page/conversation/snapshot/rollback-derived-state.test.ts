@@ -45,6 +45,7 @@ function makeTask(id: string, sessionId?: string): SessionTask {
 function makeNotice(id: string, createdAt: number): SubagentNotice {
   return {
     id,
+    source: 'subagent',
     agent: 'explore',
     state: 'done',
     description: `任务 ${id}`,

@@ -134,6 +134,28 @@ registerProjector(MessageEvents.Removed.type, (event) => {
   // session-search-store.ts).
   sqliteRun('DELETE FROM session_messages WHERE id = ?', [data.messageID]);
   sqliteRun('DELETE FROM session_messages_fts WHERE message_id = ?', [data.messageID]);
+  // 释放该消息在 `event_log` 里的 part 快照。`message.part.created` /
+  // `message.part.updated` 携带**完整 part**，而 `file` 类型 part 的 `url`
+  // 可能是 data URL 形式的 base64 图片（单张上限 4 MiB）。消息本体删掉后
+  // 这些事件再无消费者，留着只会挤占 `event_log` 的全局 50k 行配额
+  // （按行数计、不按字节，单行可达数 MB）。
+  //
+  // 只清 part 快照，不动 `message.created` / `message.updated`（元数据，体积小）
+  // 与 `message.part.delta`（文本增量，行数占绝大多数，单独清理代价高于收益）。
+  // 本事件自身尚未落库（`emitEvent` 先投影、后 INSERT），不会被误删。
+  // `json_valid` 防护历史 / 损坏行，避免 malformed JSON 让删除整体失败。
+  sqliteRun(
+    `DELETE FROM event_log
+      WHERE aggregate_id = ?
+        AND type IN (?, ?)
+        AND CASE WHEN json_valid(data) THEN json_extract(data, '$.part.messageID') END = ?`,
+    [
+      data.sessionID,
+      MessageEvents.PartCreated.type,
+      MessageEvents.PartUpdated.type,
+      data.messageID,
+    ],
+  );
 });
 
 // ─── Part Projectors ───
@@ -220,6 +242,17 @@ registerProjector(MessageEvents.PartRemoved.type, (event) => {
     data.messageID,
     data.sessionID,
   ]);
+  // 同步释放该 part 在 `event_log` 里的快照：`file` 类型（图片）part 的 `url`
+  // 是 base64 data URL，单张可达数 MB。会话级图片淘汰
+  // （`session/inline-image-retention.ts`）正是删 part 来实现「只留最近若干张」，
+  // 若这里不清事件，被淘汰的图片仍会占着 event_log 的全局 50k 行配额。
+  sqliteRun(
+    `DELETE FROM event_log
+      WHERE aggregate_id = ?
+        AND type IN (?, ?)
+        AND CASE WHEN json_valid(data) THEN json_extract(data, '$.part.id') END = ?`,
+    [data.sessionID, MessageEvents.PartCreated.type, MessageEvents.PartUpdated.type, data.partID],
+  );
 });
 
 // ─── Auto-initialize projectors on import ───
@@ -314,6 +347,17 @@ registerProjector(SessionEvents.Updated.type, (event) => {
   ]);
 });
 
+/**
+ * 事件驱动的会话删除投影。
+ *
+ * 注意覆盖边界：这里只处理「有 FK 级联 / 需要同步的索引」——`message_v2` /
+ * `part_v2` / `artifacts` 行随 CASCADE 消失，FTS 由下面一行显式清。
+ * **不覆盖**：`event_log` / `event_sequences`（无外键）与磁盘型产物
+ * （`artifacts-index.json` + 文件）。生产删除路径走 `routes/sessions.ts` 的
+ * `deleteSessionTree`，那里两者都会回收；若将来把某个入口改成 emit 本事件，
+ * 必须自行补这两项（在 projector 内删 `event_log` 无效——本事件由
+ * `emitEvent` 在投影**之后**才落库，删掉也会被自身补回一行）。
+ */
 registerProjector(SessionEvents.Deleted.type, (event) => {
   const data = event.data as { sessionID: string; info: SessionInfo };
   sqliteRun('DELETE FROM sessions WHERE id = ?', [data.sessionID]);

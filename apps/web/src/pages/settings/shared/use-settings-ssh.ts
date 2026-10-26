@@ -3,7 +3,7 @@ import { createSshClient } from '@openAwork/web-client';
 import type { SSHDialogEntry } from '@openAwork/web-client';
 import type { ArtifactItem, FileTreeNode, SSHConnectionEntry } from '@openAwork/shared-ui';
 import { logger } from '../../../utils/log/logger.js';
-import { resolveSshDialogRestore } from './settings-page-helpers.js';
+import { isSshDirectoryPreviewError, resolveSshDialogRestore } from './settings-page-helpers.js';
 
 interface UseSettingsSshOptions {
   gatewayUrl: string;
@@ -59,6 +59,8 @@ export function useSettingsSsh({
     // 例如重启后 auto-reconnect 还没跑完就点开对话。这里兜底成清空面板 +
     // 记录日志，避免 unhandled rejection，让 UI 停在「已选中、未加载」态。
     // try/catch 下沉到模块级 `runSettingsSshActionOnce`（见其注释）。
+    const sshClient = createSshClient(gatewayUrl);
+    let nodes: FileTreeNode[] = [];
     await runSettingsSshActionOnce({
       onError: (error) => {
         setSshNodes([]);
@@ -67,29 +69,40 @@ export function useSettingsSsh({
         logger.warn('failed to load ssh files', error);
       },
       run: async () => {
-        const sshClient = createSshClient(gatewayUrl);
         const entries = await sshClient.listFiles(token, connectionId, path);
-        const nodes: FileTreeNode[] = entries.map((entry) => ({
+        nodes = entries.map((entry) => ({
           path: entry.path,
           name: entry.name,
           type: entry.kind,
         }));
         setSshNodes(nodes);
         setSshCurrentPath(path);
-        const firstFile = nodes.find((node) => node.type === 'file');
-        if (firstFile) {
-          const previewPayload = await sshClient.readFile(token, connectionId, firstFile.path);
-          setSshPreview({
-            id: previewPayload.path,
-            name: previewPayload.path.split('/').pop() ?? previewPayload.path,
-            type: 'text',
-            createdAt: Date.now(),
-            sessionId: connectionId,
-            content: previewPayload.content,
-          });
-        } else {
-          setSshPreview(null);
-        }
+      },
+    });
+
+    // 自动预览与列表加载分属两个错误域：预览失败（典型是指向目录的软链被
+    // `/ssh/files` 标成 file，readFile 才判定为目录并回 400）只清空预览，
+    // 绝不能把已经加载好的文件列表一起清掉——那会让用户看到「空目录」。
+    const firstFile = nodes.find((node) => node.type === 'file');
+    if (!firstFile) {
+      setSshPreview(null);
+      return;
+    }
+    await runSettingsSshActionOnce({
+      onError: (error) => {
+        setSshPreview(null);
+        logger.warn('failed to preview ssh file', error);
+      },
+      run: async () => {
+        const previewPayload = await sshClient.readFile(token, connectionId, firstFile.path);
+        setSshPreview({
+          id: previewPayload.path,
+          name: previewPayload.path.split('/').pop() ?? previewPayload.path,
+          type: 'text',
+          createdAt: Date.now(),
+          sessionId: connectionId,
+          content: previewPayload.content,
+        });
       },
     });
   };
@@ -193,18 +206,28 @@ export function useSettingsSsh({
       void loadSshFiles(activeSSHConnectionId, path);
       return;
     }
+    const connectionId = activeSSHConnectionId;
     void createSshClient(gatewayUrl)
-      .readFile(token, activeSSHConnectionId, path)
+      .readFile(token, connectionId, path)
       .then((preview) =>
         setSshPreview({
           id: preview.path,
           name: preview.path.split('/').pop() ?? preview.path,
           type: 'text',
           createdAt: Date.now(),
-          sessionId: activeSSHConnectionId,
+          sessionId: connectionId,
           content: preview.content,
         }),
-      );
+      )
+      .catch((error: unknown) => {
+        // 指向目录的软链会被 `/ssh/files` 按 lstat 标成 file；这里按「其实是
+        // 目录」兜底成进入目录，而不是把 400 当成预览失败。
+        if (isSshDirectoryPreviewError(error)) {
+          void loadSshFiles(connectionId, path);
+          return;
+        }
+        logger.warn('failed to preview ssh file', error);
+      });
   };
 
   const uploadSshFile = (file: File) => {
@@ -224,7 +247,8 @@ export function useSettingsSsh({
         })
         .then(() => {
           void loadSshFiles(activeSSHConnectionId, sshCurrentPath);
-        });
+        })
+        .catch((error: unknown) => logger.warn('failed to upload ssh file', error));
     };
     reader.readAsArrayBuffer(file);
   };

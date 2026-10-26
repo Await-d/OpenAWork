@@ -60,6 +60,10 @@ const REQUIRED_TABLE_HITS: ReadonlyArray<{
   // child rows first.
   { table: 'artifact_versions', before: 'artifacts' },
   { table: 'artifacts' },
+  // Event-sourcing 的两张表没有指向 sessions 的外键（`aggregate_id` 只是文本），
+  // FK 关闭时必须显式清理；`message.part.created` 事件携带完整 part（含 base64 图片）。
+  { table: 'event_log', before: 'sessions' },
+  { table: 'event_sequences', before: 'sessions' },
 ];
 
 function indexOfStatementForTable(table: string): number {
