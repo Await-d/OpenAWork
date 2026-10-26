@@ -131,8 +131,10 @@ const EXECUTION_PREVIEW_CHARS = 400;
 /**
  * 给执行历史补齐产出摘要。
  *
- * 只处理**最近 `previewLimit` 条且带 `session_id`** 的记录：历史最多返回 100 条，
- * 逐条读会话消息会变成 N+1 查询。超过窗口的旧记录没有摘要也无妨（点进会话仍可看全文）。
+ * 只处理**最近 `previewLimit` 条可预览记录**（带 `session_id` 且不是 `skipped`）：
+ * 历史最多返回 100 条，逐条读会话消息会变成 N+1 查询。跳过记录会占满窗口，
+ * 故按「实际读取次数」而不是数组下标计数。超过窗口的旧记录没有摘要也无妨
+ * （点进会话仍可看全文）。
  */
 export function attachExecutionPreviews(input: {
   readonly userId: string;
@@ -140,10 +142,12 @@ export function attachExecutionPreviews(input: {
   readonly previewLimit?: number;
 }): CronJobHistoryEntry[] {
   const previewLimit = input.previewLimit ?? 5;
-  return input.executions.map((exec, index) => {
-    if (index >= previewLimit || !exec.session_id) {
+  let previewed = 0;
+  return input.executions.map((exec) => {
+    if (!exec.session_id || exec.status === 'skipped' || previewed >= previewLimit) {
       return { ...exec };
     }
+    previewed += 1;
     const text = readCronResultText({
       executionSessionId: exec.session_id,
       userId: input.userId,
@@ -315,7 +319,11 @@ export function deliverCronResult(
 export function notifyCronJobUnavailable(job: CronJobRecord, reason: string): void {
   try {
     createNotification({
-      id: `cron-unavailable:${job.id}`,
+      // **不能复用固定 id**：`createNotification` 的 dedupe 只匹配 `status='unread'`，
+      // 用户读过那条通知后再失败时不再命中 dedupe，INSERT 会撞主键并被
+      // `isUniqueConstraintViolation` 静默吞掉——任务从此「永远静默」。
+      // 用随机 id + 固定 dedupeKey：未读时更新同一条，已读后能重新点亮。
+      id: crypto.randomUUID(),
       userId: job.user_id,
       eventType: 'cron_job_unavailable',
       kind: 'informational',

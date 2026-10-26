@@ -171,6 +171,22 @@ describe('cron delivery', () => {
     expect(rows[0]?.body).toContain('第二次触发');
   });
 
+  it('目标不可达的通知：用户读过之后再次失败仍会重新提醒', () => {
+    const job = cronJob({ delivery_mode: 'session', delivery_target: 'gone' });
+    delivery.notifyCronJobUnavailable(job, '第一次失败');
+    // 用户读掉这条通知：后续失败不应因为固定 id 撞主键而被静默吞掉。
+    db.sqliteRun("UPDATE notifications SET status = 'read' WHERE user_id = ?", [USER_ID]);
+    delivery.notifyCronJobUnavailable(job, '第二次失败');
+
+    const rows = db.sqliteAll<{ body: string; status: string }>(
+      'SELECT body, status FROM notifications WHERE user_id = ? ORDER BY rowid ASC',
+      [USER_ID],
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[1]?.status).toBe('unread');
+    expect(rows[1]?.body).toContain('第二次失败');
+  });
+
   it('desktop 模式：写用户级通知（复用 /notification-events 链路）', () => {
     // `notifications.session_id` 有指向 sessions 的外键，执行会话必须先存在。
     insertSession('exec-4', 'cron:执行现场');

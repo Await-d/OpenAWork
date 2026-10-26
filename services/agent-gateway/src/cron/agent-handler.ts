@@ -143,22 +143,21 @@ function createCronExecutionSession(job: CronJobRecord): string {
 }
 
 /**
- * 校验任务声明的目标会话仍然归属该用户。
+ * 校验任务声明的**投递目标**会话仍然归属该用户。
  *
  * 与执行会话解耦之后，`session_id` / `delivery_target` 只表达「结果该投递到哪」，
- * 不再决定本次在哪个会话里跑。但**仍然要校验**：目标会话被删掉时任务必须
- * 明确失败（落 `failed` + 原因），而不是跑完把产出丢进虚空——这正是本次要修的
- * 「任务看起来成功、实际什么都没留下」那一类问题。
+ * 不再决定本次在哪个会话里跑。`delivery_mode: 'session'` 时目标被删必须明确失败
+ * （落 `failed` + 原因），而不是跑完把产出丢进虚空。
  *
- * 注：实际投递动作（把产出写回该会话 / 桌面端）尚未实现，属下一步。
+ * **只对 `session` 模式生效**：`desktop` 模式只用执行会话 id 做通知跳转
+ * （`deliverCronResultToDesktop` 会先确认它还在，不在就不带 session），`none`
+ * 根本不投递。对这两种模式也校验 `session_id` 会把「来源会话被删」变成永久失败：
+ * 任务每次触发都在执行前抛错并推一条「无法执行」，而它其实完全能跑。
  */
 function assertDeclaredTargetsStillOwned(job: CronJobRecord): void {
-  if (job.delivery_mode === 'session' && job.delivery_target) {
-    assertOwnedSession(job.delivery_target, job.user_id);
-  }
-  if (job.session_id) {
-    assertOwnedSession(job.session_id, job.user_id);
-  }
+  if (job.delivery_mode !== 'session') return;
+  const target = job.delivery_target ?? job.session_id;
+  if (target) assertOwnedSession(target, job.user_id);
 }
 
 /**
@@ -341,10 +340,17 @@ export async function runCronAgentJob(
     errorMessage = error instanceof Error ? error.message : String(error);
   }
 
+  // `none` 模式不投递，不要白读一次执行会话消息（`listSessionMessagesV2` 会
+  // join 最近 3 轮的 parts）；其余模式才需要摘要正文。
+  const resultText =
+    job.delivery_mode === 'none'
+      ? ''
+      : readCronResultText({ executionSessionId: sessionId, userId: job.user_id });
+
   const delivery = deliverCronResult(job, {
     executionSessionId: sessionId,
     executionStartedAt,
-    resultText: readCronResultText({ executionSessionId: sessionId, userId: job.user_id }),
+    resultText,
     succeeded,
     ...(errorMessage ? { errorMessage } : {}),
   });

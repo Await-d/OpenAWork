@@ -224,6 +224,41 @@ export function listCronExecutionsForJob(jobId: string, limit = 100): CronExecut
 }
 
 /**
+ * 批量取每个任务最近一次执行（`GET /cron/jobs` 用）。
+ *
+ * 为什么需要：列表页此前对每个任务单独发一次 `/history?limit=1`，10 个任务就是
+ * 11 次 HTTP + 11 次 SQL。列表本来就要逐条渲染「上次是否失败」，把这份数据并进
+ * 列表响应能少掉整整一轮 N+1。
+ *
+ * 用窗口函数一次查完（SQLite ≥ 3.25）；`IN (...)` 的参数个数受 SQLite 上限
+ * （默认 999）约束，故按 500 一批切分。
+ */
+export function listLatestCronExecutionsForJobs(
+  jobIds: readonly string[],
+): Map<string, CronExecutionRecord> {
+  const latest = new Map<string, CronExecutionRecord>();
+  const unique = [...new Set(jobIds)];
+  for (let offset = 0; offset < unique.length; offset += 500) {
+    const batch = unique.slice(offset, offset + 500);
+    if (batch.length === 0) continue;
+    const placeholders = batch.map(() => '?').join(', ');
+    const rows = sqliteAll<CronExecutionRow>(
+      `SELECT * FROM (
+         SELECT cron_job_executions.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY job_id ORDER BY started_at DESC, id DESC
+                ) AS row_num
+           FROM cron_job_executions
+          WHERE job_id IN (${placeholders})
+       ) WHERE row_num = 1`,
+      batch,
+    );
+    for (const row of rows) latest.set(row.job_id, rowToCronExecution(row));
+  }
+  return latest;
+}
+
+/**
  * 重启补偿：把上次进程残留的 `running` 执行标记为 `failed`（网关重启中断），
  * 避免历史里永远挂着不可能结束的运行态。
  */

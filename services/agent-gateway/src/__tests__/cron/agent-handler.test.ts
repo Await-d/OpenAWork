@@ -206,10 +206,10 @@ describe('cron agent channel delivery', () => {
     expect(JSON.parse(row?.metadata_json ?? '{}')['source']).toBe('cron');
   });
 
-  it('目标会话已被删除时明确失败、且主动推一条通知（用户不必等自己发现）', async () => {
-    await expect(handler.runCronAgentJob(cronJob({ session_id: 'gone-session' }))).rejects.toThrow(
-      /does not exist/,
-    );
+  it('投递目标会话已被删除时明确失败、且主动推一条通知（用户不必等自己发现）', async () => {
+    await expect(
+      handler.runCronAgentJob(cronJob({ delivery_mode: 'session', session_id: 'gone-session' })),
+    ).rejects.toThrow(/does not exist/);
     expect(runSessionInBackgroundMock).not.toHaveBeenCalled();
 
     const notice = db.sqliteGet<{ title: string; body: string }>(
@@ -218,6 +218,13 @@ describe('cron agent channel delivery', () => {
     );
     expect(notice?.title ?? '').toContain('无法执行');
     expect(notice?.body ?? '').toContain('does not exist');
+  });
+
+  it('delivery_mode 为 none 时来源会话被删不应阻塞执行', async () => {
+    // 回归：此前无条件校验 session_id，`none` / `desktop` 任务只要来源会话被删，
+    // 每次触发都在执行前失败并反复推「无法执行」，而它其实完全能跑。
+    await handler.runCronAgentJob(cronJob({ session_id: 'gone-session', delivery_mode: 'none' }));
+    expect(runSessionInBackgroundMock).toHaveBeenCalledTimes(1);
   });
 
   it('执行会话数量有上限：超出的旧 idle cron 会话被回收，且不碰用户会话', async () => {
