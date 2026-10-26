@@ -31,7 +31,7 @@ describe('collectSubagentNotices', () => {
       agent: 'explore',
       state: 'done',
       description: '审计会话唤醒原语',
-      childSessionId: 'child-1',
+      targetSessionId: 'child-1',
     });
     expect(notices[1]).toMatchObject({ state: 'failed', agent: 'general' });
   });
