@@ -264,7 +264,6 @@ export function buildAdminParameters(name: string): ToolParameters | undefined {
               plugin_chat_id: { type: ['string', 'null'] },
               enabled: { type: 'boolean' },
               delete_after_run: { type: 'boolean', description: '一次性任务执行后自动删除。' },
-              max_iterations: { type: 'integer', minimum: 1, maximum: 100 },
             },
             additionalProperties: false,
           },

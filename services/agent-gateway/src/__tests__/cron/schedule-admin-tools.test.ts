@@ -267,6 +267,38 @@ describe('schedule_manage · add / list / update / remove', () => {
     expect(cronScheduler.getJob(added.job.id)?.schedule_kind).toBe('every');
   });
 
+  it('add / update 拒绝拼错的时区（否则静默按 UTC 跑）', async () => {
+    await expect(
+      run({
+        action: 'add',
+        job: {
+          name: 'x',
+          schedule_kind: 'cron',
+          schedule_expr: '0 9 * * *',
+          schedule_tz: 'Asia/Shangai',
+          prompt: 'p',
+        },
+      }),
+    ).rejects.toThrow(/IANA/);
+
+    const created = JSON.parse(
+      await run({
+        action: 'add',
+        job: {
+          name: 'cron job',
+          schedule_kind: 'cron',
+          schedule_expr: '0 9 * * *',
+          schedule_tz: 'UTC',
+          prompt: 'p',
+        },
+      }),
+    ) as { job: { id: string } };
+    await expect(
+      run({ action: 'update', jobId: created.job.id, job: { schedule_tz: 'Asia/Shangai' } }),
+    ).rejects.toThrow(/IANA/);
+    expect(cronScheduler.getJob(created.job.id)?.schedule_tz).toBe('UTC');
+  });
+
   it('working_folder 必须在当前会话工作区内', async () => {
     const inside = JSON.parse(
       await run({

@@ -7,7 +7,7 @@
  * 「启用 / 禁用」按钮因此永不渲染——派生统一收口在这里，避免两端各写一份。
  */
 
-import type { CronJobRecord } from './types.js';
+import type { CronExecutionRecord, CronJobRecord } from './types.js';
 
 export type CronJobStatus = 'enabled' | 'disabled';
 
@@ -72,11 +72,20 @@ export interface CronJobView extends CronJobRecord {
   readonly fireCount: number;
   readonly lastFiredAt: number | null;
   readonly nextFireAt: number | null;
+  /**
+   * 最近一次执行（含失败原因）。列表页据此标出「上次失败」，不必再逐任务
+   * 单独拉一次 history（N+1）。
+   */
+  readonly lastExecution: CronExecutionRecord | null;
 }
 
 export function toCronJobView(
   job: CronJobRecord,
-  options: { readonly nextFireAt: number | null; readonly running?: boolean },
+  options: {
+    readonly nextFireAt: number | null;
+    readonly running?: boolean;
+    readonly lastExecution?: CronExecutionRecord | null;
+  },
 ): CronJobView {
   return {
     ...job,
@@ -87,5 +96,6 @@ export function toCronJobView(
     fireCount: job.fire_count,
     lastFiredAt: job.last_fired_at,
     nextFireAt: options.nextFireAt,
+    lastExecution: options.lastExecution ?? null,
   };
 }

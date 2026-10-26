@@ -19,8 +19,8 @@ import { z } from 'zod';
 import type { ToolDefinition } from '@openAwork/agent-core';
 import { sqliteGet } from '../infra/db.js';
 import { listCronExecutionsForJob } from './cron-store.js';
-import { isValidCronExpression } from './cron-expression.js';
 import { attachExecutionPreviews } from './delivery.js';
+import { assertValidSchedule, type ScheduleValidationInput } from './schedule-validation.js';
 import { SCHEDULE_MANAGE_TOOL_NAME } from './schedule-manage-tool-name.js';
 import type { CronScheduler } from './scheduler.js';
 import type { CronJobRecord } from './types.js';
@@ -70,7 +70,6 @@ const scheduleJobDraftSchema = z
     plugin_chat_id: z.string().trim().min(1).max(200).nullable().optional(),
     enabled: z.boolean().optional(),
     delete_after_run: z.boolean().optional(),
-    max_iterations: z.number().int().min(1).max(100).optional(),
   })
   .strict();
 
@@ -356,9 +355,6 @@ function findOwnedJob(
   return job;
 }
 
-/** 工具层的 `every` 间隔下限：低于 1s 的定时 agent 运行没有实际意义且浪费资源。 */
-const MIN_SCHEDULE_EVERY_MS = 1000;
-
 /**
  * 校验 `working_folder`：不得越出当前会话工作区。
  *
@@ -384,38 +380,14 @@ function assertWorkingFolderAllowed(sessionId: string, workingFolder: unknown): 
   }
 }
 
-/** 校验「结果态」的调度配置，避免出现永不触发的任务（静默失效）。 */
-function assertScheduleConsistent(input: {
-  scheduleKind: CronJobRecord['schedule_kind'];
-  scheduleAt: number | null;
-  scheduleEvery: number | null;
-  scheduleExpr: string | null;
-}): void {
-  if (input.scheduleKind === 'at') {
-    if (typeof input.scheduleAt !== 'number') {
-      throw new Error('at 调度必须提供 schedule_at（epoch 毫秒）。');
-    }
-    if (input.scheduleAt <= Date.now()) {
-      throw new Error('schedule_at 必须是未来时间（epoch 毫秒）。');
-    }
-    return;
-  }
-  if (input.scheduleKind === 'every') {
-    if (typeof input.scheduleEvery !== 'number' || input.scheduleEvery < MIN_SCHEDULE_EVERY_MS) {
-      throw new Error(`every 调度必须提供不小于 ${MIN_SCHEDULE_EVERY_MS} 毫秒的 schedule_every。`);
-    }
-    return;
-  }
-  if (!input.scheduleExpr) {
-    throw new Error('cron 调度必须提供 schedule_expr（5 段表达式）。');
-  }
-  // 表达式必须真的能算出下次触发：坏表达式在调度层只会被静默跳过
-  // （任务「永不触发」而用户以为已建好）。
-  if (!isValidCronExpression(input.scheduleExpr)) {
-    throw new Error(
-      `schedule_expr "${input.scheduleExpr}" 不是合法的 5 段 cron 表达式（分 时 日 月 周）。`,
-    );
-  }
+/**
+ * 校验「结果态」的调度配置，避免出现永不触发的任务（静默失效）。
+ *
+ * 与 HTTP 路由共用 `schedule-validation`：此前工具侧只校验表达式，时区拼错
+ * （`Asia/Shangai`）仍会静默回落 UTC，任务偏移数小时且无提示。
+ */
+function assertScheduleConsistent(input: ScheduleValidationInput): void {
+  assertValidSchedule(input);
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +422,10 @@ async function addJobForTool(
     scheduleAt: draft.schedule_at ?? null,
     scheduleEvery: draft.schedule_every ?? null,
     scheduleExpr: draft.schedule_expr ?? null,
+    scheduleTimeZone: draft.schedule_tz ?? 'UTC',
+    deliveryMode: channelScope ? 'none' : (draft.delivery_mode ?? 'none'),
+    deliveryTarget: channelScope ? null : (draft.delivery_target ?? null),
+    sessionId: draft.session_id ?? null,
   });
   if (channelScope) {
     // 渠道会话建的任务必须钉在当前渠道 + 当前会话上，否则结果回不到这里
@@ -489,7 +465,8 @@ async function addJobForTool(
     plugin_chat_id: channelScope ? channelScope.chatId : (draft.plugin_chat_id ?? null),
     enabled: draft.enabled ?? true,
     delete_after_run: draft.delete_after_run ?? false,
-    max_iterations: draft.max_iterations ?? 10,
+    // 历史列保留，但不再作为可配置项暴露（执行链路没有对应实现）。
+    max_iterations: 10,
     last_fired_at: null,
     fire_count: 0,
     created_at: now,
@@ -530,6 +507,10 @@ async function updateJobForTool(
     draft.schedule_at !== undefined ||
     draft.schedule_every !== undefined ||
     draft.schedule_expr !== undefined ||
+    draft.schedule_tz !== undefined ||
+    draft.delivery_mode !== undefined ||
+    draft.delivery_target !== undefined ||
+    draft.session_id !== undefined ||
     draft.enabled === true;
   if (scheduleTouched) {
     assertScheduleConsistent({
@@ -539,6 +520,16 @@ async function updateJobForTool(
         draft.schedule_every !== undefined ? draft.schedule_every : existing.schedule_every,
       scheduleExpr:
         draft.schedule_expr !== undefined ? draft.schedule_expr : existing.schedule_expr,
+      scheduleTimeZone: draft.schedule_tz !== undefined ? draft.schedule_tz : existing.schedule_tz,
+      deliveryMode: draft.delivery_mode ?? existing.delivery_mode,
+      deliveryTarget:
+        draft.delivery_target !== undefined ? draft.delivery_target : existing.delivery_target,
+      sessionId: draft.session_id !== undefined ? draft.session_id : existing.session_id,
+      // 只改名 / 停用不因「at 已过期」被挡；改 kind、时间或重新启用则必须严格校验。
+      allowExpiredAt:
+        draft.schedule_kind === undefined &&
+        draft.schedule_at === undefined &&
+        draft.enabled !== true,
     });
   }
   if (draft.working_folder !== undefined) {
@@ -563,7 +554,6 @@ async function updateJobForTool(
     ...(draft.plugin_chat_id !== undefined ? { plugin_chat_id: draft.plugin_chat_id } : {}),
     ...(draft.enabled !== undefined ? { enabled: draft.enabled } : {}),
     ...(draft.delete_after_run !== undefined ? { delete_after_run: draft.delete_after_run } : {}),
-    ...(draft.max_iterations !== undefined ? { max_iterations: draft.max_iterations } : {}),
   });
 
   const updated = scheduler.getJob(jobId);
@@ -600,7 +590,24 @@ async function setJobEnabledForTool(
 ): Promise<string> {
   const scheduler = await getCronScheduler();
   const jobId = requireJobId(input.jobId);
-  findOwnedJob(scheduler, userId, jobId, channelScope);
+  const job = findOwnedJob(scheduler, userId, jobId, channelScope);
+
+  // 启用前按「结果态」校验：过期的一次性任务 / 坏表达式启用后也不会触发。
+  // 直接报错比返回 `ok: true`（而 `nextFireAt` 为 null）诚实。
+  if (enabled) {
+    assertScheduleConsistent({
+      scheduleKind: job.schedule_kind,
+      scheduleAt: job.schedule_at,
+      scheduleEvery: job.schedule_every,
+      scheduleExpr: job.schedule_expr,
+      scheduleTimeZone: job.schedule_tz,
+      deliveryMode: job.delivery_mode,
+      deliveryTarget: job.delivery_target,
+      sessionId: job.session_id,
+      allowExpiredAt: false,
+    });
+  }
+
   scheduler.updateJob(jobId, { enabled });
   const updated = scheduler.getJob(jobId);
   return JSON.stringify(
@@ -616,7 +623,7 @@ async function setJobEnabledForTool(
   );
 }
 
-/** `run`：手动立即触发一次（与到点触发同路径）；只返回是否已入队。 */
+/** `run`：手动立即触发一次（与到点触发同路径）。 */
 async function runJobForTool(
   userId: string,
   input: z.infer<typeof scheduleManageInputSchema>,
@@ -625,9 +632,24 @@ async function runJobForTool(
   const scheduler = await getCronScheduler();
   const jobId = requireJobId(input.jobId);
   findOwnedJob(scheduler, userId, jobId, channelScope);
-  // 不 await handler（可能跑很久）；执行结果经 `history` 动作查看。
-  void scheduler.runJobNow(jobId).catch(() => undefined);
-  return JSON.stringify({ ok: true, action: 'run', jobId, started: true }, null, 2);
+  // 只起跑，不 await handler（可能跑很久）；执行结果经 `history` 动作查看。
+  // 但「没跑起来」必须报错：任务在途 / 并发已满时旧实现仍返回 started:true，
+  // 模型会据此告诉用户「已触发」而实际什么都没发生。
+  const started = scheduler.startJobNow(jobId);
+  if (!started.started) {
+    throw new Error(
+      started.reason === 'in-flight'
+        ? '该任务上一次执行尚未结束，请稍后再试。'
+        : started.reason === 'busy'
+          ? '网关当前并发执行已满，请稍后再试。'
+          : '目标定时任务当前无法执行。',
+    );
+  }
+  return JSON.stringify(
+    { ok: true, action: 'run', jobId, started: true, executionId: started.executionId },
+    null,
+    2,
+  );
 }
 
 async function historyForTool(

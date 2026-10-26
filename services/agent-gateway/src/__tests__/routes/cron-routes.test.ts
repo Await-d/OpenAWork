@@ -146,6 +146,177 @@ describe('cron routes', () => {
     await app.close();
   });
 
+  it('POST /cron/jobs 拒绝「字段齐全但永不触发」的配置', async () => {
+    const app = await buildApp();
+    const post = async (payload: Record<string, unknown>) =>
+      app.inject({
+        method: 'POST',
+        url: '/cron/jobs',
+        headers: { authorization: bearer(app), 'content-type': 'application/json' },
+        payload,
+      });
+
+    // cron 缺表达式：落库后 scheduleJob 会直接 return，任务永不再跑。
+    const missingExpr = await post({ name: 'x', schedule_kind: 'cron', prompt: 'p' });
+    expect(missingExpr.statusCode).toBe(400);
+    expect(missingExpr.json().error).toContain('schedule_expr');
+
+    // 时区拼错：解析器静默回落 UTC，任务按错误时间跑。
+    const badTz = await post({
+      name: 'x',
+      schedule_kind: 'cron',
+      schedule_expr: '0 9 * * *',
+      schedule_tz: 'Asia/Shangai',
+      prompt: 'p',
+    });
+    expect(badTz.statusCode).toBe(400);
+    expect(badTz.json().error).toContain('IANA');
+
+    // 投递到会话却没有目标。
+    const noTarget = await post({
+      name: 'x',
+      schedule_kind: 'cron',
+      schedule_expr: '0 9 * * *',
+      prompt: 'p',
+      delivery_mode: 'session',
+    });
+    expect(noTarget.statusCode).toBe(400);
+    expect(noTarget.json().error).toContain('delivery_target');
+
+    await app.close();
+  });
+
+  it('PATCH 只改投递方式 / 启停时不得清空调度字段', async () => {
+    const app = await buildApp();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: {
+        name: '每日同步',
+        schedule_kind: 'cron',
+        schedule_expr: '0 9 * * *',
+        schedule_tz: 'Asia/Shanghai',
+        prompt: 'p',
+      },
+    });
+    const jobId = (created.json().job as { id: string }).id;
+
+    // 回归：`jobSchema.partial()` 会把字段默认值一并注入，PATCH 只传
+    // delivery_mode 时 schedule_expr 会被写成 null，任务从此永不触发。
+    const delivery = await app.inject({
+      method: 'PATCH',
+      url: `/cron/jobs/${jobId}`,
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: { delivery_mode: 'desktop' },
+    });
+    expect(delivery.statusCode).toBe(200);
+    const afterDelivery = delivery.json().job as Record<string, unknown>;
+    expect(afterDelivery).toMatchObject({
+      schedule_kind: 'cron',
+      schedule_expr: '0 9 * * *',
+      schedule_tz: 'Asia/Shanghai',
+      delivery_mode: 'desktop',
+      enabled: true,
+    });
+    expect(typeof afterDelivery['nextFireAt']).toBe('number');
+
+    const disabled = await app.inject({
+      method: 'PATCH',
+      url: `/cron/jobs/${jobId}`,
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: { enabled: false },
+    });
+    const afterDisable = disabled.json().job as Record<string, unknown>;
+    expect(afterDisable).toMatchObject({ enabled: false, schedule_expr: '0 9 * * *' });
+    await app.close();
+  });
+
+  it('PATCH 把投递改成 session 但没给目标时拒绝，且不改动任务', async () => {
+    const app = await buildApp();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: {
+        name: '无目标',
+        schedule_kind: 'cron',
+        schedule_expr: '0 9 * * *',
+        prompt: 'p',
+      },
+    });
+    const jobId = (created.json().job as { id: string }).id;
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/cron/jobs/${jobId}`,
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: { delivery_mode: 'session' },
+    });
+    expect(patched.statusCode).toBe(400);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app) },
+    });
+    const job = (listed.json().jobs as Record<string, unknown>[])[0]!;
+    expect(job['delivery_mode']).toBe('none');
+    await app.close();
+  });
+
+  it('POST /cron/jobs 拒绝语法合法但永不触发的表达式', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: {
+        name: '永不触发',
+        schedule_kind: 'cron',
+        schedule_expr: '0 0 30 2 *',
+        prompt: 'p',
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain('不会触发');
+    await app.close();
+  });
+
+  it('PATCH 把任务改成已过去的一次性任务时拒绝，且原任务不变', async () => {
+    const app = await buildApp();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: {
+        name: '保留原配置',
+        schedule_kind: 'cron',
+        schedule_expr: '0 9 * * *',
+        prompt: 'p',
+      },
+    });
+    const jobId = (created.json().job as { id: string }).id;
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/cron/jobs/${jobId}`,
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: { schedule_kind: 'at', schedule_at: Date.now() - 1_000 },
+    });
+    expect(patched.statusCode).toBe(400);
+    expect(patched.json().error).toContain('未来时间');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app) },
+    });
+    const job = (listed.json().jobs as Record<string, unknown>[])[0]!;
+    expect(job).toMatchObject({ schedule_kind: 'cron', schedule_expr: '0 9 * * *' });
+    await app.close();
+  });
+
   it('列表返回派生字段：scheduleDisplay / status / fireCount / nextFireAt / scheduleKind', async () => {
     const app = await buildApp();
     const created = await app.inject({
@@ -189,6 +360,41 @@ describe('cron routes', () => {
       headers: { authorization: bearer(app) },
     });
     expect((disabled.json().job as Record<string, unknown>)['status']).toBe('disabled');
+    await app.close();
+  });
+
+  it('列表带上 lastExecution：前端不再逐任务拉 history', async () => {
+    const db = await import('../../infra/db.js');
+    const app = await buildApp();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload: {
+        name: '带最近一次执行',
+        schedule_kind: 'cron',
+        schedule_expr: '0 9 * * *',
+        prompt: 'p',
+      },
+    });
+    const jobId = (created.json().job as { id: string }).id;
+    db.sqliteRun(
+      `INSERT INTO cron_job_executions (id, job_id, user_id, started_at, finished_at, status, error)
+       VALUES ('e-last', ?, ?, 1, 2, 'failed', 'boom')`,
+      [jobId, CRON_USER_ID],
+    );
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app) },
+    });
+    const job = (listed.json().jobs as Record<string, unknown>[])[0]!;
+    expect(job['lastExecution']).toMatchObject({
+      id: 'e-last',
+      status: 'failed',
+      error: 'boom',
+    });
     await app.close();
   });
 
@@ -253,6 +459,20 @@ describe('cron routes', () => {
     });
     expect(run.statusCode).toBe(202);
     await app.close();
+  });
+});
+
+describe('cron 并发配置', () => {
+  it('OPENAWORK_CRON_MAX_CONCURRENT：合法值生效，非法 / 越界回落', async () => {
+    const { resolveCronMaxConcurrent, DEFAULT_CRON_MAX_CONCURRENT } =
+      await import('../../cron/router.js');
+    expect(resolveCronMaxConcurrent('5')).toBe(5);
+    expect(resolveCronMaxConcurrent(undefined)).toBe(DEFAULT_CRON_MAX_CONCURRENT);
+    expect(resolveCronMaxConcurrent('0')).toBe(DEFAULT_CRON_MAX_CONCURRENT);
+    expect(resolveCronMaxConcurrent('-2')).toBe(DEFAULT_CRON_MAX_CONCURRENT);
+    expect(resolveCronMaxConcurrent('abc')).toBe(DEFAULT_CRON_MAX_CONCURRENT);
+    // 上限保护：配成 1000 也不会真的开 1000 条并发会话。
+    expect(resolveCronMaxConcurrent('1000')).toBe(50);
   });
 });
 

@@ -8,14 +8,16 @@ import { runCronAgentJob } from './agent-handler.js';
 import {
   deleteCronJob,
   listCronExecutionsForJob,
+  listLatestCronExecutionsForJobs,
   recordCronExecution,
   upsertCronJob,
 } from './cron-store.js';
 import { CronScheduler, type CronSchedulerPersistence } from './scheduler.js';
 import { isValidCronExpression } from './cron-expression.js';
+import { collectScheduleIssues } from './schedule-validation.js';
 import { attachExecutionPreviews } from './delivery.js';
 import { toCronJobView, type CronJobView } from './schedule-display.js';
-import type { CronJobRecord } from './types.js';
+import type { CronExecutionRecord, CronJobRecord } from './types.js';
 
 /**
  * 持久化钩子：任务定义与执行历史落 `cron_jobs` / `cron_job_executions`；
@@ -27,9 +29,27 @@ const cronPersistence: CronSchedulerPersistence = {
   recordExecution: (job, exec) => recordCronExecution(job.user_id, exec),
 };
 
+/** 定时任务全局并发上限默认值（单任务同时最多 1 次，跨任务最多 N 次）。 */
+export const DEFAULT_CRON_MAX_CONCURRENT = 3;
+
+/**
+ * 解析 `OPENAWORK_CRON_MAX_CONCURRENT`。
+ *
+ * 上限 50 是保护性约束：并发的是完整 agent 会话（每条都占模型连接与 SQLite
+ * 写锁），配错一个超大值等于把网关变成压测目标。非法值 / 缺省回落默认，
+ * 不阻断启动。
+ */
+export function resolveCronMaxConcurrent(
+  raw: string | undefined = process.env['OPENAWORK_CRON_MAX_CONCURRENT'],
+): number {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_CRON_MAX_CONCURRENT;
+  return Math.min(parsed, 50);
+}
+
 export const cronScheduler = new CronScheduler(
   runCronAgentJob,
-  3,
+  resolveCronMaxConcurrent(),
   undefined,
   undefined,
   cronPersistence,
@@ -69,45 +89,90 @@ cronScheduler.setPersistenceErrorListener((label, error) => {
   });
 });
 
-const jobSchema = z.object({
+/**
+ * 创建 / 更新共用的字段定义（**不带默认值**）。
+ *
+ * 关键约束：PATCH 的 schema 不能由 `jobSchema.partial()` 生成。Zod 的 `.partial()`
+ * 只是把字段包成 optional，字段自身的 `.default()` 仍会在缺省时填充——实测
+ * `jobSchema.partial().parse({ enabled: false })` 会带回
+ * `schedule_expr: null` / `schedule_tz: 'UTC'` / `delivery_mode: 'none'`。
+ * 结果就是「改投递方式」或「停用」顺手把调度表达式清空，任务从此永不触发
+ * （`scheduleJob` 见空表达式直接 return），而界面仍显示「已启用」。
+ * 因此下面拆成两份：创建用默认值补齐，更新只认显式传入的字段。
+ */
+const scheduleExprField = z
+  .string()
+  .nullable()
+  .refine((value) => value === null || value === undefined || isValidCronExpression(value), {
+    message: 'schedule_expr 必须是合法的 5 段 cron 表达式（分 时 日 月 周）。',
+  });
+
+const jobBaseFields = {
   name: z.string().min(1),
   schedule_kind: z.enum(['at', 'every', 'cron']),
-  schedule_at: z.number().optional().nullable().default(null),
-  schedule_every: z.number().int().positive().optional().nullable().default(null),
-  schedule_expr: z
-    .string()
-    .optional()
-    .nullable()
-    .default(null)
-    .refine((value) => value === null || value === undefined || isValidCronExpression(value), {
-      message: 'schedule_expr 必须是合法的 5 段 cron 表达式（分 时 日 月 周）。',
-    }),
-  schedule_tz: z.string().default('UTC'),
+  schedule_at: z.number().nullable(),
+  schedule_every: z.number().int().positive().nullable(),
+  schedule_expr: scheduleExprField,
+  schedule_tz: z.string(),
   prompt: z.string().min(1),
-  agent_id: z.string().optional().nullable().default(null),
-  model: z.string().optional().nullable().default(null),
-  working_folder: z.string().optional().nullable().default(null),
-  session_id: z.string().optional().nullable().default(null),
-  delivery_mode: z.enum(['desktop', 'session', 'none']).default('none'),
-  delivery_target: z.string().optional().nullable().default(null),
-  plugin_id: z.string().optional().nullable().default(null),
-  plugin_chat_id: z.string().optional().nullable().default(null),
-  enabled: z.boolean().default(true),
-  delete_after_run: z.boolean().default(false),
-  max_iterations: z.number().int().default(10),
+  agent_id: z.string().nullable(),
+  model: z.string().nullable(),
+  working_folder: z.string().nullable(),
+  session_id: z.string().nullable(),
+  delivery_mode: z.enum(['desktop', 'session', 'none']),
+  delivery_target: z.string().nullable(),
+  plugin_id: z.string().nullable(),
+  plugin_chat_id: z.string().nullable(),
+  enabled: z.boolean(),
+  delete_after_run: z.boolean(),
+};
+
+const jobSchema = z.object({
+  ...jobBaseFields,
+  schedule_at: jobBaseFields.schedule_at.default(null),
+  schedule_every: jobBaseFields.schedule_every.default(null),
+  schedule_expr: jobBaseFields.schedule_expr.default(null),
+  schedule_tz: jobBaseFields.schedule_tz.default('UTC'),
+  agent_id: jobBaseFields.agent_id.default(null),
+  model: jobBaseFields.model.default(null),
+  working_folder: jobBaseFields.working_folder.default(null),
+  session_id: jobBaseFields.session_id.default(null),
+  delivery_mode: jobBaseFields.delivery_mode.default('none'),
+  delivery_target: jobBaseFields.delivery_target.default(null),
+  plugin_id: jobBaseFields.plugin_id.default(null),
+  plugin_chat_id: jobBaseFields.plugin_chat_id.default(null),
+  enabled: jobBaseFields.enabled.default(true),
+  delete_after_run: jobBaseFields.delete_after_run.default(false),
 });
-const jobPatchSchema = jobSchema.partial();
+/** 更新只接受显式字段：不注入任何默认值（见上方注释）。 */
+const jobPatchSchema = z.object(jobBaseFields).partial();
 const authUserSchema = z.object({
   sub: z.string().min(1),
   email: z.string().email(),
 });
 
-type CronRouteErrorCode = 'cron_job_not_found' | 'invalid_cron_job';
+type CronRouteErrorCode = 'cron_job_not_found' | 'invalid_cron_job' | 'cron_job_busy';
 
 const CRON_ROUTE_ERROR_MESSAGES: Record<CronRouteErrorCode, string> = {
   cron_job_not_found: '目标定时任务不存在。',
   invalid_cron_job: '定时任务配置无效。',
+  // 「立即运行」没跑起来：任务在途 / 并发已满。必须区别于 202 假成功。
+  cron_job_busy: '定时任务当前无法执行。',
 };
+
+/** 「立即运行」被跳过时的用户可读原因。 */
+function cronRunSkipMessage(reason: 'missing' | 'disabled' | 'in-flight' | 'busy'): string {
+  switch (reason) {
+    case 'in-flight':
+      return '该任务上一次执行尚未结束，请稍后再试。';
+    case 'busy':
+      return '网关当前并发执行已满，请稍后再试。';
+    case 'disabled':
+      return '该任务已停用。';
+    case 'missing':
+      return '目标定时任务不存在。';
+  }
+}
 
 function cronRouteErrorPayload(
   code: CronRouteErrorCode,
@@ -130,10 +195,42 @@ function parseAuthUser(request: FastifyRequest): z.infer<typeof authUserSchema> 
 }
 
 /** 原始记录 → 视图模型（补 `scheduleDisplay` / `status` / `fireCount` / `nextFireAt`）。 */
-function toView(job: CronJobRecord): CronJobView {
+function toView(job: CronJobRecord, lastExecution: CronExecutionRecord | null = null): CronJobView {
   return toCronJobView(job, {
     nextFireAt: cronScheduler.getNextFireAt(job.id),
     running: cronScheduler.getExecutionHistory(job.id).some((exec) => exec.status === 'running'),
+    lastExecution,
+  });
+}
+
+/**
+ * 写入前的一致性校验：kind 必填项、时区名、投递目标。
+ *
+ * 只做 Zod 的类型检查挡不住「字段齐全但组合起来永不触发」的配置——这类任务
+ * 建完就静默停摆，所以必须在落库 / 改内存之前拒绝。
+ */
+function collectJobIssues(
+  job: CronJobRecord,
+  options: { readonly allowExpiredAt?: boolean } = {},
+): string[] {
+  return collectScheduleIssues({
+    scheduleKind: job.schedule_kind,
+    scheduleAt: job.schedule_at,
+    scheduleEvery: job.schedule_every,
+    scheduleExpr: job.schedule_expr,
+    scheduleTimeZone: job.schedule_tz,
+    deliveryMode: job.delivery_mode,
+    deliveryTarget: job.delivery_target,
+    sessionId: job.session_id,
+    ...(options.allowExpiredAt === true ? { allowExpiredAt: true } : {}),
+  });
+}
+
+/** 把问题列表转成 400 body；全部原因拼进 `error`，客户端 toast 可直接展示。 */
+function invalidJobPayload(issues: readonly string[]): Record<string, unknown> {
+  return cronRouteErrorPayload('invalid_cron_job', {
+    error: issues.join('；'),
+    issues: issues.map((message) => ({ message })),
   });
 }
 
@@ -145,10 +242,11 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       const { step, child } = startRequestWorkflow(request, 'cron.job.list');
       const readStep = child('read');
       const user = parseAuthUser(request);
-      const jobs = cronScheduler
-        .listJobs()
-        .filter((job) => job.user_id === user.sub)
-        .map(toView);
+      const owned = cronScheduler.listJobs().filter((job) => job.user_id === user.sub);
+      // 一次查出所有任务的最近一次执行：列表页要逐条标「上次是否失败」，
+      // 逐任务调 `/history?limit=1` 会变成 N+1（任务数 × HTTP + SQL）。
+      const latestExecutions = listLatestCronExecutionsForJobs(owned.map((job) => job.id));
+      const jobs = owned.map((job) => toView(job, latestExecutions.get(job.id) ?? null));
       readStep.succeed(undefined, { count: jobs.length });
       step.succeed(undefined, { count: jobs.length });
       return reply.send({ jobs });
@@ -180,11 +278,23 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
         ...body.data,
         id: crypto.randomUUID(),
         user_id: user.sub,
+        // 历史列保留（表结构不变），但已从 API / 工具入参移除：执行链路没有
+        // 对应的迭代上限实现，继续暴露只会让用户以为设了有效。
+        max_iterations: 10,
         last_fired_at: null,
         fire_count: 0,
         created_at: now,
         updated_at: now,
       };
+
+      const validateStep = child('validate');
+      const issues = collectJobIssues(job);
+      if (issues.length > 0) {
+        validateStep.fail('invalid config');
+        step.fail('invalid config');
+        return reply.status(400).send(invalidJobPayload(issues));
+      }
+      validateStep.succeed();
 
       const addStep = child('add', undefined, {
         enabled: job.enabled,
@@ -235,6 +345,27 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       }
       parseStep.succeed();
 
+      // 按「合并后的最终配置」校验：只改 kind / 只改投递方式，都可能把任务
+      // 组合成永不触发或投递无门的状态（如 cron 任务被清空表达式）。
+      const merged: CronJobRecord = { ...job, ...body.data, id: job.id, user_id: job.user_id };
+      const validateStep = child('validate', undefined, { jobId: id });
+      // 只改名 / 只停用不应该被「这个 at 任务早就过期了」挡住；只要请求改了
+      // kind 或触发时间，就必须按「未来时间」严格校验。
+      const issues = collectJobIssues(merged, {
+        allowExpiredAt:
+          body.data.schedule_kind === undefined &&
+          body.data.schedule_at === undefined &&
+          // `enabled: true` 表达「我要它跑」：过期的一次性任务必须直接拒绝，
+          // 不能先放过再在调度层记一条建臂失败。
+          body.data.enabled !== true,
+      });
+      if (issues.length > 0) {
+        validateStep.fail('invalid config');
+        step.fail('invalid config');
+        return reply.status(400).send(invalidJobPayload(issues));
+      }
+      validateStep.succeed();
+
       const applyStep = child('apply', undefined, { jobId: id });
       cronScheduler.updateJob(id, body.data);
       applyStep.succeed();
@@ -269,11 +400,23 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       lookupStep.succeed();
 
       const runStep = child('run', undefined, { jobId: id });
-      // 触发后立即返回（handler 可能跑很久）；结果看 `/history`。
-      void cronScheduler.runJobNow(id).catch(() => undefined);
-      runStep.succeed();
+      // 只「起跑」，不等 handler 结束（可能跑很久）；结果看 `/history`。
+      // 但必须把「没跑起来」如实回给调用方：任务在途 / 并发已满时旧实现
+      // 仍返回 202，界面于是提示「已触发」而实际什么都没发生。
+      const started = cronScheduler.startJobNow(id);
+      if (!started.started) {
+        runStep.fail(started.reason);
+        step.fail(started.reason);
+        return reply.status(409).send(
+          cronRouteErrorPayload('cron_job_busy', {
+            error: cronRunSkipMessage(started.reason),
+            reason: started.reason,
+          }),
+        );
+      }
+      runStep.succeed(undefined, { jobId: id, executionId: started.executionId });
       step.succeed(undefined, { jobId: id });
-      return reply.status(202).send({ ok: true, jobId: id });
+      return reply.status(202).send({ ok: true, jobId: id, executionId: started.executionId });
     },
   );
 
