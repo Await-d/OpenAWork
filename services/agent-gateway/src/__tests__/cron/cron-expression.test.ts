@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isValidCronExpression,
+  isValidTimeZone,
   nextCronFireAfter,
   parseCronExpressionFields,
 } from '../../cron/cron-expression.js';
@@ -62,6 +63,18 @@ describe('cron-expression · 字段解析', () => {
   });
 });
 
+describe('cron-expression · 时区名校验', () => {
+  it('接受 IANA 名与 UTC，拒绝拼写错误与空串', () => {
+    for (const tz of ['UTC', 'Asia/Shanghai', 'America/New_York', 'Europe/Berlin']) {
+      expect(isValidTimeZone(tz), tz).toBe(true);
+    }
+    // 不用 'CST' 这类遗留缩写：部分 ICU 版本会把它解析成合法别名。
+    for (const tz of ['', '   ', 'Asia/Shangai', 'Not/AZone']) {
+      expect(isValidTimeZone(tz), tz).toBe(false);
+    }
+  });
+});
+
 describe('cron-expression · 下次触发', () => {
   it('每天 09:00（UTC）落在下一个 9 点整，而不是下一分钟', () => {
     const from = Date.UTC(2026, 0, 1, 8, 30, 15);
@@ -110,6 +123,22 @@ describe('cron-expression · 下次触发', () => {
   it('未知时区回落到 UTC 而非抛错', () => {
     const from = Date.UTC(2026, 0, 1, 0, 0, 0);
     expect(nextCronFireAfter('0 9 * * *', 'Not/AZone', from)).toBe(Date.UTC(2026, 0, 1, 9, 0, 0));
+  });
+
+  it('夏令时前跳日：不存在的 02:30 不会提前到 01:30 触发', () => {
+    // 2026-03-08 America/New_York：01:59 EST 直接跳到 03:00 EDT，02:30 不存在。
+    const from = Date.UTC(2026, 2, 8, 5, 0, 0);
+    const next = nextCronFireAfter('30 2 * * *', 'America/New_York', from);
+    // 跳过当天，落在 3-09 02:30 EDT（06:30Z）。
+    expect(next).toBe(Date.UTC(2026, 2, 9, 6, 30, 0));
+  });
+
+  it('夏令时回拨日：歧义的 01:30 取较早一次，不重复触发', () => {
+    // 2026-11-01 America/New_York：01:30 出现两次（EDT 05:30Z / EST 06:30Z）。
+    const from = Date.UTC(2026, 10, 1, 4, 0, 0);
+    expect(nextCronFireAfter('30 1 * * *', 'America/New_York', from)).toBe(
+      Date.UTC(2026, 10, 1, 5, 30, 0),
+    );
   });
 
   it('结果严格大于起点（同一分钟不重复触发）', () => {

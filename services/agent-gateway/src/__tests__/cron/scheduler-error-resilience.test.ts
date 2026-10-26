@@ -71,11 +71,11 @@ describe('cron scheduler · 持久化故障韧性', () => {
     scheduler.addJob(job());
 
     // maxConcurrent=1：若第一次 fire 泄漏了 runningCount，第二次会被直接丢弃。
-    await expect(scheduler.runJobNow('job-1')).resolves.toBe(true);
+    await expect(scheduler.runJobNow('job-1')).resolves.toMatchObject({ started: true });
     expect(handler).toHaveBeenCalledTimes(1);
 
     // 再次触发必须仍能执行（证明 inFlightJobs / runningCount 都已释放）。
-    await expect(scheduler.runJobNow('job-1')).resolves.toBe(true);
+    await expect(scheduler.runJobNow('job-1')).resolves.toMatchObject({ started: true });
     expect(handler).toHaveBeenCalledTimes(2);
 
     // 执行历史仍在内存里（只是没落库），且状态正确。
@@ -96,7 +96,7 @@ describe('cron scheduler · 持久化故障韧性', () => {
     });
     scheduler.addJob(job());
 
-    await expect(scheduler.runJobNow('job-1')).resolves.toBe(true);
+    await expect(scheduler.runJobNow('job-1')).resolves.toMatchObject({ started: true });
     expect(handler).toHaveBeenCalledTimes(1);
     expect(labels.length).toBeGreaterThan(0);
     scheduler.stopAll();

@@ -162,13 +162,53 @@ describe('CronScheduler · 立即运行与下次触发派生', () => {
       }),
     );
 
-    expect(await scheduler.runJobNow('manual')).toBe(true);
+    expect(await scheduler.runJobNow('manual')).toMatchObject({ started: true });
     expect(handler).toHaveBeenCalledTimes(1);
     expect(scheduler.getJob('manual')?.fire_count).toBe(1);
     expect(scheduler.getExecutionHistory('manual').at(-1)?.status).toBe('completed');
 
-    expect(await scheduler.runJobNow('missing')).toBe(false);
+    expect(await scheduler.runJobNow('missing')).toMatchObject({
+      started: false,
+      reason: 'missing',
+    });
     scheduler.removeJob('manual');
+  });
+
+  it('startJobNow 如实回报跳过原因：在途 / 并发已满', async () => {
+    let release: (() => void) | undefined;
+    const handler = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const scheduler = new CronScheduler(handler, 1, 0);
+    scheduler.addJob(
+      job({
+        id: 'a',
+        schedule_kind: 'at',
+        schedule_every: null,
+        schedule_at: Date.now() + 86_400_000,
+      }),
+    );
+    scheduler.addJob(
+      job({
+        id: 'b',
+        schedule_kind: 'at',
+        schedule_every: null,
+        schedule_at: Date.now() + 86_400_000,
+      }),
+    );
+
+    expect(scheduler.startJobNow('a')).toMatchObject({ started: true });
+    // 同一任务的上一次执行还没结束。
+    expect(scheduler.startJobNow('a')).toMatchObject({ started: false, reason: 'in-flight' });
+    // maxConcurrent = 1，另一个任务被并发上限挡住。
+    expect(scheduler.startJobNow('b')).toMatchObject({ started: false, reason: 'busy' });
+
+    release?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    scheduler.stopAll();
   });
 
   it('getNextFireAt 对 every / cron / at 均给出未来时刻', () => {

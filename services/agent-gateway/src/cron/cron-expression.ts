@@ -287,10 +287,35 @@ function addDays(parts: ZonedParts, days: number): ZonedParts {
 }
 
 /**
+ * 判断时区名是否可用（IANA 名或 `UTC`）。
+ *
+ * 只给**写入期**使用：解析器遇到坏时区会回落 UTC 而不是抛错（存量坏数据不该让
+ * 调度器崩），所以入口必须先拦下来，否则用户把 `Asia/Shanghai` 拼错成
+ * `Asia/Shangai` 时任务会静默按 UTC 跑，偏移 8 小时且没有任何提示。
+ */
+export function isValidTimeZone(timeZone: string): boolean {
+  if (typeof timeZone !== 'string') return false;
+  const trimmed = timeZone.trim();
+  if (trimmed.length === 0) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: trimmed });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 计算 `fromMs` 之后（严格大于）的第一个触发时刻；表达式合法但 8 年内无解时返回
  * `null`（如 `0 0 30 2 *`）。
  *
  * `from` 会被推进到下一整分再开始搜索，避免「同一分钟重复触发」。
+ *
+ * **候选必须做一次墙上时间回读**：夏令时「春季前跳」那天 02:30 并不存在（当地
+ * 01:59 直接跳到 03:00），两次偏移修正会在不存在的时刻上回跳。实测
+ * `30 2 * * *` + `America/New_York` 在 2026-03-08 会算出本地 01:30——比用户约定
+ * 的时间早一个小时触发。回读不一致即视为该墙上时间不存在，跳过这个候选（与
+ * Vixie cron「跳过的时刻不补跑」一致）。
  */
 export function nextCronFireAfter(expr: string, timeZone: string, fromMs: number): number | null {
   const parsed = parseCronExpressionFields(expr);
@@ -312,12 +337,46 @@ export function nextCronFireAfter(expr: string, timeZone: string, fromMs: number
           minute,
           timeZone: tz,
         });
-        if (candidate >= lowerBound) return candidate;
+        if (candidate < lowerBound) continue;
+        if (
+          !matchesWallClock(candidate, tz, {
+            year: day.year,
+            month: day.month,
+            day: day.day,
+            hour,
+            minute,
+          })
+        ) {
+          continue;
+        }
+        return candidate;
       }
     }
   }
 
   return null;
+}
+
+/** 候选时刻回读后是否仍落在请求的墙上时间（夏令时跳变会把不存在的时刻挪走）。 */
+function matchesWallClock(
+  candidate: number,
+  timeZone: string,
+  expected: {
+    readonly year: number;
+    readonly month: number;
+    readonly day: number;
+    readonly hour: number;
+    readonly minute: number;
+  },
+): boolean {
+  const actual = toZonedParts(candidate, timeZone);
+  return (
+    actual.year === expected.year &&
+    actual.month === expected.month &&
+    actual.day === expected.day &&
+    actual.hour === expected.hour &&
+    actual.minute === expected.minute
+  );
 }
 
 /**

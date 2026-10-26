@@ -21,6 +21,10 @@ export interface CronJobRecord {
   plugin_chat_id: string | null;
   enabled: boolean;
   delete_after_run: boolean;
+  /**
+   * 历史列（表结构保留）。执行链路没有对应的迭代上限实现，已从 HTTP / 工具入参
+   * 移除——不要再把它当可用配置，也不要新增读取点。
+   */
   max_iterations: number;
   last_fired_at: number | null;
   fire_count: number;
@@ -33,7 +37,14 @@ export interface CronExecutionRecord {
   job_id: string;
   started_at: number;
   finished_at: number | null;
-  status: 'running' | 'completed' | 'failed';
+  /**
+   * `skipped`：本次**到点触发**被跳过（上一次执行未结束 / 并发上限已满）。
+   *
+   * 以前这两种情况是静默 return：任务看起来「一直没跑」，历史里空无一物，
+   * 用户无从判断是没到点、被跳过、还是执行失败。跳过记录按任务每分钟最多
+   * 落一条，避免高频任务刷满历史。
+   */
+  status: 'running' | 'completed' | 'failed' | 'skipped';
   error?: string;
   session_id?: string;
 }
