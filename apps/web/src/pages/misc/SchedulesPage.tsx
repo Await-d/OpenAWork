@@ -5,7 +5,7 @@ import {
   type CronExecutionRecord,
   type CronJobRecord,
 } from '@openAwork/web-client';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import {
@@ -46,7 +46,13 @@ function toCronManagerJob(job: CronJobRecord): CronJob {
     id: job.id,
     name: job.name,
     scheduleKind: job.scheduleKind,
-    scheduleDisplay: job.scheduleDisplay,
+    // `at` 的展示必须由**客户端本地时区**渲染：网关侧的
+    // `formatScheduleDisplay` 用的是进程时区（Docker 默认 UTC），
+    // 会和同页历史面板的本地时间差 8 小时。
+    scheduleDisplay:
+      job.schedule_kind === 'at' && job.schedule_at !== null
+        ? formatTimestamp(job.schedule_at)
+        : job.scheduleDisplay,
     prompt: job.prompt,
     status: job.status,
     // 运行中只影响徽章与「立即运行」，不影响停用（见 CronJob.running 的说明）。
@@ -94,62 +100,60 @@ export default function SchedulesPage() {
 
   const navigate = useNavigate();
   const client = useMemo(() => createCronClient(gatewayUrl), [gatewayUrl]);
+  /**
+   * 请求代号：轮询与动作后的 reload 可能并发，慢的那个若后到会把新列表覆盖成
+   * 旧快照（例如刚创建完任务，又被 15 秒前的轮询结果刷掉）。
+   */
+  const reloadSeq = useRef(0);
 
-  const reload = useCallback(async (): Promise<void> => {
-    if (!token) {
-      setJobs([]);
-      return;
-    }
-    setLoading(true);
-    // React Compiler 的两条硬限制（`compiler-limit`，会让整个组件退出自动
-    // memoization）：① 不能有带 finalizer 的 try/finally；② try 块内不能出现
-    // 条件 / 逻辑运算等「值块」。故 try 内**只保留唯一一次取数**，其余逻辑
-    // （判错、附加数据、收尾）全部挪到块外。
-    let nextJobs: CronJobRecord[] = [];
-    let failure: Error | null = null;
-    try {
-      nextJobs = await client.list(token);
-    } catch (reason) {
-      failure = reason instanceof Error ? reason : new Error('加载定时任务失败');
-    }
-
-    if (failure) {
-      setError(failure.message);
-      setLoading(false);
-      return;
-    }
-
-    setJobs(nextJobs);
-    setError(null);
-
-    // 顺带取每个任务的最近一次执行：列表行要直接标出「上次失败」与原因，
-    // 否则用户只能逐个点开历史才能发现任务早已空转失败（本次问题的核心症状）。
-    //
-    // 用 allSettled 而非 all：某条 history 失败（例如该任务恰被另一端删除 →
-    // 404）**不能**让整个列表判定为加载失败——主数据已经拿到了，失败的只是
-    // 「附带的失败提示」这一展示增强，静默降级为该项无标记即可。
-    // `allSettled` 本身不抛错，因此它安全地留在 try 之外。
-    const settled = await Promise.allSettled(
-      // 只要最新一条、不要摘要：这里只用来在列表行标「上次失败」。
-      // 请求摘要会为每条执行读一次执行会话的全部消息，10 个任务就是数十次全量
-      // 会话读取（且渠道任务的执行会话是复用的，历史越长越慢）。
-      nextJobs.map(
-        async (job) =>
-          [
-            job.id,
-            (await client.history(token, job.id, { limit: 1, includePreview: false }))[0],
-          ] as const,
-      ),
-    );
-    const entries: Array<readonly [string, CronExecutionRecord | undefined]> = [];
-    for (const item of settled) {
-      if (item.status === 'fulfilled' && item.value[1] !== undefined) {
-        entries.push(item.value);
+  const reload = useCallback(
+    /**
+     * @param silent 后台轮询时传 true：失败不弹横幅（避免网络抖动刷错误），
+     *               也不显示首屏 loading。
+     */
+    async (silent = false): Promise<void> => {
+      const seq = (reloadSeq.current += 1);
+      if (!token) {
+        setJobs([]);
+        return;
       }
-    }
-    setLatestExecutions(Object.fromEntries(entries));
-    setLoading(false);
-  }, [client, token]);
+      if (!silent) setLoading(true);
+      // React Compiler 的两条硬限制（`compiler-limit`，会让整个组件退出自动
+      // memoization）：① 不能有带 finalizer 的 try/finally；② try 块内不能出现
+      // 条件 / 逻辑运算等「值块」。故 try 内**只保留唯一一次取数**，其余逻辑
+      // （判错、附加数据、收尾）全部挪到块外。
+      let nextJobs: CronJobRecord[] = [];
+      let failure: Error | null = null;
+      try {
+        nextJobs = await client.list(token);
+      } catch (reason) {
+        failure = reason instanceof Error ? reason : new Error('加载定时任务失败');
+      }
+
+      // 已有更新的请求发出 → 本次响应过期，直接丢弃（不覆盖列表、不动提示）。
+      if (seq !== reloadSeq.current) return;
+
+      if (failure) {
+        if (!silent) setError(failure.message);
+        setLoading(false);
+        return;
+      }
+
+      setJobs(nextJobs);
+      // 后台轮询成功不能顺手清掉用户刚看到的错误提示（例如创建校验失败）——
+      // 那条错误还没被处理，15 秒后自己消失会让人以为已经恢复。
+      if (!silent) setError(null);
+      // 列表响应已带上每个任务的最近一次执行（网关一次批量查），
+      // 不再逐任务拉 `/history?limit=1` ——那是 N+1（任务数 × HTTP + SQL）。
+      setLatestExecutions(
+        Object.fromEntries(
+          nextJobs.map((job) => [job.id, job.lastExecution ?? undefined] as const),
+        ),
+      );
+      setLoading(false);
+    },
+    [client, token],
+  );
 
   useEffect(() => {
     // 明确接住 rejection：`reload` 主路径已用 try/catch 兜住，但 try 之外的
@@ -158,6 +162,24 @@ export default function SchedulesPage() {
       setError(reason instanceof Error ? reason.message : '加载定时任务失败');
       setLoading(false);
     });
+  }, [reload]);
+
+  /**
+   * 后台轮询：列表里展示的「运行中 / 下次触发 / 上次失败」都会在服务端变化，
+   * 页面停着不刷新会让用户误以为任务没跑（尤其 `every` 任务）。
+   * 只在前台轮询；切回页面时立即补一次，避免看到过期数据。
+   */
+  useEffect(() => {
+    const refresh = (): void => {
+      if (document.visibilityState !== 'visible') return;
+      void reload(true).catch(() => undefined);
+    };
+    const timer = window.setInterval(refresh, 15_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [reload]);
 
   /** 统一的动作包装：失败一律给出可见提示，成功后重拉列表保证与服务端一致。 */
@@ -259,7 +281,9 @@ export default function SchedulesPage() {
       let entries: CronExecutionRecord[] = [];
       let failure: Error | null = null;
       try {
-        entries = await client.history(token, jobId);
+        // 面板只展示最近 5 条：默认 limit=100 会白拉 95 条，还会触发服务端
+        // 逐条读执行会话生成摘要（最多 5 条，但请求体与查询仍是 100 条）。
+        entries = await client.history(token, jobId, { limit: HISTORY_PANEL_LIMIT });
       } catch (reason) {
         failure = reason instanceof Error ? reason : new Error('读取执行历史失败');
       }
@@ -272,7 +296,7 @@ export default function SchedulesPage() {
       } else {
         // 用面板而非 toast：用户需要读到**产出摘要**并跳到执行现场，
         // toast 8 秒就消失、也无法点击——「任务成功但内容取不到」正是这么来的。
-        setHistoryView({ jobId, jobName, entries: entries.slice(0, HISTORY_PANEL_LIMIT) });
+        setHistoryView({ jobId, jobName, entries });
       }
       setHistoryJobId(null);
     },
@@ -505,6 +529,9 @@ function HistoryPanel({
     <div className="content-card" style={{ padding: '12px 14px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <span style={{ fontSize: 12, fontWeight: 700 }}>「{view.jobName}」执行历史</span>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+          最近 {HISTORY_PANEL_LIMIT} 条
+        </span>
         <div style={{ flex: 1 }} />
         <button
           type="button"
@@ -545,14 +572,18 @@ function HistoryPanel({
                         ? 'var(--complement)'
                         : entry.status === 'running'
                           ? 'var(--aux)'
-                          : 'var(--success)',
+                          : entry.status === 'skipped'
+                            ? 'var(--fg-muted)'
+                            : 'var(--success)',
                   }}
                 >
                   {entry.status === 'completed'
                     ? '成功'
                     : entry.status === 'failed'
                       ? '失败'
-                      : '运行中'}
+                      : entry.status === 'skipped'
+                        ? '跳过'
+                        : '运行中'}
                 </span>
                 <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                   {formatTimestamp(entry.started_at)}
@@ -576,7 +607,15 @@ function HistoryPanel({
                 )}
               </div>
               {entry.error && (
-                <div style={{ fontSize: 11, color: 'var(--complement)', wordBreak: 'break-word' }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    // 跳过不是失败：用灰字，别用失败的红色（否则「被并发挡住」
+                    // 看起来和「执行报错」一模一样）。
+                    color: entry.status === 'skipped' ? 'var(--fg-muted)' : 'var(--complement)',
+                    wordBreak: 'break-word',
+                  }}
+                >
                   {entry.error}
                 </div>
               )}
@@ -623,6 +662,9 @@ function FailedRunsPanel({
   jobs: CronJobRecord[];
   latestExecutions: Record<string, CronExecutionRecord | undefined>;
 }) {
+  // 只把「失败」推到列表页顶部。`skipped` 不放进来：长任务的下一个 tick 被跳过
+  // 是正常现象，放进来会让正常任务长期挂着一条「未成功」告警；跳过记录在
+  // 执行历史里单独展示（灰色「跳过」）。
   const failures = jobs.flatMap((job) => {
     const entry = latestExecutions[job.id];
     return entry?.status === 'failed' ? [{ job, entry }] : [];

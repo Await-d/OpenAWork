@@ -60,6 +60,12 @@ export interface CronJobRecord {
   lastFiredAt: number | null;
   /** 派生：下次触发时间（epoch 毫秒）；无法计算时为 `null`。 */
   nextFireAt: number | null;
+  /**
+   * 派生：最近一次执行（含失败原因）。
+   *
+   * 列表页直接用它标「上次失败」，不再逐任务拉 `/history?limit=1`（N+1）。
+   */
+  lastExecution: CronExecutionRecord | null;
   [key: string]: unknown;
 }
 
@@ -87,7 +93,11 @@ export interface CronExecutionRecord {
   job_id: string;
   started_at: number;
   finished_at: number | null;
-  status: 'running' | 'completed' | 'failed';
+  /**
+   * `skipped`：到点触发被跳过（上一次执行未结束 / 网关并发已满）。
+   * 不是失败，但必须可见——否则任务看起来「一直没跑」。
+   */
+  status: 'running' | 'completed' | 'failed' | 'skipped';
   error?: string;
   /** 本次执行所用的会话 id；存在即可跳过去看完整现场。 */
   session_id?: string;
