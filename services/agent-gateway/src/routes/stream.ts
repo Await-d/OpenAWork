@@ -149,7 +149,9 @@ import { writeToolInvokeAllowlist } from '../session/tool-invoke-allowlist.js';
 import {
   persistSessionRouteSelection,
   resolveEffectiveThinkingSelection,
+  withUserDefaultThinkingFallback,
 } from '../session/session-route-selection.js';
+import { resolveUserDefaultThinkingForChat } from '../user/user-thinking-defaults.js';
 import { normalizeToolArgumentsForStorage } from '../tools/tool-result-contract.js';
 import { detectEmptyTaskResponse } from '../task/empty-task-response-detector.js';
 import { buildDynamicOrchestratorPrompt } from '../agent/dynamic-agent-prompt-builder.js';
@@ -2200,7 +2202,7 @@ export async function handleStreamRequest(input: {
       (isTeamRoleLayer(input.sessionContext.roleLayer) ||
         hasTeamDefinition(input.sessionContext.metadataJson)) &&
       Boolean(sessionSelection.providerId && sessionSelection.modelId);
-    const effectiveThinking = resolveEffectiveThinkingSelection({
+    const sessionThinking = resolveEffectiveThinkingSelection({
       ...(requestData.thinkingEnabled !== undefined
         ? { requestDataThinkingEnabled: requestData.thinkingEnabled }
         : {}),
@@ -2215,6 +2217,21 @@ export async function handleStreamRequest(input: {
         : {}),
       hasAuthoritativeTeamModel,
     });
+    // 第 4 级兜底：用户默认思考。通道（Telegram/Discord/飞书/钉钉/Slack）与定时任务
+    // 由网关自己构造 requestData，不带 thinking 字段，新建的执行会话 metadata 里
+    // 也没有该键——缺了这一层，这些轮次的 thinkingConfig 恒为 undefined，
+    // `buildProviderOptions` 拿到 undefined 就直接返回，上游思考永远收不到。
+    // 该层**不写回会话 metadata**（见 withUserDefaultThinkingFallback 注释）。
+    // Web 正常轮两级都已表态，只有通道 / cron / 唤醒这类轮次才需要多读一次库。
+    const needsDefaultThinkingFallback =
+      sessionThinking.thinkingEnabled === undefined ||
+      sessionThinking.reasoningEffort === undefined;
+    const effectiveThinking = needsDefaultThinkingFallback
+      ? withUserDefaultThinkingFallback(
+          sessionThinking,
+          resolveUserDefaultThinkingForChat(input.user.sub),
+        )
+      : sessionThinking;
     if (effectiveThinking.thinkingEnabled !== undefined) {
       requestData.thinkingEnabled = effectiveThinking.thinkingEnabled;
     }
@@ -2224,15 +2241,16 @@ export async function handleStreamRequest(input: {
     }
     // 正常用户轮把解析结果按会话持久化（唤醒轮只读不写）：后续唤醒 / 自动续跑
     // 才能解析出与正常轮一致的模型与档位。`'default'` 占位模型不落库。
+    // 注意用的是 `sessionThinking`（兜底前），避免把用户默认值固化成会话档位。
     if (!input.continueFromHistory) {
       persistSessionRouteSelection(input.sessionId, input.user.sub, {
         ...(route.model && route.model !== 'default' ? { modelId: route.model } : {}),
         ...(route.providerId ? { providerId: route.providerId } : {}),
-        ...(requestData.thinkingEnabled !== undefined
-          ? { thinkingEnabled: requestData.thinkingEnabled }
+        ...(sessionThinking.thinkingEnabled !== undefined
+          ? { thinkingEnabled: sessionThinking.thinkingEnabled }
           : {}),
-        ...(requestData.reasoningEffort !== undefined
-          ? { reasoningEffort: requestData.reasoningEffort }
+        ...(sessionThinking.reasoningEffort !== undefined
+          ? { reasoningEffort: sessionThinking.reasoningEffort }
           : {}),
       });
     }

@@ -91,6 +91,11 @@ export interface EffectiveThinkingSelection {
   reasoningEffort?: string;
 }
 
+export interface UserDefaultThinkingSelection {
+  thinkingEnabled?: boolean;
+  reasoningEffort?: string;
+}
+
 /**
  * 解析本轮生效的思考档位（纯函数）。
  *
@@ -98,6 +103,9 @@ export interface EffectiveThinkingSelection {
  *   1. team 权威绑定（模板写进 metadata 的档位）——保持既有语义：覆盖请求；
  *   2. 请求显式携带的值；
  *   3. 会话 metadata 回退（唤醒轮没有请求值时，与正常轮保持一致）。
+ *
+ * 第 4 级「用户默认思考」不在这里：它由调用方用 `withUserDefaultThinkingFallback`
+ * 叠加，且不参与持久化（见该函数注释）。
  */
 export function resolveEffectiveThinkingSelection(input: {
   requestDataThinkingEnabled?: boolean;
@@ -121,6 +129,30 @@ export function resolveEffectiveThinkingSelection(input: {
     return input.sessionReasoningEffort;
   })();
 
+  return {
+    ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+  };
+}
+
+/**
+ * 在已解析档位之上补齐「用户默认思考」兜底（纯函数）。
+ *
+ * 只有**请求、会话 metadata、team 权威绑定都未表态**的轮次才会落到这一层——
+ * 典型就是消息通道（Telegram/Discord/飞书/钉钉/Slack）与定时任务：它们由网关
+ * 自己构造 `requestData`，不带 thinking 字段，执行会话 metadata 里也没有该键。
+ *
+ * 两条硬约束：
+ * - 只填空缺字段，绝不覆盖显式值（`false` 也算显式表态，`??` 能保证不被吞掉）；
+ * - 结果**不得**写回会话 metadata。默认设置是「实时生效」的用户级开关，
+ *   一旦落库，用户之后修改默认值时通道 / 定时任务会继续沿用旧值。
+ */
+export function withUserDefaultThinkingFallback(
+  selection: EffectiveThinkingSelection,
+  userDefault: UserDefaultThinkingSelection,
+): EffectiveThinkingSelection {
+  const thinkingEnabled = selection.thinkingEnabled ?? userDefault.thinkingEnabled;
+  const reasoningEffort = selection.reasoningEffort ?? userDefault.reasoningEffort;
   return {
     ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),
     ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),

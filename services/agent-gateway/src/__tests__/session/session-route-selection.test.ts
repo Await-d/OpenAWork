@@ -147,3 +147,66 @@ describe('resolveEffectiveThinkingSelection', () => {
     ).toEqual({});
   });
 });
+
+describe('withUserDefaultThinkingFallback', () => {
+  const userDefault = { thinkingEnabled: true, reasoningEffort: 'high' } as const;
+
+  it('通道 / 定时任务轮（请求无 thinking、会话 metadata 无档位）由默认设置兜底', () => {
+    // 两条程序化路径构造的 requestData 都不带 thinking 字段，新建执行会话
+    // metadata 也没有该键 → 解析结果为空 → 必须靠这一层兜底才会上游带思考。
+    const sessionThinking = routeSelection.resolveEffectiveThinkingSelection({
+      hasAuthoritativeTeamModel: false,
+    });
+
+    expect(routeSelection.withUserDefaultThinkingFallback(sessionThinking, userDefault)).toEqual({
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+    });
+  });
+
+  it('请求显式关闭不被默认设置覆盖（false 也是显式表态）', () => {
+    const sessionThinking = routeSelection.resolveEffectiveThinkingSelection({
+      hasAuthoritativeTeamModel: false,
+      requestDataThinkingEnabled: false,
+      requestDataReasoningEffort: 'low',
+    });
+
+    expect(routeSelection.withUserDefaultThinkingFallback(sessionThinking, userDefault)).toEqual({
+      thinkingEnabled: false,
+      reasoningEffort: 'low',
+    });
+  });
+
+  it('会话 metadata 档位优先于默认设置（唤醒轮前缀保持一致）', () => {
+    const sessionThinking = routeSelection.resolveEffectiveThinkingSelection({
+      hasAuthoritativeTeamModel: false,
+      sessionThinkingEnabled: false,
+      sessionReasoningEffort: 'minimal',
+    });
+
+    expect(routeSelection.withUserDefaultThinkingFallback(sessionThinking, userDefault)).toEqual({
+      thinkingEnabled: false,
+      reasoningEffort: 'minimal',
+    });
+  });
+
+  it('默认设置关闭时原样返回，不伪造档位', () => {
+    const sessionThinking = routeSelection.resolveEffectiveThinkingSelection({
+      hasAuthoritativeTeamModel: false,
+    });
+
+    expect(routeSelection.withUserDefaultThinkingFallback(sessionThinking, {})).toEqual({});
+  });
+
+  it('只补空缺字段：请求给了 enabled、默认补 effort', () => {
+    const sessionThinking = routeSelection.resolveEffectiveThinkingSelection({
+      hasAuthoritativeTeamModel: false,
+      requestDataThinkingEnabled: true,
+    });
+
+    expect(routeSelection.withUserDefaultThinkingFallback(sessionThinking, userDefault)).toEqual({
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+    });
+  });
+});
