@@ -59,8 +59,8 @@ const BOOLEAN_PERMISSION_FIELDS: Array<{
 }> = [
   {
     key: 'allowReadHome',
-    title: '读取 Home',
-    description: '控制是否继承通道级的 Home 目录读取能力。',
+    title: '读取数据目录',
+    description: '控制是否继承通道级的数据目录读取能力。',
   },
   {
     key: 'allowWriteOutside',
@@ -613,7 +613,7 @@ export function ChannelMemberAclEditor({
 
       <div className="channel-acl__ceiling">
         <span className="channel-mini-badge">
-          {formatBasePermissionState(basePermissions.allowReadHome, 'Home 读取')}
+          {formatBasePermissionState(basePermissions.allowReadHome, '数据目录读取')}
         </span>
         <span className="channel-mini-badge">
           {formatBasePermissionState(basePermissions.allowShell, 'Shell')}

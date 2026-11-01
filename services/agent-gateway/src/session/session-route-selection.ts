@@ -143,7 +143,8 @@ export function resolveEffectiveThinkingSelection(input: {
  * 自己构造 `requestData`，不带 thinking 字段，执行会话 metadata 里也没有该键。
  *
  * 两条硬约束：
- * - 只填空缺字段，绝不覆盖显式值（`false` 也算显式表态，`??` 能保证不被吞掉）；
+ * - 只填空缺字段，绝不覆盖显式值；仅指定 effort 已表达思考意图，不能补入默认
+ *   关闭开关；显式 `false` 仍优先于 effort；
  * - 结果**不得**写回会话 metadata。默认设置是「实时生效」的用户级开关，
  *   一旦落库，用户之后修改默认值时通道 / 定时任务会继续沿用旧值。
  */
@@ -151,7 +152,9 @@ export function withUserDefaultThinkingFallback(
   selection: EffectiveThinkingSelection,
   userDefault: UserDefaultThinkingSelection,
 ): EffectiveThinkingSelection {
-  const thinkingEnabled = selection.thinkingEnabled ?? userDefault.thinkingEnabled;
+  const thinkingEnabled =
+    selection.thinkingEnabled ??
+    (selection.reasoningEffort === undefined ? userDefault.thinkingEnabled : undefined);
   const reasoningEffort = selection.reasoningEffort ?? userDefault.reasoningEffort;
   return {
     ...(thinkingEnabled !== undefined ? { thinkingEnabled } : {}),

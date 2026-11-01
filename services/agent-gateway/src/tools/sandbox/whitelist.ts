@@ -100,7 +100,12 @@ export function normalizeWorkspaceManagedRawInput(
       ...request,
       rawInput: {
         ...parsed.data,
-        path: assertSessionWorkspacePath({ path, sessionId, allowSkillResourceRead: true }),
+        path: assertSessionWorkspacePath({
+          path,
+          sessionId,
+          allowSkillResourceRead: true,
+          access: 'read',
+        }),
       },
     };
   }
@@ -118,6 +123,7 @@ export function normalizeWorkspaceManagedRawInput(
       path,
       sessionId,
       allowSkillResourceRead: true,
+      access: 'read',
     });
     return {
       ...request,
@@ -144,6 +150,7 @@ export function normalizeWorkspaceManagedRawInput(
                 path: parsed.data.path,
                 sessionId,
                 allowSkillResourceRead: true,
+                access: 'read',
               }),
             }
           : { path: assertSessionWorkingDirectory(sessionId) }),
@@ -166,6 +173,7 @@ export function normalizeWorkspaceManagedRawInput(
                 path: parsed.data.path,
                 sessionId,
                 allowSkillResourceRead: true,
+                access: 'read',
               }),
             }
           : { path: assertSessionWorkingDirectory(sessionId) }),

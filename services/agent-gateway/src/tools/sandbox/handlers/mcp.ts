@@ -89,7 +89,7 @@ export async function handleSkillMcpTool(
     return {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
-      output: await runSkillMcpTool(userId, parsed.data),
+      output: await runSkillMcpTool(userId, parsed.data, { sessionId, effective: skillMcpEffective ?? [] }),
       isError: false,
       durationMs: 0,
     };

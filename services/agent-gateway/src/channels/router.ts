@@ -9,10 +9,15 @@ import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { extractMessageText } from '../session/session-message-store.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
+import {
+  listPendingPermissionSummaries,
+  resolveEarliestPendingExpiry,
+} from '../permission/permission-pending-store.js';
 import { AutoReplyPipeline } from './auto-reply.js';
 import { recordChannelMessage } from './channel-message-cache.js';
 import { resolveChannelMemberAcl } from './channel-member-acl.js';
-import { buildNoTextReplyMessage } from './channel-localization.js';
+import { runWithChannelActorPolicy } from './channel-actor-scope.js';
+import { buildNoTextReplyMessage, buildPermissionPendingMessage } from './channel-localization.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
 import { buildChannelSessionKey, upsertChannelSession } from './channel-session-store.js';
 import {
@@ -57,6 +62,7 @@ import {
   parseWhatsAppInboundMessage,
 } from './inbound-parsers.js';
 import {
+  CHANNELS_SETTINGS_KEY,
   channelCreateSchema,
   channelUpdateSchema,
   createChannelInstance,
@@ -68,7 +74,6 @@ interface UserSettingRow {
   value: string;
 }
 
-const CHANNELS_SETTINGS_KEY = 'channels';
 const channels = new Map<string, ChannelInstance>();
 const channelSendBodySchema = z.object({
   chatId: z.string().min(1),
@@ -134,6 +139,8 @@ const autoReply = new AutoReplyPipeline({
       });
       throw new Error('Channel owner is missing for auto reply session');
     }
+    // 闭包（下方 run 回调）内的类型收窄不会保留，这里提取成局部常量。
+    const channelOwnerUserId = channel.ownerUserId;
     const memberAcl = resolveChannelMemberAcl(channel, {
       platformUserId: senderId,
       senderName,
@@ -176,24 +183,31 @@ const autoReply = new AutoReplyPipeline({
 
     let result: Awaited<ReturnType<typeof runSessionInBackground>>;
     try {
-      result = await runSessionInBackground({
-        sessionId,
-        userId: channel.ownerUserId,
-        requestData: {
-          clientRequestId,
-          displayMessage: message,
-          ...(inputParts && inputParts.length > 0 ? { inputParts } : {}),
-          message,
+      result = await runWithChannelActorPolicy(
+        {
+          permissions: memberAcl.actor.permissions,
+          toolAllowlist: memberAcl.actor.toolAllowlist,
         },
-        writeChunk: (chunk) => {
-          if (chunk.type !== 'text_delta') {
-            return;
-          }
+        () =>
+          runSessionInBackground({
+            sessionId,
+            userId: channelOwnerUserId,
+            requestData: {
+              clientRequestId,
+              displayMessage: message,
+              ...(inputParts && inputParts.length > 0 ? { inputParts } : {}),
+              message,
+            },
+            writeChunk: (chunk) => {
+              if (chunk.type !== 'text_delta') {
+                return;
+              }
 
-          partialText += chunk.delta;
-          partialUpdates.push(partialText);
-        },
-      });
+              partialText += chunk.delta;
+              partialUpdates.push(partialText);
+            },
+          }),
+      );
     } catch (error) {
       // 内核以**抛异常**（而非返回 `stopReason: 'error'`）结束：基础设施 / 未预期故障。
       // 这条路径此前只被 auto-reply 打一行 warn + 回一条 IM —— 排障页完全看不到，
@@ -259,6 +273,26 @@ const autoReply = new AutoReplyPipeline({
     // 一轮跑通即视为恢复：否则 `sessions.last_error` 会永久钉住，让
     // `findReusableChannelSession` 把刚成功的会话误判为不可复用。
     markChannelSessionHealthy({ sessionId, userId: channel.ownerUserId });
+
+    // `tool_permission` 不是失败：状态码 200、会话已标记健康，但这一轮**停在等审批**。
+    // 渠道里此前对这种情况完全静默（只回「未生成文本」），用户既不知道发生了什么，
+    // 也不知道该到 Web / 桌面端批准。审批仍然只认带鉴权的端（群里回「同意」无效），
+    // 因此这里能做的、也必须做的是：把「在等谁做什么」讲清楚。
+    if (result.stopReason === 'tool_permission') {
+      const pendingPermissions = listPendingPermissionSummaries(sessionId);
+      const pendingNotice = buildPermissionPendingMessage(
+        normalizeChannelReplyLanguage(channel.replyLanguage),
+        {
+          toolNames: pendingPermissions.map((entry) => entry.toolName),
+          // 「还有多久失效」是用户决定「现在批还是回头再说」的关键信息。
+          expiresAt: resolveEarliestPendingExpiry(pendingPermissions),
+        },
+      );
+      // 不支持流式的渠道从不发送中间态：模型在暂停前说的话只存在于 `partialText`，
+      // 直接把它替换成提示等于丢掉这段内容（流式渠道 finish 会整体替换，故两者一致）。
+      const leadingText = partialText.trim();
+      return leadingText.length > 0 ? `${leadingText}\n\n${pendingNotice}` : pendingNotice;
+    }
 
     const latestAssistantMessage = listSessionMessagesV2({
       sessionId,

@@ -22,11 +22,26 @@
  */
 
 import { shouldGrillIntent } from '../capability/grill-intent.js';
+import {
+  assessOrchestrationDepthByRules,
+  depthForReadOnlyDecision,
+  parseOrchestrationDepthFromLlm,
+  DEPTH_OUTPUT_INSTRUCTION,
+  type OrchestrationDepth,
+} from './orchestration-depth.js';
 
 export type RouteDecision = 'direct' | 'light' | 'orchestrate' | 'clarify' | 'resume' | 'grill';
 
 export interface RouteResult {
   decision: RouteDecision;
+  /**
+   * T-14 编排深度：`light`/`direct` 恒为 L0；`orchestrate` 由改动面判据给出
+   * L1/L2/L3。未取到值时表示「待定」——`clarify`/`grill` 尚未成任务、
+   * `resume` 继承被恢复任务的深度，均由 reception-orchestrator 决定。
+   *
+   * 该字段只增不改：不参与任何既有判定分支，避免动到路由语义。
+   */
+  orchestrationDepth?: OrchestrationDepth;
   /** 决策来源：规则代码 or LLM 兜底 */
   decisionSource: 'rule' | 'llm';
   /** 人类可读的决策理由（写入 audit log） */
@@ -132,7 +147,44 @@ export { shouldGrillIntent };
  * 例如"我想问一下怎么实现 OAuth" 同时匹配"怎么"（direct）和"实现"（orchestrate），
  * 应该走 orchestrate。
  */
+/**
+ * T-14：给规则判定结果补编排深度，**不改变任何 decision**。
+ * 只读/前台直答 → L0；orchestrate → 改动面判据；其余决策保持「待定」。
+ */
+function attachRuleDepth(result: RouteResult, userIntent: string): RouteResult {
+  const readOnly = depthForReadOnlyDecision(result.decision);
+  if (readOnly) {
+    return { ...result, orchestrationDepth: readOnly };
+  }
+  if (result.decision !== 'orchestrate') {
+    return result;
+  }
+  const assessed = assessOrchestrationDepthByRules(userIntent);
+  return assessed.kind === 'assessed' ? { ...result, orchestrationDepth: assessed.depth } : result;
+}
+
+/** 模型路径可用的深度：只读决策恒 L0，orchestrate 依次尝试模型输出与规则。 */
+function resolveLlmPathDepth(
+  decision: RouteDecision,
+  userIntent: string,
+  rawOutput: string,
+): OrchestrationDepth | undefined {
+  const readOnly = depthForReadOnlyDecision(decision);
+  if (readOnly) return readOnly;
+  if (decision !== 'orchestrate') return undefined;
+  const fromLlm = parseOrchestrationDepthFromLlm(rawOutput);
+  if (fromLlm) return fromLlm;
+  const assessed = assessOrchestrationDepthByRules(userIntent);
+  return assessed.kind === 'assessed' ? assessed.depth : undefined;
+}
+
+/** 规则路由（对外入口）：判定逻辑与改前完全一致，仅附加深度字段。 */
 export function routeByRules(userIntent: string): RouteResult | null {
+  const result = classifyByRules(userIntent);
+  return result ? attachRuleDepth(result, userIntent) : null;
+}
+
+function classifyByRules(userIntent: string): RouteResult | null {
   const trimmed = userIntent.trim();
 
   // 空输入 → clarify
@@ -237,9 +289,12 @@ const ROUTER_CLASSIFICATION_PROMPT = `你是一个意图路由分类器。你需
 - 短输入（如"继续"、"对"、"嗯"）需结合上下文判断
 - 明确修改/执行意图优先于 LIGHT；无法确认只读或修改意图时选 CLARIFY，不要猜测
 
-严格按以下格式输出一行：
+严格按以下格式输出：
 DECISION: RESUME|DIRECT|LIGHT|ORCHESTRATE|CLARIFY
-REASON: <一句话理由>`;
+REASON: <一句话理由>
+
+判定为 ORCHESTRATE 时追加一行：
+${DEPTH_OUTPUT_INSTRUCTION}`;
 
 function parseRouteDecision(raw: string): RouteDecision | null {
   const normalized = raw.toUpperCase();
@@ -275,12 +330,16 @@ function buildLlmFallbackResult(
       : decision === 'light'
         ? '检测到明确只读意图，降级走轻量回答'
         : '未检测到明确只读或修改意图，要求补充目标';
+  // 降级路径没有可靠的模型深度输出，但只读决策仍恒为 L0；
+  // orchestrate 回退到改动面规则，规则不确定时保持待定由编排层兜底。
+  const orchestrationDepth = resolveLlmPathDepth(decision, userIntent, llmRawOutput ?? '');
   return {
     decision,
     decisionSource: 'llm',
     reason: `${reason}，${fallbackReason}`,
     ...(decision === 'clarify' ? { clarifyKind: 'ambiguous' as const } : {}),
     ...(llmRawOutput === undefined ? {} : { llmRawOutput }),
+    ...(orchestrationDepth ? { orchestrationDepth } : {}),
   };
 }
 
@@ -317,11 +376,13 @@ export async function routeByLlm(
       const raw = decisionMatch[1];
       const decision = raw ? parseRouteDecision(raw) : null;
       if (decision) {
+        const orchestrationDepth = resolveLlmPathDepth(decision, userIntent, output);
         return {
           decision,
           decisionSource: 'llm',
           reason: reasonMatch?.[1]?.trim() ?? 'LLM 分类',
           llmRawOutput: output,
+          ...(orchestrationDepth ? { orchestrationDepth } : {}),
         };
       }
     }

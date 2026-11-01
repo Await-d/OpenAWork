@@ -9,6 +9,7 @@
  */
 
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import type { HandleStreamResult } from '../../routes/stream-types.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,7 +33,10 @@ const llmCompletion = vi.fn(async ({ prompt }: { prompt: string }) => {
   return '【改写结果】创建一个任务看板\n【推荐角色】planner\n【下一步】拆解任务并派发执行';
 });
 
-const runSessionInBackgroundMock = vi.fn(async () => ({ statusCode: 200 }));
+const runSessionInBackgroundMock = vi.fn<() => Promise<HandleStreamResult>>(async () => ({
+  statusCode: 200,
+  stopReason: 'end_turn',
+}));
 
 vi.mock('../../routes/workflow-llm.js', () => ({
   requestWorkflowLlmCompletion: (cfg: { prompt: string }) => llmCompletion(cfg),
@@ -165,7 +169,7 @@ afterEach(() => {
   delete process.env['AI_DEFAULT_MODEL'];
   llmCompletion.mockClear();
   runSessionInBackgroundMock.mockReset();
-  runSessionInBackgroundMock.mockResolvedValue({ statusCode: 200 });
+  runSessionInBackgroundMock.mockResolvedValue({ statusCode: 200, stopReason: 'end_turn' });
 });
 
 afterAll(async () => {
@@ -176,6 +180,85 @@ afterAll(async () => {
 });
 
 describe('orchestrateReceptionInput', () => {
+  it('澄清副作用已提交但投递未ACK时，重投不重复推进状态', async () => {
+    const { submitInboundWithHistory } = await import('../../handoff/store/inbound-delivery.js');
+    const { dispatchInboundDeliveries } =
+      await import('../../handoff/workflow/inbound-delivery-dispatcher.js');
+    const original = submitInboundWithHistory({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      roleLayer: 'reception',
+      fromRoleLayer: 'user',
+      messageType: 'user_input',
+      payload: { text: '重构整个系统架构' },
+      requestId: 'durable-grill',
+      clientIdempotencyKey: 'durable-grill',
+    });
+    await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '重构整个系统架构',
+      streamClientRequestId: 'durable-grill',
+      persistUserMessage: false,
+    });
+    const grill = await import('../../handoff/runner/reception-grill-runner.js');
+    const before = grill.readReceptionGrill(SESSION_ID);
+    dbModule.sqliteRun(
+      "UPDATE team_inbound_outbox SET state='processing', lease_token='crashed', lease_until_ms=1 WHERE inbound_id=?",
+      [original.record.id],
+    );
+    await dispatchInboundDeliveries();
+    expect(grill.readReceptionGrill(SESSION_ID)).toEqual(before);
+    expect(
+      dbModule.sqliteGet<{ state: string }>(
+        'SELECT state FROM team_inbound_outbox WHERE inbound_id=?',
+        [original.record.id],
+      )?.state,
+    ).toBe('delivered');
+    const { listSessionMessagesV2 } = await import('../../message/message-v2-adapter.js');
+    expect(
+      listSessionMessagesV2({ sessionId: SESSION_ID, userId: USER_ID }).filter(
+        (m) => m.role === 'user',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('直答流返回错误不得报告已处理成功', async () => {
+    runSessionInBackgroundMock.mockResolvedValueOnce({ statusCode: 502, stopReason: 'error' });
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '你好',
+      persistAckMessage: false,
+    });
+    expect(result.reason).toBe('direct-failed');
+  });
+
+  it.each(['了解一下图片的布局', ''])(
+    '图片输入 %j 保存到历史并进入接待模型，而不是空文本澄清',
+    async (userIntent) => {
+      const inputParts = [
+        { type: 'input_image' as const, imageUrl: 'https://example.test/layout.png' },
+      ];
+      await orchestrator.orchestrateReceptionInput({
+        userId: USER_ID,
+        receptionSessionId: SESSION_ID,
+        userIntent,
+        inputParts,
+        persistAckMessage: false,
+      });
+      expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestData: expect.objectContaining({ inputParts }),
+        }),
+      );
+      const { listSessionMessagesV2 } = await import('../../message/message-v2-adapter.js');
+      expect(
+        listSessionMessagesV2({ sessionId: SESSION_ID, userId: USER_ID })[0]?.content,
+      ).toContainEqual(expect.objectContaining(inputParts[0]!));
+    },
+  );
+
   it('reception 会话已有活跃 handoff → triggered=false（避免并行链路）', async () => {
     handoffStore.createHandoff({
       userId: USER_ID,
@@ -519,6 +602,67 @@ describe('orchestrateReceptionInput', () => {
     }
   }, 10_000);
 
+  it('图片需求经过澄清确认后仍把原图交给PM1与意图改写模型', async () => {
+    process.env['AI_API_BASE_URL'] = 'https://example.test/v1';
+    process.env['AI_API_KEY'] = 'sk-test';
+    process.env['AI_DEFAULT_MODEL'] = 'gpt-test';
+    const inputParts = [
+      {
+        type: 'input_image' as const,
+        imageUrl: 'data:image/png;base64,aW1hZ2U=',
+        mimeType: 'image/png',
+      },
+    ];
+    const intent = '按截图重构整个系统架构';
+    expect(
+      await orchestrator.orchestrateReceptionInput({
+        userId: USER_ID,
+        receptionSessionId: SESSION_ID,
+        userIntent: intent,
+        inputParts,
+        streamClientRequestId: 'image-origin',
+        persistAckMessage: false,
+      }),
+    ).toMatchObject({ reason: 'grill-started' });
+    const extraParts = [
+      {
+        type: 'input_image' as const,
+        imageUrl: 'data:image/png;base64,ZXh0cmE=',
+        mimeType: 'image/png',
+      },
+    ];
+    await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '',
+      inputParts: extraParts,
+      streamClientRequestId: 'image-extra',
+      persistAckMessage: false,
+    });
+    await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '1. 改单文件；2. 无约束；3. 代码变更；4. 测试通过',
+      persistAckMessage: false,
+    });
+    await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '确认',
+      persistAckMessage: false,
+      autoRunInit: false,
+    });
+    const row = dbModule.sqliteGet<{ payload_json: string }>(
+      'SELECT payload_json FROM handoff_records WHERE from_session_id = ? LIMIT 1',
+      [SESSION_ID],
+    );
+    const expectedImages = [...inputParts, ...extraParts];
+    expect(JSON.parse(row?.payload_json ?? '{}')).toMatchObject({ inputParts: expectedImages });
+    expect(llmCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ inputParts: expectedImages }),
+    );
+  });
+
   it('确认后把已确认共识写入 handoff payload，并跳过重复路由（P4）', async () => {
     process.env['AI_API_BASE_URL'] = 'https://example.test/v1';
     process.env['AI_API_KEY'] = 'sk-test';
@@ -672,5 +816,162 @@ describe('orchestrateReceptionInput', () => {
     expect(result.triggered).toBe(false);
     expect(listHandoffsFor(SESSION_ID)).toHaveLength(0);
     expect(grill.readReceptionGrill(SESSION_ID)?.state.confirmedAt).toBeUndefined();
+  }, 10_000);
+});
+
+// ─── T-17 深度可见与升级入口 ────────────────────────────────────────────────
+describe('T-17 编排深度可见与升级', () => {
+  beforeEach(() => {
+    process.env['AI_API_BASE_URL'] = 'https://example.test/v1';
+    process.env['AI_API_KEY'] = 'sk-test';
+    process.env['AI_DEFAULT_MODEL'] = 'gpt-test';
+  });
+
+  it('L2 派发文案标注本次深度并给出升级入口', async () => {
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '实现订单提交接口并让前端调用',
+      persistUserMessage: false,
+      persistAckMessage: true,
+      autoRunInit: false,
+    });
+
+    expect(result.triggered).toBe(true);
+    const ack = listSessionTextParts(SESSION_ID).join('\n');
+    expect(ack).toContain('本次按 L2');
+    expect(ack).toContain('升级为完整流程');
+  }, 10_000);
+
+  it('L1 快车道文案标注不建规划派发，并给出升级入口', async () => {
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '修改登录按钮的文案',
+      persistUserMessage: false,
+      persistAckMessage: true,
+      autoRunInit: false,
+    });
+
+    expect(result.reason).toBe('l1-fast-lane');
+    expect(listHandoffsFor(SESSION_ID)).toHaveLength(0);
+    const ack = listSessionTextParts(SESSION_ID).join('\n');
+    expect(ack).toContain('本次按 L1');
+    expect(ack).toContain('未创建规划与派发');
+    expect(ack).toContain('升级为完整流程');
+  }, 10_000);
+
+  it('用户要求升级时走完整流程（L3），不再进 L1 快车道', async () => {
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '升级为完整流程',
+      persistUserMessage: false,
+      persistAckMessage: true,
+      autoRunInit: false,
+    });
+
+    expect(result.reason).not.toBe('l1-fast-lane');
+    expect(listHandoffsFor(SESSION_ID)).toHaveLength(1);
+    expect(runSessionInBackgroundMock).not.toHaveBeenCalled();
+    const ack = listSessionTextParts(SESSION_ID).join('\n');
+    expect(ack).toContain('本次按 L3');
+  }, 10_000);
+
+  it('升级时从当前进度续接：复用已有产物而非重新规划', async () => {
+    // 子树里已有一项活跃任务 = 可续接的进度；它挂在子会话上，
+    // 因此不会触发「本会话已有活跃 handoff」的提前返回。
+    const childSessionId = 's-upgrade-pm1';
+    dbModule.sqliteRun(`UPDATE sessions SET metadata_json = ? WHERE id = ?`, [
+      JSON.stringify({ teamWorkspaceId: 'tw-upgrade' }),
+      SESSION_ID,
+    ]);
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, role_layer, state_status, team_parent_session_id)
+       VALUES (?, ?, 'pm1', '{}', 'pm1', 'idle', ?)`,
+      [childSessionId, USER_ID, SESSION_ID],
+    );
+    handoffStore.createHandoff({
+      userId: USER_ID,
+      fromSessionId: childSessionId,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+    });
+
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '升级为完整流程',
+      persistUserMessage: false,
+      persistAckMessage: true,
+      autoRunInit: false,
+    });
+
+    const created = dbModule.sqliteAll<{ payload_json: string }>(
+      `SELECT payload_json FROM handoff_records WHERE from_session_id = ?`,
+      [SESSION_ID],
+    );
+    expect(created).toHaveLength(1);
+    const payload = JSON.parse(created[0]!.payload_json) as Record<string, unknown>;
+    // 续接模式：PM1 被要求读取已有 spec/plan/tasks，不重新规划
+    expect(payload['isResume']).toBe(true);
+    expect(payload['resumeRootSessionId']).toBe(SESSION_ID);
+    expect(result.handoffId).toBeTruthy();
+  }, 10_000);
+
+  it('深度判据不确定时保守按L2并记录可观测降级事件', async () => {
+    const {
+      __resetTeamRuntimeDiagnosticsForTesting,
+      getTeamRuntimeIncidentSummary,
+      listTeamRuntimeIncidents,
+    } = await import('../../team/team-runtime-diagnostics-store.js');
+    // 事件存储是进程级的：同文件其他用例也会产生降级事件，断言前先清空，
+    // 否则本用例在单独运行与全量运行下结果不一致。
+    __resetTeamRuntimeDiagnosticsForTesting();
+    // 「执行」命中操作指令 → orchestrate，但不含任何改动面信号 → 规则不确定，
+    // 需要在编排层用模型兜底；模型没有返回 DEPTH 行时必须保守降级并可观测。
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '执行',
+      persistUserMessage: false,
+      persistAckMessage: false,
+      autoRunInit: false,
+    });
+
+    expect(result.triggered).toBe(true);
+    const incidents = listTeamRuntimeIncidents({ userId: USER_ID }).filter(
+      (incident) => incident.category === 'depth_degraded',
+    );
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]?.code).toBe('depth-rule-uncertain');
+    expect(incidents[0]?.context['depth']).toBe('L2');
+    expect(getTeamRuntimeIncidentSummary({ userId: USER_ID }).depth_degraded).toBe(1);
+
+    // 降级后的深度仍要随任务落库，面板才能解释「为什么走了完整流程」。
+    const payload = JSON.parse(
+      dbModule.sqliteGet<{ payload_json: string }>(
+        `SELECT payload_json FROM handoff_records WHERE from_session_id = ?`,
+        [SESSION_ID],
+      )!.payload_json,
+    ) as Record<string, unknown>;
+    expect(payload['orchestrationDepth']).toBe('L2');
+  }, 10_000);
+
+  it('「升级依赖版本」这类真实开发任务不被误判为编排升级', async () => {
+    const result = await orchestrator.orchestrateReceptionInput({
+      userId: USER_ID,
+      receptionSessionId: SESSION_ID,
+      userIntent: '升级依赖版本到最新',
+      persistUserMessage: false,
+      persistAckMessage: true,
+      autoRunInit: false,
+    });
+
+    // 该输入的实际深度由改动面判据决定（触碰依赖/构建配置 → L3），
+    // 关键是不能被「升级」两字走成用户显式升级而绕过判据。
+    const ack = listSessionTextParts(SESSION_ID).join('\n');
+    expect(ack).not.toContain('用户要求升级');
+    expect(result.reason).not.toBe('l1-fast-lane');
   }, 10_000);
 });

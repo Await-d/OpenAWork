@@ -172,6 +172,7 @@ import {
 } from './conversation/settings/model-selection-source.js';
 import { useSessionSidebarRunState } from './conversation/snapshot/use-session-sidebar-run-state.js';
 import { useSessionSnapshotLoader } from './conversation/snapshot/use-session-snapshot-loader.js';
+import { useSessionHistoryLoader } from './conversation/snapshot/use-session-history-loader.js';
 import { useStaleRunningResync } from './conversation/snapshot/use-stale-running-resync.js';
 
 import { useStreamAttachRetry } from '../../components/conversation-runtime/attach/use-stream-attach-retry.js';
@@ -378,6 +379,7 @@ export default function ChatPage() {
     stoppingStreamRef,
     streamBuffer,
     streamBufferRef,
+    streamFrameHandleRef,
     streamError,
     streaming,
     streamingRef,
@@ -1434,21 +1436,23 @@ export default function ChatPage() {
       },
     );
 
-  /**
-   * 历史跳转 / 搜索 / 收藏三个入口共用:点目标消息时,如果它没在当前
-   * 渲染窗口里(分页只渲染最近 N 条 / 服务端还没拉到本地),先把它「弄
-   * 出来」再让调用方滚动。否则点击会静默无响应,用户看不到任何反馈。
-   *
-   * 必须放在 `useSessionSnapshotLoader` 解构之后,否则 useCallback 的
-   * 依赖数组会在初始化时读取尚未声明的 `loadCurrentSessionSnapshot`
-   * 触发 TDZ 错误。
-   */
+  const { loadEarlierHistory, hasMoreHistory } = useSessionHistoryLoader({
+    gatewayUrl,
+    token,
+    currentSessionId,
+    reloadKey: sessionReloadNonce,
+    currentSessionViewRef,
+    messagesRef,
+    isCurrentSessionView,
+    setMessages,
+    setSubagentNotices,
+    setServerTotalTurnCount,
+  });
   const ensureMessageVisible = useEnsureMessageVisible({
     currentSessionId,
-    loadCurrentSessionSnapshot,
+    loadEarlierHistory,
     messages,
     requestMessageScroll,
-    setServerTotalTurnCount,
     setVisibleMessageCount,
     visibleMessageCount,
   });
@@ -1744,6 +1748,7 @@ export default function ChatPage() {
       setWorkflowRuntime,
       skeletonDelayTimerRef,
       startSessionSwitchTransition,
+      streamFrameHandleRef,
       streamBufferRef,
       streamThinkingBlocksRef,
       streamingRef,
@@ -2123,6 +2128,10 @@ export default function ChatPage() {
         setStreamThinkingBuffer,
         setStreaming,
         setStreamingSegments,
+        streamFrameHandleRef,
+        streamBufferRef,
+        streamThinkingBlocksRef,
+        streamingSegmentsRef,
         stoppingStreamRef,
         streamRevealNextAllowedAtRef,
         streamRevealTargetCodePointsRef,
@@ -2769,7 +2778,7 @@ export default function ChatPage() {
     contextUsageSnapshot,
     effectiveContextMessageCount,
     sanitizedHistoricalMessages,
-    hiddenMessageCount,
+    hiddenMessageCount: renderHiddenMessageCount,
     firstVisibleMessageId,
     groupedMessageEntries,
   } = useChatRenderData({
@@ -2808,6 +2817,12 @@ export default function ChatPage() {
     stoppingStream,
     onStopActiveMessage: stopActiveMessage,
   });
+  const hiddenMessageCount =
+    hasMoreHistory === false
+      ? Math.max(0, sanitizedHistoricalMessages.length - visibleMessageCount)
+      : hasMoreHistory === true
+        ? Math.max(1, renderHiddenMessageCount)
+        : renderHiddenMessageCount;
 
   // ─── 头部插入历史消息的滚动锚点 ────────────────────────────────────
   // `messages` 是完整（或快照窗口）列表，加载旧消息 = 扩大 `slice(-visibleMessageCount)`
@@ -2832,13 +2847,12 @@ export default function ChatPage() {
     historyAnchorRestoreCancelRef,
     lastAnchorMessageIdRef,
     setLastAnchorMessageId,
-    loadCurrentSessionSnapshot,
+    loadEarlierHistory,
     pendingHistoryAnchor,
     sanitizedHistoricalMessagesLength: sanitizedHistoricalMessages.length,
     scrollRegionRef,
     setPendingHistoryAnchor,
     setPendingMessageScroll,
-    setServerTotalTurnCount,
     setVisibleMessageCount,
     visibleMessageCount,
   });

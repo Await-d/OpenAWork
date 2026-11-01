@@ -11,16 +11,18 @@ import {
 } from '@openAwork/agent-core';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import {
-  createMemory,
-  deleteMemory,
   getMemoryById,
   getMemoryStats,
   listMemories,
   readMemorySettings,
-  updateMemory,
   writeMemorySettings,
 } from '../memory/memory-store.js';
+import { applyManualMemoryChange } from '../memory/governance/memory-commit-service.js';
 import { upsertExtractedMemories } from '../memory/memory-extraction-store.js';
+import { resolveProposalScopeForSession } from '../memory/governance/memory-scope-resolver.js';
+import { readLatestChannelProvenance } from '../memory/governance/memory-provenance-store.js';
+import { memoriesProposalsRoutes } from './memories-proposals.js';
+import { memoriesRulesRoutes } from './memories-rules.js';
 import { sqliteGet } from '../infra/db.js';
 import { buildMemoryExtractionTextForSession } from '../memory/memory-runtime.js';
 import { scanMemoryWriteContent } from '../memory/memory-security-scanner.js';
@@ -32,13 +34,40 @@ interface SessionSelectionRow {
 }
 
 type MemoriesRouteErrorCode =
-  'memory_not_found' | 'memory_write_blocked' | 'memory_extract_session_not_found';
+  | 'memory_not_found'
+  | 'memory_write_blocked'
+  | 'memory_extract_session_not_found'
+  | 'memory_revision_conflict';
 
 const MEMORIES_ROUTE_ERROR_MESSAGES: Record<MemoriesRouteErrorCode, string> = {
   memory_not_found: '目标记忆不存在。',
   memory_write_blocked: '记忆内容未通过安全校验。',
   memory_extract_session_not_found: '没有可用于抽取记忆的会话。',
+  memory_revision_conflict: '记忆已被修改，请刷新后重试。',
 };
+
+/** 从请求体 / 查询里读可选 `expectedRevision`（乐观并发）。 */
+function readExpectedRevision(body: unknown, query: unknown): number | null {
+  const fromBody =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>)['expectedRevision']
+      : undefined;
+  const fromQuery =
+    query && typeof query === 'object' && !Array.isArray(query)
+      ? (query as Record<string, unknown>)['expectedRevision']
+      : undefined;
+  const value = fromBody ?? fromQuery;
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return null;
+}
 
 function memoriesRouteErrorPayload(
   code: MemoriesRouteErrorCode,
@@ -110,9 +139,25 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const memory = createMemory(user.sub, parsed);
-      step.succeed(undefined, { memoryId: memory.id });
-      return reply.status(201).send({ memory });
+      // 人工显式保存：仍直接生效（不弹二次确认），由提交器落库并记录
+      // confirmationKind='manual' + 递增 revision。
+      const result = applyManualMemoryChange({
+        userId: user.sub,
+        actorId: user.sub,
+        action: 'create',
+        payload: parsed,
+      });
+      if (!result.ok || !result.memory) {
+        step.fail('memory_write_blocked');
+        return reply.status(400).send(
+          memoriesRouteErrorPayload('memory_write_blocked', {
+            detail: result.error,
+          }),
+        );
+      }
+
+      step.succeed(undefined, { memoryId: result.memory.id });
+      return reply.status(201).send({ memory: result.memory });
     },
   );
 
@@ -178,14 +223,28 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const memory = updateMemory(user.sub, memoryId, parsed);
-      if (!memory) {
-        step.fail('memory_not_found');
-        return reply.status(404).send(memoriesRouteErrorPayload('memory_not_found'));
+      // 人工显式保存：直接生效；支持可选 expectedRevision 乐观并发（不匹配 → 409）。
+      const result = applyManualMemoryChange({
+        userId: user.sub,
+        actorId: user.sub,
+        action: 'update',
+        memoryId,
+        payload: parsed,
+        expectedRevision: readExpectedRevision(request.body, request.query),
+      });
+      if (!result.ok) {
+        if (result.error?.includes('不存在')) {
+          step.fail('memory_not_found');
+          return reply.status(404).send(memoriesRouteErrorPayload('memory_not_found'));
+        }
+        step.fail('memory_revision_conflict');
+        return reply
+          .status(409)
+          .send(memoriesRouteErrorPayload('memory_revision_conflict', { detail: result.error }));
       }
 
       step.succeed(undefined, { memoryId });
-      return reply.send({ memory });
+      return reply.send({ memory: result.memory });
     },
   );
 
@@ -197,10 +256,23 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const { memoryId } = request.params as { memoryId: string };
 
-      const deleted = deleteMemory(user.sub, memoryId);
-      if (!deleted) {
-        step.fail('memory_not_found');
-        return reply.status(404).send(memoriesRouteErrorPayload('memory_not_found'));
+      // 人工显式删除：直接生效（同 PUT，支持可选 expectedRevision）。
+      const result = applyManualMemoryChange({
+        userId: user.sub,
+        actorId: user.sub,
+        action: 'delete',
+        memoryId,
+        expectedRevision: readExpectedRevision(request.body, request.query),
+      });
+      if (!result.ok) {
+        if (result.error?.includes('不存在')) {
+          step.fail('memory_not_found');
+          return reply.status(404).send(memoriesRouteErrorPayload('memory_not_found'));
+        }
+        step.fail('memory_revision_conflict');
+        return reply
+          .status(409)
+          .send(memoriesRouteErrorPayload('memory_revision_conflict', { detail: result.error }));
       }
 
       step.succeed(undefined, { memoryId });
@@ -251,22 +323,42 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const candidates = extractMemoriesFromText(extractionText);
+      const metadataJson = session?.metadata_json ?? '{}';
       const workspaceRoot = readWorkspaceRootFromSessionMetadata(session?.metadata_json);
       const settings = readMemorySettings(user.sub);
-      const result = upsertExtractedMemories(user.sub, candidates, workspaceRoot, settings);
+      // 用户显式点了「立即抽取」：forceAsk，且来源标记为 manual_extract。
+      const provenance = extractedFromSessionId
+        ? (readLatestChannelProvenance(extractedFromSessionId) ?? null)
+        : null;
+      const scope = resolveProposalScopeForSession({
+        userId: user.sub,
+        metadataJson,
+        provenance,
+      });
+      const result = upsertExtractedMemories(user.sub, candidates, workspaceRoot, settings, {
+        scope,
+        origin: 'manual_extract',
+        provenance,
+        forceAsk: true,
+      });
+      // 兼容旧字段名：`created` / `updated` 现在表示「已提交待确认的提议数」，
+      // 不再代表已写入；新增 `proposed` 明确语义。
       const extractionSummary = {
         blocked: result.blocked,
         candidates: candidates.length,
         created: result.created,
         duplicates: result.duplicates,
+        proposed: result.proposed,
         rejected: result.rejected,
         reviewed: result.reviewed,
+        suppressed: result.suppressed,
+        transient: result.transient,
         updated: result.updated,
       };
 
       step.succeed(undefined, extractionSummary);
       return reply.send({
-        extracted: result.created + result.updated,
+        extracted: result.proposed,
         extractedFromSessionId,
         ...extractionSummary,
       });
@@ -300,4 +392,10 @@ export async function memoriesRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ settings: parsed });
     },
   );
+
+  // 提议确认路由（唯一正式写入门）。注册顺序在 `:memoryId` 之后不影响——这些
+  // 路由带 `/proposals` / `/revisions` 前缀，交由独立插件按自身顺序注册。
+  await app.register(memoriesProposalsRoutes);
+  // 结构化规则路由：新增/改内容走提议确认，停用/删除直接收窄生效。
+  await app.register(memoriesRulesRoutes);
 }

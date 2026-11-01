@@ -24,6 +24,8 @@ import type { UpstreamProtocolKind } from '../v2-runtime/upstream/native-model.j
 import { runUpstreamGenerate } from '../v2-runtime/upstream/index.js';
 import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
+import type { InputImageContent } from '@openAwork/shared';
+import { isInlineInputImage } from '../message/input-image-resolver.js';
 
 const WORKFLOW_MAX_OUTPUT_TOKENS = 2048;
 
@@ -76,6 +78,7 @@ export interface WorkflowLlmRequestConfig {
   apiKey: string;
   model: string;
   prompt: string;
+  inputParts?: InputImageContent[];
   system?: string;
   /** Planning callers must not accept empty or truncated documents. */
   requireCompleteOutput?: boolean;
@@ -217,7 +220,28 @@ export async function requestWorkflowLlmCompletion(
         baseURL: input.apiBaseUrl,
         model: input.model,
         ...(sessionId ? { sessionId } : {}),
-        messages: [{ role: 'user', content: input.prompt }],
+        messages: [
+          {
+            role: 'user',
+            content: input.inputParts?.length
+              ? [
+                  { type: 'text', text: input.prompt },
+                  ...input.inputParts.map((image) => {
+                    if (!isInlineInputImage(image))
+                      throw new Error('图片无法读取，请重新上传后重试。');
+                    return {
+                      type: 'media' as const,
+                      mediaType:
+                        image.mimeType ??
+                        /^data:([^;]+);/i.exec(image.imageUrl!)?.[1] ??
+                        'image/png',
+                      data: image.imageUrl!,
+                    };
+                  }),
+                ]
+              : input.prompt,
+          },
+        ],
         ...(input.system ? { system: input.system } : {}),
         temperature: input.temperature,
         maxOutputTokens:

@@ -617,44 +617,13 @@ const mcpManageServersPermissionDeriver: ToolPermissionDeriver = (ctx) => {
 /**
  * `memory_manage` 的权限派生。
  *
- * - `list` 只读免审批；
- * - 变更动作（add/update/delete）默认 ask，scope 精确到 `action:memoryId|new`，
- *   永久允许只覆盖同一动作类型（`action:*`）；
- * - 审批预览展示 key / type / value 片段（截断 120 字），让用户在批准前看到
- *   即将写入的长期记忆内容。
+ * 261101 起该工具**已只读化 + 提议化**：add / update / delete 只创建待确认的
+ * `MemoryProposal`，不再直接改数据；真正的写入门是 `POST /memories/proposals/:id/decision`
+ * 的确认路由（用户显式批准）。因此这里对**所有 action 一律返回 `null`（免审批）**——
+ * 在工具层再弹一次 ask 是重复且误导的（批准了也还没写入，写入仍要确认一次）。
  */
-const memoryManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
-  const action =
-    typeof ctx.rawInput['action'] === 'string' ? ctx.rawInput['action'].trim().toLowerCase() : '';
-  if (action === 'list') {
-    return null;
-  }
-  const memoryId =
-    typeof ctx.rawInput['memoryId'] === 'string' ? ctx.rawInput['memoryId'].trim() : '';
-  const memoryRecord =
-    ctx.rawInput['memory'] && typeof ctx.rawInput['memory'] === 'object'
-      ? (ctx.rawInput['memory'] as Record<string, unknown>)
-      : null;
-  const key =
-    memoryRecord && typeof memoryRecord['key'] === 'string' ? memoryRecord['key'].trim() : '';
-  const type =
-    memoryRecord && typeof memoryRecord['type'] === 'string' ? memoryRecord['type'].trim() : '';
-  const valueSnippet =
-    memoryRecord && typeof memoryRecord['value'] === 'string'
-      ? memoryRecord['value'].trim().slice(0, 120)
-      : '';
-  const scope = `${action}:${memoryId || 'new'}`;
-  const previewAction =
-    action === 'delete'
-      ? `删除记忆 ${memoryId || '(未知 id)'}`
-      : `${action === 'add' ? '新增' : '更新'}记忆${key ? `「${key}」` : ''}${type ? ` (${type})` : ''}${valueSnippet ? `：${valueSnippet}` : ''}`;
-  return {
-    scope,
-    reason: '需要修改用户的长期记忆',
-    riskLevel: 'high',
-    previewAction: previewAction.slice(0, 200),
-    always: [`${action}:*`],
-  };
+const memoryManagePermissionDeriver: ToolPermissionDeriver = (_ctx) => {
+  return null;
 };
 
 /**

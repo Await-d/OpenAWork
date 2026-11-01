@@ -15,7 +15,7 @@
  * 参考：use-chat-conversation-state.test.tsx 的渲染风格。
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { resolveChatUiWorkspaceScope, useChatUiState } from './use-chat-ui-state.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
@@ -88,6 +88,55 @@ describe('useChatUiState — 初始值', () => {
 });
 
 describe('useChatUiState — 右侧面板写入', () => {
+  it('流回调保留的setter身份稳定，连续函数式更新读取最新store值', () => {
+    const { result } = renderHook(() => useChatUiState({ effectiveWorkingDirectory: WS_A }));
+    const setTab = result.current.setRightTab;
+    const setOpen = result.current.setRightOpen;
+    act(() => {
+      setTab('tools');
+      setTab((prev) => (prev === 'tools' ? 'agent' : 'overview'));
+      setOpen((prev) => !prev);
+      setOpen((prev) => !prev);
+    });
+    expect(result.current.rightTab).toBe('agent');
+    expect(result.current.rightOpen).toBe(false);
+    expect(result.current.setRightTab).toBe(setTab);
+    expect(result.current.setRightOpen).toBe(setOpen);
+    act(() => {
+      setOpen(true);
+    });
+    expect(result.current.setRightOpen).toBe(setOpen);
+    act(() => {
+      setOpen((prev) => !prev);
+    });
+    expect(result.current.rightOpen).toBe(false);
+  });
+
+  it('工具delta重复选择同一tab或开闭状态时不通知store订阅者', () => {
+    const { result } = renderHook(() => useChatUiState({ effectiveWorkingDirectory: WS_A }));
+    const changed = vi.fn();
+    const unsubscribe = useUIStateStore.subscribe(changed);
+    try {
+      act(() => {
+        result.current.setRightTab('tools');
+        for (let index = 0; index < 100; index += 1) {
+          result.current.setRightTab('tools');
+          result.current.setRightOpen(false);
+        }
+      });
+      expect(changed).toHaveBeenCalledOnce();
+      const snapshot = useUIStateStore.getState();
+      act(() => {
+        snapshot.setRightTab('tools');
+        snapshot.setRightOpen(false);
+      });
+      expect(useUIStateStore.getState()).toBe(snapshot);
+      expect(changed).toHaveBeenCalledOnce();
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it('setRightOpen 接受具体值与函数式形式，并镜像到 rightOpenRef', () => {
     const { result } = renderHook(() => useChatUiState({ effectiveWorkingDirectory: WS_A }));
 

@@ -27,6 +27,12 @@ import {
   resumeApprovedPermissionRequest,
   resumeRejectedPermissionRequest,
 } from './stream-runtime.js';
+import {
+  notifyChannelAfterApprovedResume,
+  notifyChannelPermissionDecision,
+  notifyChannelPermissionExpired,
+  notifyChannelPermissionResumeFailure,
+} from '../channels/channel-session-notice.js';
 import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
 import { appendPermissionDecisionLog } from '../session/permission-decision-log-store.js';
 import { upsertPermissionGrant } from '../permission/permission-grants-store.js';
@@ -77,6 +83,20 @@ interface PermissionRequestRow {
   created_at: string;
 }
 
+/**
+ * 把已到期的 pending 权限请求置为终态（rejected）。返回**真正被置终态**的条数。
+ *
+ * 调用面很窄，值得记住：本函数只在「共享会话读取」路径被调用
+ * （`routes/session-shared-read-routes.ts`）。`GET /permissions/pending` 刻意不调它
+ * —— 那个接口被前端以 2.5s 轮询，在这里写库等于把写事务挂到高频轮询上。
+ * 因此「到期」是**软**约束：没人读共享会话时，过期的行会一直留在 pending，
+ * 甚至连批准都仍然可以（reply 路由只看 `status === 'pending'`）。挂在这里的渠道
+ * 提示因此也是尽力而为，不承诺必达。
+ *
+ * 逐条用 `changes` 判定而不是相信 SELECT 结果：两端同时读取共享会话时会各自
+ * 查到同一批行，只有真正把行改掉的那一次才算「我让它失效的」，否则两边都会
+ * 重复发布 `permission_replied` 事件、各推一条「授权已超时」。
+ */
 export function expirePendingPermissionRequests(input: {
   nowMs?: number;
   sessionId: string;
@@ -90,13 +110,18 @@ export function expirePendingPermissionRequests(input: {
     [input.sessionId, nowMs],
   );
 
+  const expiredToolNames: string[] = [];
   for (const request of requests) {
-    sqliteRun(
+    const changes = sqliteRunWithChanges(
       `UPDATE permission_requests
        SET status = 'rejected', decision = 'reject', updated_at = datetime('now')
        WHERE id = ? AND session_id = ? AND status = 'pending'`,
       [request.id, input.sessionId],
     );
+    if (changes === 0) {
+      continue;
+    }
+    expiredToolNames.push(request.tool_name);
     const requestClientRequestId = parsePermissionRequestClientRequestId(
       request.request_payload_json,
     );
@@ -107,7 +132,16 @@ export function expirePendingPermissionRequests(input: {
     );
   }
 
-  return requests.length;
+  if (expiredToolNames.length > 0) {
+    // 超时既不是拒绝也不是批准：用户什么都没做，本轮就作废了。渠道里那句
+    // 「等待授权」如果不说一声，会一直像是还有人在等它批准。
+    notifyChannelPermissionExpired({
+      sessionId: input.sessionId,
+      toolNames: expiredToolNames,
+    });
+  }
+
+  return expiredToolNames.length;
 }
 
 /**
@@ -141,13 +175,20 @@ export function cancelPendingPermissionRequestsByClientRequest(input: {
       parsePermissionRequestClientRequestId(request.request_payload_json) === input.clientRequestId,
   );
 
+  let transitionedCount = 0;
   for (const request of requests) {
-    sqliteRun(
+    // 同 `expirePendingPermissionRequests`：并发调用（停止与回退撞在一起）时，
+    // 只有真正改了行的那一次才发布事件、才算作废条数。
+    const changes = sqliteRunWithChanges(
       `UPDATE permission_requests
        SET status = 'rejected', decision = 'reject', updated_at = datetime('now')
        WHERE id = ? AND session_id = ? AND status = 'pending'`,
       [request.id, input.sessionId],
     );
+    if (changes === 0) {
+      continue;
+    }
+    transitionedCount += changes;
     publishSessionRunEvent(
       input.sessionId,
       createPermissionRepliedEvent({ requestId: request.id, decision: 'reject' }),
@@ -155,12 +196,12 @@ export function cancelPendingPermissionRequestsByClientRequest(input: {
     );
   }
 
-  if (requests.length > 0) {
+  if (transitionedCount > 0) {
     // 该回合已作废：清掉可能存在的 team resume 注册，避免后续 approve 续跑已删回合。
     clearInternalTeamResumeRequest(input.clientRequestId);
   }
 
-  return requests.length;
+  return transitionedCount;
 }
 
 /**
@@ -551,6 +592,16 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         userId: user.sub,
       });
 
+      // 决定此刻已经落库：渠道会话看不到 Web 端的权限卡片，必须回推一条，
+      // 否则渠道用户只会看到「一直没动静」。best-effort —— 审批已生效，
+      // 推送失败绝不能把响应变成 500 诱导用户重复提交。
+      notifyChannelPermissionDecision({
+        sessionId,
+        toolName: permissionRequest.tool_name,
+        decision: body.decision,
+        resumed: body.decision !== 'reject' && resumePayload !== null,
+      });
+
       if (body.decision === 'reject' && !continueOnDeny && requestClientRequestId) {
         clearInternalTeamResumeRequest(requestClientRequestId);
       }
@@ -562,19 +613,36 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       });
 
       if (body.decision !== 'reject' && resumePayload) {
+        // 收窄在闭包里会丢失，提取成局部常量。
+        const approvedResumePayload = resumePayload;
         void resumeApprovedPermissionRequest({
           payload: {
-            ...resumePayload,
+            ...approvedResumePayload,
             toolName: permissionRequest.tool_name,
           },
           sessionId,
           userId: user.sub,
-        }).catch((error) => {
-          request.log.error(
-            { err: error, requestId: body.requestId, sessionId },
-            'failed to auto-resume approved permission request',
-          );
-        });
+        })
+          .then(() =>
+            // 续跑发生在没有打开的 SSE / WS 的路径上，渠道侧拿不到任何输出；
+            // 批准后不再回一条（结果、或「又停下来等下一次授权」），盲区只是
+            // 从审批前挪到了审批后。
+            notifyChannelAfterApprovedResume({
+              sessionId,
+              clientRequestId: approvedResumePayload.clientRequestId,
+            }),
+          )
+          .catch((error) => {
+            request.log.error(
+              { err: error, requestId: body.requestId, sessionId },
+              'failed to auto-resume approved permission request',
+            );
+            // 续跑炸掉时渠道里不能只留下「已批准」的沉默——那比等审批更难排查。
+            notifyChannelPermissionResumeFailure({
+              sessionId,
+              detail: error instanceof Error ? error.message : String(error),
+            });
+          });
       } else if (continueOnDeny && resumePayload) {
         void resumeRejectedPermissionRequest({
           payload: {

@@ -226,6 +226,137 @@ describe('parseConstitutionCheck', () => {
 });
 
 describe('runArtifactChain', () => {
+  it('答案逐条持久化后 ACK；持久化失败释放租约，不提前生成 plan', async () => {
+    const inbound = await import('../../handoff/store/inbound-store.js');
+    const grill = await import('../../handoff/runner/pm1-grill-runner.js');
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    const submitted = inbound.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'clarification_answer',
+      payload: { questionId: 'goal', answer: '持久化的目标' },
+    });
+    const originalPersist = grill.persistPm1Grill;
+    const persist = vi.spyOn(grill, 'persistPm1Grill').mockImplementation((...args) => {
+      if (grill.formatSettledAnswers(args[1]).some((answer) => answer.includes('持久化的目标'))) {
+        throw new Error('grill persistence unavailable');
+      }
+      return originalPersist(...args);
+    });
+    const ack = vi.spyOn(inbound, 'ackInboundMessage');
+    try {
+      await expect(
+        artifactChain.runArtifactChain({
+          userId: USER_ID,
+          sessionId: SESSION_ID,
+          handoff,
+          sourceIntent: '重构整个系统架构',
+          rewrittenIntent: '重构整个系统架构',
+          teamWorkspaceId: null,
+          callLlm: validPlanningLlm(async () => '规格'),
+        }),
+      ).rejects.toThrow('grill persistence unavailable');
+      expect(ack).not.toHaveBeenCalled();
+      const retry = inbound.consumePendingInboundMessage({
+        toSessionId: SESSION_ID,
+        loopIteration: 1,
+      });
+      expect(retry?.id).toBe(submitted.record.id);
+      expect(retry?.attemptCount).toBe(2);
+    } finally {
+      persist.mockRestore();
+      ack.mockRestore();
+    }
+  });
+
+  it('每条答案在其他答案到齐前已持久化并 ACK', async () => {
+    const inbound = await import('../../handoff/store/inbound-store.js');
+    const grill = await import('../../handoff/runner/pm1-grill-runner.js');
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    inbound.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'clarification_answer',
+      payload: { questionId: 'goal', answer: '已持久化目标' },
+    });
+    const originalAck = inbound.ackInboundMessage;
+    const ack = vi.spyOn(inbound, 'ackInboundMessage').mockImplementation((lease) => {
+      expect(
+        grill.formatSettledAnswers(grill.readPm1GrillTask(SESSION_ID)!.state).join('\n'),
+      ).toContain('已持久化目标');
+      return originalAck(lease);
+    });
+    try {
+      await artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: '重构整个系统架构',
+        rewrittenIntent: '重构整个系统架构',
+        teamWorkspaceId: null,
+        callLlm: validPlanningLlm(async () => '规格'),
+      });
+      expect(ack).toHaveBeenCalledTimes(1);
+    } finally {
+      ack.mockRestore();
+    }
+  });
+
+  it('部分任务标题修正失败时整轮明确失败，不用占位任务替换原需求', async () => {
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    const baseLlm = validPlanningLlm(async () => '支持登录请求');
+    const tasks = `# 任务清单
+
+## Phase 1
+
+- [ ] T001 [KIND:build] [SURFACE:backend] [src/login.ts] 新增登录校验 - 拒绝无效凭据
+**文件**：
+- Modify: \`src/login.ts\`
+- Test: \`src/login.test.ts\`
+
+- [ ] T002 [KIND:build] [SURFACE:backend] [src/errors.ts] 错误展示
+**文件**：
+- Modify: \`src/errors.ts\`
+- Test: \`src/errors.test.ts\`
+
+**检查点**：完成`;
+    await expect(
+      artifactChain.runArtifactChain({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        handoff,
+        sourceIntent: '新增登录校验与错误展示',
+        rewrittenIntent: '新增登录校验与错误展示',
+        teamWorkspaceId: null,
+        callLlm: (system, user) =>
+          system.includes('任务清单') ? Promise.resolve(tasks) : baseLlm(system, user),
+      }),
+    ).rejects.toThrow('planning-generation-failed:');
+    expect(
+      dbModule.sqliteGet<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM artifacts WHERE session_id = ? AND phase = 'tasks'",
+        [SESSION_ID],
+      )?.count,
+    ).toBe(0);
+  });
+
   it('持续无效输出有界失败，不生成占位 artifact 或成功结果', async () => {
     const handoff = store.createHandoff({
       userId: USER_ID,

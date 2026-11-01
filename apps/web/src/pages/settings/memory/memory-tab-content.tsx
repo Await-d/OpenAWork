@@ -10,9 +10,14 @@ import type {
 } from './memory-types.js';
 import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
 import { MemorySettingsPanel } from './memory-settings-panel.js';
+import { MemoryProposalsPanel } from './memory-proposals-panel.js';
+import { useMemoryProposals } from './use-memory-proposals.js';
 
 interface MemoryTabContentProps {
   memoryState: UseMemoryManagementResult;
+  /** 网关地址 / 令牌：用于加载待确认提议（可选，缺省时不渲染提议面板）。 */
+  gatewayUrl?: string;
+  token?: string | null;
 }
 
 const SOURCE_LABELS: Record<MemorySource, string> = {
@@ -565,7 +570,7 @@ function MemoryCard({
 
 /* ── 主组件 ────────────────────────────────────────── */
 
-export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
+export function MemoryTabContent({ memoryState, gatewayUrl, token }: MemoryTabContentProps) {
   const {
     filteredMemories,
     memories,
@@ -586,6 +591,21 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
     updateSettings,
     clearActionFeedback,
   } = memoryState;
+
+  const proposalsEnabled = Boolean(gatewayUrl && token);
+  const refreshAfterProposalChange = useMemo(() => {
+    return () => {
+      void refreshMemories();
+      void refreshStats();
+    };
+  }, [refreshMemories, refreshStats]);
+
+  const proposalsState = useMemoryProposals({
+    gatewayUrl: gatewayUrl ?? '',
+    token: token ?? null,
+    active: proposalsEnabled,
+    onChanged: refreshAfterProposalChange,
+  });
 
   const [typeFilter, setTypeFilter] = useState<MemoryType | 'all'>('all');
 
@@ -620,6 +640,22 @@ export function MemoryTabContent({ memoryState }: MemoryTabContentProps) {
   return (
     <>
       <ActionFeedbackBar feedback={actionFeedback} onClear={clearActionFeedback} />
+
+      {/* ── 待确认记忆：提议列表 + 整理报告 ── */}
+      {proposalsEnabled && (
+        <MemoryProposalsPanel
+          proposals={proposalsState.proposals}
+          pendingCount={proposalsState.pendingCount}
+          listStatus={proposalsState.listStatus}
+          listError={proposalsState.listError}
+          feedback={proposalsState.feedback}
+          onClearFeedback={proposalsState.clearFeedback}
+          onRefresh={proposalsState.refresh}
+          decide={proposalsState.decide}
+          listRevisions={proposalsState.listRevisions}
+          rollback={proposalsState.rollback}
+        />
+      )}
 
       {/* ── 概览区：KPI + 操作 ── */}
       <section style={SS}>

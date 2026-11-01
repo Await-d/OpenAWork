@@ -177,6 +177,75 @@ async function main(): Promise<void> {
         'attach should preserve tool_result observability',
       );
 
+      const completedRequestId = 'req-attach-paged';
+      for (let seq = 1; seq <= 600; seq += 1) {
+        sqliteRun(
+          `INSERT INTO session_run_events (session_id, user_id, client_request_id, seq, event_type, occurred_at_ms, payload_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            sessionId,
+            userId,
+            completedRequestId,
+            seq,
+            seq === 600 ? 'done' : 'text_delta',
+            seq,
+            JSON.stringify(
+              seq === 600
+                ? { type: 'done', stopReason: 'end_turn' }
+                : { type: 'text_delta', delta: String(seq) },
+            ),
+          ],
+        );
+      }
+      const completed = await app.inject({
+        method: 'GET',
+        url: `/sessions/${sessionId}/stream/attach?token=${encodeURIComponent(accessToken)}&clientRequestId=${completedRequestId}&afterSeq=129`,
+      });
+      const completedEnvelopes = parseSseEnvelopes(completed.body).filter(
+        (row) => typeof row['seq'] === 'number',
+      );
+      assert(completed.statusCode === 200, 'completed request replay should succeed');
+      assert(
+        completedEnvelopes.length === 471,
+        'completed replay must span every page after the exclusive cursor',
+      );
+      assert(
+        completedEnvelopes[0]?.['seq'] === 130 && completedEnvelopes.at(-1)?.['seq'] === 600,
+        'completed replay must preserve cursor order',
+      );
+      assert(
+        completed.body.includes('event: attach-replay-end'),
+        'completed replay must retain its clean EOF marker',
+      );
+      const address = await app.listen({ host: '127.0.0.1', port: 0 });
+      const controller = new AbortController();
+      const multi = await fetch(
+        `${address}/sessions/${sessionId}/stream/multi-attach?token=${encodeURIComponent(accessToken)}&afterSeq=0`,
+        {
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
+        },
+      );
+      assert(multi.status === 200, 'multi-attach route should succeed');
+      const reader = multi.body!.getReader();
+      const decoder = new TextDecoder();
+      let multiBody = '';
+      let multiCount = 0;
+      try {
+        while (multiCount < 603) {
+          const chunk = await reader.read();
+          assert(!chunk.done, 'multi-attach must not end at an old request terminal event');
+          multiBody += decoder.decode(chunk.value, { stream: true });
+          const lastCompleteFrame = multiBody.lastIndexOf('\n\n');
+          const completeBody = multiBody.slice(0, lastCompleteFrame + 2);
+          multiCount = parseSseEnvelopes(completeBody).filter(
+            (row) => typeof row['seq'] === 'number',
+          ).length;
+        }
+        assert(multiCount === 603, 'multi-attach must not truncate replay at 500 rows');
+      } finally {
+        controller.abort();
+        await reader.cancel().catch(() => undefined);
+      }
       console.log('verify-stream-attach-recovery: ok');
     } finally {
       await app.close();

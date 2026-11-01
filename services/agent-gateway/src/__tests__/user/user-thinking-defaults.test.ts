@@ -41,10 +41,10 @@ describe('resolveUserDefaultThinkingForChat', () => {
       }),
     });
 
-    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({});
+    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({ thinkingEnabled: false });
   });
 
-  it('默认思考关闭时返回空对象（不下发显式 disabled）', () => {
+  it('默认思考关闭时显式返回 thinkingEnabled=false（与 Web 正常轮口径一致）', () => {
     mocks.sqliteGet.mockReturnValue({
       value: JSON.stringify({
         chat: { enabled: false, effort: 'medium' },
@@ -52,26 +52,26 @@ describe('resolveUserDefaultThinkingForChat', () => {
       }),
     });
 
-    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({});
+    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({ thinkingEnabled: false });
   });
 
-  it('没有存储行时返回空对象', () => {
+  it('没有存储行时按默认关闭处理（等价设置页展示的缺省值）', () => {
     mocks.sqliteGet.mockReturnValue(undefined);
 
-    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({});
+    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({ thinkingEnabled: false });
   });
 
-  it('存储值损坏时返回空对象，不抛错也不伪造档位', () => {
+  it('存储值损坏时按默认关闭处理，不抛错也不伪造档位', () => {
     mocks.sqliteGet.mockReturnValue({ value: '{not-json' });
 
-    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({});
+    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({ thinkingEnabled: false });
 
     mocks.sqliteGet.mockReturnValue({ value: JSON.stringify({ chat: 1 }) });
 
-    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({});
+    expect(resolveUserDefaultThinkingForChat('user-1')).toEqual({ thinkingEnabled: false });
   });
 
-  it('数据库读取抛错时退化为不兜底（不阻断对话）', () => {
+  it('数据库读取抛错时退化为不兜底（不把一次异常解释成「用户关了思考」）', () => {
     mocks.sqliteGet.mockImplementation(() => {
       throw new Error('db unavailable');
     });

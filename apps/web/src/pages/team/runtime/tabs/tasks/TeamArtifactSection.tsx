@@ -31,6 +31,12 @@ import { EmptyState } from '../../shared/content-kit/EmptyState.js';
 import { ArtifactChainWizard } from './ArtifactChainWizard.js';
 import { ClarificationsPanel } from './ClarificationsPanel.js';
 import { parseConstitutionCheck, readConstitutionWarnings } from './constitution-check.js';
+import {
+  formatDispatchStats,
+  formatOrchestrationDepth,
+  readDispatchStats,
+  readOrchestrationDepth,
+} from './orchestration-summary.js';
 import { DispatchPackageView } from './DispatchPackageView.js';
 import { ReviewReportView } from './ReviewReportView.js';
 import { SessionTreeView } from './SessionTreeView.js';
@@ -744,6 +750,53 @@ export function TeamArtifactSection({
     [reviewArtifact?.content, reviewReportFromHandoffs],
   );
 
+  // T-18：把后端已落库的「本次编排深度」与「派发/截断统计」暴露到面板。
+  // 深度取自 reception→pm1 的 payload，统计取自 PM2 的 resultJson；
+  // 两者都可能缺失（旧任务），缺失时返回 null 让 UI 整块跳过。
+  const orchestrationVisibility = useMemo(() => {
+    // 优先取「当前聚焦的 handoff」自身的记录：链里可能有多次派发，只按最新取会把
+    // 别的任务的深度/统计显示成当前任务的。取不到再回退到最新一条，并在文案里
+    // 标注来源 handoff，避免误归属。
+    const depthEntries = combinedHandoffs
+      .filter((record) => record.fromRoleLayer === 'reception' && record.toRoleLayer === 'pm1')
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map((record) => ({ depth: readOrchestrationDepth(record.payload), handoffId: record.id }))
+      .filter((entry) => entry.depth !== null);
+    const depthEntry =
+      depthEntries.find((entry) => entry.handoffId === focusHandoffId) ??
+      depthEntries.at(0) ??
+      null;
+
+    const statsEntries = combinedHandoffs
+      .map((record) => ({
+        stats: readDispatchStats(record.resultJson),
+        handoffId: record.id,
+        updatedAt: record.updatedAt,
+      }))
+      .filter((entry) => entry.stats !== null)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const statsEntry =
+      statsEntries.find((entry) => entry.handoffId === focusHandoffId) ??
+      statsEntries.at(0) ??
+      null;
+
+    return {
+      depth: depthEntry?.depth ?? null,
+      depthSourceId: depthEntry?.handoffId ?? null,
+      stats: statsEntry?.stats ?? null,
+      statsSourceId: statsEntry?.handoffId ?? null,
+    };
+  }, [combinedHandoffs, focusHandoffId]);
+
+  /**
+   * 只在「有聚焦、且数据来自别的 handoff」时标注来源。
+   * 没有聚焦时整条产物链就是当前上下文，加标注只会变成噪音。
+   */
+  const describeSource = (sourceId: string | null): string =>
+    focusHandoffId && sourceId && sourceId !== focusHandoffId
+      ? `（来自 handoff #${sourceId.slice(0, 8)}）`
+      : '';
+
   const hasAnyContent =
     Boolean(specArtifact?.content) ||
     Boolean(planArtifact?.content) ||
@@ -894,6 +947,35 @@ export function TeamArtifactSection({
               refreshArtifacts();
             }}
           />
+        ) : null}
+
+        {orchestrationVisibility.depth || orchestrationVisibility.stats ? (
+          <TabSection
+            title="编排深度"
+            hint="后端记录的本次编排深度与派发上限；被截断的任务会列在这里。"
+          >
+            <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+              {orchestrationVisibility.depth ? (
+                <span>{`本次按${formatOrchestrationDepth(orchestrationVisibility.depth)}执行${describeSource(orchestrationVisibility.depthSourceId)}`}</span>
+              ) : null}
+              {orchestrationVisibility.stats ? (
+                <span style={{ color: 'var(--fg-muted)' }}>
+                  {`派发统计：${formatDispatchStats(orchestrationVisibility.stats)}${describeSource(orchestrationVisibility.statsSourceId)}`}
+                </span>
+              ) : null}
+              {orchestrationVisibility.stats &&
+              orchestrationVisibility.stats.undispatched.length > 0 ? (
+                <div>
+                  <span style={{ color: 'var(--fg-muted)' }}>未派发任务：</span>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {orchestrationVisibility.stats.undispatched.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </TabSection>
         ) : null}
 
         {nodes.size > 0 ? (

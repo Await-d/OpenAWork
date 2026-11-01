@@ -85,4 +85,17 @@ describe('isStreamEndingRunEvent', () => {
     ).toBe(false);
     expect(isStreamEndingRunEvent({ type: 'text_delta', delta: '继续' })).toBe(false);
   });
+
+  /**
+   * 受理确认（`run_accepted`）只写传输层、不落库，因此不可能出现在 attach 回放里。
+   * 这组断言锁死的是「它没有任何收尾语义」：若将来有人给它补一个 bookend，attach 的
+   * 活订阅会在收到确认的瞬间就提前收尾，客户端看到的是「刚发出去就被断开」。
+   */
+  it('受理确认既不结束订阅，也不算终态', () => {
+    const accepted = { type: 'run_accepted' as const, occurredAt: 1, requestId: 'req-1' };
+
+    expect(deriveRunEventBookend(accepted)).toBeUndefined();
+    expect(isTerminalRunEvent(accepted)).toBe(false);
+    expect(isStreamEndingRunEvent(accepted)).toBe(false);
+  });
 });

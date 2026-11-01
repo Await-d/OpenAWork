@@ -8,6 +8,7 @@ import {
   type ChannelSettingsEntry,
   type ChannelTypeDescriptor,
 } from './ChannelSubscriptionSettings.js';
+import { validateReadablePathPrefix } from './ChannelSecuritySection.js';
 
 const FEISHU_DESCRIPTOR: ChannelTypeDescriptor = {
   type: 'feishu',
@@ -836,5 +837,187 @@ describe('ChannelSubscriptionSettings · 工具白名单保存语义', () => {
       resourceId: 'resource-soul-balanced-collaborator',
       title: '稳健协作者',
     });
+  });
+});
+
+describe('可读取路径前缀校验', () => {
+  it.each([
+    ['/srv/data', '/srv/data'],
+    ['/srv/data/', '/srv/data'],
+    ['  /srv/data  ', '/srv/data'],
+    ['C:\\data', 'C:\\data'],
+    ['C:\\data\\', 'C:\\data'],
+    ['/', '/'],
+    // 盘符根必须保留分隔符：后端用 resolve(prefix) 匹配，而 resolve('C:') 指的是
+    // 「C 盘当前目录」而不是盘根，归一成 C: 会把前缀放大到用户并没有选择的目录。
+    ['C:\\', 'C:\\'],
+    ['C:/', 'C:\\'],
+    ['\\\\srv\\share', '\\\\srv\\share'],
+  ])('接受绝对路径 %s → %s', (input, expected) => {
+    expect(validateReadablePathPrefix(input)).toEqual({ ok: true, value: expected });
+  });
+
+  it.each([
+    ['', '请输入路径'],
+    ['   ', '请输入路径'],
+    ['relative/path', '需填绝对路径'],
+    ['~/data', '需填绝对路径'],
+    ['data', '需填绝对路径'],
+    // 盘符相对路径：Windows 上会解析到「C 盘当前目录」，必须拒绝。
+    ['C:', '需填绝对路径'],
+  ])('拒绝非绝对路径 %j', (input, expectedReason) => {
+    const result = validateReadablePathPrefix(input);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.reason).toContain(expectedReason);
+  });
+
+  it('相对路径在输入时就被标出、添加按钮置灰，改成绝对路径后可添加', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[makeChannel()]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const input = await screen.findByPlaceholderText(/srv\/data/);
+    const addButton = screen.getByRole<HTMLButtonElement>('button', { name: '添加路径' });
+    expect(addButton.disabled).toBe(true);
+
+    // 输入即提示（不需要先点添加），且按钮保持不可提交。
+    fireEvent.change(input, { target: { value: 'relative/path' } });
+    const liveError = await screen.findByText(/需填绝对路径/);
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(input.getAttribute('aria-describedby')).toBe(liveError.id);
+    expect(liveError.id).not.toBe('');
+    expect(addButton.disabled).toBe(true);
+    expect(screen.queryByText('relative/path')).toBeNull();
+
+    // 改成绝对路径：提示消失、按钮可用，入列后末尾斜杠被归一。
+    fireEvent.change(input, { target: { value: '/srv/data/' } });
+    expect(screen.queryByText(/需填绝对路径/)).toBeNull();
+    expect(input.getAttribute('aria-invalid')).toBe('false');
+    expect(input.getAttribute('aria-describedby')).toBeNull();
+    expect(addButton.disabled).toBe(false);
+    fireEvent.click(addButton);
+
+    expect(await screen.findByText('/srv/data')).toBeTruthy();
+  });
+});
+
+describe('可读取路径白名单的历史体检与目录选择入口', () => {
+  it('历史遗留的相对路径会被标出，并可一键清理（保留合法项）', async () => {
+    const channel: ChannelSettingsEntry = {
+      ...makeChannel(),
+      permissions: {
+        allowReadHome: false,
+        allowShell: false,
+        allowSubAgents: true,
+        allowWriteOutside: false,
+        readablePathPrefixes: ['relative/path', '/srv/ok'],
+      },
+    };
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[channel]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(/有 1 条历史路径不是绝对路径/)).toBeTruthy();
+    expect(screen.getByText('（相对路径，不生效）')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '移除无效项' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('relative/path')).toBeNull();
+    });
+    expect(screen.getByText('/srv/ok')).toBeTruthy();
+    expect(screen.queryByText(/有 1 条历史路径不是绝对路径/)).toBeNull();
+  });
+
+  it('纯 Web 环境不渲染系统目录选择器入口（能力探测为 false）', async () => {
+    render(
+      <ChannelSubscriptionSettings
+        channels={[makeChannel()]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    await screen.findByText('可读取路径前缀');
+    expect(screen.queryByRole('button', { name: '选择目录…' })).toBeNull();
+  });
+});
+
+describe('目录选择入口的三态', () => {
+  afterEach(() => {
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    window.localStorage.removeItem('desktop_gateway_mode');
+  });
+
+  it('桌面端远程网关模式：入口置灰并说明为何不适用', async () => {
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke: () => Promise.resolve(null),
+    };
+    window.localStorage.setItem('desktop_gateway_mode', 'remote');
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[makeChannel()]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const picker = await screen.findByRole<HTMLButtonElement>('button', { name: '选择目录…' });
+    expect(picker.disabled).toBe(true);
+    expect(screen.getByText(/远程网关/)).toBeTruthy();
+  });
+
+  it('桌面端本机模式：入口可用，选中的目录直接入列', async () => {
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke: () => Promise.resolve('/srv/picked/'),
+    };
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[makeChannel()]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const picker = await screen.findByRole<HTMLButtonElement>('button', { name: '选择目录…' });
+    expect(picker.disabled).toBe(false);
+
+    fireEvent.click(picker);
+
+    // 选择器返回的路径走与手输同一条入库路径（含末尾分隔符归一）。
+    expect(await screen.findByText('/srv/picked')).toBeTruthy();
+  });
+
+  it('桌面端本机模式：用户在系统对话框取消时不写入任何前缀', async () => {
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke: () => Promise.resolve(null),
+    };
+
+    render(
+      <ChannelSubscriptionSettings
+        channels={[makeChannel()]}
+        descriptors={[FEISHU_DESCRIPTOR]}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const picker = await screen.findByRole<HTMLButtonElement>('button', { name: '选择目录…' });
+    fireEvent.click(picker);
+
+    expect(await screen.findByText('暂未设置路径白名单')).toBeTruthy();
   });
 });

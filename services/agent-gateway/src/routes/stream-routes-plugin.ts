@@ -24,12 +24,15 @@ import {
 import {
   getRunEventRunId,
   getLatestSessionRunEventSeqByRequest,
-  listRecentSessionRunEventsWithMeta,
-  listSessionRunEventsByRequest,
-  listSessionRunEventsByRequestAfterSeq,
   subscribeSessionRunEvents,
-  type PublishRunEventMeta,
 } from '../session/session-run-events.js';
+import {
+  createRunEventReplayReader,
+  getLatestRequestRunEvent,
+  type ReplayEvent,
+} from '../session/session-run-event-replay.js';
+import { runAttachEventStream } from './attach-event-stream.js';
+import { RunEventSizeError } from '../session/run-event-size-budget.js';
 import { getFreshSessionRuntimeThread } from '../session/session-runtime-thread-store.js';
 import {
   stopAnyInFlightStreamRequestForSession,
@@ -112,18 +115,6 @@ function parseSseCursorFromLastEventId(
 
   const parsedSeq = Number.parseInt(rawSeq, 10);
   return Number.isFinite(parsedSeq) && parsedSeq >= 0 ? parsedSeq : null;
-}
-
-function writeSseRunEnvelope(
-  reply: FastifyReply,
-  envelope: ReturnType<typeof buildRunEventEnvelope>,
-): boolean {
-  const requestId = envelope.payload.cursor?.clientRequestId ?? envelope.payload.clientRequestId;
-  const lastEventId = requestId ? `${requestId}:${envelope.seq}` : String(envelope.seq);
-  return (
-    safeWriteReplyRaw(reply, `id: ${lastEventId}\n`) &&
-    safeWriteReplyRaw(reply, `data: ${JSON.stringify(envelope)}\n\n`)
-  );
 }
 
 function buildAttachRunEnvelope(input: { clientRequestId: string; event: RunEvent; seq: number }) {
@@ -764,17 +755,23 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     wl.succeed(sessionStep);
 
     const currentActiveThread = getFreshSessionRuntimeThread({ sessionId, userId: user.sub });
-    const requestedEvents = listSessionRunEventsByRequest({
-      sessionId,
-      clientRequestId: query.data.clientRequestId,
-    });
-    const latestRequestedEvent = requestedEvents.at(-1);
-    const latestRequestedBookend = latestRequestedEvent
-      ? deriveRunEventBookend(latestRequestedEvent)
-      : undefined;
     const isRequestedRequestActive =
       currentActiveThread?.clientRequestId === query.data.clientRequestId;
-    const canReplayRequestedRequestToTerminal = latestRequestedBookend?.terminal === true;
+    let canReplayRequestedRequestToTerminal = false;
+    if (!isRequestedRequestActive) {
+      try {
+        const latest = await getLatestRequestRunEvent(sessionId, query.data.clientRequestId);
+        canReplayRequestedRequestToTerminal = latest
+          ? deriveRunEventBookend(latest)?.terminal === true
+          : false;
+      } catch (error) {
+        if (!(error instanceof RunEventSizeError)) throw error;
+        wl.fail(routeStep, 'run event size budget exceeded');
+        wl.flush(ctx, 413);
+        return reply.status(413).send({ code: 'ATTACH_EVENT_TOO_LARGE', error: error.message });
+      }
+    }
+    if (request.raw.aborted || reply.raw.destroyed) return;
 
     if (!isRequestedRequestActive && !canReplayRequestedRequestToTerminal) {
       wl.fail(routeStep, 'attach request mismatch', {
@@ -807,176 +804,49 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     });
     // `retry: 1000` 改到下面的「确实会挂起订阅」分支再下发，理由见该处注释。
 
-    if (!isRequestedRequestActive) {
-      const replayEvents = listSessionRunEventsByRequestAfterSeq({
-        sessionId,
-        clientRequestId: query.data.clientRequestId,
-        afterSeq,
-      });
-      for (const replayEvent of replayEvents) {
-        const delivered = writeSseRunEnvelope(
-          reply,
-          buildAttachRunEnvelope({
-            clientRequestId: query.data.clientRequestId,
-            event: replayEvent.event,
-            seq: replayEvent.seq,
-          }),
-        );
-        if (!delivered) {
-          safeEndReplyRaw(reply);
-          return;
-        }
-      }
-
-      // 明确告知客户端「本次 attach 是重放完毕后的正常结束」，而不是传输中断。
-      //
-      // 没有这个信号时，EventSource 对「服务端正常 EOF」与「网络断开」只会同样触发
-      // `onerror`（浏览器不提供区分手段）。只要上面重放出了任何一条新事件，客户端就会
-      // 按 `receivedEventCount > 0` 判成 `attach_stream_disconnected`，进而走 800ms 起
-      // 指数退避（封顶 30s）的断线重连——用户看到的就是「自动重连中 · 约 25.6s 后重试」，
-      // 而这条流其实早已正常结束。
-      //
-      // 用具名事件而非注释：`:` 开头的注释行不会派发给 `onmessage`，客户端无法观测。
-      safeWriteReplyRaw(
-        reply,
-        `event: attach-replay-end\ndata: ${JSON.stringify({ replayedCount: replayEvents.length })}\n\n`,
-      );
-
-      wl.succeed(routeStep, undefined, {
-        attached: false,
-        clientRequestId: query.data.clientRequestId,
-        replayedCount: replayEvents.length,
-        sessionId,
-      });
-      wl.flush(ctx, 200);
-      safeEndReplyRaw(reply);
-      return;
-    }
-    // 只在**真正会长期挂起**的订阅分支才给 EventSource 下发 `retry: 1000`。
-    // 上面那个「重放完立即 EOF」的分支不适用：EventSource 收到 `retry` 会在 EOF 后
-    // 自行按该间隔重连，与前端应用层的退避重连叠加，形成两条并发的重连循环
-    // （控制台可见 `closeExistingTransports gen` 连续自增、attach 成功即秒断）。
-    // 不下发时，浏览器默认重连间隔（约 3s）仍兜底，而正常结束由前端按
-    // `silent_close` 静默收敛，不会误报「连接中断」。
-    if (!safeWriteReplyRaw(reply, 'retry: 1000\n\n')) {
-      safeEndReplyRaw(reply);
-      return;
-    }
-
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      let lastSeq = afterSeq;
-      let replayCompleted = false;
-      const pendingLiveEvents: Array<{ event: RunEvent; seq: number }> = [];
-      let replayedCount = 0;
-      const noopUnsubscribe: () => void = () => undefined;
-      let unsubscribe: () => void = noopUnsubscribe;
-
-      const deliverEvent = (event: RunEvent, seq: number) => {
-        if (settled || seq <= lastSeq) {
-          return;
-        }
-        const delivered = writeSseRunEnvelope(
-          reply,
-          buildAttachRunEnvelope({
-            clientRequestId: query.data.clientRequestId,
-            event,
-            seq,
-          }),
-        );
-        if (!delivered) {
-          cleanup('write_failed');
-          return;
-        }
-        lastSeq = seq;
-        // 只对**客户端也会结算**的终态事件收尾。`isStreamEndingRunEvent` 与
-        // `isTerminalRunEvent` 的差别就在非终态 error（如 TOOL_ERROR）上：客户端
-        // 收到它只透传提示、不断连，若这里把响应结束掉，那次正常 EOF 会被判成
-        // 「流式传输中连接中断」，进而进入「重连 → 再撞上下一条同类错误 → 再断开」
-        // 的死循环。
-        if (isStreamEndingRunEvent(event)) {
-          cleanup('terminal_event');
-        }
-      };
-
-      let heartbeat: NodeJS.Timeout | null = null;
-      /**
-       * 关闭原因。此前只有布尔 `settled`，导致「客户端主动断开」「写失败」「终态事件」
-       * 三种情形在日志里完全无法区分——客户端看到 `[ATTACH] stream closed` 时无从判断
-       * 是链路被掐断还是服务端正常收尾。
-       */
-      let closeReason = 'unknown';
-      /** 订阅已建立后的存活时长，用于区分「刚连上就断」与「跑了一会儿被中断」。 */
-      const attachedAtMs = Date.now();
-      const cleanup = (reason: string) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        closeReason = reason;
-        if (heartbeat) {
-          clearInterval(heartbeat);
-          heartbeat = null;
-        }
-        unsubscribe();
-        request.raw.off('close', cleanup);
-        safeEndReplyRaw(reply);
-        wl.succeed(routeStep, undefined, {
-          attached: true,
+    const attachedAtMs = Date.now();
+    const result = await runAttachEventStream({
+      request,
+      reply,
+      after: afterSeq,
+      createReader: () =>
+        createRunEventReplayReader({ sessionId, clientRequestId: query.data.clientRequestId }),
+      ...(isRequestedRequestActive
+        ? {
+            initialFrames: 'retry: 1000\n\n',
+            subscribe: (emit: (event: ReplayEvent) => void) =>
+              subscribeSessionRunEvents(sessionId, (event, meta) => {
+                if (
+                  meta?.clientRequestId === query.data.clientRequestId &&
+                  typeof meta.seq === 'number'
+                ) {
+                  emit({ event, cursor: meta.seq, clientRequestId: meta.clientRequestId });
+                }
+              }),
+            endsStream: ({ event }: ReplayEvent) => isStreamEndingRunEvent(event),
+          }
+        : {}),
+      encode: ({ event, cursor }) => {
+        const envelope = buildAttachRunEnvelope({
           clientRequestId: query.data.clientRequestId,
-          closeReason,
-          elapsedMs: Date.now() - attachedAtMs,
-          lastSeq,
-          replayedCount,
-          sessionId,
+          event,
+          seq: cursor,
         });
-        wl.flush(ctx, 200);
-        resolve();
-      };
-      heartbeat = setInterval(() => {
-        if (!safeWriteReplyRaw(reply, ': keepalive\n\n')) {
-          cleanup('heartbeat_failed');
-        }
-      }, 10_000);
-      unsubscribe = subscribeSessionRunEvents(sessionId, (event, meta?: PublishRunEventMeta) => {
-        if (meta?.clientRequestId !== query.data.clientRequestId || typeof meta.seq !== 'number') {
-          return;
-        }
-        if (meta.seq <= lastSeq) {
-          return;
-        }
-
-        if (!replayCompleted) {
-          pendingLiveEvents.push({ event, seq: meta.seq });
-          return;
-        }
-
-        deliverEvent(event, meta.seq);
-      });
-
-      request.raw.on('close', () => {
-        cleanup('client_closed');
-      });
-
-      const replayEvents = listSessionRunEventsByRequestAfterSeq({
-        sessionId,
-        clientRequestId: query.data.clientRequestId,
-        afterSeq,
-      });
-      replayedCount = replayEvents.length;
-      for (const replayEvent of replayEvents) {
-        deliverEvent(replayEvent.event, replayEvent.seq);
-      }
-
-      replayCompleted = true;
-      pendingLiveEvents.sort((left, right) => left.seq - right.seq);
-      for (const pendingEvent of pendingLiveEvents) {
-        deliverEvent(pendingEvent.event, pendingEvent.seq);
-      }
-
-      // 收尾日志统一由 `cleanup` 产出（带 closeReason / elapsedMs），此处不再重复
-      // `wl.succeed` + `wl.flush`——否则会往同一个 workflow 里写两条终态步骤。
+        return `id: ${query.data.clientRequestId}:${cursor}\ndata: ${JSON.stringify(envelope)}\n\n`;
+      },
+      endFrame: (replayedCount) =>
+        `event: attach-replay-end\ndata: ${JSON.stringify({ replayedCount })}\n\n`,
     });
+    wl.succeed(routeStep, undefined, {
+      attached: isRequestedRequestActive,
+      clientRequestId: query.data.clientRequestId,
+      closeReason: result.reason,
+      elapsedMs: Date.now() - attachedAtMs,
+      lastSeq: result.lastCursor,
+      replayedCount: result.replayedCount,
+      sessionId,
+    });
+    wl.flush(ctx, 200);
   });
 
   // ─── Multi-Attach SSE endpoint ─────────────────────────────────────
@@ -1050,148 +920,40 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
         'Access-Control-Allow-Credentials': 'true',
         Vary: 'Origin',
       });
-      if (!safeWriteReplyRaw(reply, 'retry: 1000\n\n')) {
-        safeEndReplyRaw(reply);
-        return;
-      }
-
-      // Write the active stream metadata as the first event so the client
-      // knows whether the session is currently streaming.
-      if (
-        !safeWriteReplyRaw(
-          reply,
-          `data: ${JSON.stringify({
-            type: 'multi-attach:status',
-            sessionId,
-            activeClientRequestId: currentActiveThread?.clientRequestId ?? null,
-          })}\n\n`,
-        )
-      ) {
-        safeEndReplyRaw(reply);
-        return;
-      }
-
-      await new Promise<void>((resolve) => {
-        let settled = false;
-        let lastRowId = query.data.afterSeq;
-        let replayCompleted = false;
-        const pendingLiveEvents: Array<{
-          event: RunEvent;
-          rowId: number;
-          clientRequestId?: string;
-        }> = [];
-        const noopUnsubscribe: () => void = () => undefined;
-        let unsubscribe: () => void = noopUnsubscribe;
-
-        const deliverEvent = (event: RunEvent, rowId: number, clientRequestId?: string) => {
-          if (settled || rowId <= lastRowId) {
-            return;
-          }
-          const delivered = safeWriteReplyRaw(
-            reply,
-            `id: ${rowId}\ndata: ${JSON.stringify(
-              buildMultiAttachRunEnvelope({ event, seq: rowId, clientRequestId }),
-            )}\n\n`,
-          );
-          if (!delivered) {
-            cleanup();
-            return;
-          }
-          lastRowId = rowId;
-          // P1-1/P1-2 fix: Do NOT close on terminal events. The session may
-          // start a new round (e.g. next handoff in a chain). Instead, keep
-          // the connection open and let the client decide when to disconnect.
-          // The client closes the EventSource when the session leaves 'running'.
-        };
-
-        let heartbeat: NodeJS.Timeout | null = null;
-        const cleanup = () => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          if (heartbeat) {
-            clearInterval(heartbeat);
-            heartbeat = null;
-          }
-          unsubscribe();
-          request.raw.off('close', cleanup);
-          safeEndReplyRaw(reply);
-          resolve();
-        };
-        heartbeat = setInterval(() => {
-          if (!safeWriteReplyRaw(reply, ': keepalive\n\n')) {
-            cleanup();
-          }
-        }, 10_000);
-
-        // Subscribe to ALL run events for this session (not filtered by
-        // clientRequestId). The meta carries the DB row id (globally monotonic
-        // per session) which we use as the SSE event id for deduplication.
-        unsubscribe = subscribeSessionRunEvents(sessionId, (event, meta?: PublishRunEventMeta) => {
-          const rowId = meta?.rowId;
-          if (typeof rowId !== 'number') {
-            return;
-          }
-
-          if (!replayCompleted) {
-            pendingLiveEvents.push({
-              event,
-              rowId,
-              clientRequestId: meta?.clientRequestId,
-            });
-            return;
-          }
-
-          deliverEvent(event, rowId, meta?.clientRequestId);
-        });
-
-        request.raw.on('close', cleanup);
-
-        // Replay recent events (up to 500 rows) from the DB.
-        // listRecentSessionRunEventsWithMeta returns rows ordered by id ASC,
-        // with the DB row id as `seq`.
-        const replayEvents = listRecentSessionRunEventsWithMeta({
+      const result = await runAttachEventStream({
+        request,
+        reply,
+        after: query.data.afterSeq,
+        createReader: () => createRunEventReplayReader({ sessionId }),
+        initialFrames: `retry: 1000\n\ndata: ${JSON.stringify({
+          type: 'multi-attach:status',
           sessionId,
-          afterRowId: query.data.afterSeq,
-          limit: 500,
-        });
-        for (const replayEvent of replayEvents) {
-          deliverEvent(
-            replayEvent.event,
-            replayEvent.seq,
-            replayEvent.clientRequestId ?? undefined,
-          );
-        }
-
-        replayCompleted = true;
-        // Sort pending live events by rowId for correct ordering.
-        pendingLiveEvents.sort((left, right) => left.rowId - right.rowId);
-        for (const pendingEvent of pendingLiveEvents) {
-          deliverEvent(pendingEvent.event, pendingEvent.rowId, pendingEvent.clientRequestId);
-        }
-
-        // If there's no active thread and no recent events, end the stream
-        // gracefully so the client can fall back to polling.
-        if (!settled && !currentActiveThread && replayEvents.length === 0) {
-          safeWriteReplyRaw(
-            reply,
-            `data: ${JSON.stringify({ type: 'multi-attach:no-active-stream', sessionId })}\n\n`,
-          );
-          cleanup();
-          return;
-        }
-
-        if (!settled) {
-          wl.succeed(routeStep, undefined, {
-            attached: true,
-            sessionId,
-            replayedCount: replayEvents.length,
-            hasActiveThread: Boolean(currentActiveThread),
-          });
-          wl.flush(ctx, 200);
-        }
+          activeClientRequestId: currentActiveThread?.clientRequestId ?? null,
+        })}\n\n`,
+        subscribe: (emit) =>
+          subscribeSessionRunEvents(sessionId, (event, meta) => {
+            if (typeof meta?.rowId === 'number') {
+              emit({ event, cursor: meta.rowId, clientRequestId: meta.clientRequestId });
+            }
+          }),
+        encode: ({ event, cursor, clientRequestId }) =>
+          `id: ${cursor}\ndata: ${JSON.stringify(
+            buildMultiAttachRunEnvelope({ event, seq: cursor, clientRequestId }),
+          )}\n\n`,
+        ...(!currentActiveThread
+          ? {
+              endWhenEmpty: `data: ${JSON.stringify({ type: 'multi-attach:no-active-stream', sessionId })}\n\n`,
+            }
+          : {}),
       });
+      wl.succeed(routeStep, undefined, {
+        attached: true,
+        sessionId,
+        replayedCount: result.replayedCount,
+        closeReason: result.reason,
+        hasActiveThread: Boolean(currentActiveThread),
+      });
+      wl.flush(ctx, 200);
     },
   );
 }

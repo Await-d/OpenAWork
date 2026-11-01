@@ -272,6 +272,146 @@ describe('stream error contracts', () => {
     );
   });
 
+  it('请求未带 agentId 时回退到会话绑定的 Agent', async () => {
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: chatProvider,
+      modelId: 'gpt-4o',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+        agentId: 'general',
+      }),
+      requestData: {
+        afterSeq: 0,
+        clientRequestId: 'req-session-agent',
+        message: 'hello',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.effectiveAgentId).toBe('general');
+    expect(route.systemPrompt).toContain('general-purpose software work');
+  });
+
+  it('请求显式 agentId 优先于会话绑定', async () => {
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: chatProvider,
+      modelId: 'gpt-4o',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+        agentId: 'general',
+      }),
+      requestData: {
+        afterSeq: 0,
+        agentId: 'plan',
+        clientRequestId: 'req-explicit-agent-wins',
+        message: 'hello',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.effectiveAgentId).toBe('plan');
+  });
+
+  it('渠道会话未绑定 Agent 时用渠道人设作为 route system prompt', async () => {
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: chatProvider,
+      modelId: 'gpt-4o',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+        source: 'channel',
+        channelPersona: {
+          resourceId: 'resource-soul-balanced-collaborator',
+          title: '稳健协作者',
+          content: '# SOUL.md\n保持稳健协作。',
+        },
+      }),
+      requestData: {
+        afterSeq: 0,
+        clientRequestId: 'req-channel-persona',
+        message: 'hello',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.systemPrompt).toContain('<channel-persona>');
+    expect(route.systemPrompt).toContain('当前消息通道绑定的人设资源：稳健协作者');
+    expect(route.systemPrompt).toContain('# SOUL.md\n保持稳健协作。');
+  });
+
+  it('渠道会话显式请求的 systemPrompt 优先于渠道人设', async () => {
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: chatProvider,
+      modelId: 'gpt-4o',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+        source: 'channel',
+        channelPersona: {
+          resourceId: 'resource-soul-balanced-collaborator',
+          title: '稳健协作者',
+          content: '# SOUL.md\n保持稳健协作。',
+        },
+      }),
+      requestData: {
+        afterSeq: 0,
+        clientRequestId: 'req-channel-persona-override',
+        message: 'hello',
+        systemPrompt: '显式指定的系统提示',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.systemPrompt).toBe('显式指定的系统提示');
+  });
+
+  it('非渠道会话不会注入渠道人设', async () => {
+    providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
+      provider: chatProvider,
+      modelId: 'gpt-4o',
+    });
+
+    const route = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({
+        providerId: 'openai-chat',
+        modelId: 'gpt-4o',
+        source: 'chat',
+        channelPersona: {
+          resourceId: 'resource-soul-balanced-collaborator',
+          title: '稳健协作者',
+          content: '# SOUL.md\n保持稳健协作。',
+        },
+      }),
+      requestData: {
+        afterSeq: 0,
+        clientRequestId: 'req-non-channel-persona',
+        message: 'hello',
+        temperature: 1,
+      },
+      userId: USER_ID,
+    });
+
+    expect(route.systemPrompt ?? null).toBeNull();
+  });
+
   it('对话未指定额度时不下发 max_tokens，显式请求与模型覆盖仍优先', async () => {
     // 模型声明的 maxOutputTokens 是「模型理论上限」（如 384000），只用于压缩 /
     // 溢出计算，**不参与请求额度**；未指定时请求不下发 max_tokens（对齐 opencode）。

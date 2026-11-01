@@ -139,6 +139,10 @@ vi.mock('@openAwork/web-client', () => ({
   createCapabilitiesClient: vi.fn(() => capabilitiesClientMocks),
   createChannelsClient: vi.fn(() => clientMocks),
   createResourcesClient: vi.fn(() => resourcesClientMocks),
+  // 会话级扩展管理的「影响清单」读取器依赖这两个客户端；本文件不测那条 UI，
+  // 但组件树会建实例，缺了导出会直接报 No "createSettingsClient" export。
+  createSettingsClient: vi.fn(() => ({ listMcpServers: vi.fn(async () => ({ servers: [] })) })),
+  createSkillsClient: vi.fn(() => ({ listInstalled: vi.fn(async () => ({ skills: [] })) })),
 }));
 
 vi.mock('@openAwork/shared-ui', () => ({

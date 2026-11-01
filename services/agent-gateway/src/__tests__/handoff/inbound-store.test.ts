@@ -242,6 +242,195 @@ describe('consumePendingInboundMessage', () => {
   });
 });
 
+describe('业务消息租约', () => {
+  it('通用消费者不能领取 reception outbox 负责的消息', () => {
+    const submitted = store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'user_input',
+      payload: {},
+      clientIdempotencyKey: 'outbox-owned',
+    });
+    dbModule.sqliteRun('INSERT INTO team_inbound_outbox (inbound_id, request_id) VALUES (?, ?)', [
+      submitted.record.id,
+      'outbox-request',
+    ]);
+    expect(
+      store.consumePendingInboundMessage({ toSessionId: SESSION_ID, loopIteration: 0 }),
+    ).toBeNull();
+    expect(store.listPendingInboundMessages(SESSION_ID)).toHaveLength(1);
+  });
+
+  it('失败释放可重试，五次失败进入 dead，续租和释放拒绝失效 token', () => {
+    const submitted = store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'user_input',
+      payload: {},
+      clientIdempotencyKey: 'exhausted',
+    });
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const claimed = store.consumePendingInboundMessage({
+        toSessionId: SESSION_ID,
+        loopIteration: attempt,
+        nowMs: 1000,
+      });
+      expect(claimed?.attemptCount).toBe(attempt);
+      const lease = { messageId: claimed!.id, leaseToken: claimed!.leaseToken!, nowMs: 1001 };
+      expect(store.releaseInboundMessage({ ...lease, leaseToken: 'wrong' })).toBe(false);
+      expect(store.renewInboundMessage(lease)).toBe(true);
+      expect(store.releaseInboundMessage({ ...lease, lastError: 'retryable' })).toBe(true);
+    }
+    expect(
+      store.consumePendingInboundMessage({
+        toSessionId: SESSION_ID,
+        loopIteration: 6,
+        nowMs: 1002,
+      }),
+    ).toBeNull();
+    expect(
+      store.submitInboundMessage({
+        userId: USER_ID,
+        toSessionId: SESSION_ID,
+        fromRoleLayer: 'reception',
+        messageType: 'user_input',
+        payload: {},
+        clientIdempotencyKey: 'exhausted',
+      }).record,
+    ).toMatchObject({ id: submitted.record.id, state: 'dead' });
+  });
+
+  it('五次领取均租约过期后不再重投，且过期 token 不可续租或释放', () => {
+    store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'user_input',
+      payload: {},
+    });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const claimed = store.consumePendingInboundMessage({
+        toSessionId: SESSION_ID,
+        loopIteration: attempt,
+        nowMs: attempt * 60_000,
+      });
+      const expired = {
+        messageId: claimed!.id,
+        leaseToken: claimed!.leaseToken!,
+        nowMs: (attempt + 1) * 60_000,
+      };
+      expect(store.ackInboundMessage(expired)).toBe(false);
+      expect(store.renewInboundMessage(expired)).toBe(false);
+      expect(store.releaseInboundMessage(expired)).toBe(false);
+    }
+    expect(
+      store.consumePendingInboundMessage({
+        toSessionId: SESSION_ID,
+        loopIteration: 5,
+        nowMs: 300_000,
+      }),
+    ).toBeNull();
+  });
+
+  it('幂等范围含目标 session，延后事件不会提前发布或带租约 token', () => {
+    seedSession('second-inbound', USER_ID);
+    const events: TeamEventsBusModule.TeamEventEnvelope[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => events.push(event));
+    try {
+      dbModule.sqliteTransaction(() => {
+        const first = store.submitInboundMessage({
+          userId: USER_ID,
+          toSessionId: SESSION_ID,
+          fromRoleLayer: 'reception',
+          messageType: 'user_input',
+          payload: {},
+          clientIdempotencyKey: 'shared',
+        });
+        const second = store.submitInboundMessage({
+          userId: USER_ID,
+          toSessionId: 'second-inbound',
+          fromRoleLayer: 'reception',
+          messageType: 'user_input',
+          payload: {},
+          clientIdempotencyKey: 'shared',
+        });
+        expect(second.reused).toBe(false);
+        expect(second.record.id).not.toBe(first.record.id);
+        expect(events).toHaveLength(0);
+        expect(first.record).not.toHaveProperty('leaseToken');
+      });
+      expect(events).toHaveLength(2);
+      expect(events[0]?.payload).not.toHaveProperty('leaseToken');
+      expect(() =>
+        dbModule.sqliteTransaction(() => {
+          store.submitInboundMessage({
+            userId: USER_ID,
+            toSessionId: SESSION_ID,
+            fromRoleLayer: 'reception',
+            messageType: 'user_input',
+            payload: {},
+            clientIdempotencyKey: 'rolled-back',
+          });
+          throw new Error('rollback');
+        }),
+      ).toThrow('rollback');
+      expect(events).toHaveLength(2);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('原子领取独占、过期重投且旧 token 不得 ACK', () => {
+    store.submitInboundMessage({
+      userId: USER_ID,
+      toSessionId: SESSION_ID,
+      fromRoleLayer: 'reception',
+      messageType: 'user_input',
+      payload: { text: 'retry' },
+    });
+    const first = store.consumePendingInboundMessage({
+      toSessionId: SESSION_ID,
+      loopIteration: 0,
+      nowMs: 1000,
+    });
+    expect(first?.state).toBe('processing');
+    expect(
+      store.consumePendingInboundMessage({
+        toSessionId: SESSION_ID,
+        loopIteration: 1,
+        nowMs: 1001,
+      }),
+    ).toBeNull();
+    const second = store.consumePendingInboundMessage({
+      toSessionId: SESSION_ID,
+      loopIteration: 2,
+      nowMs: 61000,
+    });
+    expect(second?.id).toBe(first?.id);
+    expect(second?.attemptCount).toBe(2);
+    expect(second?.leaseToken).not.toBe(first?.leaseToken);
+    expect(
+      store.ackInboundMessage({
+        messageId: first!.id,
+        leaseToken: first!.leaseToken!,
+        nowMs: 61001,
+      }),
+    ).toBe(false);
+    expect(
+      store.ackInboundMessage({ messageId: second!.id, leaseToken: 'wrong', nowMs: 61001 }),
+    ).toBe(false);
+    expect(
+      store.ackInboundMessage({
+        messageId: second!.id,
+        leaseToken: second!.leaseToken!,
+        nowMs: 61001,
+      }),
+    ).toBe(true);
+  });
+});
+
 describe('hasPendingCancelSignal', () => {
   it('无 cancel 时返回 false', () => {
     expect(store.hasPendingCancelSignal(SESSION_ID)).toBe(false);

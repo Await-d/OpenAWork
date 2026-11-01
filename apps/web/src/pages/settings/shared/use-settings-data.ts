@@ -87,9 +87,9 @@ export function useSettingsData({
   setDevtoolsSourceStates,
 }: UseSettingsDataOptions) {
   const [filePatterns, setFilePatterns] = useState<string[]>([]);
-  const [githubTriggers, setGithubTriggers] = useState<Array<{ repo: string; events: string[] }>>(
-    [],
-  );
+  const [githubTriggers, setGithubTriggers] = useState<
+    Array<{ agentId?: string; repo: string; events: string[] }>
+  >([]);
   const [attribution, setAttribution] = useState<AttributionConfig>({
     coAuthoredBy: false,
     assistedBy: false,

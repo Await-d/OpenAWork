@@ -17,7 +17,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { sqliteAll, sqliteGet, sqliteRun } from '../../infra/db.js';
+import {
+  sqliteAfterCommit,
+  sqliteAll,
+  sqliteGet,
+  sqliteRun,
+  sqliteRunWithChanges,
+} from '../../infra/db.js';
 import type { HandoffRoleLayer } from './handoff-store.js';
 import { assertCanReceiveInbound } from '../capability/layer-capabilities.js';
 import { publishTeamEvent } from '../bus/team-events-bus.js';
@@ -31,7 +37,14 @@ export type InboundMessageType =
   | 'escalation_request'
   | 'progress_report';
 
-export type InboundMessageState = 'pending' | 'consumed' | 'expired';
+export type InboundMessageState = 'pending' | 'processing' | 'consumed' | 'expired' | 'dead';
+
+export interface ClaimedInboundMessageRecord extends InboundMessageRecord {
+  leaseToken: string | null;
+  leaseUntilMs: number | null;
+  attemptCount: number;
+  lastError: string | null;
+}
 
 interface InboundMessageRow {
   id: string;
@@ -46,6 +59,10 @@ interface InboundMessageRow {
   consumed_at: string | null;
   consumed_by_loop_iteration: number | null;
   expires_at: string | null;
+  lease_token: string | null;
+  lease_until_ms: number | null;
+  attempt_count: number;
+  last_error: string | null;
 }
 
 export interface InboundMessageRecord {
@@ -337,9 +354,9 @@ export function submitInboundMessage(input: SubmitInboundInput): SubmitInboundRe
   if (input.clientIdempotencyKey) {
     const existing = sqliteGet<InboundMessageRow>(
       `SELECT * FROM session_inbound_messages
-       WHERE user_id = ? AND client_idempotency_key = ?
+       WHERE user_id = ? AND to_session_id = ? AND client_idempotency_key = ?
        LIMIT 1`,
-      [input.userId, input.clientIdempotencyKey],
+      [input.userId, input.toSessionId, input.clientIdempotencyKey],
     );
     if (existing) {
       return { record: mapRow(existing), reused: true };
@@ -373,6 +390,12 @@ export function submitInboundMessage(input: SubmitInboundInput): SubmitInboundRe
     throw new Error('Failed to read back inbound message after insert');
   }
   const record = mapRow(row);
+  sqliteAfterCommit(() => publishSubmittedInboundEvent(record));
+  maybePruneInboundMessages();
+  return { record, reused: false };
+}
+
+export function publishSubmittedInboundEvent(record: InboundMessageRecord): void {
   publishTeamEvent({
     type: 'session.inbound.submitted',
     sessionId: record.toSessionId,
@@ -381,10 +404,6 @@ export function submitInboundMessage(input: SubmitInboundInput): SubmitInboundRe
     payload: buildInboundEventPayload(record),
     userId: record.userId,
   });
-  // Opportunistic retention: drop old terminal-state rows so this table stays
-  // bounded on a long-lived session with frequent inbound traffic.
-  maybePruneInboundMessages();
-  return { record, reused: false };
 }
 
 // ─── Consume ────────────────────────────────────────────────────────────────
@@ -405,53 +424,105 @@ export function submitInboundMessage(input: SubmitInboundInput): SubmitInboundRe
 export function consumePendingInboundMessage(input: {
   toSessionId: string;
   loopIteration: number;
-}): InboundMessageRecord | null {
-  // 先把过期但仍是 pending 的标为 expired（避免被消费）
+  nowMs?: number;
+  leaseMs?: number;
+}): ClaimedInboundMessageRecord | null {
+  const nowMs = input.nowMs ?? Date.now();
+  const controlTypes = "('cancel_signal', 'pause_signal', 'resume_signal')";
   sqliteRun(
-    `UPDATE session_inbound_messages
-       SET state = 'expired'
-     WHERE state = 'pending'
-       AND expires_at IS NOT NULL
-       AND expires_at < datetime('now')`,
+    `UPDATE session_inbound_messages SET state = 'expired', lease_token = NULL, lease_until_ms = NULL
+     WHERE to_session_id = ? AND (state = 'pending' OR (state = 'processing' AND lease_until_ms <= ?))
+       AND expires_at IS NOT NULL AND expires_at < datetime(?, 'unixepoch')
+       AND NOT EXISTS (SELECT 1 FROM team_inbound_outbox WHERE inbound_id = session_inbound_messages.id)`,
+    [input.toSessionId, nowMs, nowMs / 1000],
   );
-
-  // 拉一条最高优先级的 pending
+  sqliteRun(
+    `UPDATE session_inbound_messages SET state = 'dead', lease_token = NULL, lease_until_ms = NULL,
+       last_error = COALESCE(last_error, 'Inbound processing attempts exhausted')
+     WHERE to_session_id = ? AND attempt_count >= 5
+       AND (state = 'pending' OR (state = 'processing' AND lease_until_ms <= ?))
+       AND message_type NOT IN ${controlTypes}
+       AND NOT EXISTS (SELECT 1 FROM team_inbound_outbox WHERE inbound_id = session_inbound_messages.id)`,
+    [input.toSessionId, nowMs],
+  );
   const row = sqliteGet<InboundMessageRow>(
-    `SELECT * FROM session_inbound_messages
-     WHERE to_session_id = ? AND state = 'pending'
-     ORDER BY
-       CASE message_type
-         WHEN 'cancel_signal' THEN 0
-         WHEN 'pause_signal' THEN 1
-         WHEN 'resume_signal' THEN 1
-         WHEN 'clarification_answer' THEN 2
-         WHEN 'user_input' THEN 3
-         WHEN 'escalation_request' THEN 4
-         WHEN 'progress_report' THEN 5
-         ELSE 9
-       END,
-       created_at ASC
-     LIMIT 1`,
-    [input.toSessionId],
-  );
-  if (!row) return null;
-
-  // 把它标为 consumed
-  sqliteRun(
     `UPDATE session_inbound_messages
-       SET state = 'consumed',
-           consumed_at = datetime('now'),
-           consumed_by_loop_iteration = ?
-     WHERE id = ? AND state = 'pending'`,
-    [input.loopIteration, row.id],
+     SET state = CASE WHEN message_type IN ${controlTypes} THEN 'consumed' ELSE 'processing' END,
+       consumed_at = CASE WHEN message_type IN ${controlTypes} THEN datetime(?, 'unixepoch') ELSE NULL END,
+       consumed_by_loop_iteration = ?,
+       lease_token = CASE WHEN message_type IN ${controlTypes} THEN NULL ELSE ? END,
+       lease_until_ms = CASE WHEN message_type IN ${controlTypes} THEN NULL ELSE ? END,
+       attempt_count = attempt_count + CASE WHEN message_type IN ${controlTypes} THEN 0 ELSE 1 END
+     WHERE id = (
+       SELECT id FROM session_inbound_messages
+       WHERE to_session_id = ?
+         AND (state = 'pending' OR (state = 'processing' AND lease_until_ms <= ?))
+         AND (message_type IN ${controlTypes} OR attempt_count < 5)
+         AND NOT EXISTS (SELECT 1 FROM team_inbound_outbox WHERE inbound_id = session_inbound_messages.id)
+       ORDER BY CASE message_type
+         WHEN 'cancel_signal' THEN 0 WHEN 'pause_signal' THEN 1 WHEN 'resume_signal' THEN 1
+         WHEN 'clarification_answer' THEN 2 WHEN 'user_input' THEN 3
+         WHEN 'escalation_request' THEN 4 WHEN 'progress_report' THEN 5 ELSE 9 END,
+         created_at ASC, rowid ASC LIMIT 1
+     ) RETURNING *`,
+    [
+      nowMs / 1000,
+      input.loopIteration,
+      randomUUID(),
+      nowMs + (input.leaseMs ?? 60_000),
+      input.toSessionId,
+      nowMs,
+    ],
   );
+  return row
+    ? {
+        ...mapRow(row),
+        leaseToken: row.lease_token,
+        leaseUntilMs: row.lease_until_ms,
+        attemptCount: row.attempt_count,
+        lastError: row.last_error,
+      }
+    : null;
+}
 
-  // 回读以拿到 consumed_at
-  const after = sqliteGet<InboundMessageRow>(
-    `SELECT * FROM session_inbound_messages WHERE id = ? LIMIT 1`,
-    [row.id],
+interface InboundLeaseInput {
+  messageId: string;
+  leaseToken: string;
+  nowMs?: number;
+}
+
+export function ackInboundMessage(input: InboundLeaseInput): boolean {
+  const nowMs = input.nowMs ?? Date.now();
+  return (
+    sqliteRunWithChanges(
+      `UPDATE session_inbound_messages SET state = 'consumed', consumed_at = datetime(?, 'unixepoch'),
+       lease_token = NULL, lease_until_ms = NULL, last_error = NULL
+     WHERE id = ? AND state = 'processing' AND lease_token = ? AND lease_until_ms > ?`,
+      [nowMs / 1000, input.messageId, input.leaseToken, nowMs],
+    ) === 1
   );
-  return after ? mapRow(after) : mapRow(row);
+}
+
+export function releaseInboundMessage(input: InboundLeaseInput & { lastError?: string }): boolean {
+  return (
+    sqliteRunWithChanges(
+      `UPDATE session_inbound_messages SET state = CASE WHEN attempt_count >= 5 THEN 'dead' ELSE 'pending' END,
+       lease_token = NULL, lease_until_ms = NULL, last_error = ?
+     WHERE id = ? AND state = 'processing' AND lease_token = ? AND lease_until_ms > ?`,
+      [input.lastError ?? null, input.messageId, input.leaseToken, input.nowMs ?? Date.now()],
+    ) === 1
+  );
+}
+
+export function renewInboundMessage(input: InboundLeaseInput & { leaseMs?: number }): boolean {
+  const nowMs = input.nowMs ?? Date.now();
+  return (
+    sqliteRunWithChanges(
+      `UPDATE session_inbound_messages SET lease_until_ms = ?
+     WHERE id = ? AND state = 'processing' AND lease_token = ? AND lease_until_ms > ?`,
+      [nowMs + (input.leaseMs ?? 60_000), input.messageId, input.leaseToken, nowMs],
+    ) === 1
+  );
 }
 
 /**

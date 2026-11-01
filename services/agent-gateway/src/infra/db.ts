@@ -107,6 +107,20 @@ function createDatabase(dbPath: string): GatewayDatabase {
   // overlap; wait up to 5s for the lock so concurrent requests retry instead
   // of failing the operation outright.
   database.exec('PRAGMA busy_timeout=5000');
+  // WAL 自动 checkpoint 阈值（页）。默认 1000 页（≈4MB）对流式热路径太激进：
+  // `session_run_events` / `session_entry` 每轮流都会写掉 MB 级 WAL，于是
+  // 「每几秒就有一次 checkpoint」，而 checkpoint **是同步 IO**——它发生在触发它的
+  // 那次 COMMIT 内部，回写脏页 + fsync 期间整个事件循环停摆（实测 0.3~3.6s，
+  // 与 `event-loop-lag` 告警的时间点完全重合）。
+  // 调到 4096 页（≈16MB）把频率摊到 1/4：单次成本略升，但「随机一次请求被卡住」
+  // 的概率明显下降。WAL 越大崩溃恢复越慢，16MB 仍是可接受的折中。
+  const autoCheckpointPages = Number.parseInt(
+    process.env['OPENAWORK_SQLITE_WAL_AUTOCHECKPOINT_PAGES'] ?? '',
+    10,
+  );
+  const effectiveAutoCheckpointPages =
+    Number.isFinite(autoCheckpointPages) && autoCheckpointPages >= 0 ? autoCheckpointPages : 4096;
+  database.exec(`PRAGMA wal_autocheckpoint=${effectiveAutoCheckpointPages}`);
   database.exec('PRAGMA foreign_keys=ON');
   return database;
 }
@@ -594,6 +608,9 @@ export async function migrate(): Promise<void> {
   );
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_session_run_events_session_id ON session_run_events(session_id, id)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_run_events_request_latest ON session_run_events(session_id, client_request_id, seq DESC, COALESCE(occurred_at_ms, 0) DESC, id DESC)',
   );
 
   db.exec(`
@@ -1410,9 +1427,15 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_memories_role_layers ON memories(user_id, role_layers_json) WHERE role_layers_json IS NOT NULL',
   );
-  db.exec(
-    'CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_user_type_key ON memories(user_id, type, key) WHERE enabled = 1',
-  );
+  // 记忆唯一索引**不在这里建**：自 261101 起改为作用域化索引
+  // （`(user_id, scope_type, scope_id, type, key) WHERE enabled = 1 AND lifecycle = 'active'`），
+  // 由 `migrateMemoryGovernance()` 负责「先回填 scope 再换索引」。
+  //
+  // 这里曾保留旧的 `(user_id, type, key) WHERE enabled = 1` 建索引语句，那是一个**启动即崩**
+  // 的缺陷：首次启动后旧索引被 DROP，而一旦用户在不同作用域下存在同 type+key 的启用记忆
+  // （作用域化索引允许、旧索引不允许），第二次启动 `CREATE UNIQUE INDEX IF NOT EXISTS`
+  // 会真的去建它并抛 UNIQUE constraint failed，整个 migrate 失败、网关起不来。
+  // 所以：旧索引只允许被 DROP，永不允许被重建。
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS memory_extraction_logs (
@@ -1428,6 +1451,10 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_memory_extraction_logs_user ON memory_extraction_logs(user_id)',
   );
+
+  // 261101-记忆确认写入与周期整理：作用域 / 版本 / 治理表。
+  // 必须在上面 memories 建表之后执行（依赖已存在的 memories 表与索引）。
+  migrateMemoryGovernance();
 
   // ─── V2 Message Store (opencode-style Session → Message → Part) ───
 
@@ -1890,9 +1917,29 @@ export async function migrate(): Promise<void> {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_session_inbound_expires ON session_inbound_messages(expires_at) WHERE state = 'pending' AND expires_at IS NOT NULL",
   );
-  // 客户端幂等：同一 user + key 不允许重复入库（避免重试误投递）
+  ensureColumn('session_inbound_messages', 'lease_token', 'TEXT');
+  ensureColumn('session_inbound_messages', 'lease_until_ms', 'INTEGER');
+  ensureColumn('session_inbound_messages', 'attempt_count', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('session_inbound_messages', 'last_error', 'TEXT');
+  db.exec('DROP INDEX IF EXISTS idx_session_inbound_idempotency');
   db.exec(
-    'CREATE UNIQUE INDEX IF NOT EXISTS idx_session_inbound_idempotency ON session_inbound_messages(user_id, client_idempotency_key) WHERE client_idempotency_key IS NOT NULL',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_session_inbound_idempotency ON session_inbound_messages(user_id, to_session_id, client_idempotency_key) WHERE client_idempotency_key IS NOT NULL',
+  );
+  db.exec(`CREATE TABLE IF NOT EXISTS team_inbound_outbox (
+    inbound_id TEXT PRIMARY KEY REFERENCES session_inbound_messages(id) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    available_at_ms INTEGER NOT NULL DEFAULT 0,
+    lease_token TEXT,
+    lease_until_ms INTEGER,
+    last_error TEXT,
+    outcome_json TEXT,
+    confirmed_input_json TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_team_inbound_outbox_due ON team_inbound_outbox(state, available_at_ms, lease_until_ms)',
   );
   // `GET /team/runtime` 的 clarifications / notifications 两条查询（前端 20s +
   // 30s 两处轮询）：`WHERE user_id = ? AND message_type ... AND state IN
@@ -1953,6 +2000,167 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_qq_wakeup_windows_open_id ON qq_wakeup_windows(plugin_id, open_id, sent_at DESC)',
   );
+
+  // ─── 会话扩展（Skill / MCP）会话级隔离（261031） ───
+  // 历史语义是「安装归用户、选择归会话」：`installed_skills` 是用户级真相源，
+  // `chat_session_skill_overrides` 只做选择覆盖；MCP 更是完全没有会话维度，
+  // `getConfiguredMcpServersForSession` 直接读 owner 的 `user_settings`。
+  // 于是「在消息渠道里装一个 skill/MCP」必然影响该用户的其他会话。
+  //
+  // 这四张表把「安装/配置」本身下沉到会话：会话自己持有技能快照（含内容摘要）
+  // 与 MCP 配置，互不继承、互不覆盖；`revision` 供并发 CAS 使用。
+  // 另加一张审批人清单与一张操作提案表——审批与写入是两个阶段，必须可恢复、
+  // 可审计、单次消费（详见 session-extension-operation-store.ts）。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_extension_settings (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      policy_version INTEGER NOT NULL DEFAULT 1,
+      inheritance_mode TEXT NOT NULL DEFAULT 'inherit',
+      revision INTEGER NOT NULL DEFAULT 1,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_extension_settings_user ON session_extension_settings(user_id)',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_skill_installations (
+      resource_ref TEXT NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      skill_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      version TEXT,
+      manifest_json TEXT NOT NULL,
+      content_digest TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      revision INTEGER NOT NULL DEFAULT 1,
+      installed_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, resource_ref)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_skill_installations_skill ON session_skill_installations(session_id, skill_id)',
+  );
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_mcp_servers (
+      resource_ref TEXT NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      display_id TEXT NOT NULL,
+      config_json TEXT NOT NULL,
+      secret_ref TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      disabled_tools_json TEXT NOT NULL DEFAULT '[]',
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, resource_ref)
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_mcp_servers_display ON session_mcp_servers(session_id, display_id)',
+  );
+
+  // 审批人清单：审批者必须是 owner 的独立管理员（owner 自己隐式满足）。
+  // 渠道运营者与渠道 owner 未必是同一个网关用户，故需要显式配置。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_extension_admins (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      admin_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, admin_user_id)
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_extension_operations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      action TEXT NOT NULL,
+      resource_ref TEXT,
+      payload_json TEXT NOT NULL,
+      config_digest TEXT,
+      expected_revision INTEGER,
+      channel_id TEXT,
+      chat_id TEXT,
+      requester_actor_id TEXT,
+      nonce TEXT NOT NULL,
+      idempotency_key TEXT,
+      status TEXT NOT NULL,
+      approver_user_id TEXT,
+      decision_at INTEGER,
+      applied_at INTEGER,
+      expires_at INTEGER NOT NULL,
+      error_code TEXT,
+      error_message TEXT,
+      result_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_extension_operations_session ON session_extension_operations(session_id, created_at DESC)',
+  );
+  // 幂等键去重：渠道平台会重发消息，重复提案必须复用同一条记录。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_extension_operations_idem ON session_extension_operations(session_id, idempotency_key)',
+  );
+  // 全局过期收敛（启动 / 后台扫描）走 status + expires_at。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_extension_operations_status ON session_extension_operations(status, expires_at)',
+  );
+
+  // 渠道结果回推的**持久化投递**（261101）。
+  //
+  // 确认页在 Web 端，结果却要说回渠道：此前是 fire-and-forget，网关重启、
+  // 渠道服务未起、平台 API 抖动都会让「那次确认到底生效没有」永远没有回音。
+  // 这里把回执落库后由后台派发器重试（见 session-extension-delivery-dispatcher）。
+  //
+  // `operation_id` 作主键即是**按操作去重**：同一操作只回推一次，重试不会重复安装。
+  // FK 指向操作表并级联：会话被删 → 操作被删 → 未发出的回执一并消失（不给已删会话发消息）。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_extension_deliveries (
+      operation_id TEXT PRIMARY KEY REFERENCES session_extension_operations(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      available_at_ms INTEGER NOT NULL,
+      lease_token TEXT,
+      lease_until_ms INTEGER,
+      last_error TEXT,
+      text TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  // 到期扫描：state + 可投递时间 + 租约到期（与 team inbound outbox 同形）。
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_session_extension_deliveries_due ON session_extension_deliveries(state, available_at_ms, lease_until_ms)',
+  );
+
+  // 会话级凭据（261101）：`secretRef` 指向这里的**密文**。
+  //
+  // 为什么单独一张表而不是塞进 `session_mcp_servers.config_json`：配置要走提案 →
+  // 审批 → 执行三阶段并落 `payload_json` 审计，明文密钥一旦进那条链就再也擦不干净。
+  // 凭据由 owner 在会话扩展面板单独录入，配置里只留 `secretRef` 引用。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_extension_secrets (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      value_cipher TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, name)
+    )
+  `);
 
   // ─── App meta：跨版本状态戳 ───
   // 卸载桌面端但「保留用户数据」时，旧的 sqlite 仍在新版本启动时被复用。
@@ -2394,6 +2602,352 @@ function ensureColumn(table: string, column: string, definition: string): void {
   if (!exists) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+}
+
+interface MemoryGovernanceBackfillRow {
+  id: string;
+  user_id: string;
+  scope_type: string;
+  scope_id: string;
+  team_workspace_id: string | null;
+  workspace_root: string | null;
+  change_seq: number;
+  confirmation_kind: string | null;
+  source_detail: string | null;
+}
+
+/**
+ * 工作区作用域 id 归一化（与 `@openAwork/agent-core` 的 `normalizeWorkspaceScopeId` 同规）。
+ *
+ * infra 层不 import agent-core：这里只做纯粹的字符串规范化，重复 3 行比在 DB 引导
+ * 阶段拉入整个 agent-core 运行时更划算。
+ */
+function normalizeMemoryScopeWorkspaceId(workspaceRoot: string): string {
+  const unified = workspaceRoot.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  if (unified === '/' || /^[A-Za-z]:\/$/.test(unified)) {
+    return unified;
+  }
+  return unified.replace(/\/+$/, '');
+}
+
+/**
+ * 261101-记忆确认写入与周期整理 —— 作用域与治理表迁移。
+ *
+ * 关键顺序约束：**先回填 scope 再建唯一索引**。老库所有行 scope_id 都是空串，若先建
+ * `(user_id, scope_type, scope_id, type, key)` 唯一索引，同 type+key 的多行会全部塌到
+ * `'user' + ''` 上直接撞索引，迁移整条失败。
+ *
+ * 历史数据只做「标出来」不做「编造」：确认来源为空的存量行标记 `source_detail='legacy'`，
+ * 不伪造成人工确认或提议确认；来源不明的记忆一律保持 `user` 作用域，绝不推断成某个群。
+ */
+function migrateMemoryGovernance(): void {
+  ensureColumn('memories', 'scope_type', "TEXT NOT NULL DEFAULT 'user'");
+  ensureColumn('memories', 'scope_id', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('memories', 'lifecycle', "TEXT NOT NULL DEFAULT 'active'");
+  ensureColumn('memories', 'revision', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn('memories', 'confirmation_kind', 'TEXT DEFAULT NULL');
+  ensureColumn('memories', 'confirmed_at', 'TEXT DEFAULT NULL');
+  ensureColumn('memories', 'change_seq', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('memories', 'valid_until', 'TEXT DEFAULT NULL');
+  ensureColumn('memories', 'superseded_by', 'TEXT DEFAULT NULL');
+  ensureColumn('memories', 'source_detail', 'TEXT DEFAULT NULL');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_change_counter (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      value INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  db.exec('INSERT OR IGNORE INTO memory_change_counter (id, value) VALUES (1, 0)');
+
+  // ── 回填作用域与变更水位（幂等：重跑只会是 no-op） ──
+  sqliteTransaction(() => {
+    const rows = db
+      .prepare(
+        `SELECT id, user_id, scope_type, scope_id, team_workspace_id, workspace_root,
+                change_seq, confirmation_kind, source_detail
+         FROM memories`,
+      )
+      .all() as MemoryGovernanceBackfillRow[];
+    const counterRow = db
+      .prepare('SELECT value FROM memory_change_counter WHERE id = 1')
+      .get() as { value: number } | undefined;
+    let seq = counterRow?.value ?? 0;
+    const update = db.prepare(
+      `UPDATE memories
+       SET scope_type = ?, scope_id = ?, change_seq = ?, source_detail = ?
+       WHERE id = ?`,
+    );
+
+    for (const row of rows) {
+      let scopeType = row.scope_type;
+      let scopeId = row.scope_id;
+      if (!scopeId) {
+        const teamWorkspaceId =
+          typeof row.team_workspace_id === 'string' ? row.team_workspace_id.trim() : '';
+        const workspaceRoot = typeof row.workspace_root === 'string' ? row.workspace_root.trim() : '';
+        if (teamWorkspaceId) {
+          scopeType = 'team';
+          scopeId = teamWorkspaceId;
+        } else if (workspaceRoot) {
+          scopeType = 'workspace';
+          scopeId = normalizeMemoryScopeWorkspaceId(workspaceRoot);
+        } else {
+          scopeType = 'user';
+          scopeId = row.user_id;
+        }
+      }
+
+      let changeSeq = row.change_seq;
+      if (!changeSeq) {
+        seq += 1;
+        changeSeq = seq;
+      }
+
+      const sourceDetail =
+        row.source_detail ?? (row.confirmation_kind ? null : 'legacy');
+      update.run(scopeType, scopeId, changeSeq, sourceDetail, row.id);
+    }
+
+    db.prepare('UPDATE memory_change_counter SET value = ? WHERE id = 1').run(seq);
+  });
+
+  // 旧唯一索引（只按 user+type+key）与新的作用域化唯一索引语义冲突，必须先换掉。
+  db.exec('DROP INDEX IF EXISTS idx_memories_user_type_key');
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_scope_type_key
+     ON memories(user_id, scope_type, scope_id, type, key)
+     WHERE enabled = 1 AND lifecycle = 'active'`,
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memories_user_scope ON memories(user_id, scope_type, scope_id, lifecycle)',
+  );
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memories_change_seq ON memories(change_seq)');
+
+  // ── 提议（待确认）──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_proposals (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      scope_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      target_memory_id TEXT DEFAULT NULL,
+      expected_revision INTEGER DEFAULT NULL,
+      payload_json TEXT NOT NULL,
+      payload_digest TEXT NOT NULL,
+      reason TEXT DEFAULT NULL,
+      origin TEXT NOT NULL,
+      confidence REAL DEFAULT NULL,
+      source_json TEXT DEFAULT NULL,
+      dedupe_key TEXT DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      multi_item INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      decided_at TEXT DEFAULT NULL,
+      decided_by TEXT DEFAULT NULL,
+      decision_note TEXT DEFAULT NULL,
+      result_memory_id TEXT DEFAULT NULL,
+      revision INTEGER NOT NULL DEFAULT 1,
+      notified_at TEXT DEFAULT NULL
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memory_proposals_user_status ON memory_proposals(user_id, status, created_at)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memory_proposals_scope ON memory_proposals(user_id, scope_type, scope_id, status)',
+  );
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_proposals_pending_dedupe
+     ON memory_proposals(user_id, dedupe_key)
+     WHERE dedupe_key IS NOT NULL AND status = 'pending'`,
+  );
+
+  // ── 「保留原状 / 已拒绝」抑制表：同内容不再重复询问 ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_review_decisions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      scope_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      decided_by TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_review_decisions_fingerprint
+     ON memory_review_decisions(user_id, scope_type, scope_id, fingerprint)`,
+  );
+
+  // ── 版本历史（回滚依据）──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_revisions (
+      id TEXT PRIMARY KEY,
+      memory_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL,
+      operation TEXT NOT NULL,
+      before_json TEXT DEFAULT NULL,
+      after_json TEXT DEFAULT NULL,
+      proposal_id TEXT DEFAULT NULL,
+      actor_kind TEXT NOT NULL,
+      actor_id TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memory_revisions_memory ON memory_revisions(memory_id, revision)',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memory_revisions_user ON memory_revisions(user_id, created_at)',
+  );
+
+  // ── 周期整理任务（持久化 + 租约）──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_jobs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      scope_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      due_at TEXT NOT NULL,
+      period_key TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      lease_owner TEXT DEFAULT NULL,
+      lease_token TEXT DEFAULT NULL,
+      lease_expires_at TEXT DEFAULT NULL,
+      last_error TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_jobs_period
+     ON memory_jobs(kind, scope_key, period_key)`,
+  );
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memory_jobs_due ON memory_jobs(status, due_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memory_jobs_user ON memory_jobs(user_id, kind)');
+
+  // ── 每用户维护水位 ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_maintenance_state (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      change_watermark INTEGER NOT NULL DEFAULT 0,
+      last_patrol_at TEXT DEFAULT NULL,
+      last_semantic_at TEXT DEFAULT NULL,
+      last_review_at TEXT DEFAULT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  // ── 整理报告（汇总通知，不逐条追问）──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_maintenance_reports (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      job_id TEXT NOT NULL,
+      scope_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      summary_json TEXT NOT NULL,
+      watermark INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      notified_at TEXT DEFAULT NULL
+    )
+  `);
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memory_reports_user ON memory_maintenance_reports(user_id, created_at)',
+  );
+
+  // ── 渠道通知投递（幂等 outbox）──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_deliveries (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      channel_instance_id TEXT NOT NULL,
+      chat_id TEXT NOT NULL,
+      body_json TEXT NOT NULL,
+      dedupe_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      lease_owner TEXT DEFAULT NULL,
+      lease_expires_at TEXT DEFAULT NULL,
+      last_error TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_deliveries_dedupe
+     ON memory_deliveries(user_id, dedupe_key)`,
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_memory_deliveries_due ON memory_deliveries(status, next_attempt_at)',
+  );
+
+  // ── 入站消息来源（到达时冻结，供提议引用）──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_message_provenance (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      channel_message_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      channel_instance_id TEXT NOT NULL,
+      chat_id TEXT NOT NULL,
+      chat_type TEXT NOT NULL,
+      sender_id TEXT DEFAULT NULL,
+      sender_name TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_provenance_message
+     ON memory_message_provenance(session_id, channel_message_id)`,
+  );
+
+  // ── 结构化规则（DB 权威；文件发布本期关闭）──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_rule_entries (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      scope_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      body TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      confirmed_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_rule_entries_key
+     ON memory_rule_entries(user_id, scope_type, scope_id, name)
+     WHERE enabled = 1`,
+  );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_semantic_usage (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      day TEXT NOT NULL,
+      calls INTEGER NOT NULL DEFAULT 0,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, day)
+    );
+    CREATE TABLE IF NOT EXISTS memory_semantic_scopes (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      scope_key TEXT NOT NULL,
+      fingerprint TEXT DEFAULT NULL,
+      lease_token TEXT DEFAULT NULL,
+      lease_until TEXT DEFAULT NULL,
+      PRIMARY KEY (user_id, scope_key)
+    );
+  `);
 }
 
 /**
@@ -3413,9 +3967,51 @@ function repairLegacyMigratedPartOrder(): void {
   }
 }
 
+/**
+ * 慢语句观测阈值（毫秒；0 = 关闭）。
+ *
+ * 网关用的是同步 SQLite：**一条语句的耗时就是事件循环的停摆时长**。默认 300ms
+ * 低于 `event-loop-lag` 告警的实测长尾（0.3~3.6s），一旦命中就能把「到底是哪条
+ * SQL 卡住的」直接打出来，不必再按告警时间点反推当时在做什么。
+ */
+const SLOW_SQL_WARN_MS = (() => {
+  const raw = process.env['OPENAWORK_SLOW_SQL_WARN_MS'];
+  if (raw === undefined || raw.trim().length === 0) return 300;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 300;
+})();
+
+/** 同一时间窗只打一条：一次长阻塞常连带几十条慢语句，逐条打反而淹没现场。 */
+const SLOW_SQL_WARN_MIN_INTERVAL_MS = 5_000;
+let lastSlowSqlWarnAt = 0;
+let slowSqlSuppressedCount = 0;
+
+function reportSlowSql(kind: string, query: string, startedAt: number): void {
+  if (SLOW_SQL_WARN_MS <= 0) return;
+  const durationMs = performance.now() - startedAt;
+  if (durationMs < SLOW_SQL_WARN_MS) return;
+  const now = performance.now();
+  if (now - lastSlowSqlWarnAt < SLOW_SQL_WARN_MIN_INTERVAL_MS) {
+    slowSqlSuppressedCount += 1;
+    return;
+  }
+  lastSlowSqlWarnAt = now;
+  const suppressed = slowSqlSuppressedCount;
+  slowSqlSuppressedCount = 0;
+  logGatewayWarn(`[sqlite] 慢语句 ${durationMs}ms（${kind}），事件循环在此期间同步阻塞`, {
+    durationMs,
+    kind,
+    // 只留语句骨架，参数一律不打（可能含用户内容）。
+    sql: query.replace(/\s+/gu, ' ').trim().slice(0, 300),
+    ...(suppressed > 0 ? { suppressedSinceLast: suppressed } : {}),
+  });
+}
+
 export function sqliteRun(query: string, params: readonly SqliteBindableValue[] = []): void {
+  const startedAt = SLOW_SQL_WARN_MS > 0 ? performance.now() : 0;
   const stmt = preparedStatement(db, query);
   stmt.run(...normalizeSqliteBindParams(params));
+  if (startedAt > 0) reportSlowSql('run', query, startedAt);
 }
 
 /**
@@ -3426,8 +4022,10 @@ export function sqliteRunWithRowId(
   query: string,
   params: readonly SqliteBindableValue[] = [],
 ): number {
+  const startedAt = SLOW_SQL_WARN_MS > 0 ? performance.now() : 0;
   const stmt = preparedStatement(db, query);
   const result = stmt.run(...normalizeSqliteBindParams(params)) as { lastInsertRowid?: unknown };
+  if (startedAt > 0) reportSlowSql('run', query, startedAt);
   return Number(result.lastInsertRowid ?? 0);
 }
 
@@ -3439,8 +4037,10 @@ export function sqliteRunWithChanges(
   query: string,
   params: readonly SqliteBindableValue[] = [],
 ): number {
+  const startedAt = SLOW_SQL_WARN_MS > 0 ? performance.now() : 0;
   const stmt = preparedStatement(db, query);
   const result = stmt.run(...normalizeSqliteBindParams(params)) as { changes?: unknown };
+  if (startedAt > 0) reportSlowSql('run', query, startedAt);
   return Number(result.changes ?? 0);
 }
 
@@ -3448,17 +4048,29 @@ export function sqliteGet<T>(
   query: string,
   params: readonly SqliteBindableValue[] = [],
 ): T | undefined {
+  const startedAt = SLOW_SQL_WARN_MS > 0 ? performance.now() : 0;
   const stmt = preparedStatement(db, query);
   // bun:sqlite 在没有匹配行时返回 `null`，node:sqlite 返回 `undefined`。
   // 上层代码大量使用 `row !== undefined` / `row != null` 等判断，统一在
   // 这里把 `null` 折叠为 `undefined`，让所有 caller 在两种 runtime 下行为一致。
   const row = stmt.get(...normalizeSqliteBindParams(params));
+  if (startedAt > 0) reportSlowSql('get', query, startedAt);
   return (row ?? undefined) as T | undefined;
 }
 
 export function sqliteAll<T>(query: string, params: readonly SqliteBindableValue[] = []): T[] {
+  const startedAt = SLOW_SQL_WARN_MS > 0 ? performance.now() : 0;
   const stmt = preparedStatement(db, query);
-  return stmt.all(...normalizeSqliteBindParams(params)) as T[];
+  const rows = stmt.all(...normalizeSqliteBindParams(params)) as T[];
+  if (startedAt > 0) reportSlowSql('all', query, startedAt);
+  return rows;
+}
+
+let afterCommitCallbacks: Array<() => void> = [];
+
+export function sqliteAfterCommit(callback: () => void): void {
+  if (sqliteTransactionDepth > 0) afterCommitCallbacks.push(callback);
+  else callback();
 }
 
 export function sqliteTransaction<T>(fn: () => T): T {
@@ -3471,8 +4083,19 @@ export function sqliteTransaction<T>(fn: () => T): T {
   try {
     const result = fn();
     db.exec('COMMIT');
+    sqliteTransactionDepth = 0;
+    const callbacks = afterCommitCallbacks;
+    afterCommitCallbacks = [];
+    for (const callback of callbacks) {
+      try {
+        callback();
+      } catch (error) {
+        logGatewayWarn(`[sqlite] after-commit callback failed: ${String(error)}`);
+      }
+    }
     return result;
   } catch (err) {
+    afterCommitCallbacks = [];
     db.exec('ROLLBACK');
     throw err;
   } finally {

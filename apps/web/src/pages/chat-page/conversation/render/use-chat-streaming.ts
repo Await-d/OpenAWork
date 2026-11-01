@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { StreamFrameHandle } from '../../../../components/conversation-runtime/stream/stream-frame-controller.js';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import type { ChatBackendUsageSnapshot } from '../../../../components/conversation-runtime/stream/stream-usage.js';
 import type { RecoveredActiveAssistantStream } from '../../../../components/conversation-runtime/stream/stream-recovery.js';
@@ -47,6 +48,7 @@ export interface UseChatStreamingReturn {
   latestUpstreamSummary: UpstreamStreamSummary | null;
   setLatestUpstreamSummary: React.Dispatch<React.SetStateAction<UpstreamStreamSummary | null>>;
 
+  streamFrameHandleRef: React.MutableRefObject<StreamFrameHandle | null>;
   streamingRef: React.MutableRefObject<boolean>;
   stoppingStreamRef: React.MutableRefObject<boolean>;
   currentAssistantStreamMessageIdRef: React.MutableRefObject<string | null>;
@@ -110,8 +112,24 @@ export function useChatStreaming(): UseChatStreamingReturn {
   const streamRevealTargetCodePointsRef = useRef<string[]>([]);
   const streamRevealVisibleCodePointCountRef = useRef(0);
   const streamRevealNextAllowedAtRef = useRef(0);
+  const streamFrameHandleRef = useRef<StreamFrameHandle | null>(null);
+
+  useEffect(
+    () => () => {
+      streamFrameHandleRef.current?.dispose();
+      streamFrameHandleRef.current = null;
+      streamingRef.current = false;
+      if (pendingStreamRevealFrameRef.current !== null) {
+        cancelAnimationFrame(pendingStreamRevealFrameRef.current);
+        pendingStreamRevealFrameRef.current = null;
+      }
+    },
+    [],
+  );
 
   const resetStreamState = useCallback(() => {
+    streamFrameHandleRef.current?.dispose();
+    streamFrameHandleRef.current = null;
     if (pendingStreamRevealFrameRef.current !== null) {
       cancelAnimationFrame(pendingStreamRevealFrameRef.current);
       pendingStreamRevealFrameRef.current = null;
@@ -215,6 +233,7 @@ export function useChatStreaming(): UseChatStreamingReturn {
     latestUpstreamSummary,
     setLatestUpstreamSummary,
 
+    streamFrameHandleRef,
     streamingRef,
     stoppingStreamRef,
     currentAssistantStreamMessageIdRef,

@@ -44,7 +44,10 @@ import {
 import { createPermissionAskedEvent } from '../../session/session-permission-events.js';
 import { createQuestionAskedEvent } from '../../session/session-question-events.js';
 import { publishSessionRunEvent } from '../../session/session-run-events.js';
-import { shouldAutoApproveToolForSessionMetadata } from '../../session/session-tool-visibility.js';
+import {
+  isChannelManagedSession,
+  shouldAutoApproveToolForSessionMetadata,
+} from '../../session/session-tool-visibility.js';
 import {
   getSessionWorkspaceRoot,
   hasWorkspacePermanentPermission,
@@ -105,13 +108,28 @@ function findApprovedPermission(
     }
   }
 
-  // Session lineage: inherit session-level approvals from parent session.
-  // Mirrors opencode's session lineage auto-accept behavior.
-  const parentRow = sqliteGet<{ parent_id: string }>(
-    `SELECT parent_id FROM sessions WHERE id = ? AND parent_id IS NOT NULL`,
-    [sessionId],
-  );
-  if (parentRow?.parent_id) {
+  const visited = new Set<string>([sessionId]);
+  let currentSessionId = sessionId;
+  while (userId) {
+    const lineageRow = sqliteGet<{ parent_id: string | null }>(
+      'SELECT parent_id FROM sessions WHERE id = ? AND user_id = ?',
+      [currentSessionId, userId],
+    );
+    const metadata = getSessionMetadata(currentSessionId);
+    // task 派生关系实际写在 metadata 中；parent_id 仅兼容旧会话。
+    const parentSessionId =
+      typeof metadata.parentSessionId === 'string' && metadata.parentSessionId.trim()
+        ? metadata.parentSessionId.trim()
+        : lineageRow?.parent_id;
+    if (
+      !parentSessionId ||
+      visited.has(parentSessionId) ||
+      getSessionOwnerUserId(parentSessionId) !== userId
+    ) {
+      break;
+    }
+    visited.add(parentSessionId);
+    currentSessionId = parentSessionId;
     const parentCandidates = sqliteAll<PermissionApprovalCandidateRow>(
       `SELECT pr.id, pr.decision, pr.scope, pr.always_json
        FROM permission_requests pr
@@ -120,7 +138,7 @@ function findApprovedPermission(
          AND pr.status = 'approved'
          AND pr.decision = 'session'
        ORDER BY pr.updated_at DESC, pr.created_at DESC`,
-      [toolName, parentRow.parent_id],
+      [toolName, parentSessionId],
     );
     for (const row of parentCandidates) {
       if (approvalCoversScope(row, scope)) {
@@ -565,6 +583,19 @@ export async function ensurePermissionForTool(
     decision: 'ask',
   });
   if (veto) return veto;
+
+  // 渠道会话没有人工审批通道：审批入口只在 Web 端、且限会话所有者，群成员无从回复；
+  // 而落一条 pending 会把会话钉在 `paused` 上等一个永远不来的回复（`expires_at`
+  // 通常为 null，也不会有超时回收）。渠道可见工具已在前面
+  // `shouldAutoApproveToolForSessionMetadata` 分支自动批准，因此能走到这里的调用
+  // 本身就是「对本渠道不可见却仍被调用」的异常路径——直接拒绝，让模型拿到明确结果
+  // 继续，而不是整轮停摆。
+  if (isChannelManagedSession(sessionMetadata)) {
+    return {
+      kind: 'denied',
+      reason: `工具 "${request.toolName}" 在当前渠道会话中不可用：渠道没有人工审批通道，无法为它授权。如需使用，请在渠道配置中放开该工具。`,
+    };
+  }
 
   const pendingRequestId = findPendingPermission(sessionId, category, context.scope);
   if (pendingRequestId) {

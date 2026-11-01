@@ -40,6 +40,27 @@ function makeChannel(): ChannelInstance {
   };
 }
 
+describe('渠道扩展管理开关同步', () => {
+  it('默认关闭、显式开启，且关闭覆盖旧会话的 true', () => {
+    const input = { channel: makeChannel(), userId: USER_ID, chatId: CHAT_ID };
+    expect(
+      channelSessionStore.buildChannelSessionMetadata(input)['channelExtensionManagementEnabled'],
+    ).toBe(false);
+    expect(
+      channelSessionStore.buildChannelSessionMetadata({
+        ...input,
+        channel: { ...input.channel, channelExtensionManagementEnabled: true },
+      })['channelExtensionManagementEnabled'],
+    ).toBe(true);
+    expect(
+      channelSessionStore.buildChannelSessionMetadata({
+        ...input,
+        currentMetadata: { channelExtensionManagementEnabled: true },
+      })['channelExtensionManagementEnabled'],
+    ).toBe(false);
+  });
+});
+
 function makeUserPersonaChannel(): ChannelInstance {
   return {
     ...makeChannel(),
@@ -359,6 +380,33 @@ describe('channel session commands', () => {
     );
   });
 
+  it('通道未绑定 souls persona 时落入内置默认人设', () => {
+    const chatId = 'chat-default-persona';
+    channelSessionStore.upsertChannelSession({
+      chatId,
+      channel: { ...makeChannel(), persona: null },
+      sessionKey: `channel:${CHANNEL_ID}:chat:${chatId}`,
+      userId: USER_ID,
+    });
+
+    const row = dbModule.sqliteGet<{ metadata_json: string }>(
+      'SELECT metadata_json FROM sessions WHERE user_id = ? AND title = ?',
+      [USER_ID, `channel:${CHANNEL_ID}:chat:${chatId}`],
+    );
+    if (!row) {
+      throw new Error('expected channel session with default persona');
+    }
+
+    const metadata = parseSessionMetadataJson(row.metadata_json) as {
+      channelPersona?: { resourceId?: string; title?: string; content?: string };
+    };
+    expect(metadata.channelPersona?.resourceId).toBe('resource-soul-balanced-collaborator');
+    expect(metadata.channelPersona?.title).toBe('稳健协作者');
+    expect(metadata.channelPersona?.content).toContain(
+      'You are the balanced professional collaborator',
+    );
+  });
+
   it('通道绑定用户上传 souls persona 时按用户隔离写入 metadata', () => {
     dbModule.sqliteRun(
       `INSERT INTO user_resources
@@ -395,6 +443,38 @@ describe('channel session commands', () => {
       title: '客服人设',
       content: '# 客服人设\n保持简洁、礼貌。',
     });
+  });
+
+  it('通道绑定的 souls persona 已失效时回落内置默认人设', () => {
+    const chatId = 'chat-stale-persona';
+    channelSessionStore.upsertChannelSession({
+      chatId,
+      channel: {
+        ...makeChannel(),
+        persona: { resourceId: 'resource-soul-missing', title: '已删除的人设' },
+      },
+      sessionKey: `channel:${CHANNEL_ID}:chat:${chatId}`,
+      userId: USER_ID,
+    });
+
+    const row = dbModule.sqliteGet<{ metadata_json: string }>(
+      'SELECT metadata_json FROM sessions WHERE user_id = ? AND title = ?',
+      [USER_ID, `channel:${CHANNEL_ID}:chat:${chatId}`],
+    );
+    if (!row) {
+      throw new Error('expected channel session with fallback persona');
+    }
+
+    const metadata = parseSessionMetadataJson(row.metadata_json) as {
+      channel?: { persona?: { resourceId?: string } | null };
+      channelPersona?: { resourceId?: string; content?: string };
+    };
+    // 生效人设回落默认，且 metadata 如实反映生效值（而非用户选的那个失效 id）
+    expect(metadata.channelPersona?.resourceId).toBe('resource-soul-balanced-collaborator');
+    expect(metadata.channelPersona?.content).toContain(
+      'You are the balanced professional collaborator',
+    );
+    expect(metadata.channel?.persona?.resourceId).toBe('resource-soul-balanced-collaborator');
   });
 
   it('统计当前 channel conversation 的 token 使用量', () => {

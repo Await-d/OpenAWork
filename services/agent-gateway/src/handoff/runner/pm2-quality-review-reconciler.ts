@@ -31,6 +31,7 @@ import {
 } from '../workflow/review-aggregator.js';
 import type { ReviewReport } from '../workflow/review-aggregator.js';
 import { logGatewayWarn } from '../../infra/gateway-logger.js';
+import { executionVerificationCoverage } from '../capability/execution-verification.js';
 
 const inFlightPm2QualityReviews = new Set<string>();
 export const QUALITY_REVIEW_RETRY_INTERVAL_MS = 30 * 1000;
@@ -1105,6 +1106,37 @@ export async function reconcilePm2QualityReview(input: {
       return { status: 'failed' };
     }
 
+    const unverified = children.filter(
+      (child) =>
+        child.toRoleLayer === 'executor' &&
+        child.state === 'completed' &&
+        executionVerificationCoverage(
+          { userId: input.userId, sessionId: child.toSessionId ?? '', handoffId: child.id },
+          typeof child.resultJson === 'string'
+            ? parseJsonObject(child.resultJson)
+            : child.resultJson,
+        ).verified === 0,
+    );
+    if (unverified.length > 0) {
+      const reason = `缺少可核验执行证据：${unverified.map((child) => child.id).join(', ')}；未完成质量验收，需要用户介入`;
+      safeAppendPm2Message({
+        sessionId: pm2SessionId,
+        userId: input.userId,
+        role: 'assistant',
+        content: [{ type: 'text', text: reason }],
+      });
+      const didFail = failRunningHandoffById({ handoffId: row.id, reason });
+      safeSetPm2Substate({
+        sessionId: pm2SessionId,
+        userId: input.userId,
+        roleLayer: 'pm2',
+        substate: 'failed',
+      });
+      const updated = getHandoffById(row.id);
+      if (didFail && updated)
+        publishHandoffEvent({ type: 'handoff.failed', record: updated, payload: { reason } });
+      return { status: 'failed' };
+    }
     const completed = children.filter((child) => child.state === 'completed').length;
     const failed = children.filter((child) => child.state === 'failed').length;
     const summary = [

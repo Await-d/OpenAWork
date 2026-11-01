@@ -187,6 +187,23 @@ export interface CronDeliveryOutcome {
 const SKIPPED: CronDeliveryOutcome = { attempted: false, delivered: false };
 
 /**
+ * 任务是否绑定消息渠道（`plugin_id` + `plugin_chat_id` 同时存在）。
+ *
+ * 渠道任务的产出**不走本模块**：它的执行会话是 `cron-channel:*`，prompt 里已
+ * 指示模型用 `PluginSendMessage` 把结果直发回渠道（见 `buildCronAgentPrompt`），
+ * 显式失败/无法执行才用 `notifyCronJobUnavailable` 走用户通知。
+ *
+ * 因此本模块对渠道任务必须早退，否则会把一次**已经送达**的执行错判成失败：
+ * `delivery_mode: 'session'` 但 `session_id` / `delivery_target` 为空（渠道任务的
+ * 常态，它们只有 chatId）时 `resolveOwnedSession` 返回 null，`runCronAgentJob`
+ * 据 `delivered: false` 把执行记录写成 failed 并额外推一条「无法执行」通知——
+ * 用户侧其实已经收到完整结果，执行历史却显示失败。
+ */
+export function isChannelBoundJob(job: CronJobRecord): boolean {
+  return Boolean(job.plugin_id && job.plugin_chat_id);
+}
+
+/**
  * 投递 `delivery_mode: 'session'`：往目标会话追加一条合成通知。
  *
  * 用 `injectSyntheticSessionMessage` 而非裸追加 assistant 消息，原因有三：
@@ -290,6 +307,11 @@ export function deliverCronResult(
   job: CronJobRecord,
   context: CronDeliveryContext,
 ): CronDeliveryOutcome {
+  // 渠道任务的结果由执行期的 PluginSendMessage 直投渠道，本模块没有（也不该有）
+  // 第二个投递目的地。`attempted: false` 是**如实上报**：确实没有走过这条通道，
+  // 而不是「尝试了但失败」——后者会让一次成功的执行被记成 failed（见
+  // `isChannelBoundJob` 的说明）。
+  if (isChannelBoundJob(job)) return SKIPPED;
   if (job.delivery_mode === 'none') return SKIPPED;
   try {
     return job.delivery_mode === 'desktop'

@@ -65,38 +65,74 @@ function buildChannelReplyPolicyPrompt(language: ChannelReplyLanguage): string {
   ].join('\n');
 }
 
-export function buildChannelPersonaPromptFromMetadata(metadataJson: string): string | null {
+function readChannelPersona(
+  metadata: Record<string, unknown>,
+): { readonly content: string; readonly title: string } | null {
+  const persona = metadata['channelPersona'];
+  if (!isRecord(persona)) {
+    return null;
+  }
+
+  const content = persona['content'];
+  if (typeof content !== 'string' || content.trim().length === 0) {
+    return null;
+  }
+
+  const rawTitle = persona['title'];
+  return {
+    content: content.trim(),
+    title: typeof rawTitle === 'string' ? rawTitle.trim() : '',
+  };
+}
+
+/**
+ * 渠道人设（SOUL 正文）走 **stable** 段的 `route-system-prompt` 槽位。
+ *
+ * 人设只在渠道配置变更时变化，属于「路由级长期角色」——放进 stable 前缀既让
+ * 空槽位拿到真正的角色提示词，也不会随每轮对话打断 prompt cache。回复策略与
+ * 本地命令提示仍留在动态尾段（见 `buildChannelRuntimePromptFromMetadata`）。
+ */
+export function resolveChannelPersonaSystemPrompt(metadataJson: string): string | null {
+  const metadata = parseSessionMetadataJson(metadataJson);
+  if (metadata['source'] !== 'channel') {
+    return null;
+  }
+
+  const persona = readChannelPersona(metadata);
+  if (!persona) {
+    return null;
+  }
+
+  const replyLanguage = resolveReplyLanguage(metadata);
+  const title =
+    persona.title || (isEnglishChannelReplyLanguage(replyLanguage) ? 'Default' : '默认');
+  return [
+    '<channel-persona>',
+    isEnglishChannelReplyLanguage(replyLanguage)
+      ? `Persona resource bound to this channel: ${title}`
+      : `当前消息通道绑定的人设资源：${title}`,
+    '',
+    persona.content,
+    '</channel-persona>',
+  ].join('\n');
+}
+
+/**
+ * 渠道会话的动态尾段提示：回复策略 + 本地命令入口。
+ *
+ * 人设正文已提升到 stable 段（`resolveChannelPersonaSystemPrompt`），此处刻意
+ * 不再重复，避免同一段 SOUL 在两条 system 消息里各出现一次。
+ */
+export function buildChannelRuntimePromptFromMetadata(metadataJson: string): string | null {
   const metadata = parseSessionMetadataJson(metadataJson);
   if (metadata['source'] !== 'channel') {
     return null;
   }
 
   const replyLanguage = resolveReplyLanguage(metadata);
-  const replyPolicyPrompt = buildChannelReplyPolicyPrompt(replyLanguage);
-  const commandPrompt = buildChannelCommandPrompt(resolveChannelPlatform(metadata), replyLanguage);
-
-  const persona = metadata['channelPersona'];
-  if (!isRecord(persona)) {
-    return [replyPolicyPrompt, '', commandPrompt].join('\n');
-  }
-
-  const title = persona['title'];
-  const content = persona['content'];
-  if (typeof title !== 'string' || typeof content !== 'string' || content.trim().length === 0) {
-    return [replyPolicyPrompt, '', commandPrompt].join('\n');
-  }
-
   return [
-    replyPolicyPrompt,
+    buildChannelReplyPolicyPrompt(replyLanguage),
     '',
-    commandPrompt,
-    '',
-    '<channel-persona>',
-    isEnglishChannelReplyLanguage(replyLanguage)
-      ? `Persona resource bound to this channel: ${title.trim()}`
-      : `当前消息通道绑定的人设资源：${title.trim()}`,
-    '',
-    content.trim(),
-    '</channel-persona>',
+    buildChannelCommandPrompt(resolveChannelPlatform(metadata), replyLanguage),
   ].join('\n');
 }

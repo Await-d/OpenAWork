@@ -24,6 +24,7 @@ import { parseSessionMetadataJson } from '../../session/session-workspace-metada
 export interface ReceptionGrill {
   state: GrillState;
   intent: string;
+  sourceRequestIds?: string[];
 }
 
 export function readReceptionGrill(sessionId: string): ReceptionGrill | null {
@@ -40,7 +41,18 @@ export function readReceptionGrill(sessionId: string): ReceptionGrill | null {
 
   const state = parseGrillState(rawState);
   if (!state) return null;
-  return { state, intent: typeof rawIntent === 'string' ? rawIntent : '' };
+  const sources = metadata['clarificationSourceRequestIds'];
+  const legacySource = metadata['clarificationSourceRequestId'];
+  const sourceRequestIds = Array.isArray(sources)
+    ? sources.filter((value): value is string => typeof value === 'string').slice(0, 20)
+    : typeof legacySource === 'string'
+      ? [legacySource]
+      : [];
+  return {
+    state,
+    intent: typeof rawIntent === 'string' ? rawIntent : '',
+    ...(sourceRequestIds.length ? { sourceRequestIds } : {}),
+  };
 }
 
 function writeReceptionMetadata(sessionId: string, patch: Record<string, unknown>): void {
@@ -56,10 +68,19 @@ function writeReceptionMetadata(sessionId: string, patch: Record<string, unknown
   ]);
 }
 
-export function persistReceptionGrill(sessionId: string, state: GrillState, intent: string): void {
+export function persistReceptionGrill(
+  sessionId: string,
+  state: GrillState,
+  intent: string,
+  sourceRequestIds?: string[],
+): void {
   writeReceptionMetadata(sessionId, {
     clarificationState: serializeGrillState(state),
     clarificationIntent: intent,
+    clarificationSourceRequestIds: sourceRequestIds?.length
+      ? [...new Set(sourceRequestIds)]
+      : undefined,
+    clarificationSourceRequestId: undefined,
   });
 }
 
@@ -67,6 +88,8 @@ export function clearReceptionGrill(sessionId: string): void {
   writeReceptionMetadata(sessionId, {
     clarificationState: undefined,
     clarificationIntent: undefined,
+    clarificationSourceRequestId: undefined,
+    clarificationSourceRequestIds: undefined,
   });
 }
 

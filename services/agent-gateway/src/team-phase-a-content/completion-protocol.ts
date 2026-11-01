@@ -14,8 +14,8 @@ const EXECUTOR_PROTOCOL = `## 完成协议（Executor）
    - taskId
    - status: completed | blocked | failed
    - changedFiles
-   - checklist: [{ id, status: pass|fail|blocked, evidence }]
-   - summary / verification
+   - checklist: [{ id, status: pass|fail|blocked, evidence, verificationRefs?: [{ terminalId, command }] }]
+   - summary / verification。仅摘要不是验证，至少引用当前任务一次实际检查的凭证：bash结果的terminalId和完整command；派发为docs的任务可用toolCallId和path引用本轮成功未截断的read。后台须真正退出0。verified仅证明检查执行事实，由服务器填写，不接受模型自证；echo不等于测试通过。
 3. **自验证**：checklist 必须覆盖任务验收条件；未覆盖项标 fail/blocked，不要假 pass。
 
 ⚠️ 只回复文字或只 mark_completed **不算完成**。没有 submit_execution_result，runner 在 hard 模式下会判定 execution-protocol-failure。`;

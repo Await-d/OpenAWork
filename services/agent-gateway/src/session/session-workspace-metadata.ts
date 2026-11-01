@@ -135,7 +135,14 @@ const sessionPermissionModeSchema = z.enum(['ask', 'auto-edit', 'yolo']);
 
 const sessionMetadataPatchSchema = z
   .object({
-    agentId: z.string().min(1).max(120).optional(),
+    /**
+     * 会话绑定的托管 Agent。
+     *
+     * 显式传 `null` 表示**清除**绑定（PATCH 时把该键从 metadata 移除）：否则客户端
+     * 「取消选择 Agent」无法表达，旧绑定会在请求未携带 agentId 的轮次（后台续跑 /
+     * 唤醒 / 事件派遣）里被 `resolveStreamModelRoute` 继续兜底使用。
+     */
+    agentId: z.string().min(1).max(120).nullable().optional(),
     clarificationState: z
       .string()
       .max(200000)

@@ -31,6 +31,7 @@ vi.mock('../../infra/db.js', () => ({
   },
   sqliteAll: () => [],
   sqliteTransaction: (fn: () => unknown) => fn(),
+  sqliteAfterCommit: (fn: () => void) => fn(),
 }));
 
 import { MessageEvents, emitEvent } from '../../session/sync-event.js';

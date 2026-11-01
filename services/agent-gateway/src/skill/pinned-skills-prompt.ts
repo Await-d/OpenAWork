@@ -38,6 +38,10 @@ const BUILTIN_SKILL_IDS = new Set(BUILTIN_SKILLS.map((entry) => entry.manifest.i
 interface PinnedCandidate {
   skillId: string;
   manifest: SkillManifest;
+  /** 会话级资源引用；用户级 / 内置为 `undefined`。 */
+  resourceRef?: string;
+  /** 会话级内容摘要；用户级 / 内置为 `undefined`。 */
+  contentDigest?: string;
 }
 
 function selectPinnedCandidates(effective: EffectiveSkill[]): PinnedCandidate[] {
@@ -45,7 +49,14 @@ function selectPinnedCandidates(effective: EffectiveSkill[]): PinnedCandidate[] 
     if (!entry.enabled || !entry.pinned) return [];
     if (entry.origin === 'builtin' || BUILTIN_SKILL_IDS.has(entry.skillId)) return [];
     if (!entry.manifest) return [];
-    return [{ skillId: entry.skillId, manifest: entry.manifest }];
+    return [
+      {
+        skillId: entry.skillId,
+        manifest: entry.manifest,
+        ...(entry.resourceRef === undefined ? {} : { resourceRef: entry.resourceRef }),
+        ...(entry.contentDigest === undefined ? {} : { contentDigest: entry.contentDigest }),
+      },
+    ];
   });
 }
 
@@ -131,22 +142,56 @@ export function buildPinnedSkillsPromptSection(
 }
 
 /**
+ * 版本化 pin 条目（snapshot v2）。
+ *
+ * 区分两类固定：
+ *   - **固定成员**（`contentDigest === null`）：用户级 / 内置技能，只固定 skillId，
+ *     内容随安装升级漂移——这是历史语义，必须保留；
+ *   - **固定内容**（`contentDigest !== null`）：会话级技能，同时固定内容摘要。
+ *     会话里重装同名技能会换 digest，此时**不得**把新内容冒充成已固定的内容，
+ *     否则模型看到的与用户当初固定的是两份东西。
+ */
+export interface PinnedSkillSnapshotEntry {
+  skillId: string;
+  /** 会话级资源引用；用户级 / 内置为 `null`。 */
+  resourceRef: string | null;
+  /** 会话级内容摘要；用户级 / 内置为 `null`（= 只固定成员）。 */
+  contentDigest: string | null;
+}
+
+/**
  * Pinned skill snapshot stored on `sessions.metadata_json`. Captured on the
  * first stream turn so subsequent turns / replays render against a stable
  * list — UI changes to pinned skills only take effect for newly-created
  * sessions, matching the toast "next new session" promise from the spec.
  */
 export interface PinnedSkillsSnapshot {
+  extensionRevision?: number;
   /** Ordered list of pinned skill ids captured at session start. */
   skillIds: string[];
   /** ms timestamp of when the snapshot was taken. */
   capturedAt: number;
+  /**
+   * v2：逐条版本化信息。缺省（老快照）时按「只固定成员」处理，行为与升级前一致。
+   */
+  entries?: PinnedSkillSnapshotEntry[];
+  /** 快照结构版本：`2` = 含 `entries`。老快照无此字段（视为 v1）。 */
+  schemaVersion?: number;
 }
 
+export const PINNED_SKILLS_SNAPSHOT_SCHEMA_VERSION = 2;
+
 export function snapshotFromEffective(effective: EffectiveSkill[]): PinnedSkillsSnapshot {
+  const candidates = selectPinnedCandidates(effective);
   return {
-    skillIds: selectPinnedCandidates(effective).map((c) => c.skillId),
+    skillIds: candidates.map((c) => c.skillId),
     capturedAt: Date.now(),
+    entries: candidates.map((c) => ({
+      skillId: c.skillId,
+      resourceRef: c.resourceRef ?? null,
+      contentDigest: c.contentDigest ?? null,
+    })),
+    schemaVersion: PINNED_SKILLS_SNAPSHOT_SCHEMA_VERSION,
   };
 }
 
@@ -162,7 +207,29 @@ export function snapshotFromEffective(effective: EffectiveSkill[]): PinnedSkills
  *     simply had no pinned skills at session start. Suppress every live
  *     `pinned` flag so newly pinned skills do NOT leak into this session.
  *   - non-empty `skillIds` → keep only those ids pinned, in capture order.
+ *
+ * v2（`entries` 存在时）额外做**内容对齐**：条目带 `contentDigest` 表示该 pin
+ * 固定的是内容；若当前会话技能的摘要与之不同（会话内重装了同名技能），则丢弃该
+ * entry —— 宁可不注入，也不能把未固定的新内容当成已固定内容喂给模型。
+ * 撤权（`enabled === false`）在任何模式下都优先于 pin，历史快照不复活已撤销项。
  */
+/**
+ * 是否需要（重新）捕获 pin 快照。
+ *
+ * 两类会话语义不同，不能一刀切：
+ *   - **没有会话扩展的会话**（`extensionRevision === 0`）：沿用「首轮捕获、之后冻结」
+ *     的历史契约——用户中途改 pin 只对新建会话生效，与既有 toast 文案一致；
+ *   - **有会话扩展的会话**：会话扩展一旦变更（安装 / 启用 / 停用 / 移除），下一轮必须
+ *     重建快照。否则旧快照会继续压掉新增的 pin，或在技能被移除后仍把它标成 pinned。
+ */
+export function shouldRecapturePinnedSnapshot(
+  snapshot: PinnedSkillsSnapshot | null | undefined,
+  extensionRevision: number,
+): boolean {
+  if (!snapshot) return true;
+  return extensionRevision > 0 && snapshot.extensionRevision !== extensionRevision;
+}
+
 export function applyPinnedSnapshot(
   effective: EffectiveSkill[],
   snapshot: PinnedSkillsSnapshot | null | undefined,
@@ -176,11 +243,24 @@ export function applyPinnedSnapshot(
     return effective.map((entry) => (entry.pinned ? { ...entry, pinned: false } : entry));
   }
   const byId = new Map(effective.map((entry) => [entry.skillId, entry]));
+  const digestBySkillId = snapshotEntriesToDigestMap(snapshot);
+  const entryBySkillId = new Map((snapshot.entries ?? []).map((entry) => [entry.skillId, entry]));
   const result: EffectiveSkill[] = [];
   for (const skillId of snapshot.skillIds) {
     const entry = byId.get(skillId);
     if (!entry) continue;
+    // 禁用 / 撤权是立即生效的拒绝屏障：快照不能复活它。
     if (!entry.enabled) continue;
+    const pinnedDigest = digestBySkillId?.get(skillId) ?? null;
+    if (
+      pinnedDigest !== null &&
+      (entry.contentDigest !== pinnedDigest ||
+        entry.resourceRef !== entryBySkillId.get(skillId)?.resourceRef)
+    ) {
+      // 内容已被替换 / 资源身份已变：旧 pin 指向的内容不再存在，跳过
+      // （fail-closed：同名用户技能回退不算「同一份内容」）。
+      continue;
+    }
     result.push({ ...entry, pinned: true });
     byId.delete(skillId);
   }
@@ -191,4 +271,17 @@ export function applyPinnedSnapshot(
     result.push(remaining.pinned ? { ...remaining, pinned: false } : remaining);
   }
   return result;
+}
+
+/**
+ * 把 v2 快照的 `entries` 转成 skillId → 期望摘要 的映射。
+ *
+ * 返回 `null` 表示「老快照（v1）或未提供 entries」→ 只固定成员，不做内容校验。
+ */
+function snapshotEntriesToDigestMap(
+  snapshot: PinnedSkillsSnapshot,
+): Map<string, string | null> | null {
+  const entries = snapshot.entries;
+  if (!Array.isArray(entries)) return null;
+  return new Map(entries.map((entry) => [entry.skillId, entry.contentDigest ?? null]));
 }

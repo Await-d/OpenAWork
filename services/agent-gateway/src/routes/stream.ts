@@ -92,9 +92,11 @@ import { listMcpToolsForSession } from '../mcp/mcp-runtime.js';
 import { isFlatMcpToolsDisabled } from '../mcp/mcp-tool-naming.js';
 import { getEffectiveSkillsFromSessionContext } from '../skill/skill-selection-context.js';
 import type { EffectiveSkill } from '../skill/skill-selection.js';
+import { readSessionExtensionRevision } from '../session-extension/session-extension-store.js';
 import {
   applyPinnedSnapshot,
   buildPinnedSkillsPromptSection,
+  shouldRecapturePinnedSnapshot,
   snapshotFromEffective,
   type PinnedSkillsSnapshot,
 } from '../skill/pinned-skills-prompt.js';
@@ -120,6 +122,7 @@ import {
   isChannelManagedSessionMetadata,
 } from '../session/session-runtime-policy.js';
 import { resolveCanonicalName } from '../claude-code/claude-code-tool-surface.js';
+import { resolveChannelPersonaSystemPrompt } from '../channels/channel-persona-prompt.js';
 import {
   clearInFlightStreamRequest,
   getAnyInFlightStreamRequestForSession,
@@ -754,6 +757,13 @@ interface SessionUserRow {
 }
 
 interface SessionProviderSelection {
+  /**
+   * 会话绑定的 Agent（`metadata.agentId`，客户端会话设置写入、PATCH 白名单内的正式键）。
+   *
+   * 请求未显式携带 `agentId` 时用它兜底：后台续跑（`continueSessionFromHistory`）、
+   * 子代理唤醒、GitHub 事件等轮次都不带请求级 agentId，若不兜底就会丢掉角色提示词。
+   */
+  agentId?: string;
   delegatedSystemPrompt?: string;
   modelId?: string;
   providerId?: string;
@@ -1051,7 +1061,7 @@ export function replayPersistedAssistantResponse(input: {
   userId: string;
   writeChunk: (chunk: RunEvent) => void;
   afterSeq?: number;
-}): boolean {
+}): NonNullable<HandleStreamResult['stopReason']> | false {
   const durableEvents =
     typeof input.afterSeq === 'number' && input.afterSeq > 0
       ? listSessionRunEventsByRequestAfterSeq({
@@ -1073,7 +1083,9 @@ export function replayPersistedAssistantResponse(input: {
       durableEvents.forEach((event) => {
         input.writeChunk(event);
       });
-      return true;
+      return latestBookend.kind === 'interaction_wait'
+        ? 'tool_permission'
+        : (toStreamStopReason(latestBookend.stopReason) ?? 'error');
     }
 
     if (latestBookend?.replayable === false) {
@@ -1159,7 +1171,7 @@ export function replayPersistedAssistantResponse(input: {
     runId: input.runId,
     occurredAt: Date.now(),
   });
-  return true;
+  return 'end_turn';
 }
 
 function clearStaleReplayRequestArtifacts(input: {
@@ -1280,6 +1292,7 @@ function parseSessionProviderSelection(metadataJson: string): SessionProviderSel
     const channelRecord =
       typeof channel === 'object' && channel !== null ? (channel as Record<string, unknown>) : null;
     return {
+      agentId: typeof parsed['agentId'] === 'string' ? parsed['agentId'] : undefined,
       providerId:
         typeof parsed['providerId'] === 'string'
           ? parsed['providerId']
@@ -1373,9 +1386,13 @@ function getManagedAgentModelCandidates(agent: ManagedAgentRecord): string[] {
 
 function resolveStreamAgentSelection(input: {
   requestedAgentId: string | undefined;
+  sessionAgentId?: string | undefined;
   userId: string;
 }): StreamAgentSelection {
-  const requestedAgentId = normalizeRequestedAgentId(input.requestedAgentId);
+  // 请求显式值优先；缺席时落到会话绑定（见 SessionProviderSelection.agentId）。
+  const requestedAgentId =
+    normalizeRequestedAgentId(input.requestedAgentId) ??
+    normalizeRequestedAgentId(input.sessionAgentId);
   if (!requestedAgentId) {
     return {};
   }
@@ -1459,10 +1476,15 @@ export async function resolveStreamModelRoute(input: {
   const sessionSelection = parseSessionProviderSelection(input.metadataJson);
   const agentSelection = resolveStreamAgentSelection({
     requestedAgentId: input.requestData.agentId,
+    sessionAgentId: sessionSelection.agentId,
     userId: input.userId,
   });
   const requestedProviderId = normalizeRequestedProviderId(input.requestData.providerId);
   const requestedModelId = normalizeRequestedModelId(input.requestData.model);
+  // 渠道会话没有 Agent 绑定，角色提示词来自渠道人设 SOUL（未绑定时是内置默认
+  // 人设）。放在 systemPrompt 的最后一级：显式请求 / Agent / 会话绑定仍然优先。
+  const channelPersonaSystemPrompt =
+    resolveChannelPersonaSystemPrompt(input.metadataJson) ?? undefined;
   const hasAuthoritativeTeamModel =
     (isTeamRoleLayer(input.roleLayer) || hasTeamDefinition(input.metadataJson)) &&
     Boolean(sessionSelection.providerId && sessionSelection.modelId);
@@ -1487,7 +1509,8 @@ export async function resolveStreamModelRoute(input: {
       sessionSelection.delegatedSystemPrompt ??
       input.requestData.systemPrompt ??
       agentSelection.systemPrompt ??
-      sessionSelection.systemPrompt,
+      sessionSelection.systemPrompt ??
+      channelPersonaSystemPrompt,
     // 团队模板思考模式配置：当 session metadata 中显式设置了 thinking 字段时，
     // 覆盖请求中的默认值（模板优先于全局默认）。
     thinkingEnabled:
@@ -2105,20 +2128,16 @@ export async function handleStreamRequest(input: {
       sessionId: input.sessionId,
       userId: input.user.sub,
     });
-    if (
-      replayPersistedAssistantResponse({
-        clientRequestId: requestData.clientRequestId,
-        runId: randomUUID(),
-        sessionId: input.sessionId,
-        userId: input.user.sub,
-        writeChunk: input.writeChunk,
-        afterSeq: requestData.afterSeq,
-      })
-    ) {
-      return {
-        statusCode: 200,
-        errorSummary: '请求被 single-flight replay 拦截，未执行新 LLM 调用',
-      };
+    const replayStopReason = replayPersistedAssistantResponse({
+      clientRequestId: requestData.clientRequestId,
+      runId: randomUUID(),
+      sessionId: input.sessionId,
+      userId: input.user.sub,
+      writeChunk: input.writeChunk,
+      afterSeq: requestData.afterSeq,
+    });
+    if (replayStopReason) {
+      return { statusCode: 200, stopReason: replayStopReason };
     }
     reservation = reserveInFlightStreamRequest({
       clientRequestId: requestData.clientRequestId,
@@ -2221,6 +2240,8 @@ export async function handleStreamRequest(input: {
     // 由网关自己构造 requestData，不带 thinking 字段，新建的执行会话 metadata 里
     // 也没有该键——缺了这一层，这些轮次的 thinkingConfig 恒为 undefined，
     // `buildProviderOptions` 拿到 undefined 就直接返回，上游思考永远收不到。
+    // 用户关闭默认思考时该层返回显式 `false`（而非留空），否则上游会回到自己的
+    // 默认行为（DeepSeek / Gemini 2.5 默认开启思考），出现「设置关了仍在思考」。
     // 该层**不写回会话 metadata**（见 withUserDefaultThinkingFallback 注释）。
     // Web 正常轮两级都已表态，只有通道 / cron / 唤醒这类轮次才需要多读一次库。
     const needsDefaultThinkingFallback =
@@ -2343,8 +2364,15 @@ export async function handleStreamRequest(input: {
   // 在并发写抢锁时还会被 busy_timeout 放大。单独计时以便在网关日志里直接归因，
   // 避免只能靠客户端的「首token」总指标去猜。
   const stepPrepare = wl.start('stream.prepare-sync');
+  // 用**生效**的 Agent（含会话绑定回退）解析 companion 绑定：否则同一会话的前台轮
+  // （请求带 agentId）与后台续跑 / 唤醒 / 事件轮（请求不带）会命中不同的 companion
+  // 配置，同一份历史在两种轮次下拿到不一致的语音与提示词绑定。
   const companionPrompt = buildCompanionPrompt(
-    loadCompanionSettingsForUser(input.user.sub, input.user.email, requestData.agentId),
+    loadCompanionSettingsForUser(
+      input.user.sub,
+      input.user.email,
+      route.effectiveAgentId ?? requestData.agentId,
+    ),
     userVisibleMessage,
   );
   const capabilityContext = runtimePolicy.includeCapabilityContext
@@ -2413,21 +2441,17 @@ export async function handleStreamRequest(input: {
     userId: input.user.sub,
   });
 
-  if (
-    replayPersistedAssistantResponse({
-      clientRequestId: requestData.clientRequestId,
-      runId,
-      sessionId: input.sessionId,
-      userId: input.user.sub,
-      writeChunk: input.writeChunk,
-      afterSeq: requestData.afterSeq,
-    })
-  ) {
+  const replayStopReason = replayPersistedAssistantResponse({
+    clientRequestId: requestData.clientRequestId,
+    runId,
+    sessionId: input.sessionId,
+    userId: input.user.sub,
+    writeChunk: input.writeChunk,
+    afterSeq: requestData.afterSeq,
+  });
+  if (replayStopReason) {
     wl.flush(ctx, 200);
-    return finishReservation({
-      statusCode: 200,
-      errorSummary: '请求被 replay 拦截（同 clientRequestId 已有持久化结果），未执行新 LLM 调用',
-    });
+    return finishReservation({ statusCode: 200, stopReason: replayStopReason });
   }
 
   if (
@@ -2584,6 +2608,26 @@ export async function handleStreamRequest(input: {
 
       input.onStarted?.();
 
+      // 受理确认：客户端在发送瞬间渲染的「已收到」只是乐观渲染，这一条才是服务端凭据。
+      //
+      // 直接走 `input.writeChunk`（传输层）而**不是** `emitChunk`：后者会 INSERT 进
+      // `session_run_events` 并广播给 attach 订阅者，于是「已受理」会被重连回放——一个
+      // 若干秒前的受理确认重放出来，客户端只会误判成新的一轮刚刚开始。见
+      // `StreamRunAcceptedChunk` 的说明。
+      //
+      // 位置选在此处而不是更早：单飞锁已持有、模型路由已确定，此刻的确认不会在半路被
+      // 拒绝（`SESSION_ALREADY_RUNNING` 那条路径已在更早处 return）。
+      input.writeChunk({
+        type: 'run_accepted',
+        occurredAt: Date.now(),
+        requestId: requestData.clientRequestId,
+        runId,
+        // 手拼 eventId 而不是走 `createRunEventMeta(runId, eventSequence)`：后者会占用一个
+        // 序列号，而本事件不入库，会让 `session_run_events.seq` 出现无法解释的跳号。
+        // 同一 runId 只会受理一次，故这个 id 天然唯一（与 `createStreamErrorChunk` 同法）。
+        eventId: `${runId}:accepted`,
+      });
+
       // Reset doom loop history at the start of each new user message stream
       resetDoomLoopHistory(input.sessionId);
 
@@ -2662,8 +2706,10 @@ export async function handleStreamRequest(input: {
       if (runtimePolicy.includePinnedSkillsPrompt) {
         let pinnedSnapshot: PinnedSkillsSnapshot | null =
           (sessionMeta['pinnedSkillsSnapshot'] as PinnedSkillsSnapshot | undefined) ?? null;
-        if (!pinnedSnapshot) {
+        const extensionRevision = readSessionExtensionRevision(input.sessionId);
+        if (shouldRecapturePinnedSnapshot(pinnedSnapshot, extensionRevision)) {
           const captured = snapshotFromEffective(effectiveSkills);
+          captured.extensionRevision = extensionRevision;
           pinnedSnapshot = captured;
           // Persist back to sessions.metadata_json so subsequent turns and
           // any replay path reads the same list. Re-read the row first to

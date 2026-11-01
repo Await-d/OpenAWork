@@ -15,7 +15,7 @@ interface SettingsTabActionsParams {
   setDiagnostics: React.Dispatch<React.SetStateAction<SettingsDiagnosticRecord[]>>;
   setDiagnosticsAvailableDates: React.Dispatch<React.SetStateAction<string[]>>;
   setGithubTriggers: React.Dispatch<
-    React.SetStateAction<Array<{ events: string[]; repo: string }>>
+    React.SetStateAction<Array<{ agentId?: string; events: string[]; repo: string }>>
   >;
 }
 
@@ -27,14 +27,18 @@ export function useSettingsTabActions({
   setGithubTriggers,
 }: SettingsTabActionsParams) {
   const handleSaveGitHubTrigger = useCallback(
-    async (config: { events: string[]; repoFullNameOwnerSlashRepo: string }) => {
+    async (config: { agentId?: string; events: string[]; repoFullNameOwnerSlashRepo: string }) => {
       if (!token) {
         throw new Error('未登录，无法保存 GitHub 触发器。');
       }
       await createGitHubClient(gatewayUrl).createTrigger(token, config);
       setGithubTriggers((prev) => [
         ...prev,
-        { repo: config.repoFullNameOwnerSlashRepo, events: config.events },
+        {
+          repo: config.repoFullNameOwnerSlashRepo,
+          events: config.events,
+          ...(config.agentId ? { agentId: config.agentId } : {}),
+        },
       ]);
     },
     [gatewayUrl, setGithubTriggers, token],

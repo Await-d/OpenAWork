@@ -236,6 +236,139 @@ afterAll(async () => {
 });
 
 describe('createPm2Runner', () => {
+  it('同文件任务经串行依赖安全派发，不再退回合并而丢失需求', async () => {
+    const ids = {
+      specArtifactId: 'spec-shared',
+      planArtifactId: 'plan-shared',
+      tasksArtifactId: 'tasks-shared',
+    };
+    for (const [phase, content] of [
+      ['spec', buildValidSpec()],
+      ['plan', buildValidPlan()],
+      [
+        'tasks',
+        buildValidTasks([
+          '- [ ] T001 [P] [KIND:build] [SURFACE:backend] [src/orders.ts] 新增订单校验 - 拒绝无效订单',
+          '- [ ] T002 [P] [KIND:build] [SURFACE:backend] [src/orders.ts] 新增错误展示 - 展示失败原因',
+        ]),
+      ],
+    ]) {
+      seedArtifact({
+        artifactId: `${phase}-shared`,
+        sessionId: PM1_SESSION_ID,
+        userId: USER_ID,
+        title: phase!,
+        content: content!,
+        phase: phase!,
+      });
+    }
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: PM1_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+      payload: { resultJson: ids },
+    });
+    await pm2RunnerModule.createPm2Runner()({
+      handoff,
+      toSessionId: PM2_SESSION_ID,
+      signal: new AbortController().signal,
+    });
+    const children = store.listHandoffsBySession({ sessionId: PM2_SESSION_ID, userId: USER_ID });
+    const executors = children.filter((child) => child.toRoleLayer === 'executor');
+    expect(executors).toHaveLength(2);
+    const first = executors.find(
+      (child) =>
+        (child.payload as { taskMarkers?: { taskId?: string } })?.taskMarkers?.taskId === 'T001',
+    );
+    const second = executors.find(
+      (child) =>
+        (child.payload as { taskMarkers?: { taskId?: string } })?.taskMarkers?.taskId === 'T002',
+    );
+    expect(second?.payload).toMatchObject({
+      dependencyHandoffIds: [first?.id],
+      ownedPaths: ['src/orders.ts'],
+    });
+    expect(children.filter((child) => child.toRoleLayer === 'pm1')).toEqual([]);
+  });
+
+  it.each([
+    [4, '3'],
+    [60, '50'],
+  ])('计划 %i 项超过上限时明确失败，不启动部分任务冒充完整交付', async (count, cap) => {
+    vi.stubEnv('OPENAWORK_TEAM_MAX_DISPATCH_PACKAGES', cap);
+    try {
+      for (const [phase, content] of [
+        ['spec', buildValidSpec()],
+        ['plan', buildValidPlan()],
+        [
+          'tasks',
+          buildValidTasks(
+            Array.from(
+              { length: count },
+              (_, index) =>
+                `- [ ] T${String(index + 1).padStart(3, '0')} [P] [KIND:build] [SURFACE:backend] [src/item-${index}.ts] 新增能力 - 可独立运行`,
+            ),
+          ),
+        ],
+      ]) {
+        seedArtifact({
+          artifactId: `${phase}-capped`,
+          sessionId: PM1_SESSION_ID,
+          userId: USER_ID,
+          title: phase!,
+          content: content!,
+          phase: phase!,
+        });
+      }
+      const handoff = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: PM1_SESSION_ID,
+        fromRoleLayer: 'pm1',
+        toRoleLayer: 'pm2',
+        payload: {
+          resultJson: {
+            specArtifactId: 'spec-capped',
+            planArtifactId: 'plan-capped',
+            tasksArtifactId: 'tasks-capped',
+          },
+        },
+      });
+      await expect(
+        pm2RunnerModule.createPm2Runner()({
+          handoff,
+          toSessionId: PM2_SESSION_ID,
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow('派发上限');
+      expect(
+        store
+          .listHandoffsBySession({ sessionId: PM2_SESSION_ID, userId: USER_ID })
+          .filter((child) => child.fromSessionId === PM2_SESSION_ID),
+      ).toEqual([]);
+      expect(store.getHandoffById(handoff.id)?.resultJson).toMatchObject({
+        parsedTaskCount: count,
+        packageCount: 0,
+        qualityReviewPending: false,
+      });
+      const result = store.getHandoffById(handoff.id)?.resultJson as {
+        undispatched?: unknown[];
+        cap?: number;
+        parsedCount?: number;
+        dispatchedCount?: number;
+        truncated?: number;
+      };
+      expect(result.undispatched).toHaveLength(count);
+      // T-18：被截断的清单与上限必须能对照，而不是只知道「失败了」。
+      expect(result.cap).toBe(Number(cap));
+      expect(result.parsedCount).toBe(count);
+      expect(result.dispatchedCount).toBe(0);
+      expect(result.truncated).toBe(count);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('相同规划拒绝跨新 handoff 递增并触发无进展上限', async () => {
     seedReceptionToPm1Handoff('实现订单');
     for (const phase of ['spec', 'plan', 'tasks']) {
@@ -528,6 +661,12 @@ describe('createPm2Runner', () => {
         WHERE from_session_id = ? AND to_role_layer IN ('executor', 'reviewer')`,
       [PM2_SESSION_ID],
     );
+    // T-18：成功路径也要留下「解析数 / 派发数 / 上限」，否则事后无法核对
+    // 计划任务是否被上限截断（只在超限时才写会丢掉正常情况的对照）。
+    expect(resultJson['parsedCount']).toBe(2);
+    expect(resultJson['dispatchedCount']).toBe(downstreamCount?.c ?? 0);
+    expect(resultJson['truncated']).toBe(0);
+    expect(typeof resultJson['cap']).toBe('number');
     expect((downstreamCount?.c ?? 0) > 0).toBe(true);
   });
 });

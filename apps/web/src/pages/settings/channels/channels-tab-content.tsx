@@ -4,6 +4,8 @@ import {
   createCapabilitiesClient,
   createChannelsClient,
   createResourcesClient,
+  createSettingsClient,
+  createSkillsClient,
 } from '@openAwork/web-client';
 import { StatusPill } from '@openAwork/shared-ui';
 import { buildChannelCapabilityToolGroupCounts } from '../../../components/common/display/channel-capability-tool-groups.js';
@@ -184,6 +186,31 @@ async function saveChannelOnce(ctx: {
   }
 }
 
+/**
+ * 从只读接口的响应里挑出可展示的名字。
+ *
+ * 容错而不是断言：接口给 `{ servers: [...] }` / `{ skills: [...] }`，条目字段名在不同
+ * 接口间并不统一（`name` / `displayName` / `id` / `skillId` / `displayId`）。挑不出名字
+ * 的条目直接跳过——罗列影响时宁可少列，也不要往界面上写 `undefined`。
+ */
+function readImpactNames(raw: unknown, key: 'servers' | 'skills'): string[] {
+  if (typeof raw !== 'object' || raw === null) return [];
+  const list = (raw as Record<string, unknown>)[key];
+  if (!Array.isArray(list)) return [];
+
+  return list
+    .map((entry) => {
+      if (typeof entry !== 'object' || entry === null) return null;
+      const record = entry as Record<string, unknown>;
+      for (const candidate of ['name', 'displayName', 'id', 'skillId', 'displayId']) {
+        const value = record[candidate];
+        if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+      }
+      return null;
+    })
+    .filter((name): name is string => name !== null);
+}
+
 export function ChannelsTabContent({
   channels,
   setChannels,
@@ -207,6 +234,8 @@ export function ChannelsTabContent({
     [gatewayUrl],
   );
   const resourcesClient = React.useMemo(() => createResourcesClient(gatewayUrl), [gatewayUrl]);
+  const settingsClient = React.useMemo(() => createSettingsClient(gatewayUrl), [gatewayUrl]);
+  const skillsClient = React.useMemo(() => createSkillsClient(gatewayUrl), [gatewayUrl]);
   const [personas, setPersonas] = React.useState<readonly ChannelPersonaOption[]>([]);
   const [capabilityCatalogCounts, setCapabilityCatalogCounts] =
     React.useState<ChannelCapabilityCatalogCounts | null>(null);
@@ -341,6 +370,25 @@ export function ChannelsTabContent({
     },
     [capabilitiesClient, ensureToken],
   );
+
+  /**
+   * 「开启会话级扩展管理后不再继承」的清单。
+   *
+   * 两项都来自只读接口（`/settings/mcp-servers`、`/skills/installed`），单个失败就
+   * 报错、由 UI 提示「读不到影响清单」——**不假装没有影响**，也不阻断确认。
+   * 名称取值容错：不同接口可能给 `name` / `id` / `skillId` / `displayName`。
+   */
+  const loadChannelExtensionImpact = React.useCallback(async () => {
+    const token = ensureToken();
+    const [mcpRaw, skillsRaw] = await Promise.all([
+      settingsClient.listMcpServers(token),
+      skillsClient.listInstalled(token),
+    ]);
+    return {
+      mcpServers: readImpactNames(mcpRaw, 'servers'),
+      skills: readImpactNames(skillsRaw, 'skills'),
+    };
+  }, [ensureToken, settingsClient, skillsClient]);
 
   const saveChannel = async (
     channelId: string | null,
@@ -565,6 +613,7 @@ export function ChannelsTabContent({
         personas={personas}
         capabilityCatalogCounts={capabilityCatalogCounts ?? undefined}
         onResolveCapabilityCatalogCounts={token ? resolveCapabilityCatalogCounts : undefined}
+        onLoadChannelExtensionImpact={token ? loadChannelExtensionImpact : undefined}
         onSave={saveChannel}
         onConnect={connectChannel}
         onDisconnect={disconnectChannel}

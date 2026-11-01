@@ -151,11 +151,11 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
     (value: RightPanelTabId | ((prev: RightPanelTabId) => RightPanelTabId)) => {
       const next =
         typeof value === 'function'
-          ? (value as (p: RightPanelTabId) => RightPanelTabId)(rightTab)
+          ? value((useUIStateStore.getState().rightTab as RightPanelTabId) ?? 'overview')
           : value;
       setRightTabStore(next);
     },
-    [rightTab, setRightTabStore],
+    [setRightTabStore],
   );
 
   const rightOpen = useUIStateStore((s) => s.rightOpen);
@@ -163,10 +163,10 @@ export function useChatUiState(options: UseChatUiStateOptions): ChatUiState {
   const setRightOpen = useCallback(
     (value: boolean | ((prev: boolean) => boolean)) => {
       const next =
-        typeof value === 'function' ? (value as (p: boolean) => boolean)(rightOpen) : value;
+        typeof value === 'function' ? value(useUIStateStore.getState().rightOpen) : value;
       setRightOpenStore(next);
     },
-    [rightOpen, setRightOpenStore],
+    [setRightOpenStore],
   );
 
   // 把 rightOpen 镜像到 ref：流式 onToolCall 等回调需在不重新捕获闭包的前提下

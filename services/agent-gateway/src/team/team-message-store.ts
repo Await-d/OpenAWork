@@ -1,5 +1,6 @@
 /**
- * Write path + retention for `team_messages`.
+ * Write path + retention for `team_messages` (audit notes only).
+ * These records do not deliver input to an Agent; execution uses session inbound.
  *
  * `POST /team/messages` appends a row per call with no throttle, and the table
  * is read with `ORDER BY created_at ASC LIMIT 100` — so rows beyond the newest

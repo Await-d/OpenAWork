@@ -31,6 +31,7 @@ import {
 } from '../capability/completion-protocol-contract.js';
 import { normalizeReviewOutput } from './review-output-normalization.js';
 import { logGatewayWarn } from '../../infra/gateway-logger.js';
+import { executionVerificationCoverage } from '../capability/execution-verification.js';
 
 export interface ReviewInput {
   userId: string;
@@ -50,6 +51,7 @@ export interface ReviewReport {
   overallVerdict:
     'pass' | 'implementation-failure' | 'planning-failure' | 'execution-protocol-failure';
   reportMarkdown: string;
+  verificationCoverage?: { verified: number; total: number };
 }
 
 interface ReviewReadinessResult {
@@ -57,6 +59,7 @@ interface ReviewReadinessResult {
   issues: string[];
   taskOverview: string;
   childResults: string;
+  verificationCoverage: { verified: number; total: number };
   /**
    * 当存在 failed/cancelled 子任务时，ready 不会 pass，但 verdict 应该是
    * `implementation-failure`（执行层任务本身失败）而非
@@ -85,10 +88,11 @@ async function runSpecReview(input: {
   const system = `你是 Spec Review 审查员。你的职责是逐项检查验收场景的覆盖情况。
 
 **判定规则（严格遵守）**：
-1. 先从 <spec> 中提取所有验收场景（Given/When/Then、验收条件、AC-xxx 编号等）
-2. 对每个验收场景，在 <implementation-results> 中查找对应的实现证据
-3. 只有在实现结果中完全找不到对应证据时，才输出 ISSUE
-4. 禁止因为以下原因输出 ISSUE：
+1. verified只证明引用工具实际执行成功，不代表验收正确；必须核对命令/读取内容是否覆盖对应场景，echo、无关命令、读取文件本身不能证明测试通过。
+2. 先从 <spec> 中提取所有验收场景（Given/When/Then、验收条件、AC-xxx 编号等）
+3. 对每个验收场景，在 <implementation-results> 中查找对应的实现证据；自报文字或无关执行记录不是覆盖证据
+4. 找不到有效覆盖证据时输出 ISSUE，不得仅因提供摘要或verified=true而PASS
+5. 禁止因为以下原因输出 ISSUE：
    - 代码风格、命名偏好、注释质量
    - spec 中未声明的额外要求
    - 推测性的潜在问题（没有实际证据证明未覆盖）
@@ -158,6 +162,11 @@ function generateReportMarkdown(report: Omit<ReviewReport, 'reportMarkdown'>): s
     '# Review Report',
     '',
     `**总体判定**：${verdictLabel[report.overallVerdict]}`,
+    ...(report.verificationCoverage
+      ? [
+          `**执行凭证覆盖率**：${report.verificationCoverage.verified}/${report.verificationCoverage.total}（仅证明引用检查执行成功，功能正确性仍需语义评审）`,
+        ]
+      : []),
     '',
     '## Spec Review',
     '',
@@ -209,6 +218,7 @@ export async function runReviewAggregation(input: ReviewInput): Promise<ReviewRe
       : 'execution-protocol-failure';
 
     const reportData: Omit<ReviewReport, 'reportMarkdown'> = {
+      verificationCoverage: readiness.verificationCoverage,
       specReviewPassed: true,
       qualityReviewPassed: false,
       specIssues: [],
@@ -235,6 +245,7 @@ export async function runReviewAggregation(input: ReviewInput): Promise<ReviewRe
   // 不再依赖 LLM 重新“发现”同一批失败项。
   if (readiness.structuredFailedItems.length > 0) {
     const reportData: Omit<ReviewReport, 'reportMarkdown'> = {
+      verificationCoverage: readiness.verificationCoverage,
       specReviewPassed: true,
       qualityReviewPassed: false,
       specIssues: [],
@@ -289,6 +300,7 @@ export async function runReviewAggregation(input: ReviewInput): Promise<ReviewRe
   ];
 
   const reportData: Omit<ReviewReport, 'reportMarkdown'> = {
+    verificationCoverage: readiness.verificationCoverage,
     specReviewPassed: specResult.passed,
     // protocolDegraded 不否决 pass（soft）；仅写入 qualityIssues 提示
     qualityReviewPassed: qualityResult.passed,
@@ -357,6 +369,7 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
   let protocolDegraded = false;
   const mode = resolveSubmitProtocolMode();
   const taskOverviewEntries: string[] = [];
+  const verificationCoverage = { verified: 0, total: 0 };
 
   const childResults = childHandoffs
     .map((h) => {
@@ -451,6 +464,27 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
         }
       }
 
+      const coverage =
+        h.toRoleLayer === 'executor'
+          ? executionVerificationCoverage(
+              {
+                userId: h.userId,
+                sessionId: h.toSessionId ?? '',
+                handoffId: h.id,
+              },
+              resultObj,
+            )
+          : null;
+      if (coverage) {
+        verificationCoverage.total += coverage.total;
+        verificationCoverage.verified += coverage.verified;
+      }
+      if (coverage && coverage.verified === 0 && childFailedItems.length === 0) {
+        issues.push(
+          `${h.id} 缺少可核验执行证据（${coverage.verified}/${coverage.total}），摘要或自报verified不能作为验收通过依据`,
+        );
+      }
+
       const resultSummary =
         resultObj &&
         typeof resultObj['summary'] === 'string' &&
@@ -480,6 +514,11 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
         `任务ID：${taskId || '缺失'}`,
         ...(structuredStatus ? [structuredStatus] : []),
         ...(resultSummary ? [`摘要：${resultSummary}`] : []),
+        ...(coverage
+          ? [
+              `执行凭证覆盖：${coverage.verified}/${coverage.total}（仅证明引用命令执行成功，不等于功能验收）`,
+            ]
+          : []),
         `结果：${resultJson || '(无结果)'}`,
         failedItemsLine,
       ].join('\n');
@@ -492,6 +531,7 @@ function buildReviewReadiness(childHandoffs: HandoffRecord[]): ReviewReadinessRe
     taskOverview:
       taskOverviewEntries.length > 0 ? taskOverviewEntries.join('\n') : '- (没有可用子任务概览)',
     childResults,
+    verificationCoverage,
     hasFailedChildren,
     structuredFailedItems: Array.from(new Set(structuredFailedItems)),
     protocolDegraded,

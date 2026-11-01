@@ -1,13 +1,57 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createStreamFrameController } from '../../../../components/conversation-runtime/stream/stream-frame-controller.js';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { useChatStreaming } from './use-chat-streaming.js';
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe('useChatStreaming', () => {
+  it.each(['reset', 'unmount'] as const)('%s 释放请求帧和揭示帧且迟到帧不再发布', (action) => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.set(++next, callback);
+      return next;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+      frames.delete(id);
+    });
+    const { result, unmount } = renderHook(() => useChatStreaming());
+    const handleRef = result.current.streamFrameHandleRef;
+    const publish = vi.fn();
+    const drain = vi.fn();
+    const controller = createStreamFrameController({
+      sessionId: 'session',
+      handleRef,
+      isActive: () => true,
+      drain,
+      syncSnapshot: vi.fn(),
+      publishThinking: publish,
+      publishSegments: publish,
+    });
+    controller.scheduleThinkingFlush();
+    controller.scheduleSegmentsFlush();
+    result.current.scheduleStreamReveal({ prefersReducedMotion: false });
+    const lateFrames = [...frames.values()];
+    const revealRef = result.current.pendingStreamRevealFrameRef;
+    expect(frames.size).toBe(3);
+    if (action === 'unmount') unmount();
+    else
+      act(() => {
+        result.current.resetStreamState();
+      });
+    expect(handleRef.current).toBeNull();
+    expect(revealRef.current).toBeNull();
+    expect(frames.size).toBe(0);
+    for (const callback of lateFrames.slice(0, 2)) callback(0);
+    expect(publish).not.toHaveBeenCalled();
+    expect(drain).not.toHaveBeenCalled();
+  });
+
   it('初始化为空并可通过 resetStreamState 清空', () => {
     const { result } = renderHook(() => useChatStreaming());
 

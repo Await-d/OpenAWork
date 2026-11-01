@@ -75,6 +75,32 @@ afterAll(async () => {
  * 从 DB 读取一条 handoff 记录并构造 HandoffRecord 形状，
  * 以便直接传给 runReviewAggregation。
  */
+function attachExecutionEvidence(id: string): void {
+  const sessionId = `s-evidence-${id}`;
+  dbModule.sqliteRun(
+    "INSERT INTO sessions (id, user_id, title, metadata_json) VALUES (?, ?, 'executor', '{}')",
+    [sessionId, USER_ID],
+  );
+  dbModule.sqliteRun('UPDATE handoff_records SET to_session_id = ? WHERE id = ?', [sessionId, id]);
+  const row = dbModule.sqliteGet<{ result_json: string }>(
+    'SELECT result_json FROM handoff_records WHERE id = ?',
+    [id],
+  );
+  const result = JSON.parse(row!.result_json);
+  result.checklist = result.checklist.map((item: object) => ({
+    ...item,
+    verificationRefs: [{ terminalId: `term-${id}`, command: 'bun test' }],
+  }));
+  dbModule.sqliteRun('UPDATE handoff_records SET result_json = ? WHERE id = ?', [
+    JSON.stringify(result),
+    id,
+  ]);
+  dbModule.sqliteRun(
+    `INSERT INTO session_terminals (terminal_id, session_id, user_id, client_request_id, tool_name, kind, command, cwd, status, exit_code, started_at_ms, ended_at_ms, last_activity_ms) VALUES (?, ?, ?, ?, 'bash', 'foreground', 'bun test', '/workspace', 'exited', 0, 1, 2, 2)`,
+    [`term-${id}`, sessionId, USER_ID, `handoff:${id}`],
+  );
+}
+
 function getHandoffAsRecord(id: string): HandoffStoreModule.HandoffRecord {
   const row = dbModule.sqliteGet<{
     id: string;
@@ -130,6 +156,34 @@ function getHandoffAsRecord(id: string): HandoffStoreModule.HandoffRecord {
 }
 
 describe('review readiness classification', () => {
+  it('摘要或模型自报verified无服务器凭证时不调用LLM也不得pass', async () => {
+    seedChildHandoff({
+      id: 'h-unverified',
+      state: 'completed',
+      resultJson: JSON.stringify({
+        protocol: 'submit_execution_result',
+        summary: '完成且测试通过',
+        checklist: [{ id: 'AC1', status: 'pass', evidence: '测试通过', verified: true }],
+      }),
+    });
+    let calls = 0;
+    const report = await reviewAggregator.runReviewAggregation({
+      userId: USER_ID,
+      pm2HandoffId: 'pm2-unverified',
+      pm2SessionId: PM2_SESSION_ID,
+      childHandoffs: [getHandoffAsRecord('h-unverified')],
+      specContent: '',
+      constitutionBody: '',
+      callLlm: async () => {
+        calls++;
+        return 'PASS';
+      },
+    });
+    expect(report.overallVerdict).not.toBe('pass');
+    expect(report.reportMarkdown).toContain('0/1');
+    expect(calls).toBe(0);
+  });
+
   it('子任务 completed 但缺 result_json 时归类为执行协议失败', async () => {
     const childId = 'h-child-completed-no-result';
     seedChildHandoff({
@@ -233,7 +287,7 @@ describe('review readiness classification', () => {
     expect(report.qualityIssues.join('；')).toContain('缺少执行结果 artifact/summary');
   });
 
-  it('子任务 completed 且有 result_json 时正常进入双重 review', async () => {
+  it('旧格式只有result_json摘要也不能绕过零执行凭证门禁', async () => {
     const childId = 'h-child-ok';
     seedChildHandoff({
       id: childId,
@@ -255,9 +309,9 @@ describe('review readiness classification', () => {
       callLlm: async () => 'PASS',
     });
 
-    expect(report.overallVerdict).toBe('pass');
-    expect(report.specReviewPassed).toBe(true);
-    expect(report.qualityReviewPassed).toBe(true);
+    expect(report.overallVerdict).toBe('execution-protocol-failure');
+    expect(report.qualityReviewPassed).toBe(false);
+    expect(report.reportMarkdown).toContain('0/0');
   });
 
   it('联合检查时会同时注入任务概览与执行结果摘要', async () => {
@@ -278,6 +332,7 @@ describe('review readiness classification', () => {
       }),
     });
 
+    attachExecutionEvidence(childId);
     const capturedPrompts: Array<{ system: string; user: string }> = [];
     const report = await reviewAggregator.runReviewAggregation({
       userId: USER_ID,
@@ -293,6 +348,8 @@ describe('review readiness classification', () => {
     });
 
     expect(report.overallVerdict).toBe('pass');
+    expect(report.verificationCoverage).toEqual({ verified: 1, total: 1 });
+    expect(report.reportMarkdown).toContain('1/1');
     expect(capturedPrompts).toHaveLength(2);
     expect(capturedPrompts.every((entry) => entry.user.includes('<task-overview>'))).toBe(true);
     expect(capturedPrompts.every((entry) => entry.user.includes('taskId=T-ORDER-1'))).toBe(true);
@@ -324,6 +381,7 @@ describe('review readiness classification', () => {
         checklist: [{ id: 'AC-2', status: 'pass', evidence: '提交成功' }],
       }),
     });
+    attachExecutionEvidence(childId);
 
     const report = await reviewAggregator.runReviewAggregation({
       userId: USER_ID,

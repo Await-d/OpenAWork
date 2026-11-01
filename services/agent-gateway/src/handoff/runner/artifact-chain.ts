@@ -32,9 +32,10 @@ import type { HandoffRecord, HandoffRoleLayer } from '../store/handoff-store.js'
 import { getTeamConstitution } from '../../team/team-constitution-store.js';
 import { setSubstate, SUBSTATES_C } from '../store/substate-store.js';
 import {
+  ackInboundMessage,
+  consumePendingControlSignal,
   consumePendingInboundMessage,
-  hasPendingCancelSignal,
-  listPendingInboundMessages,
+  releaseInboundMessage,
   parseGrillClarificationAnswerPayload,
   submitInboundMessage,
 } from '../store/inbound-store.js';
@@ -487,33 +488,6 @@ function applyPatches(content: string, rules: ValidationRule[]): string {
   throw new PlanningFailure(`规划校验失败：${validateOutput(content, rules).failed.join('、')}`);
 }
 
-function sanitizeTasksForDispatch(content: string): string {
-  const lines = content.split('\n');
-  const output: string[] = [];
-  const owned = new Set<string>();
-  let skipTask = false;
-  for (const line of lines) {
-    const match = line.match(/^(\s*-\s*\[[ x]\]\s*T\d+\s+)(.*)$/i);
-    if (!match) {
-      if (!skipTask) output.push(line);
-      continue;
-    }
-    const title = match[2] ?? '';
-    const paths = extractComparablePathsFromText(title);
-    if (paths.some((path) => owned.has(path))) {
-      skipTask = true;
-      continue;
-    }
-    skipTask = false;
-    for (const path of paths) owned.add(path);
-    const normalizedTitle = /^\[[^\]\n]+\]\s+.+\s+-\s+.+$/.test(title.trim())
-      ? title
-      : `[src/index.ts] 实现入口模块 - 系统可启动`;
-    output.push(`${match[1]}${normalizedTitle}`);
-  }
-  return output.join('\n');
-}
-
 /**
  * 带重试的 LLM 调用：
  *   1. 可重试错误（429/503/502/overloaded/unavailable/network/invalid json）→ 指数退避重试（5s/10s/20s/30s）
@@ -703,12 +677,6 @@ function extractClarificationAnswer(
   return null;
 }
 
-function hasPendingPauseOrResumeSignal(sessionId: string): boolean {
-  return listPendingInboundMessages(sessionId).some(
-    (message) => message.messageType === 'pause_signal' || message.messageType === 'resume_signal',
-  );
-}
-
 async function sleepForNextInboundPoll(pollIntervalMs: number, deadline: number): Promise<void> {
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) return;
@@ -727,6 +695,7 @@ async function waitForClarificationAnswers(input: {
   sessionId: string;
   expectedCount: number;
   signal: AbortSignal;
+  persistAnswer: (answer: CollectedClarificationAnswer) => void;
 }): Promise<CollectedClarificationAnswer[]> {
   const collected: CollectedClarificationAnswer[] = [];
   const deadline = Date.now() + getClarificationTimeoutMs();
@@ -740,11 +709,8 @@ async function waitForClarificationAnswers(input: {
     }
 
     if (paused) {
-      if (
-        hasPendingCancelSignal(input.sessionId) ||
-        hasPendingPauseOrResumeSignal(input.sessionId)
-      ) {
-        const controlMessage = consumePendingInboundMessage({
+      {
+        const controlMessage = consumePendingControlSignal({
           toSessionId: input.sessionId,
           loopIteration,
         });
@@ -788,9 +754,23 @@ async function waitForClarificationAnswers(input: {
         continue;
       }
 
-      const answer = extractClarificationAnswer(message);
-      if (answer) {
+      const leaseToken = message.leaseToken;
+      if (!leaseToken) throw new PlanningFailure('业务消息缺少消费租约');
+      try {
+        const answer = extractClarificationAnswer(message);
+        if (!answer) throw new PlanningFailure('澄清答案载荷无效');
+        input.persistAnswer(answer);
+        if (!ackInboundMessage({ messageId: message.id, leaseToken })) {
+          throw new PlanningFailure('澄清答案消费租约已失效');
+        }
         collected.push(answer);
+      } catch (err) {
+        releaseInboundMessage({
+          messageId: message.id,
+          leaseToken,
+          lastError: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
       }
       if (collected.length >= input.expectedCount) break;
 
@@ -954,6 +934,16 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
           sessionId: input.sessionId,
           expectedCount: frontier.length,
           signal: input.signal ?? new AbortController().signal,
+          persistAnswer: (answer) => {
+            const nextState = applyPm1GrillAnswers(grillState, [
+              {
+                nodeId: answer.questionId ?? '',
+                answer: answer.answer,
+              },
+            ]);
+            persistPm1Grill(input.sessionId, nextState, input.rewrittenIntent);
+            grillState = nextState;
+          },
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -963,6 +953,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
           throw err;
         }
         logGatewayWarn(`[artifact-chain] clarification 等待异常：${message}`);
+        throw err;
       }
 
       if (roundAnswers.length === 0) {
@@ -977,14 +968,6 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
       }
 
       clarificationAnswers.push(...roundAnswers);
-      grillState = applyPm1GrillAnswers(
-        grillState,
-        roundAnswers.map((answer) => ({
-          nodeId: answer.questionId ?? '',
-          answer: answer.answer,
-        })),
-      );
-      persistPm1Grill(input.sessionId, grillState, input.rewrittenIntent);
 
       // 确认门控：仅当确认节点落定（confirmedAt 已写）才收口；被驳回则循环重提确认节点。
       if (awaitingConfirmation && grillState.confirmedAt !== undefined) break;
@@ -1301,12 +1284,7 @@ export async function runArtifactChain(input: ArtifactChainInput): Promise<Artif
 
   const finalValidation = validateTasksOutput(finalTasksContent);
   const { validateParsedTasks } = await import('../capability/dispatch-package.js');
-  let finalIssues = validateParsedTasks(parseAllTasks(finalTasksContent));
-  if (finalIssues.length > 0) {
-    finalTasksContent = sanitizeTasksForDispatch(finalTasksContent);
-    finalIssues = validateParsedTasks(parseAllTasks(finalTasksContent));
-  }
-  finalIssues = finalIssues.filter((issue) => !issue.includes('应合并为一个任务'));
+  const finalIssues = validateParsedTasks(parseAllTasks(finalTasksContent));
   if (!finalValidation.ok || finalIssues.length > 0) {
     throw new PlanningFailure([...finalValidation.failed, ...finalIssues].join('；'));
   }

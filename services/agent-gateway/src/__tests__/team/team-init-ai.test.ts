@@ -89,16 +89,6 @@ const USER_ID = 'u-team-init-ai';
 const TEAM_WORKSPACE_ID = 'tw-team-init-ai';
 let workspaceRoots: string[] = [];
 
-interface MemoryKnowledgeRow {
-  key: string;
-  value: string;
-  source: string;
-  priority: number;
-  workspace_root: string | null;
-  team_workspace_id: string | null;
-  role_layers_json: string | null;
-}
-
 function seedUser(): void {
   dbModule.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
     USER_ID,
@@ -114,13 +104,23 @@ function seedSession(sessionId: string, metadata: Record<string, unknown>): void
   );
 }
 
-function getTeamInitKnowledge(key: string): MemoryKnowledgeRow | undefined {
-  return dbModule.sqliteGet<MemoryKnowledgeRow>(
-    `SELECT key, value, source, priority, workspace_root, team_workspace_id, role_layers_json
-       FROM memories
-      WHERE user_id = ? AND type = 'project_context' AND key = ? AND enabled = 1
-      LIMIT 1`,
-    [USER_ID, key],
+interface TeamInitProposalRow {
+  origin: string;
+  status: string;
+  payload_json: string;
+  scope_type: string;
+  scope_id: string;
+}
+
+/** 261101：自动路径只产生待确认提议，这里按 key 读最近一条 team_init pending 提议。 */
+function getTeamInitProposal(key: string): TeamInitProposalRow | undefined {
+  return dbModule.sqliteGet<TeamInitProposalRow>(
+    `SELECT origin, status, payload_json, scope_type, scope_id
+       FROM memory_proposals
+      WHERE user_id = ? AND origin = 'team_init' AND status = 'pending'
+        AND payload_json LIKE ?
+      ORDER BY created_at DESC LIMIT 1`,
+    [USER_ID, `%"key":"${key}"%`],
   );
 }
 
@@ -134,6 +134,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM memory_revisions', []);
+  dbModule.sqliteRun('DELETE FROM memory_proposals', []);
   dbModule.sqliteRun('DELETE FROM memories', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
@@ -197,13 +199,21 @@ describe('team-init AI 路径', () => {
     expect(step?.result?.['usedLlm']).toBe(true);
     expect(result.state?.bindings.projectMemoryDigest).toContain('AI 提炼');
 
-    const knowledge = getTeamInitKnowledge('team-init:project-memory-digest');
-    expect(knowledge?.value).toContain('AI 提炼');
-    expect(knowledge?.source).toBe('auto_extracted');
-    expect(knowledge?.priority).toBe(75);
-    expect(knowledge?.team_workspace_id).toBe(TEAM_WORKSPACE_ID);
-    expect(knowledge?.workspace_root).toBe(dir);
-    expect(knowledge?.role_layers_json).toBeNull();
+    const proposal = getTeamInitProposal('team-init:project-memory-digest');
+    expect(proposal?.origin).toBe('team_init');
+    expect(proposal?.status).toBe('pending');
+    expect(proposal?.scope_type).toBe('team');
+    expect(proposal?.scope_id).toBe(TEAM_WORKSPACE_ID);
+    const payload = JSON.parse(proposal!.payload_json) as {
+      value: string;
+      priority: number;
+      teamWorkspaceId: string;
+      workspaceRoot: string;
+    };
+    expect(payload.value).toContain('AI 提炼');
+    expect(payload.priority).toBe(75);
+    expect(payload.teamWorkspaceId).toBe(TEAM_WORKSPACE_ID);
+    expect(payload.workspaceRoot).toBe(dir);
   });
 
   it('understand-architecture 用 AI 生成摘要', async () => {
@@ -221,13 +231,20 @@ describe('team-init AI 路径', () => {
     expect(step?.result?.['usedLlm']).toBe(true);
     expect(result.state?.bindings.architectureSummary).toContain('AI 架构摘要');
 
-    const knowledge = getTeamInitKnowledge('team-init:architecture-summary');
-    expect(knowledge?.value).toContain('AI 架构摘要');
-    expect(knowledge?.source).toBe('auto_extracted');
-    expect(knowledge?.priority).toBe(80);
-    expect(knowledge?.team_workspace_id).toBe(TEAM_WORKSPACE_ID);
-    expect(knowledge?.workspace_root).toBe(dir);
-    expect(knowledge?.role_layers_json).toBeNull();
+    const proposal = getTeamInitProposal('team-init:architecture-summary');
+    expect(proposal?.origin).toBe('team_init');
+    expect(proposal?.status).toBe('pending');
+    expect(proposal?.scope_type).toBe('team');
+    const payload = JSON.parse(proposal!.payload_json) as {
+      value: string;
+      priority: number;
+      teamWorkspaceId: string;
+      workspaceRoot: string;
+    };
+    expect(payload.value).toContain('AI 架构摘要');
+    expect(payload.priority).toBe(80);
+    expect(payload.teamWorkspaceId).toBe(TEAM_WORKSPACE_ID);
+    expect(payload.workspaceRoot).toBe(dir);
   });
 
   it('bind-tools-per-layer 用 AI 按项目挑选工具', async () => {
@@ -262,13 +279,20 @@ describe('team-init AI 路径', () => {
     expect(step?.result?.['usedLlm']).toBe(true);
     expect(step?.result?.['scaffold']).toContain('AI 占位');
 
-    const knowledge = getTeamInitKnowledge('team-init:scaffold-memory');
-    expect(knowledge?.value).toContain('AI 占位');
-    expect(knowledge?.source).toBe('auto_extracted');
-    expect(knowledge?.priority).toBe(60);
-    expect(knowledge?.team_workspace_id).toBe(TEAM_WORKSPACE_ID);
-    expect(knowledge?.workspace_root).toBe(dir);
-    expect(knowledge?.role_layers_json).toBeNull();
+    const proposal = getTeamInitProposal('team-init:scaffold-memory');
+    expect(proposal?.origin).toBe('team_init');
+    expect(proposal?.status).toBe('pending');
+    expect(proposal?.scope_type).toBe('team');
+    const payload = JSON.parse(proposal!.payload_json) as {
+      value: string;
+      priority: number;
+      teamWorkspaceId: string;
+      workspaceRoot: string;
+    };
+    expect(payload.value).toContain('AI 占位');
+    expect(payload.priority).toBe(60);
+    expect(payload.teamWorkspaceId).toBe(TEAM_WORKSPACE_ID);
+    expect(payload.workspaceRoot).toBe(dir);
   });
 
   it('AI 返回非法 id 时被过滤（不污染绑定）', async () => {

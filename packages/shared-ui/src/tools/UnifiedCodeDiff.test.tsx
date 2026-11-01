@@ -181,6 +181,38 @@ describe('toUnifiedDisplayRows — hunk 分隔条', () => {
   });
 });
 
+describe('高亮渲染预算', () => {
+  it('只高亮可见的文件前缀，隐藏的超大尾部不耗尽预算', () => {
+    const source =
+      Array.from({ length: 650 }, (_, i) => `const value${i} = ${i};`).join('\n') +
+      '\n' +
+      'x'.repeat(90_000);
+    const { container } = render(
+      <UnifiedCodeDiff beforeText="" afterText={source} filePath="a.ts" />,
+    );
+    expect(container.querySelectorAll('[data-diff-row]')).toHaveLength(600);
+    expect(container.querySelector('[class*="hljs-keyword"]')).not.toBeNull();
+    fireEvent.click(container.querySelector('[data-diff-expand]')!);
+    expect(container.querySelectorAll('[data-diff-row]')).toHaveLength(651);
+    expect(container.querySelector('[class*="hljs-"]')).toBeNull();
+  });
+
+  it('两侧共享80k预算，patch不逐行重置语法状态', () => {
+    const source = `const value = '${'x'.repeat(41_000)}';`;
+    const { container, rerender } = render(
+      <UnifiedCodeDiff beforeText={source} afterText={source + ' '} filePath="a.ts" />,
+    );
+    expect(container.querySelector('[class*="hljs-"]')).toBeNull();
+    rerender(
+      <UnifiedCodeDiff
+        diffText="@@ -4,1 +4,2 @@\n /* comment\n+const value = 1;"
+        filePath="a.ts"
+      />,
+    );
+    expect(container.querySelector('[class*="hljs-"]')).toBeNull();
+  });
+});
+
 describe('highlightCodeLines', () => {
   it('整段高亮后按行拆分，token 带 hljs 类名（多行结构不丢）', () => {
     const lines = highlightCodeLines('export const a = 1;\n// comment\n', 'typescript');

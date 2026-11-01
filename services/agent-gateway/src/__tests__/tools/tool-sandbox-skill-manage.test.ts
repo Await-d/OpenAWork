@@ -107,6 +107,26 @@ describe('tool-sandbox · skill_manage 接线与门控', () => {
     expect(output).toMatchObject({ ok: true, action: 'list', count: 0 });
   });
 
+  it('开启的渠道能通过真实 sandbox 读取会话技能，关闭后不可达', async () => {
+    mocks.metadataJson = JSON.stringify({
+      workingDirectory: TEST_WORKSPACE,
+      source: 'channel',
+      channelLlmToolsEnabled: true,
+      channelExtensionManagementEnabled: true,
+    });
+    const allowed = await executeSkillTool({ action: 'list', scope: 'session' }, 'channel-session');
+    expect(allowed.isError).toBe(false);
+    expect(JSON.parse(String(allowed.output))).toMatchObject({ scope: 'session', count: 0 });
+    mocks.metadataJson = JSON.stringify({
+      workingDirectory: TEST_WORKSPACE,
+      source: 'channel',
+      channelLlmToolsEnabled: true,
+    });
+    expect(
+      (await executeSkillTool({ action: 'list', scope: 'session' }, 'channel-disabled')).isError,
+    ).toBe(true);
+  });
+
   it('yolo 档位：免审批派发，工具错误原样归一', async () => {
     mocks.metadataJson = JSON.stringify({
       workingDirectory: TEST_WORKSPACE,

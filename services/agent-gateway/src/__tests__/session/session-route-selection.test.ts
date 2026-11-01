@@ -190,7 +190,34 @@ describe('withUserDefaultThinkingFallback', () => {
     });
   });
 
-  it('默认设置关闭时原样返回，不伪造档位', () => {
+  it.each([
+    { source: '请求', hasAuthoritativeTeamModel: false, requestDataReasoningEffort: 'high' },
+    { source: '会话', hasAuthoritativeTeamModel: false, sessionReasoningEffort: 'high' },
+    { source: '团队', hasAuthoritativeTeamModel: true, sessionReasoningEffort: 'high' },
+  ])('$source 仅指定力度时不被用户默认关闭覆盖', (input) => {
+    const selection = routeSelection.resolveEffectiveThinkingSelection(input);
+
+    expect(
+      routeSelection.withUserDefaultThinkingFallback(selection, { thinkingEnabled: false }),
+    ).toEqual({ reasoningEffort: 'high' });
+  });
+
+  it('完全未指定思考时使用用户默认关闭', () => {
+    expect(routeSelection.withUserDefaultThinkingFallback({}, { thinkingEnabled: false })).toEqual({
+      thinkingEnabled: false,
+    });
+  });
+
+  it('显式关闭即使同时指定力度也不能被默认开启覆盖', () => {
+    expect(
+      routeSelection.withUserDefaultThinkingFallback(
+        { thinkingEnabled: false, reasoningEffort: 'high' },
+        userDefault,
+      ),
+    ).toEqual({ thinkingEnabled: false, reasoningEffort: 'high' });
+  });
+
+  it('默认设置不可用时原样返回，不伪造档位', () => {
     const sessionThinking = routeSelection.resolveEffectiveThinkingSelection({
       hasAuthoritativeTeamModel: false,
     });

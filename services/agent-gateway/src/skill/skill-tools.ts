@@ -6,6 +6,8 @@ import { sqliteAll, sqliteGet } from '../infra/db.js';
 import { readResponseTextWithLimit, resolveHttpBodyLimitBytes } from '../infra/http-body-limit.js';
 import type { EffectiveSkill } from './skill-selection.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
+import { resolveCurrentSessionSkillManifest } from '../session-extension/session-skill-resolution.js';
+import { getSessionSkill } from '../session-extension/session-extension-store.js';
 
 const skillInputSchema = z
   .object({
@@ -351,6 +353,34 @@ export function createSkillTool(
         throw new Error(`Skill not allowed in current workspace/session: ${input.name}`);
       }
 
+      const sessionEntry = effective?.find(
+        (entry) =>
+          entry.origin === 'session-extension' &&
+          [
+            entry.skillId,
+            entry.manifest?.id,
+            entry.manifest?.name,
+            entry.manifest?.displayName,
+          ].some(
+            (name) =>
+              typeof name === 'string' &&
+              normalizeSkillName(name) === normalizeSkillName(input.name),
+          ),
+      );
+      if (sessionEntry) {
+        const current = sessionEntry.resourceRef
+          ? getSessionSkill(sessionId, sessionEntry.resourceRef)
+          : undefined;
+        const manifest = resolveCurrentSessionSkillManifest({
+          entry: sessionEntry,
+          manifest: sessionEntry.manifest,
+          current,
+        });
+        if (!manifest) {
+          throw new Error('会话技能已撤销或内容已变化，请在下一轮重新加载。');
+        }
+        return buildBuiltinSkillContent(manifest);
+      }
       const installed = findInstalledSkill(userId, input.name);
       if (!installed) {
         throw new Error(`Skill not found: ${input.name}`);

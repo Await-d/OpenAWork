@@ -58,6 +58,8 @@ import { reconcilePm2QualityReview } from './pm2-quality-review-reconciler.js';
 import { logGatewayError, logGatewayWarn } from '../../infra/gateway-logger.js';
 
 const DEFAULT_WATCHER_INTERVAL_MS = 100;
+/** 每 tick 有界扫描的待执行记录条数（T-21，配合游标滚动推进）。 */
+const PENDING_SCAN_BATCH = 50;
 const DEFAULT_RECOVERY_INTERVAL_MS = 5_000;
 const DEFAULT_HEARTBEAT_STALE_MS = HEARTBEAT_STALE_AFTER_MS;
 const DEFAULT_MAX_RETRY = 3;
@@ -233,6 +235,13 @@ export class HandoffWatcher {
   private recoveryTimer: NodeJS.Timeout | null = null;
   private running = false;
   private tickInFlight = false;
+  /**
+   * T-21 待执行队列扫描游标：上一 tick 已扫描到的位置 `(createdAt, id)`。
+   * 每 tick 只读取一批就绪判断所需的最早记录，然后向后推进；扫到队尾后回绕到队首。
+   * 没有它时，固定读取队首 50 条会让第 51 条之后真正就绪的任务被前一批
+   * 依赖等待 / 满额阻塞的记录永久遮挡。
+   */
+  private pendingScanCursor: { createdAt: string; id: string } | null = null;
   private readonly options: Required<Omit<HandoffWatcherOptions, 'taskRunner' | 'scheduler'>> & {
     taskRunner: HandoffTaskRunner;
     scheduler: BackgroundTaskScheduler;
@@ -300,6 +309,27 @@ export class HandoffWatcher {
   }
 
   /**
+   * 读取本 tick 的待执行批（T-21）。
+   *
+   * 从游标处向后取一批；若游标已到队尾（该位置之后没有 pending），回绕到队首重新开始，
+   * 使被前一批阻塞的任务在后续 tick 仍有机会被看到。一批不足 `PENDING_SCAN_BATCH`
+   * 说明已扫到队尾，游标复位，下一 tick 从队首开始。
+   */
+  private readPendingBatch(): HandoffRecord[] {
+    let pending = listPendingHandoffs(PENDING_SCAN_BATCH, this.pendingScanCursor ?? undefined);
+    if (pending.length === 0 && this.pendingScanCursor) {
+      this.pendingScanCursor = null;
+      pending = listPendingHandoffs(PENDING_SCAN_BATCH);
+    }
+    const last = pending.at(-1);
+    this.pendingScanCursor =
+      last && pending.length === PENDING_SCAN_BATCH
+        ? { createdAt: last.createdAt, id: last.id }
+        : null;
+    return pending;
+  }
+
+  /**
    * 主轮询 tick：拉取 pending → claim → 创建子 session → 排队执行体。
    * 暴露为 public 方便测试 / 手动触发。
    */
@@ -309,7 +339,7 @@ export class HandoffWatcher {
     }
     this.tickInFlight = true;
     try {
-      const pending = listPendingHandoffs(50);
+      const pending = this.readPendingBatch();
       let claimed = 0;
       let skipped = 0;
       for (const record of pending) {

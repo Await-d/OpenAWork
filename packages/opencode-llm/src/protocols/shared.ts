@@ -117,6 +117,19 @@ export const eventError = (route: string, message: string, raw?: string, cause?:
   });
 
 /**
+ * 流式事件解码失败时的**可见**消息。
+ *
+ * 必须带上出问题的那一帧（截断）：不同兼容网关的字段差异（空串占位、纯 usage 帧、
+ * 省略 `tool_calls[].index` 等）只能靠帧内容判断。只报
+ * `Invalid xxx stream event` 的话，`raw` 虽然挂在错误对象上却不会出现在日志里，
+ * 生产上无法定位——真实端点的排查就卡在这里。
+ */
+export const describeInvalidStreamEvent = (route: string, raw: string, limit = 300): string => {
+  const preview = raw.length > limit ? `${raw.slice(0, limit)}…` : raw;
+  return `Invalid ${route} stream event: ${preview}`;
+};
+
+/**
  * A response that ended before its terminal event (`finish` / `provider-error`).
  * `classification: 'incomplete-stream'` lets the caller distinguish "the
  * provider got cut off" from a malformed payload and decide whether to continue

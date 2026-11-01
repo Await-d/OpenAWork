@@ -3,6 +3,7 @@ node_modules
 
 # Build outputs
 dist
+apps/web/dist-diagnostics/
 .expo
 
 # Environment files (never commit secrets)
@@ -27,6 +28,7 @@ apps/desktop/src-tauri/target/
 **/.openawork.permissions.json
 .openawork.*.local.*
 .evidence/
+.codebuddy
 **/.agentdocs/tasks/
 
 # Husky 运行时自动生成的 shim 目录（`_/` 内是 husky 的 wrapper 与依赖软链），不入库。

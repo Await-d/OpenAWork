@@ -57,6 +57,7 @@ async function seedDefaultAdmin(): Promise<void> {
 import { startModelsDevRefresh } from '@openAwork/agent-core';
 import { skillsRoutes } from './routes/skills.js';
 import { skillSelectionRoutes } from './routes/skill-selection.js';
+import { sessionExtensionsRoutes } from './routes/session-extensions.js';
 import { skillRecommendRoutes } from './routes/skill-recommend.js';
 import { localSkillsRoutes } from './routes/local-skills.js';
 import { systemSkillsRoutes } from './routes/system-skills.js';
@@ -275,6 +276,7 @@ await app.register(localSkillsRoutes);
 await app.register(systemSkillsRoutes);
 await app.register(skillsRoutes);
 await app.register(skillSelectionRoutes);
+await app.register(sessionExtensionsRoutes);
 await app.register(skillRecommendRoutes);
 await app.register(capabilitiesRoutes);
 await app.register(pairingRoutes);
@@ -342,6 +344,13 @@ app.addHook('onClose', async () => {
     await backgroundScheduler.stopAll();
   } catch (err) {
     app.log.error({ err }, 'backgroundScheduler.stopAll failed');
+  }
+  try {
+    const { stopInboundDeliveries } =
+      await import('./handoff/workflow/inbound-delivery-dispatcher.js');
+    await stopInboundDeliveries();
+  } catch (err) {
+    app.log.error({ err }, 'stopInboundDeliveries failed');
   }
   try {
     await channelManager.stopAll();
@@ -425,6 +434,15 @@ try {
 
   step = bootLogger.start('gateway.migrate');
   await migrate();
+  const { failInterruptedSessionExtensionOperations, expireStaleSessionExtensionOperations } =
+    await import('./session-extension/session-extension-operation-store.js');
+  failInterruptedSessionExtensionOperations();
+  expireStaleSessionExtensionOperations();
+  // 回执补偿：先把「上一步刚改判失败」的操作补进回推队列，再让后台派发器去送。
+  // 必须排在 failInterrupted... 之后——被重启打断的操作也是要给用户回执的终态。
+  const { reconcileSessionExtensionDeliveries } =
+    await import('./session-extension/session-extension-delivery-store.js');
+  reconcileSessionExtensionDeliveries();
   bootLogger.succeed(step);
 
   // 遥测去重表 migration + 过期清理
@@ -508,6 +526,30 @@ try {
     const versionCheckIntervalMs = envMs('SKILL_VERSION_CHECK_INTERVAL_MS', hours(12));
 
     backgroundScheduler.register({
+      name: 'team-inbound.delivery',
+      intervalMs: 1_000,
+      initialDelayMs: 0,
+      run: async () => {
+        const { dispatchInboundDeliveries } =
+          await import('./handoff/workflow/inbound-delivery-dispatcher.js');
+        await dispatchInboundDeliveries({ waitForCompletion: false });
+      },
+    });
+
+    backgroundScheduler.register({
+      name: 'session-extension.delivery',
+      // 渠道回执是低频、可延迟的：2s 一轮足够「点完确认就去看群」的体感，
+      // 又不会像 team inbound 那样每秒空转。
+      intervalMs: 2_000,
+      initialDelayMs: 5_000,
+      run: async () => {
+        const { dispatchSessionExtensionDeliveries } =
+          await import('./session-extension/session-extension-delivery-dispatcher.js');
+        await dispatchSessionExtensionDeliveries();
+      },
+    });
+
+    backgroundScheduler.register({
       name: 'system-skills.periodic-sync',
       intervalMs: systemSkillIntervalMs,
       initialDelayMs: minutes(1),
@@ -539,6 +581,21 @@ try {
       versionCheckIntervalMs,
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    bootLogger.fail(step, message);
+  }
+
+  step = bootLogger.start('gateway.register-memory-governance-tasks');
+  try {
+    const { registerMemoryGovernanceBackgroundTasks } =
+      await import('./memory/maintenance/memory-maintenance-scheduler.js');
+    registerMemoryGovernanceBackgroundTasks(backgroundScheduler);
+    bootLogger.succeed(step, undefined, {
+      tasks: backgroundScheduler.listTaskNames().join(','),
+    });
+  } catch (error) {
+    // 维护任务注册失败不得阻断启动：记忆治理是增强能力，缺失时正式写入仍受
+    // 一次性确认门约束，不影响核心会话与渠道链路。
     const message = error instanceof Error ? error.message : String(error);
     bootLogger.fail(step, message);
   }

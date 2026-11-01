@@ -6,7 +6,9 @@ import authPlugin from '../../infra/auth.js';
 import { closeDb, connectDb, migrate, sqliteRun } from '../../infra/db.js';
 import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
 import requestWorkflowPlugin from '../../runtime/request-workflow.js';
+import type { RunEvent } from '@openAwork/shared';
 import { createToolResultRequestId } from '../../routes/stream.js';
+import { runSessionInBackground } from '../../routes/stream-runtime.js';
 import { streamRoutes } from '../../routes/stream-routes-plugin.js';
 import {
   listSessionRunEventsByRequest,
@@ -152,6 +154,144 @@ afterAll(async () => {
 });
 
 describe('stream replay race', () => {
+  it('已持久化成功答复在 ACK 前中断后，后台重放保留成功终态且不再请求上游', async () => {
+    appendSessionMessageV2({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientRequestId: CLIENT_REQUEST_ID,
+      role: 'assistant',
+      status: 'final',
+      content: [{ type: 'text', text: '已完成的直答' }],
+    });
+    const events: RunEvent[] = [];
+    let upstreamCalls = 0;
+    const result = await withMockFetch(
+      async () => {
+        upstreamCalls += 1;
+        throw new Error('成功重放不应请求上游');
+      },
+      async () =>
+        runSessionInBackground({
+          sessionId: SESSION_ID,
+          userId: USER_ID,
+          requestData: { message: '你好', clientRequestId: CLIENT_REQUEST_ID },
+          writeChunk: (event) => events.push(event),
+        }),
+    );
+
+    expect(result).toEqual({ statusCode: 200, stopReason: 'end_turn' });
+    expect(upstreamCalls).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'text_delta', delta: '已完成的直答' }),
+    );
+  });
+
+  it('single-flight 等待方重放已持久化答复也保留成功终态', async () => {
+    let resolveExecution!: (value: { statusCode: number }) => void;
+    const execution = new Promise<{ statusCode: number }>((resolve) => {
+      resolveExecution = resolve;
+    });
+    registerInFlightStreamRequest({
+      abortController: new AbortController(),
+      clientRequestId: CLIENT_REQUEST_ID,
+      execution,
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+    });
+    try {
+      const resultPromise = runSessionInBackground({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        requestData: { message: '恢复', clientRequestId: CLIENT_REQUEST_ID },
+      });
+      appendSessionMessageV2({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        clientRequestId: CLIENT_REQUEST_ID,
+        role: 'assistant',
+        status: 'final',
+        content: [{ type: 'text', text: '已完成' }],
+      });
+      resolveExecution({ statusCode: 200 });
+      expect(await resultPromise).toEqual({ statusCode: 200, stopReason: 'end_turn' });
+    } finally {
+      clearInFlightStreamRequest({
+        clientRequestId: CLIENT_REQUEST_ID,
+        execution,
+        sessionId: SESSION_ID,
+      });
+    }
+  });
+
+  it('会话冲突仍报告错误而非误判为成功重放', async () => {
+    const execution = Promise.resolve({ statusCode: 200 });
+    registerInFlightStreamRequest({
+      abortController: new AbortController(),
+      clientRequestId: 'another-request',
+      execution,
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+    });
+    try {
+      const result = await runSessionInBackground({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        requestData: { message: '新请求', clientRequestId: CLIENT_REQUEST_ID },
+      });
+      expect(result).toMatchObject({ statusCode: 409, stopReason: 'error' });
+    } finally {
+      clearInFlightStreamRequest({
+        clientRequestId: 'another-request',
+        execution,
+        sessionId: SESSION_ID,
+      });
+    }
+  });
+
+  it.each(['end_turn', 'max_tokens', 'cancelled', 'tool_permission'] as const)(
+    '后台持久化事件重放保留真实 stopReason=%s',
+    async (stopReason) => {
+      persistSessionRunEventForRequest(
+        SESSION_ID,
+        {
+          type: 'done',
+          stopReason,
+        },
+        { clientRequestId: CLIENT_REQUEST_ID },
+      );
+      const result = await runSessionInBackground({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        requestData: { message: '恢复', clientRequestId: CLIENT_REQUEST_ID },
+      });
+      expect(result).toEqual({ statusCode: 200, stopReason });
+    },
+  );
+
+  it.each(['permission_asked', 'question_asked'] as const)(
+    '后台 %s 重放仍为等待交互，不得算成功答复',
+    async (type) => {
+      const event: RunEvent =
+        type === 'permission_asked'
+          ? {
+              type,
+              requestId: 'permission-replay',
+              toolName: 'bash',
+              scope: 'workspace',
+              reason: '授权',
+              riskLevel: 'medium',
+            }
+          : { type, requestId: 'question-replay', toolName: 'question', title: '是否继续？' };
+      persistSessionRunEventForRequest(SESSION_ID, event, { clientRequestId: CLIENT_REQUEST_ID });
+      const result = await runSessionInBackground({
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        requestData: { message: '恢复', clientRequestId: CLIENT_REQUEST_ID },
+      });
+      expect(result).toEqual({ statusCode: 200, stopReason: 'tool_permission' });
+    },
+  );
+
   it('同 clientRequestId 的等待方遇到不可 replay 终态时继续上游，而不是 REQUEST_REPLAY_FAILED', async () => {
     const executionDeferred = (() => {
       let resolve: (value: { statusCode: number } | PromiseLike<{ statusCode: number }>) => void = (

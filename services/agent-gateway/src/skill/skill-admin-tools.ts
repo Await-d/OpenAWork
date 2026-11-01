@@ -21,6 +21,17 @@ import {
   type InstalledSkillRecord,
 } from './skill-installed-store.js';
 import { SKILL_MANAGE_TOOL_NAME } from './skill-manage-tool-name.js';
+import {
+  resolveManageToolAncestorDenial,
+  resolveSessionExtensionOrigin,
+} from '../session-extension/session-extension-origin.js';
+import {
+  listSessionScopeSkills,
+  proposeSessionScopeSkillInstall,
+  revokeSessionScopeSkill,
+  searchSessionScopeSkills,
+} from '../session-extension/session-extension-tools.js';
+import { searchSessionSkills } from '../session-extension/session-skill-source.js';
 
 export { SKILL_MANAGE_TOOL_NAME } from './skill-manage-tool-name.js';
 
@@ -32,19 +43,27 @@ const UNSUPPORTED_INSTALL_PREFIXES = ['github:', 'claude-marketplace:'] as const
 
 export const skillManageInputSchema = z
   .object({
-    action: z.enum(['list', 'install', 'uninstall', 'enable', 'disable']),
+    action: z.enum(['list', 'install', 'uninstall', 'enable', 'disable', 'search']),
+    /**
+     * 生效范围。缺省 `user` = 历史行为（写用户级安装集合，影响该用户所有会话）。
+     * `session` = 只装进**当前会话**，需要管理员确认，且不修改用户级配置。
+     */
+    scope: z.enum(['user', 'session']).optional(),
     skillId: z.string().trim().min(1).max(300).optional(),
     sourceId: z.string().trim().min(1).max(200).optional(),
+    query: z.string().trim().max(300).optional(),
+    /** 会话级条目引用（list 返回），用于精确撤权。 */
+    resourceRef: z.string().trim().min(1).max(400).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (value.action === 'list') {
+    if (value.action === 'list' || value.action === 'search') {
       return;
     }
-    if (!value.skillId) {
+    if (!value.skillId && !value.resourceRef) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `${value.action} 必须提供 skillId。`,
+        message: `${value.action} 必须提供 skillId（或会话级的 resourceRef）。`,
         path: ['skillId'],
       });
     }
@@ -54,6 +73,7 @@ export const skillManageToolDefinition: ToolDefinition<typeof skillManageInputSc
   {
     name: SKILL_MANAGE_TOOL_NAME,
     description:
+      '渠道必须显式传 scope=session；会话级 install 只创建待管理员确认提案，尚未安装。search 用 query 检索技能。' +
       '管理当前用户已安装的技能。action=list 列举（含启用态、声明权限与是否内嵌 MCP）；install 从已配置注册源安装；uninstall 卸载；enable/disable 启停。' +
       '变更类操作需要用户批准。仅支持注册源技能（github: / claude-marketplace: 前缀请在设置页安装）。' +
       '技能若内嵌 MCP（stdio 命令）或声明高危权限，安装结果会列出，请向用户说明。',
@@ -254,7 +274,25 @@ export interface RunSkillManageInput {
 }
 
 export async function runSkillManageTool(params: RunSkillManageInput): Promise<string> {
-  const denial = resolveSkillManageSessionDenial(readSkillManageSessionRow(params.sessionId));
+  // ── 会话级分支（261031）──
+  // 生效范围只限当前会话，且必须经管理员确认才真正安装。这里刻意**不套用**用户级
+  // 的 channel 拒绝守卫：渠道场景正是本能力的目标；来源授权（渠道是否显式开启、
+  // team/cron 一律拒绝）由 `session-extension-service` 统一判定。
+  if (params.input.scope === 'session') {
+    return await runSessionScopedSkillAction(params);
+  }
+
+  // ── 用户级分支（历史行为，保持不变）──
+  // 两道守卫：
+  //   1. 当前会话自身的 metadata / team 列（原有语义）；
+  //   2. **祖先链**——渠道会话派生的 task 子会话不复制 `source: 'channel'`，
+  //      只看当前会话会被绕过（详见 session-extension-origin.ts 的说明）。
+  const denial =
+    resolveSkillManageSessionDenial(readSkillManageSessionRow(params.sessionId)) ??
+    resolveManageToolAncestorDenial(resolveSessionExtensionOrigin(params.sessionId), {
+      subject: '技能安装',
+      missingObject: '技能变更',
+    });
   if (denial) {
     throw new Error(denial);
   }
@@ -263,6 +301,9 @@ export async function runSkillManageTool(params: RunSkillManageInput): Promise<s
   switch (input.action) {
     case 'list':
       return listSkillsForTool(userId);
+    case 'search':
+      // 用户级 search 与安装同源，直接复用会话级检索实现（只读、无副作用）。
+      return await searchInstalledSourcesForTool(userId, input.query);
     case 'install':
       return await installSkillForTool(userId, input);
     case 'uninstall':
@@ -276,4 +317,55 @@ export async function runSkillManageTool(params: RunSkillManageInput): Promise<s
       throw new Error(`不支持的 action: ${String(exhaustive)}`);
     }
   }
+}
+
+async function runSessionScopedSkillAction(params: RunSkillManageInput): Promise<string> {
+  const context = { sessionId: params.sessionId };
+  const { input } = params;
+  switch (input.action) {
+    case 'list':
+      return listSessionScopeSkills(context);
+    case 'search':
+      return await searchSessionScopeSkills({ ...context, query: input.query });
+    case 'install':
+      return await proposeSessionScopeSkillInstall({
+        ...context,
+        skillId: requireSkillId(input.skillId),
+        sourceId: input.sourceId,
+      });
+    case 'uninstall':
+      return await revokeSessionScopeSkill({
+        ...context,
+        resourceRef: input.resourceRef,
+        skillId: input.skillId,
+        remove: true,
+      });
+    case 'enable':
+      // 会话级的「启用」相当于重新提案安装；这里明确提示而不是静默改动。
+      return JSON.stringify(
+        {
+          ok: false,
+          scope: 'session',
+          error: '会话级技能不区分单独的「启用」动作：请重新 install 以建立新提案。',
+        },
+        null,
+        2,
+      );
+    case 'disable':
+      return await revokeSessionScopeSkill({
+        ...context,
+        resourceRef: input.resourceRef,
+        skillId: input.skillId,
+        remove: false,
+      });
+    default: {
+      const exhaustive: never = input.action;
+      throw new Error(`不支持的 action: ${String(exhaustive)}`);
+    }
+  }
+}
+
+async function searchInstalledSourcesForTool(userId: string, query?: string): Promise<string> {
+  const hits = await searchSessionSkills({ userId, query });
+  return JSON.stringify({ ok: true, action: 'search', count: hits.length, results: hits }, null, 2);
 }

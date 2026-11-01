@@ -65,7 +65,10 @@ export function useTeamConversationViewComposerDispatch(input: { state: TeamConv
         // team-inbound → reception-orchestrator → pm1/... 整条分层链路。
         // clarifying 下的普通 composer 同样不应回退到 stream，否则会绕过 c runner。
         try {
-          await state.submitInbound(strategy.messageType, { text } as never);
+          await state.submitInbound(strategy.messageType, {
+            text,
+            ...(inputParts?.length ? { inputParts } : {}),
+          });
           await state.reload();
           // inbound 提交成功后，后端会 fire-and-forget 启动后台流
           // （reception-orchestrator 的 direct 路径调用 runSessionInBackground）。
@@ -306,7 +309,8 @@ export function useTeamConversationViewRetryActions(input: {
     for (let i = idx; i >= 0; i--) {
       const m = state.messages[i];
       if (m && m.role === 'user') {
-        return { id: m.id, text: m.content };
+        const inputParts = extractInputImageParts(m.rawContent);
+        return { id: m.id, text: m.content, ...(inputParts?.length ? { inputParts } : {}) };
       }
     }
     return null;

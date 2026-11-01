@@ -36,6 +36,9 @@ export interface ScheduleValidationInput {
   readonly deliveryTarget?: string | null;
   /** `delivery_mode: 'session'` 未显式给 target 时的兜底目标。 */
   readonly sessionId?: string | null;
+  /** 渠道绑定（`plugin_id` + `plugin_chat_id`）——决定结果回发方式，见下方校验。 */
+  readonly pluginId?: string | null;
+  readonly pluginChatId?: string | null;
   /**
    * 放行「已经过期的一次性任务」。
    *
@@ -96,7 +99,19 @@ export function collectScheduleIssues(input: ScheduleValidationInput): string[] 
     }
   }
 
-  if (input.deliveryMode === 'session') {
+  const channelBound =
+    (input.pluginId?.trim().length ?? 0) > 0 && (input.pluginChatId?.trim().length ?? 0) > 0;
+
+  if (input.deliveryMode === 'session' && channelBound) {
+    // 渠道任务的结果由执行期的 `PluginSendMessage` 直接回发到渠道（见
+    // `buildCronAgentPrompt`），没有「会话」这个投递目的地。允许这种组合会让
+    // 每条任务到点必然踩坑：`delivery_target` 填 chatId 时执行前就抛「会话不存在」，
+    // 不填时执行成功后又被判「投递失败」记成 failed——两种都表现为「任务永远失败，
+    // 但用户其实在渠道里收到了结果」。
+    issues.push(
+      '渠道任务不支持 delivery_mode="session"：结果会由 PluginSendMessage 直接回发渠道，请改为 "none"。',
+    );
+  } else if (input.deliveryMode === 'session') {
     const target = input.deliveryTarget?.trim() || input.sessionId?.trim() || '';
     if (target.length === 0) {
       issues.push('投递到会话时必须提供 delivery_target（或绑定 session_id）。');

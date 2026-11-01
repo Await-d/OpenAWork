@@ -164,7 +164,7 @@ export async function callLspVirtualMcp(sessionId: string, input: MCPCallInput):
       );
     case 'rename':
       return executeLspRename(
-        scopeFileInput(lspRenameToolDefinition.inputSchema.parse(args), sessionId),
+        scopeFileInput(lspRenameToolDefinition.inputSchema.parse(args), sessionId, 'write'),
         assertSessionWorkingDirectory(sessionId),
       );
     case 'hover':
@@ -184,14 +184,28 @@ export async function callLspVirtualMcp(sessionId: string, input: MCPCallInput):
   }
 }
 
-function scopeFileInput<T extends { readonly filePath: string }>(input: T, sessionId: string): T {
-  return { ...input, filePath: assertSessionWorkspacePath({ path: input.filePath, sessionId }) };
+/**
+ * 归一化并校验 LSP 工具的 `filePath`。
+ *
+ * 缺省按**读**语义（goto_definition / hover / symbols 等只读查询），唯一会修改文件的
+ * `lsp_rename` 必须显式传 `'write'`——否则渠道路径权限会按读判定，把
+ * `allowReadHome` / `readablePathPrefixes` 误当成写授权。
+ */
+function scopeFileInput<T extends { readonly filePath: string }>(
+  input: T,
+  sessionId: string,
+  access: 'read' | 'write' = 'read',
+): T {
+  return {
+    ...input,
+    filePath: assertSessionWorkspacePath({ path: input.filePath, sessionId, access }),
+  };
 }
 
 async function lspDiagnostics(args: Record<string, unknown>, sessionId: string): Promise<unknown> {
   const filePath = typeof args['filePath'] === 'string' ? args['filePath'] : undefined;
   const scopedFile = filePath
-    ? assertSessionWorkspacePath({ path: filePath, sessionId })
+    ? assertSessionWorkspacePath({ path: filePath, sessionId, access: 'read' })
     : undefined;
   const diagnostics = await lspManager.diagnostics();
   if (!scopedFile) return diagnostics;
@@ -204,6 +218,9 @@ async function lspDiagnostics(args: Record<string, unknown>, sessionId: string):
 async function lspTouch(args: Record<string, unknown>, sessionId: string): Promise<{ ok: true }> {
   const path = typeof args['path'] === 'string' ? args['path'] : '';
   const waitForDiagnostics = args['waitForDiagnostics'] === true;
-  await lspManager.touchFile(assertSessionWorkspacePath({ path, sessionId }), waitForDiagnostics);
+  await lspManager.touchFile(
+    assertSessionWorkspacePath({ path, sessionId, access: 'read' }),
+    waitForDiagnostics,
+  );
   return { ok: true };
 }

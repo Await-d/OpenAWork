@@ -49,6 +49,21 @@ export type {
   NotificationEventsSnapshot,
   NotificationEventsStatus,
 } from './infra/notification-events.js';
+export { createSessionExtensionsClient } from './session/session-extensions.js';
+export type {
+  SessionExtensionDecisionResult,
+  SessionExtensionInheritance,
+  SessionExtensionMcpSummary,
+  SessionExtensionOperationDetail,
+  SessionExtensionOperationStatus,
+  SessionExtensionOperationSummary,
+  SessionExtensionProposalResult,
+  SessionExtensionScope,
+  SessionExtensionSecretMeta,
+  SessionExtensionSkillSummary,
+  SessionExtensionState,
+  SessionExtensionsClient,
+} from './session/session-extensions.js';
 export { createCapabilitiesClient } from './session/capabilities.js';
 export type {
   CapabilitiesClient,
@@ -268,6 +283,7 @@ export type {
   SessionImportResult,
   SessionMessageRatingRecord,
   SessionMessageRatingValue,
+  SessionMessagesPage,
   SessionLoadResult,
   SessionRecoveryReadModel,
   SessionRecoveryLoadResult,
@@ -566,7 +582,34 @@ export { createSkillsClient } from './infra/skills.js';
 export type { SkillsClient } from './infra/skills.js';
 
 export { createMemoriesClient } from './infra/memories.js';
-export type { MemoriesClient } from './infra/memories.js';
+export type {
+  DecideProposalInput,
+  DecideProposalResult,
+  ListMemoryRulesQuery,
+  ListProposalsQuery,
+  ListRevisionsQuery,
+  MemoryRuleEntry,
+  ProposeMemoryRuleInput,
+  ProposeMemoryRuleResult,
+  MemoriesClient,
+  MemoryConfirmationKind,
+  MemoryEntry,
+  MemoryLifecycle,
+  MemoryProposal,
+  MemoryProposalAction,
+  MemoryProposalOrigin,
+  MemoryProposalPayload,
+  MemoryProposalRelation,
+  MemoryProposalRelationKind,
+  MemoryProposalStatus,
+  MemoryRevisionOperation,
+  MemoryRevisionOrigin,
+  MemoryRevisionRecord,
+  MemoryScope,
+  MemoryScopeType,
+  RollbackRevisionResult,
+  UpdateMemoryInput,
+} from './infra/memories.js';
 
 export { createPromptSnippetsClient } from './infra/prompt-snippets.js';
 export type {

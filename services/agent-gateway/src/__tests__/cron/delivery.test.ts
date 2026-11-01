@@ -156,6 +156,50 @@ describe('cron delivery', () => {
     ).toMatchObject({ attempted: false, delivered: false });
   });
 
+  /**
+   * 渠道任务（`plugin_id` + `plugin_chat_id`）的结果由执行期的 PluginSendMessage
+   * 直接回发渠道，本模块没有第二个目的地。历史配置里这类任务常带
+   * `delivery_mode: 'session'` 而 `session_id` / `delivery_target` 为空——
+   * 若仍走会话通道，会把一次**已经送达**的执行判成 failed 并额外推「无法执行」。
+   */
+  it('渠道任务不参与会话投递：attempted=false，且不产生失败结论', () => {
+    const outcome = delivery.deliverCronResult(
+      cronJob({
+        delivery_mode: 'session',
+        session_id: null,
+        delivery_target: null,
+        plugin_id: 'plugin-qq',
+        plugin_chat_id: 'c2c:chat-1',
+      }),
+      {
+        executionSessionId: 'exec-channel',
+        executionStartedAt: 8,
+        resultText: '已发到 QQ',
+        succeeded: true,
+      },
+    );
+    expect(outcome).toMatchObject({ attempted: false, delivered: false });
+    expect(outcome.error).toBeUndefined();
+  });
+
+  it('渠道任务的 delivery_target 即使被写成 chatId 也不会触碰会话投递', () => {
+    const outcome = delivery.deliverCronResult(
+      cronJob({
+        delivery_mode: 'session',
+        delivery_target: 'c2c:chat-1',
+        plugin_id: 'plugin-qq',
+        plugin_chat_id: 'c2c:chat-1',
+      }),
+      {
+        executionSessionId: 'exec-channel',
+        executionStartedAt: 9,
+        resultText: '内容',
+        succeeded: true,
+      },
+    );
+    expect(outcome).toMatchObject({ attempted: false, delivered: false });
+  });
+
   it('目标不可达时能推一条通知，且同任务只保留一条未读（不刷屏）', () => {
     const job = cronJob({ delivery_mode: 'session', delivery_target: 'gone' });
     delivery.notifyCronJobUnavailable(job, '投递目标会话不存在');

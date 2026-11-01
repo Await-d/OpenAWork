@@ -30,6 +30,15 @@ const KEY_PREFIX_CONST_NAME = /(?:REQUEST|CLIENT)[A-Z_]*PREFIX[A-Z_]*/;
 // 否则与注册表中的带分隔符前缀做 `startsWith` 覆盖判定时会永远不匹配。
 const PREFIX_CONST_VALUE = /PREFIX\w*\s*=\s*'([a-z][a-z0-9_-]*[:-]?)/;
 const LITERAL_KEY_PREFIX = /`([a-z][a-z0-9-]*[:-])/;
+/**
+ * SSE 帧构造行（`` `id: <key>\ndata: <payload>\n\n` ``）。
+ *
+ * 帧里的 `id:` 是 SSE **协议字段名**，与网关内部请求键共享「小写 + 冒号」形状，
+ * 但它不是命名空间前缀（`routes/stream-routes-plugin.ts` 的 attach 事件流会同时提到
+ * `clientRequestId`，因而落入下面的字面量扫描）。判定条件收得极窄——必须同时出现
+ * `\ndata: ` 分段，只有真正的 SSE 帧行会这样写。
+ */
+const SSE_FRAME_LINE = /\\ndata: /;
 
 interface DiscoveredRequestKeyPrefix {
   prefix: string;
@@ -71,6 +80,9 @@ function scanFile(
       discovered.push({ prefix: prefixConstant[1], site });
     }
     if (!line.includes('clientRequestId') && !insideKeyBuilder) {
+      continue;
+    }
+    if (SSE_FRAME_LINE.test(line)) {
       continue;
     }
     const literal = LITERAL_KEY_PREFIX.exec(line);

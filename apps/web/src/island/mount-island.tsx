@@ -20,7 +20,7 @@ export function mountIslandApp(): void {
   // 灵动岛固定深色玻璃:浮在任意壁纸之上,浅色主题会丢失对比度。
   html.setAttribute('data-mode', 'dark');
   html.style.colorScheme = 'dark';
-  document.body.classList.add('island-body');
+  document.body.classList.add('island-page-body');
 
   createRoot(rootElement).render(<IslandApp />);
 

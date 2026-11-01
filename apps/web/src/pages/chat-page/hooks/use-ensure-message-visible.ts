@@ -3,21 +3,13 @@ import type { Dispatch, SetStateAction } from 'react';
 
 import type { ChatMessage } from '../../../components/conversation-runtime/messages/support.js';
 
-type LoadSessionSnapshot = (
-  sessionId: string,
-  options?: {
-    messageLimit?: number;
-    replaceMessages?: boolean;
-    expectedSessionViewEpoch?: number;
-  },
-) => Promise<unknown>;
+import type { LoadEarlierHistory } from '../conversation/snapshot/session-history-pager.js';
 
 type UseEnsureMessageVisibleDeps = {
   readonly currentSessionId: string | null;
-  readonly loadCurrentSessionSnapshot: LoadSessionSnapshot;
+  readonly loadEarlierHistory: LoadEarlierHistory;
   readonly messages: ChatMessage[];
   readonly requestMessageScroll: (messageId: string) => void;
-  readonly setServerTotalTurnCount: (value: number | null) => void;
   readonly setVisibleMessageCount: Dispatch<SetStateAction<number>>;
   readonly visibleMessageCount: number | undefined;
 };
@@ -26,16 +18,14 @@ type UseEnsureMessageVisibleDeps = {
  * 历史跳转 / 搜索 / 收藏三个入口共用：点目标消息时，若它不在当前渲染窗口里
  * （分页只渲染最近 N 条，或服务端还没拉到本地），先把它「弄出来」再让调用方滚动。
  *
- * 必须在 `useSessionSnapshotLoader` 之后调用，否则依赖数组会在初始化时读取尚未
- * 声明的 `loadCurrentSessionSnapshot` 触发 TDZ。
+ * 远端历史与上翻入口共用游标，只加载到目标所在页。
  */
 export function useEnsureMessageVisible(deps: UseEnsureMessageVisibleDeps) {
   const {
     currentSessionId,
-    loadCurrentSessionSnapshot,
+    loadEarlierHistory,
     messages,
     requestMessageScroll,
-    setServerTotalTurnCount,
     setVisibleMessageCount,
     visibleMessageCount,
   } = deps;
@@ -62,28 +52,26 @@ export function useEnsureMessageVisible(deps: UseEnsureMessageVisibleDeps) {
         }
         return;
       }
-      // 本地数组里也没有 → 服务端可能还没拉过来，触发一次 snapshot
-      // 重载并把窗口扩到全部新消息可见。
       if (currentSessionId) {
-        requestMessageScroll(messageId);
         try {
-          await loadCurrentSessionSnapshot(currentSessionId, { replaceMessages: true });
-          setServerTotalTurnCount(null);
-          // 拉一个足够大的值，使 `slice(-visibleMessageCount)` 等同于全部。
-          // useChatRenderData 会在 visibleMessageCount >= 总长时返回完整列表，
-          // 不会真的展示 9999 条空 slot。
-          setVisibleMessageCount(9_999);
+          const result = await loadEarlierHistory(messageId);
+          if (result === null) return;
+          const targetIndex = result.messages.findIndex((message) => message.id === messageId);
+          if (targetIndex < 0) return;
+          requestMessageScroll(messageId);
+          setVisibleMessageCount((previous) =>
+            Math.max(previous, result.messages.length - targetIndex + 5),
+          );
         } catch {
-          /* swallow — caller will fall through to its own missing-target branch */
+          /* caller handles a missing target; a failed page remains retryable */
         }
       }
     },
     [
       currentSessionId,
-      loadCurrentSessionSnapshot,
+      loadEarlierHistory,
       messages,
       requestMessageScroll,
-      setServerTotalTurnCount,
       setVisibleMessageCount,
       visibleMessageCount,
     ],

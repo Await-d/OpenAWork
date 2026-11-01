@@ -87,9 +87,26 @@ function seedCompletedChild(input: {
       artifactCount: 1,
       evidenceSource: 'summary',
       protocol: 'stream',
+      ...(input.roleLayer === 'executor'
+        ? {
+            checklist: [
+              {
+                id: 'check',
+                status: 'pass',
+                evidence: '已运行检查',
+                verificationRefs: [{ terminalId: `term-${child.id}`, command: 'bun test' }],
+              },
+            ],
+          }
+        : {}),
     }),
     child.id,
   ]);
+  if (input.roleLayer === 'executor')
+    dbModule.sqliteRun(
+      `INSERT INTO session_terminals (terminal_id, session_id, user_id, client_request_id, tool_name, kind, command, cwd, status, exit_code, started_at_ms, ended_at_ms, last_activity_ms) VALUES (?, ?, ?, ?, 'bash', 'foreground', 'bun test', '/workspace', 'exited', 0, 1, 2, 2)`,
+      [`term-${child.id}`, input.childSessionId, USER_ID, `handoff:${child.id}`],
+    );
   store.completeHandoff({ handoffId: child.id, claimToken: input.token });
   return child;
 }
@@ -135,6 +152,47 @@ afterAll(async () => {
 });
 
 describe('reconcilePm2QualityReview', () => {
+  it('无辅助模型时也不得把零凭证的completed子任务汇总为成功', async () => {
+    mocks.resolveAuxiliaryLlmConfigCandidates.mockResolvedValue([]);
+    mocks.resolveAuxiliaryLlmConfig.mockResolvedValue(null);
+    const pm2 = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: PM1_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+    });
+    store.claimHandoff({ handoffId: pm2.id, claimToken: 'no-evidence' });
+    store.startHandoff({
+      handoffId: pm2.id,
+      claimToken: 'no-evidence',
+      toSessionId: PM2_SESSION_ID,
+    });
+    const child = seedCompletedChild({
+      childSessionId: 'no-evidence-child',
+      fromSessionId: PM2_SESSION_ID,
+      roleLayer: 'executor',
+      token: 'child',
+    });
+    dbModule.sqliteRun('UPDATE handoff_records SET result_json = ? WHERE id = ?', [
+      JSON.stringify({
+        summary: '完成',
+        protocol: 'submit_execution_result',
+        checklist: [{ id: 'AC1', status: 'pass', evidence: '完成', verified: true }],
+      }),
+      child.id,
+    ]);
+    dbModule.sqliteRun('UPDATE handoff_records SET result_json = ? WHERE id = ?', [
+      JSON.stringify({ dispatchedHandoffIds: [child.id], qualityReviewPending: true }),
+      pm2.id,
+    ]);
+    const result = await reconciler.reconcilePm2QualityReview({
+      pm2HandoffId: pm2.id,
+      userId: USER_ID,
+    });
+    expect(result.status).not.toBe('completed');
+    expect(store.getHandoffById(pm2.id)?.state).not.toBe('completed');
+  });
+
   it('首个辅助 LLM 候选返回 Invalid JSON response 时，会尝试下一个候选并完成评审', async () => {
     mocks.resolveAuxiliaryLlmConfigCandidates.mockResolvedValue([
       {

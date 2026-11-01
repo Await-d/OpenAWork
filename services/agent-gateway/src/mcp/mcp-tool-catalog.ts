@@ -168,6 +168,24 @@ export function clearAllCatalogSnapshots(): void {
 }
 
 /**
+ * 按缓存键谓词清理快照（261031）。
+ *
+ * 会话级 MCP 的 `mcpPoolKey` 里编入了会话身份，会话下线（删除 / 条目移除）时必须
+ * 一并清掉它的目录快照；否则 stale 目录会跨 revision 被复用——「配置已经删了，
+ * 工具却还在列表里」。按谓词收口而不是遍历清除，避免误伤其他会话与用户级快照。
+ */
+export function clearCatalogSnapshotsMatching(predicate: (cacheKey: string) => boolean): number {
+  const keys: string[] = [];
+  for (const key of cache.keys()) {
+    if (predicate(key)) keys.push(key);
+  }
+  for (const key of keys) {
+    cache.delete(key);
+  }
+  return keys.length;
+}
+
+/**
  * Test-only seams for the catalog size-cap retention guard. Minimal so the cap
  * logic is verifiable without a real pool / MCP server.
  */

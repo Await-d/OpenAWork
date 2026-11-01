@@ -295,7 +295,11 @@ afterAll(async () => {
   await db.connectDb();
 });
 
-describe('任务5 stream preflight seam', { timeout: 30_000 }, () => {
+// 该 seam 直接跑真实的 `runModelRound` / `handleStreamRequest` 全链路（含 SQLite
+// 与模块冷加载）：安静环境单例 3–7s，高负载下会被放大数倍——实测曾越过 30s 全局
+// 上限而假红（单跑同一用例稳定通过）。这里单独放宽到 60s；真正的挂起类缺陷仍会在
+// 60s 后失败，不会因此被掩盖。
+describe('任务5 stream preflight seam', { timeout: 60_000 }, () => {
   it('在真实 runModelRound route seam 的上游调用前执行一次渲染消息检查', async () => {
     let renderedTokens = 0;
     const chunks: unknown[] = [];

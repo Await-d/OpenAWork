@@ -65,8 +65,23 @@ export interface PersistedRunEventMeta {
  * (legacy / unscoped) are never pruned.
  */
 const DEFAULT_SESSION_RUN_EVENT_MAX_SCOPES_PER_SESSION = 50;
-export const SESSION_RUN_EVENT_PRUNE_CHECK_INTERVAL = 200;
+/**
+ * 每插入多少行才「考虑」一次 prune。
+ *
+ * 原值 200 对流式热路径来说太密：prune 是一条**同步** DELETE，要按会话聚合全部
+ * scope 再删旧行，长会话上是数万到数十万行的扫描 + 三个索引的维护——执行期间
+ * 事件循环完全停摆（实测 0.3~3.6s，正是 `event-loop-lag` 告警的来源之一）。
+ * 保留策略只要求「有界」，不需要「插满 200 行立刻收缩」，故放宽到 2000 行。
+ */
+export const SESSION_RUN_EVENT_PRUNE_CHECK_INTERVAL = 2000;
+/**
+ * 两次 prune 之间的最小间隔。行数阈值之外再加一道时间闸：连续多个长回答各自
+ * 攒够 2000 行时，不至于在几秒内连着做几次全量聚合删除。
+ */
+const SESSION_RUN_EVENT_PRUNE_MIN_INTERVAL_MS = 30_000;
 let sessionRunEventPruneCheckInterval = SESSION_RUN_EVENT_PRUNE_CHECK_INTERVAL;
+let sessionRunEventPruneMinIntervalMs = SESSION_RUN_EVENT_PRUNE_MIN_INTERVAL_MS;
+let sessionRunEventLastPruneAtMs = 0;
 
 let sessionRunEventRetentionOverride: number | null = null;
 let sessionRunEventInsertsSincePrune = 0;
@@ -126,7 +141,16 @@ function maybePruneSessionRunEvents(sessionId: string): void {
   if (sessionRunEventInsertsSincePrune < sessionRunEventPruneCheckInterval) {
     return;
   }
+  const now = Date.now();
+  if (
+    sessionRunEventPruneMinIntervalMs > 0 &&
+    now - sessionRunEventLastPruneAtMs < sessionRunEventPruneMinIntervalMs
+  ) {
+    // 未复位计数：窗口结束后下一行插入就会补做，不会无限推迟。
+    return;
+  }
   sessionRunEventInsertsSincePrune = 0;
+  sessionRunEventLastPruneAtMs = now;
   try {
     pruneSessionRunEventScopes(sessionId, limit);
   } catch (error) {
@@ -149,11 +173,14 @@ export function __setSessionRunEventRetentionForTesting(
   checkInterval?: number,
 ): void {
   sessionRunEventRetentionOverride = limit;
-  sessionRunEventPruneCheckInterval =
-    typeof checkInterval === 'number' && checkInterval > 0
-      ? Math.floor(checkInterval)
-      : SESSION_RUN_EVENT_PRUNE_CHECK_INTERVAL;
+  const explicitInterval =
+    typeof checkInterval === 'number' && checkInterval > 0 ? Math.floor(checkInterval) : null;
+  sessionRunEventPruneCheckInterval = explicitInterval ?? SESSION_RUN_EVENT_PRUNE_CHECK_INTERVAL;
+  // 显式给了检查间隔 = 测试要逐行验证收缩效果，时间闸会把它挡住，故一并关掉。
+  sessionRunEventPruneMinIntervalMs =
+    explicitInterval === null ? SESSION_RUN_EVENT_PRUNE_MIN_INTERVAL_MS : 0;
   sessionRunEventInsertsSincePrune = 0;
+  sessionRunEventLastPruneAtMs = 0;
   sessionRunEventStoreDisabled = false;
 }
 

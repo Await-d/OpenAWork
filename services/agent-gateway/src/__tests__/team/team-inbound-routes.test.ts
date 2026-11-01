@@ -1,5 +1,9 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as storagePaths from '../../infra/storage-paths.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
 import type * as AuthModule from '../../infra/auth.js';
@@ -104,6 +108,179 @@ afterAll(async () => {
 });
 
 describe('POST /team/sessions/:sessionId/inbound-messages', () => {
+  it('历史写入失败时入站输入整体回滚，重试同key可恢复', async () => {
+    const app = await buildApp();
+    const events: unknown[] = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => events.push(event));
+    dbModule.sqliteRun("CREATE TRIGGER reject_inbound_history BEFORE INSERT ON message_v2 BEGIN SELECT RAISE(ABORT, 'history unavailable'); END");
+    const submit = () => app.inject({ method: 'POST', url: `/team/sessions/${SESSION_ID}/inbound-messages`, headers: { authorization: bearer(app) }, payload: { messageType: 'user_input', payload: { text: '事务输入' }, clientIdempotencyKey: 'atomic-input' } });
+    try {
+      expect((await submit()).statusCode).toBe(500);
+      expect(countRows('session_inbound_messages')).toBe(0);
+      expect(countRows('team_inbound_outbox')).toBe(0);
+      expect(events).toHaveLength(0);
+      expect(orchestrateReceptionInputMock).not.toHaveBeenCalled();
+      dbModule.sqliteRun('DROP TRIGGER reject_inbound_history');
+      expect((await submit()).statusCode).toBe(201);
+      expect(countRows('message_v2')).toBe(1);
+    } finally { unsubscribe(); dbModule.sqliteRun('DROP TRIGGER IF EXISTS reject_inbound_history'); await app.close(); }
+  });
+
+  it('相同客户端key发送到两个会话不会互相复用', async () => {
+    seedReceptionSession('s-inbound-second', USER_ID);
+    const app = await buildApp();
+    try {
+      for (const id of [SESSION_ID, 's-inbound-second']) {
+        expect((await app.inject({ method: 'POST', url: `/team/sessions/${id}/inbound-messages`, headers: { authorization: bearer(app) }, payload: { messageType: 'user_input', payload: { text: id }, clientIdempotencyKey: 'same-key' } })).statusCode).toBe(201);
+      }
+      expect(countRows('session_inbound_messages')).toBe(2);
+      expect(countRows('message_v2')).toBe(2);
+    } finally { await app.close(); }
+  });
+
+  it.each(['参考图片解释布局', ''])(
+    '图片输入 %j 同时进入历史及编排器，重放不重复',
+    async (text) => {
+      const app = await buildApp();
+      const image = {
+        type: 'input_image',
+        imageUrl: 'data:image/png;base64,aW1hZ2U=',
+        mimeType: 'image/png',
+      };
+      const payload = {
+        messageType: 'user_input',
+        payload: { text, inputParts: [image] },
+        clientIdempotencyKey: 'image-input',
+      };
+      try {
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+              headers: { authorization: bearer(app) },
+              payload,
+            })
+          ).statusCode,
+        ).toBe(201);
+        expect(orchestrateReceptionInputMock).toHaveBeenCalledWith(
+          expect.objectContaining({ inputParts: [image] }),
+        );
+        const { listSessionMessagesV2 } = await import('../../message/message-v2-adapter.js');
+        const messages = listSessionMessagesV2({ sessionId: SESSION_ID, userId: USER_ID });
+        expect(messages).toHaveLength(1);
+        expect(messages[0]?.content).toContainEqual(image);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+              headers: { authorization: bearer(app) },
+              payload,
+            })
+          ).statusCode,
+        ).toBe(200);
+        expect(listSessionMessagesV2({ sessionId: SESSION_ID, userId: USER_ID })).toHaveLength(1);
+        expect(orchestrateReceptionInputMock).toHaveBeenCalledTimes(1);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it('上传图片在首次历史写入前内联，会话外artifact不可读取', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'team-inbound-images-'));
+    const imagePath = join(dir, 'image.png');
+    const indexPath = join(dir, 'artifacts.json');
+    writeFileSync(imagePath, 'fixture');
+    writeFileSync(
+      indexPath,
+      JSON.stringify([
+        {
+          id: 'owned-image',
+          sessionId: SESSION_ID,
+          path: imagePath,
+          mimeType: 'image/png',
+          name: 'image.png',
+        },
+        { id: 'foreign-image', sessionId: 'other-session', path: imagePath, mimeType: 'image/png' },
+      ]),
+    );
+    const spy = vi
+      .spyOn(storagePaths, 'resolveGatewayArtifactsIndexPath')
+      .mockReturnValue(indexPath);
+    const app = await buildApp();
+    try {
+      const submit = (artifactId: string) =>
+        app.inject({
+          method: 'POST',
+          url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+          headers: { authorization: bearer(app) },
+          payload: {
+            messageType: 'user_input',
+            payload: { text: '看图', inputParts: [{ type: 'input_image', artifactId }] },
+          },
+        });
+      expect((await submit('owned-image')).statusCode).toBe(201);
+      const { listSessionMessagesV2 } = await import('../../message/message-v2-adapter.js');
+      expect(
+        listSessionMessagesV2({ sessionId: SESSION_ID, userId: USER_ID })[0]?.content,
+      ).toContainEqual(
+        expect.objectContaining({
+          artifactId: 'owned-image',
+          imageUrl: `data:image/png;base64,${Buffer.from('fixture').toString('base64')}`,
+        }),
+      );
+      expect((await submit('foreign-image')).statusCode).toBe(400);
+      expect(countRows('session_inbound_messages')).toBe(1);
+    } finally {
+      spy.mockRestore();
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { type: 'input_image', imageUrl: 'https://example.test/image.png' },
+    { type: 'input_image', fileId: 'unresolved' },
+    { type: 'input_image', imageUrl: 'data:image/png;base64,aW1hZ2U=', mimeType: 'image/jpeg' },
+    { type: 'input_image', imageUrl: 'data:image/svg+xml;base64,aW1hZ2U=' },
+  ])('无法交给上游的图片来源明确拒绝：%j', async (image) => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: { messageType: 'user_input', payload: { text: '看图', inputParts: [image] } },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(countRows('session_inbound_messages')).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('无来源图片拒绝入库，不启动编排', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: { text: '看图', inputParts: [{ type: 'input_image' }] },
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(countRows('session_inbound_messages')).toBe(0);
+      expect(orchestrateReceptionInputMock).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
   it('需要认证', async () => {
     const app = await buildApp();
     try {

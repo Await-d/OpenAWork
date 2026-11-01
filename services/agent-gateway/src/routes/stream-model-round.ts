@@ -53,7 +53,7 @@ import { upsertArtifactsFromAssistantMessage } from '../session/assistant-conten
 import { touchSessionHeartbeat } from '../handoff/bus/heartbeat.js';
 import { resolveSnapshotWorkspaceRoot } from '../workspace/workspace-safety.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
-import { buildChannelPersonaPromptFromMetadata } from '../channels/channel-persona-prompt.js';
+import { buildChannelRuntimePromptFromMetadata } from '../channels/channel-persona-prompt.js';
 import { getSnapshotEngine } from '../snapshot/snapshot-engine.js';
 import {
   getLatestSnapshotTreeForSession,
@@ -126,6 +126,7 @@ import type {
   ExtendedThinkingConfig,
   ThinkingConfig,
 } from '../v2-runtime/upstream/provider-options.js';
+import { anthropicThinkingBudgetForEffort } from '../v2-runtime/upstream/provider-options.js';
 import { matchesRequestScope } from '../runtime/request-lineage.js';
 
 const nativeLLMLayer = OpenCodeLLM.LLMClient.layer.pipe(
@@ -1270,20 +1271,10 @@ export async function runModelRound(input: {
           if (input.requestData.thinkingEnabled === false) {
             return { type: 'disabled' as const };
           }
-          const effort = input.requestData.reasoningEffort ?? 'medium';
-          // 从 effort 推断 budgetTokens（使用 Anthropic 映射表作为默认）
-          const BUDGET_MAP: Record<string, number> = {
-            none: 0,
-            minimal: 1024,
-            low: 4096,
-            medium: 8192,
-            high: 16384,
-            xhigh: 31999,
-            max: 31999,
-          };
+          // 从 effort 推断 budgetTokens（Anthropic 表，唯一定义在 provider-options）
           return {
             type: 'enabled' as const,
-            budgetTokens: BUDGET_MAP[effort] ?? 8192,
+            budgetTokens: anthropicThinkingBudgetForEffort(input.requestData.reasoningEffort),
           };
         })()
       : undefined);
@@ -1430,12 +1421,14 @@ export async function runModelRound(input: {
     capabilityCatalogPrompt: input.capabilityCatalogPrompt,
   });
 
-  const channelPersonaPrompt = buildChannelPersonaPromptFromMetadata(
+  // 渠道人设正文已由 `resolveStreamModelRoute` 放进 stable 段（route-system-prompt
+  // 槽位），此处只补回复策略与命令入口，避免同一段 SOUL 出现两次。
+  const channelRuntimePrompt = buildChannelRuntimePromptFromMetadata(
     input.sessionContext.metadataJson,
   );
   const dynamicSystemTail = [
     dynamicSystemContent,
-    channelPersonaPrompt,
+    channelRuntimePrompt,
     input.teamResumePrompt ?? null,
     input.teamStatusPrompt ?? null,
   ]

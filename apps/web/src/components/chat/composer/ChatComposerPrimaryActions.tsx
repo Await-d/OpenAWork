@@ -12,6 +12,15 @@ export interface ChatComposerPrimaryActionsProps {
   readonly imageGenerationBusy: boolean;
   readonly canSubmit: boolean;
   readonly stoppingStream: boolean;
+  /**
+   * 已提交、尚未进入流式的窗口期：会话创建（新建会话时一次网关往返）与附件上传都在
+   * `onSubmit` 里完成，这期间 `streaming` 还是 `false`、输入框也还没清空。用它把发送键
+   * 换成「发送中…」并禁用，避免用户以为没点上而反复点击。
+   *
+   * 不复用 `sessionBusyState`：那是「网关执行权被占用」，为真时会把裸 Enter 降级成
+   * 排队并禁用发送键，用在窗口期会误伤正常发送。
+   */
+  readonly submitPending: boolean;
   readonly sessionBusyState: ComposerBusyState;
   readonly effectiveStopCapability: ComposerStopCapability;
   readonly showStopAction: boolean;
@@ -108,6 +117,7 @@ function SendStopButton(props: ChatComposerPrimaryActionsProps) {
       <span>{getPrimaryButtonLabel(props)}</span>
       <SendStopIcon
         showStopAction={props.showStopAction}
+        submitPending={props.submitPending}
         sessionBusyState={props.sessionBusyState}
       />
     </button>
@@ -123,6 +133,8 @@ function SendStopButton(props: ChatComposerPrimaryActionsProps) {
  */
 function getPrimaryButtonDisabled(props: ChatComposerPrimaryActionsProps): boolean {
   if (props.showStopAction) return props.stoppingStream;
+  // 提交已在途：再点一次只会命中上层的重入闩并弹一句 toast，不如把按钮直接按住。
+  if (props.submitPending) return true;
   if (props.sessionBusyState === 'running') return true;
   return props.imageGenerationBusy || !props.canSubmit;
 }
@@ -142,6 +154,7 @@ function getPrimaryButtonLabel(props: ChatComposerPrimaryActionsProps): string {
     if (props.effectiveStopCapability === 'observe_only') return '尝试停止';
     return props.effectiveStopCapability === 'best_effort' ? '尝试停止' : '停止';
   }
+  if (props.submitPending) return props.imageGenerationMode ? '提交中…' : '发送中…';
   if (props.sessionBusyState === 'running') return '运行中';
   return props.imageGenerationMode ? '生成' : '发送';
 }
@@ -156,6 +169,11 @@ function getComposerStatusLabel(props: ChatComposerPrimaryActionsProps): string 
     return props.effectiveStopCapability === 'best_effort'
       ? '当前页未接管原始请求 · 将尝试停止本会话的当前运行'
       : '当前运行流仍受此页控制 · 可直接停止';
+  }
+  if (props.submitPending) {
+    return props.imageGenerationMode
+      ? '正在提交生成请求，等待网关受理…'
+      : '正在发送，等待网关受理…';
   }
   if (props.showQueueAction) {
     return `Cmd / Ctrl + Enter 可排队${props.queuedMessageCount > 0 ? ` · 已排队 ${props.queuedMessageCount} 条` : ''}`;
@@ -205,16 +223,18 @@ function PlusIcon() {
 
 function SendStopIcon({
   showStopAction,
+  submitPending,
   sessionBusyState,
 }: {
   readonly showStopAction: boolean;
+  readonly submitPending: boolean;
   readonly sessionBusyState: ComposerBusyState;
 }) {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       {showStopAction ? (
         <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" />
-      ) : sessionBusyState ? (
+      ) : sessionBusyState || submitPending ? (
         <>
           <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2.5" />
           <path d="M12 8v4l2.5 1.5" stroke="currentColor" strokeWidth="2.5" />

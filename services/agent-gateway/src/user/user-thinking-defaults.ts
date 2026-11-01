@@ -19,27 +19,39 @@ export const USER_DEFAULT_THINKING_KEY = 'default_thinking';
  * 思考参数，即「设置里开了思考，实际没思考」。
  *
  * 语义约束：
- * - 只在 `enabled === true` 时返回档位。用户关掉默认思考时保持「未指定」，
- *   不要下发显式 `disabled`——那会改变 `thinkingLanguagePrompt` 槽位口径，
- *   也会向上游发送本不必要的禁用字段。
- * - 读取 / 解析失败一律退化为「不兜底」，与改造前行为一致，不阻断对话。
+ * - 开启（`enabled === true`）时返回档位；
+ * - 关闭时**显式返回 `thinkingEnabled: false`**。不能像以前那样留空：留空会让
+ *   上游回到自己的默认行为，而 DeepSeek / Gemini 2.5 等平台默认就是开启思考，
+ *   于是「用户在设置里关掉思考」只对 Web 正常轮生效，通道 / 定时任务仍在思考。
+ *   Web 正常轮本身也总是显式带 `thinkingEnabled`（关闭时即 `disabled`），
+ *   这一层对齐同一口径。
+ * - 只读库失败（异常）时返回空对象、不兜底：数据库抖动不该被解释成「用户关了
+ *   思考」，否则一次 SQLite 异常会让所有通道轮静默失去思考能力。
  */
 export function resolveUserDefaultThinkingForChat(userId: string): UserDefaultThinkingSelection {
-  let raw: unknown;
+  let row: UserSettingRow | undefined;
   try {
-    const row = sqliteGet<UserSettingRow>(
+    row = sqliteGet<UserSettingRow>(
       `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
       [userId, USER_DEFAULT_THINKING_KEY],
     );
+  } catch {
+    // 读取失败 → 不兜底（保持改造前行为，不阻断对话）。
+    return {};
+  }
+
+  let raw: unknown;
+  try {
     raw = row ? (JSON.parse(row.value) as unknown) : undefined;
   } catch {
+    // 存储值损坏 → 按默认设置（关闭）处理，与设置页展示保持一致。
     raw = undefined;
   }
 
   const chat = resolveStoredDefaultThinkingMode(raw, 'chat');
-  if (chat.enabled !== true) {
-    return {};
+  if (chat.enabled === true) {
+    return { thinkingEnabled: true, reasoningEffort: chat.effort };
   }
 
-  return { thinkingEnabled: true, reasoningEffort: chat.effort };
+  return { thinkingEnabled: false };
 }

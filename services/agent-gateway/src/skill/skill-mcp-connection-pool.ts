@@ -15,6 +15,7 @@ import { MCPClientAdapterImpl } from '@openAwork/mcp-client';
 import type { MCPServerRef, SkillManifest } from '@openAwork/skill-types';
 import { sqliteAll } from '../infra/db.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
+import { buildMinimalStdioEnvironment } from '../session-extension/session-extension-runtime-policy.js';
 
 // ---------------------------------------------------------------------------
 // Environment cleaner (ported from oh-my-opencode env-cleaner.ts)
@@ -43,6 +44,31 @@ function createCleanMcpEnvironment(customEnv: Record<string, string> = {}): Reco
 
   Object.assign(cleanEnv, customEnv);
   return cleanEnv;
+}
+
+/**
+ * stdio 子进程的环境变量策略。
+ *
+ * - `inherit`（默认）：沿用既有 `createCleanMcpEnvironment`（只排除 npm/pnpm/yarn
+ *   变量，其余继承）。用户级配置保持这一行为不变。
+ * - `minimal`：会话级配置使用。只继承运行命令所必需的白名单项，**不把网关进程的
+ *   凭据（`*_API_KEY` / `*_TOKEN` / `AI_*` 等）带进第三方子进程**。
+ *
+ * 为什么必须区分：会话级配置的来源是对话内容，可信度低于用户在设置页手填的配置；
+ * 让一句提示词配置的 stdio 命令继承网关全部环境，等于把网关凭据交给它。
+ */
+export type McpStdioEnvPolicy = 'inherit' | 'minimal';
+
+export interface McpPoolConnectionOptions {
+  /** stdio 环境策略；缺省 `inherit`。 */
+  envPolicy?: McpStdioEnvPolicy;
+  /**
+   * 最大操作尝试次数（含首次）。缺省 3（既有行为）。
+   *
+   * 会话级**非幂等**调用必须传 1：断线自动重放可能让远端副作用执行两次
+   * （方案 §MCP 生命周期「非幂等调用不得自动重放」）。
+   */
+  maxAttempts?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,15 +110,58 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const CLEANUP_INTERVAL_MS = 60 * 1000; // 1 minute
 const MAX_OPERATION_RETRIES = 3;
 
+class McpConnectionRevokedError extends Error {
+  constructor(mcpName: string) {
+    super(`MCP connection for ${mcpName} was revoked while connecting; the attempt was discarded.`);
+    this.name = 'McpConnectionRevokedError';
+  }
+}
+
 class SkillMcpConnectionPool {
   private connections = new Map<string, ManagedConnection>();
   private pendingConnections = new Map<string, Promise<MCPClientAdapterImpl>>();
+  /**
+   * 每个连接键的**代数**（generation）。
+   *
+   * 解决的问题：`getOrCreateConnection` 里 `createConnection` 是异步的——若在它
+   * `await connect()` 期间发生回收（会话删除 / 条目移除 / 用户断连），连接会在回收
+   * **之后**完成并把适配器写回 `connections`，让已删除的资源「复活」。
+   *
+   * 只在 `connect` 前后对比一次 revision 不足以覆盖「回收发生在 connect 完成之后、
+   * 写回之前」的窗口（JS 单线程下这两步之间没有 await，但仍然跨了 caller 的
+   * await 点）。因此用单调递增的代数：发起连接时领号，写回前校验，号变了就丢弃并
+   * 主动断开。回收操作主动换号，于是所有在途尝试自动作废。
+   */
+  private connectionGenerations = new Map<string, number>();
+  private nextConnectionGeneration = 0;
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private cleanupRegistered = false;
   private toolListChangedListeners = new Set<ToolListChangedListener>();
 
   private getConnectionKey(userId: string, mcpName: string): string {
     return `${userId}:${mcpName}`;
+  }
+
+  /** 领取下一代号（发起连接）或作废当前代（回收）。 */
+  private bumpGeneration(key: string): number {
+    const next = ++this.nextConnectionGeneration;
+    this.connectionGenerations.set(key, next);
+    return next;
+  }
+
+  private isGenerationCurrent(key: string, generation: number): boolean {
+    return (this.connectionGenerations.get(key) ?? 0) === generation;
+  }
+
+  /**
+   * 回收后清理代数表：只有「既无连接、又无在途尝试」的键才可移除——否则在途尝试
+   * 会失去对比基准而重新写回。
+   */
+  private pruneGenerations(): void {
+    for (const key of [...this.connectionGenerations.keys()]) {
+      if (this.connections.has(key) || this.pendingConnections.has(key)) continue;
+      this.connectionGenerations.delete(key);
+    }
   }
 
   /**
@@ -220,6 +289,7 @@ class SkillMcpConnectionPool {
     if (this.connections.size === 0) {
       this.stopCleanupTimer();
     }
+    this.pruneGenerations();
   }
 
   // -----------------------------------------------------------------------
@@ -230,6 +300,7 @@ class SkillMcpConnectionPool {
     userId: string,
     mcpName: string,
     serverRef: MCPServerRef,
+    options: McpPoolConnectionOptions = {},
   ): Promise<MCPClientAdapterImpl> {
     const key = this.getConnectionKey(userId, mcpName);
 
@@ -246,13 +317,23 @@ class SkillMcpConnectionPool {
       return pending;
     }
 
-    const connectionPromise = this.createConnection(userId, mcpName, serverRef);
+    const generation = this.bumpGeneration(key);
+    const connectionPromise = this.createConnection(
+      userId,
+      mcpName,
+      serverRef,
+      options,
+      generation,
+    );
     this.pendingConnections.set(key, connectionPromise);
 
     try {
       return await connectionPromise;
     } finally {
-      this.pendingConnections.delete(key);
+      if (this.pendingConnections.get(key) === connectionPromise) {
+        this.pendingConnections.delete(key);
+      }
+      this.pruneGenerations();
     }
   }
 
@@ -260,18 +341,27 @@ class SkillMcpConnectionPool {
     userId: string,
     mcpName: string,
     serverRef: MCPServerRef,
+    options: McpPoolConnectionOptions = {},
+    generation?: number,
   ): Promise<MCPClientAdapterImpl> {
     this.registerProcessCleanup();
     const key = this.getConnectionKey(userId, mcpName);
+    const ownedGeneration = generation ?? this.bumpGeneration(key);
 
     const adapter = new MCPClientAdapterImpl();
 
-    // For stdio transport, clean the environment to avoid npm/pnpm conflicts
+    // For stdio transport, clean the environment to avoid npm/pnpm conflicts.
+    // 会话级配置改用最小环境（见 `McpStdioEnvPolicy` 的说明）。
     if (serverRef.transport === 'stdio' && serverRef.command) {
-      const cleanEnv = createCleanMcpEnvironment();
-      const serverWithCleanEnv: MCPServerRef & { env?: Record<string, string> } = {
+      const explicitEnv = (serverRef as MCPServerRef & { env?: Record<string, string> }).env;
+      const cleanEnv =
+        options.envPolicy === 'minimal'
+          ? buildMinimalStdioEnvironment({ explicit: explicitEnv })
+          : createCleanMcpEnvironment(explicitEnv ?? {});
+      const serverWithCleanEnv = {
         ...serverRef,
         env: cleanEnv,
+        inheritEnv: options.envPolicy !== 'minimal',
       };
       await adapter.connect(serverWithCleanEnv);
     } else {
@@ -305,6 +395,17 @@ class SkillMcpConnectionPool {
       logGatewayWarn(`Failed to subscribe to tool-list-changed for ${serverRef.id}:`, err);
     }
 
+    // 写回前校验代数：期间发生过回收（会话删除 / 条目移除 / 主动断连）就丢弃这条
+    // 连接，否则「已删除的资源」会通过池子继续可用。
+    if (!this.isGenerationCurrent(key, ownedGeneration)) {
+      try {
+        await adapter.disconnect(serverRef.id);
+      } catch {
+        // 连接可能已经关闭
+      }
+      throw new McpConnectionRevokedError(mcpName);
+    }
+
     this.connections.set(key, {
       adapter,
       serverRef,
@@ -318,6 +419,8 @@ class SkillMcpConnectionPool {
 
   async disconnectUserConnection(userId: string, mcpName: string): Promise<void> {
     const key = this.getConnectionKey(userId, mcpName);
+    // 换号作废在途连接：否则一次「重试连接」期间的旧尝试可能覆盖新连接。
+    this.bumpGeneration(key);
     const managed = this.connections.get(key);
     if (!managed) return;
 
@@ -337,6 +440,17 @@ class SkillMcpConnectionPool {
     const prefix = `${userId}:`;
     const keysToRemove: string[] = [];
 
+    // 先作废该用户的全部在途尝试，再回收已建立的连接。
+    for (const key of [...this.connectionGenerations.keys()]) {
+      if (key.startsWith(prefix)) this.bumpGeneration(key);
+    }
+    for (const key of [...this.pendingConnections.keys()]) {
+      if (key.startsWith(prefix)) {
+        this.bumpGeneration(key);
+        this.pendingConnections.delete(key);
+      }
+    }
+
     for (const [key, managed] of this.connections) {
       if (key.startsWith(prefix)) {
         keysToRemove.push(key);
@@ -352,10 +466,62 @@ class SkillMcpConnectionPool {
     if (this.connections.size === 0) {
       this.stopCleanupTimer();
     }
+    this.pruneGenerations();
+  }
+
+  /**
+   * 按连接键的**归属谓词**回收连接（261031）。
+   *
+   * 用途：会话级 MCP 的连接键里带会话身份，会话被删除或条目被移除时必须把对应
+   * 客户端 / stdio 子进程一起关掉，否则已删除的配置仍能通过池子继续被调用。
+   *
+   * 同时清掉 `pendingConnections` 中的同键条目——否则一个**正在建立**的连接会在
+   * 回收之后完成并重新写回池子（`createConnection` 末尾的 `connections.set`），
+   * 让已删除的资源「复活」。
+   */
+  async disconnectMatching(predicate: (connectionKey: string) => boolean): Promise<number> {
+    // 先作废匹配键的代数：在途尝试会在自己写回前发现号已变而主动放弃。
+    // 这一步必须在遍历 connections 之前完成——否则「摘掉 pending → connect 完成 →
+    // 写回」这条路径会绕过回收，让已删除的资源复活。
+    for (const key of this.connectionGenerations.keys()) {
+      if (predicate(key)) this.bumpGeneration(key);
+    }
+    for (const key of this.pendingConnections.keys()) {
+      if (predicate(key)) {
+        // 键可能还没领过号（首连）：补一次换号，确保在途尝试失效。
+        this.bumpGeneration(key);
+        this.pendingConnections.delete(key);
+      }
+    }
+
+    let removed = 0;
+    for (const key of [...this.connections.keys()]) {
+      if (!predicate(key)) continue;
+      const managed = this.connections.get(key);
+      if (!managed) continue;
+      this.connections.delete(key);
+      removed += 1;
+      try {
+        await managed.adapter.disconnect(managed.serverRef.id);
+      } catch {
+        // 连接可能已经关闭
+      }
+    }
+
+    if (this.connections.size === 0) {
+      this.stopCleanupTimer();
+    }
+    // 注意：这里**不能**清理代数表。在途尝试仍需旧号作为失效基准；`pruneGenerations`
+    // 在空闲清理时按「既无连接也无 pending」的键回收。
+    return removed;
   }
 
   async disconnectAll(): Promise<void> {
     this.stopCleanupTimer();
+    for (const key of this.connectionGenerations.keys()) {
+      this.bumpGeneration(key);
+    }
+    this.pendingConnections.clear();
     const entries = Array.from(this.connections.values());
     this.connections.clear();
     for (const managed of entries) {
@@ -376,14 +542,17 @@ class SkillMcpConnectionPool {
     mcpName: string,
     serverRef: MCPServerRef,
     operation: (adapter: MCPClientAdapterImpl, serverId: string) => Promise<T>,
+    options: McpPoolConnectionOptions = {},
   ): Promise<T> {
     let lastError: Error | null = null;
+    const maxAttempts = Math.max(1, options.maxAttempts ?? MAX_OPERATION_RETRIES);
 
-    for (let attempt = 1; attempt <= MAX_OPERATION_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const adapter = await this.getOrCreateConnection(userId, mcpName, serverRef);
+        const adapter = await this.getOrCreateConnection(userId, mcpName, serverRef, options);
         return await operation(adapter, serverRef.id);
       } catch (error) {
+        if (error instanceof McpConnectionRevokedError) throw error;
         lastError = error instanceof Error ? error : new Error(String(error));
         const errorMessage = lastError.message.toLowerCase();
 
@@ -396,9 +565,9 @@ class SkillMcpConnectionPool {
           throw lastError;
         }
 
-        if (attempt === MAX_OPERATION_RETRIES) {
+        if (attempt === maxAttempts) {
           throw new Error(
-            `Failed after ${MAX_OPERATION_RETRIES} reconnection attempts: ${lastError.message}`,
+            `Failed after ${maxAttempts} reconnection attempts: ${lastError.message}`,
           );
         }
 

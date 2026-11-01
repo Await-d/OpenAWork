@@ -31,6 +31,16 @@ import {
 import { mcpConnectionPool } from '../skill/skill-mcp-connection-pool.js';
 import { clearCatalogSnapshot } from './mcp-tool-catalog.js';
 import { MCP_MANAGE_SERVERS_TOOL_NAME } from './mcp-manage-tool-name.js';
+import {
+  resolveManageToolAncestorDenial,
+  resolveSessionExtensionOrigin,
+} from '../session-extension/session-extension-origin.js';
+import {
+  listSessionScopeMcp,
+  proposeSessionScopeMcpUpsert,
+  revokeSessionScopeMcp,
+} from '../session-extension/session-extension-tools.js';
+import { listSessionMcpServers } from '../session-extension/session-extension-store.js';
 
 export { MCP_MANAGE_SERVERS_TOOL_NAME } from './mcp-manage-tool-name.js';
 
@@ -90,8 +100,16 @@ export type McpManageServerDraft = z.infer<typeof mcpManageServerDraftSchema>;
 export const mcpManageServersInputSchema = z
   .object({
     action: z.enum(['list', 'add', 'update', 'remove', 'enable', 'disable']),
+    /**
+     * 生效范围。缺省 `user` = 历史行为（写用户级 `user_settings.mcp_servers`，
+     * 影响该用户所有会话）。`session` = 只配到**当前会话**，需要管理员确认，
+     * 且不改写用户级配置。
+     */
+    scope: z.enum(['user', 'session']).optional(),
     server: mcpManageServerDraftSchema.optional(),
     serverId: z.string().trim().min(1).max(100).optional(),
+    /** 会话级条目引用（list 返回），用于精确撤权。 */
+    resourceRef: z.string().trim().min(1).max(400).optional(),
     enabled: z.boolean().optional(),
   })
   .strict()
@@ -113,7 +131,11 @@ export const mcpManageServersInputSchema = z
       }
       return;
     }
-    if (value.action !== 'list' && !value.serverId) {
+    const sessionRevoke =
+      value.scope === 'session' &&
+      (value.action === 'remove' || value.action === 'disable') &&
+      Boolean(value.resourceRef);
+    if (value.action !== 'list' && !value.serverId && !sessionRevoke) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `${value.action} 必须提供 serverId。`,
@@ -128,6 +150,7 @@ export const mcpManageServersToolDefinition: ToolDefinition<
 > = {
   name: MCP_MANAGE_SERVERS_TOOL_NAME,
   description:
+    '渠道必须显式传 scope=session；会话级 add/update 仅创建待管理员确认提案，不直接生效。缺省 scope=user。' +
     '管理当前用户的 MCP 服务器配置。action=list 列举全部（含禁用项）；add/update 新增或覆盖自定义 SSE / stdio MCP；remove 移除用户配置（内置项移除后恢复默认）；enable/disable 启停。' +
     '变更类操作需要用户批准，写入后立即尝试连接并返回结果，下一轮即可使用新的 MCP 工具。' +
     '系统内置 MCP（websearch / grep_app）与受保护内置（codegraph / git_bash / lsp / omo）不支持覆盖端点，只能启停或调整 disabledTools。' +
@@ -658,7 +681,22 @@ export interface RunMcpManageServersInput {
 }
 
 export async function runMcpManageServersTool(params: RunMcpManageServersInput): Promise<string> {
-  const denial = resolveMcpManageSessionDenial(readMcpManageSessionRow(params.sessionId));
+  // ── 会话级分支（261031）──
+  // 只配到当前会话、必须经管理员确认；来源授权（渠道是否显式开启、team/cron 拒绝）
+  // 由 `session-extension-service` 统一判定，故这里不套用户级的 channel 拒绝守卫。
+  if (params.input.scope === 'session') {
+    return runSessionScopedMcpAction(params);
+  }
+
+  // ── 用户级分支（历史行为）──
+  // 当前会话守卫 + **祖先链**守卫：渠道会话派生的 task 子会话不复制
+  // `source: 'channel'`，只查当前会话会被绕过（与 skill_manage 同源修复）。
+  const denial =
+    resolveMcpManageSessionDenial(readMcpManageSessionRow(params.sessionId)) ??
+    resolveManageToolAncestorDenial(resolveSessionExtensionOrigin(params.sessionId), {
+      subject: 'MCP 配置',
+      missingObject: 'MCP 配置变更',
+    });
   if (denial) {
     throw new Error(denial);
   }
@@ -689,4 +727,77 @@ export async function runMcpManageServersTool(params: RunMcpManageServersInput):
       throw new Error(`不支持的 action: ${String(exhaustive)}`);
     }
   }
+}
+
+/**
+ * 会话级 MCP 动作。
+ *
+ * 与用户级的关键差异：
+ *   - `add` / `update` **不直接生效**，只创建待确认提案（管理员确认后才连接）；
+ *   - `remove` / `disable` 是立即生效的撤权，不需要二次确认；
+ *   - 密钥不接受模型直传明文：`env` / `headers` 一律剥离，改由设置页安全填写。
+ */
+async function runSessionScopedMcpAction(params: RunMcpManageServersInput): Promise<string> {
+  const context = { sessionId: params.sessionId };
+  const { input } = params;
+
+  switch (input.action) {
+    case 'list':
+      return listSessionScopeMcp(context);
+    case 'add':
+    case 'update': {
+      if (!input.server) {
+        return JSON.stringify(
+          { ok: false, scope: 'session', error: '缺少 server 配置。' },
+          null,
+          2,
+        );
+      }
+      return proposeSessionScopeMcpUpsert({
+        ...context,
+        config: {
+          ...input.server,
+          id: input.server.id ?? input.serverId ?? input.server.name,
+        },
+      });
+    }
+    case 'remove':
+      return await revokeSessionScopeMcpAction(context, input, true);
+    case 'disable':
+      return await revokeSessionScopeMcpAction(context, input, false);
+    case 'enable':
+      return JSON.stringify(
+        {
+          ok: false,
+          scope: 'session',
+          error: '会话级 MCP 不区分单独的「启用」动作：请重新 add/update 以建立新提案。',
+        },
+        null,
+        2,
+      );
+    default: {
+      const exhaustive: never = input.action;
+      throw new Error(`不支持的 action: ${String(exhaustive)}`);
+    }
+  }
+}
+
+async function revokeSessionScopeMcpAction(
+  context: { sessionId: string },
+  input: z.infer<typeof mcpManageServersInputSchema>,
+  remove: boolean,
+): Promise<string> {
+  const resourceRef =
+    input.resourceRef ??
+    listSessionMcpServers(context.sessionId).find(
+      (server) => server.displayId === (input.serverId ?? input.server?.id),
+    )?.resourceRef;
+  if (!resourceRef) {
+    return JSON.stringify(
+      { ok: false, scope: 'session', error: '未找到对应的会话级 MCP，请先 list。' },
+      null,
+      2,
+    );
+  }
+  return await revokeSessionScopeMcp({ ...context, resourceRef, remove });
 }

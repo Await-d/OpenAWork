@@ -141,6 +141,25 @@ describe('cron agent channel delivery', () => {
     );
   });
 
+  it('渠道任务带历史遗留的 session 投递配置时照常执行（不误判、不误报）', async () => {
+    resolveAnyChannelMock.mockReturnValue(qqChannel());
+    // 线上实测的坏配置：delivery_mode=session + delivery_target 被写成 chatId。
+    // 旧实现在**执行前**按「目标会话必须存在」校验，于是每 10 分钟失败一次、
+    // 任务根本没跑过；修好后的语义是：渠道任务的结果由 PluginSendMessage 回发，
+    // 这两个字段不参与执行（也不参与成败判定）。
+    await expect(
+      handler.runCronAgentJob(
+        cronJob({
+          plugin_id: 'qq-1',
+          plugin_chat_id: 'c2c:open-id',
+          delivery_mode: 'session',
+          delivery_target: 'c2c:open-id',
+        }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(runSessionInBackgroundMock).toHaveBeenCalledTimes(1);
+  });
+
   it('渠道任务不与用户对话会话共用（否则触发时与该渠道对话争锁 → 409）', async () => {
     resolveAnyChannelMock.mockReturnValue(qqChannel());
     // 用户在该渠道的对话会话：title 正是 `buildChannelSessionKey` 的产物。

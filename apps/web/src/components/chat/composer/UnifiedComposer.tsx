@@ -31,6 +31,7 @@ import { useUnifiedComposerState } from './use-unified-composer-state.js';
 import type { MentionFileSearchFn } from './use-mention-file-search.js';
 import { buildPromptOptimizationContext } from './prompt-optimization-context.js';
 import { buildAttachmentFileMap } from '../../../pages/chat-page/conversation/composer/use-composer-queue.js';
+import type { QueuedComposerPreview } from '../../../pages/chat-page/conversation/composer/queued-composer-state.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import { createVoiceRecordingFile } from './voice-recording-attachment.js';
 
@@ -147,6 +148,14 @@ export interface UnifiedComposerProps {
   onNavigateToArtifacts?: () => void;
   onSelectImageReferenceArtifactId?: (id: string | null) => void;
   onCompanionActivityChange?: (activity: UnifiedComposerActivity) => void;
+  /**
+   * 待发队列条目变化时上报给宿主（对话视图），由它渲染在消息流末尾。
+   *
+   * 队列状态目前只活在 composer 内部（`useUnifiedComposerState` 的本地 state，
+   * Zustand `useChatQueueStore` 只是**持久化快照**、不是实时镜像），所以渲染层
+   * 无法自行订阅；要让它出现在对话流里，只能由 composer 主动上报。
+   */
+  onQueuedMessagesChange?: (previews: QueuedComposerPreview[]) => void;
   markSessionMetadataDirty?: () => void;
   /** 会话统计数据，渲染在输入框下方 */
   statsData?: ComposerStatsData | null;
@@ -264,6 +273,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     onNavigateToArtifacts,
     onSelectImageReferenceArtifactId,
     onCompanionActivityChange,
+    onQueuedMessagesChange,
     statsData: statsDataProp,
     contextUsedTokens,
     contextMaxTokens,
@@ -433,6 +443,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     modelPickerBtnRef,
     modelSettingsBtnRef,
     isBrowsingInputHistory,
+    submitPending,
     agentOptions,
     defaultAgentLabel,
     queuedComposerPreviews,
@@ -548,6 +559,10 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     });
   }, [attachmentItems.length, onCompanionActivityChange, queuedComposerPreviews.length, showVoice]);
 
+  useEffect(() => {
+    onQueuedMessagesChange?.(queuedComposerPreviews);
+  }, [onQueuedMessagesChange, queuedComposerPreviews]);
+
   return (
     <>
       {latestGeneratedImageResult && artifactsWorkspaceHref && (
@@ -604,6 +619,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
         attachmentFilesById={attachmentFilesById}
         attachmentItems={attachmentItems}
         queuedMessages={features.queuedMessages ? queuedComposerPreviews : undefined}
+        submitPending={submitPending}
         showVoice={showVoice}
         composerMenu={composerMenu}
         slashCommandItems={features.slashCommands ? slashCommandItems : []}

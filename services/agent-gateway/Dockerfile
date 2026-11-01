@@ -126,6 +126,26 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
+# 语言服务（LSP）预装。
+#
+# 为什么要在镜像里装：`packages/lsp-client` 拿到缺失二进制时（`autoInstall: true`，
+# 见 services/agent-gateway/src/lsp/router.ts）会在**请求路径上**跑
+# `npm install -g …`。容器每次重建都是全新的可写层，全局 node_modules 不会保留，
+# 于是「重建后第一条涉及 .ts 的请求」必然现场安装。实测三次 npm 安装分别耗时
+# 3s / 32.8s / 17.1s，与 `event-loop-lag` 告警的时间戳逐条吻合（同步阻塞本身已在
+# lsp-client 里改成异步，但用户仍要白等一次完整下载）。预装后这些安装不再发生。
+#
+# 只需要 Go / Python / Rust 等语言服务时，用
+# `--build-arg PREINSTALL_LSP_SERVERS="gopls pyright"` 覆盖；置空则完全不预装。
+ARG PREINSTALL_LSP_SERVERS="typescript-language-server typescript bash-language-server"
+RUN if [ -n "$PREINSTALL_LSP_SERVERS" ]; then \
+      npm install --global --no-audit --no-fund $PREINSTALL_LSP_SERVERS; \
+    fi
+
+# 构建期的 npm debug 日志（几十 KB/次）没有诊断价值，留着只会让运行期的
+# `/root/.npm/_logs` 时间戳与真实运行时的安装记录混淆。
+RUN rm -rf /root/.npm/_logs
+
 # 浏览器实时预览是可选能力。默认镜像不带浏览器，/browser-live/status 会返回
 # `browser-missing`。加 `--build-arg INSTALL_CHROMIUM=true` 会装上 Debian 的 chromium
 # 及其系统依赖，落在 /usr/bin/chromium —— 正是

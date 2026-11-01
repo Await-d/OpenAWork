@@ -100,7 +100,9 @@ export function useSessionSettingsCallbacks(
       if (activeProviderId && activeModelId && modelSelectionSource) {
         metadata['modelSelectionSource'] = modelSelectionSource;
       }
-      if (manualAgentId.trim()) metadata['agentId'] = manualAgentId.trim();
+      // 清空选择时必须**显式写 null**（服务端按「显式 null = 清除绑定」处理）：
+      // 省略该键只会保留旧绑定，会话级回退仍会把它当成角色来源。
+      metadata['agentId'] = manualAgentId.trim() || null;
       if (effectiveWorkingDirectory) metadata['workingDirectory'] = effectiveWorkingDirectory;
       return { ...metadata, ...overrides };
     },

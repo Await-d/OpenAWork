@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
 
 import {
@@ -8,12 +8,9 @@ import {
 } from '../../../components/conversation-runtime/scroll/scroll-anchor.js';
 import { writeRefCurrent } from '../../../utils/ref/ref-current.js';
 
-const LOAD_MORE_MESSAGE_INCREMENT = 20;
+import type { LoadEarlierHistory } from '../conversation/snapshot/session-history-pager.js';
 
-type LoadSessionSnapshot = (
-  sessionId: string,
-  options?: { messageLimit?: number; replaceMessages?: boolean },
-) => Promise<unknown>;
+const LOAD_MORE_MESSAGE_INCREMENT = 20;
 
 type UseHistoryScrollAnchorDeps = {
   readonly armHistoryAnchor: () => void;
@@ -25,13 +22,12 @@ type UseHistoryScrollAnchorDeps = {
   readonly lastAnchorMessageIdRef: MutableRefObject<string | null>;
   /** 写入「锚点时刻的可见消息 id」；由父组件回调完成写入，避免改 hook 参数。 */
   readonly setLastAnchorMessageId: (id: string | null) => void;
-  readonly loadCurrentSessionSnapshot: LoadSessionSnapshot;
+  readonly loadEarlierHistory: LoadEarlierHistory;
   readonly pendingHistoryAnchor: ScrollAnchorSnapshot | null;
   readonly sanitizedHistoricalMessagesLength: number;
   readonly scrollRegionRef: RefObject<HTMLDivElement | null>;
   readonly setPendingHistoryAnchor: (value: ScrollAnchorSnapshot | null) => void;
   readonly setPendingMessageScroll: (value: null) => void;
-  readonly setServerTotalTurnCount: (value: number | null) => void;
   readonly setVisibleMessageCount: Dispatch<SetStateAction<number>>;
   readonly visibleMessageCount: number | undefined;
 };
@@ -51,13 +47,12 @@ export function useHistoryScrollAnchor(deps: UseHistoryScrollAnchorDeps) {
     historyAnchorRestoreCancelRef,
     lastAnchorMessageIdRef,
     setLastAnchorMessageId,
-    loadCurrentSessionSnapshot,
+    loadEarlierHistory,
     pendingHistoryAnchor,
     sanitizedHistoricalMessagesLength,
     scrollRegionRef,
     setPendingHistoryAnchor,
     setPendingMessageScroll,
-    setServerTotalTurnCount,
     setVisibleMessageCount,
     visibleMessageCount,
   } = deps;
@@ -98,11 +93,12 @@ export function useHistoryScrollAnchor(deps: UseHistoryScrollAnchorDeps) {
     writeRefCurrent(armHistoryAnchorImplRef, armHistoryAnchorImpl);
   }, [armHistoryAnchorImpl, armHistoryAnchorImplRef]);
 
-  /**
-   * 加载更多历史消息（手动「加载更早」按钮与上滑 onNearTop 共用）：
-   * 本地窗口还有隐藏消息时直接扩窗口，否则拉一次服务端快照。
-   * 两条路径都会往渲染列表头部插入旧消息，因此先武装滚动锚点。
-   */
+  const loadingRef = useRef<Promise<unknown> | null>(null);
+  useEffect(() => {
+    loadingRef.current = null;
+  }, [currentSessionId]);
+
+  /** 加载本地隐藏消息或下一页历史，并保持阅读位置。 */
   const handleLoadEarlierMessages = useCallback((): void => {
     const localHidden =
       sanitizedHistoricalMessagesLength -
@@ -112,22 +108,24 @@ export function useHistoryScrollAnchor(deps: UseHistoryScrollAnchorDeps) {
       setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
       return;
     }
-    if (!currentSessionId) return;
+    if (!currentSessionId || loadingRef.current !== null) return;
     armHistoryAnchor();
-    void loadCurrentSessionSnapshot(currentSessionId, {
-      replaceMessages: true,
-    })
-      .then(() => {
-        setServerTotalTurnCount(null);
+    const request = loadEarlierHistory();
+    loadingRef.current = request;
+    void request
+      .then((result) => {
+        if (result === null || loadingRef.current !== request) return;
         setVisibleMessageCount((prev) => prev + LOAD_MORE_MESSAGE_INCREMENT);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (loadingRef.current === request) loadingRef.current = null;
+      });
   }, [
     armHistoryAnchor,
     currentSessionId,
-    loadCurrentSessionSnapshot,
+    loadEarlierHistory,
     sanitizedHistoricalMessagesLength,
-    setServerTotalTurnCount,
     setVisibleMessageCount,
     visibleMessageCount,
   ]);

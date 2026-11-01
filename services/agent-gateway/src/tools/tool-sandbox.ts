@@ -1092,6 +1092,9 @@ export class ToolSandbox {
           path: effectiveFilePath,
           sessionId,
           allowSkillResourceRead: READ_ONLY_WORKSPACE_TOOLS.has(effectiveRequest.toolName),
+          // 读写分离：渠道成员的「读 Home / 可读前缀」只对只读工具生效，
+          // `allowWriteOutside` 只对写工具生效。
+          access: READ_ONLY_WORKSPACE_TOOLS.has(effectiveRequest.toolName) ? 'read' : 'write',
         });
         if (!validation.ok) {
           const result: ToolCallResult = {

@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import '../message/chat-message.css';
 import './ChatPageSections.css';
 import type { AlwaysScopeLevel, GenerativeUIMessage } from '@openAwork/shared-ui';
 import type { InputImageContent } from '@openAwork/shared';
 import { GenerativeUIRenderer, isSubagentToolName } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
+import { useRunAcceptedStore } from '../../../stores/chat/run-accepted.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import { mergeReasoningDisplayBlocks } from '@openAwork/shared';
 import { renderMediaContent } from '../media/media-renderer.js';
@@ -1251,15 +1252,66 @@ function AssistantRichContentBody({
   );
 }
 
+/**
+ * 气泡出现多久之后补上「已等待 N 秒」锚点。
+ *
+ * 阈值取得比网关「取锁 → 落用户消息 → 调上游」的常规耗时略长，避免短请求闪一下
+ * 数字又消失；超过它说明这轮确实在等（构建系统提示词 / 工具面、拉起 MCP、上游首
+ * token），此时时间锚点能帮用户区分「慢」和「卡死」。
+ */
+const PENDING_BUBBLE_ELAPSED_HINT_MS = 3_000;
+
+/** 把等待毫秒格式化为中文时长（不足 1 分钟只报秒，避免「0 分 07 秒」这种读数）。 */
+function formatPendingWaitLabel(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds} 秒`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds === 0 ? `${minutes} 分钟` : `${minutes} 分 ${seconds} 秒`;
+}
+
+/**
+ * 首 token 到达前的占位气泡——用户按下发送后看到的**第一条**助手侧反馈。
+ *
+ * 语义必须明确表达「消息已被接收」，因此文案是「已收到你的消息，正在处理」而不是
+ * 含义模糊的「正在对话」：复杂任务下这一段可能长达数十秒（网关要构建系统提示词与
+ * 工具面、拉起 MCP、再由上游产出首 token），用户需要先能确认「发出去了」，再能判断
+ * 「还在动」。
+ *
+ * 计时起点即组件挂载时刻，等价于本轮请求发出（气泡只在首 token 之前存在，挂载与
+ * 发送同帧发生，见 `startStandardChatStream`）。气泡自带的「停止生成」操作不受影响。
+ */
 function AssistantPendingBubble() {
   const prefersReducedMotion = usePrefersReducedMotion();
+  // 服务端受理凭据（`run_accepted` 流事件）。只判断「有没有」，不比较时间戳：每轮开始
+  // 由 `startStandardChatStream` 复位，因此 null 就等价于「本轮还没被受理」，浏览器与
+  // 服务端的时钟偏差也不会影响判定。
+  const serverAcceptedAt = useRunAcceptedStore((state) => state.acceptedAt);
+  const [startedAt] = useState(() => Date.now());
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  useEffect(() => {
+    const tick = () => setElapsedMs(Date.now() - startedAt);
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+
+  const showElapsedHint = elapsedMs >= PENDING_BUBBLE_ELAPSED_HINT_MS;
 
   return (
     <div
       data-testid="chat-streaming-placeholder"
+      // 屏幕阅读器在气泡出现时播报一次「已收到你的消息，正在处理」；走动的秒数
+      // 标记为 aria-hidden，否则每秒都会触发一次播报。
+      role="status"
+      aria-live="polite"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
+        flexWrap: 'wrap',
         gap: 8,
         minHeight: 26,
         color: 'var(--fg-default)',
@@ -1274,7 +1326,9 @@ function AssistantPendingBubble() {
           color: 'var(--fg-strong)',
         }}
       >
-        正在对话
+        {serverAcceptedAt === null
+          ? '消息已发送，正在等待服务端接收'
+          : '服务端已接收，正在准备上下文与工具'}
       </span>
       <span
         aria-hidden="true"
@@ -1299,6 +1353,19 @@ function AssistantPendingBubble() {
           />
         ))}
       </span>
+      {showElapsedHint ? (
+        <span
+          aria-hidden="true"
+          style={{
+            fontSize: 11.5,
+            color: 'var(--fg-muted)',
+            // 等宽数字：秒数每秒跳动时不让气泡左右抖动。
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          已等待 {formatPendingWaitLabel(elapsedMs)}
+        </span>
+      ) : null}
     </div>
   );
 }

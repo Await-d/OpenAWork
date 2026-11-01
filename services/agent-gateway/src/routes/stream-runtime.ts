@@ -1035,6 +1035,9 @@ async function continueFromApprovedToolResult(input: {
       execution,
       sessionId: input.sessionId,
     });
+    void import('../handoff/workflow/inbound-delivery-dispatcher.js')
+      .then(({ dispatchInboundDeliveries }) => dispatchInboundDeliveries({ sessionId: input.sessionId }))
+      .catch((error) => logGatewayWarn(`[team-inbound] idle wake failed: ${String(error)}`));
   }
 }
 
@@ -1366,17 +1369,15 @@ export async function runSessionInBackground(input: {
     if (result.stopReason !== 'tool_permission') {
       clearInternalTeamResumeRequest(requestData.clientRequestId);
     }
-    // 防御性补全：handleStreamRequest 的某些 early-return 路径（如模型绑定不可用、
-    // replay 命中、SESSION_ALREADY_RUNNING）返回不含 stopReason 的结果。
-    // 这会导致 runExecutionLayer 无法正确判断失败原因，报"stopReason=undefined"。
-    // 这里统一补全：无 stopReason 的结果视为 error。
+    // replay 命中会返回其真实 stopReason（包括权限暂停），不可仅凭 HTTP 200 判成功。
+    // 其余缺少 stopReason 的 early-return（如模型绑定不可用、会话冲突）仍视为 error。
     if (!result.stopReason) {
       return {
         ...result,
         stopReason: 'error' as const,
         errorSummary:
           result.errorSummary ??
-          `stream 执行未正常结束（statusCode=${result.statusCode}，无 stopReason），可能模型路由解析失败、replay 命中或 session 冲突`,
+          `stream 执行未正常结束（statusCode=${result.statusCode}，无 stopReason），可能模型路由解析失败或 session 冲突`,
       };
     }
     return result;

@@ -40,6 +40,11 @@ import { listSessionMessagesV2 } from '../../message/message-v2-adapter.js';
 import { extractLatestChildSessionSummary } from '../../task/task-result-extraction.js';
 import { sqliteGet } from '../../infra/db.js';
 import { logGatewayWarn } from '../../infra/gateway-logger.js';
+import {
+  executionAttemptRequestId,
+  executionVerificationCoverage,
+} from '../capability/execution-verification.js';
+import { inputImageContentSchema } from '../../message/input-image-content.js';
 
 /**
  * 创建一个 task runner，根据 toRoleLayer 分发。
@@ -134,8 +139,8 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
           '2. 使用 write/submit_patch/edit 产出实际文件；不要只回复文字描述。',
           '3. 结束前必须调用 submit_execution_result 提交结果；优先使用结构化字段：',
           '   - taskId / status / changedFiles',
-          '   - checklist: [{ id, status: pass|fail|blocked, evidence }]',
-          '   - summary / verification',
+          '   - checklist: [{ id, status: pass|fail|blocked, evidence, verificationRefs?: [{terminalId, command}] }]',
+          '   - summary / verification；仅摘要不能完成，至少提供一项当前任务实际检查凭证。bash用返回的terminalId和完整command；派发为docs的任务可引用本轮read的toolCallId和path（成功且未截断），不必执行shell。后台须真正退出0。verified仅代表执行事实由服务器核验，不能自填；不能以echo冒充测试。',
           '   - 如果无法完整填写，至少提供 summary 或 content 的简要总结，系统会从当前任务归一化后交给校验层检查。',
           '4.【自验证】checklist 覆盖任务验收条件；未覆盖标 fail/blocked，不要假 pass。',
           '5. 只 mark_completed 或只写文字不算完成；hard 模式下缺少 submit_execution_result 会 protocol-failure。',
@@ -170,14 +175,15 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
   // 从 DB 读取 handoff 的 retry_count，用于生成唯一的 clientRequestId。
   // 如果 handoff 被 recoveryTick reclaim 后重新执行，retry_count 会递增，
   // 确保每次执行用不同的 clientRequestId，避免触发 replay。
-  const handoffRetryRow = sqliteGet<{ retry_count: number }>(
-    `SELECT retry_count FROM handoff_records WHERE id = ? LIMIT 1`,
+  const handoffRetryRow = sqliteGet<{ retry_count: number; failed_retry_count: number }>(
+    `SELECT retry_count, failed_retry_count FROM handoff_records WHERE id = ? LIMIT 1`,
     [input.handoff.id],
   );
   const handoffRetryCount = handoffRetryRow?.retry_count ?? 0;
-  const streamClientRequestId = createHandoffStreamClientRequestId(
+  const streamClientRequestId = executionAttemptRequestId(
     input.handoff.id,
     handoffRetryCount,
+    handoffRetryRow?.failed_retry_count ?? 0,
   );
 
   // 解析 team root session id，让 stream 管线自动注入 resume context。
@@ -459,6 +465,18 @@ async function runExecutionLayer(input: Parameters<HandoffTaskRunner>[0]): Promi
     );
   }
 
+  if (role === 'executor') {
+    const coverage = executionVerificationCoverage(
+      { userId: input.handoff.userId, sessionId: input.toSessionId, handoffId: input.handoff.id },
+      completionEvidence.resultJson,
+    );
+    if (coverage.verified === 0) {
+      throw new Error(
+        `executor 层缺少可核验执行证据（${coverage.verified}/${coverage.total}），不得仅凭摘要标记完成`,
+      );
+    }
+  }
+
   // 设置完成 substate
   setSubstate({
     sessionId: input.toSessionId,
@@ -621,15 +639,6 @@ function collectExecutionCompletionEvidence(input: {
   };
 }
 
-function createHandoffStreamClientRequestId(handoffId: string, retryCount?: number): string {
-  // 加入 retryCount 避免 handoff 被 recoveryTick reclaim 后重新执行时
-  // 触发 replay（同一 clientRequestId 会命中 replayPersistedAssistantResponse，
-  // 返回 { statusCode: 200 } 无 stopReason，导致 executor 判定为失败）。
-  return retryCount && retryCount > 0
-    ? `handoff:${handoffId}:r${retryCount}`
-    : `handoff:${handoffId}`;
-}
-
 function taskStatusLabel(status: string): string {
   switch (status) {
     case 'running':
@@ -657,6 +666,10 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
         : '未提供意图';
   const sourceIntent =
     typeof payload?.['sourceIntent'] === 'string' ? payload['sourceIntent'] : rewrittenIntent;
+  const inputParts =
+    payload?.['inputParts'] === undefined
+      ? undefined
+      : inputImageContentSchema.array().max(20).parse(payload['inputParts']);
   const teamWorkspaceId =
     typeof payload?.['teamWorkspaceId'] === 'string' ? payload['teamWorkspaceId'] : null;
   const isResume = payload?.['isResume'] === true;
@@ -913,6 +926,7 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
       ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
       system: systemWithKnowledge,
       prompt: userMessage,
+      ...(inputParts?.length ? { inputParts } : {}),
       temperature: 0.3,
       signal: input.signal,
       usageContext: {

@@ -14,6 +14,8 @@ import {
 } from '../gateway/http.js';
 
 export interface GitHubTrigger {
+  /** 该仓库事件绑定的托管 Agent（未配置时不带该键）。 */
+  agentId?: string;
   events: string[];
   repo: string;
 }
@@ -21,6 +23,13 @@ export interface GitHubTrigger {
 export interface CreateGitHubTriggerInput {
   events: string[];
   repoFullNameOwnerSlashRepo: string;
+  /**
+   * 该仓库事件由哪个托管 Agent 执行（可选）。
+   *
+   * 写入事件会话的 `metadata.agentId`，让 GitHub 事件会话拿到角色提示词；
+   * 留空（或空串）表示不绑定。
+   */
+  agentId?: string;
 }
 
 export interface GitHubClient {

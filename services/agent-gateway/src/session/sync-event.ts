@@ -8,7 +8,7 @@
  * - Idempotent: duplicate event IDs are ignored
  */
 
-import { sqliteGet, sqliteRun, sqliteTransaction, sqliteAll } from '../infra/db.js';
+import { sqliteGet, sqliteRun, sqliteTransaction, sqliteAll, sqliteAfterCommit } from '../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';
@@ -279,7 +279,7 @@ export function emitEvent<T>(input: {
 
   // BusEvent: broadcast to in-process subscribers (outside transaction)
   // This enables real-time SSE push for PartDelta, PartUpdated, etc.
-  publishBusEvent(input.definition.type, input.data);
+  sqliteAfterCommit(() => publishBusEvent(input.definition.type, input.data));
 
   return event;
 }

@@ -149,4 +149,35 @@ describe('schedule-validation', () => {
       ).toEqual([]);
     }
   });
+
+  /**
+   * 渠道任务的结果由执行期的 `PluginSendMessage` 直接回发渠道，不存在「会话」
+   * 这个目的地。放行 `session` 组合会让任务到点必然踩坑：target 填 chatId 时
+   * 执行前就报「会话不存在」，不填时执行成功又被判「投递失败」记成 failed。
+   */
+  it('渠道任务不允许投递到会话', () => {
+    const channel = {
+      pluginId: 'plugin-1',
+      pluginChatId: 'c2c:chat-1',
+      deliveryMode: 'session' as const,
+    };
+    const withTarget = collectScheduleIssues(base({ ...channel, deliveryTarget: 'c2c:chat-1' }));
+    expect(withTarget).toHaveLength(1);
+    expect(withTarget[0]).toContain('渠道任务不支持');
+
+    const withoutTarget = collectScheduleIssues(
+      base({ ...channel, deliveryTarget: null, sessionId: null }),
+    );
+    expect(withoutTarget).toHaveLength(1);
+    expect(withoutTarget[0]).toContain('渠道任务不支持');
+
+    // 渠道任务的正确写法：none（结果走渠道回发）。
+    expect(collectScheduleIssues(base({ ...channel, deliveryMode: 'none' }))).toEqual([]);
+    // 只带 plugin_id 而没有 chat 的「半绑定」不算渠道任务，仍按普通任务校验。
+    expect(
+      collectScheduleIssues(
+        base({ pluginId: 'plugin-1', pluginChatId: null, deliveryMode: 'session' }),
+      ),
+    ).toHaveLength(1);
+  });
 });

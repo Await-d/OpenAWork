@@ -23,7 +23,7 @@
  *    可观测性 / 埋点；不参与业务分支（team 接入应由父级控制 props）。
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type {
   CommandDescriptor,
@@ -54,6 +54,8 @@ import type {
   UnifiedComposerSubmitPayload,
 } from '../../../components/chat/composer/UnifiedComposer.js';
 import type { MentionFileSearchFn } from '../../../components/chat/composer/use-mention-file-search.js';
+import type { QueuedComposerPreview } from './composer/queued-composer-state.js';
+import { QueuedSendBubbles } from './composer/queued-send-bubbles.js';
 import type { ComposerPermissionMode } from '../../../components/chat/composer/ComposerPermissionModeSelect.js';
 import type { WorkspaceFileMentionItem } from '../../../components/conversation-runtime/messages/support.js';
 import type { ComposerStatsData } from '../../../components/chat/composer/ComposerStatsBar.js';
@@ -475,6 +477,9 @@ function buildComposerFeatures(
 
 // ─── 主组件 ────────────────────────────────────────────────────────────────
 
+/** 稳定的空数组：无待发队列时复用同一引用，避免把下游的 memo 全部打穿。 */
+const EMPTY_QUEUED_PREVIEWS: QueuedComposerPreview[] = [];
+
 export function ChatConversationView(props: ChatConversationViewProps): React.ReactElement {
   const {
     sessionId,
@@ -654,6 +659,29 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
       setHandoffFadeActive(true);
     }
   }, [showSessionSwitchSkeleton]);
+
+  // 待发队列由 composer 上报（它才是队列状态的持有者，见 `UnifiedComposer` 的
+  // `onQueuedMessagesChange`）。本组件只负责把它渲染到消息流末尾。
+  const [queuedSendState, setQueuedSendState] = useState<{
+    sessionId: string | null;
+    items: QueuedComposerPreview[];
+  }>({ sessionId: null, items: EMPTY_QUEUED_PREVIEWS });
+  const handleQueuedMessagesChange = useCallback(
+    (items: QueuedComposerPreview[]) => {
+      // 引用相等即视为无变化：本回调挂在 `useEffect` 依赖上，若每次都写入新对象，
+      // 会「上报 → 重渲染 → 再上报」自激。
+      setQueuedSendState((previous) =>
+        previous.sessionId === sessionId && previous.items === items
+          ? previous
+          : { sessionId, items },
+      );
+    },
+    [sessionId],
+  );
+  // 会话切换后、新会话的 composer 完成首次上报之前，旧会话的队列不得继续挂在新会话
+  // 的消息流末尾——那会让用户以为消息排到了别人的会话里。
+  const visibleQueuedSendPreviews =
+    queuedSendState.sessionId === sessionId ? queuedSendState.items : EMPTY_QUEUED_PREVIEWS;
 
   const groupsWithHistoryEdit = useMemo(() => {
     if (!historyEditPrompt) return groupedMessageEntries;
@@ -853,6 +881,11 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
                     scrollRegionRef={scrollRegionRef}
                     pendingMessageScroll={pendingMessageScroll}
                     {...(onOpenSubagentChild ? { onOpenSubagentChild } : {})}
+                    trailingContent={
+                      visibleQueuedSendPreviews.length > 0 ? (
+                        <QueuedSendBubbles items={visibleQueuedSendPreviews} />
+                      ) : undefined
+                    }
                   />
                 </>
               ) : (
@@ -1022,6 +1055,7 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
           onNavigateToArtifacts={onNavigateToArtifacts}
           onSelectImageReferenceArtifactId={onSelectImageReferenceArtifactId}
           onCompanionActivityChange={onCompanionActivityChange}
+          onQueuedMessagesChange={handleQueuedMessagesChange}
           markSessionMetadataDirty={markSessionMetadataDirty}
           statsData={statsData}
           placeholder={composerPlaceholder}

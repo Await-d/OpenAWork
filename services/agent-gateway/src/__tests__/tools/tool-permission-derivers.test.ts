@@ -280,33 +280,25 @@ describe('tool permission derivers · memory_manage', () => {
     expect(buildToolPermissionRequestContext(ctx('memory_manage', { action: 'list' }))).toBeNull();
   });
 
-  it('add：scope=add:new，always 按动作隔离，预览展示 key/type/value 片段', () => {
-    const out = buildToolPermissionRequestContext(
-      ctx('memory_manage', {
-        action: 'add',
-        memory: { type: 'preference', key: 'editor', value: '偏好 Vim 键位' },
-      }),
-    );
-    expect(out).toMatchObject({ scope: 'add:new', riskLevel: 'high', always: ['add:*'] });
-    expect(out?.previewAction).toContain('editor');
-    expect(out?.previewAction).toContain('preference');
-    expect(out?.previewAction).toContain('偏好 Vim 键位');
-  });
-
-  it('update / delete：scope 精确到 memoryId', () => {
+  // 261101：工具已只读化 + 提议化——add/update/delete 只创建待确认提议，不再直接改
+  // 数据；真正的写入门在确认路由。因此工具层对所有 action 一律免审批（返回 null）。
+  it('add / update / delete 变更动作也免审批（返回 null）', () => {
+    expect(
+      buildToolPermissionRequestContext(
+        ctx('memory_manage', {
+          action: 'add',
+          memory: { type: 'preference', key: 'editor', value: '偏好 Vim 键位' },
+        }),
+      ),
+    ).toBeNull();
     expect(
       buildToolPermissionRequestContext(
         ctx('memory_manage', { action: 'update', memoryId: 'm-1', memory: { value: 'x' } }),
       ),
-    ).toMatchObject({ scope: 'update:m-1', always: ['update:*'] });
+    ).toBeNull();
     expect(
-      buildToolPermissionRequestContext(
-        ctx('memory_manage', { action: 'delete', memoryId: 'm-2' }),
-      ),
-    ).toMatchObject({ scope: 'delete:m-2', always: ['delete:*'] });
-    expect(
-      buildToolPermissionRequestContext(ctx('memory_manage', { action: 'delete' }))?.previewAction,
-    ).toContain('删除记忆');
+      buildToolPermissionRequestContext(ctx('memory_manage', { action: 'delete', memoryId: 'm-2' })),
+    ).toBeNull();
   });
 });
 

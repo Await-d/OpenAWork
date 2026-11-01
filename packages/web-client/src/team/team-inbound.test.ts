@@ -11,6 +11,28 @@ afterEach(() => {
 });
 
 describe('createTeamInboundClient', () => {
+  it('图片载荷完整进入 HTTP body', async () => {
+    const request = {
+      messageType: 'user_input' as const,
+      payload: {
+        text: '',
+        inputParts: [
+          { type: 'input_image' as const, artifactId: 'image-owned', fileName: 'layout.png' },
+        ],
+      },
+    };
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body))).toEqual(request);
+      return new Response(
+        JSON.stringify({ messageId: 'image-inbound', createdAt: '2026-10-29T00:00:00Z' }),
+        { status: 201 },
+      );
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    await createTeamInboundClient('https://gateway.test').submit('token', 'session', request);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('submit 成功时返回 messageId 和 createdAt', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

@@ -97,8 +97,10 @@ export function startEventLoopLagMonitor(
     log.warn(
       { lagMs, thresholdMs },
       `[event-loop-lag] 事件循环被阻塞 ${lagMs}ms（阈值 ${thresholdMs}ms）。` +
-        '此时 SQLite 写事务在争用写锁，SSE 心跳 /status 等请求会一起排队——' +
-        '若伴随 attach 断线或首 token 变慢，优先排查写事务数量。',
+        '阻塞期间网关不处理任何请求（SSE 心跳、/status、首 token 一起排队）。' +
+        '常见原因都是**同步**操作：SQLite 慢语句（含 WAL checkpoint 与批量清理）。' +
+        '同期若出现 [sqlite] 慢语句 日志，直接按它给出的语句排查；' +
+        '没有则说明阻塞不在 SQL 层（同步文件 IO / 大 JSON 解析）。',
     );
   }, PROBE_INTERVAL_MS);
 

@@ -49,6 +49,31 @@ const BASE_INPUT = {
 } as const;
 
 describe('requestWorkflowLlmCompletion — wall-clock timeout', () => {
+  it('规划重试中图片实际进入上游media消息', async () => {
+    const { requestPlanningCompletion } =
+      await import('../../handoff/runner/planning-completion.js');
+    const imageUrl = 'data:image/png;base64,aW1hZ2U=';
+    mocks.runUpstreamGenerate
+      .mockReturnValueOnce(Effect.succeed({ text: '', finishReason: 'length', outputTokens: 8192 }))
+      .mockReturnValueOnce(
+        Effect.succeed({ text: '完整规划', finishReason: 'stop', outputTokens: 100 }),
+      );
+    await expect(
+      requestPlanningCompletion({ ...BASE_INPUT, inputParts: [{ type: 'input_image', imageUrl }] }),
+    ).resolves.toBe('完整规划');
+    for (const [arg] of mocks.runUpstreamGenerate.mock.calls) {
+      expect(arg.messages).toEqual([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'hi' },
+            { type: 'media', mediaType: 'image/png', data: imageUrl },
+          ],
+        },
+      ]);
+    }
+  });
+
   it('默认工作流 LLM 截止时间覆盖长时上游响应', () => {
     expect(DEFAULT_WORKFLOW_LLM_TIMEOUT_MS).toBe(1_800_000);
   });

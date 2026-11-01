@@ -77,7 +77,7 @@ export interface ProviderOptionsModelInfo {
   };
 }
 
-const ANTHROPIC_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+export const ANTHROPIC_THINKING_BUDGETS: Record<ReasoningEffort, number> = {
   none: 0,
   minimal: 1024,
   low: 4096,
@@ -336,11 +336,7 @@ export function clampReasoningEffortForModel(
 ): ReasoningEffort {
   const id = modelId.toLowerCase();
   const normalized = normalizeProviderReasoningEffort(requested);
-  const declaredEfforts = reasoningOptions?.find((option) => option.type === 'effort')?.values;
-  const supported =
-    declaredEfforts?.filter(isReasoningEffort) ??
-    (reasoningOptions === undefined ? resolveCatalogReasoningEfforts(id) : undefined) ??
-    gpt5SupportedEfforts(id);
+  const supported = resolveSupportedReasoningEfforts(id, reasoningOptions);
   if (!supported || supported.length === 0) return normalized;
   if (supported.includes(normalized)) return normalized;
   const targetRank = EFFORT_RANK[normalized];
@@ -350,6 +346,18 @@ export function clampReasoningEffortForModel(
   }
   // Requested is below every supported tier — return the smallest supported.
   return sortedDesc[sortedDesc.length - 1] as ReasoningEffort;
+}
+
+function resolveSupportedReasoningEfforts(
+  modelId: string,
+  reasoningOptions?: readonly ModelReasoningOption[],
+): readonly ReasoningEffort[] | undefined {
+  const declaredEfforts = reasoningOptions?.find((option) => option.type === 'effort')?.values;
+  return (
+    declaredEfforts?.filter(isReasoningEffort) ??
+    (reasoningOptions === undefined ? resolveCatalogReasoningEfforts(modelId) : undefined) ??
+    gpt5SupportedEfforts(modelId)
+  );
 }
 
 function isReasoningEffort(value: string): value is ReasoningEffort {
@@ -365,6 +373,18 @@ function isReasoningEffort(value: string): value is ReasoningEffort {
     default:
       return false;
   }
+}
+
+/**
+ * 旧版 `reasoningEffort` → `budgetTokens` 的兜底映射（Anthropic 表）。
+ *
+ * 仅 `anthropic_budget` 风格真正消费这个数值；其余风格会在
+ * {@link buildProviderOptions} 内部按自身厂商的表重新推导预算，这里的值不参与
+ * 下发。集中在本模块是为了避免调用方再复制一份预算表。
+ */
+export function anthropicThinkingBudgetForEffort(effort: string | undefined): number {
+  const normalized = effort !== undefined && isReasoningEffort(effort) ? effort : 'medium';
+  return ANTHROPIC_THINKING_BUDGETS[normalized];
 }
 
 function resolveCatalogReasoningEfforts(modelId: string): ReasoningEffort[] | undefined {
@@ -730,12 +750,16 @@ export function buildProviderOptions(input: {
     }
 
     case 'openai_effort': {
-      if (thinkingConfig.type === 'disabled') {
+      const disabled = thinkingConfig.type === 'disabled';
+      if (
+        disabled &&
+        !resolveSupportedReasoningEfforts(model, input.reasoningOptions)?.includes('none')
+      ) {
         return undefined;
       }
-      // 从 ThinkingConfig 推断 effort（adaptive 模式使用 medium 作为默认）
-      const effort: ReasoningEffort =
-        thinkingConfig.type === 'adaptive'
+      const effort: ReasoningEffort = disabled
+        ? 'none'
+        : thinkingConfig.type === 'adaptive'
           ? 'medium'
           : isExtendedConfig && thinking.effort
             ? thinking.effort

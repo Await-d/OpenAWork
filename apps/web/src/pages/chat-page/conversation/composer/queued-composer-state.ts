@@ -28,9 +28,19 @@ export interface QueuedComposerMessage {
 }
 
 export interface QueuedComposerPreview {
+  /** 附件数量，供对话流内的待发气泡单独展示（`label` 把它揉进了摘要文本）。 */
+  attachmentCount: number;
   id: string;
   label: string;
   requiresAttachmentRebind: boolean;
+  /**
+   * 完整原文（未截断、未折叠空白）。
+   *
+   * `label` 是给 composer 排队 chip 用的 42 字摘要，而对话流里的待发气泡与真正的
+   * 用户气泡同处一条时间轴，必须显示全文，否则同一条消息在「待发」与「已发送」两个
+   * 阶段显示的文本不一致，用户会以为内容被改过。
+   */
+  text: string;
   title: string;
 }
 
@@ -69,9 +79,11 @@ export function createQueuedComposerPreview(
   });
 
   return {
+    attachmentCount: item.attachmentItems.length,
     id: item.id,
     label: summary.label,
     requiresAttachmentRebind: item.requiresAttachmentRebind,
+    text: item.text,
     title: summary.title,
   };
 }

@@ -7,6 +7,58 @@ import {
 } from '../../handoff/runner/reception-router.js';
 
 describe('reception-router', () => {
+  // T-14：深度字段只增不改判定——只读/前台直答恒 L0，orchestrate 由改动面判据给出
+  describe('orchestrationDepth', () => {
+    it.each([
+      ['实现这个按钮的文案调整', 'L1'],
+      ['配置这个卡片的间距和颜色', 'L1'],
+      ['新增一个订单接口并让前端页面调用', 'L2'],
+      ['实现购物车页面的增减与结算功能', 'L2'],
+      ['修改数据库迁移脚本', 'L3'],
+      ['配置权限校验逻辑', 'L3'],
+      ['跨包重构共享工具库', 'L3'],
+    ])('orchestrate 输入 %j 判为 %s', (intent, depth) => {
+      const result = routeByRules(intent);
+      expect(result?.decision).toBe('orchestrate');
+      expect(result?.orchestrationDepth).toBe(depth);
+    });
+
+    it.each(['你好', '什么是 OAuth 2.0', '了解一下当前项目'])(
+      '只读或前台直答 %j 恒为 L0',
+      (intent) => {
+        const result = routeByRules(intent);
+        expect(['direct', 'light']).toContain(result?.decision);
+        expect(result?.orchestrationDepth).toBe('L0');
+      },
+    );
+
+    it('规则不确定时保持待定，不猜测深度', () => {
+      const result = routeByRules('帮我搞一下那个东西');
+      expect(result?.orchestrationDepth).toBeUndefined();
+    });
+
+    it('模型路径解析 DEPTH 行并忽略非法值', async () => {
+      const withDepth = await routeByLlm('帮我搞一下那个东西', async () => {
+        return 'DECISION: ORCHESTRATE\nREASON: 需要改动\nDEPTH: L3';
+      });
+      expect(withDepth).toMatchObject({ decision: 'orchestrate', orchestrationDepth: 'L3' });
+
+      const withoutDepth = await routeByLlm('帮我搞一下那个东西', async () => {
+        return 'DECISION: ORCHESTRATE\nREASON: 需要改动\nDEPTH: unknown';
+      });
+      expect(withoutDepth.decision).toBe('orchestrate');
+      expect(withoutDepth.orchestrationDepth).toBeUndefined();
+    });
+
+    it('模型超时降级时，明确只读仍带 L0', async () => {
+      const result = await routeByLlm('看看这个文件', async () => {
+        throw new Error('timeout');
+      });
+      expect(result.decision).toBe('light');
+      expect(result.orchestrationDepth).toBe('L0');
+    });
+  });
+
   describe('routeByRules', () => {
     it('仅对问候、致谢、简短确认保留 direct', () => {
       expect(routeByRules('你好')).toMatchObject({

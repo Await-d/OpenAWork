@@ -41,6 +41,11 @@ import { getCodeFenceText as getCopyableCodeText } from './code-fence-text.js';
 import { useFoldDisabled, useMessageFoldActive } from './fold-policy.js';
 import { isFullHtmlDocument } from './markdown-html-document.js';
 import {
+  codePreviewText,
+  MAX_CODE_PREVIEW_CHARS,
+  rehypeCodeHighlightBudget,
+} from './code-render-budget.js';
+import {
   computeReasoningBodyMaxHeight,
   REASONING_COLLAPSED_MAX_LINES,
   REASONING_EXPANDED_MAX_HEIGHT,
@@ -81,6 +86,7 @@ const REMARK_PLUGINS: MarkdownRemarkPlugins = [remarkGfm, remarkMath];
  */
 const REHYPE_PLUGINS: MarkdownRehypePlugins = [
   [rehypeKatex, REHYPE_KATEX_OPTIONS],
+  rehypeCodeHighlightBudget,
   rehypeHighlight,
 ];
 /**
@@ -554,14 +560,15 @@ function CodeBlock({
 
   const text = useMemo(() => getCopyableCodeText(codeContent), [codeContent]);
   const lineCount = useMemo(() => (text === '' ? 0 : text.split('\n').length), [text]);
-  const lineNumbers = useMemo(
-    () =>
-      lineCount === 0 ? '' : Array.from({ length: lineCount }, (_, i) => String(i + 1)).join('\n'),
-    [lineCount],
-  );
-
-  const isCollapsible = lineCount > CODE_BLOCK_FOLD_THRESHOLD;
+  const isCollapsible =
+    lineCount > CODE_BLOCK_FOLD_THRESHOLD || text.length > MAX_CODE_PREVIEW_CHARS;
   const collapsed = isCollapsible && !expanded && !foldDisabled;
+  const visibleCode = collapsed ? codePreviewText(text) : codeContent;
+  const visibleLineCount = collapsed ? codePreviewText(text).split('\n').length : lineCount;
+  const lineNumbers = useMemo(
+    () => Array.from({ length: visibleLineCount }, (_, i) => String(i + 1)).join('\n'),
+    [visibleLineCount],
+  );
 
   const handleCopy = useCallback(() => {
     const writeText = navigator.clipboard?.writeText;
@@ -609,11 +616,11 @@ function CodeBlock({
         )}
         <pre className="chat-markdown-pre">
           <code className={className} {...codeProps}>
-            {codeContent}
+            {visibleCode}
           </code>
         </pre>
       </div>
-      {isCollapsible && !foldDisabled && !expanded && (
+      {collapsed && (
         <button
           type="button"
           data-testid="chat-markdown-code-expand"
@@ -1006,6 +1013,7 @@ function MarkdownPreviewCodeBlock({
   const copyableCode = getCopyableCodeText(codeContent).replace(/\n$/, '');
   const isLong = copyableCode.length > 400 || copyableCode.split('\n').length > 15;
   const shouldCollapse = isLong && !expanded && !foldDisabled;
+  const previewSource = shouldCollapse ? codePreviewText(copyableCode) : copyableCode;
 
   return (
     <div
@@ -1082,13 +1090,13 @@ function MarkdownPreviewCodeBlock({
           >
             <div className="chat-markdown">
               <NestedMarkdownScope>
-                <MarkdownImageProvider urls={extractMarkdownImageUrls(copyableCode)}>
+                <MarkdownImageProvider urls={extractMarkdownImageUrls(previewSource)}>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeHighlight]}
+                    rehypePlugins={[rehypeCodeHighlightBudget, rehypeHighlight]}
                     components={noMarkdownPreviewComponents}
                   >
-                    {copyableCode}
+                    {previewSource}
                   </ReactMarkdown>
                 </MarkdownImageProvider>
               </NestedMarkdownScope>
@@ -1124,11 +1132,12 @@ function MarkdownPreviewCodeBlock({
           )}
         </div>
       ) : (
-        <pre className="chat-markdown-pre">
-          <code className={className} {...codeProps}>
-            {codeContent}
-          </code>
-        </pre>
+        <CodeBlock
+          codeContent={codeContent}
+          codeProps={codeProps}
+          className={className}
+          language={language}
+        />
       )}
     </div>
   );
@@ -1269,11 +1278,12 @@ function StaticPreviewCodeBlock({
           />
         </div>
       ) : (
-        <pre className="chat-markdown-pre">
-          <code className={className} {...codeProps}>
-            {codeContent}
-          </code>
-        </pre>
+        <CodeBlock
+          codeContent={codeContent}
+          codeProps={codeProps}
+          className={className}
+          language={language}
+        />
       )}
     </div>
   );
@@ -1337,7 +1347,7 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
             <MarkdownImageProvider urls={extractMarkdownImageUrls(labeledSource)}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight]}
+                rehypePlugins={[rehypeCodeHighlightBudget, rehypeHighlight]}
                 components={markdownComponents}
               >
                 {labeledSource}

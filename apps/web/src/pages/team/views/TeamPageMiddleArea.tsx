@@ -283,6 +283,7 @@ export function TeamPageMiddleArea({
       <TeamConversationView
         key={selectedTeamId}
         sessionId={selectedTeamId}
+        conversationReceptionSessionId={middleArea.conversationReceptionSessionId}
         composerEnabled={inboundComposerEnabled}
         classicWorkbench={isClassicWorkbench}
         beforeMessages={classicOpsChrome}

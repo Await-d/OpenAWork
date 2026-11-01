@@ -24,6 +24,8 @@
  */
 
 import { useMemo } from 'react';
+import { getRoleLayerIdentity } from '../runtime/data/role-layer-identity.js';
+import { readRoleInstanceDisplayName } from './team-conversation-view-helpers.js';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type { CommandDescriptor, InputImageContent } from '@openAwork/shared';
 import type { PendingPermissionRequest, PendingQuestionRequest } from '@openAwork/web-client';
@@ -341,6 +343,14 @@ export interface TeamConversationLayoutProps {
    * UnifiedComposer.composerRightSlot.
    */
   composerRightSlot?: ReactNode;
+  /** 当前 session 的接收身份；与多层历史面板的选中层无关。 */
+  composerRecipient?: {
+    roleLayer: string | null;
+    displayName?: string | null;
+    sessionMetadata: Record<string, unknown> | null;
+    receptionSessionId?: string | null;
+    onOpenSession?: (sessionId: string) => void;
+  };
 }
 
 // ─── 内部样式常量（提到顶层避免每次渲染创建新对象）────────────────────────
@@ -562,6 +572,22 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
   } = props;
 
   const composerFeatures = buildComposerFeatures(composerExtras);
+  const recipient = props.composerRecipient;
+  const recipientRole = getRoleLayerIdentity(recipient?.roleLayer);
+  const recipientLabel =
+    recipient?.roleLayer === 'reception'
+      ? '接待'
+      : recipient?.displayName?.trim() ||
+        readRoleInstanceDisplayName(recipient?.sessionMetadata ?? null) ||
+        (recipientRole.label === '团队' ? '未指定' : recipientRole.label);
+  const receptionSessionId = recipient?.receptionSessionId?.trim();
+  const canReturnToReception = Boolean(
+    recipient?.roleLayer &&
+    recipient.roleLayer !== 'reception' &&
+    receptionSessionId &&
+    receptionSessionId !== sessionId &&
+    recipient.onOpenSession,
+  );
 
   const groupsWithHistoryEdit = useMemo(() => {
     if (!historyEditPrompt) return groupedMessageEntries;
@@ -913,6 +939,45 @@ export function TeamConversationLayout(props: TeamConversationLayoutProps): Reac
           contextIsEstimated={contextIsEstimated}
           placeholder={composerPlaceholder}
           composerRightSlot={composerRightSlot}
+          composerFooterSlot={
+            recipient ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  minWidth: 0,
+                  fontSize: 12,
+                  color: 'var(--fg-muted)',
+                }}
+              >
+                <span
+                  title={`发送给：${recipientLabel}`}
+                  style={{
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {`发送给：${recipientLabel}`}
+                </span>
+                {canReturnToReception ? (
+                  <button
+                    type="button"
+                    className="team-v2-control team-v2-control--surface"
+                    style={{ flexShrink: 0, fontSize: 12 }}
+                    onClick={() => {
+                      if (receptionSessionId) recipient.onOpenSession?.(receptionSessionId);
+                    }}
+                  >
+                    回到接待
+                  </button>
+                ) : null}
+              </div>
+            ) : undefined
+          }
         />
       )}
     </>

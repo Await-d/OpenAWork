@@ -25,13 +25,8 @@ import {
   type TeamRuntimeLayer,
   deriveTeamInitPhase,
 } from '@openAwork/shared';
-import type { MemoryEntry } from '@openAwork/agent-core';
 import { sqliteGet, sqliteRun } from '../../infra/db.js';
-import {
-  createMemory,
-  findEnabledMemoryByTypeAndKey,
-  updateMemory,
-} from '../../memory/memory-store.js';
+import { createMemoryProposal } from '../../memory/governance/memory-proposal-store.js';
 import { scanMemoryWriteContent } from '../../memory/memory-security-scanner.js';
 import { validateWorkspacePath } from '../../workspace/workspace-paths.js';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
@@ -65,22 +60,12 @@ function normalizeTaskGoal(value: string | null | undefined): string | null {
   return normalized.slice(0, MAX_TASK_GOAL_CHARS);
 }
 
-function canUpdateScopedTeamInitKnowledge(input: {
-  existing: MemoryEntry;
-  teamWorkspaceId: string;
-  workspaceRoot: string | null;
-}): boolean {
-  if (input.existing.teamWorkspaceId === input.teamWorkspaceId) {
-    return true;
-  }
-  return (
-    input.existing.teamWorkspaceId === null &&
-    input.existing.workspaceRoot !== null &&
-    input.workspaceRoot !== null &&
-    input.existing.workspaceRoot === input.workspaceRoot
-  );
-}
-
+/**
+ * 团队初始化产物 → 待确认提议。
+ *
+ * 261101：初始化步骤是**自动 / 后台**路径，不得静默写正式记忆；这里改为创建
+ * `origin: 'team_init'` 的提议，确认后才落库。作用域归入团队工作区。
+ */
 function syncTeamInitKnowledge(input: {
   ctx: TeamInitSessionContext;
   key: string;
@@ -93,7 +78,7 @@ function syncTeamInitKnowledge(input: {
 
   const teamWorkspaceId = input.ctx.teamWorkspaceId?.trim();
   if (!teamWorkspaceId) {
-    console.warn(`[team-init-runner] ${input.label} 入库跳过：缺少 teamWorkspaceId`);
+    console.warn(`[team-init-runner] ${input.label} 提议跳过：缺少 teamWorkspaceId`);
     return;
   }
 
@@ -108,51 +93,33 @@ function syncTeamInitKnowledge(input: {
     const scan = scanMemoryWriteContent(fieldValue);
     if (!scan.ok) {
       console.warn(
-        `[team-init-runner] ${input.label} 入库被安全扫描拦截：${field} ${scan.reason ?? 'blocked'}`,
+        `[team-init-runner] ${input.label} 提议被安全扫描拦截：${field} ${scan.reason ?? 'blocked'}`,
       );
       return;
     }
   }
 
   try {
-    const existing = findEnabledMemoryByTypeAndKey(input.ctx.userId, 'project_context', input.key);
-    if (
-      existing &&
-      !canUpdateScopedTeamInitKnowledge({ existing, teamWorkspaceId, workspaceRoot })
-    ) {
-      console.warn(
-        `[team-init-runner] ${input.label} 入库跳过：key 已被其它工作区占用（${input.key}）`,
-      );
-      return;
-    }
-
-    if (existing) {
-      updateMemory(input.ctx.userId, existing.id, {
-        confidence: 1,
-        priority: input.priority,
-        roleLayers: null,
-        source: 'auto_extracted',
-        teamWorkspaceId,
+    createMemoryProposal({
+      userId: input.ctx.userId,
+      action: 'create',
+      scope: { type: 'team', id: teamWorkspaceId },
+      payload: {
+        type: 'project_context',
+        key: input.key,
         value,
+        priority: input.priority,
+        confidence: 1,
+        roleLayers: null,
+        teamWorkspaceId,
         workspaceRoot,
-      });
-      return;
-    }
-
-    createMemory(input.ctx.userId, {
-      confidence: 1,
-      key: input.key,
-      priority: input.priority,
-      roleLayers: null,
-      source: 'auto_extracted',
-      teamWorkspaceId,
-      type: 'project_context',
-      value,
-      workspaceRoot,
+      },
+      origin: 'team_init',
+      reason: `团队初始化：${input.label}（待确认）。`,
     });
   } catch (error) {
     logGatewayWarn(
-      `[team-init-runner] ${input.label} 入库失败，初始化步骤继续：${
+      `[team-init-runner] ${input.label} 提议创建失败，初始化步骤继续：${
         error instanceof Error ? error.message : String(error)
       }`,
     );

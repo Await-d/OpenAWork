@@ -112,6 +112,9 @@ export function createDraftFromDescriptor(descriptor: ChannelTypeDescriptor): Ch
     subscriptions: [],
     features: createDefaultFeatures(),
     channelLlmToolsEnabled: false,
+    // 新建渠道默认关闭会话级扩展管理（与网关侧 `channelExtensionManagementEnabled` 同名，
+    // 默认关闭是安全方向：开启会让渠道会话不再继承用户级技能 / MCP）。
+    channelExtensionManagementEnabled: false,
     providerId: null,
     model: null,
     tools: createToolsFromDescriptor(descriptor),
@@ -145,6 +148,7 @@ export function buildDraftFromEntry(
     subscriptions: entry.subscriptions,
     features: { ...createDefaultFeatures(), ...(entry.features ?? {}) },
     channelLlmToolsEnabled: entry.channelLlmToolsEnabled ?? false,
+    channelExtensionManagementEnabled: entry.channelExtensionManagementEnabled ?? false,
     providerId: entry.providerId ?? null,
     model: entry.model ?? null,
     tools,

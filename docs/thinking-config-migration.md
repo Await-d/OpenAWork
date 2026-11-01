@@ -266,13 +266,13 @@ export interface ExtendedThinkingConfig {
 
 ## 相关文件
 
-- `services/agent-gateway/src/v2-runtime/upstream/thinking-config.ts` — 类型定义和工具函数
-- `services/agent-gateway/src/v2-runtime/upstream/provider-options.ts` — Provider 适配逻辑
+- `services/agent-gateway/src/v2-runtime/upstream/provider-options.ts` — 类型定义、预算表与 Provider 适配逻辑（唯一来源）
 - `services/agent-gateway/src/routes/stream.ts` — 请求参数 schema
 - `services/agent-gateway/src/routes/stream-model-round.ts` — 配置构建和传递
 
 ## 更新日志
 
+- **2026-10-31**: 预算表与 `ThinkingConfig` 类型收敛到 `provider-options.ts`（删除重复的 `thinking-config.ts`）；用户默认关闭不再覆盖仅指定力度的显式配置，显式关闭开关仍优先；完全未指定思考配置时采用用户默认开关。OpenAI effort 风格仅对确认支持 `none` 的模型显式关闭推理，不支持或能力未知的模型保持省略参数，省略不代表已关闭。
 - **2026-08-14**: 初始版本，对齐参考实现的 `ThinkingConfig` 设计
 - 支持 `adaptive` / `enabled` / `disabled` 三种模式
 - 保持旧版 `thinkingEnabled` + `reasoningEffort` 向后兼容

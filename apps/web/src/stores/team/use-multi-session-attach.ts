@@ -14,8 +14,8 @@
  *
  * 浏览器 SSE 连接数限制：
  * - 同域 EventSource 并发上限约 6 个
- * - team 场景同时 running 的 session 通常 ≤4（reception→pm1→pm2→executor 链式）
- * - 超过上限时按 LRU 策略淘汰最旧的连接（保留最近活跃的）
+ * - 后台逐会话 SSE 最多 3 条，为当前会话流和普通 HTTP 请求保留连接槽
+ * - 超过上限的会话走现有轮询回退，不反复淘汰重建连接
  *
  * 用法：在 TeamPageV2 顶层调用一次即可。
  */
@@ -27,7 +27,7 @@ import type { RunEvent } from '@openAwork/shared';
 import { useLayerStore } from './team-events.js';
 import { useMultiAttachStore } from './multi-attach-store.js';
 
-const MAX_CONCURRENT_CONNECTIONS = 5;
+const MAX_CONCURRENT_CONNECTIONS = 3;
 const RECONNECT_BASE_DELAY_MS = 2_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const ON_DONE_RECONNECT_DELAY_MS = 500;
@@ -110,12 +110,10 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
           // auto-attach timing in useTeamConversationState.
           if (runningSessionsRef.current.has(sessionId)) {
             const reconnectTimer = setTimeout(() => {
-              if (
-                runningSessionsRef.current.has(sessionId) &&
-                !connectionsRef.current.has(sessionId)
-              ) {
-                connectSessionRef.current(sessionId);
-              }
+              const pending = connectionsRef.current.get(sessionId);
+              if (pending?.reconnectTimer !== reconnectTimer) return;
+              connectionsRef.current.delete(sessionId);
+              if (runningSessionsRef.current.has(sessionId)) connectSessionRef.current(sessionId);
             }, NO_STREAM_RECONNECT_DELAY_MS);
             // Track timer in a phantom entry so cleanup can clear it.
             connectionsRef.current.set(sessionId, {
@@ -172,12 +170,10 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
           // one (e.g. next handoff in the chain).
           if (runningSessionsRef.current.has(sessionId)) {
             const reconnectTimer = setTimeout(() => {
-              if (
-                runningSessionsRef.current.has(sessionId) &&
-                !connectionsRef.current.has(sessionId)
-              ) {
-                connectSessionRef.current(sessionId);
-              }
+              const pending = connectionsRef.current.get(sessionId);
+              if (pending?.reconnectTimer !== reconnectTimer) return;
+              connectionsRef.current.delete(sessionId);
+              if (runningSessionsRef.current.has(sessionId)) connectSessionRef.current(sessionId);
             }, ON_DONE_RECONNECT_DELAY_MS);
             // Track timer in a phantom entry so cleanup can clear it.
             connectionsRef.current.set(sessionId, {
@@ -219,16 +215,7 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
 
   // Main effect: sync connections with running sessions from layer store
   useEffect(() => {
-    if (!enabled || !token) {
-      // Clean up all connections when disabled
-      for (const [, entry] of connectionsRef.current) {
-        clearEntryTimer(entry);
-        entry.close();
-      }
-      connectionsRef.current.clear();
-      runningSessionsRef.current.clear();
-      return;
-    }
+    if (!enabled || !token) return;
 
     const checkRunningSessions = () => {
       const nodes = useLayerStore.getState().nodes;
@@ -287,17 +274,14 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
 
     return () => {
       unsub();
-    };
-  }, [enabled, token, connectSession, storeGetState]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      for (const [, entry] of connectionsRef.current) {
+      runningSessionsRef.current.clear();
+      for (const [sessionId, entry] of connectionsRef.current) {
         clearEntryTimer(entry);
         entry.close();
+        storeGetState().setSessionState(sessionId, 'closed');
+        storeGetState().setConnectedAt(sessionId, null);
       }
       connectionsRef.current.clear();
     };
-  }, []);
+  }, [enabled, token, connectSession, storeGetState]);
 }

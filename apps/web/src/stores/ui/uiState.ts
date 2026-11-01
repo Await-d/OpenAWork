@@ -813,10 +813,10 @@ export const useUIStateStore = create<UIStateStore>()(
         }),
 
       rightOpen: false,
-      setRightOpen: (v) => set({ rightOpen: v }),
+      setRightOpen: (v) => set((state) => (state.rightOpen === v ? state : { rightOpen: v })),
       toggleRightOpen: () => set((s) => ({ rightOpen: !s.rightOpen })),
       rightTab: 'overview',
-      setRightTab: (tab) => set({ rightTab: tab }),
+      setRightTab: (tab) => set((state) => (state.rightTab === tab ? state : { rightTab: tab })),
       reviewPanelOpened: false,
       setReviewPanelOpened: (opened) => set({ reviewPanelOpened: opened }),
       toggleReviewPanelOpened: () =>

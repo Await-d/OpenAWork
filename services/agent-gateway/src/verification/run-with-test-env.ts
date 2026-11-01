@@ -1,31 +1,43 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { runVerificationChild } from './verification-child-process.js';
 
-const target = process.argv.slice(2).find((arg) => arg !== '--');
+const args = process.argv.slice(2);
+const target = args.find((arg) => arg !== '--' && arg !== '--offline');
 if (!target) {
-  throw new Error('Usage: run-with-test-env <verification-script>');
+  throw new Error('Usage: run-with-test-env <verification-script> [--offline]');
 }
 
 const tempDataDir = mkdtempSync(join(tmpdir(), 'openawork-verification-'));
-
-process.env['NODE_ENV'] = 'test';
-process.env['DATABASE_URL'] = ':memory:';
-process.env['OPENAWORK_DATA_DIR'] = tempDataDir;
-process.env['OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER'] = '1';
-// 未绑定工作区会话会回退到平台文档目录下的 OpenAWork（`resolveUnboundSessionWorkspaceFallback`）。
-// 验收脚本里 `WORKSPACE_ROOT` 常是临时目录且不像仓库，回退会被真实触发——不隔离就会把
-// 任务图写进开发者本机的 ~/Documents/OpenAWork。指向临时数据目录，随 tempDataDir 一起清理。
-process.env['XDG_DOCUMENTS_DIR'] = join(tempDataDir, 'documents');
-delete process.env['OPENAWORK_DATABASE_PATH'];
-
-if (!process.env['OPENAWORK_APP_VERSION']) {
-  process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
+const env: NodeJS.ProcessEnv = {
+  ...process.env,
+  NODE_ENV: 'test',
+  DATABASE_URL: ':memory:',
+  OPENAWORK_DATA_DIR: tempDataDir,
+  OPENAWORK_ALLOW_INSECURE_LOCALHOST_PROVIDER: '1',
+  XDG_DOCUMENTS_DIR: join(tempDataDir, 'documents'),
+  OPENAWORK_APP_VERSION: process.env['OPENAWORK_APP_VERSION'] || '0.0.0-test',
+};
+delete env['OPENAWORK_DATABASE_PATH'];
+if (args.includes('--offline')) {
+  delete env['AI_API_BASE_URL'];
+  delete env['AI_API_KEY'];
+  delete env['AI_DEFAULT_MODEL'];
 }
 
 try {
-  await import(pathToFileURL(resolve(process.cwd(), target)).href);
+  const result = await runVerificationChild({
+    runtime: process.execPath,
+    args: ['--import', 'tsx', resolve(process.cwd(), target)],
+    env,
+    timeoutMs: 600_000,
+  });
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+} catch (error) {
+  console.error(error);
+  process.exitCode = 1;
 } finally {
   rmSync(tempDataDir, { force: true, recursive: true });
 }

@@ -426,6 +426,8 @@ async function addJobForTool(
     deliveryMode: channelScope ? 'none' : (draft.delivery_mode ?? 'none'),
     deliveryTarget: channelScope ? null : (draft.delivery_target ?? null),
     sessionId: draft.session_id ?? null,
+    pluginId: channelScope ? channelScope.pluginId : (draft.plugin_id ?? null),
+    pluginChatId: channelScope ? channelScope.chatId : (draft.plugin_chat_id ?? null),
   });
   if (channelScope) {
     // 渠道会话建的任务必须钉在当前渠道 + 当前会话上，否则结果回不到这里
@@ -525,6 +527,9 @@ async function updateJobForTool(
       deliveryTarget:
         draft.delivery_target !== undefined ? draft.delivery_target : existing.delivery_target,
       sessionId: draft.session_id !== undefined ? draft.session_id : existing.session_id,
+      pluginId: draft.plugin_id !== undefined ? draft.plugin_id : existing.plugin_id,
+      pluginChatId:
+        draft.plugin_chat_id !== undefined ? draft.plugin_chat_id : existing.plugin_chat_id,
       // 只改名 / 停用不因「at 已过期」被挡；改 kind、时间或重新启用则必须严格校验。
       allowExpiredAt:
         draft.schedule_kind === undefined &&
@@ -604,6 +609,8 @@ async function setJobEnabledForTool(
       deliveryMode: job.delivery_mode,
       deliveryTarget: job.delivery_target,
       sessionId: job.session_id,
+      pluginId: job.plugin_id,
+      pluginChatId: job.plugin_chat_id,
       allowExpiredAt: false,
     });
   }

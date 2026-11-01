@@ -34,6 +34,7 @@ export function parseMemorySettings(raw: unknown): MemorySettings {
       typeof record['reviewLowConfidence'] === 'boolean'
         ? record['reviewLowConfidence']
         : DEFAULT_MEMORY_SETTINGS.reviewLowConfidence,
+    semanticMaintenance: record['semanticMaintenance'] === true,
   };
 }
 

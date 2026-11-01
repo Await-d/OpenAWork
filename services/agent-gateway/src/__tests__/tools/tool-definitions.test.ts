@@ -36,6 +36,24 @@ describe('gateway tool definitions render contract', () => {
     expect(byName.get('session_move')?.function.parameters.properties).toHaveProperty('force');
   });
 
+  it('发布会话扩展参数到模型实际收到的 JSON Schema', () => {
+    const definitions = buildGatewayToolDefinitions();
+    for (const name of ['skill_manage', 'mcp_manage_servers']) {
+      const properties = definitions.find((entry) => entry.function.name === name)?.function
+        .parameters.properties;
+      expect(properties).toHaveProperty(
+        'scope',
+        expect.objectContaining({ enum: ['user', 'session'] }),
+      );
+      expect(properties).toHaveProperty('resourceRef');
+    }
+    const skill = definitions.find((entry) => entry.function.name === 'skill_manage');
+    expect(skill?.function.parameters.properties['action']).toMatchObject({
+      enum: expect.arrayContaining(['search']),
+    });
+    expect(skill?.function.parameters.properties).toHaveProperty('query');
+  });
+
   it('Agent 工具的参数携带子代理选型指引（联网资讯检索派 web-researcher）', () => {
     const definitions = buildGatewayToolDefinitions();
     const agent = definitions.find((definition) => definition.function.name === 'Agent');

@@ -11,6 +11,10 @@ import {
   buildNoChannelOwnerMessage,
   buildNoTextReplyMessage,
   buildNoTokenUsageDataMessage,
+  buildPermissionExpiredMessage,
+  buildPermissionPendingMessage,
+  buildPermissionResolvedMessage,
+  buildPermissionResumedNoTextMessage,
   buildResetConversationMessage,
   buildStatusReply,
   buildTooFewMessagesToCompressMessage,
@@ -130,5 +134,105 @@ describe('channel help message formatting', () => {
     expect(buildLocalizedErrorMessage('zh-CN', 'boom')).toContain('**执行失败**');
     expect(buildNoTextReplyMessage('en-US')).toContain('**Reply result**');
     expect(buildBusyMessage('zh-CN')).toContain('**会话繁忙**');
+  });
+
+  it('等待授权提示包含待授权操作与「群里的同意不算授权」', () => {
+    const content = buildPermissionPendingMessage('zh-CN', { toolNames: ['bash', 'write'] });
+
+    expect(content).toContain('**等待授权**');
+    expect(content).toContain('- 状态：`待审批`');
+    expect(content).toContain('- `bash`');
+    expect(content).toContain('- `write`');
+    expect(content).toContain('不构成授权');
+  });
+
+  it('无工具名时也给出可操作指引，且英文版结构一致', () => {
+    const zh = buildPermissionPendingMessage('zh-CN');
+    const en = buildPermissionPendingMessage('en-US', { toolNames: ['bash'] });
+
+    expect(zh).not.toContain('待授权操作');
+    expect(zh).toContain('权限提示');
+    expect(en).toContain('**Waiting for approval**');
+    expect(en).toContain('NOT an authorization');
+  });
+
+  it('审批结果文案区分批准与拒绝，并如实反映是否在续跑', () => {
+    const approved = buildPermissionResolvedMessage('zh-CN', {
+      toolName: 'bash',
+      decision: 'session',
+      resumed: true,
+    });
+    const approvedNoResume = buildPermissionResolvedMessage('zh-CN', {
+      toolName: 'bash',
+      decision: 'once',
+      resumed: false,
+    });
+    const rejected = buildPermissionResolvedMessage('zh-CN', {
+      toolName: 'bash',
+      decision: 'reject',
+      resumed: false,
+    });
+
+    expect(approved).toContain('**权限已批准**');
+    expect(approved).toContain('- 范围：`本会话`');
+    expect(approved).toContain('正在继续执行');
+    expect(rejected).toContain('**权限已拒绝**');
+    expect(rejected).toContain('不会**执行');
+
+    // 「仅本次」不能因为没续跑就被说成长期规则。
+    expect(approvedNoResume).toContain('- 范围：`仅本次`');
+    expect(approvedNoResume).toContain('仅本次允许');
+    expect(approvedNoResume).not.toContain('无需再次询问');
+    expect(approvedNoResume).not.toContain('正在继续执行');
+  });
+
+  it('未续跑时按批准范围给准确结论：本会话 / 永久', () => {
+    const session = buildPermissionResolvedMessage('zh-CN', {
+      toolName: 'bash',
+      decision: 'session',
+      resumed: false,
+    });
+    const permanent = buildPermissionResolvedMessage('en-US', {
+      toolName: 'bash',
+      decision: 'permanent',
+      resumed: false,
+    });
+
+    expect(session).toContain('本会话内同类操作不会再询问');
+    expect(permanent).toContain('recorded as a permanent grant');
+  });
+
+  it('有时间限制时标出「有效至」，没有时不编造时间', () => {
+    const expiresAt = new Date('2026-11-01T10:00:00Z').getTime();
+    const withExpiry = buildPermissionPendingMessage('zh-CN', { toolNames: ['bash'], expiresAt });
+    const withoutExpiry = buildPermissionPendingMessage('zh-CN', {
+      toolNames: ['bash'],
+      expiresAt: null,
+    });
+    const english = buildPermissionPendingMessage('en-US', { toolNames: ['bash'], expiresAt });
+
+    expect(withExpiry).toContain('有效至：');
+    expect(withoutExpiry).not.toContain('有效至：');
+    expect(english).toContain('Valid until:');
+  });
+
+  it('超时失效与「已拒绝」区分开，并指向重新发起', () => {
+    const zh = buildPermissionExpiredMessage('zh-CN', { toolNames: ['bash', 'bash', 'write'] });
+    const en = buildPermissionExpiredMessage('en-US');
+
+    expect(zh).toContain('**授权已超时**');
+    expect(zh).toContain('已失效');
+    expect(zh).toContain('没有执行');
+    expect(zh).toContain('重新发起');
+    // 去重：bash 只出现一次
+    expect(zh.split('`bash`').length - 1).toBe(1);
+    expect(zh).not.toContain('已拒绝');
+    expect(en).toContain('**Approval expired**');
+    expect(en).toContain('expired');
+  });
+
+  it('授权后续跑无文本时给出明确状态而非沉默', () => {
+    expect(buildPermissionResumedNoTextMessage('zh-CN')).toContain('授权后已继续执行');
+    expect(buildPermissionResumedNoTextMessage('en-US')).toContain('Resumed after approval');
   });
 });

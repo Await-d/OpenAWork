@@ -61,6 +61,7 @@ vi.mock('../../tools/run-background-bash-tools.js', async () => {
 
 import { TEST_WORKSPACE, mocks } from './tool-sandbox-test-support.js';
 import { createDefaultSandbox } from '../../tools/tool-sandbox.js';
+import { ensurePermissionForTool } from '../../tools/sandbox/permission-ladder.js';
 
 function executionContext(clientRequestId: string) {
   return {
@@ -481,6 +482,59 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
     expect(result.pendingPermissionRequestId).toBeDefined();
     expect(String(result.output)).toContain('requires approval');
     expect(permissionInsertParams()?.[2]).toBe('bash');
+  });
+
+  it('渠道会话不落待审批：直接拒绝而不是把会话钉在 paused 上', async () => {
+    // 渠道会话对模型只暴露被渠道策略放行的工具，那些工具走自动批准分支；
+    // 能走到 ask 的调用本身就是异常路径，而渠道没有人工审批通道
+    // （审批端点只在 Web 端且限会话所有者），落 pending 等于永久挂起。
+    mocks.metadataJson = JSON.stringify({
+      source: 'channel',
+      workingDirectory: TEST_WORKSPACE,
+    });
+
+    const result = await createDefaultSandbox().execute(
+      {
+        toolCallId: 'call-channel-pending',
+        toolName: 'bash',
+        rawInput: { command: 'printf channel-pending', description: '渠道待审批回归' },
+      },
+      new AbortController().signal,
+      'session-channel-pending',
+      executionContext('req-channel-pending'),
+    );
+
+    expect(permissionInsertParams()).toBeUndefined();
+    expect(result.pendingPermissionRequestId).toBeUndefined();
+    expect(result.isError).toBe(true);
+    // 端到端路径上先被「工具未启用」守卫拦下（渠道不可见工具到不了 ask 阶段）；
+    // 这里锁定的是可观察契约：渠道会话绝不留下无人应答的 pending。
+    expect(String(result.output)).toContain('is not enabled for this session');
+  });
+
+  it('权限阶梯对渠道会话直接拒绝，不创建 pending（渠道无人工审批通道）', async () => {
+    // 纵深防御：即使未来出现绕过「工具未启用」守卫的入口，阶梯本身也不会为渠道
+    // 会话落 pending —— 审批端点只在 Web 端且限会话所有者，落下的 pending 会永久
+    // 把会话钉在 paused 上。
+    mocks.metadataJson = JSON.stringify({
+      source: 'channel',
+      workingDirectory: TEST_WORKSPACE,
+    });
+
+    const state = await ensurePermissionForTool(
+      'session-channel-ladder',
+      {
+        toolCallId: 'call-channel-ladder',
+        toolName: 'bash',
+        rawInput: { command: 'printf channel-ladder', description: '渠道权限阶梯回归' },
+      },
+      undefined,
+      executionContext('req-channel-ladder'),
+    );
+
+    expect(state.kind).toBe('denied');
+    expect(state.kind === 'denied' ? state.reason : '').toContain('渠道没有人工审批通道');
+    expect(permissionInsertParams()).toBeUndefined();
   });
 
   it('yolo 档位下 bash 自动执行且不创建 pending 权限请求', async () => {

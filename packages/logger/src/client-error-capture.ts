@@ -111,7 +111,20 @@ export interface ClientErrorRecorderOptions {
    */
   dedupeWindowMs?: number;
   now?: () => number;
+  /** 去重后补充应用侧诊断；显式 context 优先，提供者失败不影响原始错误记录。 */
+  buildDiagnostics?: ClientErrorDiagnosticsProvider;
 }
+
+/** `buildDiagnostics` 的入参：已归一化的错误内容 + 来源。 */
+export interface ClientErrorDiagnosticsInput {
+  source: ClientErrorSource;
+  described: DescribeClientErrorResult;
+}
+
+/** 补充诊断上下文提供者；返回 `undefined` 表示「这类错误无需补充」。 */
+export type ClientErrorDiagnosticsProvider = (
+  input: ClientErrorDiagnosticsInput,
+) => Record<string, string> | undefined;
 
 /**
  * 错误记录器：本地环形缓冲 + 订阅回调。
@@ -123,6 +136,7 @@ export class ClientErrorRecorder {
   private readonly capacity: number;
   private readonly dedupeWindowMs: number;
   private readonly now: () => number;
+  private readonly buildDiagnostics: ClientErrorDiagnosticsProvider | null;
   private readonly sinks = new Set<ClientErrorSink>();
   private readonly recentKeys = new Map<string, number>();
   private records: ClientErrorRecord[] = [];
@@ -135,6 +149,7 @@ export class ClientErrorRecorder {
       Math.floor(options.dedupeWindowMs ?? DEFAULT_DEDUPE_WINDOW_MS),
     );
     this.now = options.now ?? (() => Date.now());
+    this.buildDiagnostics = options.buildDiagnostics ?? null;
   }
 
   /** 订阅记录。返回取消订阅函数。sink 抛异常会被吞掉，不影响记录本身。 */
@@ -160,6 +175,9 @@ export class ClientErrorRecorder {
       return null;
     }
 
+    // 补充诊断在去重之后计算：重复报错的补充成本（例如采集调用栈）不该白付一次。
+    const mergedContext = this.mergeDiagnostics(input.source, described, input.context);
+
     this.sequence += 1;
     const record: ClientErrorRecord = {
       id: `client-error-${occurredAt}-${this.sequence}`,
@@ -168,8 +186,8 @@ export class ClientErrorRecorder {
       message: redactLogText(described.message),
       stack: described.stack ? redactLogText(described.stack) : null,
       occurredAt,
-      ...(input.context && Object.keys(input.context).length > 0
-        ? { context: sanitizeContext(input.context) }
+      ...(mergedContext && Object.keys(mergedContext).length > 0
+        ? { context: sanitizeContext(mergedContext) }
         : {}),
     };
 
@@ -228,6 +246,35 @@ export class ClientErrorRecorder {
       }
     }
     return lines.join('\n');
+  }
+
+  /**
+   * 合并「补充诊断上下文」与调用方显式 `context`。
+   *
+   * 顺序固定为「诊断在前、调用方在后」：调用方在抛错现场拿到的信息（例如
+   * `componentStack`）比事后重建的诊断更权威，不能被覆盖。
+   */
+  private mergeDiagnostics(
+    source: ClientErrorSource,
+    described: DescribeClientErrorResult,
+    context: Record<string, string> | undefined,
+  ): Record<string, string> | undefined {
+    if (!this.buildDiagnostics) {
+      return context;
+    }
+
+    let diagnostics: Record<string, string> | undefined;
+    try {
+      diagnostics = this.buildDiagnostics({ source, described });
+    } catch {
+      // 诊断提供者的失败不能把「记录错误」这件事本身变成新的错误源。
+      diagnostics = undefined;
+    }
+
+    if (!diagnostics || Object.keys(diagnostics).length === 0) {
+      return context;
+    }
+    return { ...diagnostics, ...context };
   }
 
   private isDuplicate(described: DescribeClientErrorResult, occurredAt: number): boolean {

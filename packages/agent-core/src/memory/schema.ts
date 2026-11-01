@@ -78,7 +78,116 @@ export const memorySettingsSchema = z.object({
   minConfidence: z.number().min(0).max(1),
   autoWriteMinConfidence: z.number().min(0).max(1),
   reviewLowConfidence: z.boolean(),
+  semanticMaintenance: z.boolean().optional().default(false),
 });
+
+// ---------------------------------------------------------------------------
+// 记忆治理 schema（261101-记忆确认写入与周期整理）
+// ---------------------------------------------------------------------------
+
+export const MEMORY_SCOPE_TYPES = ['user', 'workspace', 'team', 'channel_chat'] as const;
+export const MEMORY_PROPOSAL_ACTIONS = [
+  'create',
+  'update',
+  'archive',
+  'restore',
+  'merge',
+  'rule',
+] as const;
+export const MEMORY_PROPOSAL_STATUSES = [
+  'pending',
+  'applied',
+  'rejected',
+  'expired',
+  'conflicted',
+  'cancelled',
+] as const;
+export const MEMORY_PROPOSAL_ORIGINS = [
+  'auto_extract',
+  'manual_extract',
+  'tool',
+  'team_init',
+  'maintenance',
+  'channel',
+  'api',
+] as const;
+
+export const memoryScopeTypeSchema = z.enum(MEMORY_SCOPE_TYPES);
+
+export const memoryScopeSchema = z.object({
+  type: memoryScopeTypeSchema,
+  id: z.string().trim().min(1).max(500),
+});
+
+export const memoryProposalActionSchema = z.enum(MEMORY_PROPOSAL_ACTIONS);
+
+export const memoryProposalPayloadSchema = z
+  .object({
+    type: memoryTypeSchema.optional(),
+    key: z.string().trim().min(1).max(200).optional(),
+    value: z.string().trim().min(1).max(4000).optional(),
+    priority: z.number().int().min(0).max(100).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    roleLayers: memoryRoleLayersSchema.nullable().optional(),
+    workspaceRoot: z.string().trim().max(500).nullable().optional(),
+    teamWorkspaceId: z.string().trim().max(200).nullable().optional(),
+    enabled: z.boolean().optional(),
+    name: z.string().trim().min(1).max(200).optional(),
+    body: z.string().trim().min(1).max(8000).optional(),
+    ruleId: z.string().trim().min(1).max(200).optional(),
+    ruleRevision: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+export const memorySourceProvenanceSchema = z
+  .object({
+    platform: z.string().trim().min(1).max(64),
+    channelInstanceId: z.string().trim().min(1).max(200),
+    chatId: z.string().trim().min(1).max(200),
+    chatType: z.enum(['private', 'group', 'unknown']),
+    senderId: z.string().trim().max(200).nullable().default(null),
+    senderName: z.string().trim().max(200).nullable().default(null),
+    platformMessageId: z.string().trim().max(200).nullable().default(null),
+  })
+  .strict();
+
+/**
+ * 提议创建 schema。
+ *
+ * `origin` 由服务端按调用路径决定，客户端不得自报；因此这里不接收该字段。
+ * `payload` 的内容合法性（安全扫描、临时语义过滤）在服务端统一判定。
+ */
+export const createMemoryProposalSchema = z
+  .object({
+    action: memoryProposalActionSchema,
+    scope: memoryScopeSchema,
+    targetMemoryId: z.string().trim().min(1).max(200).optional(),
+    expectedRevision: z.number().int().min(1).optional(),
+    payload: memoryProposalPayloadSchema,
+    reason: z.string().trim().max(500).optional(),
+    provenance: memorySourceProvenanceSchema.optional(),
+  })
+  .strict();
+
+export const memoryProposalDecisionSchema = z
+  .object({
+    decision: z.enum(['approve', 'reject']),
+    /** 「修改后保存」：覆盖载荷后重新生成版本与摘要，确认的是新内容。 */
+    payload: memoryProposalPayloadSchema.optional(),
+    note: z.string().trim().max(500).optional(),
+    expectedRevision: z.number().int().min(1).optional(),
+    /** 「保留原状」：记录决定并抑制同内容重复建议。 */
+    keepOriginal: z.boolean().optional(),
+  })
+  .strict();
+
+export const memoryRuleDraftSchema = z
+  .object({
+    scope: memoryScopeSchema,
+    name: z.string().trim().min(1).max(200),
+    body: z.string().trim().min(1).max(8000),
+  })
+  .strict();
 
 export const DEFAULT_MEMORY_SETTINGS = {
   enabled: true,
@@ -87,6 +196,7 @@ export const DEFAULT_MEMORY_SETTINGS = {
   minConfidence: 0.3,
   autoWriteMinConfidence: 0.65,
   reviewLowConfidence: true,
+  semanticMaintenance: false,
 } as const;
 
 export const MEMORY_SETTINGS_KEY = 'memory_settings' as const;

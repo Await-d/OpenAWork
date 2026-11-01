@@ -1,4 +1,5 @@
 import {
+  Profiler,
   createContext,
   startTransition,
   useContext,
@@ -11,6 +12,7 @@ import {
 import type { ComponentProps } from 'react';
 import { UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation, useOutlet } from 'react-router';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
+import { recordReactCommit } from '../../../utils/log/react-commit-cascade.js';
 import PageTransitionLoader from '../feedback/PageTransitionLoader.js';
 
 const PageActivationContext = createContext<boolean>(true);
@@ -275,7 +277,9 @@ export function CachedRouteOutlet({ maxCacheEntries }: CachedRouteOutletProps) {
             >
               <UNSAFE_LocationContext.Provider value={entry.locationContextValue}>
                 <UNSAFE_RouteContext.Provider value={entry.routeContextValue}>
-                  {entry.element}
+                  <Profiler id={`route:${entry.cacheKey}`} onRender={recordReactCommit}>
+                    {entry.element}
+                  </Profiler>
                 </UNSAFE_RouteContext.Provider>
               </UNSAFE_LocationContext.Provider>
             </div>

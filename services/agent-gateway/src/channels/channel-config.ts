@@ -19,6 +19,15 @@ const channelFeaturesSchema = z.object({
   autoStart: z.boolean().default(false),
 });
 
+/**
+ * `user_settings` 里存渠道列表（`ChannelInstance[]` JSON）的 key。
+ *
+ * 提取为共享常量：渠道身份的读取方已不止路由一处（审批回推要按渠道拿
+ * `enabled` / `features.autoReply` 判断能不能主动发消息），两处各写一个字面量
+ * 迟早会漂移成「读得到配置」与「读不到配置」两个世界。
+ */
+export const CHANNELS_SETTINGS_KEY = 'channels';
+
 const channelPermissionsSchema = z.object({
   allowReadHome: z.boolean().default(false),
   readablePathPrefixes: z.array(z.string()).default([]),
@@ -74,6 +83,7 @@ const channelBaseSchema = z.object({
   config: z.record(z.string(), z.string()).default({}),
   replyLanguage: channelReplyLanguageSchema.optional(),
   channelLlmToolsEnabled: z.boolean().optional(),
+  channelExtensionManagementEnabled: z.boolean().optional(),
   tools: z.record(z.string(), z.boolean()).optional(),
   providerId: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
@@ -195,6 +205,10 @@ export const createChannelInstance = (
         input.channelLlmToolsEnabled === undefined
           ? existing?.channelLlmToolsEnabled
           : input.channelLlmToolsEnabled,
+      channelExtensionManagementEnabled:
+        input.channelExtensionManagementEnabled ??
+        existing?.channelExtensionManagementEnabled ??
+        false,
       providerId: input.providerId === undefined ? existing?.providerId : input.providerId,
       model: input.model === undefined ? existing?.model : input.model,
       permissions: input.permissions ?? existing?.permissions,
@@ -223,6 +237,7 @@ function normalizeChannel(input: StoredChannelInput, ownerUserId: string): Chann
       explicit: input.channelLlmToolsEnabled,
       tools: input.tools,
     }),
+    channelExtensionManagementEnabled: input.channelExtensionManagementEnabled === true,
     providerId: input.providerId ?? null,
     model: input.model ?? null,
     features: { ...defaultFeatures(), ...(input.features ?? {}) },

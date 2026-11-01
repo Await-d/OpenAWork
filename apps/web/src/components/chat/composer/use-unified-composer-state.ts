@@ -610,6 +610,18 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   ]);
 
   // ─── Send handler (constructs payload and delegates to parent) ────────────
+  /**
+   * 「已提交、但还没进入流式」的窗口期。
+   *
+   * `onSubmit` 要等会话创建（新建会话时是一次网关往返）与附件上传都完成才 resolve；
+   * 这期间 `streaming` 仍是 `false`、输入框也还没清空（清空在 resolve 之后），用户点完
+   * 发送到屏幕上出现任何东西之间存在一段**完全静默**的空档。用这个状态把这段空档的
+   * 发送键换成「发送中…」，避免被误当成「没点上」而反复点击。
+   *
+   * 它**不是** `sessionBusyState` 的替代：那个是「网关执行权被占用」的语义，为真时
+   * 会把裸 Enter 降级成排队、并禁用发送键，用在窗口期会误伤。
+   */
+  const [submitPending, setSubmitPending] = useState(false);
   const sendMessage = useCallback(
     async (overrideText?: string): Promise<boolean> => {
       const submittedText = overrideText ?? input;
@@ -631,7 +643,15 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
         effectiveAgentId: effectiveAgentId ?? '',
         imageModelLabel,
       };
-      const submitResult = await onSubmit(payload);
+      setSubmitPending(true);
+      let submitResult: boolean | void = false;
+      try {
+        submitResult = await onSubmit(payload);
+      } finally {
+        // 放在 finally 里：上传失败 / 会话创建失败同样会提前返回，按钮必须复位，
+        // 否则会永久停在「发送中…」。
+        setSubmitPending(false);
+      }
       if (submitResult === false) {
         return false;
       }
@@ -1121,6 +1141,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     streamError,
     setStreamError,
     isBrowsingInputHistory,
+    submitPending,
 
     // Refs
     textareaRef,

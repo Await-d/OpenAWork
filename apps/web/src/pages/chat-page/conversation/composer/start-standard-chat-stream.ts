@@ -4,6 +4,7 @@ import { estimateTokenCount } from '../../../../components/conversation-runtime/
 import { makeOrderedMessageId } from '../../../../components/conversation-runtime/messages/ordered-id.js';
 import type { ChatBackendUsageSnapshot } from '../../../../components/conversation-runtime/stream/stream-usage.js';
 import type { StreamingThinkingBlock } from '../../../../components/conversation-runtime/stream/streaming-thinking.js';
+import { useRunAcceptedStore } from '../../../../stores/chat/run-accepted.js';
 
 export interface StartStandardChatStreamOptions {
   currentAssistantStreamMessageIdRef: React.MutableRefObject<string | null>;
@@ -104,6 +105,9 @@ export function startStandardChatStream(
   setShowScrollToBottom(false);
   setActiveStreamStartedAt(requestStartedAt);
   setActiveStreamFirstTokenLatencyMs(null);
+  // 每轮开始清掉上一轮的受理确认：占位气泡只判断「有没有 ack」，若不复位，上一轮的
+  // ack 会让新一轮的「等待服务端接收」阶段被直接跳过。
+  useRunAcceptedStore.getState().reset();
 
   const userRawContent: Array<{ type: 'text'; text: string } | InputImageContent> = [
     ...(text.length > 0 ? [{ type: 'text' as const, text }] : []),

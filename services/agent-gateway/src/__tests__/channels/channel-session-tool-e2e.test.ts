@@ -210,6 +210,80 @@ describe('channel session tool e2e', () => {
     }
   });
 
+  it('Given the kernel pauses on tool permission When the turn ends Then the chat is told how to approve it', async () => {
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
+      if (url.includes('/getUpdates')) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, result: [] })));
+      }
+      if (url.includes('/sendMessage')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true, result: { message_id: 88 } })),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const streamRuntime = await import('../../routes/stream-runtime.js');
+    vi.mocked(streamRuntime.runSessionInBackground).mockImplementation(
+      async ({ sessionId, writeChunk }) => {
+        // 暂停前模型已经说了一句话：这条渠道不支持流式，中间态从不发送，
+        // 这段内容只能由最终回复带出去，否则会静默丢失。
+        writeChunk?.({ type: 'text_delta', delta: '我先看一下仓库。' });
+        dbModule.sqliteRun(
+          `INSERT INTO permission_requests
+             (id, session_id, tool_name, scope, reason, risk_level, status, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+          [
+            'pr-e2e-pending',
+            sessionId,
+            'bash',
+            'bash *',
+            '需要在你的机器上执行命令',
+            'high',
+            Date.now() + 600_000,
+          ],
+        );
+        return { statusCode: 200, stopReason: 'tool_permission' };
+      },
+    );
+
+    const app = await buildApp();
+    try {
+      await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/start`,
+        headers: { authorization: bearer(app) },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/inbound`,
+        headers: { 'x-openawork-channel-secret': 'relay-secret' },
+        payload: {
+          chatId: 'chat-1',
+          senderId: 'sender-1',
+          senderName: 'Sender',
+          content: '帮我看一下仓库',
+          messageId: 'message-43',
+        },
+      });
+      expect(response.statusCode).toBe(202);
+
+      await vi.waitFor(() => {
+        const bodies = fetchMock.mock.calls
+          .filter(([url]) => String(url).includes('/sendMessage'))
+          .map(([, init]) => String(init?.body ?? ''));
+        expect(bodies.some((body) => body.includes('等待授权'))).toBe(true);
+        expect(bodies.some((body) => body.includes('bash'))).toBe(true);
+        expect(bodies.some((body) => body.includes('我先看一下仓库'))).toBe(true);
+        // 有效期取自 pending 行，说明 expires_at 真的走到了回执里。
+        expect(bodies.some((body) => body.includes('有效至'))).toBe(true);
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('Given configured member ACL When the sender is not listed Then channel tools are disabled for that session', async () => {
     overwriteChannel(
       makeChannel({

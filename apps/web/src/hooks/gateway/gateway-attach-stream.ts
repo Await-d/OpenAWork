@@ -87,6 +87,7 @@ export function connectAttachEventSource(
     activeStream,
     callbacks,
     createEventSource = createGatewayEventSource,
+    signal,
     gatewayUrl,
     getCurrentActiveRequest,
     getCurrentEventSource,
@@ -100,7 +101,19 @@ export function connectAttachEventSource(
     resetStopRequested,
   } = options;
 
+  if (signal?.aborted) return Promise.resolve(false);
+
   return new Promise<boolean>((resolve) => {
+    let openingTimer: ReturnType<typeof setTimeout> | undefined;
+    const finishOpening = (opened: boolean) => {
+      clearTimeout(openingTimer);
+      resolve(opened);
+    };
+    const onAbort = () => {
+      settled = true;
+      cleanup(false, eventSource);
+      finishOpening(false);
+    };
     let settled = false;
     let opened = false;
     let openedAtMs = 0;
@@ -119,10 +132,11 @@ export function connectAttachEventSource(
     const deliveredEventIds = new Set<string>();
 
     const cleanup = (clearSnapshot: boolean, eventSource: AttachEventSourceLike) => {
+      finishOpening(false);
+      signal?.removeEventListener('abort', onAbort);
       eventSource.close();
-      if (getCurrentEventSource() === eventSource) {
-        setCurrentEventSource(null);
-      }
+      if (getCurrentEventSource() !== eventSource) return;
+      setCurrentEventSource(null);
       clearCallbacks();
       resetStopRequested();
       if (clearSnapshot) {
@@ -139,6 +153,11 @@ export function connectAttachEventSource(
       `${gatewayUrl}/sessions/${sessionId}/stream/attach?${params.toString()}`,
     );
     setCurrentEventSource(eventSource);
+    openingTimer = setTimeout(() => {
+      settled = true;
+      cleanup(false, eventSource);
+    }, 15_000);
+    signal?.addEventListener('abort', onAbort, { once: true });
     const handleChunk = createGatewayChunkDispatcher({
       callbacks,
       deliveredEventIds,
@@ -181,9 +200,14 @@ export function connectAttachEventSource(
     });
 
     eventSource.onopen = () => {
+      if (settled || getCurrentEventSource() !== eventSource) {
+        settled = true;
+        cleanup(false, eventSource);
+        return;
+      }
       opened = true;
       openedAtMs = Date.now();
-      resolve(true);
+      finishOpening(true);
     };
 
     // 具名事件：服务端「重放完毕、即将正常结束响应」的显式声明。
@@ -195,6 +219,7 @@ export function connectAttachEventSource(
     }
 
     eventSource.onmessage = (event) => {
+      if (settled || getCurrentEventSource() !== eventSource) return;
       const parsed = safeParseGatewayEventData<RunEventEnvelope | StreamChunk | RunEvent>({
         rawData: event.data,
         invalidCode: 'ATTACH_STREAM_INVALID_PAYLOAD',
@@ -254,7 +279,10 @@ export function connectAttachEventSource(
     };
 
     eventSource.onerror = () => {
-      if (settled) {
+      if (settled) return;
+      if (getCurrentEventSource() !== eventSource) {
+        settled = true;
+        cleanup(false, eventSource);
         return;
       }
       const errorAction = classifyAttachStreamError({
@@ -340,6 +368,8 @@ export async function attachActiveStreamSession(
     clearCallbacks,
     closeExistingTransports,
     connectEventSource = connectAttachEventSource,
+    isCurrentAttempt = () => true,
+    signal,
     gatewayUrl,
     getCurrentActiveRequest,
     getCurrentEventSource,
@@ -356,11 +386,14 @@ export async function attachActiveStreamSession(
   const existingSnapshot = getCurrentActiveRequest();
   let activeStream: AttachableActiveStream | null = null;
   try {
-    activeStream = await sessionsClient.getActiveStream(token, sessionId);
+    activeStream = await sessionsClient.getActiveStream(token, sessionId, { signal });
   } catch {
+    if (!isCurrentAttempt()) return { status: 'stale' };
     clearCallbacks();
     return { status: 'transport_failed' };
   }
+
+  if (!isCurrentAttempt()) return { status: 'stale' };
 
   if (!activeStream) {
     // 网关已权威确认「没有活跃流」：陈旧快照必须无条件丢弃，否则
@@ -380,10 +413,10 @@ export async function attachActiveStreamSession(
   const currentAfterGet = getCurrentActiveRequest();
   if (
     currentAfterGet &&
+    currentAfterGet !== existingSnapshot &&
     (currentAfterGet.sessionId !== sessionId ||
       currentAfterGet.clientRequestId !== activeStream.clientRequestId)
   ) {
-    clearCallbacks();
     return { status: 'stale' };
   }
 
@@ -405,6 +438,7 @@ export async function attachActiveStreamSession(
   });
 
   const attached = await connectEventSource({
+    signal,
     activeStream,
     callbacks,
     gatewayUrl,
@@ -419,5 +453,6 @@ export async function attachActiveStreamSession(
     clearCallbacks,
     resetStopRequested,
   });
+  if (signal?.aborted) return { status: 'stale' };
   return attached ? { status: 'attached' } : { status: 'transport_failed' };
 }

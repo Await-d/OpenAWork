@@ -216,6 +216,43 @@ afterAll(async () => {
 });
 
 describe('HandoffWatcher.tickOnce', () => {
+  it('执行层默认最多领取八项，满额不阻挡规划层，终态后可继续领取', async () => {
+    const scheduler = new InProcessScheduler();
+    scheduler.pauseAll();
+    const watcher = new watcherModule.HandoffWatcher({ scheduler });
+    const jobs = Array.from({ length: 9 }, (_, index) =>
+      store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'pm2',
+        toRoleLayer: index % 2 === 0 ? 'executor' : 'reviewer',
+      }),
+    );
+    await watcher.tickOnce();
+    const records = jobs.map((job) => store.getHandoffById(job.id));
+    const active = records.filter((record) => record?.state === 'running');
+    const pending = records.find((record) => record?.state === 'pending');
+    expect(active).toHaveLength(8);
+    expect(pending?.toSessionId).toBeNull();
+
+    const planner = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+    });
+    await watcher.tickOnce();
+    expect(store.getHandoffById(planner.id)?.state).toBe('running');
+    expect(store.getHandoffById(pending!.id)?.state).toBe('pending');
+
+    const completed = active[0]!;
+    expect(
+      store.completeHandoff({ handoffId: completed.id, claimToken: completed.claimToken! }),
+    ).toBe(true);
+    await watcher.tickOnce();
+    expect(store.getHandoffById(pending!.id)?.state).toBe('running');
+  });
+
   it('claim pending → 创建子 session → start handoff → 排队 task', async () => {
     const scheduler = new InProcessScheduler();
     let runnerCalled = 0;
@@ -502,6 +539,59 @@ describe('HandoffWatcher.tickOnce', () => {
     expect(store.getHandoff({ userId: USER_ID, handoffId: dependent.id })?.state).toBe('running');
   });
 
+  it('前50项被依赖阻塞时，队尾就绪任务不会被饿死', async () => {
+    // T-21：固定扫描最早 50 项时，50 项依赖等待会把第 51 项就绪任务永久遮住。
+    const scheduler = new InProcessScheduler();
+    scheduler.pauseAll();
+    const watcher = new watcherModule.HandoffWatcher({
+      scheduler,
+      taskRunner: async () => {},
+    });
+
+    // created_at 只有秒级精度，同秒记录按 id 排序会让「队尾」不确定；
+    // 这里显式指定递增时间戳，让扫描顺序可复现。
+    let seconds = 0;
+    const stamp = (id: string): void => {
+      seconds += 1;
+      const created = `2026-01-01 00:00:${String(seconds).padStart(2, '0')}`;
+      dbModule.sqliteRun(`UPDATE handoff_records SET created_at = ? WHERE id = ?`, [created, id]);
+    };
+
+    const dependency = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+      payload: { goal: '永不结束的依赖' },
+    });
+    stamp(dependency.id);
+    for (let i = 0; i < 50; i += 1) {
+      const blocked = store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'reception',
+        toRoleLayer: 'pm1',
+        payload: { goal: `被依赖阻塞-${i}`, dependencyHandoffIds: [dependency.id] },
+      });
+      stamp(blocked.id);
+    }
+    const ready = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: { goal: '队尾就绪任务' },
+    });
+    stamp(ready.id);
+
+    await watcher.tickOnce();
+    expect(store.getHandoff({ userId: USER_ID, handoffId: ready.id })?.state).toBe('pending');
+
+    // 第二轮必须继续向队尾推进，而不是永远重复扫描同一批被阻塞项。
+    await watcher.tickOnce();
+    expect(store.getHandoff({ userId: USER_ID, handoffId: ready.id })?.state).toBe('running');
+  });
+
   it('依赖失败时，后继 pending handoff 会直接收敛为 failed', async () => {
     const scheduler = new InProcessScheduler();
     let runCount = 0;
@@ -734,6 +824,24 @@ describe('HandoffWatcher.tickOnce', () => {
       claimToken: 'tok-child-a',
       toSessionId: 's-child-review-1',
     });
+    dbModule.sqliteRun('UPDATE handoff_records SET result_json = ? WHERE id = ?', [
+      JSON.stringify({
+        summary: '执行检查完成',
+        checklist: [
+          {
+            id: 'check',
+            status: 'pass',
+            evidence: '执行检查',
+            verificationRefs: [{ terminalId: 'watcher-check', command: 'bun test' }],
+          },
+        ],
+      }),
+      childA.id,
+    ]);
+    dbModule.sqliteRun(
+      `INSERT INTO session_terminals (terminal_id, session_id, user_id, client_request_id, tool_name, kind, command, cwd, status, exit_code, started_at_ms, ended_at_ms, last_activity_ms) VALUES ('watcher-check', 's-child-review-1', ?, ?, 'bash', 'foreground', 'bun test', '/workspace', 'exited', 0, 1, 2, 2)`,
+      [USER_ID, `handoff:${childA.id}`],
+    );
     store.completeHandoff({ handoffId: childA.id, claimToken: 'tok-child-a' });
 
     const childB = store.createHandoff({
@@ -936,6 +1044,57 @@ describe('HandoffWatcher.recoveryTick', () => {
     const re = store.getHandoff({ userId: USER_ID, handoffId: created.id });
     expect(re?.state).toBe('pending');
     expect(re?.retryCount).toBe(1);
+  });
+
+  it('中断达到重试上限时通知为失败而非完成', async () => {
+    const watcher = new watcherModule.HandoffWatcher({
+      scheduler: new InProcessScheduler(),
+      heartbeatStaleAfterMs: 1,
+      // maxRetry=1：首次回收即判定中断不可恢复，走到「失败通知」分支
+      maxRetry: 1,
+    });
+    const created = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm2',
+      toRoleLayer: 'executor',
+    });
+    store.claimHandoff({ handoffId: created.id, claimToken: 'tok' });
+    seedSession('to-session-interrupted', USER_ID);
+    store.startHandoff({
+      handoffId: created.id,
+      claimToken: 'tok',
+      toSessionId: 'to-session-interrupted',
+    });
+    // 子代理运行中被杀：心跳停止且已耗尽重试
+    dbModule.sqliteRun('UPDATE handoff_records SET retry_count = 5 WHERE id = ?', [created.id]);
+
+    const events: Array<{ type: string }> = [];
+    const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => {
+      events.push(event as { type: string });
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 5));
+      const result = await watcher.recoveryTick();
+
+      expect(result.failed).toBe(1);
+      const record = store.getHandoff({ userId: USER_ID, handoffId: created.id });
+      // 核心要求：中断绝不能被当成完成
+      expect(record?.state).toBe('failed');
+      expect(record?.failureReason ?? '').not.toBe('');
+      // 用户可见通知：发失败事件，且不发完成事件
+      const publishedTypes = events.map((event) => event.type);
+      expect(publishedTypes).toContain('handoff.failed');
+      expect(publishedTypes).not.toContain('handoff.completed');
+      // 目标会话进度条也进入终态失败，用户能看到「中断」而不是「已完成」
+      const target = dbModule.sqliteGet<{ substate: string | null }>(
+        'SELECT substate FROM sessions WHERE id = ?',
+        ['to-session-interrupted'],
+      );
+      expect(target?.substate).toBe('failed');
+    } finally {
+      unsubscribe();
+    }
   });
 
   it('§0.148: tickOnce 派发的在途 handoff 心跳保持新鲜，recoveryTick 不误回收', async () => {

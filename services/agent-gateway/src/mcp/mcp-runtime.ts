@@ -5,9 +5,13 @@ import { sqliteGet } from '../infra/db.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
 import { mergeBuiltinAndConfiguredMcps } from './builtin-mcps.js';
 import { sanitizePersistedMcpServers } from './mcp-settings-schemas.js';
-import { mcpConnectionPool } from '../skill/skill-mcp-connection-pool.js';
+import {
+  mcpConnectionPool,
+  type McpPoolConnectionOptions,
+} from '../skill/skill-mcp-connection-pool.js';
 import {
   clearCatalogSnapshot,
+  clearCatalogSnapshotsMatching,
   ensureToolCatalogPoolListener,
   getCatalogSnapshot,
   publishOAuthRedirect,
@@ -15,6 +19,16 @@ import {
   setCatalogSnapshotToolFilter,
 } from './mcp-tool-catalog.js';
 import { McpOAuthProvider } from './mcp-oauth-provider.js';
+import {
+  resolveSessionMcpLayer,
+  shouldInheritUserMcpServers,
+} from '../session-extension/session-mcp-resolution.js';
+import type { SessionMcpServerRecord } from '../session-extension/session-extension-contract.js';
+import { parseSessionSecretRefName } from '../session-extension/session-extension-runtime-policy.js';
+import {
+  getSessionExtensionSecretUpdatedAt,
+  resolveSessionExtensionSecretValue,
+} from '../session-extension/session-extension-secret-store.js';
 import {
   callVirtualMcpToolForSession,
   isVirtualBuiltinMcpId,
@@ -95,6 +109,26 @@ export interface ConfiguredMCPServer {
    * meaningless for local subprocesses).
    */
   oauth?: McpOAuthConfig | false;
+  /**
+   * 会话级凭据引用（261101）：**非明文**，只指向 `session_extension_secrets`。
+   * 仅在会话级条目上出现，且必须在建连时解析成 header / env 才有意义。
+   */
+  secretRef?: string;
+  /** 凭据注入点。与 `secretRef` 同时存在才生效。 */
+  secretBinding?: { kind: 'header' | 'env'; name: string };
+  /**
+   * 凭据最后修改时间。参与连接指纹：轮换同一引用下的值必须让旧连接作废，
+   * 否则改完密钥还在拿旧密文连。
+   */
+  secretUpdatedAt?: number;
+  /**
+   * 会话级条目标记（261031）。存在时该 server 属于**某个会话**而非用户：
+   * 连接池键、目录缓存键都会带上会话身份，从而与其他会话彻底隔离；
+   * 会话被删除 / 条目被禁用时按该标记回收连接与子进程。
+   *
+   * 该字段在 `sanitizePersistedMcpServers` **之后**注入，不参与持久化 schema。
+   */
+  sessionScope?: { readonly ownerUserId: string; readonly sessionId: string };
 }
 
 export interface MCPServerToolCatalog {
@@ -133,32 +167,109 @@ function getUserIdForSession(sessionId: string): string {
   return session.user_id;
 }
 
+/**
+ * 会话视角的 MCP 配置解析（261031）。
+ *
+ * 历史实现是 `session → session.user_id → 用户配置`，于是「在渠道会话里加一个
+ * MCP」必然写进用户配置、并影响该用户的所有会话。现在叠加会话层：
+ *
+ *   inherit （老会话 / 个人会话默认）：用户配置 + 会话条目（同 id 会话优先）
+ *   explicit（新开启本能力的渠道）    ：只用会话条目 + 系统内置
+ *
+ * 注意：`explicit` 下**不继承**用户配置——空集合就是「这个会话不连用户 MCP」，
+ * 而不是「沿用全部」（旧实现把「空白名单」当作不限制，那是另一个语义）。
+ */
 export function getConfiguredMcpServersForSession(sessionId: string): ConfiguredMCPServer[] {
-  return loadConfiguredMcpServersForUser(getUserIdForSession(sessionId));
+  const ownerUserId = getUserIdForSession(sessionId);
+  const layer = resolveSessionMcpLayer(sessionId);
+
+  const inherited = shouldInheritUserMcpServers(layer)
+    ? readUserConfiguredMcpServers(ownerUserId)
+    : [];
+
+  // 会话条目的 enabled 以会话表为准（配置里的 enabled 只是快照）。
+  const sessionEnabledById = new Map(layer.servers.map((record) => [record.displayId, record]));
+  const sessionServers = sanitizePersistedMcpServers(layer.servers.map((record) => record.config))
+    .filter((server) => sessionEnabledById.has(server.id))
+    .map((server) => {
+      const record = sessionEnabledById.get(server.id);
+      const secret = resolveSessionMcpCredential({ sessionId, record });
+      return {
+        ...server,
+        enabled: record?.enabled ?? server.enabled ?? true,
+        source: 'user' as const,
+        // 会话身份标记：让连接与目录按会话隔离（见 getMcpPoolKey / sessionScope 说明）。
+        sessionScope: { ownerUserId, sessionId },
+        ...secret,
+      };
+    });
+
+  // 同 id 时**会话条目优先**（仅限本会话）；用户持久化配置本身不被改写。
+  const byId = new Map(inherited.map((server) => [server.id, server]));
+  for (const server of sessionServers) {
+    byId.set(server.id, server);
+  }
+  return mergeBuiltinAndConfiguredMcps([...byId.values()]);
 }
 
-export function loadConfiguredMcpServersForUser(userId: string): ConfiguredMCPServer[] {
+/**
+ * 从会话条目解析凭据三元组（引用 / 注入点 / 轮换版本）。
+ *
+ * 三者必须同时成立才返回，否则视为「这条会话 MCP 没有凭据」——只给引用而不给注入点
+ * 是**无效配置**，运行时不能猜该塞到哪个头里去。
+ */
+function resolveSessionMcpCredential(input: {
+  sessionId: string;
+  record: SessionMcpServerRecord | undefined;
+}): Pick<ConfiguredMCPServer, 'secretRef' | 'secretBinding' | 'secretUpdatedAt'> {
+  const secretRef = input.record?.secretRef ?? null;
+  if (!secretRef) return {};
+  const binding = readSecretBinding(input.record?.config);
+  if (!binding) return {};
+  const name = parseSessionSecretRefName({ secretRef, sessionId: input.sessionId });
+  if (!name) return {};
+  const updatedAt = getSessionExtensionSecretUpdatedAt(input.sessionId, name);
+  return {
+    secretRef,
+    secretBinding: binding,
+    ...(updatedAt === null ? {} : { secretUpdatedAt: updatedAt }),
+  };
+}
+
+function readSecretBinding(config: unknown): { kind: 'header' | 'env'; name: string } | null {
+  if (!config || typeof config !== 'object') return null;
+  const binding = (config as Record<string, unknown>)['secretBinding'];
+  if (!binding || typeof binding !== 'object') return null;
+  const kind = (binding as Record<string, unknown>)['kind'];
+  const name = (binding as Record<string, unknown>)['name'];
+  if ((kind === 'header' || kind === 'env') && typeof name === 'string' && name.length > 0) {
+    return { kind, name };
+  }
+  return null;
+}
+
+/** 读取用户持久化的 MCP 配置（**不含**内置合并，供会话层自行合并）。 */
+function readUserConfiguredMcpServers(userId: string): ConfiguredMCPServer[] {
   const row = sqliteGet<UserSettingRow>(
     `SELECT value FROM user_settings WHERE user_id = ? AND key = 'mcp_servers'`,
     [userId],
   );
+  if (!row?.value) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(row.value);
+    return sanitizePersistedMcpServers(parsed);
+  } catch {
+    return [];
+  }
+}
 
+export function loadConfiguredMcpServersForUser(userId: string): ConfiguredMCPServer[] {
   // 即便用户没有任何自定义 MCP 配置，仍然要把内置 MCP（websearch / grep_app）
   // 暴露给运行时；同 id 的用户配置会在 mergeBuiltinAndConfiguredMcps
   // 中完全覆盖内置项（含 enabled=false 的禁用语义）。
-  if (!row?.value) {
-    return mergeBuiltinAndConfiguredMcps([]);
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(row.value);
-    const userServers = sanitizePersistedMcpServers(parsed);
-    return mergeBuiltinAndConfiguredMcps(userServers);
-  } catch {
-    // JSON 解析失败时仍要兜底暴露内置 MCP，避免单条坏配置把整组
-    // 内置能力一起拖下水。
-    return mergeBuiltinAndConfiguredMcps([]);
-  }
+  return mergeBuiltinAndConfiguredMcps(readUserConfiguredMcpServers(userId));
 }
 
 export function getConfiguredServerByIdForUser(
@@ -220,7 +331,11 @@ export function getConfiguredMcpServerForSession(
   sessionId: string,
   serverId: string,
 ): ConfiguredMCPServer {
-  return getConfiguredServerById(getUserIdForSession(sessionId), serverId);
+  const servers = getConfiguredMcpServersForSession(sessionId);
+  const server = servers.find((entry) => entry.id === serverId);
+  if (!server) throw new Error(describeUnknownMcpServer(servers, serverId));
+  if (!server.enabled) throw new Error(`Configured MCP server is disabled: ${serverId}`);
+  return server;
 }
 
 export function getMcpServerFingerprint(server: ConfiguredMCPServer): string {
@@ -243,6 +358,10 @@ export function getMcpServerFingerprint(server: ConfiguredMCPServer): string {
     // docstring in {@link getMcpPoolKey}.
     headers: server.headers ?? {},
     oauth: server.oauth ?? null,
+    // 会话凭据必须参与指纹：`secretRef` 本身不变而值被轮换时，只有
+    // `secretUpdatedAt` 会变——漏掉它就会一直用旧密文重连。
+    secretRef: server.secretRef ?? null,
+    secretUpdatedAt: server.secretUpdatedAt ?? null,
   });
 
   return createHash('sha256').update(fingerprintSource).digest('hex').slice(0, 16);
@@ -291,6 +410,32 @@ function toMcpServerRef(
     headers: server.headers,
   };
 
+  // 会话级凭据注入（261101）。只有同时拿到引用、注入点与会话身份才解析明文；
+  // 解析不到就**抛错**而不是「无凭据照连」——后者会安静地把请求发给一个未认证的
+  // 端点，排查方向会被彻底带偏。
+  if (server.secretRef && server.secretBinding && server.sessionScope) {
+    const name = parseSessionSecretRefName({
+      secretRef: server.secretRef,
+      sessionId: server.sessionScope.sessionId,
+    });
+    const resolved = name
+      ? resolveSessionExtensionSecretValue({
+          sessionId: server.sessionScope.sessionId,
+          name,
+        })
+      : null;
+    if (!resolved) {
+      throw new Error(
+        `会话凭据（${server.secretBinding.kind}:${server.secretBinding.name}）不可用，请在会话扩展面板重新录入后再试。`,
+      );
+    }
+    if (server.secretBinding.kind === 'env') {
+      base.env = { ...(base.env ?? {}), [server.secretBinding.name]: resolved.value };
+    } else {
+      base.headers = { ...(base.headers ?? {}), [server.secretBinding.name]: resolved.value };
+    }
+  }
+
   // OAuth opt-in path. We require `userId` because token storage is
   // per-user; without it we can't safely persist credentials. The
   // `server.oauth` truthy check already excludes both `false` (opt-out)
@@ -333,7 +478,24 @@ function toMcpServerRef(
  * (`@/temp/opencode/packages/opencode/src/mcp/index.ts:486-549`).
  */
 export function getMcpPoolKey(server: ConfiguredMCPServer): string {
-  return `${server.id}:${getMcpServerFingerprint(server)}`;
+  const base = `${server.id}:${getMcpServerFingerprint(server)}`;
+  const scope = server.sessionScope;
+  if (!scope) {
+    // 用户级 / 系统内置：沿用既有共享语义。
+    return base;
+  }
+  // 会话级：把会话身份编进键（用 `::` 分隔并整体编码，避免 id 里出现冒号时产生
+  // 歧义键）。这样同一用户的会话 A 与会话 B 各自持有独立的客户端与 stdio 子进程，
+  // 目录缓存（`${userId}::${poolKey}`）也随之隔离。
+  return `${base}::session::${encodeURIComponent(scope.ownerUserId)}::${encodeURIComponent(scope.sessionId)}`;
+}
+
+/** 会话级连接键的标记片段，用于按会话回收（`releaseSessionMcpConnections`）。 */
+export function buildSessionMcpKeyMarker(params: {
+  ownerUserId: string;
+  sessionId: string;
+}): string {
+  return `::session::${encodeURIComponent(params.ownerUserId)}::${encodeURIComponent(params.sessionId)}`;
 }
 
 /**
@@ -361,6 +523,40 @@ export async function invalidateMcpServerConnectionForUser(
   clearCatalogSnapshot(userId, poolKey);
 }
 
+/**
+ * 回收**某个会话**的全部 MCP 连接与目录缓存（261031）。
+ *
+ * 触发点：会话删除、会话级条目被移除 / 禁用。没有这一步，已删除的会话级配置仍会
+ * 通过连接池继续被调用（池里缓存着活的客户端 + stdio 子进程），构成「撤销不生效」。
+ *
+ * 只按会话标记匹配，**不会**误伤同用户其他会话或用户级连接（这正是
+ * `disconnectAllForUser` 做不到的）。
+ */
+export async function releaseSessionMcpConnections(params: {
+  ownerUserId: string;
+  sessionId: string;
+}): Promise<number> {
+  const marker = buildSessionMcpKeyMarker(params);
+  const removed = await mcpConnectionPool.disconnectMatching((key) => key.includes(marker));
+  // 目录缓存键是 `${userId}::${poolKey}`，poolKey 已含 marker，故前缀扫描即可。
+  clearCatalogSnapshotsMatching((cacheKey) => cacheKey.includes(marker));
+  return removed;
+}
+
+/**
+ * 会话级条目被移除时只清它自己的目录缓存。
+ *
+ * 与 `releaseSessionMcpConnections` 的分工：一个是「整个会话下线」，一个是
+ * 「单个 server 下线」；两者都必须清缓存，否则 stale 目录会跨 revision 复用。
+ */
+export function releaseSessionMcpServerConnection(params: {
+  ownerUserId: string;
+  sessionId: string;
+  server: ConfiguredMCPServer;
+}): Promise<void> {
+  return invalidateMcpServerConnectionForUser(params.ownerUserId, params.server);
+}
+
 function filterEnabledMcpTools(
   tools: readonly MCPToolDef[],
   disabledTools?: readonly string[],
@@ -376,6 +572,34 @@ function isRuntimeVirtualBuiltinMcpServer(server: ConfiguredMCPServer): boolean 
   return (
     server.builtin === true && isVirtualBuiltinMcpId(server.id) && server.transport === 'stdio'
   );
+}
+
+/**
+ * 由 server 推导连接池选项（T-10）。
+ *
+ * 会话级配置与用户级配置的信任级别不同，故对会话级：
+ *   - stdio 使用**最小环境**（不把网关凭据带进第三方子进程）；
+ *   - 用户级沿用既有 `inherit` 行为，行为零变化。
+ */
+function resolveMcpPoolEnvPolicy(server: ConfiguredMCPServer): 'inherit' | 'minimal' {
+  return server.sessionScope ? 'minimal' : 'inherit';
+}
+
+/**
+ * 调用路径的池选项。
+ *
+ * 会话级调用面向的是**任意第三方工具**，很多是非幂等的（写文件、发消息、下单）。
+ * 断线自动重放会让远端副作用执行两次，因此会话级调用只允许**一次尝试**；
+ * 用户级保持既有的 3 次重连语义。
+ */
+function resolveMcpCallPoolOptions(server: ConfiguredMCPServer): McpPoolConnectionOptions {
+  const envPolicy = resolveMcpPoolEnvPolicy(server);
+  return server.sessionScope ? { envPolicy, maxAttempts: 1 } : { envPolicy };
+}
+
+/** 只读路径（列目录 / 探活）的池选项：重连是安全的，保留既有重试次数。 */
+function resolveMcpReadPoolOptions(server: ConfiguredMCPServer): McpPoolConnectionOptions {
+  return { envPolicy: resolveMcpPoolEnvPolicy(server) };
 }
 
 /**
@@ -408,8 +632,12 @@ function scheduleBackgroundCatalogRefresh(
   }
   backgroundCatalogRefreshInFlight.add(inflightKey);
   void mcpConnectionPool
-    .withOperationRetry(userId, poolKey, toMcpServerRef(server, userId), (adapter, serverId) =>
-      adapter.listTools(serverId),
+    .withOperationRetry(
+      userId,
+      poolKey,
+      toMcpServerRef(server, userId),
+      (adapter, serverId) => adapter.listTools(serverId),
+      resolveMcpReadPoolOptions(server),
     )
     .then((tools) => {
       setCatalogSnapshot(userId, poolKey, server.id, tools);
@@ -433,7 +661,14 @@ export async function listMcpToolsForUser(
   userId: string,
   filter?: { serverId?: string; allowedServerIds?: readonly string[] },
 ): Promise<MCPServerToolCatalog[]> {
-  const configuredServers = loadConfiguredMcpServersForUser(userId);
+  return listMcpToolsForConfiguredServers(userId, loadConfiguredMcpServersForUser(userId), filter);
+}
+
+async function listMcpToolsForConfiguredServers(
+  userId: string,
+  configuredServers: ConfiguredMCPServer[],
+  filter?: { serverId?: string; allowedServerIds?: readonly string[] },
+): Promise<MCPServerToolCatalog[]> {
   let selectedServers = filter?.serverId
     ? configuredServers.filter((server) => server.id === filter.serverId)
     : configuredServers;
@@ -509,6 +744,7 @@ export async function listMcpToolsForUser(
           poolKey,
           toMcpServerRef(server, userId),
           (adapter, serverId) => adapter.listTools(serverId),
+          resolveMcpReadPoolOptions(server),
         );
         // 目录返回值与快照都必须过滤：模型不应看到永远调不通的工具
         // （`callMcpToolForSession` 会在执行侧拒绝 `disabledTools`）。
@@ -545,7 +781,11 @@ export async function listMcpToolsForSession(
   sessionId: string,
   filter?: { serverId?: string; allowedServerIds?: readonly string[] },
 ): Promise<MCPServerToolCatalog[]> {
-  return listMcpToolsForUser(getUserIdForSession(sessionId), filter);
+  return listMcpToolsForConfiguredServers(
+    getUserIdForSession(sessionId),
+    getConfiguredMcpServersForSession(sessionId),
+    filter,
+  );
 }
 
 /**
@@ -641,6 +881,7 @@ export async function retryMcpConnectionForUser(
       poolKey,
       toMcpServerRef(server, userId),
       (adapter, sid) => adapter.listTools(sid),
+      resolveMcpReadPoolOptions(server),
     );
     // 「重试连接」按钮的 toolCount 与目录快照一致，同样排除被禁用的工具。
     const tools = filterEnabledMcpTools(fetchedTools, server.disabledTools);
@@ -705,7 +946,18 @@ export async function callMcpToolForSession(
     userId,
     getMcpPoolKey(server),
     toMcpServerRef(server, userId),
-    (adapter, serverId) => adapter.callTool(serverId, input.toolName, input.arguments ?? {}),
+    (adapter, serverId) => {
+      const current = getConfiguredMcpServerForSession(sessionId, input.serverId);
+      assertMcpServerAllowedForScope(current, scope);
+      if (
+        getMcpPoolKey(current) !== getMcpPoolKey(server) ||
+        current.disabledTools?.includes(input.toolName)
+      ) {
+        throw new Error('MCP 配置或授权已变化，已阻止调用。');
+      }
+      return adapter.callTool(serverId, input.toolName, input.arguments ?? {});
+    },
+    resolveMcpCallPoolOptions(server),
   );
 
   return {

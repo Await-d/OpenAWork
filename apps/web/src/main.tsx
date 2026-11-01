@@ -3,6 +3,7 @@
 // 详见 utils/log/error-capture-install.ts。
 import './utils/log/error-capture-install.js';
 import { createRoot } from 'react-dom/client';
+import { Profiler } from 'react';
 import { BrowserRouter } from 'react-router';
 import { AppErrorBoundary } from '@openAwork/shared-ui';
 import App from './App.js';
@@ -16,6 +17,7 @@ import { installMonacoI18n } from './lib/monaco/monaco-i18n.js';
 import { isTauriRuntime } from './utils/gateway/desktop-gateway.js';
 import { clientErrorRecorder, exportClientErrorDiagnostics } from './utils/log/error-capture.js';
 import { readDesktopWindowMode } from './island/window-mode.js';
+import { recordReactCommit } from './utils/log/react-commit-cascade.js';
 
 // Configure Monaco to load from local bundle instead of CDN.
 // This prevents "Monaco initialization: error" when the CDN is unreachable.
@@ -154,7 +156,9 @@ function mountApp(): void {
           return sections.join('\n\n');
         }}
       >
-        <App />
+        <Profiler id="app-root" onRender={recordReactCommit}>
+          <App />
+        </Profiler>
       </AppErrorBoundary>
     </BrowserRouter>,
   );

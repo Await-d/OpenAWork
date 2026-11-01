@@ -3,9 +3,7 @@ import {
   getSessionMessageByRequestId,
 } from '../message/message-v2-adapter.js';
 import type { MessageContent } from '@openAwork/shared';
-import { readFileSync } from 'node:fs';
-import { resolveGatewayArtifactsIndexPath } from '../infra/storage-paths.js';
-import type { RunArtifact } from '@openAwork/artifacts';
+import { resolveSessionInputImage } from '../message/input-image-resolver.js';
 import { maybeAutoTitle } from './session-title.js';
 import type { ModelRouteConfig } from '../provider/model-router.js';
 import { generateSessionTitleLlm, isFirstUserMessage } from './session-title-llm.js';
@@ -40,50 +38,6 @@ export interface PersistStreamUserMessageInput {
   syntheticContext?: SyntheticRequestContext;
 }
 
-const gatewayArtifactsIndexPath = resolveGatewayArtifactsIndexPath();
-
-function loadIndexedSessionArtifact(
-  sessionId: string,
-  artifactId: string,
-): RunArtifact | undefined {
-  try {
-    const raw = readFileSync(gatewayArtifactsIndexPath, 'utf-8');
-    const artifacts = JSON.parse(raw) as RunArtifact[];
-    return artifacts.find(
-      (artifact) => artifact.id === artifactId && artifact.sessionId === sessionId,
-    );
-  } catch {
-    return undefined;
-  }
-}
-
-function resolveInputImageContent(
-  sessionId: string,
-  item: Extract<MessageContent, { type: 'input_image' }>,
-): Extract<MessageContent, { type: 'input_image' }> {
-  // 勿因 `fileId` 短路：它全仓库无生产者也无解析器，短路会让带 artifactId 的图片被静默丢弃。
-  if (item.imageUrl || !item.artifactId) {
-    return item;
-  }
-
-  const artifact = loadIndexedSessionArtifact(sessionId, item.artifactId);
-  if (!artifact?.path || !artifact.mimeType?.startsWith('image/')) {
-    return item;
-  }
-
-  try {
-    const contentBase64 = readFileSync(artifact.path, 'base64');
-    return {
-      ...item,
-      fileName: item.fileName ?? artifact.name,
-      imageUrl: `data:${artifact.mimeType};base64,${contentBase64}`,
-      mimeType: item.mimeType ?? artifact.mimeType,
-    };
-  } catch {
-    return item;
-  }
-}
-
 function resolvePersistedUserContent(
   sessionId: string,
   content: MessageContent[] | undefined,
@@ -94,7 +48,7 @@ function resolvePersistedUserContent(
     !content || content.length === 0
       ? [{ type: 'text', text }]
       : content.map((item) =>
-          item.type === 'input_image' ? resolveInputImageContent(sessionId, item) : item,
+          item.type === 'input_image' ? resolveSessionInputImage(sessionId, item) : item,
         );
 
   // Persist per-turn synthetic content as `synthetic: true` text parts

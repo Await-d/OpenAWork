@@ -3,6 +3,8 @@ import { listResourceCatalog } from '@openAwork/resources/node';
 import type { ResourceTextDescriptor } from '@openAwork/resources/node';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
+import { freezeChannelMessageProvenance } from '../memory/maintenance/memory-inbound-provenance.js';
 import { resolveChannelLlmToolsEnabled } from './channel-tool-gate.js';
 import { normalizeChannelPromptInjections } from './channel-prompt-injections.js';
 import { normalizeChannelReplyLanguage } from './channel-reply-language.js';
@@ -98,6 +100,7 @@ export function buildChannelSessionMetadata(
     questionToolEnabled: false,
     replyLanguage: normalizeChannelReplyLanguage(input.channel.replyLanguage),
     channelLlmToolsEnabled,
+    channelExtensionManagementEnabled: input.channel.channelExtensionManagementEnabled === true,
     channel: {
       id: input.channel.id,
       type: input.channel.type,
@@ -159,15 +162,20 @@ export function buildChannelSessionMetadata(
   return nextMetadata;
 }
 
-function resolveChannelPersona(
-  channel: ChannelInstance,
+/**
+ * 未绑定 SOUL 时使用的内置默认人设。
+ *
+ * 渠道会话此前「不绑定 = 什么都不注入」，模型拿不到任何角色提示词；而设置页
+ * 文案承诺的是「不绑定，使用默认助手人格」。这里把承诺补齐：未绑定即落到
+ * `balanced-collaborator`（其 SOUL 文档自带 In Channels 段），由
+ * `resolveChannelPersonaSystemPrompt` 注入 stable 段。
+ */
+const DEFAULT_CHANNEL_PERSONA_RESOURCE_ID = 'resource-soul-balanced-collaborator';
+
+function lookupChannelPersonaResource(
+  resourceId: string,
   userId: string,
 ): { readonly resourceId: string; readonly title: string; readonly content: string } | null {
-  const resourceId = channel.persona?.resourceId;
-  if (!resourceId) {
-    return null;
-  }
-
   const persona = listResourceCatalog().souls.find(
     (soul: ResourceTextDescriptor) =>
       soul.id === resourceId &&
@@ -175,32 +183,50 @@ function resolveChannelPersona(
       soul.feature === 'channels' &&
       soul.usageKind === 'channel-persona',
   );
-  if (!persona) {
-    const userPersona = sqliteGet<{
-      readonly id: string;
-      readonly title: string;
-      readonly content: string;
-    }>(
-      `SELECT id, title, content
-       FROM user_resources
-       WHERE id = ? AND user_id = ? AND area = 'souls'
-       LIMIT 1`,
-      [resourceId, userId],
-    );
-    return userPersona
-      ? {
-          resourceId: userPersona.id,
-          title: userPersona.title,
-          content: userPersona.content,
-        }
-      : null;
+  if (persona) {
+    return {
+      resourceId: persona.id,
+      title: persona.title,
+      content: persona.content,
+    };
   }
 
-  return {
-    resourceId: persona.id,
-    title: persona.title,
-    content: persona.content,
-  };
+  const userPersona = sqliteGet<{
+    readonly id: string;
+    readonly title: string;
+    readonly content: string;
+  }>(
+    `SELECT id, title, content
+     FROM user_resources
+     WHERE id = ? AND user_id = ? AND area = 'souls'
+     LIMIT 1`,
+    [resourceId, userId],
+  );
+  return userPersona
+    ? {
+        resourceId: userPersona.id,
+        title: userPersona.title,
+        content: userPersona.content,
+      }
+    : null;
+}
+
+function resolveChannelPersona(
+  channel: ChannelInstance,
+  userId: string,
+): { readonly resourceId: string; readonly title: string; readonly content: string } | null {
+  const explicitResourceId = channel.persona?.resourceId;
+  const explicitPersona = explicitResourceId
+    ? lookupChannelPersonaResource(explicitResourceId, userId)
+    : null;
+  if (explicitPersona) {
+    return explicitPersona;
+  }
+
+  // 显式绑定解析不到资源（用户上传的 SOUL 被删 / id 失效）时**不返回 null**：
+  // 那会让 `route-system-prompt` 退回空槽位，等于角色提示词消失。回落内置默认
+  // 人设；实际生效值由 metadata 的 `channel.persona` 如实体现，便于排障对比。
+  return lookupChannelPersonaResource(DEFAULT_CHANNEL_PERSONA_RESOURCE_ID, userId);
 }
 
 /**
@@ -293,6 +319,7 @@ export function upsertChannelSession(input: {
       "UPDATE sessions SET title = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
       [input.sessionKey, JSON.stringify(nextMetadata), existingSession.id, input.userId],
     );
+    freezeInboundProvenance(input, existingSession.id);
     return existingSession.id;
   }
 
@@ -301,5 +328,54 @@ export function upsertChannelSession(input: {
     'INSERT INTO sessions (id, user_id, title, messages_json, state_status, metadata_json) VALUES (?, ?, ?, ?, ?, ?)',
     [sessionId, input.userId, input.sessionKey, '[]', 'idle', JSON.stringify(nextMetadata)],
   );
+  freezeInboundProvenance(input, sessionId);
   return sessionId;
+}
+
+/**
+ * 在会话写入成功后冻结本轮入站消息来源（261101-记忆确认写入与周期整理）。
+ *
+ * 落点是「消息到达、会话 metadata 写入」这一刻，而不是等抽取时反推——渠道会话
+ * 会被复用，`channelActor` 随下一条消息覆盖，事后反推会把 A 的消息记成 B 的来源。
+ *
+ * 两条纪律：
+ *   1. 只在有 `currentMessageId` 时冻结：没有平台消息 id 的消息，冻结出来的
+ *      兜底占位无法与真实消息对应，价值为零反而污染来源表；
+ *   2. **来源冻结失败绝不能阻断渠道消息处理** —— 用户发来的话必须照常进入会话，
+ *      记不下来源只是治理能力降级，不是消息处理失败，故吞掉异常只记 warn。
+ */
+function freezeInboundProvenance(
+  input: {
+    readonly actor?: ChannelSessionActorContext;
+    readonly channel: ChannelInstance;
+    readonly chatId: string;
+    readonly currentMessageId?: string;
+  },
+  sessionId: string,
+): void {
+  if (!input.currentMessageId) {
+    return;
+  }
+  try {
+    freezeChannelMessageProvenance({
+      sessionId,
+      // `channel.id`（即 map key / pluginId）在此文件即平台实例标识；`ChannelInstance`
+      // 上并无独立的 `pluginId` 字段，故只传 id，platform 由冻结模块回退到 id。
+      channel: { id: input.channel.id },
+      chatId: input.chatId,
+      messageId: input.currentMessageId,
+      actor: input.actor
+        ? {
+            platformUserId: input.actor.platformUserId,
+            senderName: input.actor.senderName,
+          }
+        : null,
+    });
+  } catch (error) {
+    logGatewayWarn(
+      `[channel-session-store] 入站来源冻结失败，已跳过（不阻断渠道消息）：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }

@@ -35,12 +35,8 @@ import {
   scanMemoryWriteContent,
   type MemoryWriteScanResult,
 } from '../memory/memory-security-scanner.js';
-import {
-  createMemory,
-  findEnabledMemoryByTypeAndKey,
-  listMemoriesForTeamWorkspaceKnowledge,
-  updateMemory,
-} from '../memory/memory-store.js';
+import { listMemories, listMemoriesForTeamWorkspaceKnowledge } from '../memory/memory-store.js';
+import { applyManualMemoryChange } from '../memory/governance/memory-commit-service.js';
 import { getTeamConstitution, updateTeamConstitution } from '../team/team-constitution-store.js';
 import {
   ensureDefaultPersonasForUser,
@@ -212,6 +208,23 @@ function getTeamWorkspaceKnowledgeScope(
      WHERE id = ? AND user_id = ?
      LIMIT 1`,
     [teamWorkspaceId, userId],
+  );
+}
+
+/**
+ * 查找该用户下同 type + key 的**任意**启用记忆（不限作用域）。
+ *
+ * 用于「全局同 key 冲突」判定：用户级（user scope）或其它工作区的同名记忆存在时，
+ * 团队知识入库必须返回 409，绝不静默改绑。这里直接按 `(type,key)` 查，覆盖新模型
+ * （带 scope_*）与旧版（无 scope_*）两类行。
+ */
+function findAnyEnabledMemoryByTypeAndKey(
+  userId: string,
+  type: MemoryEntry['type'],
+  key: string,
+): MemoryEntry | undefined {
+  return listMemories(userId, { enabled: true, limit: 1000 }).find(
+    (memory) => memory.type === type && memory.key === key,
   );
 }
 
@@ -637,14 +650,20 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
       scanStep.succeed();
 
       const workspaceRoot = workspace.default_working_root;
-      const existing = findEnabledMemoryByTypeAndKey(user.sub, body.type, body.key);
+
+      // 人工保存路径：这是 JWT 鉴权后用户在团队界面里显式提交的表单，内容与范围
+      // 已在界面完整展示，故**不二次追问**。
+      // 作用域感知查找：`findEnabledMemoryByTypeAndKey` 已被固定为 user 作用域，团队
+      // 条目在此查不到，必须按「团队工作区 或 同工作区根目录旧版条目」定位。
+      const anySameKey = findAnyEnabledMemoryByTypeAndKey(user.sub, body.type, body.key);
       const canUpdateExisting =
-        existing?.teamWorkspaceId === teamWorkspaceId ||
-        (existing?.teamWorkspaceId === null &&
-          existing.workspaceRoot !== null &&
+        anySameKey?.teamWorkspaceId === teamWorkspaceId ||
+        (anySameKey?.teamWorkspaceId === null &&
+          anySameKey.workspaceRoot !== null &&
           workspaceRoot !== null &&
-          existing.workspaceRoot === workspaceRoot);
-      if (existing && !canUpdateExisting) {
+          anySameKey.workspaceRoot === workspaceRoot);
+      // 全局同 key（用户级 / 其它工作区）→ 409，绝不静默改绑到团队工作区。
+      if (anySameKey && !canUpdateExisting) {
         step.fail('knowledge-key-conflict');
         return reply.status(409).send({
           error: 'knowledge-key-conflict',
@@ -652,41 +671,81 @@ export async function teamPhaseARoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      if (existing) {
-        const updated = updateMemory(user.sub, existing.id, {
-          confidence: body.confidence,
-          enabled: true,
-          priority: body.priority,
-          roleLayers: body.roleLayers,
-          source: body.source,
-          teamWorkspaceId,
-          value: body.value,
-          workspaceRoot,
+      // `source` 是本路由的既有契约（团队知识 / 图谱界面按它做来源筛选与「自动/抽取」
+      // 语义词检索），本次改造只加确认语义、绝不改来源标签：未显式指定时沿用旧的
+      // `auto_extracted`。写入仍走人工提交器——它保留调用方来源（未指定才回落 manual），
+      // 并负责安全扫描、写 `memory_revisions` 与推进 `change_seq`，因此这一入口同样具备
+      // 审计与回滚能力。
+      const scope = { type: 'team' as const, id: teamWorkspaceId };
+      if (anySameKey) {
+        const updated = applyManualMemoryChange({
+          userId: user.sub,
+          actorId: user.sub,
+          action: 'update',
+          memoryId: anySameKey.id,
+          payload: {
+            confidence: body.confidence,
+            enabled: true,
+            priority: body.priority,
+            roleLayers: body.roleLayers,
+            source: body.source ?? 'auto_extracted',
+            teamWorkspaceId,
+            value: body.value,
+            workspaceRoot,
+          },
         });
-        if (updated) {
-          step.succeed(undefined, { created: false, knowledgeId: updated.id, teamWorkspaceId });
-          return reply.send({
-            created: false,
-            knowledge: toTeamWorkspaceKnowledgeRecord(updated),
+        if (!updated.ok || !updated.memory) {
+          step.fail('manual-commit-failed');
+          return reply.status(400).send({
+            error: 'memory-write-blocked',
+            message: TEAM_PHASE_A_ERROR_MESSAGES.memoryWriteBlocked,
+            ...(updated.error !== undefined ? { detail: updated.error } : {}),
           });
         }
+        step.succeed(undefined, {
+          created: false,
+          knowledgeId: updated.memory.id,
+          teamWorkspaceId,
+        });
+        return reply.send({
+          created: false,
+          knowledge: toTeamWorkspaceKnowledgeRecord(updated.memory),
+        });
       }
 
-      const created = createMemory(user.sub, {
-        confidence: body.confidence,
-        key: body.key,
-        priority: body.priority,
-        roleLayers: body.roleLayers,
-        source: body.source,
-        teamWorkspaceId,
-        type: body.type,
-        value: body.value,
-        workspaceRoot,
+      const created = applyManualMemoryChange({
+        userId: user.sub,
+        actorId: user.sub,
+        action: 'create',
+        payload: {
+          confidence: body.confidence,
+          key: body.key,
+          priority: body.priority,
+          roleLayers: body.roleLayers,
+          source: body.source ?? 'auto_extracted',
+          teamWorkspaceId,
+          type: body.type,
+          value: body.value,
+          workspaceRoot,
+          scope,
+        },
       });
-      step.succeed(undefined, { created: true, knowledgeId: created.id, teamWorkspaceId });
+      if (!created.ok || !created.memory) {
+        step.fail('manual-commit-failed');
+        return reply.status(400).send({
+          error: 'memory-write-blocked',
+          message: TEAM_PHASE_A_ERROR_MESSAGES.memoryWriteBlocked,
+          ...(created.error !== undefined ? { detail: created.error } : {}),
+        });
+      }
+      step.succeed(undefined, {
+        created: true,
+        knowledgeId: created.memory.id,
+        teamWorkspaceId,
+      });
       return reply.status(201).send({
         created: true,
-        knowledge: toTeamWorkspaceKnowledgeRecord(created),
+        knowledge: toTeamWorkspaceKnowledgeRecord(created.memory),
       });
     },
   );

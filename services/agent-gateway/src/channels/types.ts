@@ -310,6 +310,7 @@ export interface ChannelInstance {
   config: Record<string, string>;
   replyLanguage?: ChannelReplyLanguage;
   channelLlmToolsEnabled?: boolean;
+  channelExtensionManagementEnabled?: boolean;
   tools?: Record<string, boolean>;
   providerId?: string | null;
   model?: string | null;

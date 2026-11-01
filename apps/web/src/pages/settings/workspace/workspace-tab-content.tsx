@@ -33,6 +33,8 @@ interface GitHubTriggerConfig {
   webhookSecretForHmacVerification: string;
   repoFullNameOwnerSlashRepo: string;
   events: string[];
+  // 该仓库事件由哪个托管 Agent 执行（可选；写进事件会话 metadata.agentId）。
+  agentId?: string;
   agentPromptTemplate: string;
   autoApproveWithoutUserConfirmation: boolean;
 }
@@ -73,7 +75,13 @@ interface WorkspaceTabContentProps {
   onDeleteSshConnection: (id: string) => void;
   onBrowseSshPath: (path: string) => void;
   onUploadSshFile: (file: File) => void;
-  githubTriggers: Array<{ repo: string; events: string[] }>;
+  githubTriggers: Array<{ agentId?: string; events: string[]; repo: string }>;
+  /** GitHub 触发器表单的 Agent 候选（`useGitHubTriggerAgentOptions`）。 */
+  agentOptions?: Array<{ id: string; label: string }>;
+  /** 已禁用的 Agent：仅用于给「已保存但被禁用」的绑定补说明文案。 */
+  disabledAgentOptions?: Array<{ id: string; label: string }>;
+  /** 点击触发器行上的 Agent 名称时跳转到「代理」页（不传则只显示文本）。 */
+  onOpenAgentSettings?: (() => void) | undefined;
   providerUpdatesDetail: string;
   onSaveGitHubTrigger: (config: GitHubTriggerConfig) => Promise<void>;
   onDesktopAutomationStart: (url?: string) => Promise<void>;
@@ -96,6 +104,73 @@ const DASHED_CARD: React.CSSProperties = {
   background: 'color-mix(in srgb, var(--bg-overlay) 94%, var(--bg-base))',
   padding: '8px 10px',
 };
+
+/**
+ * 已保存的 Agent 绑定在当前候选列表里不可用时的展示文案。
+ *
+ * 返回 `null` 表示绑定仍然有效（或本来就没绑定）。区分「已禁用」与「已不可用」：
+ * 前者用户可以在「代理」页启用后恢复，后者说明该 id 已不存在，需要重新选择。
+ */
+function describeUnavailableAgent(
+  agentId: string,
+  enabledAgents: ReadonlyArray<{ id: string; label: string }>,
+  disabledAgents: ReadonlyArray<{ id: string; label: string }>,
+): string | null {
+  if (!agentId || enabledAgents.some((agent) => agent.id === agentId)) {
+    return null;
+  }
+  const disabledAgent = disabledAgents.find((agent) => agent.id === agentId);
+  return disabledAgent ? `${disabledAgent.label}（已禁用）` : `${agentId}（已不可用）`;
+}
+
+/**
+ * 触发器行上的「当前生效 Agent」回显。
+ *
+ * 未绑定返回 `null`（事件会话按默认角色跑）；绑定仍在候选里显示名称，已禁用 /
+ * 已不存在的 id 明确标注原因——否则用户只能看到一个空位，无法判断绑定是否还在。
+ */
+function BoundAgentLabel({
+  agentId,
+  disabledAgents,
+  enabledAgents,
+  onOpenAgentSettings,
+}: {
+  agentId: string | undefined;
+  disabledAgents: ReadonlyArray<{ id: string; label: string }>;
+  enabledAgents: ReadonlyArray<{ id: string; label: string }>;
+  onOpenAgentSettings?: (() => void) | undefined;
+}) {
+  if (!agentId) {
+    return null;
+  }
+  const enabledAgent = enabledAgents.find((agent) => agent.id === agentId);
+  const label = enabledAgent
+    ? enabledAgent.label
+    : (describeUnavailableAgent(agentId, enabledAgents, disabledAgents) ?? agentId);
+  if (!onOpenAgentSettings) {
+    return <span style={{ fontSize: 9, color: 'var(--fg-muted)' }}>Agent：{label}</span>;
+  }
+  // 绑定失效时最需要的动作就是去「代理」页看它被禁用还是被删，所以名称直接做成入口。
+  return (
+    <button
+      type="button"
+      title="前往「代理」页管理该 Agent"
+      onClick={onOpenAgentSettings}
+      style={{
+        alignSelf: 'flex-start',
+        background: 'none',
+        border: 'none',
+        color: 'var(--fg-muted)',
+        cursor: 'pointer',
+        fontSize: 9,
+        padding: 0,
+        textDecoration: 'underline',
+      }}
+    >
+      Agent：{label}
+    </button>
+  );
+}
 
 const BADGE: React.CSSProperties = {
   display: 'inline-flex',
@@ -252,6 +327,7 @@ const EMPTY_TRIGGER_FORM = {
   webhookSecret: '',
   privateKeyPem: '',
   events: [] as string[],
+  agentId: '',
   agentPromptTemplate: '',
   autoApprove: false,
 };
@@ -313,6 +389,9 @@ export function WorkspaceTabContent({
   onBrowseSshPath,
   onUploadSshFile,
   githubTriggers,
+  agentOptions = [],
+  disabledAgentOptions = [],
+  onOpenAgentSettings,
   providerUpdatesDetail,
   onSaveGitHubTrigger,
   onDesktopAutomationStart,
@@ -376,6 +455,7 @@ export function WorkspaceTabContent({
           webhookSecretForHmacVerification: triggerForm.webhookSecret,
           repoFullNameOwnerSlashRepo: triggerForm.repo,
           events: triggerForm.events,
+          agentId: triggerForm.agentId.trim() || undefined,
           agentPromptTemplate: triggerForm.agentPromptTemplate,
           autoApproveWithoutUserConfirmation: triggerForm.autoApprove,
         });
@@ -419,6 +499,12 @@ export function WorkspaceTabContent({
       },
     });
   }
+
+  const unavailableAgentLabel = describeUnavailableAgent(
+    triggerForm.agentId,
+    agentOptions,
+    disabledAgentOptions,
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -728,6 +814,12 @@ export function WorkspaceTabContent({
                     >
                       {t.repo}
                     </span>
+                    <BoundAgentLabel
+                      agentId={t.agentId}
+                      disabledAgents={disabledAgentOptions}
+                      enabledAgents={agentOptions}
+                      onOpenAgentSettings={onOpenAgentSettings}
+                    />
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                       {t.events.map((ev) => (
                         <span key={ev} style={eventPillStyle(ev)}>
@@ -814,6 +906,25 @@ export function WorkspaceTabContent({
                     </label>
                   ))}
                 </div>
+                <select
+                  style={WORKSPACE_FIELD_INPUT}
+                  value={triggerForm.agentId}
+                  onChange={(e) => setTriggerForm((f) => ({ ...f, agentId: e.target.value }))}
+                >
+                  <option value="">不绑定 Agent（沿用默认角色）</option>
+                  {unavailableAgentLabel ? (
+                    <option value={triggerForm.agentId}>{unavailableAgentLabel}</option>
+                  ) : null}
+                  {agentOptions.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.label}
+                    </option>
+                  ))}
+                </select>
+                <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
+                  事件会话按这里绑定的 Agent 取角色提示词，留空则用默认角色；已禁用的 Agent
+                  不会生效（需先在「代理」页启用）。
+                </span>
                 <textarea
                   rows={3}
                   style={{ ...WORKSPACE_FIELD_INPUT, resize: 'vertical' }}

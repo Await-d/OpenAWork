@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { ChannelQuickLinkEntry } from './ChannelQuickLinks.js';
+import type { ChannelExtensionImpact } from './ChannelExtensionManagementSection.js';
 
 export type ChannelEditorType =
   'telegram' | 'discord' | 'slack' | 'feishu' | 'dingtalk' | 'weixin' | 'wecom' | 'whatsapp' | 'qq';
@@ -200,6 +201,14 @@ export interface ChannelSettingsEntry {
   subscriptions: ChannelSubscriptionEntry[];
   features: ChannelFeaturesEntry;
   channelLlmToolsEnabled?: boolean;
+  /**
+   * 渠道是否开启「会话级扩展管理」（技能 / MCP 的会话内安装）。
+   *
+   * 默认关闭：开启后本渠道的会话按 `explicit` 策略运行，**不再继承**会话所有者的
+   * 用户级技能与 MCP。因此开启必须走确认（见 `ChannelExtensionManagementSection`），
+   * 不能一勾就生效。
+   */
+  channelExtensionManagementEnabled?: boolean;
   providerId?: string | null;
   model?: string | null;
   tools?: Record<string, boolean>;
@@ -221,6 +230,7 @@ export interface ChannelDraft {
   subscriptions: ChannelSubscriptionEntry[];
   features: ChannelFeaturesEntry;
   channelLlmToolsEnabled: boolean;
+  channelExtensionManagementEnabled: boolean;
   providerId: string | null;
   model: string | null;
   tools: Record<string, boolean>;
@@ -272,6 +282,13 @@ export interface ChannelSubscriptionSettingsProps {
   onResolveCapabilityCatalogCounts?: (
     draft: ChannelCapabilityCatalogDraft,
   ) => Promise<ChannelCapabilityCatalogCounts>;
+  /**
+   * 读取「开启会话级扩展管理后不再继承」的用户级技能 / MCP 清单。
+   *
+   * 由调用方注入而不是组件自己取：清单来自设置页与技能两个客户端，组件只负责展示与
+   * 「确认前不切换」的交互（见 `ChannelExtensionManagementSection`）。
+   */
+  onLoadChannelExtensionImpact?: () => Promise<ChannelExtensionImpact>;
   onSave: (channelId: string | null, draft: ChannelDraft) => Promise<ChannelSettingsEntry>;
   onDelete?: (channelId: string) => Promise<void>;
   onConnect?: (channelId: string) => Promise<void>;

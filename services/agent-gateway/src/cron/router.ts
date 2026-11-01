@@ -222,6 +222,10 @@ function collectJobIssues(
     deliveryMode: job.delivery_mode,
     deliveryTarget: job.delivery_target,
     sessionId: job.session_id,
+    // 渠道任务不能投递到会话（结果由 PluginSendMessage 回发渠道），否则迟早
+    // 变成「执行成功但记录失败」或「执行前就报会话不存在」。
+    pluginId: job.plugin_id,
+    pluginChatId: job.plugin_chat_id,
     ...(options.allowExpiredAt === true ? { allowExpiredAt: true } : {}),
   });
 }

@@ -69,6 +69,30 @@ function speedUpExecutorRetryDelay(): void {
   );
 }
 
+function attachExecutionEvidence(handoffId: string): void {
+  dbModule.sqliteRun('UPDATE handoff_records SET to_session_id = ?, result_json = ? WHERE id = ?', [
+    EXECUTOR_SESSION_ID,
+    JSON.stringify({
+      protocol: 'submit_execution_result',
+      status: 'completed',
+      summary: '已完成登录接口实现，并补充 JWT 校验。',
+      checklist: [
+        {
+          id: 'check',
+          status: 'pass',
+          evidence: '运行检查',
+          verificationRefs: [{ terminalId: `term-${handoffId}`, command: 'bun test' }],
+        },
+      ],
+    }),
+    handoffId,
+  ]);
+  dbModule.sqliteRun(
+    `INSERT INTO session_terminals (terminal_id, session_id, user_id, client_request_id, tool_name, kind, command, cwd, status, exit_code, started_at_ms, ended_at_ms, last_activity_ms) VALUES (?, ?, ?, ?, 'bash', 'foreground', 'bun test', '/workspace', 'exited', 0, 1, 2, 2)`,
+    [`term-${handoffId}`, EXECUTOR_SESSION_ID, USER_ID, `handoff:${handoffId}`],
+  );
+}
+
 function makeExecutorHandoff(): HandoffStoreModule.HandoffRecord {
   // 直接构造一个 toRoleLayer='executor' 的 handoff 记录（claimed/running 态），
   // 让 createPhaseCAwareRunner 走 runExecutionLayer 分支。
@@ -107,6 +131,48 @@ afterAll(async () => {
 });
 
 describe('runExecutionLayer 失败语义（🔴#1）', () => {
+  it('即使提交completed协议但只有自报verified，runner不能完成', async () => {
+    runSessionInBackgroundMock.mockResolvedValue({ stopReason: 'end_turn', statusCode: 200 });
+    const handoff = makeExecutorHandoff();
+    dbModule.sqliteRun('UPDATE handoff_records SET result_json = ? WHERE id = ?', [
+      JSON.stringify({
+        protocol: 'submit_execution_result',
+        status: 'completed',
+        summary: '已完成',
+        checklist: [{ id: 'AC1', status: 'pass', evidence: '通过', verified: true }],
+      }),
+      handoff.id,
+    ]);
+    await expect(
+      pm1RunnerModule.createPhaseCAwareRunner()({
+        handoff,
+        toSessionId: EXECUTOR_SESSION_ID,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('可核验执行证据');
+    expect(readSubstate(EXECUTOR_SESSION_ID)).not.toBe('completed');
+  });
+
+  it('失败重试使用新请求键，不能重放旧回合', async () => {
+    runSessionInBackgroundMock.mockResolvedValue({ stopReason: 'end_turn', statusCode: 200 });
+    const handoff = makeExecutorHandoff();
+    dbModule.sqliteRun('UPDATE handoff_records SET failed_retry_count = 1 WHERE id = ?', [
+      handoff.id,
+    ]);
+    await expect(
+      pm1RunnerModule.createPhaseCAwareRunner()({
+        handoff,
+        toSessionId: EXECUTOR_SESSION_ID,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow();
+    expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestData: expect.objectContaining({ clientRequestId: `handoff:${handoff.id}:f1` }),
+      }),
+    );
+  });
+
   it('stream 返回 stopReason==="error" 时 runner 抛错，substate 不被标 completed', async () => {
     speedUpExecutorRetryDelay();
     runSessionInBackgroundMock.mockResolvedValue({
@@ -168,6 +234,7 @@ describe('runExecutionLayer 失败语义（🔴#1）', () => {
       content: [{ type: 'text', text: '已完成登录接口实现，并补充 JWT 校验。' }],
     });
 
+    attachExecutionEvidence(handoff.id);
     await runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal });
 
     expect(runSessionInBackgroundMock).toHaveBeenCalledWith(
@@ -190,7 +257,7 @@ describe('runExecutionLayer 失败语义（🔴#1）', () => {
     expect(row?.result_json).toBeTruthy();
     expect(JSON.parse(row!.result_json!)).toMatchObject({
       role: 'executor',
-      protocol: 'stream-degraded',
+      protocol: 'submit_execution_result',
       summary: '已完成登录接口实现，并补充 JWT 校验。',
     });
   });
@@ -220,6 +287,7 @@ describe('runExecutionLayer 失败语义（🔴#1）', () => {
       content: [{ type: 'text', text: '已修复 Team 页面任务概览。' }],
     });
 
+    attachExecutionEvidence(handoff.id);
     await runner({ handoff, toSessionId: EXECUTOR_SESSION_ID, signal });
 
     expect(runSessionInBackgroundMock).toHaveBeenCalledWith(

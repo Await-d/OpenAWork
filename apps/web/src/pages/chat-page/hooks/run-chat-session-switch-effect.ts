@@ -18,6 +18,7 @@ import { CHAT_LATEST_RESTORE_TOLERANCE_PX } from '../../../components/conversati
 import type { RecoveredActiveAssistantStream } from '../../../components/conversation-runtime/stream/stream-recovery.js';
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
+import type { StreamFrameHandle } from '../../../components/conversation-runtime/stream/stream-frame-controller.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import { readRefCurrent } from '../../../utils/ref/ref-current.js';
 import { extractWorkingDirectory } from '../../../utils/session/session-metadata.js';
@@ -139,6 +140,7 @@ export interface ChatSessionSwitchDeps {
   readonly setWorkflowRuntime: Dispatch<SetStateAction<WorkflowRuntimeState | null>>;
   readonly skeletonDelayTimerRef: RefObject<number | null>;
   readonly startSessionSwitchTransition: TransitionStartFunction;
+  readonly streamFrameHandleRef: MutableRefObject<StreamFrameHandle | null>;
   readonly streamBufferRef: RefObject<string>;
   readonly streamThinkingBlocksRef: RefObject<StreamingThinkingBlock[]>;
   readonly streamingRef: MutableRefObject<boolean>;
@@ -227,6 +229,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     setWorkflowRuntime,
     skeletonDelayTimerRef,
     startSessionSwitchTransition,
+    streamFrameHandleRef,
     streamBufferRef,
     streamThinkingBlocksRef,
     streamingRef,
@@ -343,6 +346,8 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
   // in-progress assistant message instead of waiting for an attach event.
   const previousSessionId = currentLoadedSessionIdRef.current;
   if (previousSessionId && previousSessionId !== requestedSessionId) {
+    const streamFrames = streamFrameHandleRef.current;
+    if (streamFrames?.sessionId === previousSessionId) streamFrames.flushToRefs();
     let streamingSnapshot: SessionViewStreamingSnapshot | undefined;
     if (streamingRef.current) {
       const cachedToolCalls: AssistantTraceToolCall[] = getToolCallCards(

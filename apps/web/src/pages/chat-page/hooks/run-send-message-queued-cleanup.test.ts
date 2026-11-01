@@ -91,6 +91,10 @@ const CLIENT_COMMAND = {
 function createDeps(overrides: Partial<SendMessageDeps> = {}): SendMessageDeps {
   return {
     activeSessionRef: { current: 'session-1' },
+    streamFrameHandleRef: { current: null },
+    streamBufferRef: { current: '' },
+    streamThinkingBlocksRef: { current: [] },
+    streamingSegmentsRef: { current: [] },
     composerCommandDescriptors: [],
     currentSessionId: 'session-1',
     gatewayUrl: 'http://gateway.test',

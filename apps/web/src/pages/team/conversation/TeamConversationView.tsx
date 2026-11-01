@@ -156,6 +156,8 @@ export interface TeamConversationViewProps {
    * 视图层不猜：拿不到就不渲染入口。
    */
   onOpenSession?: (sessionId: string) => void;
+  /** 外壳已解析的当前团队接待会话；不从其他用户会话猜测。 */
+  conversationReceptionSessionId?: string | null;
 }
 
 export function TeamConversationView({
@@ -172,6 +174,7 @@ export function TeamConversationView({
   soloMode = false,
   classicWorkbench = false,
   onOpenSession,
+  conversationReceptionSessionId,
 }: TeamConversationViewProps) {
   const token = useAuthStore((s) => s.accessToken);
   const gatewayUrl = useAuthStore((s) => s.gatewayUrl);
@@ -710,6 +713,13 @@ export function TeamConversationView({
               composerDisabled={!composerEnabled}
               composerDisabledHint={composerDisabledHint}
               composerExtras={TEAM_CONVERSATION_COMPOSER_EXTRAS}
+              composerRecipient={{
+                roleLayer: state.roleLayer,
+                displayName: layerNodes.get(sessionId)?.displayName,
+                sessionMetadata: state.sessionMetadata,
+                receptionSessionId: conversationReceptionSessionId,
+                onOpenSession,
+              }}
               composerWorkspaceCatalog={composerWorkspaceCatalog}
               searchMentionFiles={searchMentionFiles}
               messages={state.messages}

@@ -302,10 +302,11 @@ export default function TeamPageV2() {
     return stored === '1';
   });
   const { accessToken, gatewayUrl } = useAuthStore();
+  const pageActive = usePageActivation();
   useMultiSessionAttach({
     token: accessToken,
     gatewayUrl,
-    enabled: Boolean(accessToken),
+    enabled: Boolean(accessToken) && pageActive,
   });
   const canCreateWorkspace = Boolean(accessToken);
   const mode = useTeamPageMode();
@@ -505,7 +506,6 @@ export default function TeamPageV2() {
   // 同步 selectedTeamId 到全局 store，供 AppSidebar 高亮当前团队会话。
   // 使用 usePageActivation 检测页面是否处于缓存状态（CachedRouteOutlet 不卸载组件），
   // 当离开 team 页面（页面非激活）时也清除 activeTeamSessionId，避免跨会话选中残留。
-  const pageActive = usePageActivation();
   const setActiveTeamSessionId = useUIStateStore((s) => s.setActiveTeamSessionId);
   useEffect(() => {
     if (!pageActive) {

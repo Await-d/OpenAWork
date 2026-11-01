@@ -34,6 +34,7 @@ vi.mock('../../infra/db.js', () => ({
   },
   sqliteAll: () => [],
   sqliteTransaction: (fn: () => unknown) => fn(),
+  sqliteAfterCommit: (fn: () => void) => fn(),
 }));
 
 // Side-effect import registers all projectors against the real

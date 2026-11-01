@@ -14,6 +14,7 @@ import type {
 const DEFAULT_SETTINGS: MemorySettings = {
   enabled: true,
   autoExtract: true,
+  semanticMaintenance: false,
   maxTokenBudget: 2000,
   minConfidence: 0.3,
   autoWriteMinConfidence: 0.65,

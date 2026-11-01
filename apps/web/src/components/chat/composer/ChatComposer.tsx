@@ -91,6 +91,11 @@ interface ChatComposerProps {
   stopCapability?: 'none' | 'precise' | 'best_effort' | 'observe_only';
   sessionBusyState?: 'running' | 'paused' | null;
   stoppingStream?: boolean;
+  /**
+   * 已提交、尚未进入流式的窗口期（会话创建 / 附件上传中）。只驱动发送键的
+   * 「发送中…」呈现与禁用，不参与 `sessionBusyState` 那套执行权语义。
+   */
+  submitPending?: boolean;
   attachedFiles: File[];
   /**
    * 附件条目 id 到源文件的映射，由 UnifiedComposer 统一构建。
@@ -225,6 +230,7 @@ export function ChatComposer({
   stopCapability = 'none',
   sessionBusyState = null,
   stoppingStream = false,
+  submitPending = false,
   attachedFiles,
   attachmentFilesById,
   attachmentItems,
@@ -883,6 +889,7 @@ export function ChatComposer({
                 imagePluginEnabled={imagePluginEnabled}
                 input={input}
                 stoppingStream={stoppingStream}
+                submitPending={submitPending}
                 sessionBusyState={sessionBusyState}
                 effectiveStopCapability={effectiveStopCapability}
                 showStopAction={showStopAction}

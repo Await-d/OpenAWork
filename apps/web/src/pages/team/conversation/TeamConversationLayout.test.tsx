@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { createRef } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TeamConversationLayout,
   type TeamConversationLayoutProps,
@@ -17,8 +17,28 @@ vi.mock('@openAwork/shared-ui', async (importOriginal) => {
   };
 });
 
-afterEach(() => {
+beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/composer-input-history')) {
+        return Response.json({ entries: [] });
+      }
+      if (url.endsWith('/composer-queue')) {
+        return Response.json({ items: [] });
+      }
+      throw new Error(`未声明的测试请求：${url}`);
+    }),
+  );
+});
+
+afterEach(async () => {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 function createLayoutProps(
@@ -133,6 +153,88 @@ function createLayoutProps(
 }
 
 describe('TeamConversationLayout', () => {
+  it('在 composer 上方展示当前接收目标，回接待只切换明确的会话而不提交草稿', () => {
+    const onOpenSession = vi.fn();
+    const props = createLayoutProps({
+      input: '尚未发送的草稿',
+      composerRecipient: {
+        roleLayer: 'executor',
+        displayName: '前端执行成员',
+        sessionMetadata: { teamRoleInstance: { displayName: '元数据成员' } },
+        receptionSessionId: 'my-reception',
+        onOpenSession,
+      },
+    });
+    render(<TeamConversationLayout {...props} />);
+
+    expect(screen.getByText('发送给：前端执行成员')).toBeTruthy();
+    expect(screen.queryByText('发送给：元数据成员')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '回到接待' }));
+    expect(onOpenSession).toHaveBeenCalledExactlyOnceWith('my-reception');
+    expect(props.onComposerSubmit).not.toHaveBeenCalled();
+    expect(props.setInput).not.toHaveBeenCalled();
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('尚未发送的草稿');
+  });
+
+  it.each([
+    ['reception', '接待别名', { teamRoleInstance: { displayName: '其他名字' } }, '接待'],
+    ['executor', '  ', { teamRoleInstance: { displayName: '元数据成员' } }, '元数据成员'],
+    ['executor', null, null, '执行层'],
+    ['pm1', null, null, 'PM1 规划层'],
+    ['pm2', null, null, 'PM2 管控层'],
+    ['reviewer', null, null, '评审层'],
+    ['tester', null, null, '测试层'],
+    ['unknown', null, null, '未指定'],
+    [null, null, null, '未指定'],
+  ])('接收身份 %s 正确回落至 %s / %s / %s', (roleLayer, displayName, sessionMetadata, expected) => {
+    render(
+      <TeamConversationLayout
+        {...createLayoutProps({ composerRecipient: { roleLayer, displayName, sessionMetadata } })}
+      />,
+    );
+
+    const recipient = screen.getByText(`发送给：${expected}`);
+    expect(recipient.getAttribute('title')).toBe(`发送给：${expected}`);
+    expect(screen.queryByRole('button', { name: '回到接待' })).toBeNull();
+    expect(
+      recipient.compareDocumentPosition(screen.getByRole('textbox')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it.each([
+    { roleLayer: 'reception', receptionSessionId: 'my-reception', onOpenSession: vi.fn() },
+    { roleLayer: 'executor', receptionSessionId: 'team-session-1', onOpenSession: vi.fn() },
+    { roleLayer: 'executor', receptionSessionId: 'my-reception' },
+    { roleLayer: 'executor', receptionSessionId: '  ', onOpenSession: vi.fn() },
+  ])('没有可安全切换的接待目标时隐藏返回入口 %#', (recipient) => {
+    render(
+      <TeamConversationLayout
+        {...createLayoutProps({ composerRecipient: { ...recipient, sessionMetadata: null } })}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '回到接待' })).toBeNull();
+  });
+
+  it('只读会话不显示 composer 接收目标或返回动作', () => {
+    render(
+      <TeamConversationLayout
+        {...createLayoutProps({
+          composerDisabled: true,
+          composerRecipient: {
+            roleLayer: 'executor',
+            displayName: '前端执行成员',
+            sessionMetadata: null,
+            receptionSessionId: 'my-reception',
+            onOpenSession: vi.fn(),
+          },
+        })}
+      />,
+    );
+    expect(screen.queryByText('发送给：前端执行成员')).toBeNull();
+    expect(screen.queryByRole('button', { name: '回到接待' })).toBeNull();
+  });
+
   it('opens the Fast model settings entry from team composer', () => {
     render(<TeamConversationLayout {...createLayoutProps()} />);
 

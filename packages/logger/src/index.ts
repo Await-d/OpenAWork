@@ -26,6 +26,8 @@ export type {
   ClientErrorSink,
   ClientErrorSource,
   ClientErrorRecorderOptions,
+  ClientErrorDiagnosticsInput,
+  ClientErrorDiagnosticsProvider,
   DescribeClientErrorResult,
   InstallGlobalErrorCaptureOptions,
 } from './client-error-capture.js';

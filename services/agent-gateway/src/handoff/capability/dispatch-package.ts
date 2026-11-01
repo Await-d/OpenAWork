@@ -20,6 +20,7 @@
  *   - priority：优先级（high / medium / low）
  */
 
+import { posix } from 'node:path';
 import { z } from 'zod';
 import { DEFAULT_FIXED_TEAM_MEMBER_SLOTS, TEAM_RUNTIME_LAYER_ORDER } from '@openAwork/shared';
 import type { FixedTeamMemberSlot, TeamMemberSpecialty, TeamRuntimeLayer } from '@openAwork/shared';
@@ -117,6 +118,7 @@ export interface ParsedTaskLine {
   title: string;
   priority: 'high' | 'medium' | 'low';
   fileEntries: ParsedTaskFileEntry[];
+  deps?: string[];
   /**
    * 当前任务明确负责的文件 / 模块路径。
    * 优先来自任务块的 `Create/Modify/Test` 清单；标题里的 bracket 路径作兜底。
@@ -125,11 +127,7 @@ export interface ParsedTaskLine {
 }
 
 export function normalizeComparablePath(value: string): string {
-  return value
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^\.\/+/, '')
-    .replace(/\/{2,}/g, '/');
+  return posix.normalize(value.trim().replace(/\\/g, '/'));
 }
 
 function isLikelyPath(value: string): boolean {
@@ -603,22 +601,13 @@ export function buildTaskProfilePromptFragment(profile: TaskProfile): string {
  *
  * 格式：`- [ ] T001 [P] [US1] 描述文本`
  */
-export function parseTaskLine(line: string): {
-  taskId: string;
-  parallel: boolean;
-  story: string | null;
-  explicitProfile: TaskProfile | null;
-  title: string;
-  priority: 'high' | 'medium' | 'low';
-  fileEntries: ParsedTaskFileEntry[];
-  ownedPaths: string[];
-} | null {
+export function parseTaskLine(line: string): ParsedTaskLine | null {
   const trimmed = line.trim();
   // 匹配 `- [ ] T001` 或 `- [x] T001`
   const taskMatch = /^-\s*\[[ x]\]\s*(T\d+)\s*(.*)$/i.exec(trimmed);
   if (!taskMatch) return null;
 
-  const taskId = taskMatch[1] ?? '';
+  const taskId = (taskMatch[1] ?? '').toUpperCase();
   const rest = taskMatch[2] ?? '';
 
   const parallel = /\[P\]/i.test(rest);
@@ -627,6 +616,10 @@ export function parseTaskLine(line: string): {
   const kindMatch = /\[KIND:([A-Z-]+)\]/i.exec(rest);
   const surfaceMatch = /\[SURFACE:([A-Z-]+)\]/i.exec(rest);
   const explicitProfile = parseExplicitTaskProfile(kindMatch?.[1], surfaceMatch?.[1]);
+  const dependencyMarkers = [...rest.matchAll(/\[DEPS:([^\]]*)\]/gi)];
+  const deps = dependencyMarkers.flatMap((match) =>
+    (match[1] ?? '').split(',').map((value) => value.trim().toUpperCase()),
+  );
 
   // 移除标记后剩余的就是标题
   const title = rest
@@ -634,6 +627,7 @@ export function parseTaskLine(line: string): {
     .replace(/\[US\d+\]/gi, '')
     .replace(/\[KIND:[^\]]+\]/gi, '')
     .replace(/\[SURFACE:[^\]]+\]/gi, '')
+    .replace(/\[DEPS:[^\]]*\]/gi, '')
     .trim();
 
   // 优先级推导：高优先级任务通常在 Phase 1/2，或标记为 high
@@ -648,6 +642,7 @@ export function parseTaskLine(line: string): {
     explicitProfile,
     title,
     priority,
+    ...(dependencyMarkers.length > 0 ? { deps: [...new Set(deps)] } : {}),
     fileEntries: [],
     ownedPaths: extractComparablePathsFromText(title),
   };
@@ -712,16 +707,17 @@ function isStructuredTaskTitle(title: string): boolean {
 
 export function validateParsedTasks(tasks: ParsedTaskLine[]): string[] {
   const issues: string[] = [];
-  const owners = new Map<string, string>();
+  const precedingIds = new Set<string>();
   for (const task of tasks) {
-    const profile =
-      task.explicitProfile ?? inferTaskProfile({ title: task.title, story: task.story });
-    if (profile.kind === 'review') continue;
-    for (const path of new Set(task.ownedPaths)) {
-      const previous = owners.get(path);
-      if (previous) issues.push(`${path}：${previous}, ${task.taskId} 应合并为一个任务`);
-      owners.set(path, task.taskId);
+    if (precedingIds.has(task.taskId)) {
+      issues.push(`${task.taskId} 任务编号重复`);
     }
+    for (const dependency of task.deps ?? []) {
+      if (!/^T\d+$/.test(dependency) || !precedingIds.has(dependency)) {
+        issues.push(`${task.taskId} 依赖无效，必须引用前序任务：${dependency || '（空）'}`);
+      }
+    }
+    precedingIds.add(task.taskId);
   }
   if (tasks.length === 0) {
     issues.push('tasks.md 中未找到任何任务');
@@ -805,16 +801,26 @@ export function buildDispatchPackages(input: {
         ? (input.reviewerToolsets ?? ['read', 'lsp', 'review'])
         : (input.executorToolsets ?? ['read', 'write', 'shell', 'lsp', 'test', 'desktop']);
 
-    const dependsOn: string[] = [];
-    if (!task.parallel && lastNonParallelHandoffId) {
-      dependsOn.push(lastNonParallelHandoffId);
+    const ownedPaths =
+      task.ownedPaths.length > 0 ? task.ownedPaths : extractComparablePathsFromText(task.title);
+    const dependsOn = new Set(task.deps ?? []);
+    if (task.deps === undefined && !task.parallel && lastNonParallelHandoffId) {
+      dependsOn.add(lastNonParallelHandoffId);
     }
-    // reviewer 依赖所有前面的 executor 任务
-    if (role === 'reviewer') {
-      for (const prev of packages) {
-        if (prev.role === 'executor') {
-          dependsOn.push(prev.taskMarkers.taskId);
-        }
+    for (const prev of packages) {
+      const overlaps = ownedPaths.some((path) =>
+        prev.ownedPaths.some((previousPath) => {
+          const current = normalizeComparablePath(path).replace(/\/$/, '');
+          const previous = normalizeComparablePath(previousPath).replace(/\/$/, '');
+          return (
+            current === previous ||
+            current.startsWith(`${previous}/`) ||
+            previous.startsWith(`${current}/`)
+          );
+        }),
+      );
+      if ((role === 'reviewer' && prev.role === 'executor') || overlaps) {
+        dependsOn.add(prev.taskMarkers.taskId);
       }
     }
     const assignedMember = resolveAssignedMember({
@@ -832,8 +838,7 @@ export function buildDispatchPackages(input: {
       toolsets,
       role,
       artifactRefs: input.artifactRefs,
-      ownedPaths:
-        task.ownedPaths.length > 0 ? task.ownedPaths : extractComparablePathsFromText(task.title),
+      ownedPaths,
       taskProfile,
       taskMarkers: {
         taskId: task.taskId,
@@ -843,7 +848,7 @@ export function buildDispatchPackages(input: {
       },
       ...(assignedMember ? { assignedMember } : {}),
       dependencyHandoffIds: [],
-      dependsOn,
+      dependsOn: [...dependsOn],
     };
     packages.push(pkg);
 

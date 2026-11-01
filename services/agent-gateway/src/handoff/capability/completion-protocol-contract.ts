@@ -23,6 +23,18 @@ export const checklistItemSchema = z.object({
   id: z.string().min(1).max(120),
   status: z.enum(['pass', 'fail', 'blocked']),
   evidence: z.string().min(1).max(2000),
+  verificationRefs: z
+    .array(
+      z.object({
+        terminalId: z.string().min(1).max(200).optional(),
+        command: z.string().min(1).max(8000).optional(),
+        toolCallId: z.string().min(1).max(200).optional(),
+        path: z.string().min(1).max(500).optional(),
+      }),
+    )
+    .max(10)
+    .optional(),
+  verified: z.boolean().optional(),
 });
 export type ChecklistItem = z.infer<typeof checklistItemSchema>;
 

@@ -31,11 +31,13 @@ import { BUILTIN_SKILLS } from '@openAwork/skills';
 import type { SkillManifest } from '@openAwork/skill-types';
 import { sqliteAll, sqliteGet } from '../infra/db.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
+import { resolveSessionSkillLayer } from '../session-extension/session-skill-resolution.js';
 
 export const DEFAULT_WORKSPACE_PATH_KEY = '__default__';
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/;
 
-export type SkillOrigin = 'workspace' | 'workspace-fallback' | 'session-override' | 'builtin';
+export type SkillOrigin =
+  'workspace' | 'workspace-fallback' | 'session-override' | 'session-extension' | 'builtin';
 
 export interface EffectiveSkill {
   skillId: string;
@@ -45,6 +47,17 @@ export interface EffectiveSkill {
   reason?: string;
   /** Parsed manifest when available — BUILTIN rows always carry one; installed rows carry one when the row is enabled. */
   manifest?: SkillManifest;
+  /**
+   * 会话级资源的引用（261031）。仅 `origin === 'session-extension'` 时有值；
+   * 用户级 / 内置条目为 `undefined`。
+   *
+   * 为什么需要：pin 快照要区分「固定成员」与「固定内容」。用户级 pin 只固定
+   * skillId（内容随安装升级漂移，这是既有语义）；会话级 pin 必须连内容一起固定，
+   * 否则会话里重装同名技能会悄悄换掉已固定给模型的内容。
+   */
+  resourceRef?: string;
+  /** 会话级资源的内容摘要，与 `resourceRef` 成对出现。 */
+  contentDigest?: string;
 }
 
 export interface ResolveEffectiveSkillsInput {
@@ -328,13 +341,53 @@ export function resolveEffectiveSkills(input: ResolveEffectiveSkillsInput): Effe
     });
   }
 
+  // 会话级独立安装层（261031）：与用户级安装解耦。
+  //   - `explicit`：不继承用户级安装/工作区选择，集合 = 会话级技能 + 内置技能；
+  //   - `inherit` ：在既有集合之上追加 / 覆盖会话级技能（老会话行为不变）。
+  // 不变式：`installed_skills.enabled = 0` 是用户级硬撤权，**优先于**会话级启用与
+  // pin 快照——否则「先装到会话里」就能绕过用户自己的卸载。
+  const sessionLayer = resolveSessionSkillLayer(sessionId);
+  const sessionEntries: EffectiveSkill[] = [];
+  for (const entry of sessionLayer.entries) {
+    if (builtinIds.has(entry.skillId)) continue; // 内置不可被会话覆盖
+    const installedRow = installed.get(entry.skillId);
+    if (installedRow && installedRow.enabled !== 1) continue;
+    sessionEntries.push({
+      skillId: entry.skillId,
+      enabled: entry.enabled,
+      pinned: entry.pinned,
+      origin: 'session-extension',
+      reason: 'session-extension',
+      manifest: entry.manifest,
+      // 资源引用 + 内容摘要：pin 快照据此把「固定内容」也一并对齐（见 T-07）。
+      resourceRef: entry.resourceRef,
+      contentDigest: entry.contentDigest,
+    });
+  }
+
+  if (sessionLayer.inheritance === 'explicit') {
+    const explicitResult: EffectiveSkill[] = [];
+    for (const entry of sessionEntries) {
+      if (entry.enabled) explicitResult.push(entry);
+    }
+    explicitResult.push(...effectiveFromBuiltins());
+    return explicitResult;
+  }
+
   // BUILTIN always appended at the end, never subject to selection filtering.
   // 注意：非内置项的顺序是**优先级语义**（PUT /skills/selection 的 items 顺序，
   // 见 skill-selection-routes 测试），不要按 skillId 排序——顺序由持久化的
   // 选择列表决定，本身已是确定性的。
   const result: EffectiveSkill[] = [];
+  const sessionBySkillId = new Map(sessionEntries.map((entry) => [entry.skillId, entry]));
   for (const entry of resolved.values()) {
     if (builtinIds.has(entry.skillId)) continue; // defensive: do not double-emit
+    const sessionEntry = sessionBySkillId.get(entry.skillId);
+    result.push(sessionEntry ? { ...entry, ...sessionEntry } : entry);
+    if (sessionEntry) sessionBySkillId.delete(entry.skillId);
+  }
+  // 会话级新增（用户级集合里没有的）追加在尾部。
+  for (const entry of sessionBySkillId.values()) {
     result.push(entry);
   }
   result.push(...effectiveFromBuiltins());

@@ -272,6 +272,38 @@ describe('sessions route error contracts', () => {
     }
   });
 
+  it('PATCH /sessions/:sessionId 传 agentId:null 会清除会话绑定的 Agent', async () => {
+    seedSession({ agentId: 'general' });
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/sessions/${SESSION_ID}`,
+        headers: {
+          authorization: bearer(app),
+          'content-type': 'application/json',
+        },
+        payload: {
+          metadata: {
+            agentId: null,
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const row = dbModule.sqliteGet<{ metadata_json: string }>(
+        'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
+        [SESSION_ID],
+      );
+      const metadata = JSON.parse(row?.metadata_json ?? '{}') as Record<string, unknown>;
+      // 键必须消失（不能留下 null）：残留绑定会让请求未携带 agentId 的轮次继续按
+      // 会话回退注入该 Agent 的角色提示词。
+      expect('agentId' in metadata).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('PATCH /sessions/:sessionId 对将自己设为父会话的请求返回中文 400', async () => {
     seedSession();
     const app = await buildApp();

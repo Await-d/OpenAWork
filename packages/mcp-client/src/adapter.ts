@@ -314,6 +314,7 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
     server: MCPServerRef & {
       disabledTools?: string[];
       headers?: Record<string, string>;
+      inheritEnv?: boolean;
       /**
        * Optional OAuth provider. When supplied, the SSE / Streamable
        * HTTP transport will negotiate OAuth on the first request and
@@ -353,7 +354,10 @@ export class MCPClientAdapterImpl implements MCPClientAdapter {
           command: server.command,
           args: server.args ?? [],
           cwd: server.cwd,
-          env: { ...env, ...(server.env ?? {}) },
+          env:
+            server.inheritEnv === false
+              ? { ...(server.env ?? {}) }
+              : { ...env, ...(server.env ?? {}) },
         }),
       );
     } else {

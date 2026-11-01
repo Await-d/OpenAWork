@@ -66,6 +66,30 @@ function getTeamInitKnowledge(key: string): MemoryKnowledgeRow | undefined {
   );
 }
 
+interface TeamInitProposalRow {
+  id: string;
+  origin: string;
+  status: string;
+  payload_json: string;
+  scope_type: string;
+  scope_id: string;
+}
+
+/**
+ * 261101：团队初始化是自动 / 后台路径，只产生待确认提议，不再直接落库。这里按 key
+ * 读最近一条 `team_init` 提议（payload_json 里含 key）。
+ */
+function getTeamInitProposal(key: string): TeamInitProposalRow | undefined {
+  return dbModule.sqliteGet<TeamInitProposalRow>(
+    `SELECT id, origin, status, payload_json, scope_type, scope_id
+       FROM memory_proposals
+      WHERE user_id = ? AND origin = 'team_init' AND status = 'pending'
+        AND payload_json LIKE ?
+      ORDER BY created_at DESC LIMIT 1`,
+    [USER_ID, `%"key":"${key}"%`],
+  );
+}
+
 beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.connectDb();
@@ -82,6 +106,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  dbModule.sqliteRun('DELETE FROM memory_revisions', []);
+  dbModule.sqliteRun('DELETE FROM memory_proposals', []);
   dbModule.sqliteRun('DELETE FROM memories', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
@@ -202,7 +228,7 @@ describe('team-init-store + runner', () => {
     expect((step?.result?.['directories'] as string[]) ?? []).toContain('src');
   });
 
-  it('understand-architecture 启发式摘要同步入工作区知识库', async () => {
+  it('understand-architecture 启发式摘要只产生待确认提议（不直接落库）', async () => {
     const existingDir = join(workspaceRoots[0]!, 'proj-architecture-knowledge');
     mkdirSync(join(existingDir, 'src'), { recursive: true });
     writeFileSync(join(existingDir, 'package.json'), '{"name":"demo"}', 'utf8');
@@ -226,13 +252,23 @@ describe('team-init-store + runner', () => {
 
     expect(result.ok).toBe(true);
     expect(result.state?.bindings.architectureSummary).toContain('项目顶层目录');
-    const knowledge = getTeamInitKnowledge('team-init:architecture-summary');
-    expect(knowledge?.value).toContain('项目顶层目录');
-    expect(knowledge?.source).toBe('auto_extracted');
-    expect(knowledge?.priority).toBe(80);
-    expect(knowledge?.team_workspace_id).toBe(TEAM_WORKSPACE_ID);
-    expect(knowledge?.workspace_root).toBe(existingDir);
-    expect(knowledge?.role_layers_json).toBeNull();
+    // 正式记忆未写入，只产生一条 team_init 待确认提议。
+    expect(getTeamInitKnowledge('team-init:architecture-summary')).toBeUndefined();
+    const proposal = getTeamInitProposal('team-init:architecture-summary');
+    expect(proposal?.origin).toBe('team_init');
+    expect(proposal?.status).toBe('pending');
+    expect(proposal?.scope_type).toBe('team');
+    expect(proposal?.scope_id).toBe(TEAM_WORKSPACE_ID);
+    const payload = JSON.parse(proposal!.payload_json) as {
+      value: string;
+      priority: number;
+      teamWorkspaceId: string;
+      workspaceRoot: string;
+    };
+    expect(payload.value).toContain('项目顶层目录');
+    expect(payload.priority).toBe(80);
+    expect(payload.teamWorkspaceId).toBe(TEAM_WORKSPACE_ID);
+    expect(payload.workspaceRoot).toBe(existingDir);
   });
 
   it('并发确认同一步骤时只执行一次（in-flight 守卫，防重复 LLM / 写入）', async () => {
@@ -507,13 +543,23 @@ describe('ensureTeamInitBeforeTask（任务前自动初始化）', () => {
     expect(scaffold?.result?.['mode']).toBe('goal-driven');
     expect(scaffold?.result?.['scaffold']).toContain('创建一个 React 看板应用');
 
-    const knowledge = getTeamInitKnowledge('team-init:scaffold-memory');
-    expect(knowledge?.value).toContain('创建一个 React 看板应用');
-    expect(knowledge?.source).toBe('auto_extracted');
-    expect(knowledge?.priority).toBe(60);
-    expect(knowledge?.team_workspace_id).toBe(TEAM_WORKSPACE_ID);
-    expect(knowledge?.workspace_root).toBe(dir);
-    expect(knowledge?.role_layers_json).toBeNull();
+    // 261101：自动路径只产生待确认提议，正式记忆未写入。
+    expect(getTeamInitKnowledge('team-init:scaffold-memory')).toBeUndefined();
+    const proposal = getTeamInitProposal('team-init:scaffold-memory');
+    expect(proposal?.origin).toBe('team_init');
+    expect(proposal?.status).toBe('pending');
+    expect(proposal?.scope_type).toBe('team');
+    expect(proposal?.scope_id).toBe(TEAM_WORKSPACE_ID);
+    const payload = JSON.parse(proposal!.payload_json) as {
+      value: string;
+      priority: number;
+      teamWorkspaceId: string;
+      workspaceRoot: string;
+    };
+    expect(payload.value).toContain('创建一个 React 看板应用');
+    expect(payload.priority).toBe(60);
+    expect(payload.teamWorkspaceId).toBe(TEAM_WORKSPACE_ID);
+    expect(payload.workspaceRoot).toBe(dir);
   });
 
   it('已 skipped 的清单 → 不自动跑（尊重用户选择）', async () => {

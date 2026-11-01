@@ -118,6 +118,35 @@ afterAll(async () => {
 });
 
 describe('createPhaseCAwareRunner PM1 auxiliary knowledge', () => {
+  it('PM1产物链把原图传给规划模型，不只是保留文本意图', async () => {
+    const inputParts = [
+      {
+        type: 'input_image' as const,
+        imageUrl: `data:image/png;base64,${Buffer.alloc(1024 * 1024).toString('base64')}`,
+      },
+    ];
+    const handoff = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: RECEPTION_SESSION_ID,
+      fromRoleLayer: 'reception',
+      toRoleLayer: 'pm1',
+      payload: {
+        sourceIntent: '按图实现页面',
+        rewrittenIntent: '实现页面',
+        inputParts,
+        teamWorkspaceId: TEAM_WORKSPACE_ID,
+      },
+    });
+    await pm1RunnerModule.createPhaseCAwareRunner()({
+      handoff,
+      toSessionId: PM1_SESSION_ID,
+      signal: new AbortController().signal,
+    });
+    expect(mocks.requestWorkflowLlmCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ inputParts, prompt: '请生成规格。' }),
+    );
+  });
+
   it('PM1 产物链辅助 LLM prompt 注入当前层可读的工作区知识', async () => {
     const handoff = store.createHandoff({
       userId: USER_ID,

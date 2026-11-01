@@ -105,7 +105,11 @@ export async function executeExtractMediaInfoTool(input: {
       toolInput.source.includes('\\') ||
       inferMimeTypeFromExtension(toolInput.source) !== undefined
     ) {
-      const filePath = assertSessionWorkspacePath({ path: toolInput.source, sessionId });
+      const filePath = assertSessionWorkspacePath({
+        path: toolInput.source,
+        sessionId,
+        access: 'read',
+      });
       buffer = await readFile(filePath);
       mimeType = inferMimeTypeFromExtension(filePath) ?? 'application/octet-stream';
     } else {

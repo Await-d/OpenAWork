@@ -259,6 +259,7 @@ const bashOutputSchema = z.object({
   output: z.string(),
   truncated: z.boolean(),
   outputPath: z.string().optional(),
+  terminalId: z.string().optional(),
   // FileDiffContent (declared in @openAwork/shared) has many optional fields
   // that are workspace-internal. We intentionally do **not** repeat its
   // shape here so this schema stays decoupled from the shared interface;
@@ -1015,6 +1016,7 @@ export async function runBashCommand(
     kind: outcome.kind,
     output: finalOutput,
     truncated: truncated.truncated,
+    ...(trackingTerminalId ? { terminalId: trackingTerminalId } : {}),
     ...(truncated.outputPath ? { outputPath: truncated.outputPath } : {}),
     ...(diffs && diffs.length > 0 ? { diffs } : {}),
   };

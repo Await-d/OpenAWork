@@ -21,6 +21,9 @@ import { assertNoServiceWorkerInDist } from '../../scripts/build/assert-no-servi
 const isDesktopBuild =
   Boolean(process.env.TAURI_ENV_PLATFORM) || process.env.OPENAWORK_DESKTOP_BUILD === '1';
 
+/** 诊断构建：保留 React 开发警告与 Profiler；所有读取 NODE_ENV 的依赖也会走开发分支。 */
+const useDevReact = process.env.OPENAWORK_DEV_REACT === '1';
+
 /**
  * 路径锚点：报表路径与文件名一律基于这两个常量解析，而不是 `process.cwd()`。
  * 因为同一份配置会被多种入口调用（`vite`、`tauri build`、CI 直接调 vite），
@@ -186,6 +189,9 @@ export default defineConfig({
     },
     dedupe: ['react', 'react-dom'],
   },
+  // 见 OPENAWORK_DEV_REACT 注释：只在诊断构建里把 NODE_ENV 定义成 development，
+  // 让 React 的入口文件选中 cjs 的 development 产物（不压缩 + 完整报错 + 组件栈）。
+  ...(useDevReact ? { define: { 'process.env.NODE_ENV': JSON.stringify('development') } } : {}),
   plugins: [
     versionPlugin(),
     fileIconAssetsPlugin({ packageDir: materialIconThemeDir }),
@@ -207,7 +213,7 @@ export default defineConfig({
       // 桌面端（Tauri）构建时禁用 PWA Service Worker：
       // Tauri WebView 跨版本持久化 SW 缓存，导致新版本更新后旧 precache 仍被使用，
       // 出现"强制刷新是新版、普通刷新回到旧版"的问题。桌面端有独立的 updater 机制，无需 PWA。
-      disable: isDesktopBuild,
+      disable: isDesktopBuild || useDevReact,
       registerType: 'autoUpdate',
       devOptions: { enabled: false },
       includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon-180x180.png'],
@@ -270,7 +276,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: useDevReact ? 'dist-diagnostics' : 'dist',
+    minify: useDevReact ? false : 'esbuild',
     sourcemap: true,
     chunkSizeWarningLimit: 800,
     rollupOptions: {

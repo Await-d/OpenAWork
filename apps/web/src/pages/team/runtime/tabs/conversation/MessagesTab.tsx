@@ -235,10 +235,10 @@ export function MessagesTab({
           </span>
           <div style={{ display: 'grid', gap: 1 }}>
             <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--fg-strong)' }}>
-              消息总线
+              团队留言
             </span>
             <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
-              {visibleMessageCount} 条消息
+              {visibleMessageCount} 条留言 · 仅记录，不投递给 Agent
             </span>
           </div>
         </div>
@@ -579,7 +579,7 @@ export function MessagesTab({
                       type="button"
                       onClick={handleReply}
                       disabled={!canManageSessionEntries || busy || !replyInput.trim()}
-                      aria-label={`发送关于 ${card.from} 的跟进消息`}
+                      aria-label={`记录关于 ${card.from} 的跟进留言`}
                       className="team-btn-focusable"
                       style={{
                         padding: '7px 12px',
@@ -601,7 +601,7 @@ export function MessagesTab({
                       }}
                     >
                       <SendIcon size={11} color="var(--fg-on-accent)" />
-                      发送
+                      留言
                     </button>
                     <button
                       type="button"
@@ -722,7 +722,7 @@ export function MessagesTab({
                   letterSpacing: '0.02em',
                 }}
               >
-                广播消息
+                工作区留言
               </span>
             </div>
             <textarea
@@ -734,8 +734,8 @@ export function MessagesTab({
                   handleBroadcast();
                 }
               }}
-              aria-label="广播内容"
-              placeholder="输入广播内容，回车发送…"
+              aria-label="留言内容"
+              placeholder="记录留言（不触发 Agent 执行），回车提交…"
               rows={3}
               disabled={!canManageSessionEntries}
               className="team-input-focusable"
@@ -758,7 +758,7 @@ export function MessagesTab({
               type="button"
               onClick={handleBroadcast}
               disabled={!canManageSessionEntries || busy || !broadcastInput.trim()}
-              aria-label="发送广播"
+              aria-label="记录留言"
               className="team-btn-focusable"
               style={{
                 padding: '8px 14px',
@@ -781,7 +781,7 @@ export function MessagesTab({
               }}
             >
               <SendIcon size={12} color="var(--fg-on-accent)" />
-              {busy ? '发送中…' : '广播'}
+              {busy ? '记录中…' : '留言'}
             </button>
             {!canManageSessionEntries ? (
               <span
@@ -792,7 +792,7 @@ export function MessagesTab({
                   textAlign: 'center',
                 }}
               >
-                当前工作区不可写，无法发送广播或跟进消息。
+                当前工作区不可写，无法记录留言。
               </span>
             ) : null}
           </div>

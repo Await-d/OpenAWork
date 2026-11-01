@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createHash, randomUUID } from 'node:crypto';
-import type { TeamReasoningEffort } from '@openAwork/shared';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
@@ -10,6 +9,10 @@ import { LayerCapabilityViolationError } from '../handoff/capability/layer-capab
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { logTeamAudit, type TeamAuditAction } from '../team/team-audit-store.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
+import { inputImageContentSchema } from '../message/input-image-content.js';
+import { submitInboundWithHistory } from '../handoff/store/inbound-delivery.js';
+import { dispatchInboundDeliveries } from '../handoff/workflow/inbound-delivery-dispatcher.js';
+import { isInlineInputImage, resolveSessionInputImage } from '../message/input-image-resolver.js';
 
 // L1.3 §1.3 反向消息通道载荷 schema（与 packages/web-client/src/team-inbound.ts 协议对齐）
 const inboundSubmitSchema = z.object({
@@ -79,48 +82,6 @@ function normalizeStreamClientRequestId(clientIdempotencyKey: string): string {
   return `team-client:${digest}`;
 }
 
-const VALID_REASONING_EFFORTS = new Set<TeamReasoningEffort>([
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-]);
-
-interface InboundUserInputModelSelection {
-  requestedModelId?: string;
-  requestedProviderId?: string;
-  requestedThinkingEnabled?: boolean;
-  requestedReasoningEffort?: TeamReasoningEffort;
-}
-
-function normalizeOptionalPayloadString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function extractInboundUserInputModelSelection(
-  payload: Record<string, unknown> | undefined,
-): InboundUserInputModelSelection {
-  const requestedModelId = normalizeOptionalPayloadString(payload?.['modelId']);
-  const requestedProviderId = normalizeOptionalPayloadString(payload?.['providerId']);
-  const requestedReasoningEffort = normalizeOptionalPayloadString(payload?.['reasoningEffort']);
-  return {
-    ...(requestedModelId ? { requestedModelId } : {}),
-    ...(requestedProviderId ? { requestedProviderId } : {}),
-    ...(typeof payload?.['thinkingEnabled'] === 'boolean'
-      ? { requestedThinkingEnabled: payload['thinkingEnabled'] }
-      : {}),
-    ...(requestedReasoningEffort &&
-    VALID_REASONING_EFFORTS.has(requestedReasoningEffort as TeamReasoningEffort)
-      ? { requestedReasoningEffort: requestedReasoningEffort as TeamReasoningEffort }
-      : {}),
-  };
-}
-
 function teamInboundRouteErrorPayload(
   code: TeamInboundRouteErrorCode,
   extra?: Record<string, unknown>,
@@ -156,6 +117,13 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
       const parseStep = child('parse-body');
       const body = parseBody(inboundSubmitSchema, request.body);
       const bodyPayload = body.payload ?? {};
+      let inputParts =
+        body.messageType === 'user_input'
+          ? parseBody(
+              z.object({ inputParts: z.array(inputImageContentSchema).max(20).optional() }),
+              bodyPayload,
+            ).inputParts
+          : undefined;
       const inboundClientIdempotencyKey = resolveInboundClientIdempotencyKey({
         clientIdempotencyKey: body.clientIdempotencyKey,
         messageType: body.messageType,
@@ -176,15 +144,23 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send(teamInboundRouteErrorPayload('team_session_not_found'));
       }
       sessionStep.succeed();
+      if (inputParts) {
+        inputParts = inputParts.map((part) => resolveSessionInputImage(sessionId, part));
+        if (inputParts.some((part) => !isInlineInputImage(part))) {
+          return reply.status(400).send({ error: '图片无法读取，请重新上传到当前会话后重试。' });
+        }
+        bodyPayload['inputParts'] = inputParts;
+      }
 
       const submitStep = child('submit-inbound');
       try {
-        const { submitInboundMessage } = await import('../handoff/store/inbound-store.js');
         const expiresAtIso =
           typeof body.expiresAt === 'number'
             ? new Date(body.expiresAt).toISOString().replace('T', ' ').replace('Z', '').slice(0, 19)
             : undefined;
-        const result = submitInboundMessage({
+        const result = submitInboundWithHistory({
+          requestId: streamClientRequestId,
+          roleLayer: session.role_layer,
           userId: user.sub,
           toSessionId: sessionId,
           // L1.4 capability：HTTP 入口的发送方语义。
@@ -264,97 +240,10 @@ export async function teamInboundRoutes(app: FastifyInstance): Promise<void> {
           }
         }
 
-        if (body.messageType === 'user_input' && !result.reused) {
-          const userInputText = typeof bodyPayload['text'] === 'string' ? bodyPayload['text'] : '';
-          if (userInputText.trim().length > 0) {
-            try {
-              const { appendSessionMessageV2 } = await import('../message/message-v2-adapter.js');
-              appendSessionMessageV2({
-                sessionId,
-                userId: user.sub,
-                role: 'user',
-                content: [{ type: 'text', text: userInputText }],
-                clientRequestId: streamClientRequestId ?? null,
-              });
-            } catch (err) {
-              logGatewayWarn(
-                `[team.session.inbound] persist user msg failed: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            }
-          }
-        }
-
-        const shouldOrchestrate =
-          !result.reused && session.role_layer === 'reception' && body.messageType === 'user_input';
-        if (shouldOrchestrate) {
-          const userInputText = typeof bodyPayload['text'] === 'string' ? bodyPayload['text'] : '';
-          const userInputModelSelection = extractInboundUserInputModelSelection(bodyPayload);
-          const sessionMeta = sqliteGet<{ metadata_json: string | null }>(
-            `SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1`,
-            [sessionId],
-          );
-          let teamWorkspaceIdFromMeta: string | null = null;
-          if (sessionMeta?.metadata_json) {
-            try {
-              const parsed = JSON.parse(sessionMeta.metadata_json) as Record<string, unknown>;
-              if (typeof parsed['teamWorkspaceId'] === 'string') {
-                teamWorkspaceIdFromMeta = parsed['teamWorkspaceId'];
-              }
-            } catch (err) {
-              void err;
-            }
-          }
-
-          // 注意：不再在此处提前把 teamInit 标记为 skipped。
-          // 周全性补强（§auto-init）：是否需要自动初始化由 orchestrateReceptionInput
-          // 在 orchestrate 路径内部决定——只有判定为真任务时才先自动跑完初始化，
-          // 闲聊 / 问候（direct/clarify）不触发，避免无谓等待。初始化产物会在
-          // 编排内部从最新 teamInit 重新构建 context 注入，无需在这里拼。
-
-          void (async () => {
-            try {
-              const { orchestrateReceptionInput } =
-                await import('../handoff/runner/reception-orchestrator.js');
-              await orchestrateReceptionInput({
-                userId: user.sub,
-                receptionSessionId: sessionId,
-                userIntent: userInputText,
-                teamWorkspaceId: teamWorkspaceIdFromMeta,
-                streamClientRequestId,
-                ...userInputModelSelection,
-                // user 消息已在上面同步写过，避免重复写
-                persistUserMessage: false,
-              });
-            } catch (err) {
-              logGatewayWarn(
-                `[team.session.inbound] orchestrate (async) failed: ${err instanceof Error ? err.message : String(err)}`,
-              );
-              // 🔴#3 端到端健壮性：编排是 fire-and-forget（不阻塞 inbound 入库），
-              // 但若它抛出**意料之外**的异常（orchestrateReceptionInput 正常会用
-              // result.reason 兜底而不抛），用户会停留在"我发了消息但团队毫无回应"
-              // 的静默态。这里补一条 best-effort 的 assistant 反馈消息，让用户知道
-              // 需要重试，而不是无限等待。
-              try {
-                const { appendSessionMessageV2 } = await import('../message/message-v2-adapter.js');
-                appendSessionMessageV2({
-                  sessionId,
-                  userId: user.sub,
-                  role: 'assistant',
-                  content: [
-                    {
-                      type: 'text',
-                      text: '抱歉，团队在处理你的请求时出现了意外错误，任务未能启动。请稍后重试。',
-                    },
-                  ],
-                  clientRequestId: null,
-                });
-              } catch (ackErr) {
-                logGatewayWarn(
-                  `[team.session.inbound] orchestrate failure ack write failed: ${ackErr instanceof Error ? ackErr.message : String(ackErr)}`,
-                );
-              }
-            }
-          })();
+        if (session.role_layer === 'reception' && body.messageType === 'user_input') {
+          void dispatchInboundDeliveries({ sessionId }).catch((error) => {
+            logGatewayWarn(`[team-inbound] dispatcher wake failed: ${String(error)}`);
+          });
         }
 
         step.succeed(undefined, { messageId: result.record.id });

@@ -4,7 +4,9 @@ import {
   filterEnabledGatewayToolsForDialogueMode,
   filterEnabledGatewayToolsForSession,
   isGatewayToolEnabledForSessionMetadata,
+  shouldAutoApproveToolForSessionMetadata,
 } from '../../session/session-tool-visibility.js';
+import { runWithChannelActorPolicy } from '../../channels/channel-actor-scope.js';
 import { MCP_MANAGE_SERVERS_TOOL_NAME } from '../../mcp/mcp-manage-tool-name.js';
 import { MEMORY_MANAGE_TOOL_NAME } from '../../memory/memory-manage-tool-name.js';
 import { SKILL_MANAGE_TOOL_NAME } from '../../skill/skill-manage-tool-name.js';
@@ -85,6 +87,56 @@ describe('mcp_manage_servers 会话可见性', () => {
         dialogueMode: 'clarify',
       }),
     ).toBe(false);
+  });
+});
+
+describe('渠道会话扩展管理', () => {
+  const enabled = {
+    source: 'channel',
+    channelLlmToolsEnabled: true,
+    channelExtensionManagementEnabled: true,
+  };
+
+  it.each([SKILL_MANAGE_TOOL_NAME, MCP_MANAGE_SERVERS_TOOL_NAME])(
+    '%s 仅在显式开启且成员允许时可见',
+    (name) => {
+      expect(isGatewayToolEnabledForSessionMetadata(name, enabled)).toBe(true);
+      expect(
+        isGatewayToolEnabledForSessionMetadata(name, {
+          ...enabled,
+          channelExtensionManagementEnabled: false,
+        }),
+      ).toBe(false);
+      expect(
+        isGatewayToolEnabledForSessionMetadata(name, { ...enabled, channelLlmToolsEnabled: false }),
+      ).toBe(false);
+      expect(
+        isGatewayToolEnabledForSessionMetadata(name, {
+          ...enabled,
+          channelToolAllowlist: ['PluginSendMessage'],
+        }),
+      ).toBe(false);
+      expect(
+        isGatewayToolEnabledForSessionMetadata(name, { ...enabled, channelToolAllowlist: [name] }),
+      ).toBe(true);
+      expect(
+        isGatewayToolEnabledForSessionMetadata(name, { ...enabled, teamWorkspaceId: 'team' }),
+      ).toBe(false);
+      expect(
+        isGatewayToolEnabledForSessionMetadata(name, { ...enabled, dialogueMode: 'clarify' }),
+      ).toBe(false);
+    },
+  );
+
+  it('不放开其他自助管理工具', () => {
+    for (const name of [
+      MEMORY_MANAGE_TOOL_NAME,
+      PLUGIN_MANAGE_TOOL_NAME,
+      AGENT_MANAGE_TOOL_NAME,
+      TEAM_WORKSPACE_MANAGE_TOOL_NAME,
+    ]) {
+      expect(isGatewayToolEnabledForSessionMetadata(name, enabled)).toBe(false);
+    }
   });
 });
 
@@ -639,5 +691,66 @@ describe('session tool visibility', () => {
 
     expect(isGatewayToolEnabledForSessionMetadata('task', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('Agent', metadata)).toBe(false);
+  });
+});
+
+describe('渠道成员权限的轮次级作用域', () => {
+  const channelMetadataWith = (permissions: Record<string, unknown>) => ({
+    source: 'channel',
+    channelLlmToolsEnabled: true,
+    channel: { tools: { bash: true, read: true }, permissions },
+  });
+
+  const DENY_ALL = {
+    allowReadHome: false,
+    readablePathPrefixes: [] as string[],
+    allowWriteOutside: false,
+    allowShell: false,
+    allowSubAgents: false,
+  };
+
+  it('作用域内的本轮权限覆盖会话 metadata（同群成员不互相改权限）', async () => {
+    // 会话 metadata 上是「别人」的宽松权限：单独看是放行的。
+    const metadata = channelMetadataWith({ allowShell: true, allowSubAgents: true });
+    expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(true);
+
+    // 本轮是发言者自己那份更严的权限：同一个 metadata 必须判否。
+    const scoped = await runWithChannelActorPolicy(
+      { permissions: DENY_ALL, toolAllowlist: null },
+      async () => isGatewayToolEnabledForSessionMetadata('bash', metadata),
+    );
+
+    expect(scoped).toBe(false);
+  });
+
+  it('作用域内的成员白名单同时收窄工具面与自动批准', async () => {
+    const metadata = channelMetadataWith({ allowShell: true, allowSubAgents: true });
+
+    const scoped = await runWithChannelActorPolicy(
+      {
+        permissions: { ...DENY_ALL, allowShell: true },
+        toolAllowlist: ['read'],
+      },
+      async () => ({
+        read: isGatewayToolEnabledForSessionMetadata('read', metadata),
+        bash: isGatewayToolEnabledForSessionMetadata('bash', metadata),
+        autoApproveBash: shouldAutoApproveToolForSessionMetadata('bash', metadata),
+      }),
+    );
+
+    // 可见性与「免审批」同源：白名单外的 bash 既不可见、也不会被自动批准。
+    expect(scoped).toEqual({ read: true, bash: false, autoApproveBash: false });
+  });
+
+  it('作用域外仍回退会话 metadata（无作用域的续跑路径不受影响）', () => {
+    expect(
+      shouldAutoApproveToolForSessionMetadata('bash', channelMetadataWith({ allowShell: false })),
+    ).toBe(false);
+    expect(
+      shouldAutoApproveToolForSessionMetadata(
+        'bash',
+        channelMetadataWith({ allowShell: true, allowSubAgents: true }),
+      ),
+    ).toBe(true);
   });
 });

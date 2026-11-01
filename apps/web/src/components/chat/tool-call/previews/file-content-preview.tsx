@@ -88,7 +88,11 @@ export function FileContentPreview({
     : effectiveExpanded
       ? MAX_RENDERED_FILE_LINES
       : FILE_CONTENT_PREVIEW_LINES;
-  const visibleLines = lines.slice(0, visibleLimit);
+  const visibleContent = useMemo(
+    () => lines.slice(0, visibleLimit).join('\n'),
+    [lines, visibleLimit],
+  );
+  const visibleLines = visibleContent.split('\n');
   const toggleAllLines = () => {
     if (isInsideExpandedCard) {
       setShowAllLines((previous) => !previous);
@@ -98,8 +102,8 @@ export function FileContentPreview({
   };
   // 语法高亮：与 diff 共用 shared-ui 的整段高亮按行拆分（超预算 → undefined，退回纯文本）。
   const highlightedLines = useMemo(
-    () => highlightCodeLines(data.content, detectLanguage(data.path)),
-    [data.content, data.path],
+    () => highlightCodeLines(visibleContent, detectLanguage(data.path)),
+    [visibleContent, data.path],
   );
   // Pad line-number gutter wide enough for the largest line number we'll show.
   const lastNumber = start + lines.length - 1;

@@ -3,22 +3,35 @@ import type {
   MemoryEntry,
   MemoryListFilter,
   MemoryRoleLayer,
+  MemoryScope,
+  MemoryLifecycle,
+  MemoryConfirmationKind,
   MemoryStats,
   CreateMemoryInput,
   UpdateMemoryInput,
   MemorySettings,
-  ExtractedMemoryCandidate,
 } from '@openAwork/agent-core';
 import {
   DEFAULT_MEMORY_SETTINGS,
   MEMORY_SETTINGS_KEY,
   parseMemorySettings,
-  deduplicateMemories,
+  userMemoryScope,
+  normalizeWorkspaceScopeId,
 } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
-import { scanMemoryWriteContent } from './memory-security-scanner.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
+
+/**
+ * 本模块只提供**存储原语**（`createMemory` / `updateMemory` / `deleteMemory` / 查询），
+ * 不提供任何「按候选批量写入」的入口。
+ *
+ * 261101 之前这里存在第二份 `upsertExtractedMemories`：它直接调用 `createMemory` 落库，
+ * 与 `memory-extraction-store` 的同名壳形成**两条写入路径**，其中直写那份绕过确认门
+ * （当时无人 import，属静默旁路）。已删除，并在 `__tests__/memory/memory-store-write-guard`
+ * 里锁定「这两类入口不得再出现」。新增批量写入请一律走 `memory-extraction-store`（提议化）
+ * 或治理提交器。
+ */
 
 interface MemoryRow {
   id: string;
@@ -35,6 +48,30 @@ interface MemoryRow {
   enabled: number;
   created_at: string;
   updated_at: string;
+  scope_type: string | null;
+  scope_id: string | null;
+  lifecycle: string | null;
+  revision: number | null;
+  confirmation_kind: string | null;
+  confirmed_at: string | null;
+  change_seq: number | null;
+  valid_until: string | null;
+  superseded_by: string | null;
+}
+
+/**
+ * 全局单调变更水位。
+ *
+ * 维护任务按 `change_seq` 增量扫描，故任何改变正式记忆的写入都必须取一次新水位，
+ * 且必须与写入本身同事务——否则会出现「条目已变但水位未动」的漏扫窗口。
+ */
+export function nextMemoryChangeSeq(): number {
+  sqliteRun('UPDATE memory_change_counter SET value = value + 1 WHERE id = 1', []);
+  const row = sqliteGet<{ value: number }>(
+    'SELECT value FROM memory_change_counter WHERE id = 1 LIMIT 1',
+    [],
+  );
+  return row?.value ?? 1;
 }
 
 const MEMORY_ROLE_LAYERS: ReadonlySet<MemoryRoleLayer> = new Set([
@@ -372,7 +409,15 @@ function addWorkspaceKnowledgeSearchAliases(terms: Set<string>, normalized: stri
   }
 }
 
+/**
+ * 把一行 `memories` 记录映射为领域对象。
+ *
+ * 作用域采用三态回退：优先 `scope_type`/`scope_id`（新库与迁移后都有值），缺失则按
+ * team → workspace → user 顺序从旧列推断，保证历史行与未迁移行也能读出合理作用域。
+ * 生命周期、版本、水位同样给默认值，避免 null 渗透到注入与展示层。
+ */
 function rowToMemoryEntry(row: MemoryRow): MemoryEntry {
+  const scope = resolveRowScope(row);
   return {
     id: row.id,
     userId: row.user_id,
@@ -386,9 +431,42 @@ function rowToMemoryEntry(row: MemoryRow): MemoryEntry {
     teamWorkspaceId: row.team_workspace_id,
     roleLayers: parseMemoryRoleLayers(row.role_layers_json),
     enabled: row.enabled === 1,
+    scope,
+    lifecycle: parseMemoryLifecycle(row.lifecycle),
+    revision: row.revision ?? 1,
+    confirmationKind: parseMemoryConfirmationKind(row.confirmation_kind),
+    confirmedAt: row.confirmed_at ?? null,
+    changeSeq: row.change_seq ?? 0,
+    validUntil: row.valid_until ?? null,
+    supersededBy: row.superseded_by ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function resolveRowScope(row: MemoryRow): MemoryScope {
+  if (row.scope_type && row.scope_id) {
+    return { type: row.scope_type as MemoryScope['type'], id: row.scope_id };
+  }
+  const teamWorkspaceId = row.team_workspace_id?.trim();
+  if (teamWorkspaceId) {
+    return { type: 'team', id: teamWorkspaceId };
+  }
+  const workspaceRoot = row.workspace_root?.trim();
+  if (workspaceRoot) {
+    return { type: 'workspace', id: normalizeWorkspaceScopeId(workspaceRoot) };
+  }
+  return userMemoryScope(row.user_id);
+}
+
+const MEMORY_LIFECYCLES: ReadonlySet<string> = new Set(['active', 'archived', 'superseded']);
+
+function parseMemoryLifecycle(value: string | null): MemoryLifecycle {
+  return value && MEMORY_LIFECYCLES.has(value) ? (value as MemoryLifecycle) : 'active';
+}
+
+function parseMemoryConfirmationKind(value: string | null): MemoryConfirmationKind | null {
+  return value === 'manual' || value === 'proposal' ? value : null;
 }
 
 export function createMemory(userId: string, input: CreateMemoryInput): MemoryEntry {
@@ -396,9 +474,16 @@ export function createMemory(userId: string, input: CreateMemoryInput): MemoryEn
   const now = new Date().toISOString();
   const roleLayers = normalizeMemoryRoleLayers(input.roleLayers);
   const enabled = input.enabled !== false;
+  const scope = input.scope ?? userMemoryScope(userId);
+  const changeSeq = nextMemoryChangeSeq();
   sqliteRun(
-    `INSERT INTO memories (id, user_id, type, key, value, source, confidence, priority, workspace_root, team_workspace_id, role_layers_json, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO memories (
+       id, user_id, type, key, value, source, confidence, priority,
+       workspace_root, team_workspace_id, role_layers_json, enabled, created_at, updated_at,
+       scope_type, scope_id, lifecycle, revision, confirmation_kind, confirmed_at,
+       change_seq, valid_until, superseded_by
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       userId,
@@ -414,6 +499,15 @@ export function createMemory(userId: string, input: CreateMemoryInput): MemoryEn
       enabled ? 1 : 0,
       now,
       now,
+      scope.type,
+      scope.id,
+      'active',
+      1,
+      input.confirmationKind ?? null,
+      input.confirmedAt ?? null,
+      changeSeq,
+      input.validUntil ?? null,
+      null,
     ],
   );
   return {
@@ -429,6 +523,14 @@ export function createMemory(userId: string, input: CreateMemoryInput): MemoryEn
     teamWorkspaceId: input.teamWorkspaceId ?? null,
     roleLayers,
     enabled,
+    scope,
+    lifecycle: 'active',
+    revision: 1,
+    confirmationKind: input.confirmationKind ?? null,
+    confirmedAt: input.confirmedAt ?? null,
+    changeSeq,
+    validUntil: input.validUntil ?? null,
+    supersededBy: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -555,16 +657,18 @@ export function listMemoriesForTeamWorkspaceKnowledge(
   return rows.map(rowToMemoryEntry);
 }
 
+/**
+ * 旧签名兼容：默认按 user 作用域查找启用记忆。
+ *
+ * 历史调用方（管理工具、提取流程）不知道作用域概念，其语义一直是「用户级同名记忆」，
+ * 故这里固定落到 `userMemoryScope(userId)`，由新函数承载作用域过滤。
+ */
 export function findEnabledMemoryByTypeAndKey(
   userId: string,
   type: MemoryEntry['type'],
   key: string,
 ): MemoryEntry | undefined {
-  const row = sqliteGet<MemoryRow>(
-    'SELECT * FROM memories WHERE user_id = ? AND type = ? AND key = ? AND enabled = 1 LIMIT 1',
-    [userId, type, key],
-  );
-  return row ? rowToMemoryEntry(row) : undefined;
+  return findActiveMemoryByTypeAndKey(userId, userMemoryScope(userId), type, key);
 }
 
 export function updateMemory(
@@ -574,6 +678,12 @@ export function updateMemory(
 ): MemoryEntry | undefined {
   const existing = getMemoryById(userId, memoryId);
   if (!existing) return undefined;
+
+  // 乐观并发：调用方持有的期望版本与库内当前版本不一致时拒绝写入，让上层去提示
+  // 「内容已被他人改动」，而不是静默覆盖掉对方的修改。
+  if (input.expectedRevision !== undefined && input.expectedRevision !== existing.revision) {
+    return undefined;
+  }
 
   const setClauses: string[] = ["updated_at = datetime('now')"];
   const params: Array<string | number | null> = [];
@@ -618,6 +728,34 @@ export function updateMemory(
     setClauses.push('enabled = ?');
     params.push(input.enabled ? 1 : 0);
   }
+  if (input.scope !== undefined) {
+    setClauses.push('scope_type = ?', 'scope_id = ?');
+    params.push(input.scope.type, input.scope.id);
+  }
+  if (input.lifecycle !== undefined) {
+    setClauses.push('lifecycle = ?');
+    params.push(input.lifecycle);
+  }
+  if (input.validUntil !== undefined) {
+    setClauses.push('valid_until = ?');
+    params.push(input.validUntil);
+  }
+  if (input.supersededBy !== undefined) {
+    setClauses.push('superseded_by = ?');
+    params.push(input.supersededBy);
+  }
+  if (input.confirmationKind !== undefined) {
+    setClauses.push('confirmation_kind = ?');
+    params.push(input.confirmationKind);
+  }
+  if (input.confirmedAt !== undefined) {
+    setClauses.push('confirmed_at = ?');
+    params.push(input.confirmedAt);
+  }
+
+  // 每次成功更新都推进版本与全局水位：版本供回滚/冲突检测，水位供维护增量扫描。
+  setClauses.push('revision = revision + 1', 'change_seq = ?');
+  params.push(nextMemoryChangeSeq());
 
   params.push(memoryId, userId);
   sqliteRun(`UPDATE memories SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ?`, params);
@@ -625,12 +763,110 @@ export function updateMemory(
   return getMemoryById(userId, memoryId);
 }
 
-export function deleteMemory(userId: string, memoryId: string): boolean {
-  const existing = getMemoryById(userId, memoryId);
-  if (!existing) return false;
-  sqliteRun('DELETE FROM memories WHERE id = ? AND user_id = ?', [memoryId, userId]);
-  return true;
+/** 按作用域列出正式记忆（可选 enabled / lifecycle / limit 过滤）。 */
+export function listMemoriesByScope(
+  userId: string,
+  scope: MemoryScope,
+  filter?: { enabled?: boolean; lifecycle?: MemoryLifecycle; limit?: number },
+): MemoryEntry[] {
+  const conditions: string[] = ['user_id = ?', 'scope_type = ?', 'scope_id = ?'];
+  const params: Array<string | number | null> = [userId, scope.type, scope.id];
+  if (filter?.enabled !== undefined) {
+    conditions.push('enabled = ?');
+    params.push(filter.enabled ? 1 : 0);
+  }
+  if (filter?.lifecycle !== undefined) {
+    conditions.push('lifecycle = ?');
+    params.push(filter.lifecycle);
+  }
+  const limit = filter?.limit ?? 1000;
+  const rows = sqliteAll<MemoryRow>(
+    `SELECT * FROM memories WHERE ${conditions.join(' AND ')} ORDER BY priority DESC, confidence DESC, key ASC, id ASC LIMIT ?`,
+    [...params, limit],
+  );
+  return rows.map(rowToMemoryEntry);
 }
+
+/** 某作用域内启用且处于 active 生命周期的记忆，供注入与查重使用。 */
+export function listActiveMemoriesForScope(userId: string, scope: MemoryScope): MemoryEntry[] {
+  return listMemoriesByScope(userId, scope, { enabled: true, lifecycle: 'active' });
+}
+
+/** 自某水位以来发生变更的 active 记忆（维护任务增量扫描）。 */
+export function listActiveMemoriesChangedSince(
+  userId: string,
+  sinceChangeSeq: number,
+  limit = 1000,
+): MemoryEntry[] {
+  const rows = sqliteAll<MemoryRow>(
+    `SELECT * FROM memories
+     WHERE user_id = ? AND lifecycle = 'active' AND change_seq > ?
+     ORDER BY change_seq ASC, id ASC LIMIT ?`,
+    [userId, sinceChangeSeq, limit],
+  );
+  return rows.map(rowToMemoryEntry);
+}
+
+/** 在某作用域内按 type + key 查启用中的 active 记忆（唯一键语义）。 */
+export function findActiveMemoryByTypeAndKey(
+  userId: string,
+  scope: MemoryScope,
+  type: MemoryEntry['type'],
+  key: string,
+): MemoryEntry | undefined {
+  const row = sqliteGet<MemoryRow>(
+    `SELECT * FROM memories
+     WHERE user_id = ? AND scope_type = ? AND scope_id = ? AND type = ? AND key = ?
+       AND enabled = 1 AND lifecycle = 'active'
+     LIMIT 1`,
+    [userId, scope.type, scope.id, type, key],
+  );
+  return row ? rowToMemoryEntry(row) : undefined;
+}
+
+/**
+ * 注入用：跨多个作用域取启用、active、置信度达标且在有效期内的记忆。
+ *
+ * `allowedScopes` 是注入白名单的来源（渠道会话据此把 owner 个人记忆挡在上下文外），
+ * 传空数组时返回空集而不是「不过滤」——白名单语义下空集就是「不注入任何记忆」。
+ */
+export function listEnabledMemoriesForScopeInjection(
+  userId: string,
+  scopes: readonly MemoryScope[],
+  minConfidence: number,
+): MemoryEntry[] {
+  if (scopes.length === 0) {
+    return [];
+  }
+  const scopeClauses = scopes.map(() => '(scope_type = ? AND scope_id = ?)').join(' OR ');
+  const params: Array<string | number | null> = [userId, minConfidence];
+  for (const scope of scopes) {
+    params.push(scope.type, scope.id);
+  }
+  const rows = sqliteAll<MemoryRow>(
+    `SELECT * FROM memories
+     WHERE user_id = ? AND enabled = 1 AND lifecycle = 'active' AND confidence >= ?
+       AND (valid_until IS NULL OR valid_until > datetime('now'))
+       AND (${scopeClauses})
+     ORDER BY priority DESC, confidence DESC, key ASC, id ASC`,
+    params,
+  );
+  return rows.map(rowToMemoryEntry);
+}
+
+/**
+ * 刻意**不提供**「硬删除记忆」原语（261101）。
+ *
+ * 这里曾导出 `deleteMemory`：一条 `DELETE FROM memories`，无调用方，但会把
+ * `memory_revisions` 经 FK CASCADE 一并抹掉——即「删一条记忆＝连它的整段变更历史一起
+ * 消失」，且不经过任何审计路径。用户可见的删除语义是**软归档**
+ * （`applyManualMemoryChange` 置 `enabled=0` + `lifecycle='archived'`），历史与版本都保留，
+ * 因此没有任何合法调用方需要硬删除。
+ *
+ * 若将来确实需要「用户明确要求的永久清除」，应当新增一条**带审计**的清除路径（写一条
+ * 终态 revision 后再删、并在审计里留下清除记录），而不是把这个原语放回来。
+ * `__tests__/memory/memory-store-write-guard.test.ts` 会锁定它不得重新出现。
+ */
 
 export function getMemoryStats(userId: string): MemoryStats {
   const allRows = sqliteAll<MemoryRow>('SELECT * FROM memories WHERE user_id = ?', [userId]);
@@ -673,18 +909,6 @@ export function getMemoryStats(userId: string): MemoryStats {
 
   return stats;
 }
-
-export function listEnabledMemoriesForInjection(
-  userId: string,
-  minConfidence: number,
-): MemoryEntry[] {
-  const rows = sqliteAll<MemoryRow>(
-    'SELECT * FROM memories WHERE user_id = ? AND enabled = 1 AND confidence >= ? ORDER BY priority DESC, confidence DESC',
-    [userId, minConfidence],
-  );
-  return rows.map(rowToMemoryEntry);
-}
-
 export function hasExtractionLog(
   userId: string,
   sessionId: string,
@@ -703,8 +927,8 @@ export function hasExtractionLog(
  * turn, read ONLY by the point-query `hasExtractionLog` and removed only by the
  * session-delete CASCADE. A `clientRequestId` is a one-time id for a single
  * streaming run, so a row older than a generous window can never be re-queried
- * (the run that owns it has long since completed), and `upsertExtractedMemories`
- * dedupes at the memory level regardless — the log is an optimization, not a
+ * (the run that owns it has long since completed), and the proposal store dedupes
+ * at the proposal level regardless — the log is an optimization, not a
  * correctness guarantee. So old rows are safe to drop, bounding what is
  * otherwise an only-grows table on a long-lived account. Amortized: prune every
  * N inserts so write amplification is negligible.
@@ -799,83 +1023,6 @@ export function insertExtractionLog(
   // account. Old rows can never be re-queried (one-time clientRequestId).
   maybePruneExtractionLogs();
 }
-
-export function upsertExtractedMemories(
-  userId: string,
-  candidates: ExtractedMemoryCandidate[],
-  workspaceRoot: string | null = null,
-): { created: number; updated: number; duplicates: number; blocked: number } {
-  // 260515-team-phase-a · T-07：自动抽取也要过安全扫描，避免对话历史里
-  // 出现的注入载荷 / 零宽字符通过自动抽取静默落库。命中威胁的候选项被
-  // 直接丢弃，由调用方通过返回值 blocked 计数感知。
-  const safeCandidates: ExtractedMemoryCandidate[] = [];
-  let blocked = 0;
-  for (const candidate of candidates) {
-    const scanKey = scanMemoryWriteContent(candidate.key);
-    const scanValue = scanMemoryWriteContent(candidate.value);
-    if (!scanKey.ok || !scanValue.ok) {
-      blocked += 1;
-      continue;
-    }
-    safeCandidates.push(candidate);
-  }
-
-  const existing = listMemories(userId, { enabled: true, limit: 1000 });
-  const result = deduplicateMemories(safeCandidates, existing);
-
-  // Per-candidate resilience: each createMemory / updateMemory is an
-  // unguarded SQLite write. Without isolation one row throwing (DB lock /
-  // disk error / constraint) would abort the remaining candidates AND — since
-  // the counts below were derived from the PLANNED arrays — report writes that
-  // never happened. Isolate per candidate, count only actual successes, and
-  // warn on failures so a single bad row neither starves the rest nor inflates
-  // the result. (§0.94/§0.103 single-point-failure-isolation class.)
-  let created = 0;
-  for (const candidate of result.toCreate) {
-    try {
-      createMemory(userId, {
-        type: candidate.type,
-        key: candidate.key,
-        value: candidate.value,
-        source: 'auto_extracted',
-        confidence: candidate.confidence,
-        priority: 30,
-        workspaceRoot,
-      });
-      created += 1;
-    } catch (err) {
-      logGatewayWarn(
-        `[memory-store] 自动抽取记忆写入失败，已跳过该条：${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-
-  let updated = 0;
-  for (const { existingId, candidate } of result.toUpdate) {
-    try {
-      updateMemory(userId, existingId, {
-        value: candidate.value,
-      });
-      updated += 1;
-    } catch (err) {
-      logGatewayWarn(
-        `[memory-store] 自动抽取记忆更新失败，已跳过该条：${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-
-  return {
-    created,
-    updated,
-    duplicates: result.duplicates.length,
-    blocked,
-  };
-}
-
 export function readMemorySettings(userId: string): MemorySettings {
   const row = sqliteGet<{ value: string }>(
     'SELECT value FROM user_settings WHERE user_id = ? AND key = ? LIMIT 1',

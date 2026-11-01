@@ -60,6 +60,29 @@ async function prepareWithOpenAIFastMode(input: PrepareThinkingRequestInput) {
   return Effect.runPromise(OpenCodeLLM.LLMClient.prepare(request));
 }
 
+async function prepareWithDisabledThinking(input: PrepareThinkingRequestInput) {
+  const thinking = {
+    config: { type: 'disabled' },
+    providerType: input.providerType,
+    supportsThinking: true,
+  } satisfies ExtendedThinkingConfig;
+  const model = buildNativeModel({
+    ...input,
+    apiKey: 'local-test-key',
+  });
+  const request = OpenCodeLLM.LLM.request({
+    model,
+    prompt: 'ping',
+    providerOptions: buildProviderOptions({
+      thinking,
+      model: input.model,
+      upstreamProtocol: input.upstreamProtocol,
+    }),
+  });
+
+  return Effect.runPromise(OpenCodeLLM.LLMClient.prepare(request));
+}
+
 describe('thinking wire protocol mapping', () => {
   it('forwards a UI high effort to DeepSeek Chat Completions', async () => {
     const input: PrepareThinkingRequestInput = {
@@ -202,5 +225,100 @@ describe('thinking wire protocol mapping', () => {
     });
 
     expect(prepared.body).toMatchObject({ service_tier: 'priority' });
+  });
+
+  it('forwards an explicit disabled toggle to DeepSeek (upstream defaults to enabled)', async () => {
+    const prepared = await prepareWithDisabledThinking({
+      providerType: 'deepseek',
+      upstreamProtocol: 'chat_completions',
+      model: 'deepseek-chat',
+    });
+
+    expect(prepared.body).toMatchObject({ thinking: { type: 'disabled' } });
+    expect(prepared.body).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('forwards an explicit disabled toggle to Anthropic Messages', async () => {
+    const prepared = await prepareWithDisabledThinking({
+      providerType: 'anthropic',
+      upstreamProtocol: 'anthropic_messages',
+      model: 'claude-sonnet-4-5',
+    });
+
+    expect(prepared.route).toBe('anthropic-messages');
+    expect(prepared.body).toMatchObject({ thinking: { type: 'disabled' } });
+  });
+
+  it.each(['chat_completions', 'responses'] as const)(
+    '支持 none 的模型在 %s 请求中显式关闭推理',
+    async (upstreamProtocol) => {
+      const prepared = await prepareWithDisabledThinking({
+        providerType: 'openai',
+        upstreamProtocol,
+        model: 'gpt-5.1',
+      });
+
+      expect(
+        buildProviderOptions({
+          thinking: { type: 'disabled' },
+          providerType: 'openai',
+          upstreamProtocol,
+          model: 'gpt-5.1',
+        }),
+      ).toMatchObject({ openai: { reasoningEffort: 'none' } });
+      if (upstreamProtocol === 'responses') {
+        expect(prepared.body).toMatchObject({ reasoning: { effort: 'none' } });
+        expect(prepared.body).not.toHaveProperty('reasoning_effort');
+      } else {
+        expect(prepared.body).toMatchObject({ reasoning_effort: 'none' });
+        expect(prepared.body).not.toHaveProperty('reasoning');
+      }
+    },
+  );
+
+  it('自定义模型明确声明支持 none 时下发关闭参数', () => {
+    expect(
+      buildProviderOptions({
+        thinking: { config: { type: 'disabled' }, providerType: 'custom', supportsThinking: true },
+        model: 'local-reasoner',
+        reasoningOptions: [{ type: 'effort', values: ['none', 'high'] }],
+      }),
+    ).toMatchObject({ custom: { reasoning_effort: 'none' } });
+  });
+
+  it('模型声明不支持 none 时不能使用模型名称推断强行下发', () => {
+    expect(
+      buildProviderOptions({
+        thinking: { config: { type: 'disabled' }, providerType: 'openai', supportsThinking: true },
+        model: 'gpt-5.1',
+        reasoningOptions: [{ type: 'effort', values: ['low', 'high'] }],
+      }),
+    ).toBeUndefined();
+  });
+
+  it.each(['gpt-5', 'gpt-5.1-codex', 'gpt-5.2-pro', 'unknown-reasoner'])(
+    '不向不支持或未确认支持关闭的模型 %s 下发 none',
+    (model) => {
+      expect(
+        buildProviderOptions({
+          thinking: {
+            config: { type: 'disabled' },
+            providerType: 'openai',
+            supportsThinking: true,
+          },
+          model,
+        }),
+      ).toBeUndefined();
+    },
+  );
+
+  it('未声明关闭能力的旧版 OpenAI 模型保持省略参数', () => {
+    expect(
+      buildProviderOptions({
+        thinking: { config: { type: 'disabled' }, providerType: 'openai', supportsThinking: true },
+        model: 'gpt-5',
+        upstreamProtocol: 'chat_completions',
+      }),
+    ).toBeUndefined();
   });
 });

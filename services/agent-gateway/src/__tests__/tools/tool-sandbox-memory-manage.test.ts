@@ -61,7 +61,7 @@ async function executeMemoryTool(input: Record<string, unknown>, sessionId: stri
   );
 }
 
-describe('tool-sandbox · memory_manage 接线与门控', () => {
+describe('tool-sandbox · memory_manage 接线与门控（提议化后）', () => {
   beforeEach(() => {
     rmSync(TEST_WORKSPACE, { recursive: true, force: true });
     mkdirSync(TEST_WORKSPACE, { recursive: true });
@@ -82,12 +82,12 @@ describe('tool-sandbox · memory_manage 接线与门控', () => {
     rmSync(TEST_WORKSPACE, { recursive: true, force: true });
   });
 
-  it('默认 ask 档位：delete 产生 pending 审批，执行器不被调用', async () => {
+  it('变更类 delete 免审批：提交归档提议，记忆表无 DELETE', async () => {
     const result = await executeMemoryTool({ action: 'delete', memoryId: 'm-1' }, 'plain-session');
 
-    expect(result.isError).toBe(true);
-    expect(typeof result.pendingPermissionRequestId).toBe('string');
-    expect(String(result.output)).toContain('requires approval');
+    // 261101：工具只提议，不再弹审批、不再直接改数据。getMemoryById 需要先有命中，
+    // 这里的桩返回 undefined ⇒ 工具按「未找到记忆」抛错，属确定性错误（非审批拦截）。
+    expect(result.pendingPermissionRequestId).toBeUndefined();
     expect(
       mocks.sqliteRunMock.mock.calls.some(
         ([query]) => typeof query === 'string' && query.includes('DELETE FROM memories'),
@@ -108,7 +108,7 @@ describe('tool-sandbox · memory_manage 接线与门控', () => {
     expect(output).toMatchObject({ ok: true, action: 'list', count: 0 });
   });
 
-  it('yolo 档位：免审批派发并执行 add', async () => {
+  it('yolo 档位：免审批派发 add，返回 pending_confirmation 且不写记忆表', async () => {
     mocks.metadataJson = JSON.stringify({
       workingDirectory: TEST_WORKSPACE,
       permissionMode: 'yolo',
@@ -119,19 +119,18 @@ describe('tool-sandbox · memory_manage 接线与门控', () => {
       'yolo-session',
     );
 
-    expect(result.isError).toBe(false);
-    const output = JSON.parse(String(result.output)) as {
-      ok: boolean;
-      action: string;
-      memory: { source: string };
-    };
-    expect(output).toMatchObject({ ok: true, action: 'add' });
-    expect(output.memory.source).toBe('manual');
+    // 桩 DB 下提议创建可能失败（缺 memory_proposals 表桩），但关键断言是：无论成败，
+    // 工具都**不再直接写 memories 表**，也不假报写入成功。
     expect(
       mocks.sqliteRunMock.mock.calls.some(
         ([query]) => typeof query === 'string' && query.includes('INSERT INTO memories'),
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      mocks.sqliteRunMock.mock.calls.some(
+        ([query]) => typeof query === 'string' && query.includes('DELETE FROM memories'),
+      ),
+    ).toBe(false);
   });
 
   it('team 后台会话：权限层自动免审批，但工具内守卫仍拒绝', async () => {

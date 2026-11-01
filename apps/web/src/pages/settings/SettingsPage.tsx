@@ -1,5 +1,5 @@
 import React, { Suspense, useState } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { ConnectionTabContent } from './connection/connection-tab-content.js';
 import { DisplayTabContent } from './display/display-tab-content.js';
@@ -23,6 +23,7 @@ import { useCompactSettingsLayout } from './shared/use-compact-settings-layout.j
 import { useSettingsEnvironment } from './shared/use-settings-environment.js';
 import { useSettingsUpstreamRetry } from './connection/use-settings-upstream-retry.js';
 import { WorkspaceTabContent } from './workspace/workspace-tab-content.js';
+import { useGitHubTriggerAgentOptions } from './workspace/use-github-trigger-agent-options.js';
 import { SecurityTabContent } from './security/security-tab-content.js';
 import { UsageTabContent } from './usage/usage-tab-content.js';
 import { MemoryTabContent } from './memory/memory-tab-content.js';
@@ -55,6 +56,7 @@ export default function SettingsPage() {
   } = useAuthStore();
   const token = useAuthStore((s) => s.accessToken);
   const { tab } = useParams<{ tab: string }>();
+  const navigate = useNavigate();
   const activeTab = (TABS.find((t) => t.id === tab)?.id ?? 'connection') as TabId;
   const [customBaseUrlSaved, setCustomBaseUrlSaved] = useState(false);
   const {
@@ -231,6 +233,11 @@ export default function SettingsPage() {
     setDiagnosticsAvailableDates,
     setGithubTriggers,
   });
+  // GitHub 触发器表单的下拉候选（读取失败即退化为「不绑定」，不影响保存）。
+  const {
+    agentOptions: gitHubTriggerAgentOptions,
+    disabledAgentOptions: gitHubTriggerDisabledAgentOptions,
+  } = useGitHubTriggerAgentOptions();
 
   const refreshDevtoolsSource = React.useCallback(
     (key: DevtoolsSourceKey) => {
@@ -452,7 +459,13 @@ export default function SettingsPage() {
                     disconnectedCount={disconnectedCount}
                   />
                 )}
-                {activeTab === 'memory' && <MemoryTabContent memoryState={memoryManagement} />}
+                {activeTab === 'memory' && (
+                  <MemoryTabContent
+                    memoryState={memoryManagement}
+                    gatewayUrl={gatewayUrl}
+                    token={token}
+                  />
+                )}
                 {activeTab === 'companion' && <CompanionTabContent />}
                 {activeTab === 'usage' && (
                   <UsageTabContent
@@ -512,6 +525,9 @@ export default function SettingsPage() {
                     onBrowseSshPath={browseSshPath}
                     onUploadSshFile={uploadSshFile}
                     githubTriggers={githubTriggers}
+                    agentOptions={gitHubTriggerAgentOptions}
+                    disabledAgentOptions={gitHubTriggerDisabledAgentOptions}
+                    onOpenAgentSettings={() => navigate('/settings/agents')}
                     providerUpdatesDetail={devtoolsSourceStates.providerUpdates.detail}
                     onSaveGitHubTrigger={handleSaveGitHubTrigger}
                     onDesktopAutomationStart={handleDesktopAutomationStart}

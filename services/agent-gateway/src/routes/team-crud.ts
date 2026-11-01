@@ -549,6 +549,7 @@ export async function teamCrudRoutes(app: FastifyInstance): Promise<void> {
       step.succeed(undefined, { messageId: id, type: body.type });
       return reply.status(201).send({
         id,
+        delivered: false,
         sessionId: body.sessionId ?? null,
         memberId: body.senderId ?? 'system',
         recipientMemberId: body.recipientMemberId ?? null,

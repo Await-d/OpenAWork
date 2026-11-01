@@ -16,7 +16,15 @@
  *   - docs/team-architecture-l1-3-streaming-handoff-spec.md §1.1.3
  */
 
-import { sqliteAll, sqliteGet, sqliteRun as dbSqliteRun } from '../../infra/db.js';
+import {
+  sqliteAll,
+  sqliteGet,
+  sqliteRun as dbSqliteRun,
+  sqliteTransaction,
+} from '../../infra/db.js';
+import { recordInboundOutcome } from '../store/inbound-delivery.js';
+import { isDepthUpgradeIntent, type OrchestrationDepth } from './orchestration-depth.js';
+import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { TeamReasoningEffort } from '@openAwork/shared';
 import { resolveAuxiliaryLlmConfig } from '../../provider/auxiliary-llm-config.js';
@@ -29,8 +37,13 @@ import { createHandoff } from '../store/handoff-store.js';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
 import { recordLatency } from '../bus/latency-monitor.js';
 import { setSubstate, SUBSTATES_RECEPTION } from '../store/substate-store.js';
-import { appendSessionMessageV2 } from '../../message/message-v2-adapter.js';
+import {
+  appendSessionMessageV2,
+  getSessionMessageByRequestId,
+} from '../../message/message-v2-adapter.js';
 import { logGatewayWarn } from '../../infra/gateway-logger.js';
+import type { InputImageContent } from '@openAwork/shared';
+import { buildUserInputContent } from '../../message/input-image-content.js';
 import {
   routeByRules,
   routeByLlm,
@@ -121,6 +134,7 @@ export interface OrchestrateReceptionInput {
   receptionSessionId: string;
   /** 用户输入的原始 intent */
   userIntent: string;
+  inputParts?: InputImageContent[];
   /** 可选上下文摘要 */
   context?: string | null;
   /** team workspace id（可选，会注入 handoff payload 让 c 拿到 constitution） */
@@ -205,15 +219,17 @@ export function persistReceptionUserMessage(input: {
   userId: string;
   receptionSessionId: string;
   userIntent: string;
+  inputParts?: InputImageContent[];
   streamClientRequestId?: string | null;
 }): void {
-  if (input.userIntent.trim().length === 0) return;
+  const content = buildUserInputContent(input.userIntent, input.inputParts);
+  if (content.length === 0) return;
   try {
     appendSessionMessageV2({
       sessionId: input.receptionSessionId,
       userId: input.userId,
       role: 'user',
-      content: [{ type: 'text', text: input.userIntent }],
+      content,
       clientRequestId: input.streamClientRequestId ?? null,
     });
   } catch (err) {
@@ -259,12 +275,28 @@ export async function orchestrateReceptionInput(
     streamClientRequestId: input.streamClientRequestId,
   });
 
+  const delivery = sqliteGet<{ outcome_json: string | null; confirmed_input_json: string | null }>(
+    `SELECT o.outcome_json, o.confirmed_input_json FROM team_inbound_outbox o JOIN session_inbound_messages i ON i.id = o.inbound_id
+     WHERE i.user_id = ? AND i.to_session_id = ? AND o.request_id = ? LIMIT 1`,
+    [input.userId, input.receptionSessionId, streamClientRequestId],
+  );
+  if (delivery?.outcome_json)
+    return JSON.parse(delivery.outcome_json) as OrchestrateReceptionResult;
+  if (delivery?.confirmed_input_json)
+    input = { ...input, ...JSON.parse(delivery.confirmed_input_json) };
+  const existing = sqliteGet<{ id: string }>(
+    `SELECT id FROM handoff_records WHERE user_id = ? AND from_session_id = ? AND client_request_id = ? AND to_role_layer = 'pm1' LIMIT 1`,
+    [input.userId, input.receptionSessionId, streamClientRequestId],
+  );
+  if (existing) return { triggered: true, handoffId: existing.id };
+
   // 1. 立刻把用户输入写入消息流（仅在 persistUser=true 时）
   if (persistUser) {
     persistReceptionUserMessage({
       userId: input.userId,
       receptionSessionId: input.receptionSessionId,
       userIntent: input.userIntent,
+      inputParts: input.inputParts,
       streamClientRequestId,
     });
   }
@@ -304,8 +336,41 @@ async function runReceptionOrchestrationBody(
     activeGrill &&
     activeGrill.intent.length > 0 &&
     activeGrill.state.confirmedAt === undefined &&
-    input.userIntent.trim().length > 0
+    (input.userIntent.trim().length > 0 || Boolean(input.inputParts?.length))
   ) {
+    if (input.userIntent.trim().length === 0 && input.inputParts?.length) {
+      const sources = [
+        ...new Set([...(activeGrill.sourceRequestIds ?? []), streamClientRequestId]),
+      ];
+      if (sources.length > 20) {
+        if (persistAck)
+          writeAck(
+            input.userId,
+            input.receptionSessionId,
+            '图片补充轮次超过20次，请整合附件后重新提交。',
+          );
+        return { triggered: false, reason: 'too-many-image-sources' };
+      }
+      sqliteTransaction(() => {
+        persistReceptionGrill(
+          input.receptionSessionId,
+          activeGrill.state,
+          activeGrill.intent,
+          sources,
+        );
+        recordInboundOutcome(input.receptionSessionId, streamClientRequestId, {
+          triggered: false,
+          reason: 'grill-images-added',
+        });
+      });
+      if (persistAck)
+        writeAck(
+          input.userId,
+          input.receptionSessionId,
+          '已收到补充图片，请继续回答当前澄清问题。',
+        );
+      return { triggered: false, reason: 'grill-images-added' };
+    }
     setSubstate({
       sessionId: input.receptionSessionId,
       substate: SUBSTATES_RECEPTION.GRILLING,
@@ -317,7 +382,62 @@ async function runReceptionOrchestrationBody(
     if (advanced.kind === 'confirmed') {
       const confirmedIntent = activeGrill.intent || input.userIntent;
       const confirmation = buildGrillConfirmation(advanced.state, confirmedIntent);
-      clearReceptionGrill(input.receptionSessionId);
+      const originals = (activeGrill.sourceRequestIds ?? []).map((clientRequestId) =>
+        getSessionMessageByRequestId({
+          clientRequestId,
+          role: 'user',
+          sessionId: input.receptionSessionId,
+          userId: input.userId,
+        }),
+      );
+      if (originals.some((message) => !message)) {
+        if (persistAck)
+          writeAck(
+            input.userId,
+            input.receptionSessionId,
+            '原始图片消息已不可用，请重新上传后再确认。',
+          );
+        return { triggered: false, reason: 'image-source-unavailable' };
+      }
+      const images = [
+        ...originals.flatMap((message) =>
+          message!.message.content.filter(
+            (part): part is InputImageContent => part.type === 'input_image',
+          ),
+        ),
+        ...(input.inputParts ?? []),
+      ];
+      const inputParts = [
+        ...new Map(
+          images.map((image) => [image.imageUrl ?? image.artifactId ?? image.fileId, image]),
+        ).values(),
+      ];
+      if (inputParts.length > 20) {
+        if (persistAck)
+          writeAck(
+            input.userId,
+            input.receptionSessionId,
+            '本次需求图片超过20张，请减少附件后重新提交。',
+          );
+        return { triggered: false, reason: 'too-many-images' };
+      }
+      sqliteTransaction(() => {
+        clearReceptionGrill(input.receptionSessionId);
+        dbSqliteRun(
+          `UPDATE team_inbound_outbox SET confirmed_input_json = ? WHERE request_id = ? AND inbound_id IN (SELECT id FROM session_inbound_messages WHERE user_id = ? AND to_session_id = ?)`,
+          [
+            JSON.stringify({
+              userIntent: confirmedIntent,
+              inputParts,
+              __skipGrill: true,
+              ...(confirmation ? { grillConfirmation: confirmation } : {}),
+            }),
+            streamClientRequestId,
+            input.userId,
+            input.receptionSessionId,
+          ],
+        );
+      });
       if (persistAck) {
         writeAck(input.userId, input.receptionSessionId, '共识已确认，开始按此派发任务。');
       }
@@ -325,6 +445,7 @@ async function runReceptionOrchestrationBody(
         {
           ...input,
           userIntent: confirmedIntent,
+          ...(inputParts.length ? { inputParts } : {}),
           __skipGrill: true,
           ...(confirmation ? { grillConfirmation: confirmation } : {}),
         },
@@ -334,7 +455,13 @@ async function runReceptionOrchestrationBody(
     }
 
     if (advanced.kind === 'cancelled') {
-      clearReceptionGrill(input.receptionSessionId);
+      sqliteTransaction(() => {
+        clearReceptionGrill(input.receptionSessionId);
+        recordInboundOutcome(input.receptionSessionId, streamClientRequestId, {
+          triggered: false,
+          reason: 'grill-cancelled',
+        });
+      });
       setSubstate({
         sessionId: input.receptionSessionId,
         substate: SUBSTATES_RECEPTION.IDLE,
@@ -357,7 +484,33 @@ async function runReceptionOrchestrationBody(
       });
     }
 
-    persistReceptionGrill(input.receptionSessionId, advanced.state, activeGrill.intent);
+    const sourceRequestIds = [
+      ...new Set([
+        ...(activeGrill.sourceRequestIds ?? []),
+        ...(input.inputParts?.length ? [streamClientRequestId] : []),
+      ]),
+    ];
+    if (sourceRequestIds.length > 20) {
+      if (persistAck)
+        writeAck(
+          input.userId,
+          input.receptionSessionId,
+          '图片补充轮次超过20次，请整合附件后重新提交。',
+        );
+      return { triggered: false, reason: 'too-many-image-sources' };
+    }
+    sqliteTransaction(() => {
+      persistReceptionGrill(
+        input.receptionSessionId,
+        advanced.state,
+        activeGrill.intent,
+        sourceRequestIds,
+      );
+      recordInboundOutcome(input.receptionSessionId, streamClientRequestId, {
+        triggered: false,
+        reason: `grill-${advanced.kind}`,
+      });
+    });
     if (persistAck && advanced.text) {
       writeAck(input.userId, input.receptionSessionId, advanced.text);
     }
@@ -402,11 +555,38 @@ async function runReceptionOrchestrationBody(
   // grill 确认后跳过重复路由：确认后的 intent 仍可能命中 grill/clarify 等分支，导致
   // 反复回问或误判，故直接进入 orchestrate。
   let routeResult: RouteResult;
-  if (input.__skipGrill) {
+  // ─── T-17 显式升级：用户要求「升级为完整流程」→ 强制完整链路（L3）───────
+  // 优先尝试续接既有产物（PM1 读已有 spec/plan/tasks，不重复生成）；没有可复用
+  // 产物时仍按完整流程执行。升级请求不参与路由，避免被当成「太短」而回问。
+  if (!input.__skipGrill && isDepthUpgradeIntent(input.userIntent)) {
+    const upgradeResume = await tryResumePreviousWork({
+      userId: input.userId,
+      receptionSessionId: input.receptionSessionId,
+      userIntent: input.userIntent,
+      teamWorkspaceId: input.teamWorkspaceId ?? null,
+      persistAck,
+      streamClientRequestId,
+    });
+    if (upgradeResume.handled && upgradeResume.result) {
+      return upgradeResume.result;
+    }
+    routeResult = {
+      decision: 'orchestrate',
+      decisionSource: 'rule',
+      reason: '用户要求升级为完整流程',
+      orchestrationDepth: 'L3',
+    };
+  } else if (input.__skipGrill) {
     routeResult = {
       decision: 'orchestrate',
       decisionSource: 'rule',
       reason: 'grill 已确认，跳过重复路由',
+    };
+  } else if (input.userIntent.trim().length === 0 && input.inputParts?.length) {
+    routeResult = {
+      decision: 'light',
+      decisionSource: 'rule',
+      reason: '纯图片输入交给接待模型理解',
     };
   } else {
     const ruled = routeByRules(input.userIntent);
@@ -439,6 +619,7 @@ async function runReceptionOrchestrationBody(
             ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
             ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
             signal,
+            ...(input.inputParts?.length ? { inputParts: input.inputParts } : {}),
             prompt: prependAuxiliaryTeamInstructionPrefix({
               instructionPrefix,
               prompt,
@@ -479,7 +660,9 @@ async function runReceptionOrchestrationBody(
   // ─── 路径 A：direct/light → b.companion 直接回答（走 stream） ─────────────
   // light 只读任务和 direct 前台消息都留在 reception：不自动初始化、不做意图改写、
   // 不创建 reception→pm1 handoff，避免简单了解任务展开成完整团队层级。
-  if (routeResult.decision === 'direct' || routeResult.decision === 'light') {
+  // T-16 的 L1 快车道复用同一承载方式（见下方 fastLane），因此这里抽成局部函数，
+  // 避免两条浅编排路径各写一份 stream 调用与失败反馈。
+  const runReceptionFastLane = async (reason: string): Promise<OrchestrateReceptionResult> => {
     setSubstate({
       sessionId: input.receptionSessionId,
       substate: SUBSTATES_RECEPTION.CHATTING,
@@ -487,12 +670,13 @@ async function runReceptionOrchestrationBody(
       roleLayer: 'reception',
     });
     const directStartedAt = Date.now();
+    let directFailed = false;
     try {
       const { runSessionInBackground } = await import('../../routes/stream-runtime.js');
       // 使用与 inbound 端点相同的 clientRequestId，这样 stream 管线的
       // persistStreamUserMessage 会检测到已有该 requestId 的消息并跳过，
       // 避免用户消息重复写入（Fix #1/#2）。
-      await runSessionInBackground({
+      const directResult = await runSessionInBackground({
         sessionId: input.receptionSessionId,
         userId: input.userId,
         requestData: {
@@ -502,6 +686,7 @@ async function runReceptionOrchestrationBody(
           // 不改持久态；grill/clarify 分支不经模型轮次，仍走确定性澄清链条。
           dialogueMode: 'coding',
           message: input.userIntent,
+          ...(input.inputParts?.length ? { inputParts: input.inputParts } : {}),
           model: input.requestedModelId ?? 'default',
           ...(input.requestedProviderId ? { providerId: input.requestedProviderId } : {}),
           ...(input.requestedThinkingEnabled !== undefined
@@ -513,7 +698,10 @@ async function runReceptionOrchestrationBody(
           clientRequestId: streamClientRequestId,
         },
       });
+      if (directResult && (directResult.statusCode >= 400 || directResult.stopReason === 'error'))
+        throw new Error('direct-stream-failed');
     } catch (err) {
+      directFailed = true;
       logGatewayWarn(
         `[reception-orchestrator] reception direct/light stream 失败：${err instanceof Error ? err.message : String(err)}`,
       );
@@ -531,9 +719,79 @@ async function runReceptionOrchestrationBody(
     });
     return {
       triggered: false,
-      reason: routeResult.decision === 'light' ? 'light-answer' : 'direct-answer',
+      reason: directFailed ? 'direct-failed' : reason,
     };
+  };
+
+  if (routeResult.decision === 'direct' || routeResult.decision === 'light') {
+    return await runReceptionFastLane(
+      routeResult.decision === 'light' ? 'light-answer' : 'direct-answer',
+    );
   }
+
+  /**
+   * T-16：路由未给出深度时的兜底判据。模型不可用 / 超时 / 输出非法时
+   * `resolveOrchestrationDepth` 会保守返回 L2（因此不进入快车道），这里额外记录降级原因，
+   * 让「深度没定下来」成为可观测事件而不是静默行为。
+   */
+  const resolveFastLaneDepth = async (): Promise<OrchestrationDepth | undefined> => {
+    const { resolveOrchestrationDepth } = await import('./orchestration-depth.js');
+    let callLlm: ((prompt: string, signal: AbortSignal) => Promise<string>) | undefined;
+    try {
+      const auxiliary = await ensureAuxiliaryContext();
+      if (auxiliary) {
+        const { requestWorkflowLlmCompletion } = await import('../../routes/workflow-llm.js');
+        const { llmConfig, instructionPrefix } = auxiliary;
+        callLlm = (prompt, signal) =>
+          requestWorkflowLlmCompletion({
+            apiBaseUrl: llmConfig.apiBaseUrl,
+            apiKey: llmConfig.apiKey,
+            model: llmConfig.model,
+            ...(llmConfig.providerType ? { providerType: llmConfig.providerType } : {}),
+            ...(llmConfig.upstreamProtocol ? { upstreamProtocol: llmConfig.upstreamProtocol } : {}),
+            ...(llmConfig.openaiFastMode === true ? { openaiFastMode: true } : {}),
+            signal,
+            prompt: prependAuxiliaryTeamInstructionPrefix({ instructionPrefix, prompt }),
+            temperature: 0.1,
+            usageContext: {
+              userId: input.userId,
+              sessionId: input.receptionSessionId,
+              layer: 'reception',
+              clientRequestId: streamClientRequestId,
+            },
+          });
+      }
+    } catch (err) {
+      logGatewayWarn(
+        `[reception-orchestrator] 深度兜底判据不可用：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const resolved = await resolveOrchestrationDepth({
+      intent: input.userIntent,
+      ...(callLlm ? { callLlm } : {}),
+    });
+    if (resolved.source === 'degraded') {
+      logGatewayWarn(
+        `[reception-orchestrator] 编排深度降级为 ${resolved.depth}：${resolved.reason}`,
+      );
+      // T-18：深度降级是可观测事件，不能只留在日志里——否则无法解释
+      // 「这次为什么走了完整流程」，也无法统计判据命中率。
+      recordTeamRuntimeIncident({
+        category: 'depth_degraded',
+        code: 'depth-rule-uncertain',
+        context: {
+          depth: resolved.depth,
+          reason: resolved.reason,
+          receptionSessionId: input.receptionSessionId,
+        },
+        message: `编排深度判据不确定，保守按 ${resolved.depth} 执行：${resolved.reason}`,
+        severity: 'warning',
+        timestamp: Date.now(),
+        userId: input.userId,
+      });
+    }
+    return resolved.depth;
+  };
 
   // ─── 路径 B：clarify → b.companion 追问 ────────────────────────────────
   if (routeResult.decision === 'clarify') {
@@ -556,7 +814,18 @@ async function runReceptionOrchestrationBody(
       roleLayer: 'reception',
     });
     const state = startReceptionGrill(input.userIntent);
-    persistReceptionGrill(input.receptionSessionId, state, input.userIntent);
+    sqliteTransaction(() => {
+      persistReceptionGrill(
+        input.receptionSessionId,
+        state,
+        input.userIntent,
+        input.inputParts?.length ? [streamClientRequestId] : undefined,
+      );
+      recordInboundOutcome(input.receptionSessionId, streamClientRequestId, {
+        triggered: false,
+        reason: 'grill-started',
+      });
+    });
     if (persistAck) {
       writeAck(input.userId, input.receptionSessionId, formatFrontierPrompt(state));
     }
@@ -589,6 +858,21 @@ async function runReceptionOrchestrationBody(
   }
 
   // ─── 路径 C：orchestrate → 走 c→d→e/f/g 链路 ──────────────────────────
+
+  // T-16 L1 快车道：改动面只有单文件/单函数且不碰 schema·迁移·权限·构建配置时，
+  // 不建 PM1/PM2、不做意图改写、也不跑自动初始化，直接复用接待层的后台执行。
+  // 深度由路由给出（规则），路由不确定时用模型兜底；兜底失败按 L2 保守处理，
+  // 不会把小改动误升级，也不会把大改动误降级。
+  const resolvedDepth =
+    routeResult.orchestrationDepth ??
+    (routeResult.decision === 'orchestrate' ? await resolveFastLaneDepth() : undefined);
+  if (resolvedDepth === 'L1') {
+    // T-17 深度可见：快车道也要让用户看到本次没有创建规划与派发，并给出升级入口。
+    if (persistAck) {
+      writeAck(input.userId, input.receptionSessionId, buildFastLaneAck());
+    }
+    return await runReceptionFastLane('l1-fast-lane');
+  }
 
   // 自动初始化前置（周全性补强）：用户直接提了真任务但初始化还没做完时，
   // 先把未完成的初始化步骤自动跑完（了解项目 / 提取记忆 / 绑定工具），再派发任务。
@@ -686,6 +970,7 @@ async function runReceptionOrchestrationBody(
         instructionPrefix,
         prompt: INTERACTION_AGENT_PROMPT_TEMPLATE(input.userIntent, contextBlock),
       }),
+      ...(input.inputParts?.length ? { inputParts: input.inputParts } : {}),
       temperature: 0.3,
       usageContext: {
         userId: input.userId,
@@ -745,12 +1030,16 @@ async function runReceptionOrchestrationBody(
     fromRoleLayer: 'reception',
     toRoleLayer: 'pm1',
     clientRequestId: streamClientRequestId,
+    idempotencyKey: `inbound:${input.userId}:${input.receptionSessionId}:${streamClientRequestId}`,
     payload: {
       sourceIntent: input.userIntent,
       rewrittenIntent,
+      ...(input.inputParts?.length ? { inputParts: input.inputParts } : {}),
       recommendedRole,
       recommendedNextStep,
       teamWorkspaceId: input.teamWorkspaceId ?? null,
+      // T-18：本次编排深度随任务落库，任务面板与事后复盘都能看到「为什么走了完整流程」。
+      ...(resolvedDepth ? { orchestrationDepth: resolvedDepth } : {}),
       ...(input.grillConfirmation ? { grillConfirmation: input.grillConfirmation } : {}),
     },
   });
@@ -800,6 +1089,7 @@ async function runReceptionOrchestrationBody(
         recommendedRole,
         recommendedNextStep,
         handoffId: handoff.id,
+        ...(resolvedDepth ? { orchestrationDepth: resolvedDepth } : {}),
       }),
     );
   }
@@ -859,15 +1149,40 @@ function buildSuccessAck(input: {
   recommendedRole: string;
   recommendedNextStep: string;
   handoffId: string;
+  orchestrationDepth?: OrchestrationDepth;
 }): string {
   return [
     '已收到你的需求，团队开始接管。',
     '',
+    ...(input.orchestrationDepth ? [describeOrchestrationDepth(input.orchestrationDepth), ''] : []),
     `**改写后的意图**：${input.rewrittenIntent}`,
     `**推荐起点角色**：${input.recommendedRole}`,
     `**下一步**：${input.recommendedNextStep}`,
     '',
     `_派发记录：handoff \`${input.handoffId.slice(0, 8)}\`_`,
+  ].join('\n');
+}
+
+/**
+ * T-17 深度可见：让用户知道本次按哪个深度执行、以及如何升级。
+ * L1 走的是另一条快车道文案（见 buildFastLaneAck）。
+ */
+function describeOrchestrationDepth(depth: OrchestrationDepth): string {
+  const label: Record<OrchestrationDepth, string> = {
+    L0: 'L0（只读回答）',
+    L1: 'L1（小改动直接执行）',
+    L2: 'L2（同模块改动）',
+    L3: 'L3（跨模块 / 高风险改动）',
+  };
+  return `**编排深度**：本次按 ${label[depth]} 执行。如需完整流程（规划 + 派发 + 双评审），回复「升级为完整流程」即可。`;
+}
+
+/** L1 快车道的可见说明：明确没有创建规划与派发，并给出升级入口。 */
+function buildFastLaneAck(): string {
+  return [
+    '**编排深度**：本次按 L1（小改动直接执行）处理，未创建规划与派发。',
+    '',
+    '如需完整流程（规划 + 派发 + 双评审），回复「升级为完整流程」即可。',
   ].join('\n');
 }
 

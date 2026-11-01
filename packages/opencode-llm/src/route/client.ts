@@ -355,14 +355,17 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
   const decodeEventEffect = Schema.decodeUnknownEffect(protocol.stream.event);
   const decodeEvent = (route: string) => (frame: Frame) =>
     decodeEventEffect(frame).pipe(
-      Effect.mapError((cause) =>
-        ProviderShared.eventError(
+      Effect.mapError((cause) => {
+        const raw = typeof frame === 'string' ? frame : ProviderShared.encodeJson(frame);
+        return ProviderShared.eventError(
           input.id,
-          `Invalid ${route} stream event`,
-          typeof frame === 'string' ? frame : ProviderShared.encodeJson(frame),
+          // 消息里带上帧内容：否则日志只有「Invalid ... stream event」，
+          // 无法判断是哪个网关字段不合规范（真实端点排查时受阻）。
+          ProviderShared.describeInvalidStreamEvent(route, raw),
+          raw,
           cause,
-        ),
-      ),
+        );
+      }),
     );
 
   type BuiltRouteInput = Omit<

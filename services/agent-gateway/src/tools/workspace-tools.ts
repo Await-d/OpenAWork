@@ -249,7 +249,7 @@ function assertAccessibleWorkspacePath(
   // 安全不变量：生产 read 路径不传 sessionId，故此处 allowSkillResourceRead 不生效；
   // 技能资源放行只由 tool-sandbox 的 READ_ONLY_WORKSPACE_TOOLS 承担，勿删该白名单。
   const safePath = sessionId
-    ? assertSessionWorkspacePath({ path, sessionId, allowSkillResourceRead: true })
+    ? assertSessionWorkspacePath({ path, sessionId, allowSkillResourceRead: true, access: 'read' })
     : resolveUnscopedWorkspacePath(path);
   if (!safePath) {
     throw new Error(`Forbidden workspace path: ${path}`);
@@ -286,16 +286,18 @@ function assertSearchablePath(
   sessionId?: string,
   options?: { allowSkillResourceRead?: boolean },
 ): string {
-  // The skill-resource relaxation is caller-scoped: only the read-only search
-  // callers (`list`/`glob`/`grep`) opt in via `options`. The mutation tools
-  // that share this guard (`workspace_review_status`/`workspace_review_diff`/
-  // `workspace_review_revert`) stay strict, matching layer 1 in
-  // `tool-sandbox.ts`, which only relaxes READ_ONLY_WORKSPACE_TOOLS.
+  // 读语义断言：技能资源放宽由调用方按需打开（只读搜索类 `list`/`glob`/`grep`），
+  // 只读查询 `workspace_review_status` / `workspace_review_diff` 共用它。
+  // **写工具不得复用本函数**：`workspace_review_revert` 会修改文件，且它绕过
+  // `tool-sandbox.ts` 的第一道 FILE_TOOLS 闸（早退分支），本函数曾是它唯一的路径
+  // 闸——按读语义判定会让渠道的读放宽（allowReadHome / readablePathPrefixes）
+  // 变成写授权。它已改用 `assertWritableWorkspacePath`。
   const safePath = sessionId
     ? assertSessionWorkspacePath({
         path,
         sessionId,
         ...(options?.allowSkillResourceRead === true ? { allowSkillResourceRead: true } : {}),
+        access: 'read',
       })
     : resolveUnscopedWorkspacePath(path);
   if (!safePath) {
@@ -1153,7 +1155,11 @@ export async function executeWorkspaceReviewRevert(
   input: z.infer<typeof workspaceReviewRevertInputSchema>,
   sessionId?: string,
 ): Promise<z.infer<typeof workspaceReviewRevertOutputSchema>> {
-  const safePath = assertSearchablePath(input.path, sessionId);
+  // 这是**写**工具（回退文件到 HEAD），必须走写语义断言：`assertSearchablePath`
+  // 声明的是读语义，用它会让渠道路径权限按「读」判定（allowReadHome /
+  // readablePathPrefixes 会错误地放行写操作）。它也是少数绕过 tool-sandbox
+  // 第一道 FILE_TOOLS 闸的写工具，因此这里的标注就是唯一那道闸。
+  const safePath = assertWritableWorkspacePath(input.path, 'directory', sessionId);
   await ensureIgnoreRulesLoadedForPath(safePath);
   await assertDirectory(safePath);
   const relativeFilePath = resolveWorkspaceReviewFilePath(safePath, input.filePath);

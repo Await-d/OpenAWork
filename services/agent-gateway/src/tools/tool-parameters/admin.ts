@@ -35,6 +35,16 @@ export function buildAdminParameters(name: string): ToolParameters | undefined {
       return {
         type: 'object',
         properties: {
+          scope: {
+            type: 'string',
+            enum: ['user', 'session'],
+            description:
+              '渠道必须显式选择 session；add/update 只创建待管理员确认的提案，不立即生效。缺省 user 保持旧行为。',
+          },
+          resourceRef: {
+            type: 'string',
+            description: '会话级 list 返回的资源引用，remove/disable 时可替代 serverId。',
+          },
           action: {
             type: 'string',
             enum: ['list', 'add', 'update', 'remove', 'enable', 'disable'],
@@ -162,9 +172,20 @@ export function buildAdminParameters(name: string): ToolParameters | undefined {
       return {
         type: 'object',
         properties: {
+          scope: {
+            type: 'string',
+            enum: ['user', 'session'],
+            description:
+              '渠道必须显式选择 session；install 只创建待管理员确认的提案，不立即安装。缺省 user 保持旧行为。',
+          },
+          resourceRef: {
+            type: 'string',
+            description: '会话级 list 返回的资源引用，用于精确移除或禁用。',
+          },
+          query: { type: 'string', description: 'search 的技能检索关键词。' },
           action: {
             type: 'string',
-            enum: ['list', 'install', 'uninstall', 'enable', 'disable'],
+            enum: ['list', 'install', 'uninstall', 'enable', 'disable', 'search'],
             description: '管理动作：list 列举；install 安装；uninstall 卸载；enable/disable 启停。',
           },
           skillId: {

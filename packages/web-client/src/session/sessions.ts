@@ -643,7 +643,11 @@ export interface SessionsClient {
     sessionId: string,
     options?: { signal?: AbortSignal },
   ): Promise<SessionStatusReadModel>;
-  getActiveStream(token: string, sessionId: string): Promise<SessionActiveStream | null>;
+  getActiveStream(
+    token: string,
+    sessionId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionActiveStream | null>;
   getFileChangesReadModel(
     token: string,
     sessionId: string,
@@ -1377,12 +1381,13 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
       });
     },
 
-    async getActiveStream(token, sessionId) {
+    async getActiveStream(token, sessionId, options) {
       const data = await performSessionRequest<{ active?: SessionActiveStream | null }>({
         actionLabel: '读取活跃流状态',
         request: () =>
           fetchWithTimeout(`${gatewayUrl}/sessions/${sessionId}/stream/active`, {
             headers: authHeader(token),
+            signal: options?.signal,
           }),
       });
       return data.active ?? null;

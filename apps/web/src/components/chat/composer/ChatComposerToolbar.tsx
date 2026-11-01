@@ -49,6 +49,8 @@ export interface ChatComposerToolbarProps {
   readonly imagePluginEnabled: boolean;
   readonly input: string;
   readonly stoppingStream: boolean;
+  /** 已提交、尚未进入流式的窗口期（会话创建 / 附件上传中）。 */
+  readonly submitPending: boolean;
   readonly sessionBusyState: ComposerBusyState;
   readonly effectiveStopCapability: ComposerStopCapability;
   readonly showStopAction: boolean;
@@ -142,6 +144,7 @@ export function ChatComposerToolbar(props: ChatComposerToolbarProps) {
         imageGenerationBusy={props.imageGenerationBusy}
         canSubmit={props.canSubmit}
         stoppingStream={props.stoppingStream}
+        submitPending={props.submitPending}
         sessionBusyState={props.sessionBusyState}
         effectiveStopCapability={props.effectiveStopCapability}
         showStopAction={props.showStopAction}

@@ -28,6 +28,7 @@ export interface MemoryStats {
 export interface MemorySettings {
   enabled: boolean;
   autoExtract: boolean;
+  semanticMaintenance?: boolean;
   maxTokenBudget: number;
   minConfidence: number;
   autoWriteMinConfidence: number;

@@ -17,6 +17,13 @@
  */
 import { ClientErrorRecorder, installGlobalErrorCapture } from '@openAwork/logger';
 import { logger } from './logger.js';
+import {
+  buildReactUpdateDepthDiagnostics,
+  installReactCommitCascadeDiagnostics,
+} from './react-commit-cascade.js';
+
+/** 记录里附带的级联报告上限：`sanitizeContext` 会截断到 2000 字符，别让它白截。 */
+const CASCADE_REPORT_CONTEXT_LIMIT = 2_000;
 
 /**
  * 容量 200 条：足以覆盖一次会话内的多次故障，又不至于让 localStorage/内存占用失控。
@@ -25,6 +32,17 @@ import { logger } from './logger.js';
 export const clientErrorRecorder = new ClientErrorRecorder({
   capacity: 200,
   dedupeWindowMs: 3_000,
+  buildDiagnostics: ({ described }) => {
+    const report = buildReactUpdateDepthDiagnostics(described.message);
+    if (!report) return undefined;
+    const context: Record<string, string> = {};
+    // 每个 context 字段有 2000 字符上限；分片保存完整现场供既有复制诊断入口导出。
+    for (let offset = 0; offset < report.length; offset += CASCADE_REPORT_CONTEXT_LIMIT) {
+      const key = `reactCommitCascade${String(offset / CASCADE_REPORT_CONTEXT_LIMIT).padStart(3, '0')}`;
+      context[key] = report.slice(offset, offset + CASCADE_REPORT_CONTEXT_LIMIT);
+    }
+    return context;
+  },
 });
 
 // 记录器 → 本地 logger。每条错误都写一条 error 级日志，带脱敏后的消息与堆栈。
@@ -53,6 +71,9 @@ let uninstallGlobalCapture: (() => void) | null = null;
  * 否则同一条错误会被记录 N 次，反而淹没真实故障。
  */
 export function installClientErrorCapture(): void {
+  // 与全局捕获同期安装：提交级联诊断的采集入口（Profiler 回调）可能在任何时刻
+  // 被触发，手动导出通道必须在那之前就绪。幂等，重复调用无副作用。
+  installReactCommitCascadeDiagnostics();
   if (uninstallGlobalCapture) return;
   uninstallGlobalCapture = installGlobalErrorCapture({
     recorder: clientErrorRecorder,

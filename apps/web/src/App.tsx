@@ -1017,6 +1017,38 @@ export default function App() {
           />
           <Route path="/about" element={<Navigate to="/settings/about" replace />} />
         </Route>
+        {/*
+          会话扩展确认页（261031 / T-17）：独立于 Layout（自带居中卡片），但仍在
+          ProtectedRoute 内 —— 确认动作必须带已登录令牌，链接本身不是授权凭据。
+        */}
+        <Route
+          path="/session-extensions/confirm"
+          element={
+            <ProtectedRoute>
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES.sessionExtensions.component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES.sessionExtensions.title}
+              />
+            </ProtectedRoute>
+          }
+        />
+        {/*
+          会话扩展面板（261101）：会话扩展的只读一览 + 收窄操作 + 凭据录入。
+          与确认页一样在 ProtectedRoute 内，且同样自带布局。
+        */}
+        <Route
+          path="/session-extensions/panel"
+          element={
+            <ProtectedRoute>
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES.sessionExtensionPanel.component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES.sessionExtensionPanel.title}
+              />
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </FileIconThemeProvider>

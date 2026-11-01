@@ -1039,7 +1039,7 @@ export function useTeamCollaboration(
       }
       return runMutation(async () => {
         await client.createMessage(accessToken, input);
-      }, '已发送团队消息');
+      }, '团队留言已记录，不会触发成员执行');
     },
     [accessToken, client, runMutation],
   );

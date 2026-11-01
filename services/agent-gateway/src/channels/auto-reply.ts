@@ -17,6 +17,7 @@ import {
   buildChannelCommandActionsUnavailableMessage,
   buildLocalizedErrorMessage,
   buildNoChannelConfigurationMessage,
+  buildQueuedMessage,
 } from './channel-localization.js';
 import { channelLogInfo, channelLogWarn, summarizeChannelMessage } from './channel-log.js';
 import { recordChannelHealthIssue, type ChannelErrorSource } from './channel-error-store.js';
@@ -199,6 +200,30 @@ export class AutoReplyPipeline {
       service.supportsStreaming &&
       !!service.sendStreamingMessage;
 
+    // 前一/前几轮还没跑完：这条消息只会进入串行队列等待。等待期原本没有任何
+    // 日志、也没有任何用户可见反馈，用户侧与「机器人挂了」无法区分。这里补一条
+    // 回执让等待可见。队列已满（接下来会被拒绝并回 busy）时不发，避免同一轮收到
+    // 两条相互矛盾的提示。
+    const queuedAhead = this.pendingSessionTaskCount(sessionKey);
+    if (queuedAhead > 0 && queuedAhead < MAX_SESSION_TASK_QUEUE_DEPTH) {
+      channelLogInfo('auto-reply queued behind running session task', {
+        pluginId,
+        chatId: message.chatId,
+        sessionKey,
+        queuedAhead,
+      });
+      // 不 await：回执自身的发送耗时不能推迟入队时刻，否则后到的消息会抢先。
+      void this.safeSend(pluginId, () =>
+        this.sendChannelReply({
+          channel,
+          content: buildQueuedMessage(replyLanguage),
+          message: event,
+          service,
+        }),
+      );
+    }
+
+    const enqueuedAt = Date.now();
     const enqueued = await this.enqueueSessionTask(sessionKey, async () => {
       const startedAt = Date.now();
       channelLogInfo('auto-reply agent run started', {
@@ -206,6 +231,8 @@ export class AutoReplyPipeline {
         chatId: message.chatId,
         sessionKey,
         supportsStreaming,
+        queuedAhead,
+        waitMs: startedAt - enqueuedAt,
         imageCount: inputParts.length,
         hasAudio: Boolean(message.audio),
         messageLength: effectiveMessage.length,
@@ -320,6 +347,11 @@ export class AutoReplyPipeline {
         }),
       );
     }
+  }
+
+  /** 该通道会话当前仍未跑完的轮次数（正在执行的 1 + 排队的 N）。 */
+  private pendingSessionTaskCount(sessionKey: string): number {
+    return this.sessionTaskChains.get(sessionKey)?.queuedCount ?? 0;
   }
 
   private async enqueueSessionTask(

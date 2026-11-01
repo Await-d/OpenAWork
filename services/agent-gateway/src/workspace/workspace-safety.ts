@@ -15,6 +15,8 @@ import {
   resolveSessionWorkspaceResolution,
 } from '../session/session-workspace-resolution.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { getChannelActorPolicy } from '../channels/channel-actor-scope.js';
+import type { ChannelPermissions } from '../channels/types.js';
 import { isPathWithinSkillResources } from './skill-resource-roots.js';
 import {
   assertWorkspacePathSupportedByCurrentHost,
@@ -68,6 +70,31 @@ export interface SessionWorkspaceResolutionInfo {
 
 export function getSessionWorkingDirectory(sessionId: string): string | null {
   return getSessionWorkspaceResolution(sessionId)?.path ?? null;
+}
+
+/**
+ * 渠道会话未绑定工作目录时的**隐式会话边界**。
+ *
+ * 渠道会话默认不写 `workingDirectory`（`buildChannelSessionMetadata`），而
+ * `validateSessionWorkspacePath` 的「会话工作区之外」判定要求边界非空——边界为空时
+ * 整段跳过，渠道设置里配的路径类权限（`allowReadHome` / `readablePathPrefixes` /
+ * `allowWriteOutside`）便形同虚设。这里把默认工作目录
+ * （`resolveUnboundSessionWorkspaceFallback()`，与工具执行根同一口径）当作隐式边界：
+ * 目录内照常放行，目录外需要 ACL 显式放宽，否则按 `outside-session-workspace` 拒绝。
+ *
+ * **只对渠道会话生效**：chat / team / task 会话「未绑定 = 不做边界判定」的既有语义不变
+ * （team / task 子会话另有 `requiresBoundSessionWorkspace` 强制绑定）。
+ */
+function resolveImplicitChannelWorkspaceBoundary(sessionId: string): string | null {
+  const row = sqliteGet<SessionMetadataRow>(
+    'SELECT metadata_json, user_id FROM sessions WHERE id = ? LIMIT 1',
+    [sessionId],
+  );
+  if (!row) {
+    return null;
+  }
+  const metadata = parseSessionMetadataJson(row.metadata_json);
+  return metadata['source'] === 'channel' ? resolveUnboundSessionWorkspaceFallback() : null;
 }
 
 export function getSessionWorkspaceResolution(
@@ -332,6 +359,98 @@ export function assertSessionWorkingDirectory(sessionId: string): string {
   return workingDirectory;
 }
 
+/**
+ * 渠道路径权限的读取来源：本轮 run 的成员权限优先，作用域外回退会话 metadata。
+ *
+ * 与会话内工具可见性同源（见 `channel-actor-scope` 的说明）：同一群成员共享一条
+ * 会话，metadata 上的 `channel.permissions` 会被下一位发言者覆盖，只有轮次级快照
+ * 才能保证「这一轮用自己那份权限」。
+ */
+function resolveChannelPathPermissions(sessionId: string): ChannelPermissions | null {
+  const scopedPolicy = getChannelActorPolicy();
+  if (scopedPolicy) {
+    return scopedPolicy.permissions;
+  }
+
+  const row = sqliteGet<SessionMetadataRow>(
+    'SELECT metadata_json, user_id FROM sessions WHERE id = ? LIMIT 1',
+    [sessionId],
+  );
+  if (!row) {
+    return null;
+  }
+
+  const metadata = parseSessionMetadataJson(row.metadata_json);
+  const channel = metadata['channel'];
+  if (typeof channel !== 'object' || channel === null || Array.isArray(channel)) {
+    return null;
+  }
+  return readChannelPermissions((channel as Record<string, unknown>)['permissions']);
+}
+
+/**
+ * 从任意 JSON 形状里读出渠道权限。字段缺失一律按「不许」处理（保守），
+ * 形状由 `channel-session-store` 写入保证，这里只做防御性解析。
+ */
+function readChannelPermissions(value: unknown): ChannelPermissions | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const prefixes = record['readablePathPrefixes'];
+  return {
+    allowReadHome: record['allowReadHome'] === true,
+    readablePathPrefixes: Array.isArray(prefixes)
+      ? prefixes.filter((entry): entry is string => typeof entry === 'string')
+      : [],
+    allowWriteOutside: record['allowWriteOutside'] === true,
+    allowShell: record['allowShell'] === true,
+    allowSubAgents: record['allowSubAgents'] === true,
+  };
+}
+
+/**
+ * 渠道路径权限的「会话工作区之外」放行判定。
+ *
+ * 三条硬约束：
+ * - 只放宽**会话工作区**这一层：`validateWorkspacePath`（主机根 / 全局白名单）在更
+ *   前面已经判定过，这里的放行不会让它失效；
+ * - 读写分离：`allowReadHome` / `readablePathPrefixes` 只对读语义生效，
+ *   `allowWriteOutside` 只对写语义生效；
+ * - 渠道未配置 `permissions` 或字段缺失时一律不放行，保持原有严格行为。
+ *
+ * 注意 `allowReadHome` 的语义是「OpenAWork 数据目录整体可读」——网关语境下的
+ * 「Home」指 `resolveGatewayDataDir()`（会话库 / 产物 / 日志），不是进程用户的
+ * 家目录；开启与否由管理员显式决定。
+ */
+function isAllowedByChannelPathPermissions(input: {
+  access: 'read' | 'write';
+  safePath: string;
+  sessionId: string;
+}): boolean {
+  const permissions = resolveChannelPathPermissions(input.sessionId);
+  if (!permissions) {
+    return false;
+  }
+
+  if (input.access === 'write') {
+    return permissions.allowWriteOutside;
+  }
+
+  if (permissions.allowReadHome) {
+    // 「Home」在网关语境里指 **OpenAWork 数据目录**（`resolveGatewayDataDir`：
+    // 会话库、产物、日志等），不是进程用户的家目录——后者包含 `~/.ssh`、`~/.aws`
+    // 之类的凭据，不该由渠道侧的一个开关放开。
+    if (isPathWithinRoot(input.safePath, resolveGatewayDataDir())) {
+      return true;
+    }
+  }
+
+  return permissions.readablePathPrefixes.some((prefix) =>
+    prefix.trim().length > 0 ? isPathWithinRoot(input.safePath, resolve(prefix)) : false,
+  );
+}
+
 export type SessionWorkspacePathValidationResult =
   | {
       ok: true;
@@ -345,10 +464,17 @@ export type SessionWorkspacePathValidationResult =
       workingDirectory: string | null;
     };
 
+export type SessionWorkspacePathAccess = 'read' | 'write';
+
 export function validateSessionWorkspacePath(input: {
   path: string;
   sessionId: string;
   allowSkillResourceRead?: boolean;
+  /**
+   * 路径用途。缺省按 `write` 处理（最严格）：读放宽（Home / 前缀白名单）只对显式
+   * 声明读语义的调用点生效，避免写工具被顺带放宽。
+   */
+  access?: SessionWorkspacePathAccess;
 }): SessionWorkspacePathValidationResult {
   const safePath = validateWorkspacePath(input.path);
   if (!safePath) {
@@ -360,11 +486,29 @@ export function validateSessionWorkspacePath(input: {
     };
   }
 
-  const workingDirectory = getSessionWorkingDirectory(input.sessionId);
+  // 未绑定的渠道会话用默认工作目录作隐式边界（见 resolveImplicitChannelWorkspaceBoundary），
+  // 让「会话工作区之外」这一层（含 ACL 放宽）真正参与判定。
+  const workingDirectory =
+    getSessionWorkingDirectory(input.sessionId) ??
+    resolveImplicitChannelWorkspaceBoundary(input.sessionId);
   if (workingDirectory && !isPathWithinRoot(safePath, workingDirectory)) {
     // Read-only tools may reach app-owned skill assets; the forbidden-path
     // (host/global-root) failure above is never bypassed by this allowance.
     if (input.allowSkillResourceRead === true && isPathWithinSkillResources(safePath)) {
+      return {
+        ok: true,
+        safePath,
+        workingDirectory,
+      };
+    }
+    // 渠道成员 ACL 可以显式放宽「会话工作区之外」的读或写（默认不放宽）。
+    if (
+      isAllowedByChannelPathPermissions({
+        access: input.access ?? 'write',
+        safePath,
+        sessionId: input.sessionId,
+      })
+    ) {
       return {
         ok: true,
         safePath,
@@ -390,8 +534,14 @@ export function assertSessionWorkspacePath(input: {
   path: string;
   sessionId: string;
   allowSkillResourceRead?: boolean;
+  /** 语义同 `validateSessionWorkspacePath`：缺省按写处理。 */
+  access?: SessionWorkspacePathAccess;
 }): string {
-  const workingDirectory = getSessionWorkingDirectory(input.sessionId);
+  // 与 `validateSessionWorkspacePath` 保持同一边界口径：未绑定的渠道会话以默认工作目录
+  // 为隐式边界（相对路径也以它为基准解析）。
+  const workingDirectory =
+    getSessionWorkingDirectory(input.sessionId) ??
+    resolveImplicitChannelWorkspaceBoundary(input.sessionId);
   if (!workingDirectory && requiresBoundSessionWorkspace(input.sessionId)) {
     throw new Error(`当前会话未绑定工作区，禁止访问路径：${input.path}`);
   }
@@ -410,6 +560,7 @@ export function assertSessionWorkspacePath(input: {
     path: effectivePath,
     sessionId: input.sessionId,
     ...(input.allowSkillResourceRead === true ? { allowSkillResourceRead: true } : {}),
+    ...(input.access === undefined ? {} : { access: input.access }),
   });
   if (!result.ok) {
     if (result.reason === 'forbidden-path') {

@@ -47,12 +47,13 @@ export function normalizeExecutionResult(
     status === 'completed' ? 'pass' : status === 'failed' ? 'fail' : 'blocked';
   const checklist: ChecklistItem[] =
     args.checklist && args.checklist.length > 0
-      ? args.checklist
+      ? args.checklist.map((item) => ({ ...item, verified: false }))
       : [
           {
             id: taskId,
             status: checklistStatus,
             evidence: summary,
+            verified: false,
           },
         ];
   const blockedReason = args.blockedReason ?? (status === 'blocked' ? summary : undefined);

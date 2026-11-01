@@ -160,6 +160,18 @@ describe('tool-sandbox · mcp_manage_servers 接线与门控', () => {
     expect(output.servers.map((server) => server.id)).toContain('websearch');
   });
 
+  it('开启的渠道能通过真实 sandbox 读取会话 MCP', async () => {
+    mocks.metadataJson = JSON.stringify({
+      workingDirectory: TEST_WORKSPACE,
+      source: 'channel',
+      channelLlmToolsEnabled: true,
+      channelExtensionManagementEnabled: true,
+    });
+    const result = await executeManageTool({ action: 'list', scope: 'session' }, 'channel-session');
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(String(result.output))).toMatchObject({ scope: 'session', servers: [] });
+  });
+
   it('yolo 档位：免审批派发并执行 disable', async () => {
     mocks.metadataJson = JSON.stringify({
       workingDirectory: TEST_WORKSPACE,

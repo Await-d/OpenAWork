@@ -1,28 +1,24 @@
 /**
- * `memory_manage` —— 会话内模型在用户审批下维护「用户级长期记忆」。
+ * `memory_manage` —— 会话内模型**提交待确认记忆提议**（不再直接写正式记忆）。
  *
- * 设计边界（对齐 260924-记忆管理工具 方案文档）：
- * - 只写当前会话 owner 的记忆；工具不接受 userId 参数；
- * - 写入前必须过 `scanMemoryWriteContent`（与 `POST/PUT /memories` 同规）；
- * - `source` 固定为 `manual`：不接受模型把记忆伪装成自动抽取 / API 写入；
+ * 设计边界（261101-记忆确认写入与周期整理）：
+ * - 只针对当前会话 owner 的记忆；工具不接受 userId 参数；
+ * - add / update / delete 一律创建 `MemoryProposal`（`origin: 'tool'`），返回
+ *   `status: 'pending_confirmation'`，由用户在确认路由批准后才落地；
+ * - `list` 仍为只读列举，保持不变；
+ * - 提交前提议内容必须过 `scanMemoryWriteContent`（与 `POST/PUT /memories` 同规）；
  * - v1 不写 `teamWorkspaceId`（团队知识记忆不开放给模型自助管理）；
  * - team / cron / channel 会话直接拒绝（记忆是用户级长期上下文，后台会话不得改写）；
- * - 记忆块（`buildMemoryBlockForSession`）按请求读取 ⇒ 写入后下一轮即时生效。
+ * - 真正写入门在 `POST /memories/proposals/:id/decision`，工具本身**不再是**写入点。
  */
 
 import { z } from 'zod';
 import type { ToolDefinition } from '@openAwork/agent-core';
-import { MEMORY_ROLE_LAYERS, MEMORY_TYPES } from '@openAwork/agent-core';
+import { MEMORY_ROLE_LAYERS, MEMORY_TYPES, userMemoryScope } from '@openAwork/agent-core';
 import type { MemoryEntry } from '@openAwork/agent-core';
 import { sqliteGet } from '../infra/db.js';
-import {
-  createMemory,
-  deleteMemory,
-  findEnabledMemoryByTypeAndKey,
-  getMemoryById,
-  listMemories,
-  updateMemory,
-} from './memory-store.js';
+import { findEnabledMemoryByTypeAndKey, getMemoryById, listMemories } from './memory-store.js';
+import { createMemoryProposal } from './governance/memory-proposal-store.js';
 import { scanMemoryWriteContent } from './memory-security-scanner.js';
 import { MEMORY_MANAGE_TOOL_NAME } from './memory-manage-tool-name.js';
 
@@ -96,7 +92,9 @@ export const memoryManageToolDefinition: ToolDefinition<
   name: MEMORY_MANAGE_TOOL_NAME,
   description:
     '管理当前用户的长期记忆。action=list 检索/列举（可按 search / type / enabled 过滤）；add 新增；update 修改（含 enabled 启停）；delete 删除。' +
-    '写入前会做安全校验，变更类操作需要用户批准，写入后下一轮对话即时生效。source 固定为 manual，不支持团队知识记忆。',
+    '注意：add / update / delete **仅提交一条待用户确认的记忆提议，确认后才真正生效**，' +
+    '返回 `status: "pending_confirmation"` 与 `proposalId`；在用户确认前记忆不会发生变化，' +
+    '请如实告知用户「已提交待确认」。提交前会做安全校验。不支持团队知识记忆。',
   inputSchema: memoryManageInputSchema,
   outputSchema: z.string(),
   timeout: 30000,
@@ -235,6 +233,53 @@ function listMemoryForTool(userId: string, input: z.infer<typeof memoryManageInp
   );
 }
 
+/**
+ * 提议提交结果的统一输出。
+ *
+ * 关键：不再出现 `ok: true` 直接表示「已写入」。`status` 恒为 `pending_confirmation`，
+ * `outcome !== 'created'` 时明确说明提议未建立及原因，避免模型误报写入成功。
+ */
+function toProposalResult(input: {
+  action: string;
+  outcome: string;
+  proposalId?: string;
+  detail?: string;
+  summary?: Record<string, unknown>;
+}): string {
+  const created = input.outcome === 'created';
+  return JSON.stringify(
+    {
+      ok: created,
+      action: input.action,
+      status: created ? 'pending_confirmation' : 'not_created',
+      pendingConfirmation: created,
+      outcome: input.outcome,
+      ...(input.proposalId ? { proposalId: input.proposalId } : {}),
+      ...(input.detail ? { detail: input.detail } : {}),
+      ...(input.summary ?? {}),
+      message: created
+        ? '已提交待用户确认的记忆提议；在用户确认前不会写入正式记忆。'
+        : `未能提交记忆提议（${input.outcome}）；记忆未发生变化。`,
+    },
+    null,
+    2,
+  );
+}
+
+/** 从 draft 构造提议 payload（剔除非记忆字段，仅保留 schema 内可见字段）。 */
+function buildProposalPayload(draft: MemoryManageDraft): Record<string, unknown> {
+  return {
+    ...(draft.type !== undefined ? { type: draft.type } : {}),
+    ...(draft.key !== undefined ? { key: draft.key } : {}),
+    ...(draft.value !== undefined ? { value: draft.value } : {}),
+    ...(draft.priority !== undefined ? { priority: draft.priority } : {}),
+    ...(draft.confidence !== undefined ? { confidence: draft.confidence } : {}),
+    ...(draft.workspaceRoot !== undefined ? { workspaceRoot: draft.workspaceRoot } : {}),
+    ...(draft.roleLayers !== undefined ? { roleLayers: draft.roleLayers } : {}),
+    ...(draft.enabled !== undefined ? { enabled: draft.enabled } : {}),
+  };
+}
+
 function addMemoryForTool(userId: string, input: z.infer<typeof memoryManageInputSchema>): string {
   const draft = input.memory;
   if (!draft?.type || !draft.key || !draft.value) {
@@ -258,21 +303,22 @@ function addMemoryForTool(userId: string, input: z.infer<typeof memoryManageInpu
     }
   }
 
-  // 停用态必须在**创建时**写入：唯一索引只约束 enabled = 1，同键已存在启用记忆时
-  // 「先创建再停用」会直接撞索引，无法表达停用记忆。
-  const memory = createMemory(userId, {
-    type: draft.type,
-    key: draft.key,
-    value: draft.value,
-    source: 'manual',
-    ...(draft.priority !== undefined ? { priority: draft.priority } : {}),
-    ...(draft.confidence !== undefined ? { confidence: draft.confidence } : {}),
-    ...(draft.workspaceRoot !== undefined ? { workspaceRoot: draft.workspaceRoot } : {}),
-    ...(draft.roleLayers !== undefined ? { roleLayers: draft.roleLayers } : {}),
-    ...(wantsEnabled ? {} : { enabled: false }),
+  const result = createMemoryProposal({
+    userId,
+    action: 'create',
+    scope: userMemoryScope(userId),
+    payload: buildProposalPayload(draft),
+    origin: 'tool',
+    reason: 'memory_manage 工具提交的新增提议。',
+    confidence: draft.confidence ?? null,
   });
-
-  return JSON.stringify({ ok: true, action: 'add', memory: toMemorySummary(memory) }, null, 2);
+  return toProposalResult({
+    action: 'add',
+    outcome: result.outcome,
+    ...(result.proposal ? { proposalId: result.proposal.id } : {}),
+    ...(result.detail ? { detail: result.detail } : {}),
+    summary: { memory: buildProposalPayload(draft) },
+  });
 }
 
 function updateMemoryForTool(
@@ -306,21 +352,36 @@ function updateMemoryForTool(
     }
   }
 
-  const updated = updateMemory(userId, memoryId, {
-    ...(draft.type !== undefined ? { type: draft.type } : {}),
-    ...(draft.key !== undefined ? { key: draft.key } : {}),
-    ...(draft.value !== undefined ? { value: draft.value } : {}),
-    ...(draft.priority !== undefined ? { priority: draft.priority } : {}),
-    ...(draft.confidence !== undefined ? { confidence: draft.confidence } : {}),
-    ...(draft.workspaceRoot !== undefined ? { workspaceRoot: draft.workspaceRoot } : {}),
-    ...(draft.roleLayers !== undefined ? { roleLayers: draft.roleLayers } : {}),
-    ...(draft.enabled !== undefined ? { enabled: draft.enabled } : {}),
+  // 提议载荷必须可独立表达「结果态正文」：`update` 动作要求 key + value 齐备，故把
+  // 草稿与既有条目合并（草稿字段覆盖），否则只改 value 的提议会被判为载荷不完整。
+  const result = createMemoryProposal({
+    userId,
+    action: 'update',
+    scope: existing.scope,
+    payload: {
+      type: draft.type ?? existing.type,
+      key: draft.key ?? existing.key,
+      value: draft.value ?? existing.value,
+      priority: draft.priority ?? existing.priority,
+      confidence: draft.confidence ?? existing.confidence,
+      workspaceRoot:
+        draft.workspaceRoot !== undefined ? draft.workspaceRoot : existing.workspaceRoot,
+      roleLayers: draft.roleLayers !== undefined ? draft.roleLayers : existing.roleLayers,
+      ...(draft.enabled !== undefined ? { enabled: draft.enabled } : {}),
+    },
+    origin: 'tool',
+    reason: 'memory_manage 工具提交的修改提议。',
+    targetMemoryId: memoryId,
+    expectedRevision: existing.revision,
+    confidence: draft.confidence ?? null,
   });
-  if (!updated) {
-    throw new Error(`未找到记忆 ${memoryId}。`);
-  }
-
-  return JSON.stringify({ ok: true, action: 'update', memory: toMemorySummary(updated) }, null, 2);
+  return toProposalResult({
+    action: 'update',
+    outcome: result.outcome,
+    ...(result.proposal ? { proposalId: result.proposal.id } : {}),
+    ...(result.detail ? { detail: result.detail } : {}),
+    summary: { memoryId, memory: buildProposalPayload(draft) },
+  });
 }
 
 function deleteMemoryForTool(
@@ -332,11 +393,25 @@ function deleteMemoryForTool(
   if (!existing) {
     throw new Error(`未找到记忆 ${memoryId}。`);
   }
-  const deleted = deleteMemory(userId, memoryId);
-  if (!deleted) {
-    throw new Error(`删除记忆 ${memoryId} 失败。`);
-  }
-  return JSON.stringify({ ok: true, action: 'delete', memoryId, key: existing.key }, null, 2);
+
+  // 归档即删除的用户可见语义：创建 `archive` 提议，确认后由提交器归档条目。
+  const result = createMemoryProposal({
+    userId,
+    action: 'archive',
+    scope: existing.scope,
+    payload: { type: existing.type, key: existing.key, value: existing.value },
+    origin: 'tool',
+    reason: 'memory_manage 工具提交的删除（归档）提议。',
+    targetMemoryId: memoryId,
+    expectedRevision: existing.revision,
+  });
+  return toProposalResult({
+    action: 'delete',
+    outcome: result.outcome,
+    ...(result.proposal ? { proposalId: result.proposal.id } : {}),
+    ...(result.detail ? { detail: result.detail } : {}),
+    summary: { memoryId, key: existing.key },
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ import { sqliteRun, sqliteGet } from '../../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { publishHandoffEvent, publishTeamEvent } from '../bus/team-events-bus.js';
 import { logGatewayWarn } from '../../infra/gateway-logger.js';
+import { verifyExecutionChecklist } from './execution-verification.js';
 import {
   extractComparablePathsFromText,
   inferTaskProfile,
@@ -726,7 +727,8 @@ registerInstruction({
   description:
     '【必须】executor 提交结构化执行结果。没有调用本工具，runner 不会把任务视为合法完成。' +
     '优先提交 taskId、status、changedFiles、checklist（逐项 pass/fail/blocked + evidence）、summary、verification；' +
-    '至少提供 summary 或 content 的简要总结，缺失的任务字段会从当前 handoff 归一化。',
+    '至少提供 summary 或 content 的简要总结，缺失的任务字段会从当前 handoff 归一化。' +
+    '仅摘要不算验证。逐项提交 verificationRefs:[{terminalId,command}]，引用本任务bash结果返回的terminalId与原命令；派发为docs的任务也可用{toolCallId,path}引用本轮成功且未截断的read结果。verified仅代表检查执行凭证由服务器核验，不是功能验收；不能自行声明。后台必须退出码0，运行中不算。',
   schema: submitExecutionResultSchema,
   handler: async (ctx, args): Promise<InstructionResult> => {
     const handoff = resolveActiveHandoffForSession(ctx.sessionId, ctx.userId, ctx.handoffId);
@@ -749,8 +751,11 @@ registerInstruction({
     }
 
     const normalized = normalizeExecutionResult(args, expectedTaskId ?? undefined);
-    const { changedFiles, verification, checklist, status, summary, taskId, blockedReason } =
-      normalized;
+    const { changedFiles, verification, status, summary, taskId, blockedReason } = normalized;
+    const checklist = verifyExecutionChecklist(
+      { userId: ctx.userId, sessionId: ctx.sessionId, handoffId: handoff.id },
+      normalized.checklist,
+    );
     const ownedPaths = readOwnedPathsFromPayload(payload);
     const outOfScope = findOutOfScopePaths({
       changedFiles,
@@ -804,7 +809,10 @@ registerInstruction({
       ...(changedFiles.length > 0 ? changedFiles.map((file) => `- ${file}`) : ['- (none)']),
       '',
       '## Checklist',
-      ...checklist.map((item) => `- [${item.status}] ${item.id}: ${item.evidence}`),
+      ...checklist.map(
+        (item) =>
+          `- [${item.status}] ${item.id}: ${item.evidence}（执行凭证${item.verified ? '已核验' : '未核验'}）`,
+      ),
       '',
       '## Verification',
       ...(verification.length > 0 ? verification.map((step) => `- ${step}`) : ['- (none)']),
@@ -850,11 +858,25 @@ registerInstruction({
 
     setSubstate({
       sessionId: ctx.sessionId,
-      substate: status === 'completed' ? 'completed' : 'failed',
+      substate:
+        status === 'completed'
+          ? checklist.some((item) => item.verified)
+            ? 'completed'
+            : 'implementing'
+          : 'failed',
       userId: ctx.userId,
       roleLayer: 'executor',
     });
 
+    if (status === 'completed' && !checklist.some((item) => item.verified)) {
+      return {
+        ok: false,
+        errorCode: 'execution-evidence-required',
+        message:
+          '自报结果已保存为未核验记录，尚未验收。请执行本任务检查并在checklist.verificationRefs中引用真实terminalId和原命令，再次提交；不要结束回合或自行填写verified。',
+        data: { handoffId: handoff.id, artifactId, verified: false, verificationRequired: true },
+      };
+    }
     return {
       ok: true,
       message: `已提交执行结果 protocol=${SUBMIT_EXECUTION_RESULT_PROTOCOL} status=${status} failedItems=${failedItems.length}`,

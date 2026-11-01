@@ -149,6 +149,71 @@ describe('createHandoff / getHandoff', () => {
 });
 
 describe('claimHandoff（并发互斥）', () => {
+  it('claimed 和暂停中的 running 共占执行槽，完成后释放且规划层不占槽', () => {
+    const createExecution = (toRoleLayer: 'executor' | 'reviewer') =>
+      store.createHandoff({
+        userId: USER_ID,
+        fromSessionId: FROM_SESSION_ID,
+        fromRoleLayer: 'pm2',
+        toRoleLayer,
+      });
+    const first = createExecution('executor');
+    const second = createExecution('reviewer');
+    const third = createExecution('executor');
+    expect(
+      store.claimHandoff({
+        handoffId: first.id,
+        claimToken: 'capacity-first',
+        maxActiveExecutionHandoffs: 2,
+      }),
+    ).not.toBeNull();
+    expect(
+      store.startHandoff({
+        handoffId: first.id,
+        claimToken: 'capacity-first',
+        toSessionId: TO_SESSION_ID,
+      }),
+    ).toBe(true);
+    expect(store.pauseHandoff({ userId: USER_ID, handoffId: first.id })).toBe(true);
+    expect(
+      store.claimHandoff({
+        handoffId: second.id,
+        claimToken: 'capacity-second',
+        maxActiveExecutionHandoffs: 2,
+      }),
+    ).not.toBeNull();
+    expect(
+      store.claimHandoff({
+        handoffId: third.id,
+        claimToken: 'capacity-third',
+        maxActiveExecutionHandoffs: 2,
+      }),
+    ).toBeNull();
+    expect(store.getHandoffById(third.id)?.state).toBe('pending');
+
+    const planner = store.createHandoff({
+      userId: USER_ID,
+      fromSessionId: FROM_SESSION_ID,
+      fromRoleLayer: 'pm1',
+      toRoleLayer: 'pm2',
+    });
+    expect(
+      store.claimHandoff({
+        handoffId: planner.id,
+        claimToken: 'capacity-planner',
+        maxActiveExecutionHandoffs: 2,
+      }),
+    ).not.toBeNull();
+    expect(store.completeHandoff({ handoffId: first.id, claimToken: 'capacity-first' })).toBe(true);
+    expect(
+      store.claimHandoff({
+        handoffId: third.id,
+        claimToken: 'capacity-third',
+        maxActiveExecutionHandoffs: 2,
+      }),
+    ).not.toBeNull();
+  });
+
   it('第一次 claim 成功，第二次 claim 同一记录返回 null', () => {
     const created = store.createHandoff({
       userId: USER_ID,

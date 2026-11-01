@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
+import { recordReactUpdateSource } from '../../utils/log/react-commit-cascade.js';
 import { stripOversizedInlineImageUrls } from './sanitize-input-image-parts.js';
 import {
   isNonTerminalStreamErrorCode,
@@ -217,6 +218,7 @@ export interface AttachableActiveStream {
 }
 
 export interface AttachActiveStreamConnectionOptions {
+  signal?: AbortSignal | undefined;
   activeStream: AttachableActiveStream;
   callbacks: StreamCallbacks;
   createEventSource?: (url: string) => AttachEventSourceLike;
@@ -234,6 +236,8 @@ export interface AttachActiveStreamConnectionOptions {
 }
 
 export interface AttachActiveStreamSessionOptions {
+  signal?: AbortSignal | undefined;
+  isCurrentAttempt?: () => boolean;
   callbacks: StreamCallbacks;
   clearCallbacks: () => void;
   closeExistingTransports: () => void;
@@ -246,7 +250,11 @@ export interface AttachActiveStreamSessionOptions {
   resetStopRequested: () => void;
   sessionId: string;
   sessionsClient: {
-    getActiveStream: (token: string, sessionId: string) => Promise<AttachableActiveStream | null>;
+    getActiveStream: (
+      token: string,
+      sessionId: string,
+      options?: { signal?: AbortSignal | undefined },
+    ) => Promise<AttachableActiveStream | null>;
   };
   setCallbacks: (callbacks: StreamCallbacks) => void;
   setCurrentEventSource: (eventSource: AttachEventSourceLike | null) => void;
@@ -554,6 +562,12 @@ export function createGatewayChunkDispatcher(input: {
       case 'error':
         onErrorChunk(chunk);
         return;
+      case 'run_accepted':
+        // 受理确认没有专属回调，与其它信息性事件一样走 `onEvent`。这里显式列出是为了
+        // 让「协议里确实有这条」在分发处可见——否则它会被 `default` 静默吞掉，将来协议
+        // 里写错 type 也会同样安静地消失，只剩「界面没反应」这个表象。
+        callbacks.onEvent?.(chunk);
+        return;
       default:
         callbacks.onEvent?.(chunk);
         return;
@@ -641,6 +655,8 @@ export function useGatewayClient(token: string | null): GatewayClient {
   // SSE 回退的有界重连定时器。跨 stream() 生命周期持有，确保新消息 / attach
   // 接管时能取消上一条流遗留的重试，而不是让旧闭包静默重开连接。
   const sseRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attachControllerRef = useRef<AbortController | null>(null);
+  const streamProbeCleanupRef = useRef<(() => void) | null>(null);
 
   const clearSseRetryTimer = useCallback(() => {
     if (sseRetryTimerRef.current !== null) {
@@ -663,6 +679,10 @@ export function useGatewayClient(token: string | null): GatewayClient {
    */
   const closeTransports = useCallback(() => {
     streamGenerationRef.current += 1;
+    attachControllerRef.current?.abort();
+    attachControllerRef.current = null;
+    streamProbeCleanupRef.current?.();
+    streamProbeCleanupRef.current = null;
     clearSseRetryTimer();
     wsRef.current?.close();
     sseRef.current?.close();
@@ -670,9 +690,17 @@ export function useGatewayClient(token: string | null): GatewayClient {
     sseRef.current = null;
   }, [clearSseRetryTimer]);
 
+  useEffect(() => () => closeTransports(), [closeTransports]);
+
   const syncActiveRequest = useCallback((snapshot: ActiveStreamSnapshot | null) => {
+    const previousSessionId = activeRequestRef.current?.sessionId ?? null;
+    const nextSessionId = snapshot?.sessionId ?? null;
+    recordReactUpdateSource(
+      'gateway.syncActiveRequest',
+      `sessionChanged=${previousSessionId !== nextSessionId} transport=${snapshot?.transport ?? 'none'}`,
+    );
     activeRequestRef.current = snapshot;
-    setActiveStreamSessionId(snapshot?.sessionId ?? null);
+    if (previousSessionId !== nextSessionId) setActiveStreamSessionId(nextSessionId);
     persistActiveStreamSnapshot(snapshot);
   }, []);
 
@@ -684,13 +712,20 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       const gatewayUrl = useAuthStore.getState().gatewayUrl;
       const sessionsClient = createSessionsClient(gatewayUrl);
+      recordReactUpdateSource('gateway.attachToActiveStream', 'start');
+      closeTransports();
+      const attachGeneration = streamGenerationRef.current;
+      const controller = new AbortController();
+      attachControllerRef.current = controller;
       return await attachActiveStreamSession({
+        signal: controller.signal,
+        isCurrentAttempt: () =>
+          !controller.signal.aborted && streamGenerationRef.current === attachGeneration,
         callbacks,
         clearCallbacks: () => {
           callbacksRef.current = null;
         },
         closeExistingTransports: () => {
-          closeTransports();
           console.log('[ATTACH] closeExistingTransports gen:', streamGenerationRef.current);
         },
         gatewayUrl,
@@ -758,8 +793,8 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
   const stream = useCallback(
     (sessionId: string, message: string, callbacks: StreamCallbacks) => {
+      closeTransports();
       callbacksRef.current = callbacks;
-      streamGenerationRef.current += 1;
       const streamGeneration = streamGenerationRef.current;
 
       const gatewayUrl = useAuthStore.getState().gatewayUrl;
@@ -867,6 +902,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         },
       });
       const handleChunk = (chunk: StreamChunk | RunEvent) => {
+        if (settled || streamGenerationRef.current !== streamGeneration) return;
         const cursor = readGatewayCursor(chunk);
         const activeRequest = activeRequestRef.current;
         if (
@@ -1163,7 +1199,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
         startSse();
       }
     },
-    [clearSseRetryTimer, syncActiveRequest, token],
+    [clearSseRetryTimer, closeTransports, syncActiveRequest, token],
   );
 
   return useMemo(

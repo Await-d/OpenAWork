@@ -145,6 +145,16 @@ export const PRELOADABLE_ROUTE_MODULES = {
     () => import('../pages/misc/UsagePage.js'),
     '用量统计',
   ),
+  sessionExtensions: createPreloadableRouteModule(
+    'session-extensions',
+    () => import('../pages/session-extensions/SessionExtensionConfirmPage.js'),
+    '会话扩展确认',
+  ),
+  sessionExtensionPanel: createPreloadableRouteModule(
+    'session-extensions-panel',
+    () => import('../pages/session-extensions/SessionExtensionPanelPage.js'),
+    '会话扩展面板',
+  ),
 } as const;
 
 export type PreloadableRouteKey = keyof typeof PRELOADABLE_ROUTE_MODULES;

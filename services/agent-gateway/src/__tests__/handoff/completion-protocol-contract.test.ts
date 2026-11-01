@@ -182,7 +182,8 @@ describe('submit_execution_result', () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe('execution-evidence-required');
     const row = dbModule.sqliteGet<{ result_json: string }>(
       `SELECT result_json FROM handoff_records WHERE id = ?`,
       ['h-exec-1'],

@@ -24,8 +24,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
 import ChatPage from './ChatPage.js';
+import Layout from '../../components/Layout.js';
 
 const { getRecoveryMock } = vi.hoisted(() => ({ getRecoveryMock: vi.fn() }));
+
+vi.mock('@openAwork/shared-ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@openAwork/shared-ui')>()),
+  ...(await import('../../../../../packages/shared-ui/src/misc/CommandPalette.js')),
+  ...(await import('../../../../../packages/shared-ui/src/permissions/PermissionConfirmDialog.js')),
+}));
 
 vi.mock('@openAwork/web-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@openAwork/web-client')>();
@@ -103,7 +110,7 @@ function readRequestUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
-function createFetchStub(): ReturnType<typeof vi.fn> {
+function createFetchStub() {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = readRequestUrl(input);
     if (url.includes('/terminals')) {
@@ -144,13 +151,19 @@ class InertWebSocket {
 }
 
 class InertEventSource {
+  static instances: InertEventSource[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: (() => void) | null = null;
   static readonly CLOSED = 2;
   static readonly OPEN = 1;
   readonly readyState = InertEventSource.CLOSED;
   readonly url: string;
+  closed = false;
 
   constructor(url: string) {
     this.url = url;
+    InertEventSource.instances.push(this);
   }
 
   addEventListener(): void {
@@ -158,7 +171,7 @@ class InertEventSource {
   }
 
   close(): void {
-    return undefined;
+    this.closed = true;
   }
 
   removeEventListener(): void {
@@ -187,8 +200,10 @@ function readRenderedNoticeTexts(): string[] {
   );
 }
 
-function renderChatPageAt(initialPath: string) {
-  const router = createMemoryRouter([{ path: '/chat/:sessionId?', element: <ChatPage /> }], {
+function renderChatPageAt(initialPath: string, withLayout = false) {
+  const chatRoute = { path: '/chat/:sessionId?', element: <ChatPage /> };
+  const routes = withLayout ? [{ element: <Layout />, children: [chatRoute] }] : [chatRoute];
+  const router = createMemoryRouter(routes, {
     initialEntries: [initialPath],
   });
   render(<RouterProvider router={router} />);
@@ -278,6 +293,8 @@ async function settleScroll(): Promise<void> {
 }
 
 beforeEach(() => {
+  InertEventSource.instances = [];
+  sessionStorage.clear();
   useUIStateStore.setState({
     chatView: 'home',
     editorFullScreen: false,
@@ -325,6 +342,143 @@ afterEach(() => {
 });
 
 describe('ChatPage — 会话切换', () => {
+  it.each(['classic', 'fusion'] as const)(
+    '%s 布局运行中会话切换并回放工具SSE后更新收敛',
+    async (layoutMode) => {
+      useUIStateStore.setState({ workbenchLayoutMode: layoutMode, rightTab: 'overview' });
+      const active = (sessionId: string) => ({
+        clientRequestId: `request-${sessionId}`,
+        sessionId,
+        startedAtMs: 100,
+        lastSeq: 0,
+      });
+      getRecoveryMock.mockImplementation(async (_token: string, sessionId: string) => {
+        const result = buildRecovery(sessionId, {
+          messages: [{ id: `user-${sessionId}`, role: 'user', content: `input-${sessionId}` }],
+        });
+        return {
+          ...result,
+          activeStream: active(sessionId),
+          session: { ...result.session, state_status: 'running' },
+        };
+      });
+      const defaultFetch = createFetchStub();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = readRequestUrl(input);
+          const match = url.match(/\/sessions\/([^/]+)\/stream\/active/);
+          if (match) return jsonResponse({ active: active(match[1]!) });
+          const status = url.match(/\/sessions\/([^/?]+)\/status/);
+          if (status)
+            return jsonResponse({
+              status: {
+                activeStream: active(status[1]!),
+                children: [],
+                tasks: [],
+                pendingPermissions: [],
+                pendingQuestions: [],
+                todoLanes: { main: [], temp: [] },
+                state_status: 'running',
+                sessionStateStatus: 'running',
+              },
+            });
+          return defaultFetch(input);
+        }),
+      );
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const router = renderChatPageAt('/chat/session-a', true);
+      await waitFor(() =>
+        expect(
+          InertEventSource.instances.some((source) =>
+            source.url.includes('/session-a/stream/attach'),
+          ),
+        ).toBe(true),
+      );
+      const first = InertEventSource.instances.find((source) =>
+        source.url.includes('/session-a/stream/attach'),
+      )!;
+      await act(async () => {
+        first.onopen?.();
+      });
+      await switchToSession(router, '/chat/session-b');
+      await waitFor(() =>
+        expect(
+          InertEventSource.instances.some((source) =>
+            source.url.includes('/session-b/stream/attach'),
+          ),
+        ).toBe(true),
+      );
+      const second = InertEventSource.instances.find((source) =>
+        source.url.includes('/session-b/stream/attach'),
+      )!;
+      await act(async () => {
+        second.onopen?.();
+        first.onmessage?.({
+          data: JSON.stringify({ type: 'done', stopReason: 'end_turn' }),
+        } as MessageEvent);
+        first.onerror?.();
+        for (let seq = 1; seq <= 6; seq += 1) {
+          second.onmessage?.({
+            data: JSON.stringify({
+              aggregateType: 'run',
+              seq,
+              payload: {
+                cursor: { seq },
+                event: { type: 'text_delta', delta: `live-${seq}`, eventId: `B-${seq}` },
+              },
+            }),
+          } as MessageEvent);
+        }
+      });
+      const emitTool = (seq: number) =>
+        second.onmessage?.({
+          data: JSON.stringify({
+            aggregateType: 'run',
+            seq,
+            payload: {
+              cursor: { seq },
+              event: {
+                type: 'tool_call_delta',
+                toolCallId: 'live-tool',
+                toolName: 'read',
+                inputTextDelta: ' ',
+                eventId: `tool-${seq}`,
+              },
+            },
+          }),
+        } as MessageEvent);
+      const readTab = vi.fn();
+      const unsubscribe = useUIStateStore.subscribe(readTab);
+      try {
+        for (let seq = 7; seq <= 70; seq += 1) {
+          act(() => {
+            emitTool(seq);
+          });
+        }
+        expect(useUIStateStore.getState().rightTab).toBe('tools');
+        expect(readTab).toHaveBeenCalledOnce();
+        act(() => {
+          useUIStateStore.getState().setRightTab('overview');
+        });
+        await act(async () => {
+          emitTool(71);
+        });
+        expect(useUIStateStore.getState().rightTab).toBe('overview');
+      } finally {
+        unsubscribe();
+      }
+      await settleScroll();
+      expect(first.closed).toBe(true);
+      expect(
+        InertEventSource.instances.filter((source) =>
+          source.url.includes('/session-b/stream/attach'),
+        ),
+      ).toHaveLength(1);
+      expect(errors.mock.calls.flat().map(String).join('\n')).not.toContain('Maximum update depth');
+    },
+  );
+
   it('切到会话 B 后渲染 B 的消息，且不残留 A 的消息', async () => {
     const router = renderChatPageAt('/chat/session-a');
 

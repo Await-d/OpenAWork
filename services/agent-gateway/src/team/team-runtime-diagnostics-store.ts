@@ -8,7 +8,10 @@ export type TeamRuntimeIncidentCategory =
   | 'handoff_failure'
   | 'latency_violation'
   | 'team_events_connection'
-  | 'team_events_listener';
+  | 'team_events_listener'
+  // T-18：编排深度判据降级（规则不确定且模型兜底失败/不可用）必须可观测，
+  // 否则「这次为什么走了完整流程」在事后无从查证。
+  | 'depth_degraded';
 
 export type TeamRuntimeIncidentSeverity = 'warning' | 'error';
 
@@ -123,6 +126,7 @@ export function getTeamRuntimeIncidentSummary(input?: {
       latency_violation: 0,
       team_events_connection: 0,
       team_events_listener: 0,
+      depth_degraded: 0,
     },
   );
 }

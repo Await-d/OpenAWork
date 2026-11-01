@@ -753,7 +753,7 @@ describe('attachActiveStreamSession', () => {
     await expect(resultPromise).resolves.toEqual({ status: 'stale' });
     expect(closeExistingTransports).not.toHaveBeenCalled();
     expect(connectEventSource).not.toHaveBeenCalled();
-    expect(clearCallbacks).toHaveBeenCalledTimes(1);
+    expect(clearCallbacks).not.toHaveBeenCalled();
   });
 
   it('续挂同一 clientRequestId 时会用客户端已见 lastSeq 作为 afterSeq', async () => {
@@ -1091,6 +1091,57 @@ describe('useGatewayClient', () => {
     expect(onDone.mock.calls[0]?.[0]).toBe('cancelled');
     expect(onEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'done', stopReason: 'cancelled' }),
+    );
+  });
+
+  it('WS 收到 run_accepted（受理确认）时只透传给 onEvent，不结算、不断连', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('EventSource', MockEventSource);
+    useAuthStore.setState({
+      accessToken: 'token-test',
+      clearAuth: () => undefined,
+      email: 'qa@example.com',
+      gatewayUrl: 'https://gw.test',
+      refreshAccessToken: async () => undefined,
+      refreshToken: null,
+      setAuth: () => undefined,
+      setGatewayUrl: () => undefined,
+      setWebAccess: () => undefined,
+      tokenExpiresAt: null,
+      webAccessEnabled: false,
+      webExposeLan: false,
+      webPort: 3000,
+    });
+
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const onEvent = vi.fn();
+    const { result } = renderHook(() => useGatewayClient('token-test'));
+
+    act(() => {
+      result.current.stream('session-run-accepted', 'hello', {
+        onDelta: vi.fn(),
+        onDone,
+        onError,
+        onEvent,
+      });
+    });
+
+    const ws = MockWebSocket.instances[0];
+    act(() => {
+      ws?.onopen?.();
+      ws?.onmessage?.({
+        data: JSON.stringify({ type: 'run_accepted', occurredAt: 1, requestId: 'req-1' }),
+      } as MessageEvent);
+    });
+
+    // 受理确认没有专属回调：它不是终态、不是错误，只作信息性事件透传。若它被误判为
+    // 终态，客户端会在服务端「刚受理」的那一刻就收尾整轮——表现是发出去立刻结束。
+    expect(onError).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(ws?.readyState).toBe(MockWebSocket.OPEN);
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'run_accepted', requestId: 'req-1' }),
     );
   });
 

@@ -62,7 +62,13 @@ const mocks = vi.hoisted(() => ({
       return { metadata_json: mocks.metadataJson, title: 'channel:channel-1:chat:chat-1' };
     }
     if (query.includes('SELECT metadata_json')) {
-      return { metadata_json: mocks.metadataJson };
+      return {
+        metadata_json: JSON.stringify({
+          ...JSON.parse(mocks.metadataJson),
+          workingDirectory: REPO_ROOT,
+        }),
+        user_id: 'user-1',
+      };
     }
     return undefined;
   }),
@@ -266,7 +272,7 @@ describe('channel tools', () => {
       'session-1',
     );
 
-    expect(result.isError).toBe(false);
+    expect(result.isError, String(result.output)).toBe(false);
     expect(result.output).toBe(JSON.stringify({ messageId: 'image-1' }));
     expect(mocks.sendImageMock).toHaveBeenCalledTimes(1);
     const sendImageCall = mocks.sendImageMock.mock.calls[0];
@@ -444,7 +450,7 @@ describe('channel tools', () => {
       'session-1',
     );
 
-    expect(result.isError).toBe(false);
+    expect(result.isError, String(result.output)).toBe(false);
     expect(result.output).toBe(JSON.stringify({ messageId: 'image-1' }));
     expect(mocks.sendImageMock).toHaveBeenCalledTimes(1);
     const sendImageCall = mocks.sendImageMock.mock.calls[0];

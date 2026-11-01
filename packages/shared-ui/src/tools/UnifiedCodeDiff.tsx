@@ -829,53 +829,67 @@ export function UnifiedCodeDiff({
       : unifiedRows?.[firstChangeIndex]?.key;
   const anchorIndex = revealFirstChange ? firstChangeIndex : -1;
 
-  // 语法高亮：snapshot 路径按行号取 before/after 的高亮行（多行结构由整段高亮保证）；
-  // unified diff 只有 patch 文本、没有完整文件，退回「逐行高亮」——多行结构可能丢失，
-  // 属可接受的降级（视觉主路径是 edit / write 的 snapshot diff）。
+  const totalRowCount = unifiedRows ? unifiedRows.length : rows.length;
+  const hiddenRowCount = showAllRows ? 0 : Math.max(0, totalRowCount - MAX_RENDERED_DIFF_ROWS);
+  const visibleRows = useMemo(
+    () => (hiddenRowCount > 0 ? rows.slice(0, MAX_RENDERED_DIFF_ROWS) : rows),
+    [hiddenRowCount, rows],
+  );
+  const visibleUnifiedRows = useMemo(
+    () =>
+      unifiedRows && hiddenRowCount > 0
+        ? unifiedRows.slice(0, MAX_RENDERED_DIFF_ROWS)
+        : unifiedRows,
+    [hiddenRowCount, unifiedRows],
+  );
+
+  // 只高亮可见 snapshot 前缀，保留从文件起点开始的多行语法状态。
+  // patch 缺失完整上下文，直接使用纯文本，不逐行重置解析器或绕过总预算。
   // key：unified 用 row.key；split 用 `${row.key}:left` / `${row.key}:right`。
   const rowTokens = useMemo(() => {
     const map = new Map<string, DiffToken[]>();
     const language = detectLanguage(filePath);
-    const beforeLines = usingSnapshot ? highlightCodeLines(normalizedBefore, language) : undefined;
-    const afterLines = usingSnapshot ? highlightCodeLines(normalizedAfter, language) : undefined;
-    const highlightSingleLine = (text: string): DiffToken[] | undefined =>
-      !usingSnapshot && language ? highlightCodeLines(text, language)?.[0] : undefined;
+    if (!usingSnapshot || !language) return map;
+    let beforeEnd = 0;
+    let afterEnd = 0;
+    if (visibleUnifiedRows) {
+      for (const row of visibleUnifiedRows) {
+        beforeEnd = Math.max(beforeEnd, row.leftLine ?? 0);
+        afterEnd = Math.max(afterEnd, row.rightLine ?? 0);
+      }
+    } else {
+      for (const row of visibleRows) {
+        beforeEnd = Math.max(beforeEnd, row.left.lineNumber ?? 0);
+        afterEnd = Math.max(afterEnd, row.right.lineNumber ?? 0);
+      }
+    }
+    const beforePrefix = normalizedBefore.split('\n', beforeEnd).join('\n');
+    const afterPrefix = normalizedAfter.split('\n', afterEnd).join('\n');
+    if (beforePrefix.length + afterPrefix.length > MAX_HIGHLIGHT_CHARS) return map;
+    const beforeLines = highlightCodeLines(beforePrefix, language);
+    const afterLines = highlightCodeLines(afterPrefix, language);
 
-    if (unifiedRows) {
-      for (const row of unifiedRows) {
+    if (visibleUnifiedRows) {
+      for (const row of visibleUnifiedRows) {
         if (row.kind === 'hunk') continue;
         const tokens =
           row.kind === 'removed'
             ? beforeLines?.[(row.leftLine ?? 0) - 1]
-            : (afterLines?.[(row.rightLine ?? 0) - 1] ??
-              beforeLines?.[(row.leftLine ?? 0) - 1] ??
-              highlightSingleLine(row.text));
+            : (afterLines?.[(row.rightLine ?? 0) - 1] ?? beforeLines?.[(row.leftLine ?? 0) - 1]);
         if (tokens && tokens.length > 0) map.set(row.key, tokens);
       }
       return map;
     }
 
-    for (const row of rows) {
+    for (const row of visibleRows) {
       if (row.type === 'hunk') continue;
-      const left =
-        beforeLines?.[(row.left.lineNumber ?? 0) - 1] ??
-        (row.left.kind === 'empty' ? undefined : highlightSingleLine(row.left.text));
-      const right =
-        afterLines?.[(row.right.lineNumber ?? 0) - 1] ??
-        (row.right.kind === 'empty' ? undefined : highlightSingleLine(row.right.text));
+      const left = beforeLines?.[(row.left.lineNumber ?? 0) - 1];
+      const right = afterLines?.[(row.right.lineNumber ?? 0) - 1];
       if (left && left.length > 0) map.set(`${row.key}:left`, left);
       if (right && right.length > 0) map.set(`${row.key}:right`, right);
     }
     return map;
-  }, [filePath, normalizedAfter, normalizedBefore, rows, unifiedRows, usingSnapshot]);
-
-  // 超长 diff 的渲染上限：不做真虚拟化，但避免一次挂载数千行把主线程拖住；
-  // 超出部分由「展开全部」按钮一次性放开（与参考实现的虚拟化视觉等价、实现更轻）。
-  const totalRowCount = unifiedRows ? unifiedRows.length : rows.length;
-  const hiddenRowCount = showAllRows ? 0 : Math.max(0, totalRowCount - MAX_RENDERED_DIFF_ROWS);
-  const visibleRows = hiddenRowCount > 0 ? rows.slice(0, MAX_RENDERED_DIFF_ROWS) : rows;
-  const visibleUnifiedRows =
-    unifiedRows && hiddenRowCount > 0 ? unifiedRows.slice(0, MAX_RENDERED_DIFF_ROWS) : unifiedRows;
+  }, [filePath, normalizedAfter, normalizedBefore, visibleRows, visibleUnifiedRows, usingSnapshot]);
 
   useLayoutEffect(() => {
     if (!revealFirstChange) {

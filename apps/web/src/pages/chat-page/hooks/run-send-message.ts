@@ -5,6 +5,9 @@
  * 依赖数组引用），并在函数体内构造 deps —— 调用时才求值，无 TDZ、无顺序变化。
  */
 
+import { createStreamDeltaBatch } from './stream-delta-batch.js';
+import { createStreamFrameController } from '../../../components/conversation-runtime/stream/stream-frame-controller.js';
+import type { StreamFrameHandle } from '../../../components/conversation-runtime/stream/stream-frame-controller.js';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { isImageFile } from '../../../components/conversation-runtime/attachments/attachment-upload.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
@@ -37,16 +40,12 @@ import {
 import { mergeChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import type { ChatBackendUsageSnapshot } from '../../../components/conversation-runtime/stream/stream-usage.js';
 import {
-  appendStreamingTextDelta,
-  appendStreamingThinkingDelta,
   applyToolProgressToStreamingSegment,
   markStreamingReasoningSegmentEnded,
   upsertStreamingToolSegment,
 } from '../../../components/conversation-runtime/stream/streaming-segments.js';
 import {
-  appendStreamingThinkingChunk,
   buildStreamingThinkingChunkDeliveryKey,
-  joinStreamingThinkingTexts,
   markStreamingThinkingChunkEnded,
 } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
@@ -68,6 +67,7 @@ import {
   requestSessionListRefresh,
 } from '../../../utils/session/session-list-events.js';
 import { notifyQueuedMessageSendRejected } from '../../../utils/chat/composer-queue-events.js';
+import { useRunAcceptedStore } from '../../../stores/chat/run-accepted.js';
 import { prepareImageGenerationInput } from '.././conversation/composer/prepare-image-generation-input.js';
 import { prepareStandardChatSendInput } from '.././conversation/composer/prepare-standard-chat-send-input.js';
 import { deleteQueuedComposerFiles } from '.././conversation/composer/queued-composer-file-store.js';
@@ -238,6 +238,10 @@ export interface SendMessageDeps {
   readonly setStreamThinkingBuffer: Dispatch<SetStateAction<string>>;
   readonly setStreaming: Dispatch<SetStateAction<boolean>>;
   readonly setStreamingSegments: Dispatch<SetStateAction<ChatMessagePart[]>>;
+  readonly streamFrameHandleRef: MutableRefObject<StreamFrameHandle | null>;
+  readonly streamBufferRef: MutableRefObject<string>;
+  readonly streamThinkingBlocksRef: MutableRefObject<StreamingThinkingBlock[]>;
+  readonly streamingSegmentsRef: MutableRefObject<ChatMessagePart[]>;
   readonly stoppingStreamRef: MutableRefObject<boolean>;
   readonly streamRevealNextAllowedAtRef: MutableRefObject<number>;
   readonly streamRevealTargetCodePointsRef: MutableRefObject<string[]>;
@@ -332,6 +336,10 @@ export async function runSendMessage(
     setStreamThinkingBuffer,
     setStreaming,
     setStreamingSegments,
+    streamFrameHandleRef,
+    streamBufferRef,
+    streamThinkingBlocksRef,
+    streamingSegmentsRef,
     stoppingStreamRef,
     streamRevealNextAllowedAtRef,
     streamRevealTargetCodePointsRef,
@@ -655,44 +663,39 @@ export async function runSendMessage(
   // straight from this list. Reset on round boundaries / cancel / done.
   let accumulatedSegments: ChatMessagePart[] = [];
   const reasoningSegmentMeta = new Map<string, { blockKey: string }>();
-  let pendingThinkingFlushFrame: number | null = null;
-  let pendingSegmentsFlushFrame: number | null = null;
-  const flushThinkingState = () => {
-    pendingThinkingFlushFrame = null;
-    // Guard against late RAF callbacks landing after the stream was reset
-    // (session switch / cancel / round-close) to prevent UI from flashing
-    // stale reasoning content over the cleared buffer.
-    if (!streamingRef.current || activeSessionRef.current !== sid) {
-      return;
-    }
-    setStreamThinkingBlocks(accumulatedThinkingBlocks);
-    setStreamThinkingBuffer(accumulatedThinking);
+  const deltaBatch = createStreamDeltaBatch();
+  const drainStreamDeltas = () => {
+    const next = deltaBatch.drain(
+      {
+        segments: accumulatedSegments,
+        thinkingBlocks: accumulatedThinkingBlocks,
+        thinking: accumulatedThinking,
+      },
+      reasoningSegmentMeta,
+    );
+    accumulatedSegments = next.segments;
+    accumulatedThinkingBlocks = next.thinkingBlocks;
+    accumulatedThinking = next.thinking;
   };
-  const scheduleThinkingFlush = () => {
-    if (pendingThinkingFlushFrame !== null) return;
-    pendingThinkingFlushFrame = window.requestAnimationFrame(flushThinkingState);
+  const syncStreamSnapshot = () => {
+    streamingSegmentsRef.current = accumulatedSegments;
+    streamThinkingBlocksRef.current = accumulatedThinkingBlocks;
+    streamBufferRef.current = accumulated;
   };
-  const cancelThinkingFlush = () => {
-    if (pendingThinkingFlushFrame !== null) {
-      window.cancelAnimationFrame(pendingThinkingFlushFrame);
-      pendingThinkingFlushFrame = null;
-    }
-  };
-  const flushSegmentsState = () => {
-    pendingSegmentsFlushFrame = null;
-    if (!streamingRef.current || activeSessionRef.current !== sid) return;
-    setStreamingSegments(accumulatedSegments);
-  };
-  const scheduleSegmentsFlush = () => {
-    if (pendingSegmentsFlushFrame !== null) return;
-    pendingSegmentsFlushFrame = window.requestAnimationFrame(flushSegmentsState);
-  };
-  const cancelSegmentsFlush = () => {
-    if (pendingSegmentsFlushFrame !== null) {
-      window.cancelAnimationFrame(pendingSegmentsFlushFrame);
-      pendingSegmentsFlushFrame = null;
-    }
-  };
+  const frameController = createStreamFrameController({
+    sessionId: sid,
+    handleRef: streamFrameHandleRef,
+    isActive: () => streamingRef.current && activeSessionRef.current === sid,
+    drain: drainStreamDeltas,
+    syncSnapshot: syncStreamSnapshot,
+    publishThinking: () => {
+      setStreamThinkingBlocks(accumulatedThinkingBlocks);
+      setStreamThinkingBuffer(accumulatedThinking);
+    },
+    publishSegments: () => setStreamingSegments(accumulatedSegments),
+  });
+  const { scheduleThinkingFlush, scheduleSegmentsFlush, cancelThinkingFlush, cancelSegmentsFlush } =
+    frameController;
   let firstTokenObservedAt: number | null = null;
   const deliveredThinkingChunkKeys = new Set<string>();
   let toolPanelRevealed = false;
@@ -752,6 +755,7 @@ export async function runSendMessage(
     // / setStreamThinkingBuffer('') reset is not overwritten by a late flush.
     cancelThinkingFlush();
     cancelSegmentsFlush();
+    drainStreamDeltas();
     const committed = commitStreamingRound({
       accumulated,
       accumulatedSegments,
@@ -788,6 +792,7 @@ export async function runSendMessage(
     accumulatedThinking = committed.accumulatedThinking;
     accumulatedThinkingBlocks = committed.accumulatedThinkingBlocks;
     accumulatedSegments = committed.accumulatedSegments;
+    syncStreamSnapshot();
     reasoningSegmentMeta.clear();
     liveToolCalls.clear();
     firstTokenLatencyAttached = committed.firstTokenLatencyAttached;
@@ -849,6 +854,19 @@ export async function runSendMessage(
     onEvent: (event) => {
       if (activeSessionRef.current !== sid) {
         return;
+      }
+      if (event.type !== 'thinking_delta' && event.type !== 'text_delta') {
+        drainStreamDeltas();
+      }
+
+      if (event.type === 'run_accepted') {
+        // 服务端凭据：这条到了才说明「消息真的被收下了」。占位气泡据此从「等待接收」
+        // 切到「正在准备上下文与工具」。
+        //
+        // 记的是**本端收到确认的时刻**而不是 `event.occurredAt`（服务端时刻）：该值只
+        // 用来判断「本轮有没有被受理」，一旦混入服务端时钟，将来任何一次时间比较都会
+        // 被两端偏差坑到。
+        useRunAcceptedStore.getState().markAccepted(Date.now());
       }
 
       if (event.type === 'upstream_route') {
@@ -1127,7 +1145,7 @@ export async function runSendMessage(
       // deltas into a single trailing text segment if no other segment
       // (reasoning / tool) was recorded between them.
       const messageId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-      accumulatedSegments = appendStreamingTextDelta(accumulatedSegments, delta, messageId);
+      deltaBatch.appendText(delta, messageId);
       scheduleSegmentsFlush();
       streamRevealTargetRef.current = accumulated;
       streamRevealTargetCodePointsRef.current.push(...Array.from(delta));
@@ -1170,21 +1188,8 @@ export async function runSendMessage(
       // 会把同一轮内 `tool_call → reasoning` 的交错错误拆成两条消息）。
       closeRoundIfGatewayAdvanced();
 
-      accumulatedThinkingBlocks = appendStreamingThinkingChunk(accumulatedThinkingBlocks, chunk, {
-        forceNewBlock: accumulatedSegments[accumulatedSegments.length - 1]?.type !== 'reasoning',
-      });
-      accumulatedThinking = joinStreamingThinkingTexts(accumulatedThinkingBlocks);
-      // Mirror reasoning chunks into the ordered segment list. Each
-      // reasoning block has a stable identity (itemId/outputIndex/...) so
-      // late deltas of the same block extend the existing segment in place
-      // even if text/tool segments arrived between two reasoning chunks.
       const messageId = currentAssistantStreamMessageIdRef.current ?? makeOrderedMessageId();
-      accumulatedSegments = appendStreamingThinkingDelta(
-        accumulatedSegments,
-        reasoningSegmentMeta,
-        chunk,
-        messageId,
-      );
+      deltaBatch.appendThinking(chunk, messageId);
       scheduleSegmentsFlush();
       // Coalesce per-chunk setState into one React commit per animation frame
       // — SSE `EventSource.onmessage` runs outside React's batching scope, so
@@ -1197,6 +1202,7 @@ export async function runSendMessage(
       if (activeSessionRef.current !== sid || stoppingStreamRef.current) {
         return;
       }
+      drainStreamDeltas();
       accumulatedThinkingBlocks = markStreamingThinkingChunkEnded(accumulatedThinkingBlocks, chunk);
       accumulatedSegments = markStreamingReasoningSegmentEnded(
         accumulatedSegments,
@@ -1207,7 +1213,7 @@ export async function runSendMessage(
       scheduleThinkingFlush();
     },
     onToolCall: (chunk) => {
-      if (activeSessionRef.current !== sid) {
+      if (!frameController.isCurrent() || activeSessionRef.current !== sid) {
         return;
       }
       toolCallIds.add(chunk.toolCallId);
@@ -1219,11 +1225,16 @@ export async function runSendMessage(
       }
     },
     onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {
+      drainStreamDeltas();
+      cancelThinkingFlush();
+      cancelSegmentsFlush();
       if (streamTerminalized) {
         return;
       }
       streamTerminalized = true;
-      if (activeSessionRef.current !== sid) {
+      const ownsFrames = frameController.isCurrent();
+      frameController.dispose();
+      if (!ownsFrames || activeSessionRef.current !== sid) {
         requestSessionListRefresh();
         return;
       }
@@ -1372,6 +1383,9 @@ export async function runSendMessage(
       requestSessionListRefresh();
     },
     onError: (code: string, message?: string, technicalDetail?: string) => {
+      drainStreamDeltas();
+      const ownsFrames = frameController.isCurrent();
+      frameController.dispose();
       // 队列来源的发送撞上单飞锁：回流重排，不按错误终态处理。
       // 网关在落库用户消息**之前**就拒绝了这次请求，会话历史里不会有这条消息；弹
       // 「当前会话已有请求正在运行。」只会让用户以为消息丢了。
@@ -1395,7 +1409,7 @@ export async function runSendMessage(
         });
         // 流状态复位只在仍停留在该会话时做：切走后这些 setter 属于新会话的视图，
         // 旧流的清理已被切换路径处理过，这里再动会清掉新会话的实时状态。
-        if (activeSessionRef.current === sid) {
+        if (ownsFrames && activeSessionRef.current === sid) {
           // 乐观用户气泡一并撤掉：消息未送达，不应留痕。
           if (userMessageId) {
             setMessages((previous) => previous.filter((item) => item.id !== userMessageId));
@@ -1405,7 +1419,7 @@ export async function runSendMessage(
         }
         return;
       }
-      if (activeSessionRef.current !== sid) {
+      if (!ownsFrames || activeSessionRef.current !== sid) {
         requestSessionListRefresh();
         return;
       }

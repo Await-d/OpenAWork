@@ -172,6 +172,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
+/** 读取包装对象里的可索引子对象（如 `{ stats: {...} }` 的 `stats`）。 */
+function asInnerRecord(container: unknown, key: string): Record<string, unknown> | null {
+  return asRecord(asRecord(container)?.[key]);
+}
+
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -306,26 +311,85 @@ export default function SettingsSectionScreen() {
 
       if (sectionKey === 'memory') {
         const client = createMemoriesClient(gatewayUrl);
-        const [statsRaw, listRaw, settingsRaw] = await Promise.all([
-          client.getStats(accessToken).catch(() => null),
-          client.list(accessToken).catch(() => null),
-          client.getSettings(accessToken).catch(() => null),
+        // 拉取结果与成功与否分开：后端返回 `{ stats }` / `{ settings }` 包装形态，
+        // 且失败必须能被区分，不能把「加载失败」渲染成「空库 / 开关关闭」。
+        const [statsResult, listResult, settingsResult, pendingResult] = await Promise.all([
+          client.getStats(accessToken).then(
+            (value) => ({ ok: true as const, value }),
+            (error: unknown) => ({ ok: false as const, error }),
+          ),
+          client.list(accessToken).then(
+            (value) => ({ ok: true as const, value }),
+            (error: unknown) => ({ ok: false as const, error }),
+          ),
+          client.getSettings(accessToken).then(
+            (value) => ({ ok: true as const, value }),
+            (error: unknown) => ({ ok: false as const, error }),
+          ),
+          client
+            .countPendingProposals(accessToken)
+            .then(
+              (value) => ({ ok: true as const, value }),
+              (error: unknown) => ({ ok: false as const, error }),
+            ),
         ]);
-        const stats = asRecord(statsRaw) ?? {};
-        const list = asArray(
-          asRecord(listRaw)?.['items'] ?? asRecord(listRaw)?.['memories'] ?? listRaw,
-        );
-        const settings = asRecord(settingsRaw) ?? {};
+
+        const list = listResult.ok
+          ? asArray(
+              asRecord(listResult.value)?.['memories'] ?? asRecord(listResult.value)?.['items'],
+            )
+          : [];
+        // 后端契约：GET /memories/stats 与 /memories/settings 均返回包装对象
+        // （`reply.send({ stats })` / `{ settings }`），直接读顶层字段会把「加载失败」
+        // 显示成「空库 / 开关关闭」。这里显式标注为 `Record<string, unknown>` 以保留索引签名。
+        const stats: Record<string, unknown> | null = statsResult.ok
+          ? asInnerRecord(statsResult.value, 'stats')
+          : null;
+        const settings: Record<string, unknown> | null = settingsResult.ok
+          ? asInnerRecord(settingsResult.value, 'settings')
+          : null;
+
         const total =
-          typeof stats['total'] === 'number'
+          stats && typeof stats['total'] === 'number'
             ? stats['total']
-            : typeof stats['count'] === 'number'
+            : stats && typeof stats['count'] === 'number'
               ? stats['count']
               : list.length;
         const autoWrite =
-          settings['autoWrite'] === true ||
-          settings['enabled'] === true ||
-          settings['autoExtract'] === true;
+          settings !== null && (settings['autoExtract'] === true || settings['enabled'] === true);
+
+        const statsTrailing = statsResult.ok ? `${total} 条` : '读取失败';
+        const settingsTrailing = settingsResult.ok ? (autoWrite ? '开' : '关') : '读取失败';
+        const pendingTrailing = pendingResult.ok ? `${String(pendingResult.value)} 条` : '读取失败';
+
+        const recentRows: Row[] =
+          listResult.ok && list.length > 0
+            ? list.slice(0, 5).map((item, index) => {
+                const rec = asRecord(item) ?? {};
+                const content =
+                  typeof rec['value'] === 'string'
+                    ? rec['value']
+                    : typeof rec['content'] === 'string'
+                      ? rec['content']
+                      : typeof rec['text'] === 'string'
+                        ? rec['text']
+                        : '记忆条目';
+                return {
+                  title: typeof rec['key'] === 'string' ? rec['key'] : `记忆 ${index + 1}`,
+                  subtitle: content.slice(0, 80),
+                };
+              })
+            : [
+                {
+                  title: listResult.ok ? '暂无记忆' : '记忆列表读取失败',
+                  subtitle: listResult.ok
+                    ? '对话沉淀后将出现在这里'
+                    : '稍后下拉刷新重试',
+                  trailing: listResult.ok ? '空' : '错误',
+                  tone: listResult.ok ? 'default' : 'danger',
+                } satisfies Row,
+              ];
+
         setGroups([
           {
             title: '记忆库',
@@ -333,36 +397,31 @@ export default function SettingsSectionScreen() {
               {
                 title: '长期记忆',
                 subtitle: '跨会话可检索记忆条目',
-                trailing: `${total} 条`,
+                trailing: statsTrailing,
+                tone: statsResult.ok ? 'default' : 'danger',
               },
               {
                 title: '自动写入',
                 subtitle: '重要结论自动沉淀',
-                trailing: autoWrite ? '开' : '关',
-                tone: autoWrite ? 'success' : 'default',
+                trailing: settingsTrailing,
+                tone: settingsResult.ok ? (autoWrite ? 'success' : 'default') : 'danger',
+              },
+            ],
+          },
+          {
+            title: '待确认',
+            rows: [
+              {
+                title: '待确认记忆',
+                subtitle: '系统只提出建议，未修改任何正式记忆；请在 Web 或桌面端确认。',
+                trailing: pendingTrailing,
+                tone: pendingResult.ok && pendingResult.value > 0 ? 'warning' : 'default',
               },
             ],
           },
           {
             title: '最近记忆',
-            rows:
-              list.length > 0
-                ? list.slice(0, 5).map((item, index) => {
-                    const rec = asRecord(item) ?? {};
-                    const content =
-                      typeof rec['content'] === 'string'
-                        ? rec['content']
-                        : typeof rec['text'] === 'string'
-                          ? rec['text']
-                          : typeof rec['summary'] === 'string'
-                            ? rec['summary']
-                            : '记忆条目';
-                    return {
-                      title: typeof rec['title'] === 'string' ? rec['title'] : `记忆 ${index + 1}`,
-                      subtitle: content.slice(0, 80),
-                    };
-                  })
-                : [{ title: '暂无记忆', subtitle: '对话沉淀后将出现在这里', trailing: '空' }],
+            rows: recentRows,
           },
         ]);
         return;

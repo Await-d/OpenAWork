@@ -648,17 +648,39 @@ export function getHandoffById(handoffId: string): HandoffRecord | undefined {
   return row ? mapRow(row) : undefined;
 }
 
-export function listPendingHandoffs(limit = 50): HandoffRecord[] {
+/**
+ * 待执行队列的有界分页读取（T-21）。
+ *
+ * `after` 为上一批最后一条的 `(createdAt, id)` 游标：调用方按批推进即可遍历
+ * 整条队列，而不是每轮都从队首重扫同一批被依赖/满额阻塞的记录——那种固定扫描
+ * 会让排在第 limit 条之后、实际已就绪的任务永远取不到。`id` 参与排序与比较是为了
+ * 给同一秒创建的记录一个稳定且唯一的位置，不能只按 `created_at` 分页。
+ */
+export function listPendingHandoffs(
+  limit = 50,
+  after?: { createdAt: string; id: string },
+): HandoffRecord[] {
   const nowMs = Date.now();
-  const rows = sqliteAll<HandoffRow>(
-    `SELECT * FROM handoff_records
+  const rows = after
+    ? sqliteAll<HandoffRow>(
+        `SELECT * FROM handoff_records
      WHERE state = 'pending'
        AND paused = 0
        AND (available_at_ms IS NULL OR available_at_ms <= ?)
-     ORDER BY created_at ASC
+       AND (created_at > ? OR (created_at = ? AND id > ?))
+     ORDER BY created_at ASC, id ASC
      LIMIT ?`,
-    [nowMs, limit],
-  );
+        [nowMs, after.createdAt, after.createdAt, after.id, limit],
+      )
+    : sqliteAll<HandoffRow>(
+        `SELECT * FROM handoff_records
+     WHERE state = 'pending'
+       AND paused = 0
+       AND (available_at_ms IS NULL OR available_at_ms <= ?)
+     ORDER BY created_at ASC, id ASC
+     LIMIT ?`,
+        [nowMs, limit],
+      );
   return rows.map(mapRow);
 }
 
@@ -722,7 +744,11 @@ export function listHandoffsBySession(input: {
 export function claimHandoff(input: {
   handoffId: string;
   claimToken: string;
+  maxActiveExecutionHandoffs?: number;
 }): HandoffRecord | null {
+  const requestedLimit = input.maxActiveExecutionHandoffs ?? 8;
+  const executionLimit =
+    Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 8;
   sqliteRun(
     `UPDATE handoff_records
        SET state = 'claimed',
@@ -730,8 +756,16 @@ export function claimHandoff(input: {
            claimed_at = datetime('now'),
            available_at_ms = NULL,
            updated_at = datetime('now')
-     WHERE id = ? AND state = 'pending' AND paused = 0`,
-    [input.claimToken, input.handoffId],
+     WHERE id = ? AND state = 'pending' AND paused = 0
+       AND (
+         to_role_layer NOT IN ('executor', 'reviewer')
+         OR (
+           SELECT COUNT(*) FROM handoff_records AS active
+           WHERE active.to_role_layer IN ('executor', 'reviewer')
+             AND active.state IN ('claimed', 'running')
+         ) < ?
+       )`,
+    [input.claimToken, input.handoffId, executionLimit],
   );
   // SQLite 无返回行数；通过回读判断是否成功
   const row = sqliteGet<HandoffRow>(`SELECT * FROM handoff_records WHERE id = ? LIMIT 1`, [

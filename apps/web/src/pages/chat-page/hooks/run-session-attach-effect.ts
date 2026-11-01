@@ -574,6 +574,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
   const toolCallIds = new Set<string>();
   const liveToolCalls = new Map<string, LiveToolCallState>();
   let attachStreamTerminalized = false;
+  let toolPanelRevealed = false;
   const buildAttachToolCalls = (): AssistantTraceToolCall[] => {
     return Array.from(liveToolCalls.values()).map((toolCallState) => {
       const hasPendingPermission = hasActivePendingPermissionRequest({
@@ -1237,8 +1238,9 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         noteAttachActivity();
         ensureAttachStateInitialized();
         toolCallIds.add(chunk.toolCallId);
-        if (!rightOpenRef.current) {
-          setRightTab('tools');
+        if (!toolPanelRevealed) {
+          toolPanelRevealed = true;
+          if (!rightOpenRef.current) setRightTab('tools');
         }
       },
       onDone: (stopReason, streamAgentId, cancellation, upstreamSummary) => {

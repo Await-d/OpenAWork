@@ -338,6 +338,7 @@ describe('team crud routes', () => {
         type: string;
       };
       expect(createdMessage).toMatchObject({
+        delivered: false,
         memberId: 'member-sender',
         recipientMemberId: 'member-recipient',
         replyToMessageId: 'msg-parent',

@@ -98,6 +98,8 @@ export interface TeamTaskRecord {
 
 export interface TeamMessageRecord {
   id: string;
+  /** 审计留言不投递给Agent；旧读取结果可不含此字段。 */
+  delivered?: false;
   sessionId?: string | null;
   memberId: string;
   recipientMemberId?: string | null;

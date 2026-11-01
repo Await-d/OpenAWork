@@ -17,6 +17,7 @@ import {
   resolveModelPriceEntry,
 } from './chat-page-utils.js';
 import { mergeStreamingEntryIntoHistoricalEntries } from './chat-render-merge.js';
+import { buildAssistantUsageDetails } from './assistant-usage-details.js';
 import {
   groupChatRenderEntries,
   reconcileChatRenderGroups,
@@ -429,6 +430,8 @@ interface ChatRenderFrameHistoricalGroupCache {
 interface ChatRenderFrameEntryCache {
   closureDeps: readonly unknown[];
   entries: ChatRenderEntry[];
+  entriesById: Map<string, ChatRenderEntry>;
+  streamingMessageId: string | undefined;
   /**
    * 上一帧的「内联审批按钮」回调。
    *
@@ -443,6 +446,7 @@ interface ChatRenderFrameEntryCache {
 
 /** 每个 hook 实例的渲染帧缓存集合（成对更新，见下）。 */
 interface ChatRenderFrameCaches {
+  assistantUsage: Map<string, ChatUsageDetails> | null;
   streamingGroup: ChatRenderFrameStreamingGroupCache | null;
   historicalEntry: ChatRenderFrameEntryCache | null;
   historicalGroup: ChatRenderFrameHistoricalGroupCache | null;
@@ -478,6 +482,13 @@ const chatRenderFrameCaches = new WeakMap<object, ChatRenderFrameCaches>();
  * 模块函数后语义完全不变：仍是同一个单元格、同一时机（`useMemo` 回调末尾）、
  * 同一个值，只是「谁执行这条赋值」换了地方。
  */
+function writeAssistantUsageCache(
+  caches: ChatRenderFrameCaches,
+  value: Map<string, ChatUsageDetails>,
+): void {
+  caches.assistantUsage = value;
+}
+
 function writeHistoricalEntryCache(
   caches: ChatRenderFrameCaches,
   value: ChatRenderFrameEntryCache,
@@ -505,6 +516,7 @@ function resolveChatRenderFrameCaches(instanceKey: object): ChatRenderFrameCache
     return existing;
   }
   const created: ChatRenderFrameCaches = {
+    assistantUsage: null,
     streamingGroup: null,
     historicalEntry: null,
     historicalGroup: null,
@@ -569,61 +581,26 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   );
 
   const assistantUsageDetails = useMemo(() => {
-    const usageByMessageId = new Map<string, ChatUsageDetails>();
-    let contextTokens = 0;
-    let requestIndex = 0;
-
-    for (const message of messages) {
-      const providerUsage = message.role === 'assistant' ? message.providerUsage : undefined;
-      const messageTokens =
-        providerUsage?.outputTokens ?? message.tokenEstimate ?? estimateTokenCount(message.content);
-
-      if (message.role === 'assistant') {
-        requestIndex += 1;
-        const inputTokens = providerUsage?.inputTokens ?? contextTokens;
-        const outputTokens = providerUsage?.outputTokens ?? messageTokens;
-        const cacheReadTokens = providerUsage?.cacheReadTokens ?? 0;
-        const cacheWriteTokens = providerUsage?.cacheWriteTokens ?? 0;
-        const totalTokens = providerUsage?.totalTokens ?? inputTokens + outputTokens;
-        const matchedPrice = resolveModelPriceEntry(modelPrices, [
-          message.providerId ? `${message.providerId}/${message.model ?? ''}` : undefined,
-          activeProviderId ? `${activeProviderId}/${activeModelId}` : undefined,
-          message.model,
-          activeModelId,
-          activeModelOption?.label,
-        ]);
-        const estimatedCostUsd = matchedPrice
-          ? estimateModelUsageCost({
-              inputTokens,
-              outputTokens,
-              cacheReadTokens,
-              cacheWriteTokens,
-              price: matchedPrice,
-            })
-          : undefined;
-
-        usageByMessageId.set(message.id, {
-          requestIndex,
-          inputTokens,
-          outputTokens,
-          totalTokens,
-          cacheReadTokens,
-          cacheWriteTokens,
-          estimatedCostUsd,
-          durationMs: message.durationMs,
-          firstTokenLatencyMs: message.firstTokenLatencyMs,
-          tokensPerSecond:
-            message.durationMs && message.durationMs > 0
-              ? outputTokens / (message.durationMs / 1000)
-              : undefined,
-        });
-      }
-
-      contextTokens += messageTokens;
-    }
-
-    return usageByMessageId;
-  }, [activeModelId, activeModelOption?.label, activeProviderId, messages, modelPrices]);
+    const usage = buildAssistantUsageDetails(
+      {
+        messages,
+        modelPrices,
+        activeProviderId,
+        activeModelId,
+        activeModelLabel: activeModelOption?.label,
+      },
+      renderFrameCaches.assistantUsage,
+    );
+    writeAssistantUsageCache(renderFrameCaches, usage);
+    return usage;
+  }, [
+    activeModelId,
+    activeModelOption?.label,
+    activeProviderId,
+    messages,
+    modelPrices,
+    renderFrameCaches,
+  ]);
 
   const messageInputTokens = useMemo(() => {
     return effectiveContextMessages.reduce((sum, message) => {
@@ -848,41 +825,9 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       openChildSessionInspector,
       selectedChildSessionId,
       visibleStreaming,
-      assistantUsageDetails,
       taskToolRuntimeLookup,
     ];
 
-    const nextEntries: ChatRenderEntry[] = deduplicatedMessages.map((message, index) => ({
-      message,
-      actions: buildMessageActions(message),
-      // Keep compaction markers as their own visual group so they don't
-      // collapse into the surrounding assistant turn bubbles.
-      ...(isTranscriptCompactionMessage(message)
-        ? { groupIdentityKey: `compaction:${message.id}` }
-        : {}),
-      renderContent:
-        index === lastStreamingHistoricalIndex
-          ? (currentMessage: ChatMessage) =>
-              renderStreamingChatMessageContentWithOptions(currentMessage, {
-                onOpenChildSession: openChildSessionInspector,
-                resolveInlinePermissionActions,
-                selectedChildSessionId,
-                taskRuntimeLookup: taskToolRuntimeLookup,
-              })
-          : (currentMessage: ChatMessage) =>
-              renderChatMessageContentWithOptions(currentMessage, {
-                onOpenChildSession: openChildSessionInspector,
-                resolveInlinePermissionActions,
-                selectedChildSessionId,
-                taskRuntimeLookup: taskToolRuntimeLookup,
-              }),
-      usageDetails: assistantUsageDetails.get(message.id),
-    }));
-
-    // 引用回收：`actions` / `renderContent` / `usageDetails` / `groupIdentityKey` 都是
-    // (message, closureDeps, index) 的纯函数——`actions` 每次调用都返回新闭包，所以不能
-    // 按引用比较。改为沿用同一位置（index）的旧 entry：message 引用未变且闭包依赖
-    // 未变时，该 entry 必然逐字段等价。
     const previousCache = renderFrameCaches.historicalEntry;
     let canReuse =
       previousCache !== null && previousCache.closureDeps.length === closureDeps.length;
@@ -895,43 +840,58 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       }
     }
 
-    let entries = nextEntries;
-    if (previousCache !== null) {
-      const permissionResolveChanged =
-        previousCache.permissionResolve !== resolveInlinePermissionActions;
-      const recycled = nextEntries.map((entry, index) => {
-        const previousEntry = previousCache.entries[index];
-        if (previousEntry === undefined || previousEntry.message !== entry.message) {
-          return entry;
-        }
-        // 审批回调没变：走原来的「全量复用 / 全量重建」语义（不额外遍历 parts）。
-        if (!permissionResolveChanged) {
-          return canReuse ? previousEntry : entry;
-        }
-        // 其它闭包依赖也变了：旧 entry 的 `renderContent` 捕获的是过期的
-        // `buildMessageActions` / `openChildSessionInspector` / `visibleStreaming` 等，
-        // 不能复用，必须按原语义全量重建。
-        if (!canReuse) {
-          return entry;
-        }
-        // 只有审批回调变了：仅「确实会渲染审批按钮」的消息需要换新闭包，其余沿用，
-        // 让一次权限弹窗不至于把整段历史消息组件全部重渲染。
-        return messageCarriesLivePermissionRequest(entry.message) ? entry : previousEntry;
-      });
-      // 全部命中时直接沿用旧数组，让下游 `useMemo` 整体短路。
-      let fullyReused = true;
-      for (let index = 0; index < recycled.length; index += 1) {
-        if (recycled[index] !== previousCache.entries[index]) {
-          fullyReused = false;
-          break;
-        }
-      }
-      entries = fullyReused ? previousCache.entries : recycled;
-    }
+    const permissionResolveChanged =
+      previousCache?.permissionResolve !== resolveInlinePermissionActions;
+    const streamingMessageId = deduplicatedMessages[lastStreamingHistoricalIndex]?.id;
+    const entriesById = new Map<string, ChatRenderEntry>();
+    let fullyReused = previousCache?.entries.length === deduplicatedMessages.length;
+    const nextEntries = deduplicatedMessages.map((message, index): ChatRenderEntry => {
+      const previousEntry = previousCache?.entriesById.get(message.id);
+      const usageDetails = assistantUsageDetails.get(message.id);
+      const isStreaming = message.id === streamingMessageId;
+      // 先验证再分配，命中项不调用 actions 工厂，也不创建 renderContent 闭包。
+      const reusable =
+        canReuse &&
+        previousEntry?.message === message &&
+        previousEntry.usageDetails === usageDetails &&
+        (previousCache?.streamingMessageId === message.id) === isStreaming &&
+        (!permissionResolveChanged || !messageCarriesLivePermissionRequest(message));
+      const entry: ChatRenderEntry = reusable
+        ? previousEntry
+        : {
+            message,
+            actions: buildMessageActions(message),
+            ...(isTranscriptCompactionMessage(message)
+              ? { groupIdentityKey: `compaction:${message.id}` }
+              : {}),
+            renderContent: isStreaming
+              ? (currentMessage: ChatMessage) =>
+                  renderStreamingChatMessageContentWithOptions(currentMessage, {
+                    onOpenChildSession: openChildSessionInspector,
+                    resolveInlinePermissionActions,
+                    selectedChildSessionId,
+                    taskRuntimeLookup: taskToolRuntimeLookup,
+                  })
+              : (currentMessage: ChatMessage) =>
+                  renderChatMessageContentWithOptions(currentMessage, {
+                    onOpenChildSession: openChildSessionInspector,
+                    resolveInlinePermissionActions,
+                    selectedChildSessionId,
+                    taskRuntimeLookup: taskToolRuntimeLookup,
+                  }),
+            usageDetails,
+          };
+      entriesById.set(message.id, entry);
+      fullyReused = fullyReused && entry === previousCache?.entries[index];
+      return entry;
+    });
+    const entries = fullyReused && previousCache ? previousCache.entries : nextEntries;
 
     writeHistoricalEntryCache(renderFrameCaches, {
       closureDeps,
       entries,
+      entriesById,
+      streamingMessageId,
       permissionResolve: resolveInlinePermissionActions,
     });
 

@@ -121,6 +121,54 @@ describe('ClientErrorRecorder', () => {
   });
 });
 
+describe('补充诊断上下文', () => {
+  it('合并诊断并让显式 context 优先，仍执行脱敏与长度限制', () => {
+    const recorder = new ClientErrorRecorder({
+      buildDiagnostics: () => ({
+        route: 'diagnostic',
+        trace: 'x'.repeat(3_000),
+        secret: 'Authorization: Bearer abcdef123456',
+      }),
+    });
+    const record = recorder.record({
+      source: 'manual',
+      error: new Error('故障'),
+      context: { route: 'explicit' },
+    });
+    expect(record?.context?.['route']).toBe('explicit');
+    expect(record?.context?.['trace']).toHaveLength(2_000);
+    expect(record?.context?.['secret']).not.toContain('abcdef123456');
+  });
+
+  it('提供者抛错仍保留原始错误与显式上下文', () => {
+    const recorder = new ClientErrorRecorder({
+      buildDiagnostics: () => {
+        throw new Error('诊断故障');
+      },
+    });
+    const record = recorder.record({
+      source: 'manual',
+      error: new Error('原始故障'),
+      context: { route: 'chat' },
+    });
+    expect(record?.message).toBe('原始故障');
+    expect(record?.context?.['route']).toBe('chat');
+  });
+
+  it('去重后才调用提供者，未返回诊断时不生成空 context', () => {
+    const buildDiagnostics = vi.fn(() => undefined);
+    const recorder = new ClientErrorRecorder({ buildDiagnostics, now: () => 1_000 });
+    const error = new Error('重复故障');
+    expect(recorder.record({ source: 'uncaught', error })?.context).toBeUndefined();
+    expect(recorder.record({ source: 'uncaught', error })).toBeNull();
+    expect(buildDiagnostics).toHaveBeenCalledTimes(1);
+    expect(buildDiagnostics).toHaveBeenCalledWith({
+      source: 'uncaught',
+      described: expect.objectContaining({ message: '重复故障' }),
+    });
+  });
+});
+
 describe('installGlobalErrorCapture', () => {
   it('捕获 error 与 unhandledrejection 事件', () => {
     const recorder = new ClientErrorRecorder();

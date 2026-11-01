@@ -16,6 +16,7 @@ import { PLUGIN_MANAGE_TOOL_NAME } from '../plugin/plugin-manage-tool-name.js';
 import { SCHEDULE_MANAGE_TOOL_NAME } from '../cron/schedule-manage-tool-name.js';
 import { AGENT_MANAGE_TOOL_NAME } from '../agent/agent-manage-tool-name.js';
 import { TEAM_WORKSPACE_MANAGE_TOOL_NAME } from '../team/team-workspace-manage-tool-name.js';
+import { getChannelActorPolicy } from '../channels/channel-actor-scope.js';
 
 interface ChannelToolPermissionsLike {
   allowShell?: boolean;
@@ -31,6 +32,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readChannelToolAllowlist(
   metadata: Record<string, unknown>,
 ): readonly string[] | null | undefined {
+  // 本轮 run 的成员权限优先：`channelToolAllowlist` 存在**同群共享**的会话
+  // metadata 上，会被下一个发言的成员覆盖（详见 channel-actor-scope 的说明）。
+  const scopedPolicy = getChannelActorPolicy();
+  if (scopedPolicy) {
+    return scopedPolicy.toolAllowlist;
+  }
+
   const allowlist = metadata['channelToolAllowlist'];
   if (allowlist === null) {
     return null;
@@ -62,6 +70,13 @@ function readChannelTools(metadata: Record<string, unknown>): ChannelToolsLike |
 function readChannelPermissions(
   metadata: Record<string, unknown>,
 ): ChannelToolPermissionsLike | null {
+  // 与白名单同理：会话 metadata 里的渠道权限是**最后一位发言者**的成员权限，
+  // 本轮必须用自己那份快照，否则同群成员交替发言会互相改权限。
+  const scopedPolicy = getChannelActorPolicy();
+  if (scopedPolicy) {
+    return scopedPolicy.permissions;
+  }
+
   const channel = metadata['channel'];
   if (!isRecord(channel)) {
     return null;
@@ -136,7 +151,7 @@ function resolveChannelToolKey(toolName: string): string | null {
   }
 }
 
-function isChannelManagedSession(metadata: Record<string, unknown>): boolean {
+export function isChannelManagedSession(metadata: Record<string, unknown>): boolean {
   return metadata['source'] === 'channel';
 }
 
@@ -345,6 +360,19 @@ export function isGatewayToolEnabledForSessionMetadata(
   const dialogueMode = metadata['dialogueMode'];
   if (dialogueMode === 'clarify' && !isClarifyModeToolAllowed(toolName)) {
     return false;
+  }
+
+  if (
+    (toolName === SKILL_MANAGE_TOOL_NAME || toolName === MCP_MANAGE_SERVERS_TOOL_NAME) &&
+    isChannelManagedSession(metadata)
+  ) {
+    return (
+      metadata['channelExtensionManagementEnabled'] === true &&
+      areChannelLlmToolDeclarationsEnabled(metadata) &&
+      typeof metadata['teamWorkspaceId'] !== 'string' &&
+      !isRecord(metadata['teamRoleInstance']) &&
+      isToolAllowedByChannelAllowlist(readChannelToolAllowlist(metadata), toolName)
+    );
   }
 
   // 自助管理类工具（mcp_manage_servers / memory_manage / skill_manage / plugin_manage /

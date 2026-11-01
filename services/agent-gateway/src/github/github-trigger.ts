@@ -16,6 +16,14 @@ export interface GitHubTriggerConfig {
   events: GitHubEventType[];
   branchFilterUndefinedMeansAll?: string[];
   pathFilterUndefinedMeansAll?: string[];
+  /**
+   * 该仓库事件由哪个托管 Agent 执行（可选）。
+   *
+   * 写入事件会话的 `metadata.agentId`，经 `resolveStreamModelRoute` 的
+   * 「请求显式 > 会话绑定」回退生效——否则 GitHub 事件会话拿不到任何角色提示词
+   * （`route-system-prompt` 落回空占位）。未配置时沿用无角色行为。
+   */
+  agentId?: string;
   agentPromptTemplate: string;
   autoApproveWithoutUserConfirmation: boolean;
 }
@@ -77,7 +85,12 @@ export interface GitHubTrigger {
   register(appConfig: GitHubTriggerConfig): void;
   unregister(repoFullName: string): boolean;
   handleWebhook(req: GitHubWebhookRequest): Promise<GitHubWebhookResult>;
-  listTriggers(ownerUserId?: string): Array<{ repo: string; events: string[] }>;
+  listTriggers(ownerUserId?: string): Array<{
+    /** 该仓库事件绑定的托管 Agent（未配置时不带该键）。 */
+    agentId?: string;
+    events: string[];
+    repo: string;
+  }>;
 }
 
 function extractHeaderString(
@@ -159,12 +172,19 @@ export class GitHubTriggerImpl implements GitHubTrigger {
     return Array.from(this.configs.values()).filter((config) => config.ownerUserId === ownerUserId);
   }
 
-  listTriggers(ownerUserId?: string): Array<{ repo: string; events: string[] }> {
+  listTriggers(ownerUserId?: string): Array<{
+    agentId?: string;
+    events: string[];
+    repo: string;
+  }> {
     return Array.from(this.configs.values())
       .filter((config) => ownerUserId === undefined || config.ownerUserId === ownerUserId)
       .map((config) => ({
         repo: config.repoFullNameOwnerSlashRepo,
         events: config.events,
+        // 回显绑定：设置页据此展示每条触发器当前生效的 Agent（空串视为未绑定，
+        // 与写入侧 buildGitHubSessionMetadata 的判定保持一致）。
+        ...(config.agentId ? { agentId: config.agentId } : {}),
       }));
   }
 

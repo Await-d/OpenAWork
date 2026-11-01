@@ -2343,6 +2343,24 @@ describe('GET /team/runtime', () => {
       claimToken: 'tok-child-pending',
       toSessionId: SESSION_ACTIVE_ID,
     });
+    dbModule.sqliteRun('UPDATE handoff_records SET result_json = ? WHERE id = ?', [
+      JSON.stringify({
+        summary: '已执行检查',
+        checklist: [
+          {
+            id: 'check',
+            status: 'pass',
+            evidence: '检查退出0',
+            verificationRefs: [{ terminalId: 'runtime-pending-check', command: 'bun test' }],
+          },
+        ],
+      }),
+      child.id,
+    ]);
+    dbModule.sqliteRun(
+      `INSERT INTO session_terminals (terminal_id, session_id, user_id, client_request_id, tool_name, kind, command, cwd, status, exit_code, started_at_ms, ended_at_ms, last_activity_ms) VALUES ('runtime-pending-check', ?, ?, ?, 'bash', 'foreground', 'bun test', '/workspace', 'exited', 0, 1, 2, 2)`,
+      [SESSION_ACTIVE_ID, USER_ID, `handoff:${child.id}`],
+    );
     store.completeHandoff({ handoffId: child.id, claimToken: 'tok-child-pending' });
 
     dbModule.sqliteRun(
@@ -2433,6 +2451,24 @@ describe('GET /team/runtime', () => {
       claimToken: 'tok-child-cooling',
       toSessionId: SESSION_ACTIVE_ID,
     });
+    dbModule.sqliteRun('UPDATE handoff_records SET result_json = ? WHERE id = ?', [
+      JSON.stringify({
+        summary: '已执行检查',
+        checklist: [
+          {
+            id: 'check',
+            status: 'pass',
+            evidence: '检查退出0',
+            verificationRefs: [{ terminalId: 'runtime-cooling-check', command: 'bun test' }],
+          },
+        ],
+      }),
+      child.id,
+    ]);
+    dbModule.sqliteRun(
+      `INSERT INTO session_terminals (terminal_id, session_id, user_id, client_request_id, tool_name, kind, command, cwd, status, exit_code, started_at_ms, ended_at_ms, last_activity_ms) VALUES ('runtime-cooling-check', ?, ?, ?, 'bash', 'foreground', 'bun test', '/workspace', 'exited', 0, 1, 2, 2)`,
+      [SESSION_ACTIVE_ID, USER_ID, `handoff:${child.id}`],
+    );
     store.completeHandoff({ handoffId: child.id, claimToken: 'tok-child-cooling' });
 
     const lastAttemptAtMs = Date.now() - 5_000;

@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { exec } from 'node:child_process';
 import { findServerForFile, findServersForFile, ALL_SERVERS, whichSync } from './server.js';
 import { createLSPClient } from './client.js';
 import type {
@@ -10,6 +10,23 @@ import type {
   LSPManagerOptions,
 } from './types.js';
 import type { Diagnostic } from 'vscode-languageserver-types';
+
+/**
+ * 自动安装语言服务的超时（毫秒）与「失败后的冷却」。
+ *
+ * 安装命令形如 `npm install -g typescript-language-server`，是**网络操作**：实测在
+ * 容器里首次执行要 17~33 秒（probe 三次 `npm install` 分别耗时 3s / 32.8s / 17.1s，
+ * 与 `event-loop-lag` 告警的时间戳逐条吻合）。失败（离线 / 代理不可达）时会一直卡到
+ * 超时。因此：
+ *   - 安装期间**绝不能**同步阻塞事件循环（网关是单线程，阻塞期间 SSE 心跳、/status、
+ *     首 token 全部排队，实测一次 32.8 秒）；
+ *   - 同一 server 并发只装一次（两个 npm 同时写全局 node_modules 会互相破坏）；
+ *   - 失败后冷却一段时间，避免每个 LSP 请求都重试一次、把用户反复拖满超时。
+ */
+const INSTALL_TIMEOUT_MS = 120_000;
+const INSTALL_FAILURE_COOLDOWN_MS = 10 * 60 * 1000;
+/** npm 安装输出可能很长（依赖树 + warning），给足缓冲避免回调被截断成 error。 */
+const INSTALL_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 
 const SEVERITY_MAP: Record<number, DiagnosticSummary['severity']> = {
   1: 'error',
@@ -29,6 +46,10 @@ function isBinaryInstalled(binary: string | string[] | undefined): boolean {
 export class LSPManager {
   private clients: LSPClientInfo[] = [];
   private spawning = new Map<string, Promise<LSPClientInfo | undefined>>();
+  /** serverId → 进行中的安装（并发去重，见 `ensureInstalled`）。 */
+  private installs = new Map<string, Promise<boolean>>();
+  /** serverId → 冷却截止时刻：安装失败后短期内不再重试。 */
+  private installCooldownUntil = new Map<string, number>();
   private broken = new Set<string>();
   private servers: LSPServerInfo[];
   private autoInstall: boolean;
@@ -282,6 +303,11 @@ export class LSPManager {
    * Attempt to install a missing LSP server binary.
    * Returns true if the binary is available after the install attempt.
    * Safe to call multiple times — no-op if already installed.
+   *
+   * 安装是**网络操作**（`npm install -g …`，首次实测 17~33 秒），因此这里只做
+   * 「异步 spawn + 并发去重 + 失败冷却」。历史实现用 `execSync`，把整个网关的事件
+   * 循环按住直到 npm 返回——这正是 `event-loop-lag` 里 32.8s / 17.1s 两次阻塞的
+   * 直接原因（同期的 `/root/.npm/_logs` 时间戳与告警逐条对齐）。
    */
   async ensureInstalled(serverId: string): Promise<boolean> {
     const server = this.servers.find((s) => s.id === serverId);
@@ -289,16 +315,53 @@ export class LSPManager {
 
     if (isBinaryInstalled(server.binary)) return true;
 
-    try {
-      execSync(server.installCommand, {
-        stdio: 'pipe',
-        timeout: 120_000,
-      });
-    } catch {
-      return false;
-    }
+    const cooldownUntil = this.installCooldownUntil.get(serverId) ?? 0;
+    if (Date.now() < cooldownUntil) return false;
 
-    return isBinaryInstalled(server.binary);
+    // 同一个 server 的并发安装必须合并：两个 npm 同时写全局 node_modules 会互相
+    // 破坏，最终两边都可能装出不可用的二进制。
+    const pending = this.installs.get(serverId);
+    if (pending) return pending;
+
+    const running = this.runInstall(serverId, server.installCommand, server.binary).finally(
+      () => {
+        this.installs.delete(serverId);
+      },
+    );
+    this.installs.set(serverId, running);
+    return running;
+  }
+
+  /** 执行一次安装并复核结果；失败时开启冷却（见 `INSTALL_FAILURE_COOLDOWN_MS`）。 */
+  private async runInstall(
+    serverId: string,
+    installCommand: string,
+    binary: string | string[],
+  ): Promise<boolean> {
+    const spawned = await new Promise<boolean>((resolve) => {
+      exec(
+        installCommand,
+        {
+          timeout: INSTALL_TIMEOUT_MS,
+          maxBuffer: INSTALL_MAX_BUFFER_BYTES,
+          windowsHide: true,
+        },
+        (error) => {
+          // 安装输出不转发（可能很大且没有诊断价值），只看退出状态。
+          resolve(error === null);
+        },
+      );
+    });
+
+    // 退出码为 0 也可能没装上（命令是 `a || b` 之类）：一律以「二进制是否真的
+    // 出现在 PATH 上」为准，与 `isBinaryInstalled` 的判定口径保持一致。
+    const installed = spawned && isBinaryInstalled(binary);
+    if (!installed) {
+      this.installCooldownUntil.set(serverId, Date.now() + INSTALL_FAILURE_COOLDOWN_MS);
+    } else {
+      this.installCooldownUntil.delete(serverId);
+    }
+    return installed;
   }
 
   /**

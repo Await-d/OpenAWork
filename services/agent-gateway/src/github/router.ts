@@ -58,6 +58,7 @@ interface UserSettingRow {
 const trigger = new GitHubTriggerImpl();
 
 function buildGitHubSessionMetadata(ctx: {
+  agentId?: string | undefined;
   eventType: string;
   repoFullName: string;
   autoApprove: boolean;
@@ -67,6 +68,9 @@ function buildGitHubSessionMetadata(ctx: {
       eventType: ctx.eventType,
       repoFullName: ctx.repoFullName,
     },
+    // 触发器配置的 Agent 落到会话绑定：`resolveStreamModelRoute` 的会话级回退
+    // 会让本会话（含后台续跑/唤醒轮）拿到该 Agent 的角色提示词。
+    ...(ctx.agentId ? { agentId: ctx.agentId } : {}),
     // autoApprove 必须写入会话 metadata 的规范键 `permissionMode`：工具审批的
     // 强制执行只读会话 metadata（tool-sandbox.ensurePermissionForTool →
     // resolveSessionPermissionMode），请求级 yoloMode 仅投影系统提示词、不参与
@@ -249,6 +253,7 @@ trigger.setRouteHandler(async (ctx) => {
       '[]',
       'idle',
       buildGitHubSessionMetadata({
+        ...(config?.agentId ? { agentId: config.agentId } : {}),
         eventType: ctx.eventType,
         repoFullName: ctx.repoFullName,
         autoApprove: ctx.autoApprove,
@@ -297,6 +302,15 @@ const triggerConfigSchema = z.object({
     .min(1),
   branchFilterUndefinedMeansAll: z.array(z.string()).optional(),
   pathFilterUndefinedMeansAll: z.array(z.string()).optional(),
+  // 事件会话绑定的托管 Agent（可选；与会话 metadata 的 `agentId` 同一取值空间）。
+  // 刻意**不设 `.min(1)`**：表单未填写时提交的是空串，若在此拒绝会让「不绑定 Agent」
+  // 这一合法选择保存失败。空串 / 全空格一律归一为 `undefined`（= 不绑定）。
+  agentId: z
+    .string()
+    .trim()
+    .max(120)
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
   agentPromptTemplate: z.string().min(1),
   autoApproveWithoutUserConfirmation: z.boolean().default(false),
 });

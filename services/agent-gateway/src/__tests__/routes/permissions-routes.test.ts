@@ -48,6 +48,7 @@ process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 let authPlugin: typeof AuthModule.default;
 let dbModule: typeof DbModule;
+let permissionsModule: typeof PermissionsRoutesModule;
 let permissionsRoutes: typeof PermissionsRoutesModule.permissionsRoutes;
 let requestWorkflowPlugin: typeof RequestWorkflowModule.default;
 let teamResumeContext: typeof TeamResumeContextModule;
@@ -118,6 +119,15 @@ function seedPermissionRequestRow(input: {
   );
 }
 
+function seedExpiredPermissionRequest(id: string): void {
+  dbModule.sqliteRun(
+    `INSERT INTO permission_requests
+      (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status)
+     VALUES (?, ?, 'bash', 'ls -la', 'reason', 'medium', NULL, '{}', ?, NULL, 'pending')`,
+    [id, SESSION_ID, Date.now() - 1_000],
+  );
+}
+
 function readPermissionRow(id: string): { status: string; decision: string | null } | undefined {
   return dbModule.sqliteGet<{ status: string; decision: string | null }>(
     `SELECT status, decision FROM permission_requests WHERE id = ?`,
@@ -152,7 +162,8 @@ beforeAll(async () => {
   await dbModule.migrate();
   authPlugin = (await import('../../infra/auth.js')).default;
   requestWorkflowPlugin = (await import('../../runtime/request-workflow.js')).default;
-  permissionsRoutes = (await import('../../routes/permissions.js')).permissionsRoutes;
+  permissionsModule = await import('../../routes/permissions.js');
+  permissionsRoutes = permissionsModule.permissionsRoutes;
   teamResumeContext = await import('../../team/team-resume-context.js');
 });
 
@@ -176,6 +187,28 @@ beforeEach(() => {
 
 afterAll(async () => {
   await dbModule.closeDb();
+});
+
+describe('过期收敛（软约束）', () => {
+  it('到期行只作废一次，第二次既不计数也不重复发布事件', () => {
+    seedExpiredPermissionRequest('perm-expired-1');
+    seedExpiredPermissionRequest('perm-expired-2');
+
+    expect(permissionsModule.expirePendingPermissionRequests({ sessionId: SESSION_ID })).toBe(2);
+    expect(repliedRequestIds().sort()).toEqual(['perm-expired-1', 'perm-expired-2']);
+
+    mocks.publishSessionRunEvent.mockReset();
+    expect(permissionsModule.expirePendingPermissionRequests({ sessionId: SESSION_ID })).toBe(0);
+    expect(mocks.publishSessionRunEvent).not.toHaveBeenCalled();
+    expect(readPermissionRow('perm-expired-1')?.status).toBe('rejected');
+  });
+
+  it('没有时限的请求不会被过期收敛动到', () => {
+    seedPendingPermissionRequest('perm-no-deadline');
+
+    expect(permissionsModule.expirePendingPermissionRequests({ sessionId: SESSION_ID })).toBe(0);
+    expect(readPermissionRow('perm-no-deadline')?.status).toBe('pending');
+  });
 });
 
 describe('permissions routes error contracts', () => {

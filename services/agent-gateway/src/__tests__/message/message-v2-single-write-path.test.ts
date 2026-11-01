@@ -241,6 +241,7 @@ vi.mock('../../infra/db.js', () => ({
     return [];
   },
   sqliteTransaction: (fn: () => unknown) => fn(),
+  sqliteAfterCommit: (fn: () => void) => fn(),
 }));
 
 import {

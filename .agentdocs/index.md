@@ -1,5 +1,17 @@
 # OpenAWork Agent Docs 索引
 
+## 进行中的任务
+
+### 🔄 250115-修复设计缺陷优化方案
+
+**状态**: 🟡 **方案制定完成，待批准启动**（2025-01-15）  
+**方案文档**: [workflow/250115-修复设计缺陷优化方案.md](workflow/250115-修复设计缺陷优化方案.md)  
+**概述**: 三阶段修复 11 个设计缺陷（P0: ChatPage 拆分；P1: stream.ts 分层 + 错误处理 + 定时任务 API；P2: 持久化 + 权限 + 并发）  
+**时间估算**: 20 个工程日（4 周）  
+**关键路径**: P0（1 周）→ P1（2 周）→ P2（1 周）  
+
+---
+
 ## 已完成的任务
 
 ### ✅ 261013-opencode-llm 对齐上游 packages/ai - 从 v1 线 packages/llm 追平 v2.0.28（方案 A 全量）
@@ -796,7 +808,73 @@
 
 ## 未完成与近期收口任务
 
+### 261101-记忆确认写入与周期整理
+
+**状态**：已实施并验证（2026-11-01）；**存在登记中的未完成项，未全量收口**，故未归档。
+**方案文档**：[workflow/261101-记忆确认写入与周期整理实施方案.md](workflow/261101-记忆确认写入与周期整理实施方案.md)
+**运行计划**：`.agentdocs/runtime/261101-记忆确认写入与周期整理实施方案/master_plan.md`
+**落地**：`packages/agent-core/src/memory/{types,schema,governance,injector}.ts` 契约；`services/agent-gateway/src/memory/governance/` 8 模块（提议/授权/提交/来源/任务/投递/规则）；`memory/maintenance/` 4 模块（巡检/调度/投递派发/来源冻结）；`infra/db.ts` 作用域化迁移（先回填再换唯一索引）；`routes/memories-proposals.ts` / `memories-rules.ts` 确认与规则路由；`apps/web/src/pages/settings/memory/memory-proposals-panel.tsx` 等待确认界面；`docs/memory/README.md` 用户说明。
+**验证**：网关全量 **715 文件 / 6063 用例（6060 通过 / 3 跳过）、0 失败**；记忆域 165、工具域 753、渠道域 395、团队域 368 全绿；客户端与 Web 定向用例全绿；agent-core / web-client / web / mobile typecheck 0 error；本任务文件 ESLint 0 error。
+**关键修复**：① `migrate()` 旧唯一索引 `IF NOT EXISTS` 会在第二次启动重建并抛 UNIQUE 约束错误导致**网关起不来**（已改「只 DROP 不重建」+ 回归用例）；② 显式来源（api）被临时语义过滤静默丢弃；③ 团队人工写入被误提议化；④ 提交器写死 `source` 逼团队路由绕开提交器直写、丢失审计与回滚（已改为保留调用方来源并切回提交器）。**复查轮另修 6 处**：注入白名单缺省不过滤（越权回归风险）、存储层残留直写旁路与全作用域注入查询、未审计硬删除原语、确认门覆盖载荷结构校验（可写空键记忆）、抑制机制让用户主动来源变成死路、`api` 来源标签错位。
+**未完成（登记，勿读作已完成）**：大模型语义归并（需模型预算与用户开启）、规则文件自动发布（旁路未证明受控 → 保持关闭）、真实渠道 E2E（缺凭据与公开地址）、规则 Web 编辑器、原生移动端批准、强人机认证边界；全量 `preflight` 待干净基线复跑。
+
 > 本节仅保留**真实未完成 / 阻塞 / 在途**任务；已完成条目一律登记于上方「已完成的任务」区与「归档全量索引」（2026-10-09 清理整理完成归位，原「（明细）」章节取消）。
+
+### 🟡 261031-消息渠道 Skill / MCP 对话安装与会话隔离
+
+**状态**：实施中，未归档。2026-11-01 经两轮复核（运行接线 + 代码复查两轴）后撤回“端到端完成”结论并修复 9 项，随后补齐 5 项（pin 刷新回归、持久化回执、会话凭据存储与注入、会话面板与收窄路由、跨进程中断恢复验证），再按复查收口 2 项（探活改为默认实现、回执补偿改按结算时刻），并收口撤权可等待与技能分支端到端。**真实模型端到端已覆盖 MCP 与技能两条链路**（真实模型 → 工具调用 → 提案 → nonce → 探活 / 执行；技能分支含 manifest 取回与注册源鉴权）。**唯一硬阻塞仍为 T-21（需真实渠道凭据与公开确认地址）**。
+**复杂度**：Full orchestration（score 7）。
+**方案文档**：[workflow/261031-消息渠道Skill与MCP对话安装及会话隔离方案.md](workflow/261031-消息渠道Skill与MCP对话安装及会话隔离方案.md)
+**运行计划**：`.agentdocs/runtime/261031-消息渠道Skill与MCP对话安装及会话隔离方案/master_plan.md`
+
+**落地**：新增 `services/agent-gateway/src/session-extension/` 12 模块 + `routes/session-extensions.ts`（迁移新增 5 张表）；`skill_manage` / `mcp_manage_servers` 新增 `scope: 'session'`（缺省语义逐字不变）；`mcp-runtime` 的会话 MCP resolver 与池键会话化；`skill-selection` 叠加会话技能层；web-client 新增会话扩展客户端。
+**四项闭环**：对话入口（提案）→ 会话隔离（独立存储 + 连接隔离）→ 独立审批（不受自动批准/永久授权影响）→ 三阶段编排（提案 ≠ 安装，探活失败不算成功，重启不重放）。
+**安全加固**：祖先链来源解析修复「派子代理绕过渠道限制」；派生子会话收紧为只读 + 不可提案；pin 快照 v2（固定成员 / 固定内容）；会话级 stdio 开关 + 拒绝 OAuth + 不自动重放。
+**2026-11-01 复查修复**：① stdio 最小环境贯通到真实子进程（`inheritEnv` 传至 transport，`packages/mcp-client` 产物已重建），修掉「过滤后的环境又被完整 `process.env` 合并回去」；② 会话 MCP 改用严格 schema，含密 URL（userinfo/query/fragment）、非 http(s) 端点、凭据类或 shell 表达式 `args`、未知嵌套字段在**提案前拒绝且不落库**；③ 未实现的会话凭据存储不再假装可用，`secretRef` 一律拒绝；④ `skill` 工具改用**获批会话快照**渲染正文（不再读用户安装、不再联网重取），撤权或内容变更即拒绝；⑤ `skill_mcp` 按会话快照选 transport，禁止同名用户 MCP 回退，连接键带会话标记；⑥ 撤权/删除接入连接回收（`invalidateSessionExtensionConnections`，复用 `buildSessionMcpKeyMarker`），且 MCP 调用在 connect 完成后、发送前复核当前配置与授权；⑦ 执行前复核当前 owner / 渠道开关 / 审批资格 / 运行策略；⑧ 策略 PATCH 收紧（渠道不得经 PATCH 从 `explicit` 扩到 `inherit`，派生来源拒绝）；⑨ HTTP 确认注入会话探活（fresh connect + listTools），中断恢复移到 migrate 之后，并移除路由注册期的 DB 副作用（避免「先注册后迁移」缺表）。
+**第三轮补齐（2026-11-01）**：① pin 刷新判定提取为纯函数 `shouldRecapturePinnedSnapshot` 并补 4 组边界用例；② 新增 `session_extension_deliveries` 表 + 存储 + 派发器，把渠道结果回推从 fire-and-forget 改为**持久化投递**（入队幂等、租约互斥、指数退避、非渠道会话 skipped 终态、启动补偿限 30 分钟窗口且刻意不含 `expired` 以免重启刷屏）；③ 新增 `session_extension_secrets` 表（复用既有 AES-256-GCM 信封加密）与 owner-only 录入接口，`secretRef` 需「归属 + `secretBinding` 注入点 + 真实存在」三条件，建连时注入 header/env，解析失败抛错（fail-closed），凭据 `updatedAt` 参与连接指纹使轮换即失效；④ 新增 `POST /sessions/:id/extensions/revoke`（**只收窄**：禁用/移除；启用须重新提案）+ 客户端方法与 `SessionExtensionPanelPage`（`/session-extensions/panel`，ProtectedRoute 内）；⑤ 新增跨进程验证 `verify-session-extension-interrupt-recovery.ts`：真实 SIGKILL 命中 `applying` 中途 → 新进程改判 `failed/gateway_restart` **且**补上回执，连跑两次结果一致（`test:session-extension-interrupt`）。
+
+**第四轮（2026-11-01，复查 P-1/P-4 收口）**：① 探活从「路由层记得传的注入点」改为**服务层默认实现**（新模块 `session-extension-probe.ts`），删除 `probe_not_configured` —— 它会把「根本没验过」谎报成「配置已保存但不可用」，实测在真实模型端到端里就把排查方向带偏过。新增直接单测锁定「先作废旧连接、再取目录」的顺序与判定口径；真实模型端到端在**不注入任何端口**的前提下通过。② 启动回执补偿由 `created_at` + 30 分钟改为**结算时刻 `updated_at` + 24 小时**：原实现下（提案 TTL 10 分钟）网关停机超过约 20 分钟，崩溃前那批已结算回执会被静默丢掉。已用「早建晚结算」用例复现——修复前该用例失败（`expected +0 to be 1`），修复后通过。
+
+**第五轮（2026-11-01，复查 P-1/P-4 之外的两项边界收口）**：① **撤权/删除的连接回收改为可等待**：`invalidateSessionExtensionConnections` 与 `revokeSessionSkill` / `revokeSessionMcp` 全部异步化，并沿调用链传播（HTTP 撤权路由、模型工具 `skill_manage` / `mcp_manage_servers` 的 disable/remove、会话删除）——「撤权返回」现在真的等于「连接与子进程已释放」，而不是「正在释放」。新增用例用可等待的假回收证明：回收未完成前 `revoke` 不得返回（fire-and-forget 实现下该用例会失败）。② **端到端补上技能分支**：`test:live-e2e` 现在同时覆盖 MCP 与技能两条链路。技能分支的注册源改指向**本地桩**（`/skills/<id>.json` 只给 `manifestUrl`，manifest 由安装器自己取回），因此整条技能链路可离线用真实模型跑通——此前它因依赖 GitHub 内置源而完全没有真实模型覆盖。
+
+**第八轮（2026-11-01，第三次两轴复查的 4 项修复）**：① **S2 前端抽取**：两个新页面（面板 / 确认）此前各自复制 `Phase` / `STATUS_LABELS` / `formatTime`，并把取数与提交写在页面里，违反 `apps/web/AGENTS.md:78/111/115`。现拆为 `shared/`（展示常量 + 说明卡片）、`hooks/session-extension-hooks.ts`（取数与副作用）、`panel/sections.tsx` 与 `confirm/sections.tsx`（分区渲染），页面只剩组装；顺带修掉面板「未登录」分支永远不可达（会一直停在「正在加载」）。15 例页面测试逐字契约不变。② **S4 删死代码**：`stripSecretFields`、`describeOperationAction`、`makeSessionResourceId`（命名与语义不符：返回裸 `randomUUID()`）与对应的过时注释一并删除；连带清理 3 处失效导入。顺带发现并修掉 `purgeSessionExtensions` **漏删 `session_extension_secrets`** —— 它是「清空本会话扩展」，会话行还在，残留凭据会在重新启用后被继续使用，而用户以为已清掉。③ **P-1 渠道隔离**：渠道开启扩展管理后不再全量继承用户级配置。默认继承模式改为来源感知（渠道 + 开关已开 → `explicit`），且 `ensureSessionExtensionSettings` 建行用同一口径（否则首次提案建出的行会把刚生效的隔离反过来关掉）；个人会话与未开关的渠道仍是历史 `inherit`，用户显式写过的设置行永久优先。④ **P-2 渠道身份**：`origin.ts` 此前只读顶层 `channelId`（无人写入），改从 `channel.id` 兜底读取，`origin.channelId` 与操作记录的 `channel_id` 不再恒空。两条修复各配「旧实现下必失败」的回归（`expected null to be 'plugin-42'`、`expected 'inherit' to be 'explicit'`）。
+
+**第九轮（2026-11-01，补上渠道启用界面）**：规格 `:34` 的另一半「启用界面展示哪些旧能力将不再继承，确认前不切换」此前完全没实现——开关只存在于渠道配置字段层，Web 侧无任何引用。现新增 `ChannelExtensionManagementSection`：点击开启只进入**待确认态**（内部状态），先把「将不再继承」的用户级技能与 MCP 列出来（读 `/settings/mcp-servers` + `/skills/installed`，名称取值容错；读不到就如实说「读不到影响清单」，**不假装没有影响**，也不阻断确认），只有点「确认开启」才写进草稿，取消什么都不改。开关字段贯通 `ChannelSettingsEntry` / `ChannelDraft` / 草稿构建与回填；网关侧无需改动（`channel-config.ts` 的 `??` 合并本来就保留显式 `false`）。
+
+**第十轮（2026-11-01，第四次复查的 4 项修复）**：第四次两轴复查报 12 条，**其中 4 条是我最近两轮引入或遗漏的**：① **建行默认值分叉**——`ensureSessionExtensionSettings` 已用来源感知默认值，但另一处建行点 `bumpRevisionInTransaction` 仍写死 `inherit`，两处都是 `INSERT ... ON CONFLICT DO NOTHING` 先到者决定，渠道会话只要先有一次写入就会把刚生效的 `explicit` 隔离**静默关掉**；② **接口报的策略与运行时相反**——路由用 `settings?.inheritance ?? 'inherit'` 绕过来源感知默认值；而既有用例原先断言的正是这个错误值（等于把缺陷固化成期望），已改为断言有效策略；③ **界面承诺与行为矛盾**——关闭开关写着「恢复继承」，实际关闭只停本能力；改为改文案不改行为（「恢复继承」等于关闭功能顺带把用户级技能/MCP 放给渠道，方向是反的）；④ **渠道发言者身份恒空**——`origin.ts` 读顶层 `channelActorId`，实际写在 `channelActor.userId` 下，`requester_actor_id` 恒 null。另实现规格承诺的条目上限 `SESSION_EXTENSION_MAX_RESOURCES`、删除 4 处死代码（含仅测试引用的重复审批判断，其用例改测生产函数）、派发器统一注入时钟。**两处定性经我核实后更正**：撤权守卫「无生产接点」不成立（生产就地过滤，撤权确实生效，真问题是重复实现+注释分叉）；`purgeSessionExtensions` 是死函数，我上一轮把它说成生产缺陷是错的。
+
+**第十一轮（2026-11-01，S1 真正收口 + 规格同步）**：第十轮对 S1 只改了注释（承认「生产是就地过滤、语义等价」），**没有真正消除重复**——复查揭示那两处 `validateSession` 是**逐字复制的五条件**，而且**已经分叉**：`skill/skill-tools.ts` 检查条目自身 `enabled`，`skill/skill-mcp-tools.ts` **漏查**。本轮新增 `resolveCurrentSessionSkillManifest`（`session-skill-resolution.ts`）作为**唯一决策点**，两个执行入口共用，并直接对它写测试（含「manifest 正文被替换、摘要字段未变也必须拒绝」）；顺带补上内嵌 MCP 入口此前漏查的条目 `enabled`。同时删除三个**生产无调用方**的守卫（`isSessionMcpServerEnabled` / `isSessionSkillUsable` / `isSessionSkillEmbeddedMcpAllowed`）及其用例——保留「只被测试引用」的函数正是上一轮被点名的反模式。规格 §6 的接口清单也已同步（补上实际存在的 `extensions/revoke`、`extension-secrets` PUT/DELETE、`session-extension-admins`，并说明各自为什么必需）。
+
+**第十二轮（2026-11-01，第五次复查的修复，含一条 P1）**：第五次两轴复查报 10 条，核实后全部属实。① **P1：会话条目可占用内置 MCP id 顶替内置端点**——合并层只保护 `virtual`/`adapter` 两类内置，kind 为 `system` 的内置（含 `open_websearch`/`grep_app` 这类远程端点）会被配置**直接顶替**，而 `proposeSessionMcpUpsert` 不校验 id；技能侧有保护、MCP 侧没有，规格 §3:48 明令「模型不得替换内置端点」。现提案阶段拒绝任何内置 id（回归在旧实现下 `expected 'created' to be 'denied'`）。② **P2：确认页看不到端点主机名**——`buildSafePayloadPreview` 没有 `endpointHost`，而确认页读它渲染「端点」行，那行是死代码；已补上（只取 host），回归旧实现下 `expected null to be 'mcp.example.com:8443'`。③ **P2：第十轮我改的文案又指了条走不通的路**——写成「到扩展面板调整」，但渠道会话在面板被禁用、网关对 channel→inherit 直接 403；已改为说明「渠道会话不允许改回继承」。④⑤ 修正 `expireStaleSessionExtensionOperations` 的过时注释、删除 `transport ?? type` 的死分支。Standards 轴另有 5 条判断题（收敛函数 9 处重复、来源判定 4 份、撤权/执行同形双实现、操作投影字段组三处、确认链接跨包手拼两份）**未修**，留待维护性专项。
+
+**第十三轮（2026-11-01，第六次复查：反向审上一轮的修复）**：这轮复查特意先审「第十二轮修得对不对」，结论是 **5 项里 3 项不完整或本身有错**：① **P1：F1 可用空白绕过**——schema 对 `id` 带 `.trim()`，而内置校验用的是未 trim 的原始值，`" open_websearch "` 顺利通过、落库后变成 `open_websearch` 并顶替内置端点（回归旧顺序下 `expected 'created' to be 'denied'`）；已改为**先规范化再判定**，内置校验/上限/displayId 一律用规范化值。② **F2 只做了一半**：新加的详情预览取 `host`，原有提案预览取 `host+pathname`，同字段两口径；已抽 `resolveEndpointHost` 统一。③ **F5 没删净**：仍有两处 `type` 兜底；已删。④ **我上一轮改的注释本身是错的**：写「执行前过期由 CAS 的 `expires_at > now` 保证」，实测 `markApplying`/`settle` 都没有该条件，只有决策阶段有；已按实测改写并写明「TTL 管确认窗口、不管执行窗口」。⑤ **F1 有旁路**：内嵌 MCP 缺内置 id 校验（规格 §3:58 要求同一白名单），已补。**两条被推翻**：确认页预览行不是死代码（`requiresLocalFiles`/`scope`/`effectiveFrom` 确有返回）；`deleteSessionExtensionData` 函数不存在。**已确认但未修的两处行为分叉**（上轮我判轻了）：`origin.source` 四份实现不一致（可见性只读本会话、管理工具走祖先链 → `task` 子会话「可见但必拒」）；9 处收敛函数 trim 语义不一致。
+
+**最新验证（2026-11-01 第十三轮后）**：影响域 **362 文件 / 2954 用例通过**（session-extension / skill / mcp / tools / channels / session / routes，0 失败，3 跳过）；`packages/mcp-client` 8 文件 / 28 用例；确认页 10 例 + 面板 5 例；客户端 6 例；agent-gateway / mcp-client / web-client / web 四端 typecheck 0 error；改动文件 ESLint 0 error；跨进程中断恢复脚本连跑两次一致。证据：`runtime/.../final-gate2.log`、`p1-p4-gate.log`、`final-gate3.log`。
+**真实模型端到端（手工脚本，不进 CI）**：`bun run test:live-e2e`（需 `PROBE_BASE_URL` / `PROBE_KEY` / `PROBE_MODEL`）。
+- MCP 分支：真实模型 → 工具可见性门 → `mcp_manage_servers(scope=session)` → 提案 `pending_approval`（此时会话内无任何 MCP，即「提案 ≠ 安装」）→ 错误 nonce 被拒不消费 → 正确 nonce 确认执行 → 探活真实发起连接并判 `configured_unavailable`（`errorCode: probe_failed`），条目仍保存为启用。
+- 技能分支：真实模型 → `skill_manage(install, scope=session)` → 提案 `pending_approval`（会话内无技能）→ 同样 nonce 流程 → 执行成功（`succeeded`），会话技能落库并启用。注册源为本地桩，全程离线；条目**只给 `manifestUrl`**（不给内联 manifest），因此走的是安装器真实的「取回 manifest」路径，并以桩命中计数断言这一步确实发生过（`manifestFetches: 1`）。安装器没有 tarball/解包步骤——`installer.ts` 的 `parseManifestFromEntry` 与 `verifySignature` 可查。注册源另配 bearer 鉴权，桩记录并断言收到的 `Authorization`（`registryAuth: "Bearer e2e-registry-token"`）——`buildHeaders` 是详情取回中唯一与类型无关的分支，也是唯一可能把凭据发错地方的一步。
+（另更正：`fetchSkillDetailFromSource` **不看 `source.type`**，所有类型共用同一条 HTTP 取回；`LocalInstaller.installFromLocalDir` 在本仓 `services/` / `packages/` / `apps/` 中无调用方，不在本功能路径上。）鉴权三种形态（缺省 / `bearer` / 自定义头）由单元层锁定：`packages/skill-registry/src/client-source-auth.test.ts`（10 例，桩 fetch 断言请求头本身；并断言四种 `type` 取回 URL 相同，把「类型不参与分派」钉成不变量）；该包 7 文件 / 38 用例通过、`bun run build` 0 且 `dist` 无改动。
+**剩余缺口（不隐瞒）**：① **T-21 真实渠道试点与真实浏览器三视口验收未执行**——需要渠道凭据与公开确认地址，本环境不具备；② ~~技能分支没有真实模型端到端~~（第五轮已补：注册源指向本地桩后两分支都跑通）；③ **OAuth 授权事务未绑定会话身份**，会话内仍一律拒绝 OAuth（需 OAuth 的 MCP 走设置页用户级配置）；③b ~~渠道扩展开关没有 Web 启用界面~~（第九轮已补：新增 `ChannelExtensionManagementSection`，开启前先列出将不再继承的用户级技能与 MCP，**确认前不写草稿**）；④ 网关级敏感信息全量扫描未做（只核过已知出口：提案 payload、预览、回执文案、`request_workflow_logs`、审计日志、告警日志；后者已确认不含请求体）；⑤ 渠道面板凭据为会话级明文一次性录入，未做「引用设置页既有凭据」的复用路径；⑥ ~~撤权/删除的连接回收是 fire-and-forget~~（第五轮已改为可等待，撤权返回即已释放）；⑦ 进程级击杀与迟到连接竞态由跨进程脚本 + mock adapter 单测覆盖，不能等同真实平台故障注入。
+**边界**：隔离扩展配置/授权/版本/MCP 客户端与子进程，**不是** OS 沙箱；未配置 `OPENAWORK_PUBLIC_WEB_URL` 时确认回执按设计降级为面板指引；会话内不接受 OAuth（需 OAuth 的 MCP 走设置页用户级配置）；会话级 stdio 默认关闭，用户级 stdio 行为不变。
+
+### 🟡 261029-team-编排精度与协作闭环优化 - 小任务分级 / 任务不丢 / 消息可靠 / 完成可信
+**状态**: **已批准，实施中**（2026-10-29）；首批 T-03/T-06 → T-04 → T-05，其余任务待实施，未宣告全量完成
+**复杂度**: 方案编写 Lightweight（score 2，仅 workflow）；**实施 Full orchestration（score 7）**
+**开始日期**: 2026-10-29（规划）
+**方案文档**: [workflow/261029-team-编排精度与协作闭环优化方案.md](workflow/261029-team-编排精度与协作闭环优化方案.md)
+**运行计划**: `.agentdocs/runtime/261029-team-编排精度与协作闭环优化方案/master_plan.md`（T-03~T-08及T-22已完成；图片进PM1、执行凭证由服务器核验、零凭证阻止完成。网关全量5498测试通过/3跳过，类型/lint通过；通信与深度等仍待实施，基线及真实模型验收未完成）
+
+**目标**: 把 Team 从「固定分层流水线」改为按规模分级、消息可靠、完成可信的编排——小任务走 L1 快车道（不建 PM1/PM2），复杂任务显式依赖 + 真并发门禁 + 有证据的完成判定。
+
+**现状证据（15 项，均已定位到行）**: 小改动仍进完整链（`reception-router.ts:54-81`）· 清洗按路径重复直接丢任务 + 占位标题替换（`artifact-chain.ts:490-514`）· 依赖仅「上一个非并行任务」（`dispatch-package.ts:606-653,808-819`）· 派发上限只截断不续派（`pm2-runner.ts:1062-1077`）· 并发上限计算后未接线（`pm2-runner.ts:1079-1107` + `scheduler.ts:102-131`）· 仅摘要即 `completed/pass`（`execution-result-normalization.ts:16-68`，且被 `submit-execution-summary-normalization.test.ts:71-105` 固化为预期）· 双评审无工具查证（`review-aggregator.ts:79-145`）· `/team/messages` 仅落库（`team-crud.ts:531-559`）· inbound 双写非事务 + 重试跳过再触发（`team-inbound.ts:267-289,314-357`）· 消费先标 consumed 后处理（`inbound-store.ts:405-455`）· 流式控制不消费业务消息（`team-stream-control.ts:110-138`）· 接待附件只发 `{text}`（`team-conversation-view-composer-actions.ts:61-78`）· 选中成员≠收件人（`TeamPageV2.tsx:736-740`）· 成员共享 workingDirectory（`watcher.ts:453-458`）· 规则上下文冻结时点不一致（`workspace-context-snapshot.ts:84-112`）。
+
+**关键决策**: D-1 深度由路由决定、不新增快速模式按钮；D-2 超限先「显式失败 + 未派发清单」，分批续派另立项；D-3 完成证据用 `checklist[].verified` 而非新增 handoff 终态；D-4 `/team/messages` 定位为审计留言板，Agent 通信统一走 inbound + outbox + 租约；D-5 附件扩展 inbound `inputParts`；D-6 本期不做成员 worktree，只做 ownedPaths 冲突提示。
+
+**分阶段路线**: Phase 0 基线与深度文档（T-01…T-02）→ **Phase 1 正确性（T-03…T-08，不可协商先行）** → Phase 2 通信闭环（T-09…T-13，可与 Phase 1 并行）→ Phase 3 深度分级（T-14…T-17）→ Phase 4 埋点与故障注入验收（T-18…T-20）。
+
+**已验证基础**: 2026-10-29 复跑 `reception-router` / `dispatch-package` / `inbound-store` / `submit-execution-summary-normalization` / `task-job-delivery` / `artifact-chain` 共 **6 文件 113 用例全绿** —— 说明 P2/P4/P6 的薄弱行为正是当前测试认可的预期，修契约须同步改断言。
+
+**待评审**: Q1 L1 是否默认带独立 review；Q2 `verified` 覆盖率阈值；Q3 并发闸门放 PM2 还是 watcher 领取处；Q4 `/team/messages` 是否下线模型工具入口。
 
 ### 🟡 260921-opencode-v2能力对齐 - 对照 opencode v2.0.12 补齐工具与设计缺口
 **状态**: 🟢 **Phase 1/2 已交付并验证**（2026-09-21，多并发实施）；**Phase 3（CodeMode）未开始**
@@ -1047,6 +1125,20 @@
 - [261013-opencode-llm对齐packages-ai](workflow/done/261013-opencode-llm对齐packages-ai.md)
 
 ## 项目记忆
+
+### 会话扩展隔离（Skill / MCP 按会话）（2026-10-31）
+
+- **架构决策**：历史语义是「安装归用户、选择归会话」（`installed_skills` 用户级 + `chat_session_skill_overrides` 只做选择），MCP 更是完全没有会话维度（`getConfiguredMcpServersForSession` 直接读 owner 的 `user_settings`）。新增 `session_extension_settings` / `session_skill_installations` / `session_mcp_servers` / `session_extension_admins` / `session_extension_operations` 五张表，把「安装 / 配置」本身下沉到会话。两种继承语义必须区分：`inherit`（老会话默认，沿用用户级）与 `explicit`（只用会话自己的条目，**空集合 = 什么都不继承**，而不是旧实现那种「空白名单 = 不限制」）。用户级 `installed_skills.enabled = 0` 是**硬撤权**，永远优先于会话级启用与 pin 快照。
+- **架构决策（祖先链来源解析）**：任何「这个会话是什么来源、谁能操作它」的判断必须能从**持久化状态**推出，不能只信当前会话 metadata。`task` 派生的子会话（`tools/sandbox/handlers/delegation.ts`）只写 `parentSessionId` + `createdByTool: 'task'`，**不复制** `source: 'channel'`；只查当前会话会让「渠道会话禁用的自助管理工具」通过派个子代理绕过。修法：`session-extension/session-extension-origin.ts` 沿 `metadata.parentSessionId` 与 `team_parent_session_id` 向上遍历（深度上限 8，防环），第一个命中 channel / cron / team 的层决定来源；`originSessionId` 必须取**链尾**，否则 `isDescendantSessionOrigin`（子代理只读 + 不可提案）永远不成立。副作用：`skill-admin-tools` / `mcp-admin-tools` 的入口守卫必须同时跑「当前会话」与「祖先链」两道。
+- **陷阱：会话级 MCP 只改工具列表不隔离进程**——`skill-mcp-connection-pool.ts` 的连接键是 `${userId}:${mcpName}`，只给每个 session 一个 `ToolRegistry` 并不能隔离 MCP 客户端与 stdio 子进程。修法：`ConfiguredMCPServer` 增加 `sessionScope` 标记（在 `sanitizePersistedMcpServers` **之后**注入，不参与持久化 schema），`getMcpPoolKey` 把 owner + sessionId 编进键（逐段 `encodeURIComponent`，避免 id 含冒号时键歧义）；目录缓存键 `${userId}::${poolKey}` 因此自动隔离。回收必须走 `disconnectMatching`（谓词匹配），并**同时清 `pendingConnections`**——否则一个正在建立的连接会在回收完成后写回池子，让已删除的配置复活。
+- **陷阱：`to_timestamp`/`extract(epoch)` 之外的同类问题——审批摘要不能"自比自"**：`applyApprovedSessionExtensionOperation` 最初用「提案里存的 digest」与自身比对，等于没有校验。必须从 payload **重算**摘要再比对（`computeOperationPayloadDigest`），否则 payload 被改写也能通过；补齐了 payload 篡改用例作为回归网。
+- **陷阱：首次写入 + revision CAS 的自锁**——`setSessionExtensionInheritance` 若先 `ensure`（revision 建为 1）再走 CAS（比较 `expectedRevision = 0`），首次合法写入必然 409。修法：无设置行时直接以目标继承模式 INSERT 并返回，不再「先建默认行再 CAS」。
+- **约定：`scope` 缺省必须是历史语义**——`skill_manage` / `mcp_manage_servers` 新增 `scope` 时，缺省值保持 `'user'`，使「渠道会话被拒绝」的既有断言逐字不变；渠道启用是**显式开关**（`channelExtensionManagementEnabled`），避免升级即改变既有渠道行为。
+- **安全边界（不可回退）**：扩展变更的授权门 `session-extension-authorization.ts` 必须独立于普通权限阶梯 —— `yolo` 档位、team 后台成员、渠道 `channel-policy` 自动批准、`ALLOW_BY_DEFAULT`、作用域级永久授权**都不得**成为扩展变更的放行依据（一次「永久允许」不等于「此后可以随便装」）；审批单次消费（条件 UPDATE + `changes === 0`），不接受 `session` / `permanent` / `alwaysOverride`；审批者必须是 owner ∨ owner 管理员清单成员（渠道 senderId 与成员 ACL 不是网关用户身份，不能用来批准）；密钥在提案阶段剥离（`stripSecretFields`），详情/回执只给主机名与「是否已配置凭据」。
+- **架构决策（pin 快照区分「固定成员」与「固定内容」）**：`PinnedSkillsSnapshot` 升级为 v2（`entries` + `schemaVersion`），条目带 `resourceRef` / `contentDigest`。用户级 pin 只固定 skillId（内容随升级漂移，历史语义）；会话级 pin 同时固定内容摘要 —— 会话内重装同名技能会换 digest，此时**不得注入**（否则模型看到的与用户固定的不是同一份）。撤权（`enabled = false`）永远优先于 pin，历史快照不复活已撤销项。注意 `selectPinnedCandidates` 必须**透传**这两个字段，否则快照拿不到内容标识（曾漏过）。
+- **约定：会话级与用户级 MCP 的信任级别不同，收紧策略必须不对称**：`ConfiguredMCPServer.sessionScope` 存在时走「最小环境 + 不自动重放」，用户级保持既有 `createCleanMcpEnvironment` 与 3 次重连。会话内**拒绝 OAuth**（`mcp-oauth-store` 的 state/token 仍是「用户 + server」粒度的，允许会退化成跨会话共享凭据）；stdio 需 `OPENAWORK_SESSION_EXTENSION_ALLOW_STDIO=1`；`secretRef` 必须形如 `session:<会话ID>:<名称>`（`isSessionSecretRefOwnedBySession`）。恢复会话内 OAuth 的正确做法是把 state / grant 纳入 `owner + session + resourceRef + revision`。
+- **陷阱：非幂等工具调用不能靠「重连」兜底**：`skill-mcp-connection-pool.withOperationRetry` 默认 3 次尝试；对写文件 / 发消息 / 下单类 MCP 工具，断线重放会让远端副作用执行两次。会话级调用必须传 `maxAttempts: 1`（只读的 `listTools` 路径保留重试）。
+- **陷阱：确认类页面的测试，auth store mock 相对路径随目录深度变化**：`apps/web` 的页面测试用 `vi.mock('<相对路径>/stores/auth/auth.js', ...)`，路径必须按测试文件所在目录层级写；写错不会报错，只会让页面渲染成未登录态，表现为「断言找不到文案」而非「mock 失败」（`pages/misc/` 用 `../../`，深一层要用同样的 `../../` 指回 `src/stores`）。
 
 ### 插件平台 v2（2026-09-24）
 

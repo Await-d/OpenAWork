@@ -5,7 +5,15 @@ import { validateMemberAclDocumentForSave } from './ChannelMemberAclEditor.js';
 import { ChannelDiagnosticsPanel } from './ChannelDiagnosticsPanel.js';
 import { ChannelPromptInjectionSection } from './ChannelPromptInjectionSection.js';
 import { ChannelQuickLinks } from './ChannelQuickLinks.js';
-import { ChannelSecuritySection } from './ChannelSecuritySection.js';
+import {
+  ChannelSecuritySection,
+  validateReadablePathPrefix,
+  type ChannelDirectoryPickerEntry,
+} from './ChannelSecuritySection.js';
+import {
+  pickDirectory,
+  resolveDirectoryPickerAvailability,
+} from '../../../utils/tauri/pick-directory.js';
 import {
   CATEGORY_LABEL,
   CATEGORY_ORDER,
@@ -47,6 +55,7 @@ import {
   isDraftValid,
   normalizeDraft,
 } from './channel-subscription-draft.js';
+import { ChannelExtensionManagementSection } from './ChannelExtensionManagementSection.js';
 import { logger } from '../../../utils/log/logger.js';
 export type {
   ChannelCapabilityCatalogDraft,
@@ -94,6 +103,7 @@ const EMPTY_DRAFT: ChannelDraft = {
     autoStart: true,
   },
   channelLlmToolsEnabled: false,
+  channelExtensionManagementEnabled: false,
   providerId: null,
   model: null,
   tools: {},
@@ -154,6 +164,7 @@ export function ChannelSubscriptionSettings({
   personas = [],
   capabilityCatalogCounts,
   onResolveCapabilityCatalogCounts,
+  onLoadChannelExtensionImpact,
   onSave,
   onDelete,
   onConnect,
@@ -170,6 +181,7 @@ export function ChannelSubscriptionSettings({
   const [draft, setDraft] = useState<ChannelDraft>(cloneDraft(EMPTY_DRAFT));
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [newReadPath, setNewReadPath] = useState('');
+  const [readPathError, setReadPathError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [weixinQrCodeUrl, setWeixinQrCodeUrl] = useState('');
@@ -390,6 +402,17 @@ export function ChannelSubscriptionSettings({
     }));
   }
 
+  /**
+   * 只有在「确认开启」后才会走到这里（待确认态在
+   * `ChannelExtensionManagementSection` 内部，取消不会调用本函数）。
+   */
+  function updateChannelExtensionManagementEnabled(enabled: boolean): void {
+    setDraft((current) => ({
+      ...current,
+      channelExtensionManagementEnabled: enabled,
+    }));
+  }
+
   function selectPersona(resourceId: string): void {
     const persona = personas.find((item) => item.resourceId === resourceId);
     setDraft((current) => ({
@@ -422,19 +445,71 @@ export function ChannelSubscriptionSettings({
     });
   }
 
-  function addReadablePath(): void {
-    const trimmed = newReadPath.trim();
-    if (!trimmed) {
+  /** 手输与目录选择器共用的入库路径：先校验/归一，再查重，最后写入。 */
+  function commitReadablePath(raw: string): void {
+    const validated = validateReadablePathPrefix(raw);
+    if (!validated.ok) {
+      setReadPathError(validated.reason);
       return;
     }
 
-    if (draft.permissions.readablePathPrefixes.includes(trimmed)) {
-      setNewReadPath('');
+    if (draft.permissions.readablePathPrefixes.includes(validated.value)) {
+      setReadPathError('该路径已在白名单中。');
       return;
     }
 
-    updatePermission('readablePathPrefixes', [...draft.permissions.readablePathPrefixes, trimmed]);
+    updatePermission('readablePathPrefixes', [
+      ...draft.permissions.readablePathPrefixes,
+      validated.value,
+    ]);
     setNewReadPath('');
+    setReadPathError(null);
+  }
+
+  function addReadablePath(): void {
+    commitReadablePath(newReadPath);
+  }
+
+  async function handlePickDirectory(): Promise<void> {
+    try {
+      const picked = await pickDirectory();
+      if (picked === null) {
+        // 用户在系统对话框里取消：保持输入框原样，不报错。
+        return;
+      }
+      commitReadablePath(picked);
+    } catch (error) {
+      setReadPathError(error instanceof Error ? error.message : '打开系统目录选择器失败。');
+    }
+  }
+
+  // 入口形态一次算好：纯 Web 不渲染；桌面端通道未就绪 / 远程网关模式渲染禁用按钮并说明原因。
+  const directoryPickerAvailability = resolveDirectoryPickerAvailability();
+  const directoryPicker: ChannelDirectoryPickerEntry | undefined =
+    directoryPickerAvailability.available
+      ? {
+          kind: 'enabled',
+          onPick: () => {
+            void handlePickDirectory();
+          },
+        }
+      : directoryPickerAvailability.renderEntry
+        ? {
+            kind: 'disabled',
+            reason:
+              directoryPickerAvailability.unavailableReason ?? '当前环境不可用系统目录选择器。',
+          }
+        : undefined;
+
+  /** 历史体检的一键清理：移除所有不是绝对路径的前缀。 */
+  function removeInvalidReadPaths(): void {
+    updatePermission(
+      'readablePathPrefixes',
+      draft.permissions.readablePathPrefixes.filter(
+        (prefix) => validateReadablePathPrefix(prefix).ok,
+      ),
+    );
+    setReadPathError(null);
   }
 
   function handleReadPathKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {
@@ -1116,6 +1191,15 @@ export function ChannelSubscriptionSettings({
                 </div>
               </section>
 
+              <ChannelExtensionManagementSection
+                value={draft.channelExtensionManagementEnabled}
+                disabled={isBusy}
+                {...(onLoadChannelExtensionImpact
+                  ? { loadImpact: onLoadChannelExtensionImpact }
+                  : {})}
+                onChange={updateChannelExtensionManagementEnabled}
+              />
+
               <ChannelPromptInjectionSection
                 channelLlmToolsEnabled={draft.channelLlmToolsEnabled}
                 descriptorTools={activeDescriptor?.tools}
@@ -1134,8 +1218,15 @@ export function ChannelSubscriptionSettings({
               <ChannelSecuritySection
                 permissions={draft.permissions}
                 newReadPath={newReadPath}
-                onNewReadPathChange={setNewReadPath}
+                readPathError={readPathError}
+                onNewReadPathChange={(value) => {
+                  setNewReadPath(value);
+                  // 用户重新输入即清掉上一次的校验提示，避免旧错误一直挂着。
+                  setReadPathError(null);
+                }}
                 onAddReadablePath={addReadablePath}
+                directoryPicker={directoryPicker}
+                onRemoveInvalidReadPaths={removeInvalidReadPaths}
                 onReadPathKeyDown={handleReadPathKeyDown}
                 onBooleanPermissionChange={(key, value) => updatePermission(key, value)}
                 onReadablePathPrefixesChange={(value) =>

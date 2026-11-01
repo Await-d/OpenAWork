@@ -37,12 +37,9 @@ import {
   buildTeamRosterManifest,
   resolveMemberModelForSessionLayer,
 } from '../bus/resolve-member-model.js';
-import {
-  buildDispatchPackages,
-  inferTaskProfile,
-  parseAllTasks,
-} from '../capability/dispatch-package.js';
+import { buildDispatchPackages, parseAllTasks } from '../capability/dispatch-package.js';
 import { setSubstate, SUBSTATES_D } from '../store/substate-store.js';
+import { PlanningFailure } from '../capability/planning-failure.js';
 import { resolveSessionWorkspacePath } from '../../session/session-workspace-resolution.js';
 import { assertCanWriteArtifactPhase } from '../capability/layer-capabilities.js';
 import { recordTeamRuntimeIncident } from '../../team/team-runtime-diagnostics-store.js';
@@ -52,9 +49,6 @@ import {
   validateSpecOutput,
   validateTasksOutput,
 } from '../capability/planning-validation.js';
-
-const MIN_EXECUTOR_PARALLEL = 2;
-const DEFAULT_MAX_EXECUTOR_PARALLEL = 8;
 
 /**
  * 安全地将 PM2 层的消息写入 message_v2，确保 recovery API 能拉取到
@@ -874,6 +868,44 @@ export function createPm2Runner(): HandoffTaskRunner {
           })?.memberSlots
         : undefined);
     const maxDispatchPackages = resolveMaxDispatchPackages();
+    if (maxDispatchPackages > 0 && tasks.length > maxDispatchPackages) {
+      const undispatched = tasks.map((task) => ({ taskId: task.taskId, title: task.title }));
+      const reason = `任务计划共 ${tasks.length} 项，超过派发上限 ${maxDispatchPackages}；本轮未派发任何执行任务，请拆分计划后重试。`;
+      writeArchitectureReviewResult(input.handoff.id, {
+        parsedTaskCount: tasks.length,
+        packageCount: 0,
+        // T-18：派发统计与上限一并落库，超限时「被截断清单」必须可核对。
+        parsedCount: tasks.length,
+        dispatchedCount: 0,
+        cap: maxDispatchPackages,
+        truncated: undispatched.length,
+        undispatched,
+        architectureReview: architectureReviewResult,
+        architectureReviewArtifactId,
+        qualityReviewPending: false,
+      });
+      persistPm2AssistantMessage({
+        userId: input.handoff.userId,
+        sessionId: input.toSessionId,
+        handoffId: input.handoff.id,
+        step: 'dispatch-cap-exceeded',
+        text: `${reason}\n\n未派发任务：\n${undispatched.map((task) => `- ${task.taskId}: ${task.title}`).join('\n')}`,
+      });
+      recordTeamRuntimeIncident({
+        category: 'handoff_failure',
+        code: 'pm2-dispatch-cap-exceeded',
+        context: {
+          handoffId: input.handoff.id,
+          parsedTaskCount: tasks.length,
+          cap: maxDispatchPackages,
+        },
+        message: reason,
+        severity: 'warning',
+        timestamp: Date.now(),
+        userId: input.handoff.userId,
+      });
+      throw new PlanningFailure(reason);
+    }
     const packages = buildDispatchPackages({
       tasks,
       artifactRefs: {
@@ -919,66 +951,6 @@ export function createPm2Runner(): HandoffTaskRunner {
         teamWorkspaceId,
         feedback: granularityFeedback,
         step: 'tasks-too-granular',
-      });
-      return;
-    }
-
-    // 同文件多任务检测：如果多个任务指向同一文件路径，说明拆分过细。
-    // 同一文件的创建、修改应在一个任务中完成。
-    const fileTaskMap = new Map<string, number[]>();
-    for (const [taskIndex, task] of tasks.entries()) {
-      const taskProfile =
-        task.explicitProfile ??
-        inferTaskProfile({
-          title: task.title,
-          context: tasksRow.content,
-          story: task.story,
-        });
-      // reviewer 任务天然要和 executor 共享同一文件范围做审查，
-      // 这不属于“同文件被拆成多个执行任务”的反模式，不应在这里拦截。
-      if (taskProfile.kind === 'review') {
-        continue;
-      }
-      for (const filePath of task.ownedPaths) {
-        if (!fileTaskMap.has(filePath)) {
-          fileTaskMap.set(filePath, []);
-        }
-        fileTaskMap.get(filePath)!.push(taskIndex);
-      }
-    }
-    const duplicateFiles = Array.from(fileTaskMap.entries()).filter(
-      ([, indices]) => indices.length > 1,
-    );
-    if (duplicateFiles.length > 0) {
-      const dupFeedback = [
-        'tasks.md 中存在同一文件被拆成多个任务的情况，任务粒度过细。',
-        '',
-        '同一文件的创建和修改应合并为一个完整任务。例如：',
-        '- ❌ 错误：[apps/web/src/pages/login.tsx] 创建登录页面框架 + [apps/web/src/pages/login.tsx] 添加表单验证 + [apps/web/src/pages/login.tsx] 接入提交接口',
-        '- ✅ 正确：[apps/web/src/pages/login.tsx] 实现完整登录页面 - 包含表单、验证和提交功能',
-        '',
-        '重复文件的任务：',
-        ...duplicateFiles.map(
-          ([filePath, indices]) =>
-            `- ${filePath}：${indices.map((i) => tasks[i]?.taskId ?? `T${i + 1}`).join(', ')} 应合并为一个任务`,
-        ),
-      ].join('\n');
-      persistPm2AssistantMessage({
-        userId: input.handoff.userId,
-        sessionId: input.toSessionId,
-        handoffId: input.handoff.id,
-        step: 'tasks-duplicate-files',
-        text: `⚠️ tasks.md 中 ${duplicateFiles.length} 个文件被拆成多个任务，退回 PM1 重新合并。`,
-      });
-      await createReturnToPm1Handoff({
-        userId: input.handoff.userId,
-        pm2HandoffId: input.handoff.id,
-        pm2SessionId: input.toSessionId,
-        pm1SessionId: input.handoff.fromSessionId,
-        sourceIntent: '',
-        teamWorkspaceId,
-        feedback: dupFeedback,
-        step: 'tasks-duplicate-files',
       });
       return;
     }
@@ -1056,33 +1028,9 @@ export function createPm2Runner(): HandoffTaskRunner {
       });
     }
 
-    // D50 全局并发上限：当解析出的任务数超过派发上限时，buildDispatchPackages
-    // 只保留前 maxDispatchPackages 个（按文档顺序，保留依赖前缀）。这里把截断
-    // 作为一条 runtime incident 留痕，便于运维发现「计划过大被截断」。
-    if (maxDispatchPackages > 0 && tasks.length > packages.length) {
-      recordTeamRuntimeIncident({
-        category: 'handoff_failure',
-        code: 'pm2-dispatch-packages-capped',
-        context: {
-          handoffId: input.handoff.id,
-          parsedTaskCount: tasks.length,
-          dispatchedCount: packages.length,
-          cap: maxDispatchPackages,
-        },
-        message: `tasks.md 解析出 ${tasks.length} 个任务，超过派发上限 ${maxDispatchPackages}，仅派发前 ${packages.length} 个`,
-        severity: 'warning',
-        timestamp: Date.now(),
-        userId: input.handoff.userId,
-      });
-    }
-
-    // 6. D46 动态编制：确保 executor 并行数 ≥ MIN_EXECUTOR_PARALLEL
     const parallelExecutors = packages.filter(
       (p) => p.role === 'executor' && p.taskMarkers.parallel,
     );
-    const _effectiveParallel = Math.max(parallelExecutors.length, MIN_EXECUTOR_PARALLEL);
-    // 上限检查（D50 全局并发上限）
-    const _maxParallel = DEFAULT_MAX_EXECUTOR_PARALLEL;
 
     // 7. 为每个 package 创建 handoff（d→e/f/g）
     const createdHandoffs: HandoffRecord[] = [];
@@ -1129,6 +1077,12 @@ export function createPm2Runner(): HandoffTaskRunner {
       dispatchedHandoffIds: createdHandoffs.map((h) => h.id),
       packageCount: packages.length,
       parallelCount: parallelExecutors.length,
+      // T-18：成功路径也记录「解析数 / 派发数 / 上限」，否则事后无法核对
+      // 计划里的任务是否被上限截断（只在超限时才写会丢掉正常情况的对照）。
+      parsedCount: tasks.length,
+      dispatchedCount: packages.length,
+      cap: maxDispatchPackages,
+      truncated: 0,
       architectureReview: architectureReviewResult,
       architectureReviewArtifactId,
       qualityReviewPending: true,

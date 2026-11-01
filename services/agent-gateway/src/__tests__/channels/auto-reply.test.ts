@@ -270,7 +270,63 @@ describe('AutoReplyPipeline error isolation', () => {
     secondRun.resolve('reply second');
     await Promise.all([first, second]);
 
-    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual(['reply first', 'reply second']);
+    // 第二条消息等待期间会先收到一条「已排队」回执（见下方排队可见性用例）。
+    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual([
+      expect.stringContaining('**消息已排队**'),
+      'reply first',
+      'reply second',
+    ]);
+  });
+
+  it('上一轮未结束时回执排队状态，并在开始执行时记录队列深度与等待时长', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const id = 'tg-queued-feedback';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const firstRun = createDeferred<string>();
+    const onAgentRun = vi.fn(({ message }: { readonly message: string }) => {
+      return message === 'first' ? firstRun.promise : Promise.resolve('reply second');
+    });
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    const first = pipeline.handle(messageEvent(id, 'first'));
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    const second = pipeline.handle(messageEvent(id, 'second'));
+
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith('chat-1', expect.stringContaining('**消息已排队**'));
+    });
+    // 回执只表示「已收下、在排队」，此时第二条仍未开始执行。
+    expect(onAgentRun).toHaveBeenCalledTimes(1);
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining('auto-reply queued behind running session task'),
+      expect.objectContaining({ queuedAhead: 1 }),
+    );
+
+    firstRun.resolve('reply first');
+    await Promise.all([first, second]);
+
+    const queuedRunLog = infoSpy.mock.calls.find((call) => {
+      const details = call[1] as { queuedAhead?: number } | undefined;
+      return (
+        typeof call[0] === 'string' &&
+        call[0].includes('auto-reply agent run started') &&
+        details?.queuedAhead === 1
+      );
+    });
+    expect(queuedRunLog?.[1]).toMatchObject({ queuedAhead: 1 });
+    expect(typeof (queuedRunLog?.[1] as { waitMs?: unknown } | undefined)?.waitMs).toBe('number');
+    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual([
+      expect.stringContaining('**消息已排队**'),
+      'reply first',
+      'reply second',
+    ]);
   });
 
   it('不同通道会话的自动回复保持并发，不被单个会话队列全局阻塞', async () => {

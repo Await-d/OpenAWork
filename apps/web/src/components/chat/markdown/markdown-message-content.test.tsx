@@ -10,9 +10,60 @@ vi.mock('mermaid', () => ({
 }));
 
 import MarkdownMessageContent from './markdown-message-content.js';
+import { FoldDisabledContext } from './fold-policy.js';
 import { OPEN_LINK_PREVIEW_EVENT } from '../../../utils/preview/link-preview.js';
 
 afterEach(cleanup);
+
+describe('代码计算与节点预算', () => {
+  it('禁用折叠时超长围栏仍完整展示，追加内容不丢失', () => {
+    const source = Array.from(
+      { length: 200 },
+      (_, i) => `const value${i} = '${'x'.repeat(80)}';`,
+    ).join('\n');
+    const message = (text: string) => (
+      <FoldDisabledContext value={true}>
+        <MarkdownMessageContent content={`\u0060\u0060\u0060ts\n${text}\n\u0060\u0060\u0060`} />
+      </FoldDisabledContext>
+    );
+    const { container, rerender } = render(message(source));
+    expect(container.querySelector('pre code')?.textContent).toBe(source);
+    expect(screen.queryByTestId('chat-markdown-code-expand')).toBeNull();
+    rerender(message(`${source}\nconst latest = true;`));
+    expect(container.querySelector('pre code')?.textContent).toBe(
+      `${source}\nconst latest = true;`,
+    );
+  });
+
+  it('长围栏折叠只挂载前36行，复制与显式展开保留全文', () => {
+    const source = Array.from({ length: 200 }, (_, i) => `const value${i} = ${i};`).join('\n');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { container } = render(
+      <MarkdownMessageContent content={`\u0060\u0060\u0060ts\n${source}\n\u0060\u0060\u0060`} />,
+    );
+    const code = container.querySelector('pre code');
+    expect(code?.textContent?.split('\n')).toHaveLength(36);
+    expect(code?.querySelector('span')).toBeNull();
+    fireEvent.click(screen.getByTestId('chat-markdown-code-copy'));
+    expect(writeText).toHaveBeenCalledWith(source);
+    fireEvent.click(screen.getByTestId('chat-markdown-code-expand'));
+    expect(container.querySelector('pre code')?.textContent).toBe(source);
+    fireEvent.click(screen.getByTestId('chat-markdown-code-collapse'));
+    expect(container.querySelector('pre code')?.textContent?.split('\n')).toHaveLength(36);
+  });
+
+  it('超长单行不高亮且提供全文展开', () => {
+    const source = `const value = '${'x'.repeat(90_000)}';`;
+    const { container } = render(
+      <MarkdownMessageContent content={`\u0060\u0060\u0060ts\n${source}\n\u0060\u0060\u0060`} />,
+    );
+    expect(container.querySelector('pre code')?.textContent?.length).toBe(12_000);
+    expect(container.querySelector('pre code span')).toBeNull();
+    fireEvent.click(screen.getByTestId('chat-markdown-code-expand'));
+    expect(container.querySelector('pre code')?.textContent).toBe(source);
+  });
+});
 
 describe('MarkdownMessageContent math rendering', () => {
   it('renders the copied bracketed LaTeX answer as display math', async () => {

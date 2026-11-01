@@ -111,8 +111,17 @@ export function MemorySettingsPanel({
           onToggle={() => void updateSettings({ autoExtract: !settings.autoExtract })}
         />
         <ToggleRow
-          title="低置信候选需确认"
-          description="低于自动写入阈值的候选只计入待确认，不直接入库。"
+          title="模型语义整理"
+          description="将当前范围的记忆交给已配置的辅助模型分析，可能产生 API 费用。每人每天最多 3 次；只生成待确认建议，不自动修改记忆。"
+          checked={settings.semanticMaintenance === true}
+          ariaLabel="切换模型语义整理"
+          onToggle={() =>
+            void updateSettings({ semanticMaintenance: !settings.semanticMaintenance })
+          }
+        />
+        <ToggleRow
+          title="保留低置信候选"
+          description="是否将低置信候选也提交审阅。所有候选均须确认，不存在自动写入。"
           checked={settings.reviewLowConfidence}
           ariaLabel="切换低置信候选审阅"
           onToggle={() =>
@@ -145,8 +154,8 @@ export function MemorySettingsPanel({
           onChange={(value) => void updateSettings({ minConfidence: value })}
         />
         <NumberSetting
-          label="自动写入阈值"
-          hint="低于该值的自动候选不会直接入库"
+          label="候选置信度阈值"
+          hint="用于区分候选质量；无论高低均需用户确认"
           min={0}
           max={1}
           step={0.05}

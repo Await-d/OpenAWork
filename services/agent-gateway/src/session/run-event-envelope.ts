@@ -87,6 +87,10 @@ export function deriveRunEventBookend(event: RunEvent): RunEventBookend | undefi
         interactionType: 'question',
         requestId: event.requestId,
       };
+    // 受理确认只走传输层（不落库、不回放），既不代表本轮结束，也不代表交互暂停。
+    // 显式列出以免后人把它读成「漏判的终态」——`default` 之外再写一遍是有意的。
+    case 'run_accepted':
+      return undefined;
     default:
       return undefined;
   }

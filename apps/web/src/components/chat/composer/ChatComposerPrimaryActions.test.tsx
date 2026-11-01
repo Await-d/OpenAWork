@@ -19,6 +19,7 @@ function renderActions(overrides: Partial<ChatComposerPrimaryActionsProps> = {})
     imageGenerationBusy: false,
     canSubmit: true,
     stoppingStream: false,
+    submitPending: false,
     sessionBusyState: null,
     effectiveStopCapability: 'none',
     showStopAction: false,
@@ -69,5 +70,21 @@ describe('ChatComposerPrimaryActions · 发送键启用态', () => {
 
     const button = screen.getByRole('button', { name: /运行中/ });
     expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('提交在途时显示「发送中…」并禁用，避免被误当成没点上而重复点击', () => {
+    const { onSend } = renderActions({ submitPending: true });
+
+    const button = screen.getByRole('button', { name: /发送中/ });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(button);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('提交在途优先于运行态文案', () => {
+    renderActions({ sessionBusyState: 'running', submitPending: true });
+
+    expect(screen.getByRole('button', { name: /发送中/ })).toBeTruthy();
   });
 });

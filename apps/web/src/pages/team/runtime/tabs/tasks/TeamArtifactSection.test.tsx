@@ -461,6 +461,103 @@ describe('TeamArtifactSection', () => {
     expect(wizard.getAttribute('data-constitution-warning-statuses')).toBe('warning,conflict');
   });
 
+  it('展示本次编排深度与被截断的派发清单', () => {
+    sessionHandoffState.bySessionId = new Map([
+      [
+        'session-reception',
+        [{ ...createReceptionToPm1Handoff(), payload: { orchestrationDepth: 'L2' } }],
+      ],
+      [
+        'session-pm1',
+        [
+          {
+            ...createHandoffRecord(),
+            resultJson: {
+              parsedCount: 12,
+              dispatchedCount: 8,
+              cap: 8,
+              truncated: 4,
+              undispatched: [
+                { taskId: 'T009', title: '导出账单' },
+                { taskId: 'T010', title: '对账补偿' },
+              ],
+            },
+          },
+        ],
+      ],
+    ]);
+
+    render(<TeamArtifactSection selectedTeamId="session-reception" />);
+
+    expect(screen.getByText('本次按L2（同模块改动）执行')).toBeTruthy();
+    expect(screen.getByText(/派发统计：解析 12 \/ 派发 8 \/ 上限 8 \/ 被截断 4/)).toBeTruthy();
+    expect(screen.getByText('T009: 导出账单')).toBeTruthy();
+    expect(screen.getByText('T010: 对账补偿')).toBeTruthy();
+  });
+
+  it('聚焦某个 handoff 时显示它自己的统计，并标注来源而不混用最新任务', () => {
+    const olderStats = {
+      ...createHandoffRecord(),
+      id: 'aaaaaaaa-1111-4111-8111-111111111111',
+      updatedAt: '2026-06-03T09:00:00.000Z',
+      resultJson: { parsedCount: 5, dispatchedCount: 5, cap: 8, truncated: 0 },
+    };
+    const newerStats = {
+      ...createHandoffRecord(),
+      id: 'bbbbbbbb-2222-4222-8222-222222222222',
+      updatedAt: '2026-06-03T11:00:00.000Z',
+      resultJson: { parsedCount: 12, dispatchedCount: 8, cap: 8, truncated: 4 },
+    };
+    sessionHandoffState.bySessionId = new Map([['session-pm2', [olderStats, newerStats]]]);
+
+    render(
+      <TeamArtifactSection
+        selectedTeamId="session-pm2"
+        focusHandoffId="aaaaaaaa-1111-4111-8111-111111111111"
+      />,
+    );
+
+    // 聚焦的是较旧那条，就应显示它的解析数，而不是更新的那条
+    expect(screen.getByText(/派发统计：解析 5 \/ 派发 5 \/ 上限 8/)).toBeTruthy();
+    expect(screen.queryByText(/派发统计：解析 12/)).toBeNull();
+  });
+
+  it('聚焦不到对应记录时回退到最新统计，并标注来源 handoff', () => {
+    sessionHandoffState.bySessionId = new Map([
+      [
+        'session-pm2',
+        [
+          {
+            ...createHandoffRecord(),
+            id: 'cccccccc-3333-4333-8333-333333333333',
+            resultJson: { parsedCount: 12, dispatchedCount: 8, cap: 8, truncated: 4 },
+          },
+        ],
+      ],
+    ]);
+
+    render(
+      <TeamArtifactSection
+        selectedTeamId="session-pm2"
+        focusHandoffId="dddddddd-4444-4444-8444-444444444444"
+      />,
+    );
+
+    expect(screen.getByText(/派发统计：解析 12 \/ 派发 8 \/ 上限 8 \/ 被截断 4/)).toBeTruthy();
+    expect(screen.getByText(/来自 handoff #cccccccc/)).toBeTruthy();
+  });
+
+  it('后端未记录深度与派发统计时不渲染该区块，避免展示空数据', () => {
+    sessionHandoffState.bySessionId = new Map([
+      ['session-reception', [createReceptionToPm1Handoff()]],
+    ]);
+
+    render(<TeamArtifactSection selectedTeamId="session-reception" />);
+
+    expect(screen.queryByText(/本次按 L/)).toBeNull();
+    expect(screen.queryByText(/派发统计/)).toBeNull();
+  });
+
   it('聚焦到可恢复失败 handoff 时会展示行级重试按钮，并按 handoffId 触发 remediation', async () => {
     sessionHandoffState.bySessionId = new Map([
       ['session-reviewer', [createReviewerDispatchHandoff()]],

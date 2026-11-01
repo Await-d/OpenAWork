@@ -4,10 +4,14 @@ import {
   validateSpecOutput,
   validateTasksOutput,
 } from '../../handoff/runner/artifact-chain.js';
-import { parseAllTasks, validateParsedTasks } from '../../handoff/capability/dispatch-package.js';
+import {
+  buildDispatchPackages,
+  parseAllTasks,
+  validateParsedTasks,
+} from '../../handoff/capability/dispatch-package.js';
 
 describe('planning contract validators', () => {
-  it('共享校验拒绝同一文件的两个执行任务', () => {
+  it('共享文件的两个任务保留需求，并在派发时串行化', () => {
     const tasks =
       parseAllTasks(`- [ ] T001 [KIND:build] [SURFACE:backend] [src/index.ts] 实现入口 - 服务启动
 **文件**：
@@ -15,7 +19,14 @@ describe('planning contract validators', () => {
 - [ ] T099 [KIND:build] [SURFACE:backend] [src/index.ts] 实现入口 - 服务启动
 **文件**：
 - Modify: \`src/index.ts\``);
-    expect(validateParsedTasks(tasks).join(';')).toContain('应合并为一个任务');
+    expect(validateParsedTasks(tasks)).toEqual([]);
+    const packages = buildDispatchPackages({
+      tasks,
+      artifactRefs: { tasksId: 'shared-file-tasks' },
+      context: '',
+    });
+    expect(packages.map((pkg) => pkg.taskMarkers.taskId)).toEqual(['T001', 'T099']);
+    expect(packages[1]?.dependsOn).toEqual(['T001']);
   });
   it('会拒绝缺少验收覆盖矩阵的 spec', () => {
     const result = validateSpecOutput(

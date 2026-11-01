@@ -43,7 +43,7 @@
  */
 
 html.island-html,
-body.island-body {
+body.island-page-body {
   margin: 0;
   padding: 0;
   width: 100%;
@@ -52,7 +52,7 @@ body.island-body {
   overflow: hidden;
 }
 
-body.island-body #root {
+body.island-page-body #root {
   width: 100%;
   height: 100%;
   background: transparent;
@@ -409,7 +409,7 @@ body.island-body #root {
 }
 
 .island-btn-accent:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: var(--accent-hover, #72e0ce);
 }
 
 /* 底部进度线(展开 + 运行中) */

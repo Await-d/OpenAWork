@@ -95,7 +95,13 @@ export async function readChannelMedia(input: {
     };
   }
 
-  const safePath = assertSessionWorkspacePath({ path: input.filePath, sessionId: input.sessionId });
+  const safePath = assertSessionWorkspacePath({
+    path: input.filePath,
+    sessionId: input.sessionId,
+    // 读媒体文件：声明读语义，渠道的读放宽（allowReadHome / readablePathPrefixes）
+    // 才对渠道出站媒体这一类读取生效。
+    access: 'read',
+  });
   await ensureIgnoreRulesLoadedForPath(safePath);
   if (defaultIgnoreManager.shouldIgnore(safePath)) {
     throw new Error(formatAgentIgnoreDenial('file', safePath));

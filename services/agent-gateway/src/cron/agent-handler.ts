@@ -6,7 +6,12 @@ import { logGatewayWarn } from '../infra/gateway-logger.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
 import type { HandleStreamResult } from '../routes/stream-types.js';
 import { deleteSessionWithMalformedRecovery } from '../session/session-delete-recovery.js';
-import { deliverCronResult, notifyCronJobUnavailable, readCronResultText } from './delivery.js';
+import {
+  deliverCronResult,
+  isChannelBoundJob,
+  notifyCronJobUnavailable,
+  readCronResultText,
+} from './delivery.js';
 import type { CronJobExecutionContext, CronJobRecord } from './types.js';
 
 interface SessionOwnerRow {
@@ -155,6 +160,10 @@ function createCronExecutionSession(job: CronJobRecord): string {
  * 任务每次触发都在执行前抛错并推一条「无法执行」，而它其实完全能跑。
  */
 function assertDeclaredTargetsStillOwned(job: CronJobRecord): void {
+  // 渠道任务不投递到会话（结果由 PluginSendMessage 回发渠道），它的
+  // `delivery_target` 若被历史配置写成了 chatId，在这里校验只会让任务**每次
+  // 触发前**就抛错、连跑都不跑。跳过校验，让执行照常进行。
+  if (isChannelBoundJob(job)) return;
   if (job.delivery_mode !== 'session') return;
   const target = job.delivery_target ?? job.session_id;
   if (target) assertOwnedSession(target, job.user_id);
@@ -341,9 +350,9 @@ export async function runCronAgentJob(
   }
 
   // `none` 模式不投递，不要白读一次执行会话消息（`listSessionMessagesV2` 会
-  // join 最近 3 轮的 parts）；其余模式才需要摘要正文。
+  // join 最近 3 轮的 parts）；渠道任务同理（结果已由 PluginSendMessage 发出）。
   const resultText =
-    job.delivery_mode === 'none'
+    job.delivery_mode === 'none' || isChannelBoundJob(job)
       ? ''
       : readCronResultText({ executionSessionId: sessionId, userId: job.user_id });
 

@@ -50,6 +50,7 @@ describe('executeExtractMediaInfoTool', () => {
     expect(mocks.assertSessionWorkspacePath).toHaveBeenCalledWith({
       path: source,
       sessionId: 'session-1',
+      access: 'read',
     });
     expect(mocks.probeMediaBuffer).toHaveBeenCalledWith(bytes, 'image/png', undefined);
   });
@@ -71,6 +72,7 @@ describe('executeExtractMediaInfoTool', () => {
     expect(mocks.assertSessionWorkspacePath).toHaveBeenCalledWith({
       path: 'sample.png',
       sessionId: 'session-1',
+      access: 'read',
     });
     expect(mocks.probeMediaBuffer).toHaveBeenCalledWith(bytes, 'image/png', undefined);
   });

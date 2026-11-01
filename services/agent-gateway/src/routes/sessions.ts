@@ -1456,6 +1456,9 @@ async function deleteSessionTree(input: {
       // The session row is gone — drop its cached owner so later writes do
       // not resolve a stale user_id through the owner cache.
       invalidateSessionOwnerCache(session.id);
+      const { invalidateSessionExtensionConnections } =
+        await import('../session-extension/session-extension-service.js');
+      await invalidateSessionExtensionConnections(input.userId, session.id);
 
       // 磁盘型产物（artifacts-index.json + 文件）同样不随 FK 级联消失：
       // DB 行删除后它们再无消费者。收集起来，循环结束后一次批量回收——
@@ -2228,6 +2231,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           ? { ...metadataPatch.data, workingDirectory }
           : metadataPatch.data;
       const normalizedMetadata = normalizeIncomingSessionMetadata(mergedMetadata);
+      // `agentId: null` 是「未选择 Agent」的显式表达（客户端取消选择时写 null）。
+      // 创建路径不留 null 脏键：会话级回退只认非空字符串。
+      if (normalizedMetadata.metadata['agentId'] === null) {
+        delete normalizedMetadata.metadata['agentId'];
+      }
       if (normalizedMetadata.workingDirectory === null) {
         const pathStep = child('path-safety');
         pathStep.fail('forbidden path');
@@ -3748,6 +3756,11 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         const isExplicitSshClear =
           Object.hasOwn(metadataPatch.data, 'sshConnectionId') &&
           metadataPatch.data['sshConnectionId'] === null;
+        // 显式传 `agentId: null` 表示清除会话绑定的 Agent（持久化字段一并移除）。
+        // 没有这条清除路径时，客户端「取消选择 Agent」表达不出来，旧绑定会被
+        // `resolveStreamModelRoute` 的会话级回退继续使用。
+        const isExplicitAgentClear =
+          Object.hasOwn(metadataPatch.data, 'agentId') && metadataPatch.data['agentId'] === null;
         const requestedWorkingDirectory = getRequestedWorkingDirectory(metadataPatch.data, {
           sshSession: mergedSshConnectionId !== null,
         });
@@ -3805,6 +3818,9 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         if (isExplicitSshClear) {
           delete normalizedMetadata.metadata['sshConnectionId'];
           pendingSshUnbind = true;
+        }
+        if (isExplicitAgentClear) {
+          delete normalizedMetadata.metadata['agentId'];
         }
 
         nextMetadataJson = JSON.stringify(normalizedMetadata.metadata);

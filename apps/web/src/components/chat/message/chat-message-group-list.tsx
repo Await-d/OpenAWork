@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { SubagentNotice } from '@openAwork/shared';
 import { SubagentNoticeRow } from '@openAwork/shared-ui';
 import type { ChatMessage, ChatUsageDetails } from '../../conversation-runtime/messages/support.js';
@@ -13,6 +13,12 @@ import {
 import MarkdownMessageContent from '../markdown/markdown-message-content.js';
 import { setElementScrollTop } from '../../../utils/dom/scroll.js';
 import { decideTimeDivider } from './time-divider.js';
+import {
+  buildChatVirtualBlocks,
+  ChatVirtualLayout,
+  VIRTUAL_BLOCK_ENTRY_LIMIT,
+  type ChatVirtualBlock,
+} from './chat-virtual-layout.js';
 
 export interface ChatRenderAction {
   id: string;
@@ -140,7 +146,11 @@ export function ChatMessageGroupList({
   scrollRegionRef,
   trailingContent,
 }: ChatMessageGroupListProps) {
-  const shouldVirtualize = groups.length >= VIRTUALIZATION_GROUP_THRESHOLD;
+  const shouldVirtualize =
+    groups.length >= VIRTUALIZATION_GROUP_THRESHOLD ||
+    groups.some(
+      (group) => group.kind === 'messages' && group.entries.length > VIRTUAL_BLOCK_ENTRY_LIMIT,
+    );
   const activePendingPermissions = pendingPermissions?.filter((p) => p.requestId) ?? [];
   const showQuickBar =
     activePendingPermissions.length > 0 && resolveInlinePermissionActions !== undefined;
@@ -248,21 +258,51 @@ function VirtualizedChatGroupViewport({
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_VIEWPORT_HEIGHT);
   const [scrollTop, setScrollTop] = useState(0);
   const [measuredVersion, setMeasuredVersion] = useState(0);
-  // 布局测量缓存。**不得用 useRef 承载**：`layout` / `visibleRange` 两个 useMemo 与
-  // ref 回调工厂都必须在渲染期读取它们，而 React Compiler 一旦见到「渲染期读 ref」
-  // 就放弃优化整个组件（`Cannot access refs during render`）。
-  // `useState` 惰性初始化给出的是一个**身份恒定**的可变容器，读写时机、可变性与原
-  // ref 逐点相同——首渲染同样从空 Map 开始，只是不再经过 `ref.current` 这层被编译器
-  // 拦截的间接寻址。名称也不再以 `Ref` 结尾，否则会被编译器的「ref 按名字推断」
-  // （`enableTreatRefLikeIdentifiersAsRefs`）再次判为渲染期访问 ref。
+  // 测量容器仅在 ref 提交回调、ResizeObserver 或 effect 中写入；渲染期只读。
+  // 新布局和 ref 回调表在 useMemo 内局部分配，不改写已发布的 state 缓存。
   const [groupHeightsCache] = useState(() => new Map<string, number>());
   const [groupSignaturesCache] = useState(() => new Map<string, string>());
   const groupContentMetricsRef = useRef(new Map<string, GroupContentMetrics>());
   const [nodeCache] = useState(() => new Map<string, HTMLDivElement>());
-  const [nodeCallbackCache] = useState(
-    () => new Map<string, (element: HTMLDivElement | null) => void>(),
-  );
   const [resizeObserverCache] = useState(() => new Map<string, ResizeObserver>());
+  const [committedBlocks, setCommittedBlocks] = useState<{
+    groups: ChatRenderGroup[];
+    blocks: ChatVirtualBlock[];
+  } | null>(null);
+  const blocks = useMemo(
+    () =>
+      committedBlocks?.groups === groups
+        ? committedBlocks.blocks
+        : buildChatVirtualBlocks(groups, committedBlocks?.blocks),
+    [groups, committedBlocks],
+  );
+  useEffect(() => {
+    if (committedBlocks?.groups !== groups) setCommittedBlocks({ groups, blocks });
+  }, [groups, blocks, committedBlocks]);
+
+  const { layout, blockExtras } = useMemo(() => {
+    const nextLayout = new ChatVirtualLayout();
+    const extras = new Map<string, number>();
+    nextLayout.reconcile(
+      blocks.map((block) => block.key),
+      (index) => {
+        const { group, key, entryOffset, groupIndex, isLast } = blocks[index]!;
+        const gap = index === blocks.length - 1 ? 0 : isLast ? GROUP_GAP_PX : 6;
+        extras.set(key, gap);
+        return (
+          resolveGroupHeight({
+            estimateHeight:
+              estimateGroupHeight(group) +
+              (entryOffset === 0 && dividerLabels[groupIndex] ? TIME_DIVIDER_HEIGHT_PX : 0),
+            hasObservedNode: nodeCache.has(key),
+            measuredHeight: groupHeightsCache.get(key),
+            signatureMatches: groupSignaturesCache.get(key) === getGroupLayoutSignature(group),
+          }) + gap
+        );
+      },
+    );
+    return { layout: nextLayout, blockExtras: extras };
+  }, [blocks, dividerLabels, nodeCache, groupHeightsCache, groupSignaturesCache]);
 
   useEffect(() => {
     const scrollRegion = scrollRegionRef.current;
@@ -307,6 +347,7 @@ function VirtualizedChatGroupViewport({
         const nextHeight = Math.ceil(entry.contentRect.height);
         if (nextHeight > 0 && groupHeightsCache.get(key) !== nextHeight) {
           groupHeightsCache.set(key, nextHeight);
+          layout.update(key, nextHeight + (blockExtras.get(key) ?? 0));
           changed = true;
         }
       }
@@ -328,41 +369,51 @@ function VirtualizedChatGroupViewport({
       observer.disconnect();
       resizeObserverCache.delete(RESIZE_OBSERVER_SLOT);
     };
-  }, []);
+  }, [layout, blockExtras, groupHeightsCache, resizeObserverCache, nodeCache]);
 
   useEffect(() => {
-    const validKeys = new Set(groups.map((group) => group.key));
+    const validKeys = new Set(blocks.map((block) => block.key));
     let changed = false;
 
-    for (const group of groups) {
+    for (const block of blocks) {
+      const { group, key } = block;
       const signature = getGroupLayoutSignature(group);
       const metrics = readGroupContentMetrics(group);
-      const previousSignature = groupSignaturesCache.get(group.key);
+      const previousSignature = groupSignaturesCache.get(key);
 
       if (previousSignature !== undefined && previousSignature !== signature) {
-        const previousMetrics = groupContentMetricsRef.current.get(group.key);
+        const previousMetrics = groupContentMetricsRef.current.get(key);
         const shrank =
           previousMetrics !== undefined && metrics.contentWeight < previousMetrics.contentWeight;
         const statusChanged =
           previousMetrics !== undefined && metrics.statuses !== previousMetrics.statuses;
 
         // 内容缩水或状态跃迁（流式结束、折叠生效、编辑截断）时旧实测可能偏大，必须丢弃重测；
-        // 仅内容增长时保留旧实测作为下界，供屏幕内的组继续沿用并由 RO 纠正。
-        if (shrank || statusChanged) {
-          groupHeightsCache.delete(group.key);
+        // 仅屏幕内内容增长时保留旧实测并由 RO 纠正；离屏组必须清掉过期实测，
+        // 否则下方签名更新后，下一次布局会误把旧高度当成当前内容的可信实测。
+        if (shrank || statusChanged || !nodeCache.has(key)) {
+          const measured = Math.ceil(nodeCache.get(key)?.getBoundingClientRect().height ?? 0);
+          if (measured > 0) groupHeightsCache.set(key, measured);
+          else groupHeightsCache.delete(key);
+          const divider =
+            block.entryOffset === 0 && dividerLabels[block.groupIndex] ? TIME_DIVIDER_HEIGHT_PX : 0;
+          layout.update(
+            key,
+            (measured || estimateGroupHeight(group) + divider) + (blockExtras.get(key) ?? 0),
+          );
         }
         changed = true;
       }
 
-      groupSignaturesCache.set(group.key, signature);
-      groupContentMetricsRef.current.set(group.key, metrics);
+      groupSignaturesCache.set(key, signature);
+      groupContentMetricsRef.current.set(key, metrics);
     }
 
-    for (const [key, element] of Array.from(nodeCache.entries())) {
+    for (const key of groupSignaturesCache.keys()) {
       if (!validKeys.has(key)) {
-        resizeObserverCache.get(RESIZE_OBSERVER_SLOT)?.unobserve(element);
+        const element = nodeCache.get(key);
+        if (element) resizeObserverCache.get(RESIZE_OBSERVER_SLOT)?.unobserve(element);
         nodeCache.delete(key);
-        nodeCallbackCache.delete(key);
         groupHeightsCache.delete(key);
         groupSignaturesCache.delete(key);
         groupContentMetricsRef.current.delete(key);
@@ -372,94 +423,22 @@ function VirtualizedChatGroupViewport({
     if (changed) {
       setMeasuredVersion((value) => value + 1);
     }
-  }, [groups]);
+  }, [blocks, layout, blockExtras]);
 
-  const measurementVersion = measuredVersion;
-  const layout = useMemo(() => {
-    const offsets: number[] = [];
-    let totalHeight = 0;
+  // 实测只更新对应块的前缀和；滚动时不再遍历全表或解析消息内容。
+  const layoutView = useMemo(() => layout.readView(measuredVersion), [layout, measuredVersion]);
+  const visibleRange = {
+    startIndex: Math.max(0, layoutView.lowerBound(Math.max(0, scrollTop - OVERSCAN_PX)) - 1),
+    endIndex: Math.min(
+      blocks.length,
+      layoutView.lowerBound(scrollTop + viewportHeight + OVERSCAN_PX) + 2,
+    ),
+  };
 
-    void measurementVersion;
-
-    groups.forEach((group, i) => {
-      offsets.push(totalHeight);
-      const dividerExtra = dividerLabels[i] ? TIME_DIVIDER_HEIGHT_PX : 0;
-      const signature = getGroupLayoutSignature(group);
-      const height = resolveGroupHeight({
-        estimateHeight: estimateGroupHeight(group),
-        hasObservedNode: nodeCache.has(group.key),
-        measuredHeight: groupHeightsCache.get(group.key),
-        signatureMatches: groupSignaturesCache.get(group.key) === signature,
-      });
-      totalHeight += height + dividerExtra + GROUP_GAP_PX;
-    });
-
-    return {
-      offsets,
-      totalHeight: totalHeight > 0 ? totalHeight - GROUP_GAP_PX : 0,
-    };
-    // 三个缓存身份恒定（useState 惰性初始化），列进依赖只为让 React Compiler 能保留
-    // 这个手写 useMemo；运行时身份不变，等价于永不额外触发重算。
-  }, [
-    groups,
-    measurementVersion,
-    dividerLabels,
-    groupSignaturesCache,
-    groupHeightsCache,
-    nodeCache,
-  ]);
-
-  const visibleRange = useMemo(() => {
-    const startBoundary = Math.max(0, scrollTop - OVERSCAN_PX);
-    const endBoundary = scrollTop + viewportHeight + OVERSCAN_PX;
-
-    let startIndex = 0;
-    while (startIndex < groups.length) {
-      const key = groups[startIndex]?.key;
-      const group = groups[startIndex];
-      const signature = group ? getGroupLayoutSignature(group) : '';
-      const height = group
-        ? resolveGroupHeight({
-            estimateHeight: estimateGroupHeight(group),
-            hasObservedNode: key !== undefined && nodeCache.has(key),
-            measuredHeight: key === undefined ? undefined : groupHeightsCache.get(key),
-            signatureMatches: key !== undefined && groupSignaturesCache.get(key) === signature,
-          })
-        : 0;
-      if ((layout.offsets[startIndex] ?? 0) + height >= startBoundary) {
-        break;
-      }
-      startIndex += 1;
-    }
-
-    let endIndex = startIndex;
-    while (endIndex < groups.length && (layout.offsets[endIndex] ?? 0) <= endBoundary) {
-      endIndex += 1;
-    }
-
-    return {
-      endIndex: Math.min(groups.length, endIndex + 1),
-      startIndex: Math.max(0, startIndex - 1),
-    };
-  }, [
-    groups,
-    layout.offsets,
-    scrollTop,
-    viewportHeight,
-    // 同 layout：仅为编译器保留手写 memo，运行时身份恒定。
-    groupSignaturesCache,
-    groupHeightsCache,
-    nodeCache,
-  ]);
-
-  const getMeasuredNodeRef = useCallback(
-    (key: string) => {
-      const existing = nodeCallbackCache.get(key);
-      if (existing) {
-        return existing;
-      }
-
-      const callback = (element: HTMLDivElement | null) => {
+  const measuredNodeCallbacks = useMemo(() => {
+    const callbacks = new Map<string, (element: HTMLDivElement | null) => void>();
+    for (const { key } of blocks) {
+      callbacks.set(key, (element: HTMLDivElement | null) => {
         const previousElement = nodeCache.get(key);
         if (previousElement && previousElement !== element) {
           resizeObserverCache.get(RESIZE_OBSERVER_SLOT)?.unobserve(previousElement);
@@ -480,21 +459,17 @@ function VirtualizedChatGroupViewport({
         const measuredHeight = Math.ceil(element.getBoundingClientRect().height);
         if (measuredHeight > 0 && groupHeightsCache.get(key) !== measuredHeight) {
           groupHeightsCache.set(key, measuredHeight);
+          layout.update(key, measuredHeight + (blockExtras.get(key) ?? 0));
           setMeasuredVersion((value) => value + 1);
         }
 
         resizeObserverCache.get(RESIZE_OBSERVER_SLOT)?.observe(element);
-      };
+      });
+    }
+    return callbacks;
+  }, [blocks, nodeCache, groupHeightsCache, resizeObserverCache, layout, blockExtras]);
 
-      nodeCallbackCache.set(key, callback);
-      return callback;
-      // 回调体读的缓存/观察器都是身份恒定的 state 容器，列进依赖只为让编译器
-      // 保留这个手写 useCallback（否则回调每次渲染换身份 → ref 回调反复装卸）。
-    },
-    [nodeCallbackCache, nodeCache, groupHeightsCache, resizeObserverCache],
-  );
-
-  const visibleGroups = groups.slice(visibleRange.startIndex, visibleRange.endIndex);
+  const visibleBlocks = blocks.slice(visibleRange.startIndex, visibleRange.endIndex);
 
   // 一次性「滚动到目标消息」：历史跳转 / 搜索扩窗后，目标组可能仍在挂载窗口
   // 之外（离屏组不渲染节点），调用方的 `scrollIntoView` 会因查不到节点而静默
@@ -508,8 +483,8 @@ function VirtualizedChatGroupViewport({
     const scrollRegion = scrollRegionRef.current;
     if (!scrollRegion || scrollRegion.clientHeight === 0) return;
 
-    const targetIndex = groups.findIndex(
-      (group) =>
+    const targetIndex = blocks.findIndex(
+      ({ group }) =>
         group.kind === 'messages' &&
         group.entries.some((entry) => entry.message.id === request.messageId),
     );
@@ -518,14 +493,16 @@ function VirtualizedChatGroupViewport({
 
     handledMessageScrollNonceRef.current = request.nonce;
 
-    const targetTop = layout.offsets[targetIndex] ?? 0;
-    const targetBottom = layout.offsets[targetIndex + 1] ?? layout.totalHeight;
+    const targetTop = layout.offset(targetIndex);
+    const targetBottom = layout.offset(targetIndex + 1);
     const desiredTop = targetTop + (targetBottom - targetTop) / 2 - scrollRegion.clientHeight / 2;
     const maxTop = Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight);
     // scrollRegion 来自 props 传入的 ref，直接写 scrollTop 会让本组件整体退出
     // React Compiler 优化，故走收敛函数（见 utils/dom/scroll.ts）。
-    setElementScrollTop(scrollRegion, Math.max(0, Math.min(desiredTop, maxTop)));
-  }, [groups, layout, pendingMessageScroll, scrollRegionRef]);
+    const nextTop = Math.max(0, Math.min(desiredTop, maxTop));
+    setElementScrollTop(scrollRegion, nextTop);
+    setScrollTop(nextTop);
+  }, [blocks, layout, pendingMessageScroll, scrollRegionRef]);
 
   return (
     <>
@@ -533,20 +510,21 @@ function VirtualizedChatGroupViewport({
         data-testid="chat-virtualized-group-list"
         style={{
           position: 'relative',
-          minHeight: layout.totalHeight,
+          minHeight: layoutView.totalHeight,
         }}
       >
-        {visibleGroups.map((group, index) => {
+        {visibleBlocks.map((block, index) => {
           const actualIndex = visibleRange.startIndex + index;
+          const { group, key, entryOffset, groupIndex } = block;
 
           return (
             <div
-              key={group.key}
-              data-virtual-group-key={group.key}
-              ref={getMeasuredNodeRef(group.key)}
+              key={key}
+              data-virtual-group-key={key}
+              ref={measuredNodeCallbacks.get(key)}
               style={{
                 position: 'absolute',
-                top: layout.offsets[actualIndex] ?? 0,
+                top: layoutView.offset(actualIndex),
                 left: 0,
                 right: 0,
                 // Do not clip content while heights are still settling.
@@ -563,7 +541,8 @@ function VirtualizedChatGroupViewport({
                 currentUserEmail={currentUserEmail}
                 group={group}
                 providerCatalog={providerCatalog}
-                timeDividerLabel={dividerLabels[actualIndex] ?? null}
+                entryOffset={entryOffset}
+                timeDividerLabel={entryOffset === 0 ? (dividerLabels[groupIndex] ?? null) : null}
                 {...(onOpenSubagentChild ? { onOpenSubagentChild } : {})}
               />
             </div>
@@ -601,7 +580,9 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   onOpenSubagentChild,
   providerCatalog,
   timeDividerLabel,
+  entryOffset = 0,
 }: {
+  entryOffset?: number;
   activeModelId: string;
   activeModelLabel?: string;
   activeProviderId: string;
@@ -665,8 +646,10 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
             modelId={entry.message.model?.trim() || activeModelLabel || activeModelId}
             email={currentUserEmail}
             currentUserDisplayName={currentUserDisplayName}
-            actions={entryIndex === 0 ? (group.actions ?? entry.actions) : entry.actions}
-            groupedWithPrevious={entryIndex > 0}
+            actions={
+              entryOffset + entryIndex === 0 ? (group.actions ?? entry.actions) : entry.actions
+            }
+            groupedWithPrevious={entryOffset + entryIndex > 0}
             identityOverride={entry.identityOverride}
             presentationMode={entry.presentationMode ?? 'chat'}
             renderContent={entry.renderContent}

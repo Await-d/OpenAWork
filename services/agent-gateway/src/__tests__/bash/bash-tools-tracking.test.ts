@@ -87,6 +87,7 @@ describe('runBashCommand with tracking', () => {
     });
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
+    expect(result.terminalId).toBe(row.terminalId);
     expect(row.status).toBe('exited');
     expect(row.exitCode).toBe(0);
     expect(row.toolName).toBe('bash');

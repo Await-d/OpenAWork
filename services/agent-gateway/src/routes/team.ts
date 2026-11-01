@@ -1837,7 +1837,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         | 'handoff_failure'
         | 'latency_violation'
         | 'team_events_connection'
-        | 'team_events_listener',
+        | 'team_events_listener'
+        | 'depth_degraded',
         number
       >
     >(
@@ -1851,6 +1852,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
         latency_violation: 0,
         team_events_connection: 0,
         team_events_listener: 0,
+        depth_degraded: 0,
       },
     );
     const handledPm2ReviewCache = new Map<string, boolean>();
@@ -1938,7 +1940,8 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           | 'handoff_failure'
           | 'latency_violation'
           | 'team_events_connection'
-          | 'team_events_listener',
+          | 'team_events_listener'
+          | 'depth_degraded',
           number
         >
       >(
@@ -1952,6 +1955,7 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           latency_violation: 0,
           team_events_connection: 0,
           team_events_listener: 0,
+          depth_degraded: 0,
         },
       );
     const latency = getAllLatencyStats();
