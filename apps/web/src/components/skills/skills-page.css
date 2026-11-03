@@ -1,0 +1,295 @@
+/**
+ * 技能页（`/skills`）布局样式 —— 方案 B「三栏内联详情」。
+ *
+ * 只放**页面特有**的规则：三栏骨架、列表行的内部结构、内联详情的头部/分区、
+ * 分页条。按钮、输入框、徽章、开关、列容器、元信息表等跨页面复用的部分统一在
+ * `src/styles/console-surfaces.css`（`console-*` 前缀），此处不再重复定义。
+ */
+
+.skills-console {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--spacing-4);
+  color: var(--fg-default);
+}
+
+.skills-workbench {
+  display: grid;
+  /* 与 /agents 同一口径（真机走查 2026-11-03）：右列由 282 收到 264，三栏阈值 1360px；
+     更窄的窗口改用两栏，内联详情反而更宽。 */
+  grid-template-columns: 296px minmax(0, 1fr) 264px;
+  gap: var(--spacing-3);
+  flex: 1;
+  min-height: 0;
+}
+
+/* 左列搜索行：复用 .console-search 的图标与输入框留白，这里只补布局。 */
+.skills-search {
+  flex: none;
+  padding: 0 var(--spacing-3) var(--spacing-2);
+}
+
+/* ── 列表行（列格与内部结构是本页专有，外壳行为来自 .console-row） ── */
+
+.skills-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--spacing-2);
+}
+
+.skills-row__name {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+
+.skills-row__name > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-row__ver {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.skills-row__sub {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+
+.skills-row__src {
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 左列分页 / 视图动作条 ──────────────────────────────────────── */
+
+.skills-pager {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+}
+
+.skills-pager__page {
+  min-width: 26px;
+  padding: 2px var(--spacing-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.skills-pager__page.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+/* ── 中列内联详情 ───────────────────────────────────────────────── */
+
+.skills-detail__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-3);
+  flex-wrap: wrap;
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.skills-detail__title-group {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.skills-detail__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg-strong);
+}
+
+.skills-detail__subtitle {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+}
+
+.skills-detail__badges {
+  display: flex;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  margin-top: var(--spacing-2);
+}
+
+.skills-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+}
+
+.skills-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 var(--spacing-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.skills-tab {
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 100ms ease,
+    border-color 100ms ease;
+}
+
+.skills-tab:hover {
+  color: var(--fg-default);
+}
+
+.skills-tab.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+.skills-doc {
+  display: grid;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3) var(--spacing-4);
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--fg-default);
+}
+
+.skills-doc h3 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--fg-strong);
+}
+
+.skills-doc p {
+  margin: 0;
+}
+
+.skills-doc ul {
+  display: grid;
+  gap: var(--spacing-1);
+  margin: 0;
+  padding-left: var(--spacing-5);
+}
+
+.skills-doc pre {
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--fg-default);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.skills-perm-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-1) 0;
+}
+
+.skills-perm-row + .skills-perm-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.skills-perm-row code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  color: var(--aux);
+}
+
+/* ── 右列内容容器（列外壳来自 .console-col） ────────────────────── */
+
+.skills-meta {
+  display: grid;
+  gap: var(--spacing-4);
+  padding: var(--spacing-3);
+}
+
+/* 已安装视图右列：shared-ui 的注册源面板自带边框，这里只负责给它留出内缩。 */
+.skills-registry-slot {
+  padding: var(--spacing-3);
+}
+
+/* ── 响应式：三栏 → 两栏（右列整行）→ 单栏 ─────────────────────── */
+
+@media (max-width: 1360px) {
+  .skills-console {
+    overflow-y: auto;
+  }
+
+  .skills-workbench {
+    flex: none;
+    grid-template-columns: 288px minmax(0, 1fr);
+  }
+
+  .skills-workbench .console-col {
+    overflow: visible;
+  }
+
+  .skills-workbench .console-col__scroll {
+    max-height: 480px;
+    overflow-y: auto;
+  }
+
+  .console-col--aside {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 980px) {
+  .skills-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .console-col--aside {
+    grid-column: auto;
+  }
+}

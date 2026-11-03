@@ -1,28 +1,40 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createAgentsClient } from '@openAwork/web-client';
-import { formatCanonicalRole } from '@openAwork/shared';
 import type {
   CreateManagedAgentInput,
-  CoreRole,
   ManagedAgentRecord,
-  RolePreset,
   UpdateManagedAgentInput,
 } from '@openAwork/shared';
 import { useAuthStore } from '../../stores/auth/auth.js';
+import { AgentsCatalogPanel } from '../../components/agents/agents-catalog-panel.js';
+import { AgentsEditorPanel } from '../../components/agents/agents-editor-panel.js';
+import { AgentsInspectorPanel } from '../../components/agents/agents-inspector-panel.js';
+import { AgentsPageHeader } from '../../components/agents/agents-page-header.js';
+import { AgentsToolbar } from '../../components/agents/agents-toolbar.js';
 import {
-  AgentsEditorPanel,
-  AgentsFilters,
-  AgentsHero,
-  AgentsListPanel,
-  type AgentEditorState,
-  type AgentStatusFilter,
-  type EditorMode,
+  collectRoleOptions,
+  filterAgents,
+  sortAgents,
+  summarizeAgents,
+} from '../../components/agents/agents-page-data.js';
+import type { AgentsFilterState } from '../../components/agents/agents-page-data.js';
+import {
   emptyEditorState,
-  formatCanonicalRoleZh,
-  localizeAgentDescription,
   parseAliases,
   toEditorState,
-} from '../../components/agents/AgentsPageSections.js';
+} from '../../components/agents/agents-editor-state.js';
+import type { AgentEditorState, EditorMode } from '../../components/agents/agents-editor-state.js';
+import { toBuiltinUpdateInput } from './agents-builtin-update-input.js';
+import '../../styles/console-surfaces.css';
+import '../../components/agents/agents-page.css';
+
+/** 初始筛选条件：全部来源 / 全部角色 / 全部状态 / 空查询。 */
+const INITIAL_FILTER: AgentsFilterState = {
+  query: '',
+  originFilter: 'all',
+  roleFilter: 'all',
+  statusFilter: 'all',
+};
 
 function toCreateInput(state: AgentEditorState): CreateManagedAgentInput {
   return {
@@ -47,37 +59,6 @@ function toCreateInput(state: AgentEditorState): CreateManagedAgentInput {
 
 function toUpdateInput(state: AgentEditorState): UpdateManagedAgentInput {
   return toCreateInput(state);
-}
-
-function toBuiltinUpdateInput(state: AgentEditorState): UpdateManagedAgentInput {
-  return {
-    model: state.model.trim() || undefined,
-    variant: state.variant.trim() || undefined,
-    fallbackModels: parseAliases(state.fallbackModelsText),
-  };
-}
-
-function summarizeAgents(agents: ManagedAgentRecord[]) {
-  return {
-    total: agents.length,
-    enabled: agents.filter((agent) => agent.enabled).length,
-    disabled: agents.filter((agent) => !agent.enabled).length,
-    custom: agents.filter((agent) => agent.origin === 'custom').length,
-  };
-}
-
-function sortAgents(agents: ManagedAgentRecord[]): ManagedAgentRecord[] {
-  return [...agents].sort((left, right) => {
-    const statusDelta = Number(right.enabled) - Number(left.enabled);
-    if (statusDelta !== 0) {
-      return statusDelta;
-    }
-    const originDelta = Number(left.origin === 'builtin') - Number(right.origin === 'builtin');
-    if (originDelta !== 0) {
-      return -originDelta;
-    }
-    return left.label.localeCompare(right.label, 'zh-CN');
-  });
 }
 
 /**
@@ -115,24 +96,11 @@ export default function AgentsPage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>('edit');
   const [editorState, setEditorState] = useState<AgentEditorState>(emptyEditorState());
-  const [query, setQuery] = useState('');
-  const [sourceFilter, setSourceFilter] = useState<'all' | ManagedAgentRecord['source']>('all');
-  const [roleFilter, setRoleFilter] = useState<'all' | CoreRole>('all');
-  const [statusFilter, setStatusFilter] = useState<AgentStatusFilter>('all');
+  const [filter, setFilter] = useState<AgentsFilterState>(INITIAL_FILTER);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [isNarrow, setIsNarrow] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth <= 1080 : false,
-  );
-
-  useEffect(() => {
-    const handler = () => setIsNarrow(window.innerWidth <= 1080);
-    handler();
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
-  }, []);
 
   useEffect(() => {
     if (!accessToken) {
@@ -171,45 +139,7 @@ export default function AgentsPage() {
     };
   }, [accessToken, gatewayUrl]);
 
-  const filteredAgents = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return sortAgents(agents).filter((agent) => {
-      if (sourceFilter !== 'all' && agent.source !== sourceFilter) {
-        return false;
-      }
-      if (roleFilter !== 'all' && agent.canonicalRole?.coreRole !== roleFilter) {
-        return false;
-      }
-      if (statusFilter === 'enabled' && !agent.enabled) {
-        return false;
-      }
-      if (statusFilter === 'disabled' && agent.enabled) {
-        return false;
-      }
-      if (!normalizedQuery) {
-        return true;
-      }
-
-      const haystack = [
-        agent.id,
-        agent.label,
-        agent.description,
-        localizeAgentDescription(agent),
-        agent.canonicalRole ? formatCanonicalRole(agent.canonicalRole) : '',
-        formatCanonicalRoleZh(agent) ?? '',
-        agent.model ?? '',
-        agent.variant ?? '',
-        ...(agent.fallbackModels ?? []),
-        agent.note ?? '',
-        agent.systemPrompt ?? '',
-        ...agent.aliases,
-      ]
-        .join(' ')
-        .toLowerCase();
-
-      return haystack.includes(normalizedQuery);
-    });
-  }, [agents, query, roleFilter, sourceFilter, statusFilter]);
+  const filteredAgents = useMemo(() => filterAgents(agents, filter), [agents, filter]);
 
   useEffect(() => {
     if (editorMode === 'create') {
@@ -237,13 +167,11 @@ export default function AgentsPage() {
   }, [editorMode, selectedAgent]);
 
   const summary = useMemo(() => summarizeAgents(agents), [agents]);
-  const roleOptions = Array.from(
-    new Set(
-      agents
-        .map((agent) => agent.canonicalRole?.coreRole)
-        .filter((role): role is CoreRole => typeof role === 'string'),
-    ),
-  );
+  const roleOptions = useMemo(() => collectRoleOptions(agents), [agents]);
+
+  const handleFilterChange = useCallback((patch: Partial<AgentsFilterState>) => {
+    setFilter((current) => ({ ...current, ...patch }));
+  }, []);
 
   function updateLocalAgent(next: ManagedAgentRecord) {
     setAgents((current) =>
@@ -288,7 +216,7 @@ export default function AgentsPage() {
           accessToken,
           selectedAgent.id,
           selectedAgent.origin === 'builtin'
-            ? toBuiltinUpdateInput(editorState)
+            ? toBuiltinUpdateInput(editorState, selectedAgent)
             : toUpdateInput(editorState),
         );
         updateLocalAgent(updated);
@@ -376,6 +304,11 @@ export default function AgentsPage() {
     });
   }
 
+  function handleResetDraft() {
+    setEditorState(toEditorState(selectedAgent));
+    setSaveMessage(null);
+  }
+
   const canSave =
     editorMode === 'create'
       ? editorState.label.trim().length > 0 && editorState.systemPrompt.trim().length > 0
@@ -384,94 +317,65 @@ export default function AgentsPage() {
         : editorState.label.trim().length > 0 && editorState.systemPrompt.trim().length > 0;
 
   return (
-    <div className="page-root">
-      <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div
-          style={{
-            width: '100%',
-            maxWidth: isNarrow ? '100%' : 1380,
-            margin: '0 auto',
-            display: 'grid',
-            gap: 16,
-            padding: isNarrow ? '0 2px 14px' : '2px 4px 20px',
-          }}
-        >
-          <AgentsHero
-            summary={summary}
-            saving={saving}
-            onCreate={() => {
-              setEditorMode('create');
-              setSelectedAgentId(null);
-            }}
-            onResetAll={() => void handleResetAll()}
-          />
+    <div className="agents-console">
+      <AgentsPageHeader
+        summary={summary}
+        saving={saving}
+        onCreate={() => {
+          setEditorMode('create');
+          setSelectedAgentId(null);
+        }}
+        onResetAll={() => void handleResetAll()}
+      />
 
-          <AgentsFilters
-            isNarrow={isNarrow}
-            query={query}
-            sourceFilter={sourceFilter}
-            roleFilter={roleFilter}
-            statusFilter={statusFilter}
-            roleOptions={roleOptions}
-            onQueryChange={setQuery}
-            onSourceFilterChange={setSourceFilter}
-            onRoleFilterChange={setRoleFilter}
-            onStatusFilterChange={setStatusFilter}
-          />
+      <AgentsToolbar
+        filter={filter}
+        roleOptions={roleOptions}
+        matchCount={filteredAgents.length}
+        totalCount={agents.length}
+        onChange={handleFilterChange}
+      />
 
-          {error && (
-            <section
-              style={{
-                borderRadius: 18,
-                border: '1px solid var(--complement-border)',
-                background: 'var(--complement-muted)',
-                padding: '14px 16px',
-              }}
-            >
-              <div style={{ color: 'var(--complement)', fontSize: 13 }}>{error}</div>
-            </section>
-          )}
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isNarrow ? '1fr' : 'minmax(0, 1.15fr) minmax(340px, 460px)',
-              gap: 16,
-              alignItems: 'start',
-            }}
-          >
-            <AgentsListPanel
-              loading={loading}
-              filteredAgents={filteredAgents}
-              editorMode={editorMode}
-              selectedAgentId={selectedAgentId}
-              saving={saving}
-              onSelect={(agentId) => {
-                setEditorMode('edit');
-                setSelectedAgentId(agentId);
-              }}
-            />
-
-            <AgentsEditorPanel
-              editorMode={editorMode}
-              selectedAgent={selectedAgent}
-              editorState={editorState}
-              setEditorState={setEditorState}
-              canSave={canSave}
-              saving={saving}
-              saveMessage={saveMessage}
-              onCreate={() => void handleCreate()}
-              onCancelCreate={() => {
-                setEditorMode('edit');
-                setEditorState(toEditorState(selectedAgent));
-              }}
-              onSave={() => void handleSave()}
-              onToggleEnabled={() => void handleToggleEnabled()}
-              onResetOne={() => void handleResetOne()}
-              onRemove={() => void handleRemove()}
-            />
-          </div>
+      {error ? (
+        <div className="console-alert" role="alert">
+          {error}
         </div>
+      ) : null}
+
+      <div className="agents-workbench">
+        <AgentsCatalogPanel
+          loading={loading}
+          filteredAgents={filteredAgents}
+          editorMode={editorMode}
+          selectedAgentId={selectedAgentId}
+          saving={saving}
+          onSelect={(agentId) => {
+            setEditorMode('edit');
+            setSelectedAgentId(agentId);
+          }}
+        />
+
+        <AgentsEditorPanel
+          editorMode={editorMode}
+          selectedAgent={selectedAgent}
+          editorState={editorState}
+          setEditorState={setEditorState}
+          canSave={canSave}
+          saving={saving}
+          saveMessage={saveMessage}
+          onCreate={() => void handleCreate()}
+          onCancelCreate={() => {
+            setEditorMode('edit');
+            setEditorState(toEditorState(selectedAgent));
+          }}
+          onResetDraft={handleResetDraft}
+          onSave={() => void handleSave()}
+          onToggleEnabled={() => void handleToggleEnabled()}
+          onResetOne={() => void handleResetOne()}
+          onRemove={() => void handleRemove()}
+        />
+
+        <AgentsInspectorPanel agent={editorMode === 'edit' ? selectedAgent : null} />
       </div>
     </div>
   );

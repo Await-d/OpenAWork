@@ -1,0 +1,685 @@
+/**
+ * 控制台页面共用表面（`/agents`、`/skills` 等主从工作台）。
+ *
+ * 为什么要单独一层：这两个页面都是「标题行 + 工具条 + 多列工作台」，按钮、分段控件、
+ * 输入框、徽章、开关、列容器、行容器、元信息表、空态/提示条等片段**逐字重复**。
+ * 按 `apps/web/AGENTS.md`「在 2 个及以上页面/组件中重复出现的 UI 片段必须提取」，
+ * 统一收到这里，页面各自的 CSS 只保留真正的差异（列宽、行内部结构、专属区块）。
+ *
+ * 约定：
+ *   - 只用 `--bg-*` / `--fg-*` / `--accent-*` 等全局 token，不写死色值；
+ *   - 结构优先靠背景层级 + 间距表达，描边只用 `--border-subtle` / `--border-default`；
+ *   - 间距/圆角走 `--spacing-*` / `--radius-*`（DESIGN 的 4/8/12/16/20/24 阶梯）；
+ *     字号沿用仓库既有惯例（项目未定义字号 token）。
+ */
+
+/* ── 标题行 / 工具条 ────────────────────────────────────────────── */
+
+/** 页面标题行：标题组 + 内联统计 + 全局动作。 */
+.console-head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  flex-wrap: wrap;
+}
+
+.console-title-group {
+  min-width: 0;
+}
+
+.console-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--fg-strong);
+}
+
+.console-subtitle {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+/** 次级说明行：目录行、编辑器头部、元信息共用（等宽 id、来源、时间等）。 */
+.console-subline {
+  overflow: hidden;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-spacer {
+  flex: 1;
+}
+
+.console-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-overlay);
+}
+
+.console-search {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 160px;
+}
+
+.console-search::before {
+  content: '⌕';
+  position: absolute;
+  left: var(--spacing-2);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* 给放大镜图标留位，否则与占位符重叠。 */
+.console-search .console-field {
+  padding-left: var(--spacing-6);
+}
+
+/* ── 内联统计 ───────────────────────────────────────────────────── */
+
+.console-statline {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.console-statline b {
+  color: var(--fg-default);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.console-statline--warn,
+.console-statline--warn b {
+  color: var(--contrast);
+}
+
+.console-statline__sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+/* ── 按钮 / 分段控件 ────────────────────────────────────────────── */
+
+.console-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-default);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 100ms ease,
+    border-color 100ms ease,
+    color 100ms ease;
+}
+
+.console-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-emphasis);
+  color: var(--fg-strong);
+}
+
+.console-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.console-btn--primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--fg-on-accent);
+  font-weight: 700;
+}
+
+.console-btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+  color: var(--fg-on-accent);
+}
+
+.console-btn--danger {
+  border-color: var(--complement-border);
+  background: var(--complement-subtle);
+  color: var(--complement);
+}
+
+.console-btn--danger:hover:not(:disabled) {
+  background: var(--complement-muted);
+  border-color: var(--complement-border);
+  color: var(--complement);
+}
+
+.console-btn--ghost {
+  border-color: transparent;
+  color: var(--fg-muted);
+}
+
+.console-btn--ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: transparent;
+  color: var(--fg-default);
+}
+
+.console-btn--sm {
+  padding: 2px var(--spacing-2);
+  font-size: 11px;
+}
+
+.console-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.console-seg__btn {
+  padding: var(--spacing-1) var(--spacing-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 100ms ease,
+    color 100ms ease;
+}
+
+.console-seg__btn:hover {
+  color: var(--fg-default);
+}
+
+.console-seg__btn.is-active {
+  background: var(--bg-elevated);
+  color: var(--fg-strong);
+}
+
+.console-btn:focus-visible,
+.console-seg__btn:focus-visible,
+.console-row:focus-visible,
+.console-switch:focus-visible,
+.console-field:focus-visible,
+.console-select:focus-visible,
+.console-textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 分段控件里的计数气泡（如「已安装 2」）。 */
+.console-seg__count {
+  margin-left: var(--spacing-2);
+  padding: 1px var(--spacing-2);
+  border-radius: var(--radius-pill);
+  background: var(--contrast-muted);
+  color: var(--contrast);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* ── 输入控件 ───────────────────────────────────────────────────── */
+
+.console-field,
+.console-select,
+.console-textarea {
+  width: 100%;
+  padding: 6px var(--spacing-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  color: var(--fg-strong);
+  font-family: inherit;
+  font-size: 12px;
+  transition:
+    border-color 100ms ease,
+    box-shadow 100ms ease;
+}
+
+.console-field::placeholder,
+.console-textarea::placeholder {
+  color: var(--fg-subtle);
+}
+
+.console-field:hover,
+.console-select:hover,
+.console-textarea:hover {
+  border-color: var(--border-emphasis);
+}
+
+.console-field:focus,
+.console-select:focus,
+.console-textarea:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.console-field:disabled,
+.console-select:disabled,
+.console-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.console-select {
+  appearance: none;
+  padding-right: var(--spacing-6);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%),
+    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) 12px,
+    calc(100% - 8px) 12px;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.console-textarea {
+  min-height: 96px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+/* 按字段用途定高度的三档，避免在 JSX 里写内联 minHeight。 */
+.console-textarea--sm {
+  min-height: 64px;
+}
+
+.console-textarea--md {
+  min-height: 72px;
+}
+
+.console-textarea--lg {
+  min-height: 120px;
+}
+
+.console-label {
+  display: grid;
+  gap: var(--spacing-2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.console-label__hint {
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--fg-subtle);
+}
+
+.console-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--spacing-2);
+}
+
+/* ── 徽章 / 状态点 / 开关 / 头像 ───────────────────────────────── */
+
+.console-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: 1px var(--spacing-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.console-badge--accent {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.console-badge--aux {
+  border-color: var(--aux-border);
+  background: var(--aux-muted);
+  color: var(--aux);
+}
+
+.console-badge--contrast {
+  border-color: var(--contrast-border);
+  background: var(--contrast-muted);
+  color: var(--contrast);
+}
+
+.console-badge--success {
+  border-color: var(--success-border);
+  background: var(--success-muted);
+  color: var(--success);
+}
+
+.console-badge--danger {
+  border-color: var(--complement-border);
+  background: var(--complement-muted);
+  color: var(--complement);
+}
+
+.console-badge--mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 500;
+}
+
+.console-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.console-dot.is-off {
+  background: var(--fg-subtle);
+}
+
+/* 开关尺寸与 shared-ui 的 `InstalledSkillsManager` 保持一致（36×20）。 */
+.console-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--switch-track-off);
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.console-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-sm);
+  transition: left 160ms ease;
+}
+
+.console-switch[aria-checked='true'] {
+  background: var(--accent);
+}
+
+.console-switch[aria-checked='true']::after {
+  left: 18px;
+}
+
+.console-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.console-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.console-avatar--accent {
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-hover) 100%);
+  color: var(--fg-on-accent);
+}
+
+.console-swatch {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-xs);
+}
+
+/* ── 列容器 / 行容器 ───────────────────────────────────────────── */
+
+.console-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-radius: var(--radius-lg);
+  background: var(--bg-overlay);
+  overflow: hidden;
+}
+
+.console-col__head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.console-col__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--fg-default);
+}
+
+.console-col__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 注：`console-col--aside` 是第三列的标记位，样式的实际落点在页面 CSS 的窄屏
+   媒体查询里（窄屏时该列整行下移），此处不重复定义。 */
+
+.console-row {
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.console-row + .console-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.console-row:hover {
+  background: var(--bg-hover);
+}
+
+.console-row.is-active {
+  border-left-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.console-row:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+/* ── 分组 / 元信息 / 提示 ──────────────────────────────────────── */
+
+.console-group {
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+.console-group__head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.console-group__head::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.console-group__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.console-meta {
+  display: grid;
+  gap: 1px;
+  border-radius: var(--radius-md);
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+
+.console-meta__row {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  background: var(--bg-overlay);
+  font-size: 11.5px;
+}
+
+.console-meta__row dt {
+  color: var(--fg-subtle);
+}
+
+.console-meta__row dd {
+  margin: 0;
+  color: var(--fg-default);
+  overflow-wrap: anywhere;
+}
+
+.console-check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+}
+
+.console-check-row b {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+
+.console-tag-row {
+  display: flex;
+  gap: var(--spacing-1);
+  flex-wrap: wrap;
+}
+
+.console-notice {
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--aux-border);
+  border-radius: var(--radius-md);
+  background: var(--aux-subtle);
+  color: var(--fg-default);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.console-danger-zone {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--complement-border);
+  border-radius: var(--radius-md);
+  background: var(--complement-subtle);
+}
+
+.console-danger-zone p {
+  flex: 1 1 200px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+}
+
+.console-save-state {
+  font-size: 11px;
+  color: var(--success);
+}
+
+.console-empty {
+  display: grid;
+  place-items: center;
+  gap: var(--spacing-2);
+  min-height: 160px;
+  padding: var(--spacing-6);
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.console-alert {
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--complement-border);
+  border-radius: var(--radius-md);
+  background: var(--complement-subtle);
+  color: var(--complement);
+  font-size: 11.5px;
+}
+
+/* 直接落在列表滚动区里时的内缩（滚动区自身没有内边距）。 */
+.console-alert--inset {
+  margin: 0 var(--spacing-3) var(--spacing-2);
+}
+
+.console-status {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--accent);
+}

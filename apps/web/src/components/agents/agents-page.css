@@ -1,0 +1,188 @@
+/**
+ * Agent 管理页（`/agents`）布局样式 —— 方案 A「控制台三栏」。
+ *
+ * 只放**页面特有**的规则：三栏骨架、目录行的内部结构、编辑器的头/身/脚。
+ * 按钮、分段控件、输入框、徽章、开关、列容器、元信息表等跨页面复用的部分
+ * 统一在 `src/styles/console-surfaces.css`（`console-*` 前缀），此处不再重复定义。
+ *
+ * 视觉约定（DESIGN.openawork.md）：结构靠 `--bg-*` 层级 + 间距表达，描边只用
+ * `--border-subtle` / `--border-default`；强调色只用于选中态与主 CTA。
+ */
+
+.agents-console {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--spacing-4);
+  color: var(--fg-default);
+}
+
+/* ── 工作台三栏 ─────────────────────────────────────────────────── */
+
+/* 工具条里的下拉宽度（角色名较长，单独给一档）。 */
+.agents-toolbar__role {
+  width: 132px;
+}
+
+.agents-toolbar__status {
+  width: 118px;
+}
+
+.agents-workbench {
+  display: grid;
+  /* 真机走查结论（2026-11-03）：应用侧栏 + 页面内边距约占 385px，三栏同时展开时
+     编辑器只剩「视口 − 945px」。故两侧固定列从 296/292 收到 272/264，并把三栏
+     阈值提到 1360px —— 1280/1200 这类常见窗口改走两栏，编辑器反而有 540px+。 */
+  grid-template-columns: 272px minmax(0, 1fr) 264px;
+  gap: var(--spacing-3);
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 目录行（列格与内部结构是本页专有，外壳行为来自 .console-row） ── */
+
+.agents-row {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  gap: var(--spacing-2);
+  align-items: center;
+}
+
+.agents-row__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agents-row__title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.agents-row__label {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-row__tags {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+
+.agents-row__model {
+  font-size: 10px;
+  color: var(--fg-subtle);
+}
+
+/* ── 编辑器 ─────────────────────────────────────────────────────── */
+
+.agents-editor__head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.agents-editor__name {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--fg-strong);
+}
+
+.agents-editor__body {
+  display: grid;
+  gap: var(--spacing-4);
+  padding: var(--spacing-4);
+}
+
+.agents-editor__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  padding: var(--spacing-2) var(--spacing-4);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+}
+
+/* ── 只读检视 ───────────────────────────────────────────────────── */
+
+.agents-inspector {
+  display: grid;
+  gap: var(--spacing-4);
+  padding: var(--spacing-3);
+}
+
+/* 提示词预览：只读、限高、可滚动，避免长提示词把检视栏撑爆。 */
+.agents-prompt-preview {
+  max-height: 140px;
+  margin: 0;
+  padding: var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--fg-default);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* 覆盖态下并排展示的「系统默认提示词」：降一级亮度，避免与当前生效值抢注意力。 */
+.agents-prompt-preview--muted {
+  color: var(--fg-muted);
+  max-height: 96px;
+}
+
+/* ── 响应式：三栏 → 两栏（检视整行）→ 单栏 ─────────────────────── */
+
+@media (max-width: 1360px) {
+  .agents-console {
+    overflow-y: auto;
+  }
+
+  .agents-workbench {
+    flex: none;
+    grid-template-columns: 264px minmax(0, 1fr);
+  }
+
+  .agents-workbench .console-col {
+    overflow: visible;
+  }
+
+  .agents-workbench .console-col__scroll {
+    max-height: 480px;
+    overflow-y: auto;
+  }
+
+  .console-col--aside {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 980px) {
+  .agents-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .console-col--aside {
+    grid-column: auto;
+  }
+}

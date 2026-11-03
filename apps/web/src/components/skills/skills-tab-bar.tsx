@@ -1,5 +1,3 @@
-import type { CSSProperties } from 'react';
-
 export type SkillsTab = 'market' | 'local' | 'installed';
 
 export interface SkillsTabBarProps {
@@ -14,42 +12,16 @@ const TABS: Array<{ id: SkillsTab; label: string }> = [
   { id: 'installed', label: '已安装' },
 ];
 
-const baseTab: CSSProperties = {
-  background: 'transparent',
-  border: 'none',
-  borderRadius: 6,
-  color: 'var(--fg-muted)',
-  cursor: 'pointer',
-  fontSize: 12,
-  fontWeight: 600,
-  padding: '5px 12px',
-  transition: 'background 100ms ease, color 100ms ease',
-};
-
-const activeTabStyle: CSSProperties = {
-  ...baseTab,
-  background: 'var(--bg-overlay)',
-  boxShadow: 'var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.25))',
-  color: 'var(--fg-strong)',
-};
-
-/** 分段式标签栏（替代旧版「技能工作区」工具条卡）。 */
+/**
+ * 分段式标签栏。方案 B 把它从页面级工具条降级为**左列列表头部的视图切换**，
+ * 因为它切换的正是左列的数据源（市场 / 本地工作区 / 已安装）。
+ *
+ * 控件外观走 `console-surface` 的 `console-seg`（与 Agent 页的来源筛选同源），
+ * 这里不再自带一套内联样式。
+ */
 export function SkillsTabBar({ activeTab, updateCount, onTabChange }: SkillsTabBarProps) {
   return (
-    <div
-      role="tablist"
-      aria-label="技能视图"
-      style={{
-        alignItems: 'center',
-        alignSelf: 'flex-start',
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 8,
-        display: 'inline-flex',
-        gap: 2,
-        padding: 3,
-      }}
-    >
+    <div className="console-seg" role="tablist" aria-label="技能视图">
       {TABS.map((tab) => {
         const active = activeTab === tab.id;
         return (
@@ -58,24 +30,12 @@ export function SkillsTabBar({ activeTab, updateCount, onTabChange }: SkillsTabB
             type="button"
             role="tab"
             aria-selected={active}
+            className={`console-seg__btn${active ? ' is-active' : ''}`}
             onClick={() => onTabChange(tab.id)}
-            style={active ? activeTabStyle : baseTab}
           >
             {tab.label}
             {tab.id === 'installed' && updateCount > 0 ? (
-              <span
-                style={{
-                  background: 'var(--contrast-muted)',
-                  borderRadius: 9999,
-                  color: 'var(--contrast)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  marginLeft: 6,
-                  padding: '1px 6px',
-                }}
-              >
-                {updateCount}
-              </span>
+              <span className="console-seg__count">{updateCount}</span>
             ) : null}
           </button>
         );
