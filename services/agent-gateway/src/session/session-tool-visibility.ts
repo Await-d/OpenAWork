@@ -94,7 +94,12 @@ function readChannelType(metadata: Record<string, unknown>): string | null {
   return typeof channel['type'] === 'string' ? channel['type'] : null;
 }
 
-function resolveChannelToolKey(toolName: string): string | null {
+/**
+ * 模型工具名 → 渠道 `channel.tools` 配置键的映射。
+ *
+ * 导出仅供测试直接断言「规范名与别名解析一致」（G1 回归）；生产使用仍限于本模块。
+ */
+export function resolveChannelToolKey(toolName: string): string | null {
   // Flat MCP tools (PR-C) inherit the legacy `mcp_call` channel/visibility
   // class so per-session toggles for "MCP" continue to apply uniformly,
   // regardless of whether the model called via `mcp_call` or via the
@@ -144,7 +149,12 @@ function resolveChannelToolKey(toolName: string): string | null {
     case 'mcp_list_tools':
     case 'mcp_call':
       return 'mcp';
+    // 委派工具的两个名字同属一个工具：历史别名 `task` 与规范名 `subagent`
+    // （`TASK_TOOL_NAME`；`tool-definitions.ts` 的 `getVisibleToolName` 对
+    // `subagent` 无覆盖 → 模型可见名就是 `subagent`）。只登记别名会让规范名
+    // 落 `default` 返回 null，进而被判不可见。两个名字必须都解析为 `'task'`。
     case 'task':
+    case 'subagent':
       return 'task';
     default:
       return null;
@@ -399,6 +409,9 @@ export function isGatewayToolEnabledForSessionMetadata(
     return isTaskToolEnabledForSessionMetadata(metadata);
   }
 
+  // 兼容分支：`call_omo_agent`（历史名，仍可能出现在存量会话 / 历史 tool_call）与
+  // `Agent`（Claude Code 呈报名）。261102 批次 B 后服务端产出的委派一律是规范名
+  // `subagent`（已由上方 `isTaskToolName` 分支处理），本分支只为存量名保留原语义。
   if (toolName === 'call_omo_agent' || toolName === 'Agent') {
     return isAgentToolEnabledForSessionMetadata(metadata);
   }

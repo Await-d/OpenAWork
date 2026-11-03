@@ -4,6 +4,7 @@ import {
   filterEnabledGatewayToolsForDialogueMode,
   filterEnabledGatewayToolsForSession,
   isGatewayToolEnabledForSessionMetadata,
+  resolveChannelToolKey,
   shouldAutoApproveToolForSessionMetadata,
 } from '../../session/session-tool-visibility.js';
 import { runWithChannelActorPolicy } from '../../channels/channel-actor-scope.js';
@@ -422,9 +423,7 @@ describe('session tool visibility', () => {
     };
 
     expect(isGatewayToolEnabledForSessionMetadata('mcp_call', metadata)).toBe(false);
-    expect(isGatewayToolEnabledForSessionMetadata('mcp__omo__adapter_catalog', metadata)).toBe(
-      false,
-    );
+    expect(isGatewayToolEnabledForSessionMetadata('mcp__lsp__diagnostics', metadata)).toBe(false);
   });
 
   it('Given channel-managed metadata When channel tools are checked Then channel send tools are visible', () => {
@@ -579,9 +578,7 @@ describe('session tool visibility', () => {
     expect(isGatewayToolEnabledForSessionMetadata('bash', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('run_bash_in_background', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('interactive_bash', metadata)).toBe(false);
-    expect(isGatewayToolEnabledForSessionMetadata('mcp__omo__adapter_catalog', metadata)).toBe(
-      false,
-    );
+    expect(isGatewayToolEnabledForSessionMetadata('mcp__lsp__diagnostics', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('task', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('Agent', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('generate_image', metadata)).toBe(false);
@@ -691,6 +688,106 @@ describe('session tool visibility', () => {
 
     expect(isGatewayToolEnabledForSessionMetadata('task', metadata)).toBe(false);
     expect(isGatewayToolEnabledForSessionMetadata('Agent', metadata)).toBe(false);
+  });
+});
+
+/**
+ * G1（261102 修复规范名 subagent 静默漏点）：委派工具的**规范名 `subagent`**
+ * 必须在渠道 `channel.tools` 键解析上与历史别名 `task` **逐字一致**。
+ *
+ * 漏点：`resolveChannelToolKey` 只登记 `case 'task'`，规范名落 `default → null`。
+ * 这些用例以 **`'subagent'` 为入参**（此前所有用例都用字面量 `'task'`，故漏点长期未暴露）。
+ */
+describe('G1：渠道委派工具键解析覆盖规范名 subagent', () => {
+  const channelMetadata = (over: {
+    tools?: Record<string, boolean>;
+    permissions?: Record<string, unknown>;
+  }) => ({
+    source: 'channel',
+    channelLlmToolsEnabled: true,
+    channel: {
+      type: 'telegram',
+      ...(over.tools ? { tools: over.tools } : { tools: {} }),
+      ...(over.permissions ? { permissions: over.permissions } : {}),
+    },
+  });
+
+  type Tri = 'true' | 'false' | 'missing';
+
+  const matrixMetadata = (toolsTask: Tri, allowSubAgents: Tri) => {
+    const tools: Record<string, boolean> = {};
+    if (toolsTask !== 'missing') {
+      tools['task'] = toolsTask === 'true';
+    }
+    const permissions: Record<string, unknown> = {};
+    if (allowSubAgents !== 'missing') {
+      permissions['allowSubAgents'] = allowSubAgents === 'true';
+    }
+    return channelMetadata(
+      Object.keys(permissions).length > 0 ? { tools, permissions } : { tools },
+    );
+  };
+
+  it('resolveChannelToolKey 对 subagent 与 task 解析结果逐字一致（均为 task）', () => {
+    expect(resolveChannelToolKey('task')).toBe('task');
+    expect(resolveChannelToolKey('subagent')).toBe('task');
+    // 反向：未登记的无关工具仍为 null（防止把 default 分支改坏）
+    expect(resolveChannelToolKey('nonexistent_tool')).toBeNull();
+  });
+
+  it('tools.task=true + allowSubAgents=true → subagent 可见（且与 task 一致）', () => {
+    const metadata = channelMetadata({
+      tools: { task: true },
+      permissions: { allowSubAgents: true },
+    });
+    expect(isGatewayToolEnabledForSessionMetadata('subagent', metadata)).toBe(true);
+    expect(isGatewayToolEnabledForSessionMetadata('subagent', metadata)).toBe(
+      isGatewayToolEnabledForSessionMetadata('task', metadata),
+    );
+  });
+
+  it('allowSubAgents=false → subagent 不可见', () => {
+    const metadata = channelMetadata({
+      tools: { task: true },
+      permissions: { allowSubAgents: false },
+    });
+    expect(isGatewayToolEnabledForSessionMetadata('subagent', metadata)).toBe(false);
+  });
+
+  it('allowSubAgents 缺失 → subagent 不可见', () => {
+    const metadata = channelMetadata({ tools: { task: true } });
+    expect(isGatewayToolEnabledForSessionMetadata('subagent', metadata)).toBe(false);
+  });
+
+  it('tools.task 缺失或为 false → subagent 不可见', () => {
+    const missing = channelMetadata({ permissions: { allowSubAgents: true } });
+    expect(isGatewayToolEnabledForSessionMetadata('subagent', missing)).toBe(false);
+
+    const disabled = channelMetadata({
+      tools: { task: false },
+      permissions: { allowSubAgents: true },
+    });
+    expect(isGatewayToolEnabledForSessionMetadata('subagent', disabled)).toBe(false);
+  });
+
+  /**
+   * 不变量（V2 要求）：经**公共入口**，`subagent` 与 `task` 在全部
+   * `channel.tools.task × permissions.allowSubAgents` 组合下**结果始终相同**。
+   *
+   * 这是对"G1 不可达（`:398` 的 `isTaskToolName` 让 `subagent` 走 `'task'` 字面量）"
+   * 这一结论的回归保护：一旦将来有人把 `:295` 的字面量改成传 `toolName`、
+   * 或新增一条把 `subagent` 送进 `resolveChannelToolKey` 的路径，本断言即可暴露差异。
+   */
+  it('公共入口下 subagent 与 task 在全部配置组合下结果一致（不可达性回归保护）', () => {
+    const values: Tri[] = ['true', 'false', 'missing'];
+    for (const toolsTask of values) {
+      for (const allowSubAgents of values) {
+        const metadata = matrixMetadata(toolsTask, allowSubAgents);
+        const subagent = isGatewayToolEnabledForSessionMetadata('subagent', metadata);
+        const task = isGatewayToolEnabledForSessionMetadata('task', metadata);
+        expect(subagent, `tools.task=${toolsTask} allowSubAgents=${allowSubAgents}`).toBe(task);
+      }
+    }
   });
 });
 
