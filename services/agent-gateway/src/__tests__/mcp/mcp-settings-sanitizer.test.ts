@@ -56,48 +56,48 @@ describe('mcp settings sanitizer', () => {
     {
       source: 'user',
       enabled: true,
-      disabledTools: ['omo_list_agents', 'omo_list_agents'],
-      expectedDisabledTools: ['omo_list_agents'],
+      disabledTools: ['lsp_rename', 'lsp_rename'],
+      expectedDisabledTools: ['lsp_rename'],
       expectedSystem: false,
     },
     {
       source: 'plugin',
       enabled: false,
-      disabledTools: ['omo_agent_sessions'],
-      expectedDisabledTools: ['omo_agent_sessions'],
+      disabledTools: ['lsp_diagnostics'],
+      expectedDisabledTools: ['lsp_diagnostics'],
       expectedSystem: false,
     },
     {
       source: 'system',
       enabled: true,
-      disabledTools: ['omo_read_session'],
-      expectedDisabledTools: ['omo_read_session'],
+      disabledTools: ['lsp_hover'],
+      expectedDisabledTools: ['lsp_hover'],
       expectedSystem: true,
     },
   ] as const)(
-    'keeps $source protected OMO trust boundary while stripping fake endpoints',
+    'keeps $source protected virtual trust boundary while stripping fake endpoints',
     ({ source, enabled, disabledTools, expectedDisabledTools, expectedSystem }) => {
       const sanitized = sanitizePersistedMcpServers([
         {
-          id: 'omo',
-          name: `${source}-omo`,
+          id: 'lsp',
+          name: `${source}-lsp`,
           transport: 'stdio',
           source,
-          command: `malicious-${source}-omo-command`,
-          url: `https://fake.invalid/${source}-omo`,
+          command: `malicious-${source}-lsp-command`,
+          url: `https://fake.invalid/${source}-lsp`,
           enabled,
           disabledTools,
         },
       ]);
-      const merged = mergeBuiltinAndConfiguredMcps(sanitized).find((server) => server.id === 'omo');
+      const merged = mergeBuiltinAndConfiguredMcps(sanitized).find((server) => server.id === 'lsp');
 
       expect(sanitized).toEqual([
         {
-          id: 'omo',
-          name: 'omo',
+          id: 'lsp',
+          name: 'lsp',
           transport: 'stdio',
           builtin: true,
-          builtinKind: 'adapter',
+          builtinKind: 'virtual',
           source,
           enabled,
           disabledTools: expectedDisabledTools,
@@ -106,12 +106,34 @@ describe('mcp settings sanitizer', () => {
       expect(sanitized[0]).not.toHaveProperty('command');
       expect(sanitized[0]).not.toHaveProperty('url');
       expect(merged).toMatchObject({
-        id: 'omo',
+        id: 'lsp',
         source,
         enabled,
         disabledTools: expectedDisabledTools,
       });
       expect(merged ? isSystemMcpServer(merged) : null).toBe(expectedSystem);
+    },
+  );
+
+  it.each(['system', 'user'] as const)(
+    'drops retired protected builtin (%s source) instead of re-normalizing it into a spawnable stdio server',
+    (source) => {
+      // D5：`omo` 已下线，其存量配置不能再被归一成 command: 'openawork-virtual-omo'。
+      const sanitized = sanitizePersistedMcpServers([
+        {
+          id: 'omo',
+          name: `${source}-omo`,
+          transport: 'stdio',
+          source,
+          command: 'openawork-virtual-omo',
+          enabled: true,
+        },
+      ]);
+
+      const merged = mergeBuiltinAndConfiguredMcps(sanitized);
+
+      expect(merged.find((server) => server.id === 'omo')).toBeUndefined();
+      expect(merged.filter((server) => server.command === 'openawork-virtual-omo')).toEqual([]);
     },
   );
 

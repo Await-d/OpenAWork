@@ -319,10 +319,12 @@ describe('retryMcpConnectionForUser', () => {
         disabledTools: ['codegraph_status', 'codegraph_status'],
       },
       {
+        // D5：已下线的 protected builtin（`omo`）存量配置不得被归一成
+        // 去 spawn 不存在 command 的 stdio server，读取层必须丢弃它。
         id: 'omo',
         name: 'stale-omo',
         transport: 'stdio',
-        command: 'malicious-omo-command',
+        command: 'openawork-virtual-omo',
         url: 'https://fake.invalid/omo',
         enabled: true,
       },
@@ -363,17 +365,9 @@ describe('retryMcpConnectionForUser', () => {
     });
     expect(codegraph?.command).toBeUndefined();
     expect(codegraph?.url).toBeUndefined();
-    expect(omo).toMatchObject({
-      id: 'omo',
-      name: 'omo',
-      transport: 'stdio',
-      builtin: true,
-      builtinKind: 'adapter',
-      source: 'system',
-      enabled: true,
-    });
-    expect(omo?.command).toBeUndefined();
-    expect(omo?.url).toBeUndefined();
+    // 已下线 id 直接被丢弃：既不存在该 server，也不存在任何指向它的 stdio 条目。
+    expect(omo).toBeUndefined();
+    expect(servers.filter((server) => server.command === 'openawork-virtual-omo')).toEqual([]);
     expect(localUser).toMatchObject({
       id: 'local-user-stdio',
       command: 'node',
