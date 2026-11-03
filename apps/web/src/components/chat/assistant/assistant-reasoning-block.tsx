@@ -1,9 +1,8 @@
 import React, { memo, useEffect, useState } from 'react';
 import { getLocalReasoningLabel } from './assistant-reasoning-block.helpers.js';
 import {
-  computeReasoningBodyMaxHeight,
-  REASONING_COLLAPSED_MAX_LINES,
-  REASONING_EXPANDED_MAX_HEIGHT,
+  createReasoningCollapsedBodyStyle,
+  createReasoningExpandedBodyStyle,
 } from './reasoning-window.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 
@@ -79,30 +78,17 @@ export const AssistantReasoningBlock = memo(function AssistantReasoningBlock({
   const showExpandButton = !expanded && isCollapsible;
   const showCollapseButton = expanded && isCollapsible;
 
-  // 折叠与展开共用同一套「贴底窗口」：`column-reverse` 把内容钉在容器底部，超出部分从
-  // **顶部**裁掉，可见区始终落在最新的若干行上 —— 流式期间新内容自动进入窗口
-  // （无需 JS 跟随滚动 / 无滚动位置跳变），用户手动收起后看到的也是最新思考。
+  // 折叠与展开共用同一套「贴底窗口」（见 `reasoning-window.ts`）：`column-reverse` 把内容
+  // 钉在容器底部，超出部分从**顶部**裁掉，可见区始终落在最新的若干行上 —— 流式期间新内容
+  // 自动进入窗口（无需 JS 跟随滚动 / 无滚动位置跳变），用户手动收起后看到的也是最新思考。
   // 流式与静态共用同一布局，finalize 时不会出现"末 N 行 → 前 N 行"的跳动。
-  // 展开只是把窗口从 `REASONING_COLLAPSED_MAX_LINES` 行放宽到
-  // `REASONING_EXPANDED_MAX_HEIGHT` 并在块内滚动：想回看更早的思考向上滚即可，
-  // 窗口方向不变、内容不会翻回开头。
-  const windowStyle: React.CSSProperties | null = shouldCollapse
-    ? {
-        maxHeight: computeReasoningBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES),
-        overflow: 'clip',
-      }
+  // 展开只是把窗口从折叠态行数放宽到 `REASONING_EXPANDED_MAX_HEIGHT` 并在块内滚动：
+  // 想回看更早的思考向上滚即可，窗口方向不变、内容不会翻回开头。
+  const bodyStyle: React.CSSProperties | undefined = shouldCollapse
+    ? createReasoningCollapsedBodyStyle()
     : expanded && isCollapsible
-      ? { maxHeight: REASONING_EXPANDED_MAX_HEIGHT, overflow: 'auto' }
-      : null;
-
-  const bodyStyle: React.CSSProperties | undefined = windowStyle
-    ? {
-        ...windowStyle,
-        display: 'flex',
-        flexDirection: 'column-reverse',
-        position: 'relative',
-      }
-    : undefined;
+      ? createReasoningExpandedBodyStyle()
+      : undefined;
 
   return (
     <section
