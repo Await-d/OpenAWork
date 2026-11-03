@@ -2,9 +2,58 @@
 
 ## 进行中的任务
 
+### 🟢 261103-消息媒体渲染融合方案 - 消息内媒体渲染收敛为「图片拼贴 + 非图片卡片 + 共享灯箱」（**Phase 1–4 全部交付，仅 1 项登记延后**）
+
+**状态**: **Phase 1（图片拼贴）/ 2（文件卡片）/ 3（媒体卡片收敛）/ 4（灯箱增强）全部交付并验证**（2026-11-03；Full orchestration score **+7**；T-01…T-13 / T-16 / T-18 共 **16 项 ✅**，仅 T-17 媒体加载骨架按裁决延后）。门禁：`apps/web` **316 文件 / 3357 例通过**、`shared-ui` **27 文件 / 255 例通过**、`prettier` 全过、ESLint 与 web `lint`（React Compiler）exit 0、**两侧 `tsc` 均 0 错误**；**未执行 shared-ui build**（已证 desktop/web 均走源码 alias）。设计原型 `docs/media-render-demo/` 已交付并获用户确认方向（用户对 A/B/C 三方案「都喜欢」→ 采用融合路线，不三选一）。
+**已落地**: ① **图片拼贴**：新增 `gallery-layout.ts` 纯函数（1 张 `contain` 16:10 / 2 张等宽 / 3 张 1 大 2 小 / 4 张 2×2 / 5–9 张 3 列 / **>9 张折叠为前 8 张 + `+N`**），图集改布局表驱动 + `data-*` 落 CSS；② **文件卡片**：`- <name> (artifact:<id>)` 从正文还原为卡片（以 **`[附件]` 段**为界解析，段外不误判、解析失败返回原文），新增 `media-file-badge.ts` 自绘扩展名徽章；③ **媒体卡片收敛**：`MediaReferenceCard` 按扩展名分流（音视频→播放器 / 其余→文件卡片），含「非媒体不取流 / 取流中占位 / 失败回落卡片」三条降级；`AudioPlayer` **删掉 32 根 `Math.sin` 假波形**、`VideoPlayer` **新增进度条**，两侧同构（`role="slider"` + aria + 指针四事件 + `touch-action: none` + 键盘 ←→/Home/End + 共用 `seekFromClientX`）；④ **灯箱**：底部缩略图条 + 键盘提示浮层。
+**并行执行（本轮实证）**: **团队成员可真实写码**（先前「subagent 只读」的判断被证伪）。两名成员并行改 `AudioPlayer` / `VideoPlayer`（互不重叠），协调者同时改 `apps/web` 侧卡片与 mock 桶转发。
+**并行纪律（两条实证教训）**: ① **同一文件的多处编辑必须串行** —— 曾并行发「加 import」+「改函数体」导致后者基于旧快照覆盖前者，症状是「测试失败但不报错」；② **`index.md` 等共享文件会被并行工作流用旧快照覆盖** —— 本条目的上一版更新就因此丢失，改完需复核（同 E-02 的 `UpdateBanner.tsx` 被并行改坏属同类）。
+**方案文档**: [workflow/261103-消息媒体渲染融合方案.md](workflow/261103-消息媒体渲染融合方案.md)
+**runtime**: `.agentdocs/runtime/261103-消息媒体渲染融合方案/master_plan.md`
+**融合规则（唯一需要记住的一条）**: **图片 → 拼贴；视频 / 音频 / 文件 → 卡片；全部共享同一个增强灯箱。**（图片本身是内容，套壳是多余层级；音视频/文件需要元信息与控制，必须套壳。该规则同时化解「方案 A 与 B 在图片上冲突」。）
+**分期**: P1-A 图片自适应拼贴（零跨包依赖，可立即开工）→ P1-B 文件卡片（**阻塞于 D-1**）→ P2 视频/音频收敛为媒体卡片（音频去假波形）→ P3 灯箱缩略图条 + 键盘提示 + 加载/失败态。
+**⚠️ 关键核实结论（决定 P1-B 形状）**: 「消息内文件卡片」的数据链路**三层全断** —— ① 类型层 `packages/shared/src/message-schema.ts:239-247` 的 `MessageContent` 无 `input_file`/`file`/`document` 成员（V2 内部 `FilePart` 存在但读回 V1 时只还原 `input_image`，其余丢弃：`message-v2-adapter.ts:280-293`）；② 前端组装层 `prepare-standard-chat-send-input.ts:48-69` 只把 image 变结构化 part，PDF/音视频/代码**一律压平成文本行**；③ 网关 `stream.ts:650-668` / `stream-session-title.ts:41-52` / `message-v2-adapter.ts:773-793` 落库只认 `input_image`；④ 产物↔消息无关联（`Message`/`ChatMessage` 无 `artifacts` 字段、`ArtifactRecord` 无 messageId、`metadata.originMessageId` 已声明但**全仓零写入**、`listForSession` 不接受 messageId）。
+**✅ 现有低成本挂钩**: `attachment-upload.ts:130-136` 已把 `- <fileName> (artifact:<artifactId>)` 写进消息文本 → 存在「零跨包改动」的卡片渲染路线（D-1 路线 3），需视作**临时数据源**并以契约测试锁格式。
+**裁决结果（全部已定）**: D-1 **路线 3 文本挂钩** / D-2 **改 `contain` 不裁切** / D-3 **假波形下线** / D-4 保留 ⤢ 徽标 + 新增同级下载按钮 / D-5 逐格 `i/n` 胶囊**不做**（重复信息，`>9` 由 `+N` 表达）/ D-6 **自绘扩展名徽章**（不引 shared-ui 图标，避免牵连包依赖与产物重建）/ D-7 **以 `[附件]` 段为界解析**（全文正则会在用户粘贴日志时误判）/ D-8 容器落 `apps/web/src/components/chat/media/` / D-9 既有硬编码颜色收敛**本期不做**（单列一期）/ D-10 视频进度条**新增**（原以为已存在，实际没有）/ D-11 seek 入口**仅 pointerdown**（移除 `onClick`；pointer 是 mouse+touch 超集，双入口虽幂等但冗余）。
+**必须继续成立的不变量**: 无图源不产生多余可聚焦控件；放大徽标无内联 `style`；`ChatPageSections.css` 禁 `--fg-on-accent` / 禁 `#hex` / 禁 `rgba(`；灯箱 `items` 与 `onIndexChange` 下标映射正确。
+
+### ✅ 261102-修复规范名subagent静默漏点（G1/G2/#3/#4/#6） - 补齐规范名 `subagent` 的登记（2026-11-02 完成并归档）
+
+**状态**: **已完成**（5 处修复 + 1 处登记不修；10 个文件；独立核验通过；门禁 `typecheck`/前端 `tsc`/eslint/prettier 全 0、定向 vitest 79 + 5 passed）
+**方案文档**: [workflow/done/261102-修复规范名subagent静默漏点.md](workflow/done/261102-修复规范名subagent静默漏点.md)（**已归档**）
+**runtime**: `.agentdocs/runtime/261102-修复规范名subagent静默漏点/master_plan.md`（4 份证据）
+**唯一行为变更**: **#3 澄清（clarify）模式下委派工具可见性 `false → true`**（`task`/`Agent` 一直 `true`）；只读意图未放宽（`write` 仍 `false`、白名单 `diff` 仅 `+1` 行）；审批仍 `task_run → ask`。其余 4 处（G1/G2/#4/#6）**无对外行为变化**。
+**遗留**: ① ✅ **`routes/stream.ts:952` 已收敛**（2026-11-02 20:2x；并行重构已停、`stream.ts` 停在 19:06 → 补 `'subagent'` 至 `TOOLS_REQUIRING_NON_EMPTY_ARGS` + 一条"补登记前会失败"的守卫断言；实测 `stream-error-contracts` 19 passed、`typecheck` 0）；② **同一分组规则在前后端各有一份实现**（`resolveChannelCapabilityToolGroup` vs `classifyCapabilityToolGroup`）→ 建议单独立项做实现统一。
+**缺陷（V2 复核后定性）**: ① **G1** `session/session-tool-visibility.ts:97` 的 `resolveChannelToolKey()` 只有 `case 'task'`、缺 `case 'subagent'`。**但经逐跳复核，该缺项在 `subagent` 路径上不可达**：`:398` 的 `isTaskToolName()` 会提前截获，`isTaskToolEnabledForSessionMetadata` 内部传的是**字面量 `'task'`**（`:295`），所以渠道会话里 `subagent` 与 `task` 判定逐字相同、`allowSubAgents` 门控完整生效 → 属**一致性/防御性瑕疵，当前不可达**（既非 fail-open 也非 fail-closed）。② **G2** `channels/channel-capability-tool-groups.ts:77` 的 `resolveChannelCapabilityToolGroup()` 的 `orchestration` 分组含 `task` / `Agent` 却缺 `subagent` → 落 `default: 'other'`；**这是可达的**：`routes/capabilities.ts:451` 用分组结果做能力**过滤**（渠道 `toolGroups.orchestration=false` 关不掉 `subagent`、`toolGroups.other=false` 会误关它），`:182` 的分组统计也错位。两处均为 `142a7196` 既有、且无测试覆盖。
+**行为影响**: 修 G1 **无对外行为变化**（证明见 workflow 的不可达证据链）；修 G2 使渠道"按组开关"语义变正确。**委派审批仍默认 `ask`，allowlist 与终审语义均未放宽。**
+**回归要求**: G1 的断言须直接断言内部函数（本次一并 `export resolveChannelToolKey`），因为公共入口被 `:398` 截获、修复前后不可观测；G2 的断言在修复前会失败。只测别名 `task` 无法卡住这两处漏点。
+
+### ✅ 261102-移除omo耦合与提示词替换 - 把 omo（MCP adapter + `call_omo_agent` 协议 + 提示词文案）替换为原生能力（**代码侧与证据侧全部完成**；仅剩 4 项真实 UI / 真实 LLM 行为走查受环境阻塞）
+
+**状态**: **已完成**（2026-11-02 交付 / **2026-11-03 磁盘复核**；Full orchestration score +7；35 项 = **31 项实测完成 + 4 项以替代证据完成**）。D1–D5 + **D6** 全部裁决；批次 A（adapter 摘除 + 文案 + 存量迁移）与批次 B（`call_omo_agent` → `subagent` 收敛 + `Agent` 呈报名重映射）均已交付并由独立核验通过；**T-27 门禁差集口径：`typecheck` 0 / `lint` 0 / 本任务新增格式不通过 0**；F1（Scope OUT 7/7、替代映射 13/13）/F2（六维通过）/F3（权限未放宽）完成。**发现并修复 1 处真实缺陷**：`TOOL_PERMISSION_DERIVERS` 精确查表只登记别名 `task`，规范名 `subagent` 落到 `defaultPermissionDeriver`（medium + 通用文案）→ 委派审批**静默弱化**（已补注册 + 回归用例 68/68）。
+**2026-11-03 复核（磁盘实证）**：10 个 omo 资产**全部已删**（`src/omo/**` 4 文件、`virtual-omo-mcp.ts`、`omo.json`、`call-omo-agent-{tools,output}.ts`、前端 `omo-catalog-preview.tsx`、`__tests__/omo/**`）；生产代码**零功能残留**（命中全为退役说明注释 + 两处有意保留：D1-a 的 `call_omo_agent` 兼容分支、A-05 的 `.omo` 忽略目录）；锚点在位（`RETIRED_PROTECTED_MCP_IDS=['omo']`、`PLAN_DISCOVERY_DIRS=[.agentdocs/workflow, .sisyphus/plans]`、`Agent: 'subagent'`、`subagent: taskPermissionDeriver`、三处集合走 `isTaskToolName()`、前端保留历史名、P8 纠偏句在位）；**重跑 115 passed（5 文件）+ A 组反回归断言 6/6**（含 `listMcpToolsForUser` 不返回 `omo`）。
+**登记的两处既有漏点已全部闭环**：G1 经逐跳复核为**不可达的一致性瑕疵**（**早期"fail-closed 功能丧失"表述已作废**）、G2 为可达的分组判定错位 → 两者在 `261102-修复规范名subagent静默漏点` 中修复、`#5` 收敛（该系列共 6 处，5 修 + 1 收敛）；前后端分组规则重复实现已在 `261102-渠道能力分组规则去重` 中上移 `@openAwork/shared`。
+**待环境补验（非代码遗留）**：设置页真实 UI 走查、chat 委派审批弹窗交互、**真实 LLM `subagent_type` 选型观察**（P8 只证明指引文本在位，模型是否照做需真实对话验证）、渠道会话实测。缺口已在 `t28-settings-notes.md` / `t29-smoke-notes.md` / `f4-qa.md` 逐条声明。
+**方案文档**: [workflow/done/261102-移除omo耦合与提示词替换.md](workflow/done/261102-移除omo耦合与提示词替换.md)（**已归档**）
+**runtime**: `.agentdocs/runtime/261102-移除omo耦合与提示词替换/master_plan.md`
+**核心判定**: ① **MCP 层零能力缺口** —— `ast_grep` 已有原生 `ast_grep_search`/`ast_grep_replace`（`tool-definitions.ts:200-201`），`context7` 本就有「不引入」结论（`builtin-mcps.ts:16-19`），其余 5 个 native alias 本就复用原生 server；② **协议层能力重叠** —— `subagent` 已在模型可见列表且含同款选型指引，`call_omo_agent` 唯一实质差异是运行期白名单（`delegation.ts:99-113`）；③ **提示词层仅 3 处纯文案**（`tool-parameters/admin.ts:57`、`command-templates.ts:89`、`start-work.ts:152`），提示词资源层（agents/skills md + `prompt/`）零耦合。
+**批次划分**: A（adapter 摘除 + 文案替换 + 存量迁移，0.5~1 人日，可独立回滚）／B（`call_omo_agent` → `subagent` 收敛 + `Agent` 呈报名重映射，2~4 人日，含权限语义变更，需 D1/D2）。
+**高风险项**: 委派白名单静默放宽（R-01）、三处手写集合缺 `subagent` 的既有缺陷（R-02；`prometheus-md-only.ts:23` / `task-resume-info.ts:12` / `stream.ts:1445`）、存量配置被归一成可 spawn 的 `openawork-virtual-omo` stdio（R-03）、误删 task 共用的 `buildDelegatedChildClientRequestId`（R-04）。
+**明确保留**: `workspace-ignored-dirs` 的 `.omo`（否则 965 个 `run-continuation/*.json` 涌入索引）、前端 `SUBAGENT_TOOL_NAMES` 的 `call_omo_agent`（历史名兼容，删了老会话子代理卡片会失去「打开子会话」）。
+
 ### 🔄 250115-修复设计缺陷优化方案
 
-**状态**: 🟡 **方案制定完成，待批准启动**（2025-01-15）  
+**状态**: **代码实施阶段已收口，剩余为待决策项**（2026-11-01 R-01～06；2026-11-02 复查 V-01～06；剩余工作 W-01～09）
+**最新落地（含 2026-11-02 剩余工作）**：cron 超时占位保持到真实结束、执行记录 upsert+裁剪同一事务；MCP 派生失败在全局 allow/yolo 之前硬拒绝；审批状态/审计/grant 共同事务且文件镜像失败不阻断续跑；权限决策审计新增 15 项可枚举理由与稳定标识（自动放行不记成用户批准）；错误辅助器安全结构化日志；浏览器安装单飞、总超时覆盖准备+下载及状态 URL 脱敏；流式 TTL 到期改为可观测；channel 真实读取/只读展示、expired 正确映射；任务页刷新收敛为 `useSchedulesPage`。
+**最新验证（第十二轮后）**：Web **664 文件 6761 例通过、exit0、0 次 teardown 错误**；网关单元见下方收口数字；**两侧 `typecheck` 均 0 错误**（此前范围外的 skill-registry 既有错误已被其他任务修掉）；**根级 `bun run lint` **0 错误 exit0**（此前那处范围外 `verify-claude-first-tools.ts` 已不再复现）；`check:fastify-alignment`/`check:docker-versions`/`check:gateway-binary` 与锁文件 `--frozen-lockfile` 均通过。`preflight` 现仅剩**格式门**失败，且失败文件全部与 HEAD 一致或属并发任务（仓库既有状态，非本方案回归）。
+**T-13 分阶段进展**：`stream.ts` 3450 → **3117**（阶段 1 抽 replay/agent-resolution −287；阶段 2 抽 prompt-assembly −47；R-11 索引校正 +3）。已按 **D-06** 将 250 行目标调整为「目标量级 1500～2000」——低风险簇已耗尽，剩余为 `execution` IIFE 的 1086 行线性执行体。
+**本轮另修复两处伪完成/过期文档**：`EXECUTION_SUMMARY.md` 的成功标准原被整体勾成 `[x]`（多项实测未达成，已逐项按实测重标并挂 D-02/D-03/D-06）；`README.md` 原写「待批准启动」与实际不符（已改为已获批执行中 + 文档分类）；`PROGRESS.md`/`LIVE_DASHBOARD.md` 自称"实时"但为 2025-01-15 快照（已加历史标记）。**原则：历史记述不改，只修会误导当下判断的表述。**
+**T-28 已补齐读侧**：`GET /sessions/:sessionId/permissions/decisions`（会话级、`ownsSession` → 404 同文案不泄露、`limit` 默认 50/上限 200、`beforeId` 游标、`id DESC`、`reason` 历史行 null 原样透出、严格只读）。**边界**：暂无 UI 消费方，经 API 可读；「所有门禁必经的统一裁决中心」按 D-01 不实施。
+**T-23 已实现（任务专用 SSE）**：网关 `GET /cron/events` 用户级推送（`?token=` 鉴权、`createSseClientChannel` 幂等拆除、按 `userId` 过滤、25s 心跳）+ 模块级事件总线 + **9 值 reason**（含 `run_skipped`/`schedule_error`）；web 侧改为 SSE 驱动（300ms 去抖 → 静默重拉），保留断连降级 15s 轮询与「页面激活 + 文档可见」门控。**已知边界**：无 `Last-Event-ID` 增量续传（靠降级轮询 + 重连保证最终一致）、代理长断连未真机验证。
+**并行开发的教训（本轮实证）**：轮询「笨但全」、SSE「快但须显式枚举所有写路径」——两端各自正确仍可能漏覆盖，**必须把新旧机制的覆盖面做差集**才能发现缺口（本轮据此查出 `delete_after_run` 自动删除/跳过执行/建臂失败三处未发布，其中前者会导致一次性任务永久滞留）。
+**前轮新增优化**：① 窗口事件订阅（含 `composer-reference`）按 `isPageActive` 门控——**属性为防御性/一致性修复**：`getRouteCacheKey` 只取路径首段且路由只有一个 `/chat`，故多实例并存**当前不可达**，**不得**记为线上 bug 修复；② 任务页轮询按「页面激活 **且** 文档可见」门控——此项**真实可达**，已修（R-05；该门控在第九轮被 T-23 保留）。
+**共享工作区注意**：门禁变红未必是本方案回归——先用 `git diff --quiet HEAD` 判归属、核对缺失符号与失败文件集合，再决定是否动手；本轮曾遇并发任务边改边跑导致 12 例失败与 2 处类型错误，约 1 分钟后自愈。
+**遗留**：F-03b 跨资源（库内 + 工作区文件 diff）整体原子架构上不可行、F-06 优先级/pending 队列属产品语义变更需先决策、F-08 大装配层（实测 2026-11-02：ChatPage **3612** / stream.ts **3114** / stream-runtime.ts **1487** 行）拆分需按既有前置方案分批——ChatPage 已按 **D-03** 登记组装层例外，stream.ts 已按 **D-06** 改为「持续分阶段下降，目标量级 1500～2000」（阶段 1/2 已由 3450 降至 3114）、跨实例隔离与真实多端验收未完；强取消未实现，永久挂起任务保留隔离占位。
 **方案文档**: [workflow/250115-修复设计缺陷优化方案.md](workflow/250115-修复设计缺陷优化方案.md)  
 **概述**: 三阶段修复 11 个设计缺陷（P0: ChatPage 拆分；P1: stream.ts 分层 + 错误处理 + 定时任务 API；P2: 持久化 + 权限 + 并发）  
 **时间估算**: 20 个工程日（4 周）  
@@ -13,6 +62,122 @@
 ---
 
 ## 已完成的任务
+
+### ✅ 261103-Agent 管理页与技能页布局落地（方案 A + B） - `/agents` 改控制台三栏、`/skills` 改三栏内联详情（2026-11-03 完成并归档）
+
+**状态**: ✅ **全部完成并归档**（真机走查同批完成；无阻塞项）。门禁：`prettier --check` 全过、`eslint`（React Compiler）**exit 0**、`tsc`（整个 `apps/web`）**0 错误**、**本次范围内定向 vitest 16 文件 157 用例全绿**、网关侧 agent 相关 **11 文件 63 用例全绿**。真机走查：真实 Chromium（agent-browser 自带 Chrome 156）+ mock 网关，**8 档视口 × 暗亮主题**，`agent-browser errors` 空。**归属判定（差集口径）**：最终状态下 web 全量 7 文件 / 27 用例失败，全部落在他人并行编辑范围（chat/media、layout/fusion、stores/ui-state、hooks/editor、team 预览），非本次改动文件；交付途中曾全绿跑过全量（693 文件 7091 用例）。
+**方案文档**: [workflow/done/261103-Agent管理页与技能页布局落地（方案A+B）.md](workflow/done/261103-Agent管理页与技能页布局落地（方案A+B）.md)（**已归档**）
+**走查可复现**: `demo/layout-demos/walkthrough/mock-gateway.mjs`（已入库；截图属本地产物，见 `.agentdocs/runtime/261103-Agent管理页与技能页布局落地/evidence/screenshots/`，按 `.gitignore:56` 不入库）
+**选定方案**: Agent = **A 控制台三栏**（`demo/layout-demos/agents-a-command-console.html`）；技能 = **B 三栏内联详情**（`demo/layout-demos/skills-b-split-detail.html`）；六方案对比页 `demo/layout-demos/index.html`。
+**落地**: 新增共享控制台表面 `apps/web/src/styles/console-surfaces.css`（59 个 `console-*` 类，依据 `apps/web/AGENTS.md:118`「2 个及以上页面重复的 UI 片段必须提取共享」）；`AgentsPage.tsx` 479 → **398 行** + 9 个视图/纯函数模块，`SkillsPage.tsx` 876 → **596 行** + 7 个模块；删除 `AgentsPageSections.tsx`（1119 行）与 `skills-installed-section.tsx`；两页 CSS 由 1459 行降到 1114 行且不再有两套平行控件。数据契约零改动（`createAgentsClient` / `useSkillsApi` / `useInstalledSkills` 原样复用，`shared` 与 `shared-ui` 导出未动）。
+**真机走查发现并修掉 3 处（含 1 处可用性缺陷）**: ① **1181–1400px 三栏把编辑器压到 203–443px**（应用侧栏 + 内边距实测占 385px，编辑器 = 视口 − 945px）→ 两侧固定列收窄（Agent 272/264、技能 296/264）+ 三栏阈值 `1180 → 1360px`，修后 1440 编辑器 **495 / 471px**、1280/1200 走两栏；② **本地技能显示市场版本**（同 id 时列表 `v0.1.0`、元信息 `v1.6.2`）→ 新增 `mergeSkillDisplayDetail`：名称/版本/描述/分类以条目自身为准，市场详情只补充 README/权限等；③ 市场已安装条目的按钮「已安装」→ **「重新安装」**（状态词不承担动作）。
+**复查修复（多轮）**: 类型筛选比对 `source` 与头部统计（按 `origin`）自相矛盾 → 统一按 `origin`；排序说明与实现相反 → 删除误导文案并测试固定契约；列表行漏挂共享 `console-row` 外壳；8 处内联魔法数字收进类；4 个多余 `export` 收回；技能搜索图标压占位符；安装来源按条目记忆避免串号。
+**跨层修复（提示词覆盖，细节见 V-12）**: 客户端等于默认值的提示词按 `null` 提交；网关覆盖记录**只存与默认不同的字段**（四个字段逐字段归一），修掉「改了模型 + 提示词等于默认 → 上游升级后静默钉在旧配置」，两次变异校验确认新用例有效。
+**遗留**: ① .NET 网关不支持内置提示词覆盖（`ManagedAgentCatalog.cs:133` 直接拒绝该字段），两边功能不对等，未动；② `useInstalledSkills.dismissError` 仍未接线（与旧版一致）；③ 字号仍为裸 px（仓库无字号 token）；④ 未做 axe 专项（当前 agent-browser 无 `a11y` 子命令）。
+**风险**: 三栏阈值依赖应用侧栏宽度（公式：编辑器宽度 = 视口 − 945px）；`shared-ui` 的 `SkillMarketHome` / `SkillDetailPage` 在 web 侧已无消费方（按「不动包契约」处理，另行清理）；新增视图文件属并行编辑热点（本次被回退过 3 次，改后需 `grep` 复核）。
+
+### ✅ 261103-workflows 模板响应健壮性修复 - 无校验强转导致整页崩溃（2026-11-03 完成并归档）
+
+**状态**: ✅ **已完成并归档**（Lightweight orchestration；无阻塞）。**翻案重查**：此前把「`/workflows` 在 mock 环境下整页崩」登记为「走查环境限制」，本轮用 `console`/`errors` 抓到真实异常后确认是**真实缺陷**（非环境问题）。
+**根因**: `packages/web-client/src/infra/workflows.ts:423` 把响应体**无校验强转** `as WorkflowTemplateRecord[]` → 响应非数组（空对象 / 错误包装 / 中间层截断）时坏数据进入页面 state → `use-workflow-studio.ts:101` 的 `templates.find(...)` 抛 `TypeError: templates.find is not a function` → 整页落进 `AppErrorBoundary`。
+**修法**: 在取数边界校验 `Array.isArray(payload)`；不符即返回结构化失败（`ok:false` + `retryable:true` + 「工作流模板响应格式异常（预期数组）。」），页面显示错误条而不是白屏。**刻意不做静默空列表** —— 那会把「网关契约坏了」伪装成「你还没有模板」。
+**验证**: 真机（mock 同条件）修复前 `templates.find is not a function` + 错误边界 → 修复后 `errorBoundary=false`、`main=1`、`h1=1`、标题「工作流工作台」、模板错误条可见、`agent-browser errors` 空；截图 `runtime/261103-workflows模板响应健壮性修复/evidence/workflows-degraded.png`。门禁：**web-client 55 文件 481 用例** 全绿、`build` exit 0（`dist` 已含校验）、apps/web `tsc`/`eslint` 0 错。
+**同类盘存（未修，建议专项）**: web-client 另有 7 处对响应体做无校验 `as` —— `team.ts:1094`（`workspaces: … as TeamWorkspaceSummary[]`，与本次同形态、风险最高）、`team-phase-a.ts:690/920`，以及 `agents/commands/capabilities/team-workflows/team-handoffs`（带 `?`、下游多有 `?? []` 兜底）。
+**沉淀**: 对网络响应只 `as T` 不做运行时校验，**崩点永远在下游某个数组方法**、报错栈指向使用处而非取数处；**判定「环境限制」前必须先用 `console`/`errors` 抓真实异常**（上一轮正是归因过早，差点把真实缺陷永久写进「遗留」）。
+**方案文档**: [workflow/done/261103-workflows模板响应健壮性修复.md](workflow/done/261103-workflows模板响应健壮性修复.md)（**已归档**）
+
+### ✅ 261103-落地接线复查（latestExecutions 下线 + 导出面收紧） - 「调整是否都接入使用」的全量体检（2026-11-03 完成并归档）
+
+**状态**: ✅ **已完成并归档**。方法：**静态 4 维审计**（孤儿文件 / 导出面 / `sch-*` 类名↔CSS 双向 / hook 返回值与 props 消费，另补动作调用覆盖与 `data-*` 属性双向）+ **运行时逐项触发**（agent-browser + mock 网关，以网络请求与 `errors` 为证据）。
+**方案文档**: [workflow/done/261103-落地接线复查（latestExecutions下线+导出面收紧）.md](workflow/done/261103-落地接线复查（latestExecutions下线+导出面收紧）.md)（**已归档**）
+**发现的真问题（已修）**: `use-schedules-page` 的 **`latestExecutions` 是彻底无人消费的派生态**（state + 接口字段 + `runReload` 里派生 + return 出去，只有它自己的测试在断言）—— 重构把视图改为直接读 `job.lastExecution` 后就该一起删 → 已整体下线，测试断言改到真实数据路径。
+**顺带收紧**: 8 个「导出但只有本文件在用」的符号（`ScheduleTone` / `ExecutionStatusDescriptor` / `ScheduleDayBucket` / `ScheduleDayGroup` / `SchedulesOverviewStats` / `SCHEDULE_DAY_BUCKETS` / `SchedulesClock` / `SessionOptionsResult`）收回为模块私有。
+**体检结论（修复后全绿）**: 无孤儿文件 · 无未使用导出 · **84 ↔ 84** 类名（无缺失 / 无死样式）· hook **22 个返回值全部被消费** · 6 个动作在视图内均有调用点 · 5 个 `data-*` 属性 ↔ 5 个 CSS 属性选择器一一对应。
+**运行时证据**: KPI `6/5/1/1` · 时间轴 6 条目 4 分组 + 消歧说明（时间轴下排序与密度控件隐藏）· 紧凑档 233px + `clamp=1` · 历史 5 条 + 3 个「查看执行现场」· 「最近失败」筛到 1 张卡 · **`POST /cron/jobs/job_weekly/run`**（重跑落在失败任务）+ **`PATCH /cron/jobs/job_probe`**（禁用 / 改投递 / 会话选择）· `errors` 为空。
+**门禁**: `prettier` ✓ · `tsc`（`pages/misc`）0 错 · `src/pages/misc/` **8 文件 67 用例** 通过。
+**可复用资产**: 审计脚本 `runtime/261102-定时任务页布局方案E落地/evidence/wiring-audit.mjs`（`node` 直接跑，改路径即可用于其它页面族）。
+
+### ✅ 261103-全局遗留收尾（标题栏死代码 + 主题对比度回归） - 最后两项全局遗留清零（2026-11-03 完成并归档）
+
+**状态**: ✅ **已完成并归档**（Lightweight orchestration；无阻塞）。① **死代码**：`ClassicWorkbenchTitlebar` 仅被自身测试引用（classic 布局实际无标题栏）→ 组件/测试/专属 CSS 三件套整体删除，源码零残留引用，`src/components/layout` 测试 **119 → 118 用例** 全通过。② **主题对比度回归**（8 套主题 × 明暗 = **16 档**，agent-browser 逐档 axe）：修复前 **26 个对比度节点**（本页 8 个）→ 修复后 **16/16 档 violations = 0**。
+**方案文档**: [workflow/done/261103-全局遗留收尾（标题栏死代码+主题对比度回归）.md](workflow/done/261103-全局遗留收尾（标题栏死代码+主题对比度回归）.md)（**已归档**）
+**证据**: `runtime/261103-应用级无障碍专项/evidence/theme-regression/{before,after}/`（前后各 16 份 axe 报告 + 终版回归脚本 + `summary-after.txt`）
+**两个根因**: ① **6 套主题的 `--fg-muted` 略低于 4.5:1**（carbon-dark 3.84 最差；sunset-dark / linear-light / linear-dark / ocean-dark / sakura-dark 4.39~4.49）→ 按各主题**实测最差底色反推**新值（`#6e747e→#7c828d`、`#8a7568→#958073`、`#6a7184→#676e80`、`#7a8194→#7f8698`、`#6a8898→#708d9c`、`#8e7a88→#927e8c`，目标 ≥4.7:1，只挪亮度不改色相）；② **`.sidebar-primary-action` 彩字压在 accent 淡底上**（forest-light 4.18、nebula-light 3.75）→ 强调改由**底色 + 内描边**（`inset 0 0 0 1px var(--accent-border)`）承担、文字用 `--fg-strong`（彩字再深一档 `--accent-active` 在暗色主题会反向变差）。
+**踩坑（重要）**: 主题回归必须做 **「健康度 + 身份」双校验** —— 中途有 3 档（linear-dark / nebula-light / nebula-dark）页面落进错误边界（cards=0/main=0），此时 axe 必然全 0，不校验就会把「页面崩了」误读成「对比度达标」；`getComputedStyle(body).backgroundColor` **不能**当主题身份（时序噪声大），要用该主题独有的 token（如 `--fg-muted`）。
+**收尾**: 本仓登记的全部遗留项（定时任务页 4 条 + 全局 2 条）**至此清空**。
+
+### ✅ 261103-定时任务卡片密度切换（D-02） - 卡片视图提供「舒适 / 紧凑」两档密度（2026-11-03 完成并归档）
+
+**状态**: ✅ **已完成并归档**（Lightweight orchestration；T-01…T-05 全 ✅、无阻塞）。门禁：`prettier --check` ✓ · `eslint`（React Compiler）exit 0 · `tsc --noEmit`（`pages/misc`）0 错 · 定向 vitest **34 用例**（较前 +4）· `src/pages/misc/` 全量 **63 用例**。**真机**（agent-browser + mock 网关，1440×900）：舒适档卡宽 **312px**、紧凑档 **233px（-25%）**，提示词 2 行→1 行、倒计时 19→16px；刷新后偏好留存；时间轴视图不渲染密度控件与排序下拉；`agent-browser errors` 为空。
+**方案文档**: [workflow/done/261103-定时任务卡片密度切换.md](workflow/done/261103-定时任务卡片密度切换.md)（**已归档**）
+**落地**: ① `SchedulesDensity`（`comfortable | compact`）+ **卡片视图自有 props** `SchedulesCardGridProps`（密度不进公共契约——公共契约明确要求两视图完全一致，而密度天然只属于网格）；② 网格输出 `data-density`，换档全交给 CSS（组件**不写内联样式**）；③ 工具栏在排序下拉后加 `role="group" aria-label="卡片密度"`，**仅卡片视图渲染**（时间轴下不留死控件）；④ 偏好存 `sessionStorage['openAwork.schedules.density']`，白名单校验 + `try/catch` 降级「舒适」。
+**踩坑**: 收紧必填 prop 会打断所有既有渲染点（视图测试 5 处 → 加 `cardProps()` 脚手架，**不放宽类型**）；偏好写进 storage 会让用例串味（`afterEach` 补 `window.sessionStorage.clear()`）；spy 必须打在 `Storage.prototype` 上。
+**结清**: 至此 `261102` 的四条遗留（`CronManager` 清理 / `session` 投递选择器 / 应用级 axe 违规 / D-02 密度切换）**全部关闭**。仍需单项立项的仅剩全局项：主题 token 对比度按主题回归、`ClassicWorkbenchTitlebar` 死代码清理。
+
+### ✅ 261103-应用级无障碍专项 - 清掉应用级 axe 违规（landmark / h1 / tablist / 对比度）（2026-11-03 完成并归档）
+
+**状态**: ✅ **已完成并归档**（Full orchestration score **+5**；T-01…T-10 全 ✅、无阻塞）。真机 axe（真实 Chromium + mock 网关）复验：`/schedules` 与首页**目标规则全部清零**（`region` 10→0、`landmark-one-main` 1→0、`page-has-heading-one` 1→0、`aria-required-parent`(critical) 1→0，另清掉 `aria-allowed-attr` 与 `heading-order` 及 3 处对比度）；页面 `violations` 由 5 条降到 **1 条**（唯一剩余的侧栏既有按钮也已修）。结构实测 `main=1 / aside=1 / h1=1 / h2=6 / footer=1`。门禁：`tsc` 改动范围 0 错、`eslint` 3 批全 exit 0、`prettier` 通过、定向测试 **layout 119 / feedback 2 / schedules 30 / home+resources+workflows+skills 27 / misc+artifacts 87**。
+**方案文档**: [workflow/done/261103-应用级无障碍专项.md](workflow/done/261103-应用级无障碍专项.md)（**已归档**）
+**runtime**: `.agentdocs/runtime/261103-应用级无障碍专项/master_plan.md`；axe 报告与统计脚本在 `runtime/261103-定时任务遗留收口/evidence/axe-after-landmarks/`
+**改动要点**: ① **主内容 landmark 由布局壳提供** —— `LayoutClassic`/`LayoutFusion` 的 `.outlet-content-wrap` → `<main>`、fusion 标题栏 → `<header>`、`FusionSidebar` 根 → `<aside>`；页面内一律不再用 `<main>`（`HomePage`/`ResourcesPage` → `<section aria-label>`、`ImagesPage`/`TeamPageV2` → `<div>`）；② 5 个页面 `.page-title` `span` → `<h1>`（`.page-title` 补 `margin: 0`，否则 h1 的 UA margin 撑高 44px 页头）+ 4 个 `.page-header` `div` → `<header>`；③ **`aria-required-parent` 真凶是 `TitlebarHomeButton` 错用 `role="tab"`**（它不在任何 tablist 内，`tab-list` 本身合法）→ 改普通 `button` + `aria-current="page"`，`TitlebarTabStrip.test.tsx` 5 处断言同步改 `getByRole('button', {name:'首页'})`；④ `HomeSessionSearch` 的 `input` 上非法 `aria-expanded` → 补标准 combobox 语义 `role="combobox"` + `aria-autocomplete="list"`；⑤ 版本角标（`UpdateBanner` 无更新分支）→ `<footer aria-label="版本信息">`（**不用 `aria-hidden`**，否则可点击的 GitHub 链接对读屏不可达）；⑥ 定时任务卡片 `h3` → `h2`（页头已是 h1，跳级触发 heading-order）+ CSS 选择器同步；⑦ 对比度：muted 徽章 `--fg-muted`→`--fg-default`、停用卡片去掉整体 `opacity: 0.72`（会把文字一起压到 3.18）改虚线边框、`.sidebar-primary-action` 文字 `--accent`→`--accent-hover`（4.34→达标）。
+**踩坑**: JSX 注释**不能**放在 `return (` 之后、根元素之前（会 TS1005）；改标签必须连带 grep 组件 CSS 里的**标签选择器**（本次漏了 `.sch-card-title h3`）；`opacity` 表达「停用」会连带压低文字对比度。
+**遗留**: `/workflows` 页在 mock 网关下整页崩溃（走查环境限制，需真实网关复验）；`ClassicWorkbenchTitlebar.tsx` 为死代码；主题 token 级对比度建议按主题做一次回归。
+
+### ✅ 261103-定时任务遗留收口 - 删除无消费方的 `CronManager` + 投递方式改用会话选择器（2026-11-03 完成并归档）
+
+**状态**: ✅ **已完成并归档**（Full orchestration score **+5**；T-01…T-10 全 ✅、无阻塞）。门禁：shared-ui **25 文件 227 用例**、web `src/pages/misc/` **8 文件 59 用例**、shared-ui `build` exit 0、prettier / eslint(0 error) / tsc(`pages/misc` 0 错) 全绿；真机复验 `PATCH /cron/jobs/job_probe` 200 → 列表自动刷新。
+**方案文档**: [workflow/done/261103-定时任务遗留收口.md](workflow/done/261103-定时任务遗留收口.md)（**已归档**）
+**runtime**: `.agentdocs/runtime/261103-定时任务遗留收口/master_plan.md`
+**① CronManager 清理**: 删除 `packages/shared-ui/src/misc/CronManager.tsx`(+test) 与 `index.ts` 的 6 个类型导出（`CronManagerProps`/`CronJob`/`CronJobDeliveryMode`/`ScheduleKind`/`CronJobStatus`）；唯一真实依赖（`use-schedules-page.ts` 的 `CronJobDeliveryMode`）改用本地已有且语义相同的 `ScheduleDeliveryMode`；重建 dist 后 `dist` 中 `CronManager` 命中 **0**（mobile/desktop 零引用、`tokens` 色值仍被多处使用，均不受影响）。
+**② 投递方式选择器**: `handleDeliveryChange(jobId,'session')` 不再 `window.prompt`，改为**挂起**（`pendingSessionDelivery` = {jobId, jobName}）→ `AppDialog` 承载的会话选择弹层（搜索 + 按 `updatedAt` 降序 + 无标题兜底「(未命名会话)」）→ 选中后 `confirmSessionDelivery` 才写 `delivery_target`；**会话列表懒加载**（仅弹层打开时 `GET /sessions`，避免每次进页多拉 100 条）；新建表单里手填「目标会话 id」的输入框同步替换为选择器（仍显示 id 供核对，执行器按 id 查会话）。
+**顺手登记的坑**: 同一文件并行两次编辑会**丢一次写入**（本次踩到并复现）；`eval` 移除 React 管理的 DOM 会让整页落进**错误边界**；`agent-browser select` 匹配不到中文 `aria-label`（改用原生 value setter + `change` 事件）；`DialogError` 自带「操作失败：」前缀（断言要用子串）。
+
+### ✅ 261103-handoff-store 拆分（请求键注册表 + 重试策略） - 1316 → 1162 行，离开体积预警区
+
+**状态**: **已完成**（2026-11-03；纯代码搬迁 + 保留再导出，既有 import 与调用点零改动）
+**方案文档**: [workflow/done/261103-handoff-store拆分.md](workflow/done/261103-handoff-store拆分.md)（已归档）
+**来源**: `261102-移除omo耦合与提示词替换` 遗留表 L-1（`AGENTS.md`：1300–2000 行为预警区间，应主动评估拆分）
+**做法**: 只拆两块**无依赖纯代码** —— 网关内部请求键形状注册表（→ `handoff/store/gateway-internal-request-key.ts`，147 行）与失败重试策略（→ `handoff/store/handoff-retry-policy.ts`，41 行）；`handoff-store.ts` 对两者保持**再导出**，8 个既有消费方（`pm2-runner` / `pm2-quality-review-reconciler` / `watcher` / `stream` / `stream-session-title` / `cron/schedule-admin-tools` / `task-wake-budget` / 守卫脚本）零改动。含 DB 查询的 `resolveSessionTurnClientRequestId` 与需迁移类型的 review-disposition 助手**刻意未拆**（登记为后续候选）。
+**门禁**: handoff 8 个测试文件全绿（91 + 18 + watcher/executor 2 files passed）；请求键守卫脚本 `verify-team-turn-rollback-internal-keys` **exit 0**；`gateway typecheck` **0 error**；eslint / prettier exit 0；重构前基线 66 passed 作对照。
+**副产品**: 闭环 `@openAwork/shared` **子路径导出评估 → 不实施**（全仓 0 处子路径导入、143 条 export 单入口、无需求驱动），理由与重新评估触发条件见 `workflow/done/261102-渠道能力分组规则去重.md` §七。
+
+### ✅ 261102-定时任务页布局方案E落地 - `/schedules` 改为「概览 + 卡片/时间轴双视图」（2026-11-02 完成并归档）
+
+**状态**: ✅ **全部完成并归档**（2026-11-02 交付 / 2026-11-03 补做真机走查；Full orchestration score **+5**；T-01…T-11 **全 ✅**、无阻塞项）。门禁：`prettier --check` 全过、`eslint`（React Compiler）0 error、`tsc --noEmit` 在 `pages/misc/**` 范围内 0 错误、定向 vitest **44 + 23 用例**通过、样式一致性 **77/77 类名一一对应**、**axe 无障碍审计本页确定违规 0**。
+**方案文档**: [workflow/done/261102-定时任务页布局方案E落地.md](workflow/done/261102-定时任务页布局方案E落地.md)（**已归档**）
+**runtime**: `.agentdocs/runtime/261102-定时任务页布局方案E落地/master_plan.md`；`evidence/` 内含 `mock-gateway.mjs`（含 `/sessions`，真机走查用）、`axe-report.json`、`screenshots/`（走查截图）、`wiring-audit.mjs`（可复跑的接线体检脚本）—— 真机走查已于 2026-11-03 完成，**不再是待补跑**。
+**选定方案**: **E · 概览 + 卡片 / 时间轴双视图**（`docs/design/schedules-layout-demos/option-e-hybrid.html`；总览 `index.html`，备选 A/B/C/D 同目录）
+**落地**: `SchedulesPage.tsx` **630 → 268 行**（装配层）；新增 `apps/web/src/pages/misc/schedules/` 16 个文件（utils + 单测、props 契约、共享原子件 + CSS、概览/卡片/时间轴各带 CSS、表单、时钟 hook、页面 CSS、视图测试）。header 分段控件切换两视图（`sessionStorage` 记忆）；概览卡 = KPI×4 + 今日 24h 执行轨道（只标未到点任务）+ 失败告警条（带「立即重跑」）；时间轴按**本地日差**分组（今天/明天/本周稍后/更晚/未排期）并显式说明「只画下一轮」。
+**顺带修掉的既有缺口**: `use-schedules-page.ts` 的 `handleDeliveryChange` **早已实现但页面从未接线**（只传 5 个回调）→ 此前列表里根本改不了投递方式，本次接线；渠道任务仍为纯文本。
+**未改动（2026-11-02 交付时的状态）**: `use-schedules-page.ts`（数据/动作零改动）、`shared-ui/**`（`CronManager` 保留）、网关与 `web-client` 零改动 → 当时无需重建 dist。
+**⚠️ 后续已被 261103 系列改变（勿按上面这句理解当前代码）**: hook 下线了无人消费的 `latestExecutions` 并改接挂起式投递（`pendingSessionDelivery` / `confirmSessionDelivery`）；`CronManager` 及 6 个类型导出已删除、`dist` 已重建；卡片新增**密度两档**；页头改 `<header>` + 标题改 `<h1>`；`shared-ui` 的 `--fg-muted` 等 token 在 6 套主题上调过。
+**关键不变量**: ① 渠道任务不渲染投递下拉（测试按 `结果投递方式` 名称查询）；② `expired` 灰字「已过期」；③ `at` 时间一律客户端本地时区（网关进程时区常为 UTC，差 8 小时）；④ 失败推到顶部；⑤ SSE/轮询「页面激活 + 文档可见」门控不变。
+**偏离登记**: T-06 从「卡片只读 + 详情面板可改」改为「卡片就地可改」（渠道仍纯文本），并据此把测试查询从裸 `combobox` 收窄；新增 3 个计划外文件（共享原子件 / props 契约 / 时钟 hook）。
+**真机走查（2026-11-03，T-11 完成）**: 真实 Chromium（agent-browser 自带 Chrome 156）+ mock 网关（`evidence/mock-gateway.mjs`）渲染真实 `/schedules`；暗/亮主题、卡片/时间轴、历史内联、窄屏断点逐项核对，`errors` 为空，axe 本页违规清零。**走查修掉 4 处实测问题**：轨道刻度对比度 3.48:1、筛选 chip 激活态 3.38:1、页头非 landmark（div → `<header>`）、窄内容区下「卡片视图」与「0 时」折行。
+**遗留（非本任务）**: ✅ `CronManager` 清理 与 ✅「投递到会话」选择器 已在 `261103-定时任务遗留收口` 处理完毕；✅ 应用级 axe 问题（landmark-one-main / 全站 page-header 用 div / titlebar 首页按钮 role / 侧栏 region）已在 `261103-应用级无障碍专项` **清零**；✅ D-02 卡片密度切换已在 `261103-定时任务卡片密度切换` 落地 —— **四条遗留全部结清**。
+
+### ✅ 261102-渠道能力分组规则去重 - 把前后端重复的「工具名 → 渠道能力分组」规则上移到 `@openAwork/shared`（唯一事实来源）
+
+**状态**: **已完成**（2026-11-02；9 文件；`shared` build exit 0、两端 typecheck 0、契约断言全绿）
+**方案文档**: [workflow/done/261102-渠道能力分组规则去重.md](workflow/done/261102-渠道能力分组规则去重.md)（已归档）
+**评估**: `.agentdocs/runtime/261102-渠道能力分组规则去重-评估/评估报告.md`；**台账**: `.agentdocs/runtime/261102-渠道能力分组规则去重/master_plan.md`
+**来源**: `261102-修复规范名subagent静默漏点` §七 架构遗留项（用户批准执行）
+**做法**: 规则 / 默认值 / 归一化 / 分组键类型上移共享；gateway 侧改为**再导出垫片**，前端保留 UI 专属构造器并把 `classifyCapabilityToolGroup` 作为**同一实现的别名**；新增 `CHANNEL_CAPABILITY_TOOL_GROUP_CONTRACT` 契约黄金表（保留 `subagent` / `repo_clone` / `repo_overview` 三个历史漂移锚点），两端测试遍历它 + 断言**同一函数对象**（`toBe`），从此不可能"只改一侧"。
+**形态语义显式化**: 注入开关区分「可缺省持久化形态」与「归一化形态（`Required<>`）」——前端 UI 保持字段必有，不再各自手写同名类型。
+**门禁**: shared 测试 6/6；gateway 分组测试 8/8、`channels/` 整目录 **55 files passed**；`gateway typecheck` 0、`apps/web tsc` 0；web 分组测试 7/7、消费点（`ChannelSubscriptionSettings` + `channels-tab-content`）**44/44**；eslint / prettier exit 0。
+**归属判定（差集口径）**: 根级 `bun run typecheck` 当前 exit 2（5 条）全部为**并行工作流在途**（`session-manager-tools.ts` mtime 23:22 的 `buildChannelSourceLine`、`agents-catalog-panel.tsx` 23:23、`ChatPage.tsx` 23:25、`use-chat-conversation-state.test.tsx` 11:35），**均非本次改动文件**。
+
+### ✅ 261102-模式与内置角色提示词用户级覆盖 - 对话模式与内置 Agent 提示词支持用户级覆盖（2026-11-02 完成并归档）
+
+**状态**: ✅ **已完成并归档**（T-01…T-17 全部交付；新增文件 11 个、修改 12 个；门禁 typecheck / eslint / prettier / web lint / build 全 0）
+**复查（2026-11-03）**: 逐行复核 store 与路由**实现**（此前只跑测试、未读实现）后修 3 处真实问题 —— V-01 corrupt 状态下「恢复默认」不可达（幂等短路 + 按钮按 `hasOverride` 禁用双重卡死）、V-02 超长文案被路由 schema 抢先拦截致 store 文案成死代码、V-03 基础设施错误伪装成 400 且回显内部 message；另登记 V-04 文档不精确、**V-05 声称的 T-13 组件测试未交付**（已抽出纯函数 + 5 项单测补上）、V-06 `apps/web` 曾因他人在途重构整体编译不过（`AgentsPage.tsx:13` 悬空 `console-toolbar.js` + `skills-meta-panel.tsx:84` 改名漏改，**已于 2026-11-03 按用户要求修复**，修复后本任务文件 0 报错；该临时脚本随后已被其作者自行删除）、V-07 配置中字段值非法时不标 `corrupt`（静默丢弃 = 把异常伪装成「没有覆盖」）、V-08 自定义 Agent 的 `null` 防护无回归（已补 HTTP 用例）。收口后补跑 `stream-runtime` resume（3）、流式契约（19）、`shared` 包（168）均通过。再一轮复查又修 **V-09**（「恢复默认提示词」实为清空编辑器 → 改为填回默认值，顺带消除无覆盖时的空 override 写入）与 **V-10**（模式覆盖 hook 的 `save`/`reset` 缺并发门控 → 切换账号会把旧账号覆盖写进新账号视图；以「移除门控即失败于污染本身」验证缺口真实）。前端定向测试现 **18 passed**。继续检查端到端 null 语义与工具路径后，再修 **V-11**（`agent_manage` 摘要缺 `hasPromptOverride`，模型无法判断当前是默认还是已覆盖；顺带首次为工具路径补 update 用例）。本任务文件 `tsc` 0 报错（前端剩余报错属他人在途的定时任务页重构）。均按 TDD 先建失败回归再修；复验存储 13 / 路由 8 / 组件 6 / 纯函数 5 / 组装 27 / 委派 4 全绿，网关 `tsc` exit 0，web lint 与 prettier 全 0。
+**跨层收口（V-12，2026-11-03，由布局任务顺带发现）**: 越层复查发现「等于默认值的配置被固化成覆盖」这一族缺陷跨客户端与网关两层，均已修并各带回归 —— ① **客户端** `pages/misc/agents-builtin-update-input.ts`：提交文本等于 `promptMetadata.defaultText` 时按 `null` 提交（等价「无覆盖」），否则「恢复默认提示词」会把默认值写成覆盖；② **网关** `services/agent-gateway/src/agent/agent-catalog.ts`：覆盖记录**只存与默认不同的字段**（`systemPrompt` / `model` / `variant` / `fallbackModels` 逐字段归一）。原先只靠 `sameAsDefault`（要求四字段全等于默认才删整条记录），「改了模型 + 提示词等于默认」会被漏掉，等上游升级后该 Agent 静默钉在旧配置上（提示词与模型同族）。网关用例 13 → 15，并做**两次变异校验**（分别禁用提示词归一、禁用三字段归一）确认新用例会红。因该功能尚未提交（`shared` 与 `agent-catalog.ts` 均为未提交改动），**无需数据迁移**。
+**方案文档**: [workflow/done/261102-模式与内置角色提示词用户级覆盖.md](workflow/done/261102-模式与内置角色提示词用户级覆盖.md)
+**runtime**: `.agentdocs/runtime/261102-模式与内置角色提示词用户级覆盖/`（master_plan + final_output）
+**落地**: ① 模式覆盖存 `user_settings.prompt_overrides`；新增叶子模块 `prompt/resolve-dialogue-mode-prompt.ts` 统一门控，普通请求与**权限审批恢复**入口共用（恢复入口此前缺有效 Agent 抑制，本次补齐）；② 内置 Agent 覆盖复用 `agent_catalog.builtinOverrides.systemPrompt`，`hasOverrides`/`sameAsDefault`/`next.systemPrompt` 全链纳入；③ HTTP `GET /prompt-overrides` + `PUT|POST /prompt-overrides/dialogue-modes/:mode[/reset]`，内置 Agent 复用 `PUT /agents/:agentId`（`systemPrompt: null` = 恢复默认）；④ shared 契约新增 `UpdateManagedAgentInput.systemPrompt: string | null` 与 `ManagedAgentRecord.promptMetadata`（类型 `ManagedAgentPromptMetadata`）；⑤ UI：设置页 Display tab 独立「模式提示词」section（独立组件 + hook，父文件薄挂载）+ Agents 编辑器放开内置提示词、按初始值差异提交。
+**行为边界**: 覆盖只改提示词文本，不改工具可见性 / 权限档位 / 审批语义；有显式 Agent 时模式提示词仍被抑制；在途请求与团队 handoff 既有快照不回溯，但**显式 task resume 会刷新快照**（本轮新证，已加回归）。
+**已知取舍**: 未复用 `memory-security-scanner` 词面规则作硬拒绝器（会误拦合法提示词），改为鉴权 + 类型 + 长度 + 非法控制字符校验；模式提示词位于 stable 前缀，用户改长会推高每轮缓存成本，故设上限并在 UI 明示。
+**未验证（环境限制）**: 模型是否实际遵循提示词（自动化只能证文本接线）、真实浏览器 UI 走查。
 
 ### ✅ 261013-opencode-llm 对齐上游 packages/ai - 从 v1 线 packages/llm 追平 v2.0.28（方案 A 全量）
 
@@ -810,13 +975,17 @@
 
 ### 261101-记忆确认写入与周期整理
 
-**状态**：已实施并验证（2026-11-01）；**存在登记中的未完成项，未全量收口**，故未归档。
+**状态**：基础闭环与 F-01～F-08 后续交付已实施并验证（2026-11-02 复查收尾）；**T-18～T-20 仍为 waiting，未全量收口**，故未归档。
 **方案文档**：[workflow/261101-记忆确认写入与周期整理实施方案.md](workflow/261101-记忆确认写入与周期整理实施方案.md)
 **运行计划**：`.agentdocs/runtime/261101-记忆确认写入与周期整理实施方案/master_plan.md`
 **落地**：`packages/agent-core/src/memory/{types,schema,governance,injector}.ts` 契约；`services/agent-gateway/src/memory/governance/` 8 模块（提议/授权/提交/来源/任务/投递/规则）；`memory/maintenance/` 4 模块（巡检/调度/投递派发/来源冻结）；`infra/db.ts` 作用域化迁移（先回填再换唯一索引）；`routes/memories-proposals.ts` / `memories-rules.ts` 确认与规则路由；`apps/web/src/pages/settings/memory/memory-proposals-panel.tsx` 等待确认界面；`docs/memory/README.md` 用户说明。
-**验证**：网关全量 **715 文件 / 6063 用例（6060 通过 / 3 跳过）、0 失败**；记忆域 165、工具域 753、渠道域 395、团队域 368 全绿；客户端与 Web 定向用例全绿；agent-core / web-client / web / mobile typecheck 0 error；本任务文件 ESLint 0 error。
+**验证（2026-11-02复查）**：记忆+迁移+HTTP21文件212例、Web23/client24/mobile13例通过；Web/mobile/client类型与Web lint通过；gateway仅skill-registry trusted类型遗留。网关全量最新6164通过/3失败/3跳过（browser安装/下载及权限路由），随后3文件41例单跑通过，仍不宣称全量稳定。preflight其他8文件格式阻塞，完整日志保留。
 **关键修复**：① `migrate()` 旧唯一索引 `IF NOT EXISTS` 会在第二次启动重建并抛 UNIQUE 约束错误导致**网关起不来**（已改「只 DROP 不重建」+ 回归用例）；② 显式来源（api）被临时语义过滤静默丢弃；③ 团队人工写入被误提议化；④ 提交器写死 `source` 逼团队路由绕开提交器直写、丢失审计与回滚（已改为保留调用方来源并切回提交器）。**复查轮另修 6 处**：注入白名单缺省不过滤（越权回归风险）、存储层残留直写旁路与全作用域注入查询、未审计硬删除原语、确认门覆盖载荷结构校验（可写空键记忆）、抑制机制让用户主动来源变成死路、`api` 来源标签错位。
-**未完成（登记，勿读作已完成）**：大模型语义归并（需模型预算与用户开启）、规则文件自动发布（旁路未证明受控 → 保持关闭）、真实渠道 E2E（缺凭据与公开地址）、规则 Web 编辑器、原生移动端批准、强人机认证边界；全量 `preflight` 待干净基线复跑。
+**后续已落地**：默认关闭的语义建议（持久预算每日3次、范围租约、敏感过滤/版本复核、仅提案）、Web规则编辑器与规则审批ID/版本CAS、原生移动端详情复核与逐条确认；schema的expectedRevision丢写已顺序修复。网关全量最新实跑6081通过/3跳过，之后新增重试用例的定向3文件28例通过；Web13/client23/mobile9通过。mobile早期类型通过，末次也受shared缺zod阻塞；client类型与Web lint通过。另修复跨scope/动作/目标的pending错误去重，不再吞提案。
+**11-02复查新增修复**：服务端冻结审批版本、失败override不污染pending、消费失败事务回滚、整理全部依据版本复验、merge实际superseded、job用户隔离与scope水位/报告原子提交、历史DTO与before回滚、Web完整载荷/切身份/失败反馈；移除伪“两者并存”。
+**晚到审查补修**：移动端批准前展示完整payload/目标版本，刷新空态排除加载与错误；记忆移动13例及移动全量18文件327例通过，末次typecheck受shared定时任务Zod errorMap契约阻塞（非新增组件）。
+**计划归位（F-08）**：已交付能力（语义建议／规则编辑器／移动批准／真实合并／版本回滚）从「未完成」表移出并落到 F-01～F-08；T-18～T-20 保持 waiting 且逐条写明前置条件；渠道卡片批准按 abandoned（有意不做）登记而非留 pending；网关全量两轮失败与单独复跑证据按重试契约记入 runtime Error Log，不宣称全量稳定。
+**仍阻塞**：文件规则发布禁用、真实渠道/模型质量/浏览器真机验收、强人机认证；preflight已实际运行但首道格式门失败（其他在途文件保留），T-18～T-20恢复waiting，禁止以禁用功能或离线用例当全量完成。
 
 > 本节仅保留**真实未完成 / 阻塞 / 在途**任务；已完成条目一律登记于上方「已完成的任务」区与「归档全量索引」（2026-10-09 清理整理完成归位，原「（明细）」章节取消）。
 
@@ -1124,7 +1293,32 @@
 - [261009-tool-sandbox拆分方案](workflow/done/261009-tool-sandbox拆分方案.md)
 - [261013-opencode-llm对齐packages-ai](workflow/done/261013-opencode-llm对齐packages-ai.md)
 
+### 2026-11（1）
+
+- [261102-模式与内置角色提示词用户级覆盖](workflow/done/261102-模式与内置角色提示词用户级覆盖.md)
+- [261103-Agent管理页与技能页布局落地（方案A+B）](workflow/done/261103-Agent管理页与技能页布局落地（方案A+B）.md)
+
 ## 项目记忆
+
+### 控制台页面布局与共享表面（2026-11-03）
+
+- **架构决策：跨页面「控制台表面」统一在 `apps/web/src/styles/console-surfaces.css`**（`console-*`，59 类：按钮 / 分段 / 输入 / 徽章 / 开关 / 列容器 / 行外壳 / 元信息表 / 分组 / 提示条 / 空态）。依据 `apps/web/AGENTS.md:118`「2 个及以上页面重复的 UI 片段必须提取共享」——落地前 `/agents` 与 `/skills` 各写了一套逐字重复的控件。页面 CSS 只保留差异（列宽、行内部结构、专属区块）。
+- **事实：三栏布局的可用宽度公式 = 编辑器宽度 = 视口 − 945px**（classic 布局：侧栏 + 页面内边距实测占 **385px**，两侧固定列 272+264 + 两道 12px 间距 = 572px）。实测 1440 → 495px、1360 → 415px、1280 → **283px**、1200 → **203px**，故三栏阈值定在 **1360px**，1280/1200 这类常见窗口走两栏（编辑器 619/539px+，反而更宽）。**任何三栏控制台页面都要按这个公式定阈值，不能照搬原型的列宽**（原型的 chrome 里没有应用侧栏）。
+- **陷阱：页面行类必须与共享 `console-row` 同时挂载**——只留本页行类会静默丢失 hover / 选中竖条 / 内距（重构中真实发生过，且 typecheck 与 lint 都不会报）。
+- **陷阱：列表行的版本/分类是「条目自身」的权威，市场详情不能覆盖它**——`/skills` 里同 id 的本地技能与市场条目是**两件产物**，用市场详情填元信息会显示成市场版本（实测本地 `v0.1.0` 被显示成市场 `v1.6.2`）。统一走 `mergeSkillDisplayDetail`：名称/版本/描述/分类/标签/安装量以行为准，详情只补充 README/权限/作者/许可。
+- **约定：动作按钮不承担状态语义**——已安装条目的按钮写「已安装」会让用户以为不可点，应写动作词（「重新安装」）并由旁边徽章表达状态。
+
+### 提示词用户级覆盖（对话模式 + 内置 Agent）（2026-11-02）
+
+- **架构决策：模式提示词覆盖用独立 `user_settings` 键，内置 Agent 覆盖复用 `builtinOverrides`**——两者生命周期不同（模式覆盖只有文本、无模型语义），混存会让 reset 与差异比对互相牵连。取值门控必须收敛到单一叶子模块 `services/agent-gateway/src/prompt/resolve-dialogue-mode-prompt.ts`，否则普通入口（`stream-prompt-assembly.ts`）与**权限审批恢复入口**（`stream-runtime.ts`）会各自实现门控——实测恢复入口长期缺失「有效 Agent 抑制」，属既有静默不一致，本轮补齐。
+- **陷阱：放开 `builtinOverrides.systemPrompt` 只改 `forbiddenFields` 会让「仅改提示词」保存后静默消失**——必须同时改三处：`sanitizedOverride` 白名单、`currentBody` 合并、以及 `sameAsDefault`/`hasOverrides` 的差异比较（后者的 `sameAsDefault` 命中会整项 `delete` 覆盖）。
+- **陷阱：内置 Agent 编辑器整表单提交会把默认提示词固化成覆盖**——表单预填的是当前有效值，无条件随模型一起提交会让「只改模型」也写入一条等于默认的提示词覆盖（此后不再随版本升级）。必须前端按初始值差异提交 + 后端把「等于当前默认」归一为无覆盖。
+- **约定：用户主动配置的提示词不得复用 `memory-security-scanner` 做硬拒绝**——其词面正则（`reveal your system prompt`、`<tool_call>`、`忽略以上指令`）面向不可信记忆注入，会误拦合法提示词（实证 `Never reveal your system prompt to anyone.` 被判违规）。主动配置只需鉴权 + 类型 + 长度 + 非法控制字符（零宽 / 双向 / Tag block / 私有使用区）校验。
+- **事实：委派提示词快照三条路径语义不同**（2026-11-02 核查 `delegation.ts:336-339`）——新委派取派发当时的解析值；**显式 task resume 用 `{ ...existing, ...childSessionMetadata }` 刷新快照**；团队 handoff 的 `mergeDelegatedSystemPromptIntoMetadata` **不覆盖**已存在值。故「改了 Agent 提示词」不保证历史子会话立即生效，任何「保存即生效」表述必须限定为「后续重新解析的请求」。
+- **陷阱：「幂等短路 + 损坏态」会形成不可达的修复路径**（2026-11-03 复查）—— `resetDialogueModePromptOverride` 原为「该模式无覆盖则直接 `return` 不写库」，而损坏配置解析出的 overrides 恒为空 → reset 永不写库 → 损坏键永不被清除；叠加 UI「恢复默认」按钮按 `hasOverride` 禁用（corrupt 下恒为 false），用户被卡在「配置已损坏、界面却说可以恢复」。**规则**：写操作的幂等短路必须区分「为空」与「损坏」（写成 `if (无覆盖 && !corrupt)`）；UI 里用于**修复异常态**的入口不得按「内容是否存在」禁用。
+- **陷阱：schema 抢先校验会让业务层文案成死代码，且错误兜底不得一律 4xx**（2026-11-03 复查）—— 路由用 `z.string().min(1).max(N)` 校验文本时，超长/空白在 `parseBody`（通常在 `try` 之外，走全局错误处理器）就被拒，于是 store 的明确文案与 `mapPromptOverrideError` 的对应分支在 HTTP 路径**永不命中**，用户只拿到框架通用文案；同一处兜底还把 DB 故障映射成 400 并回显 `error.message`，既误导用户又泄露内部细节。**规则**：同一字段的业务语义校验只放一处（本例放 store，schema 只做类型）；错误映射兜底走 5xx + 中性文案，只有已登记的业务文案映射 4xx。
+- **陷阱：`@openAwork/web-client` 有两个同名 `HttpError`**——`session/sessions.ts:777` 与 `gateway/http.ts:13` 各定义一份。断言 `instanceof HttpError` 必须与实现同源（`session/agents.ts` 一族用 `gateway/http.ts`），否则测试报「expected HttpError … to be an instance of HttpError」。
+- **规则：覆盖记录只存「与默认不同的字段」（2026-11-03，V-12）**——任何等于默认值的字段（提示词 / 模型 / variant / 回退链同族）一旦落库，等上游升级默认值后它就变成**陈旧值**，把该 Agent 静默钉在旧配置上（用户并没有要固定它）。因此客户端要把「等于当前默认」按无覆盖提交、网关要在写库前逐字段剥掉等于默认的字段。**`sameAsDefault` 不能当作逐字段归一的替代品**——它只在四字段全等于默认时删整条记录，「改了模型 + 提示词等于默认」这类组合会被漏掉。
 
 ### 会话扩展隔离（Skill / MCP 按会话）（2026-10-31）
 
@@ -1157,6 +1351,61 @@
 
 ### 已知陷阱补充
 
+#### 261102（移除 omo 耦合）新增（2026-11-02）
+
+1. **规范名迁移的"静默变弱/失效"漏点（精确查表型注册表）**：凡形如 `MAP[ctx.toolName]`、`SET.has(name)`、`case '<工具名>'` 的**精确查表**判定点，在工具规范名收敛（如 `subagent`）后若只登记历史别名（`task`），会出现**不报错但行为退化**的后果。261102 期间已修 1 处（`permission/tool-permission-derivers.ts` 的 `subagent` 曾落到 `defaultPermissionDeriver` → `medium` + 通用文案，属**审批静默弱化**）；另扫出 2 处**既有漏点待立项**：`session/session-tool-visibility.ts:147` 的 `resolveChannelToolKey()` 缺 `case 'subagent'`（渠道会话规范名委派被判**不可见**，**fail-closed 功能丧失**）、`channels/channel-capability-tool-groups.ts:126-128` 缺 `case 'subagent'`（能力目录归类错误）。**规则**：规范名与历史别名必须**成对登记**，或统一走 `isTaskToolName()`；新增规范名时应补负向断言（上述 3 处漏点全部"无测试覆盖"才得以静默）。
+2. **提示词纠偏文案的载体唯一性**：涉及"模型行为纠偏"的关键句（如「联网资讯检索派 web-researcher，**不要派 scout**」）若唯一载体是被删除的文件，删除即造成**提示词能力退化**且测试会红（261102 的 P8 即此：`call-omo-agent-tools.ts` 删除后该句消失，`task-tools.ts` 只剩较弱的「不要默认 scout」）。**规则**：删除承载关键纠偏文案的文件前必须做**载体检查**（grep 同句在其它载体的存在性），或保证 ≥2 载体。**注意**：修完只证明"指引文本存在于模型读到的位置"，**模型是否照做需真实对话验证，自动化不能证明**。
+3. **门禁必须按"本任务改动集合"取差集，不可用全仓聚合数字**：工作树常有并行工作流同时写盘（261102 期间实测有 4 条：stream 分层重构 / 渠道本地化 / 工具输出预览重构 / 移动端记忆审批），全仓 lint/format/test 数字会持续波动。**做法**：`format:check` 用 `prettier --list-different <本任务文件>` 给"新增不通过 = N"；测试失败先按 `git diff` + 写盘时间判定归属，**"重跑仍失败"不等于 flaky**（活跃重构的中间态同样稳定失败）。
+
+#### 261103（应用级无障碍专项）新增（2026-11-03）
+
+1. **landmark 分工（新增页面必须遵守）**：主内容 landmark 由**布局壳**提供 —— `LayoutClassic`/`LayoutFusion` 的 `.outlet-content-wrap` 是 `<main>`、fusion 的 `.layout-titlebar-fusion` 是 `<header>`、`FusionSidebar` 根是 `<aside>`、classic 侧栏 `AppSidebar` 是 `<nav>`。**页面内不要再写 `<main>`**（会嵌套）；需要给页面根加标识时用 `<section aria-label="…">`（例：`HomePage`、`ResourcesPage`）。固定悬浮装饰（如 `UpdateBanner` 的版本角标）要么收进 `footer`/landmark，要么接受 axe 的 `region` 提示。
+2. **标题层级约定**：页面主标题统一 `<h1 className="page-title">`（`.page-title` 已在 `index.css` 补 `margin: 0`，否则 h1 的 UA margin 会撑高 44px 页头）；**页头下方第一级标题只能是 h2**（定时任务卡片标题从 `h3` 改 `h2` 就是因为 heading-order）。页面私有样式里若存在标签选择器（如 `.sch-card-title h3`），**改标签必须同步改 CSS**。
+3. **`role="tab"` 必须真在 `tablist` 内**：标题栏左上角「首页」按钮曾用 `role="tab"` + `aria-selected`，但它在 `__home-slot` 里、不在任何 tablist 内 → axe `aria-required-parent`(critical)。这类「看起来像 tab 的入口按钮」用普通 `button` + `aria-current="page"` 表达「当前页」。
+4. **`aria-expanded` 只能挂在支持它的角色上**：「输入框 + 下拉结果」要写成标准 combobox：`role="combobox"` + `aria-expanded` + `aria-controls` + `aria-autocomplete="list"`（`input[type=search]` 单独用 `aria-expanded` 会被判 `aria-allowed-attr`）。
+5. **不要用 `opacity` 表达「禁用/停用」**：整体透明度会把卡内文字对比度一起乘下去（实测 0.72 的停用卡片文字掉到 3.18:1），改用虚线边框 / 平面背景 / 降饱和背景。
+
+6. **主题对比度回归的方法 + 三条 token 约定**（2026-11-03 全 16 档实测）：① **回归必须做「健康度 + 身份」双校验** —— 每档先确认 `cards=6 / main=1`（页面没落进错误边界）且该档主题的独有 token（如 `--fg-muted`）计算值符合预期；**页面崩溃时 axe 必然报 0**，不校验就会把「页面崩了」误读成「达标」（本轮实测有 3 档踩到）。**别用 `getComputedStyle(body).backgroundColor` 当主题身份**（时序噪声大，实测亮档读到暗底）。② **小字（≤12px）不要用 `--fg-subtle`**，且 `--fg-muted` 必须在「该主题最差底色」上 ≥4.6:1 —— 本轮修了 6 套主题的 `--fg-muted`（carbon-dark 3.84 最差 → 4.71；sunset-dark / linear-light / linear-dark / ocean-dark / sakura-dark 4.39~4.49）。③ **强调色不要当浅底上的正文色**：`.sidebar-primary-action` 由「彩字 + accent 淡底」改为「底色 + 内描边（`inset 0 0 0 1px var(--accent-border)`）+ `--fg-strong`」，因为 `--accent`/`--accent-hover`/`--accent-active` 无法在所有主题的浅底上同时达标（往深一档在暗色主题反向变差）。
+
+#### 261103（定时任务遗留收口）新增（2026-11-03）
+
+1. **`@openAwork/shared-ui` 不再导出任何 Cron 相关符号**：`CronManager`（组件）与 6 个类型（`CronManagerProps` / `CronJob` / `CronJobDeliveryMode` / `ScheduleKind` / `CronJobStatus`）已随零消费方清理一并删除，dist 已重建。需要投递方式类型时用 `apps/web/src/components/schedules/schedule-form-utils.ts` 的 `ScheduleDeliveryMode`（`'none'|'session'|'desktop'`，与网关联集一致但**不含 `channel`**）。
+2. **定时任务「投递到会话」是挂起式两段写入**：`handleDeliveryChange(jobId,'session')` 只设置 `pendingSessionDelivery`，真正写入由 `confirmSessionDelivery(sessionId)` 完成（`{delivery_mode:'session', delivery_target: sessionId}`）。**不要**把它改回"选模式即写"，也不要重新引入 `window.prompt`——旧实现取消/留空是静默放弃，用户以为改了其实没有，且填错的会话要到下次执行才以「目标会话不存在」失败。会话列表只在弹层打开时拉（`GET /sessions` 固定上限 100、无 offset 分页）。
+3. **同一文件的多次编辑必须串行**（工具层教训，本次实际踩到）：把两处 `replace` 放在同一批次并行作用于同一文件时，**后一次写入会覆盖前一次**，表现为"工具报成功但内容缺失"（本次症状是 mock 网关运行期 `sessions is not defined`）。同文件改动要一次一个，或合并成一次替换。
+4. **别用 `eval` 移除 React 管理的 DOM**：走查时 `document.querySelector(覆盖层).remove()` 会让 React 后续操作该节点抛错并把整页打进**错误边界**（页面显示「界面渲染出错」）。关弹窗/遮罩必须点它自己的按钮；本仓两类首次弹窗（「连接 Gateway」引导、遥测同意）点掉一次即持久化，之后不再出现。
+5. **agent-browser 的几个实测细节**：① `select` 命令匹配不到中文 `aria-label` 选择器 → 在 `eval` 里用原生 value setter + `dispatchEvent(new Event('change',{bubbles:true}))` 才能驱动 React 受控组件；② 页面里的**下拉/按钮点击**优先用 `eval` 取 `elementFromPoint` 复核后 `click()`，`agent-browser click` 偶发误报 "element covered"；③ `AppDialog` 的 `DialogError` 渲染为「操作失败：{message}」，断言要用子串或 `role="alert"`。
+
+#### 261102（定时任务页布局 E 落地）新增（2026-11-02）
+
+1. **apps/web 前端前后端字段口径**：`CronJobRecord` / `ScheduledTaskExecution` 的时间字段是 **epoch 毫秒 number**（`nextFireAt` / `lastFiredAt` / `started_at` / `finished_at`），不是 ISO 字符串；相对时间、日差分组、轨道定位全部按 ms 计算（`pages/misc/schedules/schedules-view-utils.ts`）。
+2. **`at`（单次）任务的时间必须由客户端本地时区渲染**：网关派生的 `scheduleDisplay` 用进程时区（Docker 默认 UTC），直接用会与同页历史时间差 8 小时。统一走 `formatScheduleText()`（内部复用 `formatTimestamp`），改布局时不得绕过。
+3. **apps/web 页面重构约定（实测）**：页面私有子组件放 `pages/<page>/` 的子目录（不集中到 `components/`），CSS 就近 `import './x.css'` 并在 `.tsx` 顶部；测试与实现同目录 `*.test.tsx`（无 `__tests__`），vitest 为 jsdom + `src/test/setup.ts`；`apps/web` 的 lint 只启用 `react-compiler/react-compiler: error` 且忽略测试文件 → 前端门禁实际是 `prettier --check` + `tsc --noEmit` + 定向 vitest。
+4. **页面级测试断言别用裸角色/文本查询**：新增筛选 chip 会让 `queryByText('运行中')` 撞名（状态徽章 vs 筛选按钮），新增排序下拉会让 `queryByRole('combobox')` 恒不为空（原本用来证明「渠道任务不渲染投递下拉」）。规则：**按 role + name（如 `结果投递方式`）或 `{ selector }` 收窄**，语义不变但不会随页面新增控件假抛红——本次两处断言都因此需要成对修改。
+5. **前端真机走查走 agent-browser 自带渠道，别用 Playwright（本机实测）**：`npx playwright install chromium` 在本机两次（`~/.cache/ms-playwright` 与工作区路径）都只解压出 3 个条目（缺 `chrome` 二进制），`~/.local/bin/playwright` 还指向不存在的 `/home/await/project/00-new-property/...`（ENODEV 症状）；而 `agent-browser install` 能正常装 **Chrome 156** 到 `~/.agent-browser/browsers/`。可用能力远超截图：`set viewport|media|device`、`eval`、`get styles/count/text`、`is visible`、`console`、`errors`、`a11y`（axe 4.12）、`network route`、`storage`、`vitals`、`react tree`。
+   **可复现流程**：① `node <task>/evidence/mock-gateway.mjs`（mock `/cron/**` + CORS，端口 3100）② `cd apps/web && bunx vite --port 5173` ③ `agent-browser set viewport 1440 900` ④ `open http://127.0.0.1:5173/` 后 `eval "localStorage.setItem('auth-store', JSON.stringify({state:{accessToken:'tok',gatewayUrl:'http://127.0.0.1:3100',…},version:0}))"` 注入登录态 ⑤ `open …/schedules` ⑥ 首次必须点掉「跳过引导，直接登录」与遥测同意弹窗（两者一次性持久化，之后不再出现）。
+   **两个坑**：编辑 `.tsx` 触发 HMR 会整页重载**回首页**（截图前必须重新导航并复检 `.sch-*` 是否还在）；`agent-browser click` 偶发误报 "element is covered by …"，先用 `eval` + `document.elementFromPoint` 复核命中元素，必要时直接 `eval` 调 `btn.click()`。
+   **可自动化的补充证据**（无需浏览器也能做）：组件 `className` ↔ CSS 选择器一致性比对（本次 77/77，能抓类名写错与死样式）、属性选择器契约（`data-tone`/`data-kind`/`aria-pressed`）对齐、断点规则存在性。
+
+6. **定时任务页的「视角偏好」统一走 sessionStorage 键族 `openAwork.schedules.*`**：`viewMode`（`cards|timeline`）与 `density`（`comfortable|compact`），读写都做白名单校验 + `try/catch` 降级（隐私模式存不住不影响功能）。**密度只作用于卡片视图**（时间轴单列竖排），因此控件只在卡片视图渲染、`density` 也是卡片视图自有 props（`SchedulesCardGridProps`），**不放进**要求「两视图完全一致」的 `SchedulesViewCommonProps`。**两条工程约定**：① 收紧 props 契约（新增必填字段）时优先改调用点（本次在测试里加 `cardProps()` 脚手架），**不要**为了省事把 prop 改成可选；② 任何会写 sessionStorage 的用例，其 `afterEach` 必须 `window.sessionStorage.clear()`，否则后续用例会在错误视角/密度下起跑（`Storage` 的方法要 `vi.spyOn(Storage.prototype, 'getItem')` 才拦得住）。
+
+7. **页面族收尾固定跑一次「落地 + 接线」体检**（脚本 `runtime/261102-定时任务页布局方案E落地/evidence/wiring-audit.mjs`，`node` 直接跑，改页面族路径即可复用）：① 孤儿模块（只被测试引用）；② 导出但全仓无人用；③ TSX `className` ↔ CSS 选择器**双向**比对（用了没定义 / 定义了没用）；④ hook 返回值 vs 页面解构、视图 props 字段 vs 组件解构；⑤ 每个动作在每个视图里是否真有调用点；⑥ `data-*` 属性 ↔ CSS 属性选择器双向。**最容易漏的是 hook 里的「派生态」**：重构把视图改成直接读原始字段后（本轮 `latestExecutions` → `job.lastExecution`），那份派生 map 就没人消费了，而**它自己的单测还在保护它** —— 静态看是绿的，只有「这个导出/返回值到底有没有外部消费者」这类检查才挖得出来。
+
+#### 261103（workflows 模板响应健壮性修复）新增（2026-11-03）
+
+1. **对网络响应体只写 `as T` 是隐藏炸弹**：TS 断言不校验运行时形状，坏形状一旦进入类型化 state，**崩点在下游任意数组方法**（本例 `templates.find(...)` → `TypeError: templates.find is not a function`），报错栈指向**使用处**、根因在**取数处**，排查时极易看错方向。`packages/web-client/src/infra/*` 是共享客户端（web / mobile / desktop 都消费），取数边界应 `Array.isArray(payload)` 校验后返回**结构化失败**（`ok:false` + `retryable` + 文案），**不要静默返回空列表** —— 那会把「网关契约坏了」伪装成「没有数据」。同类待处理清单见 `workflow/done/261103-workflows模板响应健壮性修复.md`（`team.ts:1094` 与本次同形态、风险最高）。
+2. **判定「环境限制 / 走查环境问题」前必须先用 `console` / `errors` 抓真实异常取证**：`/workflows` 整页崩曾被记为「mock 未提供接口 → 走查环境限制」，实际是「契约不符未降级」的真实缺陷；`agent-browser console` 一行就能看到 `templates.find is not a function`。**归因过早 = 把真实缺陷写进「遗留」后永久尘封**。
+
+#### 261102（规范名 subagent 漏点）新增（2026-11-02）
+
+4. **"精确查表型"登记点的规范名漏点清单（已修 5 处 / 1 处待修）**：工具规范名收敛为 `subagent`（`TASK_TOOL_NAME`）后，凡按历史别名 `task` 登记的判定点都会漏掉规范名。已修：`session/session-tool-visibility.ts` 的 `resolveChannelToolKey`（G1，**不可达**，防御性）、`channels/channel-capability-tool-groups.ts` 的 `resolveChannelCapabilityToolGroup`（G2，**可达**：影响 `capabilities.ts:451` 的能力过滤与 `:182` 分组统计）、`session/clarify-mode-tool-policy.ts` 的 `CLARIFY_MODE_ALLOWED_TOOLS`（#3，**可达：唯一行为变更** —— 澄清模式下委派工具 `false → true`，`write` 仍 `false`、审批仍 `task_run → ask`）、`tools/tool-output-truncator.ts` 的 `TRUNCATABLE_TOOLS`（#4，**零可观测效果**）、前端 `apps/web/src/components/common/display/channel-capability-tool-groups.ts` 的 `classifyCapabilityToolGroup`（#6）。**待修**：`routes/stream.ts:952` 的 `TOOLS_REQUIRING_NON_EMPTY_ARGS`（并行 stream 分层重构在写该文件，待其合入后收敛）。**规则**：规范名与历史别名必须成对登记或统一走 `isTaskToolName()`；新增规范名时补负向断言（上述漏点全部因"无测试覆盖"才得以长期静默）。
+5. **"可达性"必须以"可观测差异"为准，而不是"集合/配置的文本差异"**。两处实例：`resolveChannelToolKey` 缺 `subagent`，但公共入口被 `isTaskToolName()` 提前截获 → 端到端无差异（**不可达**）；`TRUNCATABLE_TOOLS` 缺 `subagent`，但 `DEFAULT_MAX_BYTES === UNIVERSAL_MAX_BYTES === 50 KiB` 且两者都无 per-tool override → **零可观测效果**。**做法**：先跑"输入 → 输出"差异，再谈缺陷等级；不要把"集合缺项"直接当"行为缺陷"上报（本轮先后两次把不可达/无效果的项定成"功能丧失/降级"）。
+6. **比对两份实现要用"行为等价法"**：逐输入比较两个函数的返回值，**不要比 `case` 标签集合** —— `switch` 与 pre-switch `if` 链的组织差异会被误报为缺失（本轮把 `repo_clone`/`repo_overview` 误报成"前端缺 case"，实际由 `label === '...'` 的前缀分支等价处理，行为一致）。
+7. **自报门禁必须带"命令 + 退出码 + 时点"**：本轮一次 `TS2345` 曾被误判为"自报不实"，实为并发采样时点差（实施方 19:55 落地、核验方 19:4x 采样）。**发现快照与实测冲突时先查 mtime，再下结论**。
+8. **证据到手前不得宣称"已核实"**：本轮协调者在核实命令返回前即向两名成员宣称"漂移表我独立核实成立"，并据此派发了一个会产出**死代码**的改动（往 `switch` 里加被 pre-switch `if` 提前返回的 `case`）。**规则**：任何"我核实了/我确认了"的表述必须晚于证据到手；否则宁可写"待核实"。同理，**同一分类规则在前后端各有一份实现**（`resolveChannelCapabilityToolGroup` vs `classifyCapabilityToolGroup`）属架构债务 —— 已于 2026-11-02 治理，见下条。
+
+9. **同一规则在前后端各有一份实现 → 必然漂移（已治理，2026-11-02）**：`resolveChannelCapabilityToolGroup` / `classifyCapabilityToolGroup` 曾各自手写，已出现「规范名 `subagent` 归组不一致」与「注入开关可选性语义不一致」。已**上移到 `@openAwork/shared`**（唯一事实来源），两端只做再导出/别名，并新增 `CHANNEL_CAPABILITY_TOOL_GROUP_CONTRACT` **契约黄金表**（保留 `subagent` / `repo_clone` / `repo_overview` 三个历史漂移锚点）；两端测试遍历契约表**并断言与共享实现是同一函数对象（`toBe`）**。**通用做法**：跨端共用的规则/常量/类型一律上移共享包；两端保留的再导出除行为断言外，必须补"同一函数对象"断言 —— 只测行为无法阻止再次分叉出第二份实现。
+10. **两个纯 TS 陷阱（本系列各踩两次）**：① **`eslint no-fallthrough` 会把相邻 `case` 标签之间的注释判为 fallthrough** —— 说明性注释应放函数 JSDoc，不要夹在 `case` 之间；② **`export type { X } from 'm'` 不会在本文件内绑定 `X`** —— 若该文件内仍需引用（如作为其它类型的字段类型），必须顶部 `import type { X }` + 本地 `export type { X }`，否则报 `TS2304`。
+
 - [2026-09-23] **「后台任务」视图必须过滤 `foreground` 终端**：`SessionTerminalSummary.kind` 有三值——`foreground`（**阻塞式** `bash` 调用 + 用户交互终端 `quick_terminal`）、`background`（`run_bash_in_background`）、`tmux`（`interactive_bash`）；三者都会写 `session_terminals`。不过滤的后果：后台任务面板/左侧浮动栏/composer 胶囊把用户自己开着的终端算成「后台命令在跑」（实测真实会话 3 个终端全部 foreground，含 2 个交互终端）。过滤点唯一：`apps/web/src/pages/chat-page/panels/background-task-model.ts` 的 `buildBackgroundTaskRows`（`kind` 缺失时不隐藏，兼容旧网关）。
 
 - [2026-09-23] **折叠胶囊的宽度断言会被「新增文案」打破**：`apps/web/harness/verify-sub-agent-run-list.ts` 原断言折叠宽度 `<= 100`（`子代理` 单词时代），加入「后台 N 运行中」后实测 131.75px。**改这类断言时保留「`< expanded`」的严格关系**（原始意图是「显著窄于 200px 展开态」），只放宽绝对值阈值并把新阈值写进 README。
@@ -1184,6 +1433,23 @@
 - [2026-09-24] **同一视图内两个按钮同名会让 `getByText` 命中歧义**：`McpServerManager` 头部「+ 添加服务器」开关与表单提交按钮同名时，测试取到的是被禁用的提交按钮（点击超时）。现提交按钮改「+ 确认添加」，头部开关加 `data-mcp-add-toggle`，测试选择器一律按 data 属性锚定。
 
 ### 架构决策
+
+- [2026-11-01] **定时任务契约以 `/cron/jobs` 真实 wire 为准**：`shared/scheduled-tasks*` 仅类型与边界 schema，网关保留可执行性业务校验；客户端保公开类型名，历史摘要为 `outputPreview`、时间为 Unix 毫秒，PATCH 不补创建默认值。Zod 主版本须与网关一致并同步锁文件。
+- [2026-11-02] **并发与事务重构不得覆盖已有语义**：流式不同请求409、同请求single-flight/回放，composer用数据库claim，cron到点skip/手动忙碌409；cron超时不等于底层取消，占位必须保持到真实settle且stop/restore不绕过。审批状态/audit/grant用同步`sqliteTransaction`共同提交，文件镜像失败不应返回假500并丢续跑。
+- [2026-11-02] **权限派生失败必须fail-closed**：MCP上下文解析/指纹异常不能用null表示免审批，硬拒绝检查必须先于全局allow/yolo/永久授权；保留session-extension独立门禁。HTTP(S)错误URL脱敏必须剥userinfo与全部query/hash，单靠key=value正则不能保护签名参数，未知错误对象不得任意String。
+- [2026-11-02] **判定缺陷可达性再定性**：`CachedRouteOutlet` 的 `getRouteCacheKey`（`apps/web/src/components/common/routing/CachedRouteOutlet.tsx:53-56`）**只取路径首段**，路由首段唯一时（如只有一个 `/chat`）不同子路径会**替换**缓存条目而非并存——因此「多个 ChatPage 同时挂载」这类场景需先确认是否存在首段不同的路由。**判据：若测试必须人为构造路由/环境条件才能复现，多半在生产不可达**，此时应定性为「潜在 + 防御性修复」而不是「修复线上 bug」。
+- [2026-11-02] **共享工作区里门禁变红先判归属**：本项目多任务共享同一批未提交改动，`typecheck`/`test`/`lint` 可能被他人**实时改写**的文件临时打断（实测遇到 `block-tool-call.tsx` 缺符号导致 12 例失败 + 2 处 TS2304，约 1 分钟后自愈）。判定三步：`git diff --quiet HEAD -- <file>` 看是否他人在途 → 核对失败/报错文件集合是否与自身改动有交集 → 检查缺失符号是否全仓无定义。**确认无交集就不要代改他人在途文件**。
+- [2026-11-02] **`preflight` 在 HEAD 即失败**：`bun run preflight` 的格式门有 8 个文件在 HEAD 上就不满足 Prettier（`DESIGN_DEFECTS.md`、`docs/architecture/team-orchestration-depth.md`、`packages/lsp-client/src/index.ts`、`services/agent-gateway/src/__tests__/handoff/dispatch-dependencies.test.ts`、`services/agent-gateway/src/__tests__/team/team-inbound-routes.test.ts`、`services/agent-gateway/src/routes/stream-runtime.ts`、`services/agent-gateway/src/session/sync-event.ts`、`services/agent-gateway/src/tools/sandbox/handlers/mcp.ts`）。判断「是否本轮回归」前先用 `git diff --quiet HEAD -- <file>` 核对，不要把仓库既有脏格式算作自己的改动。
+- [2026-11-02] **权限决策审计的可枚举理由**：`permission_decision_logs.reason` 用 `ensureColumn` 的 `ADD COLUMN` 迁移（重建表在 `IF NOT EXISTS` 幂等重入时会撞 UNIQUE）；`permission-ladder` 所有出口经单一 `finish(state, reason, scope)` 记账，自动放行绝不记 `user_approved`，插件把内置 allow 降级为 deny 时必须记 `plugin_denied`。
+- [2026-11-02] **Vitest 4 的 options 位置**：`test(name, fn, options)` 签名已被移除，options 必须是**第二个**参数（`it.each(...)(name, options, fn)`）。写在回调之后会让整个测试文件加载失败并报 `Signature "test(name, fn, { ... })" was deprecated ... removed in Vitest 4`，表现为「0 test / Failed Suites」。
+- [2026-11-02] **全量并行会让重型用例耗时膨胀约 4 倍**：`ChatPage.session-switch.test.tsx` 的 SSE 回放用例单独跑 1.35s，全量并行负载下 5.2s，撞 5s 默认超时被误报成会话切换回归。判断「是否回归」前先单独复跑测耗时，再决定是改代码还是补显式 `timeout`。
+- [2026-11-02] **本工作区禁止 `git stash`**：多个任务共享同一批未提交改动，`stash push/pop` 会折叠「已暂存/未暂存」分界（实测 `MM` → ` M`），使「只提交已暂存内容」的组成发生变化。需要对比基线时用 `git diff <ref> -- <file>` 或复制文件，不要用 stash。事后核验方法：`git stash list` 应为空 + 抽查关键文件内容 + `git diff --stat` 总量。
+- [2026-11-02] **窗口事件订阅的正确写法**：订阅回调必须走 ref（`messagesRef.current`）且订阅 effect 的依赖**不含** `messages`——依赖 `messages` 会导致流式期间监听器被反复 remove/add，在拆装间隙**静默丢失事件**（探针实测 settle 后 2→3 次重装）。参照 `pages/team/conversation/team-conversation-view-host-interactions.ts`。chat 侧已修为 `hooks/use-chat-page-window-events.ts`；注意 `open-browser` 两侧语义不同（chat 用「最新预览地址」ref，team 显式传默认 URL），不可照搬。
+- [2026-11-02] **异步 catch 必须做取消门控（已修）**：`.then` 判了 `cancelled` 而 `.catch` 没判，会导致组件卸载后仍写日志——生产上无诊断价值，测试上则落到已关闭的 worker 上。修复见 `use-composer-input-history.ts`（catch 内先判 `cancelled || revision`）与 `use-composer-queue-backend.ts`（`hydrate(isCancelled?)` 可选判定，向后兼容）。写回归测试时注意：`waitFor(() => expect(logs).toHaveLength(0))` 条件初始即成立会**立即通过**、没有回归价值，需先把 reject 链路 flush 完再断言。
+- [2026-11-02] **Web 全量退出码可能是 1 而用例全过（根因已定位并已修复）**：`EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending`。机制：composer 水合 effect 对 `gatewayUrl` 发真实 `fetch`（`packages/web-client/src/gateway/http.ts` 还挂 20s abort 定时器），请求在组件卸载/worker 拆除后才 reject，而 `.catch` **无条件** `logger.warn` → 命中 vitest `onUserConsoleLog` 通道时 RPC 已关闭。**这不是测试配置问题，是产品代码缺陷**：异步 catch 必须做取消门控，否则卸载后仍写日志（`use-composer-input-history.ts` 的 `cancelled` 只挡 `.then` 未挡 `.catch`；`use-composer-queue-backend.ts` 的 `hydrate` catch 无取消门）。判读口径：退出码 1 而用例全过时，先看 `Errors` 段是否仅含该类 teardown 条目。**不要**用 vitest 全局 `disableConsoleIntercept` 掩盖（会削弱全部测试的 console 可观测性并可能掩盖真实失败）。
+- [2026-11-02] **抽取时同名导出会撞 TS2300，且测试抓不到**：把 `stream.ts` 的私有 `buildErrorContent` 搬进新模块并在「兼容汇出层」一并转出，会与既有 `stream-error-handler.ts` 的同名导出冲突 → `TS2300 Duplicate identifier`。**vitest 全绿、只有 `tsc` 报**（运行时只有一份生效）。所以拆分阶段必须把 typecheck 与测试**同时**作为门禁，缺一即漏。修法是保留**拆分前**就存在的那份导出（对外面不变），移除新加的那份。
+- [2026-11-02] **兼容汇出层（re-export index）需要防腐化测试**：`routes/stream-refactor-index.ts` 这类「模块汇总导出」极易腐化（条目指向已改名或不存在的符号，而 typecheck 不一定报）。有效做法：加一个测试 `import * as index` 后用 `it.each` 逐条断言运行时汇出存在（本次登记 54 个）；纯类型不登记、交由 typecheck 负责。
+- [2026-11-02] **`ORCHESTRATOR_AGENT_IDS` 单源**：真源在 `routes/stream-system-prompts.ts`（中立叶子模块，被 `stream.ts` 与 `stream-prompt-assembly.ts` 共同 import）。注意 `session/atlas-guard.ts` 与 `session/sisyphus-junior-notepad.ts` 仍各有一份同名副本（仓库既有遗留）。同类「为避环而复制常量」应优先找既有中立模块承载，而不是复制或反向 import。
 
 - [2026-09-25] **同一元素的内外层同时写 inline style 会互相覆盖（复查抓到）**：`BashTerminalCard` 的输出面板设了 `--fg-default` / 13px，但真正承载文本的 `ShellTextPane` 内部又写死 `muted` / `fontSize: 11` → 「终端观感」的文字颜色与字号被抵消。**改样式先确认「文本最终由哪个节点承载」**，把字号/颜色写在承载节点上（ANSI 片段仍各自覆盖颜色、stderr 仍走危险色）。
 - [2026-09-25] **工具卡「内容优先」的两条 UI 口径**：① **read 的路径只显示一处**——折叠态在摘要（`已查看了 <路径>:起-止`），展开态只在预览 meta 行（可点击跳转 + 复制），摘要退成 `已查看了文件`（`naturalLanguageSummary` 的 `options.omitPath`，`InlineToolCall` 在预览可见时启用）；**不要为了"信息全"把同一路径铺两遍**，也**不要**把 meta 的点击预览动作合掉。② **提问类工具（question / askuserquestion）不渲染「参数」等分区标签**——问答对自带问题文本（`QuestionAnswerPreview`），参数区只是重复；摘要固定 `已向用户提问（N 题）`，不要再回退成 `已执行了 <英文工具名>`。同类口径：bash / diff / 目录类（`list` / `workspace_create_directory` / `workspace_review_revert`）也不渲染参数区（`HIDE_PARAMS_TOOLS`）。
