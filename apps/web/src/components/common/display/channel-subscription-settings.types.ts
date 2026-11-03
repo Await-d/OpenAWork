@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import type { NormalizedChannelCapabilityContextToolPromptInjections } from '@openAwork/shared';
 import type { ChannelQuickLinkEntry } from './ChannelQuickLinks.js';
 import type { ChannelExtensionImpact } from './ChannelExtensionManagementSection.js';
 
@@ -98,32 +99,14 @@ export interface ChannelMemberAclRuleDraft {
   permissions?: ChannelMemberAclPermissionPatchDraft;
 }
 
-export type ChannelCapabilityToolGroupKey =
-  | 'web'
-  | 'lsp'
-  | 'files'
-  | 'shell'
-  | 'orchestration'
-  | 'session'
-  | 'mcp'
-  | 'desktop'
-  | 'repo'
-  | 'channel'
-  | 'other';
+// 分组键统一由 `@openAwork/shared` 定义（唯一事实来源），此处仅再导出。
+export type { ChannelCapabilityToolGroupKey } from '@openAwork/shared';
 
-export interface ChannelCapabilityContextToolPromptInjections {
-  web: boolean;
-  lsp: boolean;
-  files: boolean;
-  shell: boolean;
-  orchestration: boolean;
-  session: boolean;
-  mcp: boolean;
-  desktop: boolean;
-  repo: boolean;
-  channel: boolean;
-  other: boolean;
-}
+// 前端持有的注入开关是**归一化形态**（字段必有）：设置页与订阅草稿始终以完整值渲染。
+// 共享包另提供可缺省的持久化形态（同名 `ChannelCapabilityContextToolPromptInjections`），
+// 两者由同一处定义派生 —— 此前两端各写一份并已发生漂移。
+export type ChannelCapabilityContextToolPromptInjections =
+  NormalizedChannelCapabilityContextToolPromptInjections;
 
 export interface ChannelCapabilityContextPromptInjections {
   agents: boolean;

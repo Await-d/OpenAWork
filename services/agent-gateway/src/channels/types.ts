@@ -1,4 +1,8 @@
 import type { Buffer } from 'node:buffer';
+import type {
+  ChannelCapabilityContextToolPromptInjections,
+  NormalizedChannelCapabilityContextToolPromptInjections,
+} from '@openAwork/shared';
 
 export type ChannelPlatform =
   'telegram' | 'discord' | 'slack' | 'feishu' | 'dingtalk' | 'weixin' | 'wecom' | 'whatsapp' | 'qq';
@@ -262,32 +266,15 @@ export interface ChannelPersonaSelection {
   title: string;
 }
 
-export type ChannelCapabilityToolGroupKey =
-  | 'web'
-  | 'lsp'
-  | 'files'
-  | 'shell'
-  | 'orchestration'
-  | 'session'
-  | 'mcp'
-  | 'desktop'
-  | 'repo'
-  | 'channel'
-  | 'other';
-
-export interface ChannelCapabilityContextToolPromptInjections {
-  web?: boolean;
-  lsp?: boolean;
-  files?: boolean;
-  shell?: boolean;
-  orchestration?: boolean;
-  session?: boolean;
-  mcp?: boolean;
-  desktop?: boolean;
-  repo?: boolean;
-  channel?: boolean;
-  other?: boolean;
-}
+// 分组键与注入开关类型统一由 `@openAwork/shared` 定义（唯一事实来源），此处仅再导出。
+// 背景：此前 gateway 与 `apps/web` 各写一份，已发生「规范名 `subagent` 只在一侧登记」的漂移。
+export type { ChannelCapabilityToolGroupKey } from '@openAwork/shared';
+// 下面两个类型本文件内仍要引用（`ChannelCapabilityContextPromptInjections.toolGroups`），
+// 故顶部已 import，这里做本地再导出。
+export type {
+  ChannelCapabilityContextToolPromptInjections,
+  NormalizedChannelCapabilityContextToolPromptInjections,
+};
 
 export interface ChannelCapabilityContextPromptInjections {
   agents?: boolean;

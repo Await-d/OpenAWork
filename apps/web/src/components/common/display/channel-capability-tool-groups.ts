@@ -1,26 +1,35 @@
+/**
+ * 渠道能力分组与提示词注入开关 —— 前端侧。
+ *
+ * **规则、默认值、归一化与分组键类型都不在本文件定义**：它们是 `@openAwork/shared`
+ * 里的唯一事实来源。本文件只保留前端 UI 专属的构造器（分组选项、可用性推导、计数），
+ * 并把共享实现按其**既有名字**再导出，使既有消费点无需改动。
+ *
+ * 背景（2026-11-02）：此处此前有一份手写的 `classifyCapabilityToolGroup` 副本，与后端
+ * `resolveChannelCapabilityToolGroup` 逐条漂移 —— 委派工具规范名 `subagent` 未登记，
+ * 前端能力目录把它归入 `other`，而后端归 `orchestration`。现统一为共享实现。
+ */
+import {
+  DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS,
+  normalizeChannelCapabilityContextToolPromptInjections,
+  resolveChannelCapabilityToolGroup,
+} from '@openAwork/shared';
+import type { CapabilityDescriptor, ChannelCapabilityToolGroupKey } from '@openAwork/shared';
+
 import type {
   ChannelCapabilityCatalogToolGroupCounts,
   ChannelCapabilityContextToolPromptInjections,
   ChannelDescriptorTool,
   ChannelPermissionsEntry,
-  ChannelCapabilityToolGroupKey,
 } from './channel-subscription-settings.types.js';
-import type { CapabilityDescriptor } from '@openAwork/shared';
 
-export const DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS: Readonly<ChannelCapabilityContextToolPromptInjections> =
-  {
-    web: true,
-    lsp: true,
-    files: true,
-    shell: true,
-    orchestration: true,
-    session: true,
-    mcp: true,
-    desktop: true,
-    repo: true,
-    channel: true,
-    other: true,
-  };
+export {
+  DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS,
+  normalizeChannelCapabilityContextToolPromptInjections,
+};
+
+/** 工具名（能力标签）→ 能力目录分组。与后端 `resolveChannelCapabilityToolGroup` 为**同一实现**，此处保留前端既有名字。 */
+export const classifyCapabilityToolGroup = resolveChannelCapabilityToolGroup;
 
 export const CHANNEL_CAPABILITY_TOOL_GROUP_OPTIONS = [
   {
@@ -46,7 +55,7 @@ export const CHANNEL_CAPABILITY_TOOL_GROUP_OPTIONS = [
   {
     key: 'orchestration',
     label: '编排与协作',
-    description: 'task、Agent、Skill、计划模式和问答流程。',
+    description: '子代理（`subagent`，历史别名 `task`）、`Agent`、`Skill`、计划模式与问答流程。',
   },
   {
     key: 'session',
@@ -83,139 +92,6 @@ export const CHANNEL_CAPABILITY_TOOL_GROUP_OPTIONS = [
   label: string;
   description: string;
 }>;
-
-function resolvePromptInjectionFlag(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
-}
-
-export function normalizeChannelCapabilityContextToolPromptInjections(
-  input?: Partial<ChannelCapabilityContextToolPromptInjections> | null,
-): ChannelCapabilityContextToolPromptInjections {
-  return {
-    web: resolvePromptInjectionFlag(
-      input?.web,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.web,
-    ),
-    lsp: resolvePromptInjectionFlag(
-      input?.lsp,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.lsp,
-    ),
-    files: resolvePromptInjectionFlag(
-      input?.files,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.files,
-    ),
-    shell: resolvePromptInjectionFlag(
-      input?.shell,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.shell,
-    ),
-    orchestration: resolvePromptInjectionFlag(
-      input?.orchestration,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.orchestration,
-    ),
-    session: resolvePromptInjectionFlag(
-      input?.session,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.session,
-    ),
-    mcp: resolvePromptInjectionFlag(
-      input?.mcp,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.mcp,
-    ),
-    desktop: resolvePromptInjectionFlag(
-      input?.desktop,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.desktop,
-    ),
-    repo: resolvePromptInjectionFlag(
-      input?.repo,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.repo,
-    ),
-    channel: resolvePromptInjectionFlag(
-      input?.channel,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.channel,
-    ),
-    other: resolvePromptInjectionFlag(
-      input?.other,
-      DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS.other,
-    ),
-  };
-}
-
-export function classifyCapabilityToolGroup(label: string): ChannelCapabilityToolGroupKey {
-  if (label.startsWith('Plugin') || label.startsWith('Weixin') || label.startsWith('Feishu')) {
-    return 'channel';
-  }
-  if (label.startsWith('lsp_')) {
-    return 'lsp';
-  }
-  if (
-    label.startsWith('ast_grep_') ||
-    label.startsWith('codegraph_') ||
-    label === 'repo_clone' ||
-    label === 'repo_overview'
-  ) {
-    return 'repo';
-  }
-
-  switch (label) {
-    case 'websearch':
-    case 'codesearch':
-    case 'webfetch':
-      return 'web';
-    case 'list':
-    case 'read':
-    case 'glob':
-    case 'grep':
-    case 'edit':
-    case 'multi_edit':
-    case 'write':
-    case 'patch':
-    case 'workspace_review_status':
-    case 'workspace_review_diff':
-    case 'workspace_create_directory':
-    case 'workspace_review_revert':
-      return 'files';
-    case 'bash':
-    case 'run_bash_in_background':
-    case 'bash_output':
-    case 'bash_kill':
-    case 'interactive_bash':
-    case 'background_output':
-    case 'background_cancel':
-    case 'read_tool_output':
-      return 'shell';
-    case 'task_create':
-    case 'task_get':
-    case 'task_list':
-    case 'task_update':
-    case 'AskUserQuestion':
-    case 'EnterPlanMode':
-    case 'ExitPlanMode':
-    case 'task':
-    case 'Skill':
-    case 'Agent':
-    case 'batch':
-      return 'orchestration';
-    case 'session_list':
-    case 'session_read':
-    case 'session_search':
-    case 'session_info':
-    case 'todowrite':
-    case 'todoread':
-    case 'subtodowrite':
-    case 'subtodoread':
-      return 'session';
-    case 'skill_mcp':
-    case 'mcp_list_tools':
-    case 'mcp_call':
-      return 'mcp';
-    case 'desktop_automation':
-    case 'desktop_control':
-    case 'look_at':
-    case 'generate_image':
-      return 'desktop';
-    default:
-      return 'other';
-  }
-}
 
 function isChannelRuntimeToolKey(key: string): boolean {
   return key.startsWith('Plugin') || key.startsWith('Feishu') || key.startsWith('Weixin');

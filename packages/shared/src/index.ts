@@ -1849,3 +1849,16 @@ export {
   stripToolOutputTruncation,
   stripToolOutputTruncationDeep,
 } from './tool-output-truncation.js';
+
+export type {
+  ChannelCapabilityToolGroupKey,
+  ChannelCapabilityContextToolPromptInjections,
+  NormalizedChannelCapabilityContextToolPromptInjections,
+} from './channel-capability-tool-groups.js';
+export {
+  CHANNEL_CAPABILITY_TOOL_GROUP_KEYS,
+  CHANNEL_CAPABILITY_TOOL_GROUP_CONTRACT,
+  DEFAULT_CHANNEL_CAPABILITY_CONTEXT_TOOL_PROMPT_INJECTIONS,
+  normalizeChannelCapabilityContextToolPromptInjections,
+  resolveChannelCapabilityToolGroup,
+} from './channel-capability-tool-groups.js';
