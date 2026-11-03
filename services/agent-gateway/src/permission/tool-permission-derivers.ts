@@ -290,18 +290,6 @@ const taskUpdatePermissionDeriver: ToolPermissionDeriver = (ctx) => {
   };
 };
 
-const callOmoAgentPermissionDeriver: ToolPermissionDeriver = (ctx) => {
-  const agentDesc =
-    typeof ctx.rawInput.description === 'string' ? ctx.rawInput.description.trim() : '';
-  return {
-    scope: agentDesc ? `agent:${agentDesc}` : 'agent:*',
-    reason: '需要调用子 Agent',
-    riskLevel: 'high',
-    previewAction: agentDesc ? `调用子 Agent: ${agentDesc}` : '调用子 Agent',
-    always: ['*'],
-  };
-};
-
 const channelSendPermissionDeriver: ToolPermissionDeriver = (ctx) => {
   const pluginId = typeof ctx.rawInput.plugin_id === 'string' ? ctx.rawInput.plugin_id.trim() : '';
   const chatId = typeof ctx.rawInput.chat_id === 'string' ? ctx.rawInput.chat_id.trim() : '';
@@ -1049,7 +1037,6 @@ const TOOL_PERMISSION_DERIVERS: Readonly<Record<string, ToolPermissionDeriver>> 
   multi_edit: multiEditPermissionDeriver,
   task_create: taskCreatePermissionDeriver,
   task_update: taskUpdatePermissionDeriver,
-  call_omo_agent: callOmoAgentPermissionDeriver,
   PluginReplyMessage: channelReplyPermissionDeriver,
   ...Object.fromEntries(
     CHANNEL_SEND_TOOL_NAMES.map((name) => [name, channelSendPermissionDeriver]),
@@ -1066,7 +1053,12 @@ const TOOL_PERMISSION_DERIVERS: Readonly<Record<string, ToolPermissionDeriver>> 
   bash_kill: bashKillPermissionDeriver,
   ast_grep_replace: astGrepReplacePermissionDeriver,
   patch: applyPatchPermissionDeriver,
+  // 委派工具的两个名字同属一个工具：历史别名 `task` 与规范名 `subagent`
+  // （261102 批次 B 收敛后服务端实际产出的是 `subagent`）。派生器按工具名**精确**
+  // 查表，只登记别名会让规范名落到 `defaultPermissionDeriver`（scope 变成
+  // `subagent:{...json}`、reason 变成通用文案），审批弹窗信息退化。两个名字必须都登记。
   task: taskPermissionDeriver,
+  subagent: taskPermissionDeriver,
   workspace_create_directory: workspaceCreateDirectoryPermissionDeriver,
   workspace_review_revert: workspaceReviewRevertPermissionDeriver,
   lsp_rename: lspRenamePermissionDeriver,

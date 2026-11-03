@@ -87,14 +87,11 @@ describe('tool permission derivers · 简单任务 / 渠道 / 桌面类', () => 
     { tool: 'task_create', input: {}, scope: 'task:*', risk: 'medium' },
     { tool: 'task_update', input: { id: 't-1' }, scope: 'task:t-1', risk: 'low' },
     { tool: 'task_update', input: {}, scope: 'task:*', risk: 'low' },
-    {
-      tool: 'call_omo_agent',
-      input: { description: 'review' },
-      scope: 'agent:review',
-      risk: 'high',
-    },
-    { tool: 'call_omo_agent', input: {}, scope: 'agent:*', risk: 'high' },
+    // NOTE（261102 T-21）：`call_omo_agent` 派生器已随入口收敛删除；`subagent`/`task`
+    // 委派统一走 taskPermissionDeriver（riskLevel 'high'）。
     { tool: 'task', input: { description: '子任务' }, scope: 'task:子任务', risk: 'high' },
+    // 规范名必须与历史别名派生一致（精确查表，漏登记会落到 defaultPermissionDeriver）。
+    { tool: 'subagent', input: { description: '子任务' }, scope: 'task:子任务', risk: 'high' },
     {
       tool: 'PluginSendMessage',
       input: { plugin_id: 'telegram', chat_id: 'c-1' },
@@ -297,7 +294,9 @@ describe('tool permission derivers · memory_manage', () => {
       ),
     ).toBeNull();
     expect(
-      buildToolPermissionRequestContext(ctx('memory_manage', { action: 'delete', memoryId: 'm-2' })),
+      buildToolPermissionRequestContext(
+        ctx('memory_manage', { action: 'delete', memoryId: 'm-2' }),
+      ),
     ).toBeNull();
   });
 });
