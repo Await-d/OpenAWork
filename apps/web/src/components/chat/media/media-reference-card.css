@@ -1,0 +1,14 @@
+/*
+ * 媒体引用卡片的容器。
+ *
+ * 「取流中 / 取流失败」的呈现已迁到 `media-card-status.css`（与结构化媒体路径
+ * `VideoContentBlock` / `AudioContentBlock` 共用同一份，消除两套观感），因此这里
+ * 只保留播放器的宽度约束。
+ *
+ * 宽度与 media-file-card（文件卡片）对齐：三态（文件卡片 → 加载中 → 播放器）切换时
+ * 容器不跳动。
+ */
+.media-reference-card {
+  max-width: 420px;
+  width: 100%;
+}

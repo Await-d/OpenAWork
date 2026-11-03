@@ -191,6 +191,7 @@ const SUB_SESSION_SEPARATOR_STYLE: React.CSSProperties = {
 function buildGroupedMessages(
   messages: ChatMessage[],
   taskRuntimeLookup?: TaskToolRuntimeLookup,
+  sessionId?: string,
 ): ChatRenderGroup[] {
   const entries: ChatRenderEntry[] = messages.map((message) => ({
     message,
@@ -199,7 +200,11 @@ function buildGroupedMessages(
         ? renderStreamingChatMessageContentWithOptions(currentMessage.content, {
             taskRuntimeLookup,
           })
-        : renderChatMessageContentWithOptions(currentMessage, { taskRuntimeLookup }),
+        : // 子会话里的附件属于子会话：磁盘型取流必须带子会话 id，否则卡片下载会失败。
+          renderChatMessageContentWithOptions(currentMessage, {
+            taskRuntimeLookup,
+            ...(sessionId ? { sessionId } : {}),
+          }),
   }));
 
   const groups: ChatRenderGroup[] = [];
@@ -388,8 +393,13 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
         tokenEstimate: estimateTokenCount(sendError),
       });
     }
-    return buildGroupedMessages(withEphemeral, parentTaskRuntimeLookup);
+    return buildGroupedMessages(
+      withEphemeral,
+      parentTaskRuntimeLookup,
+      childSessionId ?? undefined,
+    );
   }, [
+    childSessionId,
     liveToolCalls,
     messages,
     optimisticUserMessage,

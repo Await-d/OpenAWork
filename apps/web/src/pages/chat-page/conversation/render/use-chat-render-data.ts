@@ -374,6 +374,14 @@ export interface ChatRenderDataInput {
   handleCopyMessageGroup: (messages: ChatMessage[]) => void;
   openChildSessionInspector: (sessionId: string) => void;
   selectedChildSessionId: string | null;
+  /**
+   * 当前会话 id，透传到消息渲染层。
+   *
+   * 必需的原因：消息里的非图片附件是**磁盘型产物**，读取面按会话寻址
+   * （`GET /sessions/:id/artifacts/:artifactId/content`）；缺省会让文件卡片下载失败、
+   * 音视频引用降级为文件卡片。
+   */
+  sessionId?: string | null;
   subagentNotices?: SubagentNotice[];
   taskToolRuntimeLookup: TaskToolRuntimeLookup | undefined;
   visibleMessageCount?: number;
@@ -554,6 +562,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     handleCopyMessageGroup,
     openChildSessionInspector,
     selectedChildSessionId,
+    sessionId,
     subagentNotices,
     taskToolRuntimeLookup,
     visibleMessageCount,
@@ -824,6 +833,9 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
       buildMessageActions,
       openChildSessionInspector,
       selectedChildSessionId,
+      // sessionId 被 renderContent 闭包捕获（磁盘型附件按会话取流），换会话必须失效缓存，
+      // 否则会复用上一个会话的 entry、把旧会话的卡片留在新会话里。
+      sessionId,
       visibleStreaming,
       taskToolRuntimeLookup,
     ];
@@ -877,6 +889,8 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
                     onOpenChildSession: openChildSessionInspector,
                     resolveInlinePermissionActions,
                     selectedChildSessionId,
+                    // 磁盘型附件按会话取流；漏传会让文件卡片下载失败并让音视频降级。
+                    ...(sessionId ? { sessionId } : {}),
                     taskRuntimeLookup: taskToolRuntimeLookup,
                   }),
             usageDetails,
@@ -914,6 +928,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     renderFrameCaches,
     resolveInlinePermissionActions,
     selectedChildSessionId,
+    sessionId,
     visibleMessages,
     visibleStreaming,
     taskToolRuntimeLookup,

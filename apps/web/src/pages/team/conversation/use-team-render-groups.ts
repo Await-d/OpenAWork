@@ -30,6 +30,8 @@ export interface UseTeamRenderGroupsInput {
   streamBuffer: string;
   streamingSegments: ChatMessagePart[];
   subagentNotices?: SubagentNotice[];
+  /** 该层消息所属会话 id：附件是磁盘型产物、按会话取流。 */
+  sessionId?: string;
   visibleStreaming: boolean;
 }
 
@@ -53,6 +55,7 @@ export function useTeamRenderGroups(input: UseTeamRenderGroupsInput): ChatRender
     streamBuffer,
     streamingSegments,
     subagentNotices,
+    sessionId,
     visibleStreaming,
   } = input;
 
@@ -63,9 +66,17 @@ export function useTeamRenderGroups(input: UseTeamRenderGroupsInput): ChatRender
         roleLayer,
         resolveInlinePermissionActions,
         buildEntryActions,
+        sessionId,
         visibleStreaming,
       }),
-    [buildEntryActions, messages, resolveInlinePermissionActions, roleLayer, visibleStreaming],
+    [
+      buildEntryActions,
+      messages,
+      resolveInlinePermissionActions,
+      roleLayer,
+      sessionId,
+      visibleStreaming,
+    ],
   );
 
   const historicalGroups = useMemo(

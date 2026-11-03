@@ -15,6 +15,15 @@ export type { Tokens } from '../../../../../packages/shared-ui/src/tokens.js';
 export { ImagePreview } from '../../../../../packages/shared-ui/src/chat/ImagePreview.js';
 export type { ImagePreviewProps } from '../../../../../packages/shared-ui/src/chat/ImagePreview.js';
 
+// VideoPlayer / AudioPlayer 是媒体渲染的真实交互组件（原生 <video>/<audio> + 自绘控件 +
+// 可访问进度条），没有值得替身的行为：转发真实实现，媒体卡片的接线测试才能覆盖真实的
+// seek / 键盘 / aria 契约。二者静态依赖只有 react —— hls.js 是 VideoPlayer 内部的动态
+// import（非 HLS 分支不会加载），转发不会把重依赖拖进测试环境。
+export { VideoPlayer } from '../../../../../packages/shared-ui/src/chat/VideoPlayer.js';
+export type { VideoPlayerProps } from '../../../../../packages/shared-ui/src/chat/VideoPlayer.js';
+export { AudioPlayer } from '../../../../../packages/shared-ui/src/chat/AudioPlayer.js';
+export type { AudioPlayerProps } from '../../../../../packages/shared-ui/src/chat/AudioPlayer.js';
+
 // SubagentNoticeRow 同为纯展示组件（仅依赖 react + shared 类型 + tokens），
 // 转发真实实现才能让「通知按时间位置渲染」的接线测试覆盖真实行渲染。
 export { SubagentNoticeRow } from '../../../../../packages/shared-ui/src/chat/SubagentNoticeRow.js';
@@ -68,3 +77,15 @@ export type {
 // 动态导入失败判定是纯函数（无副作用、无依赖）：转发真实实现，
 // 保证路由懒加载自愈与错误边界使用同一套判定口径。
 export { isDynamicImportFailure } from '../../../../../packages/shared-ui/src/feedback/dynamic-import-failure.js';
+
+// `BlockToolCall` 的 web 分支只读 displayData 的 `bashView` / `diffView`，而这两个字段
+// 在 web 路径下本就是 undefined。这里给一个最小替身，避免为了一条卡片测试把 1340 行的
+// `ToolCallCard` 整块拖进测试环境（它连带 diff / 高亮渲染依赖）。
+// 注意：若将来 web 分支开始读 displayData 的其它字段，需要在替身里一并补上，
+// 否则测试会静默通过而真实环境取不到值。
+export function resolveToolCallCardDisplayData(): {
+  bashView?: undefined;
+  diffView?: undefined;
+} {
+  return {};
+}

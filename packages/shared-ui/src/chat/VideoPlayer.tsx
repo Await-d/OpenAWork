@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import './VideoPlayer.css';
+import { capturePointer, releasePointer } from './pointer-capture.js';
+import { color } from '../tokens.js';
+
 type HlsHandle = {
   destroy(): void;
 };
@@ -45,6 +49,9 @@ export function VideoPlayer({
   const [hover, setHover] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [currentSrc, setCurrentSrc] = useState<string | null>(null);
+  const [current, setCurrent] = useState(0);
+  /** 播放器已知的总时长：优先取真实媒体 duration，回退到 duration prop。 */
+  const [total, setTotal] = useState(0);
 
   // HLS 初始化
   useEffect(() => {
@@ -126,6 +133,38 @@ export function VideoPlayer({
     };
   }, [src]);
 
+  // 进度追踪：timeupdate 维护 current，loadedmetadata 修正 total。
+  // 清理与设置同处，卸载时一并移除监听。
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onTimeUpdate = () => setCurrent(video.currentTime);
+    const onLoadedMetadata = () => {
+      if (video.duration && isFinite(video.duration)) {
+        setTotal(video.duration);
+      }
+    };
+    const onEnded = () => setCurrent(0);
+
+    video.addEventListener('timeupdate', onTimeUpdate);
+    video.addEventListener('loadedmetadata', onLoadedMetadata);
+    video.addEventListener('ended', onEnded);
+
+    return () => {
+      video.removeEventListener('timeupdate', onTimeUpdate);
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      video.removeEventListener('ended', onEnded);
+    };
+  }, []);
+
+  // duration prop 作为 total 的兜底初值；真实媒体元数据到达后会被 loadedmetadata 覆盖。
+  useEffect(() => {
+    if (typeof duration === 'number' && duration > 0) {
+      setTotal((prev) => (prev > 0 ? prev : duration));
+    }
+  }, [duration]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -157,17 +196,83 @@ export function VideoPlayer({
     document.body.removeChild(a);
   }, [src, fileName]);
 
-  const onLoadedMetadata = useCallback(() => {
-    const video = videoRef.current;
-    if (video && duration === undefined && video.duration && isFinite(video.duration)) {
-      // 可以在此触发回调
-    }
-  }, [duration]);
+  /**
+   * 统一的「按横向坐标算比例 → 设 currentTime」换算。
+   * 点击 / 拖拽 / 键盘三处共用，避免第二份换算逻辑漂移。
+   */
+  const seekFromClientX = useCallback(
+    (target: HTMLElement, clientX: number) => {
+      const video = videoRef.current;
+      if (!video || total <= 0) return;
+      const rect = target.getBoundingClientRect();
+      const ratio = (clientX - rect.left) / rect.width;
+      const next = Math.min(total, Math.max(0, ratio * total));
+      video.currentTime = next;
+      setCurrent(next);
+    },
+    [total],
+  );
+
+  const draggingRef = useRef(false);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (total <= 0) return;
+      e.preventDefault();
+      // 捕获排在置拖拽标志之前：即使抛错也不会进入半途的拖拽态。
+      capturePointer(e.currentTarget, e.pointerId);
+      draggingRef.current = true;
+      seekFromClientX(e.currentTarget, e.clientX);
+    },
+    [total, seekFromClientX],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!draggingRef.current) return;
+      seekFromClientX(e.currentTarget, e.clientX);
+    },
+    [seekFromClientX],
+  );
+
+  const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // 与音频侧同构：先无条件重置，且不依赖 hasPointerCapture 的返回值 ——
+    // pointercancel（触摸被系统手势接管）时捕获可能已自动失效，靠捕获状态决定是否
+    // 清理会卡在拖拽态。
+    draggingRef.current = false;
+    releasePointer(e.currentTarget, e.pointerId);
+  }, []);
+
+  const handleSeekKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const video = videoRef.current;
+      if (!video || total <= 0) return;
+
+      let next: number | null = null;
+      if (e.key === 'ArrowRight') {
+        next = Math.min(total, video.currentTime + total * 0.05);
+      } else if (e.key === 'ArrowLeft') {
+        next = Math.max(0, video.currentTime - total * 0.05);
+      } else if (e.key === 'Home') {
+        next = 0;
+      } else if (e.key === 'End') {
+        next = total;
+      }
+
+      if (next === null) return;
+
+      e.preventDefault();
+      video.currentTime = next;
+      setCurrent(next);
+    },
+    [total],
+  );
 
   const aspectRatio = width && height ? `${width} / ${height}` : '16 / 9';
   const maxWidth = width ? Math.min(width, 400) : 360;
   const maxHeight = 240;
   const isHls = isHlsSource(src);
+  const progress = total > 0 ? (current / total) * 100 : 0;
 
   return (
     <div
@@ -181,7 +286,7 @@ export function VideoPlayer({
         overflow: 'hidden',
         border: '1px solid var(--border-subtle, hsla(215,20%,50%,0.07))',
         boxShadow: '0 2px 8px color-mix(in oklch, var(--fg-strong) 6%, transparent)',
-        background: '#000',
+        background: color.mediaScrim,
         aspectRatio,
       }}
       onMouseEnter={() => setHover(true)}
@@ -193,7 +298,6 @@ export function VideoPlayer({
         autoPlay={autoPlay}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onLoadedMetadata={onLoadedMetadata}
         onClick={togglePlay}
         playsInline
         controls={false}
@@ -215,7 +319,7 @@ export function VideoPlayer({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'rgba(255,255,255,0.5)',
+            color: color.mediaTextFaint,
             fontSize: 12,
           }}
         >
@@ -223,18 +327,39 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* 悬浮控件栏 */}
+      {/* 播放进度条（常显，不随悬浮控件栏淡出） */}
+      <div
+        className="video-player__progress"
+        role="slider"
+        tabIndex={0}
+        aria-label="播放进度"
+        aria-valuemin={0}
+        aria-valuemax={Math.max(0, Math.round(total))}
+        aria-valuenow={Math.max(0, Math.round(current))}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onKeyDown={handleSeekKeyDown}
+      >
+        <div className="video-player__progress-track">
+          <div className="video-player__progress-fill" style={{ width: `${progress}%` }} />
+        </div>
+        <div className="video-player__progress-thumb" style={{ left: `${progress}%` }} />
+      </div>
+
+      {/* 悬浮控件栏（上移 18px 让出进度条点击区） */}
       <div
         style={{
           position: 'absolute',
-          bottom: 0,
+          bottom: 18,
           left: 0,
           right: 0,
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           padding: '8px 12px',
-          background: 'linear-gradient(transparent 0%, rgba(0,0,0,0.6) 100%)',
+          background: `linear-gradient(transparent 0%, ${color.mediaGradient} 100%)`,
           opacity: hover || !playing ? 1 : 0,
           transition: 'opacity 200ms ease',
           pointerEvents: hover || !playing ? 'auto' : 'none',
@@ -268,7 +393,7 @@ export function VideoPlayer({
             style={{
               flex: 1,
               fontSize: 12,
-              color: 'rgba(255,255,255,0.85)',
+              color: color.mediaTextStrong,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -280,7 +405,7 @@ export function VideoPlayer({
 
         {/* 时长标签 */}
         {duration !== undefined && duration > 0 && (
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontFamily: 'monospace' }}>
+          <span style={{ fontSize: 11, color: color.mediaTextSubtle, fontFamily: 'monospace' }}>
             {formatDuration(duration)}
           </span>
         )}
@@ -295,8 +420,8 @@ export function VideoPlayer({
             height: 28,
             borderRadius: 6,
             border: 'none',
-            background: 'rgba(255,255,255,0.15)',
-            color: 'white',
+            background: color.mediaControlBg,
+            color: color.mediaTextContrast,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -319,8 +444,8 @@ export function VideoPlayer({
               height: 28,
               borderRadius: 6,
               border: 'none',
-              background: 'rgba(255,255,255,0.15)',
-              color: 'white',
+              background: color.mediaControlBg,
+              color: color.mediaTextContrast,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -342,8 +467,8 @@ export function VideoPlayer({
           right: 8,
           padding: '2px 6px',
           borderRadius: 4,
-          background: 'rgba(0,0,0,0.5)',
-          color: 'rgba(255,255,255,0.7)',
+          background: color.mediaBadgeBg,
+          color: color.mediaTextMuted,
           fontSize: 10,
           fontFamily: 'monospace',
           pointerEvents: 'none',

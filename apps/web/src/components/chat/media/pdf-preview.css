@@ -1,0 +1,97 @@
+/*
+ * 消息内 PDF 预览。
+ *
+ * 画布本身由 pdfjs 决定尺寸，这里只负责容器、间距与滚动上限：
+ * 预览嵌在消息流里，必须限高，否则一份 20 页的 PDF 会把整条会话撑爆。
+ */
+.pdf-preview {
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  max-width: 420px;
+  padding: var(--spacing-2);
+  width: 100%;
+}
+
+/* 加载 / 失败态：与 media-card-status 同高度，避免高度跳动 */
+.pdf-preview--message {
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+}
+
+.pdf-preview__pages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  /* 关键：内嵌预览必须限高，超出滚动 */
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.pdf-preview__page {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  line-height: 0;
+  overflow: hidden;
+}
+
+.pdf-preview__page canvas {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.pdf-preview__page-error {
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+  padding: var(--spacing-2);
+}
+
+.pdf-preview__more {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-sm);
+  color: var(--fg-strong);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11.5px;
+  padding: var(--spacing-1) var(--spacing-3);
+  transition:
+    background-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+.pdf-preview__more:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.pdf-preview__more:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pdf-preview__hint {
+  color: var(--fg-muted);
+  font-size: 11px;
+  margin: 0;
+  text-align: center;
+}
+
+.pdf-preview__hint--error {
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pdf-preview__more {
+    transition: none;
+  }
+}

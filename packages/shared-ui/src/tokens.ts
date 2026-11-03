@@ -69,6 +69,21 @@ export const color = {
   infoMuted: 'var(--info-muted, rgba(139, 156, 245, 0.14))',
   infoBorder: 'var(--info-border, rgba(139, 156, 245, 0.30))',
 
+  // 媒体层 —— 叠加在视频/图片画面之上的 chrome（letterbox 底、控件栏、角标）。
+  // 这些值**不随主题翻转**：chrome 压在动态画面之上，必须始终是「暗底 + 浅色字」，
+  // 若改用 fg/bg 语义 token，亮色主题下会变成深色字压暗视频 → 不可读。
+  mediaScrim: 'var(--media-scrim, #000)',
+  mediaGradient: 'var(--media-gradient, rgba(0, 0, 0, 0.6))',
+  mediaBadgeBg: 'var(--media-badge-bg, rgba(0, 0, 0, 0.5))',
+  // 控件图标的「纯白」前景。名为 Contrast 而非 Strong：Strong 是 0.85 的半透明字，
+  // 用于压在画面上的文字；控件字形需要满不透明才够清晰，二者不可互换（换了是可见改动）。
+  mediaTextContrast: 'var(--media-text-contrast, #fff)',
+  mediaTextStrong: 'var(--media-text-strong, rgba(255, 255, 255, 0.85))',
+  mediaTextMuted: 'var(--media-text-muted, rgba(255, 255, 255, 0.7))',
+  mediaTextSubtle: 'var(--media-text-subtle, rgba(255, 255, 255, 0.6))',
+  mediaTextFaint: 'var(--media-text-faint, rgba(255, 255, 255, 0.5))',
+  mediaControlBg: 'var(--media-control-bg, rgba(255, 255, 255, 0.15))',
+
   // 线条层级
   borderInvisible: 'var(--border-invisible, hsla(215, 20%, 50%, 0.03))',
   borderSubtle: 'var(--border-subtle, hsla(215, 20%, 50%, 0.07))',

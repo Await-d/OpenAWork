@@ -1,28 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import './AudioPlayer.css';
+import { capturePointer, releasePointer } from './pointer-capture.js';
+
 export interface AudioPlayerProps {
   src: string;
   fileName?: string;
   mimeType?: string;
   duration?: number;
   transcript?: string;
-  /** compact 模式下隐藏文件名，适合嵌入消息流 */
-  variant?: 'default' | 'compact';
 }
 
 /**
- * 内联音频播放器 —— 波形条 + 进度 + 播放/暂停 + 下载。
+ * 内联音频播放器 —— 可拖拽进度条 + 播放/暂停 + 语速 + 下载 + 转写。
  *
  * 使用原生 `<audio>` 元素，上层自绘 UI 以匹配 E · Nebula 设计 token。
+ *
+ * 进度条与 `VideoPlayer` 同构：`role="slider"` + 指针拖拽（`capturePointer` /
+ * `releasePointer`）+ 键盘 ←→±5% / Home / End；比例换算统一走 `seekFromClientX`，
+ * 不保留 `onClick`（pointer 事件是 mouse + touch 超集，双入口会重复 seek）。
+ * 进度条样式在 `AudioPlayer.css`。
  */
-export function AudioPlayer({
-  src,
-  fileName,
-  mimeType,
-  duration,
-  transcript,
-  variant = 'default',
-}: AudioPlayerProps) {
+export function AudioPlayer({ src, fileName, mimeType, duration, transcript }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -71,17 +70,52 @@ export function AudioPlayer({
     }
   }, [playing]);
 
-  const seek = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+  /** 点击 / 拖拽 / 键盘共用：按 clientX 在进度条上的比例设置播放位置。 */
+  const seekFromClientX = useCallback(
+    (target: HTMLDivElement, clientX: number) => {
       const audio = audioRef.current;
       if (!audio || !total) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      const ratio = (e.clientX - rect.left) / rect.width;
-      audio.currentTime = ratio * total;
-      setCurrent(audio.currentTime);
+      const rect = target.getBoundingClientRect();
+      if (!rect.width) return;
+      const ratio = (clientX - rect.left) / rect.width;
+      const next = Math.min(total, Math.max(0, ratio * total));
+      audio.currentTime = next;
+      setCurrent(next);
     },
     [total],
   );
+
+  // 指针拖拽状态。用 ref 而非 state：拖拽不驱动渲染，只需在事件间传递。
+  const draggingRef = useRef(false);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // 阻止拖拽时选中文本 / 触发原生拖拽。
+      // 注意：preventDefault 只抑制兼容性鼠标事件（mousedown 等），**不阻止 click**
+      // —— click 是激活事件。故此处不使用 onClick，避免与 pointerdown 重复 seek。
+      e.preventDefault();
+      // 捕获排在置拖拽标志之前：即使抛错也不会进入半途的拖拽态。
+      capturePointer(e.currentTarget, e.pointerId);
+      draggingRef.current = true;
+      seekFromClientX(e.currentTarget, e.clientX);
+    },
+    [seekFromClientX],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!draggingRef.current) return;
+      seekFromClientX(e.currentTarget, e.clientX);
+    },
+    [seekFromClientX],
+  );
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // 先无条件重置，且不依赖 hasPointerCapture 的返回值：pointercancel（触摸被系统
+    // 手势接管）时捕获可能已自动失效，靠捕获状态决定是否清理会卡在拖拽态。
+    draggingRef.current = false;
+    releasePointer(e.currentTarget, e.pointerId);
+  }, []);
 
   const changeRate = useCallback(() => {
     const rates = [1, 1.5, 2, 0.75];
@@ -102,8 +136,32 @@ export function AudioPlayer({
     document.body.removeChild(a);
   }, [src, fileName]);
 
+  const handleSeekKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const audio = audioRef.current;
+      if (!audio || total <= 0) return;
+
+      let next: number | null = null;
+      if (e.key === 'ArrowRight') {
+        next = Math.min(total, audio.currentTime + total * 0.05);
+      } else if (e.key === 'ArrowLeft') {
+        next = Math.max(0, audio.currentTime - total * 0.05);
+      } else if (e.key === 'Home') {
+        next = 0;
+      } else if (e.key === 'End') {
+        next = total;
+      }
+
+      if (next === null) return;
+
+      e.preventDefault();
+      audio.currentTime = next;
+      setCurrent(next);
+    },
+    [total],
+  );
+
   const progress = total > 0 ? (current / total) * 100 : 0;
-  const isCompact = variant === 'compact';
 
   return (
     <div
@@ -151,49 +209,25 @@ export function AudioPlayer({
           {playing ? '\u23F8' : '\u25B6'}
         </button>
 
-        {/* 波形进度条 */}
+        {/* 进度条 */}
         <div
-          onClick={seek}
-          style={{
-            flex: 1,
-            height: 28,
-            display: 'flex',
-            alignItems: 'center',
-            cursor: 'pointer',
-            position: 'relative',
-          }}
+          className="audio-player__progress"
+          role="slider"
+          tabIndex={0}
+          aria-label="播放进度"
+          aria-valuemin={0}
+          aria-valuemax={Math.max(0, Math.round(total))}
+          aria-valuenow={Math.max(0, Math.round(current))}
+          onKeyDown={handleSeekKeyDown}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         >
-          {/* 波形条 */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 2,
-              width: '100%',
-              height: '100%',
-              overflow: 'hidden',
-            }}
-          >
-            {Array.from({ length: 32 }).map((_, i) => {
-              const barProgress = (i / 32) * 100;
-              const active = barProgress < progress;
-              const height = 4 + Math.abs(Math.sin(i * 1.5)) * 20;
-              return (
-                <div
-                  key={i}
-                  style={{
-                    flex: 1,
-                    height,
-                    borderRadius: 1,
-                    background: active
-                      ? 'var(--accent, #5cd4c0)'
-                      : 'var(--border-emphasis, hsla(215,16%,55%,0.20))',
-                    transition: 'background 100ms ease',
-                  }}
-                />
-              );
-            })}
+          <div className="audio-player__progress-track">
+            <div className="audio-player__progress-fill" style={{ width: `${progress}%` }} />
           </div>
+          <div className="audio-player__progress-thumb" style={{ left: `${progress}%` }} />
         </div>
 
         {/* 时长 */}
@@ -248,7 +282,7 @@ export function AudioPlayer({
           ↓ 下载
         </button>
 
-        {!isCompact && fileName && (
+        {fileName && (
           <span
             style={{
               fontSize: 11,

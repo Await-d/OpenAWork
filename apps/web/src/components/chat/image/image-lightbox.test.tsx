@@ -277,3 +277,73 @@ describe('ImageLightbox 主题 token 使用', () => {
     expect(imageDisplayCssSource).toContain('.generate-image-display__hover-btn:focus-visible');
   });
 });
+
+describe('ImageLightbox 缩略图条与键盘提示', () => {
+  const cssSource = stripCssComments(
+    readFileSync(
+      path.resolve(process.cwd(), 'src/components/chat/image/image-lightbox.css'),
+      'utf8',
+    ),
+  );
+
+  it('图集模式渲染与图片数量一致的缩略图，当前项标记 aria-current', () => {
+    render(<ImageLightbox open items={galleryItems} onClose={vi.fn()} />);
+
+    const thumbs = document.querySelectorAll('.image-lightbox__thumb');
+    expect(thumbs).toHaveLength(3);
+    expect(thumbs[0]?.getAttribute('aria-current')).toBe('true');
+    expect(thumbs[1]?.getAttribute('aria-current')).toBe('false');
+
+    fireEvent.click(getButton('下一张'));
+    const afterNext = document.querySelectorAll('.image-lightbox__thumb');
+    expect(afterNext[0]?.getAttribute('aria-current')).toBe('false');
+    expect(afterNext[1]?.getAttribute('aria-current')).toBe('true');
+  });
+
+  it('点击缩略图直接跳转，且不关闭查看器', () => {
+    const onClose = vi.fn();
+    const onIndexChange = vi.fn();
+    render(
+      <ImageLightbox open items={galleryItems} onClose={onClose} onIndexChange={onIndexChange} />,
+    );
+
+    fireEvent.click(getButton('查看第 3 张图片'));
+    expect(getImage().getAttribute('src')).toBe('/images/c.png');
+    expect(onIndexChange).toHaveBeenCalledWith(2);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('点击当前项的缩略图是 no-op：不重复回抛相同索引', () => {
+    const onIndexChange = vi.fn();
+    render(
+      <ImageLightbox open items={galleryItems} onClose={vi.fn()} onIndexChange={onIndexChange} />,
+    );
+
+    fireEvent.click(getButton('查看第 1 张图片'));
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(getImage().getAttribute('src')).toBe('/images/a.png');
+  });
+
+  it('单图模式不渲染缩略图条（不出现只有一格的空条）', () => {
+    render(<ImageLightbox open src="/images/legacy.png" onClose={vi.fn()} />);
+    expect(document.querySelector('.image-lightbox__strip')).toBeNull();
+  });
+
+  it('缩略图按钮样式走 class，不内联颜色', () => {
+    render(<ImageLightbox open items={galleryItems} onClose={vi.fn()} />);
+
+    for (const node of document.querySelectorAll('.image-lightbox__thumb')) {
+      expect(node.getAttribute('style')).toBeNull();
+    }
+  });
+
+  it('新增浮层样式仍然只使用中性浮层 token，且激活项用 accent 描边', () => {
+    expect(cssSource).toContain('.image-lightbox__strip');
+    expect(cssSource).toContain(".image-lightbox__thumb[aria-current='true']");
+    expect(cssSource).toContain('border-color: var(--accent)');
+    expect(cssSource).toContain('.image-lightbox__kbd-hint');
+    // 键盘提示在窄屏隐藏（触屏无物理键盘）
+    expect(cssSource).toContain('.image-lightbox__kbd-hint {');
+    expect(cssSource).not.toContain('--fg-on-accent');
+  });
+});

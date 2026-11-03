@@ -2783,6 +2783,9 @@ export default function ChatPage() {
     groupedMessageEntries,
   } = useChatRenderData({
     messages,
+    // 磁盘型附件（上传的非图片附件）按会话取流：漏传会让文件卡片下载失败、
+    // 并让音视频引用静默降级为文件卡片。
+    sessionId: currentSessionId,
     subagentNotices,
     pendingPermissions,
     modelPrices,

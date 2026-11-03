@@ -478,6 +478,9 @@ export function rawListToEntries(
     // 折叠策略钳住高度：滚动容器不再随 token 增长，feed 的自动滚底随之停摆，同时丢掉
     // 流式光标等呈现。判定依据：LayerMessages.streamingMessage 由 View 层注入，status
     // 恒为 'streaming'（见 TeamConversationView 的构造处）；已定稿消息不会带该状态。
+    // 附件是磁盘型产物，按**该消息所属会话**取流：这里必须用层的 sessionIds，
+    // 而不是某个全局「当前会话」—— team feed 里每层可能来自不同会话。
+    const layerSessionId = layerData.sessionIds[0];
     const renderContent =
       message.status === 'streaming'
         ? (m: ChatMessage) =>
@@ -489,6 +492,7 @@ export function rawListToEntries(
             renderChatMessageContentWithOptions(m, {
               presentationMode: 'team',
               resolveInlinePermissionActions,
+              ...(layerSessionId ? { sessionId: layerSessionId } : {}),
             });
 
     return {

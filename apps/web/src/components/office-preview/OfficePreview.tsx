@@ -2,10 +2,10 @@
  * Office document preview — currently supports:
  *   - DOCX → mammoth.js → HTML in a sandboxed div
  *   - XLSX/XLS → SheetJS → HTML <table> per sheet, switchable
- *   - PPTX / PDF / DOC → "not yet supported" notice (with download
- *     guidance). PPTX has no good pure-JS renderer; PDF needs
- *     pdfjs-dist which is heavy; DOC (legacy binary) is unsupported
- *     by mammoth.
+ *   - PDF → pdfjs-dist → canvas（复用消息内 `PdfPreview`，按需加载）
+ *   - PPTX / DOC → "not yet supported" notice (with download
+ *     guidance). PPTX has no good pure-JS renderer; DOC (legacy binary)
+ *     is unsupported by mammoth.
  *
  * The component fetches the file via `/workspace/file/binary` (raw
  * bytes) and lazy-loads the renderer libs so users not opening
@@ -24,6 +24,7 @@ import {
   buildPreviewReadAttempts,
   runWithReadIdentityFallback,
 } from '../../utils/file/preview-read-identity.js';
+import { PdfPreview } from '../chat/media/pdf-preview.js';
 
 const DocxPreview = lazy(() => import('./DocxPreview.js'));
 const XlsxPreview = lazy(() => import('./XlsxPreview.js'));
@@ -72,7 +73,7 @@ function useOfficeFile(path: string, enabled: boolean): OfficePreviewState {
   const identity = useWorkspaceReadIdentity();
 
   useEffect(() => {
-    // 不可在浏览器渲染的类型（pptx/pdf/doc/xls）根本不需要字节流。
+    // 不渲染的类型（pptx/doc/xls）根本不需要字节流；PDF 走 pdfjs 需要字节。
     // 旧实现的早退判断写在 hook 之后，注释与代码相反，每个这类文件都会白拉一次。
     if (!enabled) return;
     let cancelled = false;
@@ -114,8 +115,6 @@ function UnsupportedKindNotice({ kind, path }: { kind: OfficeKind; path: string 
         return 'PowerPoint 演示文稿暂不支持在线渲染。请下载后用 PowerPoint / WPS / Keynote 打开。';
       case 'ppt':
         return '旧版 .ppt 二进制格式无法在浏览器中渲染。请用 Office 转换为 .pptx 后再预览。';
-      case 'pdf':
-        return 'PDF 在线预览正在规划中。请下载后用 PDF 阅读器打开。';
       case 'doc':
         return '旧版 .doc 二进制格式无法在浏览器中渲染。请用 Office 转换为 .docx 后再预览。';
       case 'xls':
@@ -212,9 +211,49 @@ function ErrorState({ error }: { error: string }) {
   );
 }
 
+/**
+ * PDF 渲染适配层：把已拉到的字节转成 object URL，交给消息内共用的
+ * `PdfPreview`（pdfjs 按需加载的那一份，避免重复维护加载逻辑）。
+ *
+ * 字节非空但不一定是合法 PDF：`contentType` 交给 Blob，pdfjs 解析失败时
+ * `PdfPreview` 自己会落到错误态，这里无需额外校验。卸载 / 换文件必须
+ * `revokeObjectURL`，否则每打开一个 PDF 就泄漏一份常驻内存。
+ */
+function PdfPreviewRenderer({
+  buffer,
+  contentType,
+  path,
+}: {
+  buffer: ArrayBuffer;
+  contentType?: string;
+  path: string;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(
+      new Blob([buffer], { type: contentType ?? 'application/pdf' }),
+    );
+    setSrc(objectUrl);
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [buffer, contentType]);
+
+  const fileName = path.split('/').pop() ?? path;
+
+  if (!src) return <LoadingState />;
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg-overlay)' }}>
+      <PdfPreview src={src} fileName={fileName} />
+    </div>
+  );
+}
+
 export function OfficePreview({ path }: { path: string }) {
   const kind = getOfficeKindFromPath(path);
-  const renderable = kind === 'docx' || kind === 'xlsx';
+  const renderable = kind === 'docx' || kind === 'xlsx' || kind === 'pdf';
   const fileState = useOfficeFile(path, renderable);
 
   if (!kind) return null;
@@ -240,6 +279,15 @@ export function OfficePreview({ path }: { path: string }) {
       <Suspense fallback={<LoadingState />}>
         <XlsxPreview buffer={fileState.buffer} />
       </Suspense>
+    );
+  }
+  if (kind === 'pdf') {
+    return (
+      <PdfPreviewRenderer
+        buffer={fileState.buffer}
+        contentType={fileState.contentType}
+        path={path}
+      />
     );
   }
   return null;

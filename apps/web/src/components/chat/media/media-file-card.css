@@ -1,0 +1,167 @@
+/*
+ * 消息内文件卡片。
+ *
+ * 色彩全部引用 E·Nebula token；徽章色调用 color-mix 在 accent / danger / success 等
+ * 语义色上做低饱和填充，避免为每种文件类型新增 token。
+ *
+ * 与灯箱浮层同一条铁律：禁止 --fg-on-accent 作为文字色（它在暗色主题下近似黑色，
+ * 只在 accent 实色填充之上才可读；这里是低饱和填充，不属于该场景）。
+ */
+.media-file-card {
+  align-items: center;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  display: flex;
+  gap: var(--spacing-3);
+  max-width: 380px;
+  padding: var(--spacing-2) var(--spacing-3);
+  position: relative;
+  transition: border-color 150ms ease;
+  width: 100%;
+}
+
+.media-file-card:hover {
+  border-color: var(--border-strong);
+}
+
+.media-file-card__glyph {
+  align-items: center;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  color: var(--fg-default);
+  display: flex;
+  flex: 0 0 auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  height: 30px;
+  justify-content: center;
+  letter-spacing: 0.02em;
+  width: 30px;
+}
+
+.media-file-card[data-tone='pdf'] .media-file-card__glyph {
+  background: color-mix(in oklch, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.media-file-card[data-tone='sheet'] .media-file-card__glyph {
+  background: color-mix(in oklch, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.media-file-card[data-tone='doc'] .media-file-card__glyph,
+.media-file-card[data-tone='image'] .media-file-card__glyph,
+.media-file-card[data-tone='video'] .media-file-card__glyph {
+  background: color-mix(in oklch, var(--aux) 16%, transparent);
+  color: var(--aux);
+}
+
+.media-file-card[data-tone='code'] .media-file-card__glyph {
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.media-file-card[data-tone='audio'] .media-file-card__glyph {
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.media-file-card__meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.media-file-card__name {
+  color: var(--fg-strong);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-file-card__sub {
+  color: var(--fg-muted);
+  font-size: 10.5px;
+}
+
+.media-file-card__action {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-sm);
+  color: var(--fg-strong);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 13px;
+  height: 28px;
+  justify-content: center;
+  transition:
+    background-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1));
+  width: 28px;
+}
+
+.media-file-card__action:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.media-file-card__action:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.media-file-card__action:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.media-file-card__action:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.media-file-card__error {
+  color: var(--danger);
+  font-size: 10.5px;
+  left: var(--spacing-3);
+  position: absolute;
+  top: calc(100% + 2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-file-card,
+  .media-file-card__action {
+    transition: none;
+  }
+}
+
+/*
+ * 卡片 + 内联预览（PDF）的纵向容器。
+ *
+ * 宽度取 380px 与卡片本身对齐：预览面板各自声明 max-width 420px，在这个容器里会被
+ * 自然收窄到 380，三态（卡片 / 状态卡 / 预览）宽度一致，展开时不横向跳动。
+ */
+.media-file-card-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  max-width: 380px;
+  width: 100%;
+}
+
+.media-file-card-group__preview {
+  width: 100%;
+}
+
+/* 文字型操作按钮（「预览」/「收起」）：与方形图标按钮同一视觉语言，只放开宽度 */
+.media-file-card__action--wide {
+  padding: 0 var(--spacing-3);
+  width: auto;
+}

@@ -6,9 +6,12 @@ import type { InputImageContent } from '@openAwork/shared';
 import { GenerativeUIRenderer, isSubagentToolName } from '@openAwork/shared-ui';
 import { usePrefersReducedMotion } from '../../../hooks/ui/usePrefersReducedMotion.js';
 import { useRunAcceptedStore } from '../../../stores/chat/run-accepted.js';
+import {
+  PENDING_WAIT_HINT_THRESHOLD_MS,
+  formatPendingWaitLabel,
+} from '../../../utils/pending-wait.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
 import { mergeReasoningDisplayBlocks } from '@openAwork/shared';
-import { renderMediaContent } from '../media/media-renderer.js';
 import {
   type AssistantTracePayload,
   type ChatMessage,
@@ -16,7 +19,6 @@ import {
   type ChatToolPart,
   createCompactionCardContent,
   extractNestedCompactionCardContent,
-  extractInputImages,
   parseAssistantEventContent,
   parseAssistantTraceContent,
   parseCopiedToolCardContent,
@@ -33,9 +35,10 @@ import {
 import { AssistantEventRow } from '../assistant/assistant-event-row.js';
 import { shouldStreamLocalReasoningBlock } from '../assistant/assistant-reasoning-block.helpers.js';
 import { AssistantReasoningBlock } from '../assistant/assistant-reasoning-block.js';
+import { createReasoningExpandedBodyStyle } from '../assistant/reasoning-window.js';
 import { CollapsibleAssistantContent } from '../message/collapsible-assistant-content.js';
 import { FoldDisabledContext } from '../markdown/fold-policy.js';
-import { ImageLightbox, type ImageLightboxItem } from '../image/image-lightbox.js';
+import { renderMessageMediaAttachments } from './message-media-attachments.js';
 import { ModifiedFilesSummaryCard } from '../misc/modified-files-summary-card.js';
 import StreamingMarkdownContent from '../markdown/streaming-markdown-content.js';
 import { TaskToolInline } from '../tool-call/display/task-tool-inline.js';
@@ -87,6 +90,14 @@ export interface ChatToolRenderOptions {
   messageId?: string;
   onOpenChildSession?: (sessionId: string) => void;
   presentationMode?: 'chat' | 'team';
+  /**
+   * 当前消息所属会话 id。
+   *
+   * 上传的非图片附件是**磁盘型产物**，读取面按会话寻址
+   * （`GET /sessions/:id/artifacts/:artifactId/content`）。缺省时：音视频引用降级为
+   * 文件卡片、文件卡片下载会给出明确错误 —— 而不是发一个注定 404 的请求。
+   */
+  sessionId?: string | undefined;
   resolveInlinePermissionActions?: (requestId: string) =>
     | {
         errorMessage?: string;
@@ -112,175 +123,16 @@ export interface ChatToolRenderOptions {
   taskRuntimeLookup?: TaskToolRuntimeLookup;
 }
 
-/**
- * 用户消息附件图集。
- *
- * 无障碍：可预览附件的文件名标签是一个真实控件，由原生 `<button type="button">`
- * 承担，与缩略图按钮同级（同一 tile 内并列，不互相嵌套），键盘 Enter / Space 交给
- * 浏览器原生按钮语义，不再使用无角色、不可聚焦的 `<span onClick>`。没有可预览图源时
- * 文件名退化为纯文本标签（`--static`），不产生任何交互语义。
- */
-function UserAttachedImagesGallery({ images }: { images: ReturnType<typeof extractInputImages> }) {
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-
-  const viewableImages = images.flatMap((image, imageIndex) =>
-    image.imageUrl ? [{ image, imageIndex }] : [],
-  );
-  const lightboxItems: ImageLightboxItem[] = viewableImages.flatMap(({ image, imageIndex }) => {
-    if (!image.imageUrl) return [];
-    const label = image.fileName ?? `图片 ${imageIndex + 1}`;
-    return [
-      {
-        src: image.imageUrl,
-        alt: label,
-        caption: label,
-        ...(image.fileName ? { fileName: image.fileName } : {}),
-      },
-    ];
-  });
-  // openIndex 是 images 下标；图集索引用可预览图片的位置，两者互转。
-  const openPosition = viewableImages.findIndex((entry) => entry.imageIndex === openIndex);
-
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-      {images.map((image, index) => {
-        const label = image.fileName ?? `图片 ${index + 1}`;
-        const src = image.imageUrl;
-        const isHovered = hoverIndex === index;
-        const clickable = Boolean(src);
-
-        return (
-          <div
-            key={`${src ?? image.artifactId ?? image.fileId ?? 'image'}-${index}`}
-            style={{ display: 'grid', gap: 6, width: 180 }}
-          >
-            {src ? (
-              <button
-                type="button"
-                onClick={() => setOpenIndex(index)}
-                onMouseEnter={() => setHoverIndex(index)}
-                onMouseLeave={() => setHoverIndex((value) => (value === index ? null : value))}
-                title="点击放大查看"
-                style={{
-                  position: 'relative',
-                  padding: 0,
-                  width: '100%',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 12,
-                  background: 'var(--bg-overlay)',
-                  cursor: 'zoom-in',
-                  overflow: 'hidden',
-                  lineHeight: 0,
-                }}
-              >
-                <img
-                  src={src}
-                  alt={label}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    maxHeight: 180,
-                    objectFit: 'cover',
-                  }}
-                />
-                {/* Hover overlay */}
-                <div
-                  aria-hidden="true"
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background:
-                      'linear-gradient(180deg, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.18) 100%)',
-                    opacity: isHovered ? 1 : 0,
-                    transition: 'opacity 150ms ease',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  <span className="chat-attachment-thumbnail__zoom-badge">⤢</span>
-                </div>
-              </button>
-            ) : (
-              <div
-                style={{
-                  minHeight: 120,
-                  borderRadius: 12,
-                  border: '1px dashed var(--border-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--fg-muted)',
-                  fontSize: 11,
-                  background: 'var(--bg-overlay)',
-                }}
-              >
-                图片已附加
-              </div>
-            )}
-            {clickable ? (
-              <button
-                type="button"
-                className="chat-attachment-file-name"
-                aria-label={`放大查看 ${label}`}
-                title={label}
-                onClick={() => setOpenIndex(index)}
-              >
-                {label}
-              </button>
-            ) : (
-              <span
-                className="chat-attachment-file-name chat-attachment-file-name--static"
-                title={label}
-              >
-                {label}
-              </span>
-            )}
-          </div>
-        );
-      })}
-
-      {openIndex !== null && openPosition >= 0 && (
-        <ImageLightbox
-          open
-          items={lightboxItems}
-          index={openPosition}
-          onIndexChange={(next) => {
-            // 可选链读值先落局部变量：直接写 `?.imageIndex ?? null` 会让编译器报
-            // "Unexpected terminal in optional" 并放弃优化本组件。
-            const nextImageIndex = viewableImages[next]?.imageIndex;
-            setOpenIndex(nextImageIndex ?? null);
-          }}
-          onClose={() => setOpenIndex(null)}
-        />
-      )}
-    </div>
-  );
-}
-
 export function renderChatMessageContentWithOptions(
   m: ChatMessage,
   options?: Omit<ChatToolRenderOptions, 'streaming'>,
 ) {
   if (m.role !== 'assistant') {
-    const inputImages = m.rawContent ? extractInputImages(m.rawContent) : [];
-    const mediaNodes = m.rawContent
-      ? renderMediaContent(m.rawContent as unknown as import('@openAwork/shared').MessageContent[])
-      : [];
-
-    if (inputImages.length === 0 && mediaNodes.length === 0) {
-      return m.content;
-    }
-
-    return (
-      <div style={{ display: 'grid', gap: 10 }}>
-        {m.content ? <span>{m.content}</span> : null}
-        {inputImages.length > 0 && <UserAttachedImagesGallery images={inputImages} />}
-        {mediaNodes.length > 0 && <div style={{ display: 'grid', gap: 10 }}>{mediaNodes}</div>}
-      </div>
-    );
+    // 附件与媒体的渲染整体落在 `message-media-attachments.tsx`：该职责域此前一直堆在
+    // 本文件里（图集 + 文件卡片 + 下载），把本文件推到 1462 行 —— 已按 `AGENTS.md`
+    // 「1300–1500 为预警区间，应主动评估拆分」抽出，主文件回落到 1300 行以下。
+    // 返回 `null` 表示没有正文之外的额外内容，此时保持既有的「原样返回正文字符串」快路径。
+    return renderMessageMediaAttachments(m, options?.sessionId) ?? m.content;
   }
   return renderAssistantMessageContentValue(m, { ...options, messageId: m.id });
 }
@@ -1062,7 +914,10 @@ function HiddenReasoningNotice({
           data-streaming="false"
           style={{ marginTop: 8, marginBottom: 0 }}
         >
-          <div className="assistant-reasoning-body">
+          {/* 展开态与主思考块共用同一份窗口样式：高度上限 `REASONING_EXPANDED_MAX_HEIGHT`
+              不变、块内滚动回看更早的思考。缺了这层限高，点开「思考过程」就会把整条消息
+              撑成好几屏（且没有块内滚动），与「显示推理过程」时的展开态完全不一致。 */}
+          <div className="assistant-reasoning-body" style={createReasoningExpandedBodyStyle()}>
             {/* 思考占位展开后的正文同样自带折叠语义（▶/▼），不再叠加消息级「展开全部」，
                 内部的围栏块也不再自折叠 */}
             <FoldDisabledContext value={true}>
@@ -1253,26 +1108,6 @@ function AssistantRichContentBody({
 }
 
 /**
- * 气泡出现多久之后补上「已等待 N 秒」锚点。
- *
- * 阈值取得比网关「取锁 → 落用户消息 → 调上游」的常规耗时略长，避免短请求闪一下
- * 数字又消失；超过它说明这轮确实在等（构建系统提示词 / 工具面、拉起 MCP、上游首
- * token），此时时间锚点能帮用户区分「慢」和「卡死」。
- */
-const PENDING_BUBBLE_ELAPSED_HINT_MS = 3_000;
-
-/** 把等待毫秒格式化为中文时长（不足 1 分钟只报秒，避免「0 分 07 秒」这种读数）。 */
-function formatPendingWaitLabel(elapsedMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
-  if (totalSeconds < 60) {
-    return `${totalSeconds} 秒`;
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return seconds === 0 ? `${minutes} 分钟` : `${minutes} 分 ${seconds} 秒`;
-}
-
-/**
  * 首 token 到达前的占位气泡——用户按下发送后看到的**第一条**助手侧反馈。
  *
  * 语义必须明确表达「消息已被接收」，因此文案是「已收到你的消息，正在处理」而不是
@@ -1285,9 +1120,10 @@ function formatPendingWaitLabel(elapsedMs: number): string {
  */
 function AssistantPendingBubble() {
   const prefersReducedMotion = usePrefersReducedMotion();
-  // 服务端受理凭据（`run_accepted` 流事件）。只判断「有没有」，不比较时间戳：每轮开始
-  // 由 `startStandardChatStream` 复位，因此 null 就等价于「本轮还没被受理」，浏览器与
-  // 服务端的时钟偏差也不会影响判定。
+  // 服务端受理凭据（`run_accepted` 流事件）。只判断「有没有」，不比较时间戳：新一轮
+  // 发送在 `startStandardChatStream` 复位，会话切换 / 流收尾 / 错误清理统一在
+  // `resetStreamState()`，因此 null 就等价于「本轮还没被受理」，浏览器与服务端的
+  // 时钟偏差也不影响判定。
   const serverAcceptedAt = useRunAcceptedStore((state) => state.acceptedAt);
   const [startedAt] = useState(() => Date.now());
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -1299,13 +1135,13 @@ function AssistantPendingBubble() {
     return () => window.clearInterval(timer);
   }, [startedAt]);
 
-  const showElapsedHint = elapsedMs >= PENDING_BUBBLE_ELAPSED_HINT_MS;
+  const showElapsedHint = elapsedMs >= PENDING_WAIT_HINT_THRESHOLD_MS;
 
   return (
     <div
       data-testid="chat-streaming-placeholder"
-      // 屏幕阅读器在气泡出现时播报一次「已收到你的消息，正在处理」；走动的秒数
-      // 标记为 aria-hidden，否则每秒都会触发一次播报。
+      // 屏幕阅读器会在气泡出现、以及文案切到「服务端已接收」时各播报一次；走动的
+      // 秒数标记为 aria-hidden，否则每秒都会触发一次播报。
       role="status"
       aria-live="polite"
       style={{

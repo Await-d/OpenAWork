@@ -23,6 +23,11 @@ export interface BuildTeamMessageEntriesInput {
   messages: ChatMessage[];
   roleLayer: string | null;
   resolveInlinePermissionActions?: ResolveInlinePermissionActionsFn;
+  /**
+   * 该层消息所属会话 id。附件是磁盘型产物、按会话取流，缺省会让文件卡片下载失败、
+   * 音视频引用降级为文件卡片。
+   */
+  sessionId?: string;
   visibleStreaming: boolean;
 }
 
@@ -60,6 +65,7 @@ export function buildTeamMessageEntries(input: BuildTeamMessageEntriesInput): Ch
         renderChatMessageContentWithOptions(m, {
           presentationMode: 'team',
           resolveInlinePermissionActions: input.resolveInlinePermissionActions,
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         }),
       ...(message.role === 'assistant'
         ? {

@@ -1,4 +1,5 @@
 import { VideoPlayer } from '@openAwork/shared-ui';
+import { MediaCardStatus } from './media-card-status.js';
 import { useMediaArtifact } from './use-media-artifact.js';
 
 /**
@@ -39,48 +40,11 @@ export function VideoContentBlock({
   const poster = thumbnailUrl;
 
   if (loading) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 480,
-          maxWidth: '100%',
-          aspectRatio: '16 / 9',
-          borderRadius: 12,
-          border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-overlay)',
-          color: 'var(--fg-muted)',
-          fontSize: 12,
-        }}
-      >
-        加载视频中…
-      </div>
-    );
+    return <MediaCardStatus fileName={displayName} kind="pending" />;
   }
 
   if (error) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
-        <span style={{ color: 'var(--fg-complement)', fontSize: 12 }}>视频加载失败: {error}</span>
-        <button
-          type="button"
-          onClick={retry}
-          style={{
-            padding: '2px 8px',
-            borderRadius: 4,
-            border: '1px solid var(--border-default)',
-            background: 'var(--bg-base)',
-            color: 'var(--fg-muted)',
-            fontSize: 11,
-            cursor: 'pointer',
-          }}
-        >
-          重试
-        </button>
-      </div>
-    );
+    return <MediaCardStatus fileName={displayName} kind="error" detail={error} onRetry={retry} />;
   }
 
   if (!src) {

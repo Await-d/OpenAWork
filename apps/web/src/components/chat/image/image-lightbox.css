@@ -204,12 +204,109 @@
   }
 }
 
+/*
+ * ── 缩略图条 + 键盘提示（图集模式下） ─────────────────────────────────
+ *
+ * 两者都叠在深色遮罩之上，因此沿用同一套「中性浮层」配色：
+ * 背景 = --bg-elevated，文字 = --fg-strong，描边 = --border-emphasis。
+ * 缩略图条只有「当前项」用 --accent 描边——这里是 accent 描边而非实色填充，
+ * 所以不涉及 --fg-on-accent（它只在 accent 实色填充之上才可读）。
+ */
+.image-lightbox__strip {
+  align-items: center;
+  backdrop-filter: blur(6px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-md);
+  bottom: 56px;
+  display: flex;
+  gap: var(--spacing-1);
+  left: 50%;
+  max-width: min(80vw, 640px);
+  overflow-x: auto;
+  padding: var(--spacing-1);
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.image-lightbox__thumb {
+  background: none;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex: 0 0 auto;
+  height: 40px;
+  opacity: 0.55;
+  overflow: hidden;
+  padding: 0;
+  transition:
+    opacity var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color var(--dur-micro, 100ms) var(--ease-micro, cubic-bezier(0.4, 0, 0.2, 1));
+  width: 56px;
+}
+
+.image-lightbox__thumb img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.image-lightbox__thumb:hover:not([aria-current='true']) {
+  opacity: 0.85;
+}
+
+.image-lightbox__thumb[aria-current='true'] {
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.image-lightbox__thumb:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.image-lightbox__kbd-hint {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-pill);
+  color: var(--fg-muted);
+  font-size: 11px;
+  left: var(--spacing-4);
+  padding: var(--spacing-1) var(--spacing-3);
+  pointer-events: none;
+  position: absolute;
+  top: var(--spacing-4);
+  z-index: 2;
+}
+
+/* 窄屏没有物理键盘，提示无意义；缩略图同步收窄，避免与 caption 抢空间 */
+@media (max-width: 768px) {
+  .image-lightbox__kbd-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .image-lightbox__strip {
+    bottom: 50px;
+  }
+
+  .image-lightbox__thumb {
+    height: 32px;
+    width: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .image-lightbox {
     animation: none;
   }
 
-  .image-lightbox__image {
+  .image-lightbox__image,
+  .image-lightbox__thumb {
     transition: none;
   }
 }

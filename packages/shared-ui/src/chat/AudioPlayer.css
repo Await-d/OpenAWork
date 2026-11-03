@@ -1,0 +1,45 @@
+/* 统一进度条样式（与 VideoPlayer 同构）。仅进度条，其它样式仍由组件内联。 */
+
+.audio-player__progress {
+  position: relative;
+  flex: 1;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  /* 触屏拖拽必需：阻止手势被浏览器滚动 / 缩放接管。 */
+  touch-action: none;
+}
+
+.audio-player__progress-track {
+  width: 100%;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--border-emphasis);
+  overflow: hidden;
+}
+
+.audio-player__progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.audio-player__progress-thumb {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateX(-50%);
+  transition: transform 100ms ease;
+}
+
+.audio-player__progress:hover .audio-player__progress-thumb {
+  transform: translateX(-50%) scale(1.4);
+}
+
+.audio-player__progress:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}

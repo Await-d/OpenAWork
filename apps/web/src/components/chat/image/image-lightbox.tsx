@@ -128,6 +128,10 @@ export function ImageLightbox({
 
   return createPortal(
     <div className="image-lightbox" onClick={handleClose}>
+      {/* 键盘提示：由 CSS 在窄屏隐藏（触屏上没有物理键盘，这行只会占位） */}
+      <div className="image-lightbox__kbd-hint" aria-hidden="true">
+        ← → 切换 · + / − 缩放 · R 旋转 · Esc 关闭
+      </div>
       {/* Toolbar */}
       <div className="image-lightbox__toolbar" onClick={(e) => e.stopPropagation()}>
         <button
@@ -257,6 +261,25 @@ export function ImageLightbox({
         onClick={(e) => e.stopPropagation()}
         style={{ transform: `rotate(${rotation}deg) scale(${scale})` }}
       />
+      {/* 缩略图条：多图时的直接跳转入口。单图不渲染，避免出现只有一格的空条；
+          点击走同一 goToIndex，因此边界与「不循环」语义与左右箭头完全一致。 */}
+      {hasMultiple && (
+        <div className="image-lightbox__strip" onClick={(e) => e.stopPropagation()}>
+          {effectiveItems.map((item, itemIndex) => (
+            <button
+              key={`${item.src}-${itemIndex}`}
+              type="button"
+              className="image-lightbox__thumb"
+              title={`第 ${itemIndex + 1} 张`}
+              aria-label={`查看第 ${itemIndex + 1} 张图片`}
+              aria-current={itemIndex === effectiveIndex}
+              onClick={() => goToIndex(itemIndex)}
+            >
+              <img src={item.src} alt="" referrerPolicy="no-referrer" />
+            </button>
+          ))}
+        </div>
+      )}
       {/* Caption + gallery progress */}
       {(current.caption || hasMultiple) && (
         <div className="image-lightbox__caption">

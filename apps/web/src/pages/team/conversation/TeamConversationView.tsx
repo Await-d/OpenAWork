@@ -480,6 +480,8 @@ export function TeamConversationView({
     subagentNotices: state.subagentNotices,
     roleLayer: state.roleLayer,
     resolveInlinePermissionActions,
+    // 磁盘型附件按会话取流：把本视图的会话带进渲染层。
+    sessionId,
     visibleStreaming: state.visibleStreaming,
     streamBuffer: state.streamBuffer,
     streamingSegments: state.streamingSegments,

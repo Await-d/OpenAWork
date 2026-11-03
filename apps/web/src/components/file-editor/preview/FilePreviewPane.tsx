@@ -18,6 +18,7 @@ import {
   type FilePreviewKind,
 } from '../../../utils/file/file-preview.js';
 import { ImageZoomTrigger } from '../../common/display/ImageZoomTrigger.js';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 import { ImageLightbox } from '../../chat/image/image-lightbox.js';
 import {
   MarkdownImage,
@@ -76,8 +77,9 @@ export function FilePreviewPane({ content, path }: { content: string; path: stri
   }
 
   // Binary kinds (office docs, pdf, archives) — server reads them as
-  // utf-8 which produces mojibake. Office docs go through dedicated
-  // renderers (mammoth / SheetJS); archives keep the friendly notice.
+  // utf-8 which produces mojibake. Office docs and PDFs go through
+  // dedicated renderers (mammoth / SheetJS / pdfjs); archives keep the
+  // friendly notice.
   if (previewKind === 'binary-office' || previewKind === 'binary-pdf') {
     return (
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -466,7 +468,7 @@ function SvgPreview({ content, path }: { content: string; path: string }) {
     : `${content.length} 字符`;
 
   const handleCopy = useCallback(() => {
-    void navigator.clipboard?.writeText(content).catch(() => undefined);
+    void copyTextToClipboard(content).catch(() => undefined);
   }, [content]);
 
   const handleDownload = useCallback(() => {
