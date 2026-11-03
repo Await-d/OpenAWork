@@ -38,14 +38,15 @@ describe('commands workflow plan matching', () => {
     expect(match?.relativePath).toBe(BASE_PLAN.relativePath);
   });
 
-  it('/start-work 计划匹配兼容 .omo/plans 目录', async () => {
-    const workspaceRoot = await mkdtemp(join(tmpdir(), 'openawork-omo-plan-'));
+  it('/start-work 计划匹配不再扫描 .omo/plans 目录（D6）', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'openawork-retired-plan-'));
     try {
+      // 已下线的 `.omo/plans` 目录里放一份计划，必须不被发现。
       const planDir = join(workspaceRoot, '.omo', 'plans');
       await mkdir(planDir, { recursive: true });
       await writeFile(
         join(planDir, 'lazycodex-native-workflow.md'),
-        ['# LazyCodex/OmO 原生化接入工作流', '', '- [ ] T1 计划发现兼容'].join('\n'),
+        ['# 历史计划', '', '- [ ] T1 计划发现兼容'].join('\n'),
         'utf-8',
       );
 
@@ -54,7 +55,29 @@ describe('commands workflow plan matching', () => {
         'lazycodex-native-workflow',
       );
 
-      expect(match?.relativePath).toBe('.omo/plans/lazycodex-native-workflow.md');
+      expect(match).toBeNull();
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it('/start-work 计划匹配仍兼容 .sisyphus/plans 旧目录（D3）', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'openawork-legacy-plan-'));
+    try {
+      const planDir = join(workspaceRoot, '.sisyphus', 'plans');
+      await mkdir(planDir, { recursive: true });
+      await writeFile(
+        join(planDir, 'lazycodex-native-workflow.md'),
+        ['# 历史计划', '', '- [ ] T1 计划发现兼容'].join('\n'),
+        'utf-8',
+      );
+
+      const match = await __testing.findLatestWorkflowPlan(
+        workspaceRoot,
+        'lazycodex-native-workflow',
+      );
+
+      expect(match?.relativePath).toBe('.sisyphus/plans/lazycodex-native-workflow.md');
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }

@@ -37,7 +37,7 @@ import type { ConfiguredMCPServer } from '../../mcp/mcp-runtime.js';
 describe('buildBuiltinMcpServers', () => {
   it('exposes remote and virtual builtin MCP servers by default', () => {
     const out = buildBuiltinMcpServers({ env: {} });
-    expect(out).toHaveLength(7);
+    expect(out).toHaveLength(6);
 
     const openWebsearch = out.find((server) => server.id === 'open_websearch');
     expect(openWebsearch).toMatchObject({
@@ -97,14 +97,10 @@ describe('buildBuiltinMcpServers', () => {
       builtin: true,
       enabled: true,
     });
-    expect(out.find((server) => server.id === 'omo')).toMatchObject({
-      id: 'omo',
-      transport: 'stdio',
-      command: 'openawork-virtual-omo',
-      required: false,
-      builtin: true,
-      enabled: true,
-    });
+    // `omo` adapter 已整条下线：不再出现在内置集合里，也不会 spawn 任何
+    // `openawork-virtual-omo` 占位 command。
+    expect(out.find((server) => server.id === 'omo')).toBeUndefined();
+    expect(out.map((server) => server.id)).not.toContain('omo');
   });
 
   it('injects EXA_API_KEY header when present in env', () => {
@@ -198,7 +194,6 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
         'codegraph',
         'git_bash',
         'lsp',
-        'omo',
         'my-custom-mcp',
       ]),
     );
@@ -206,6 +201,74 @@ describe('mergeBuiltinAndConfiguredMcps', () => {
     const customIndex = merged.findIndex((server) => server.id === 'my-custom-mcp');
     const websearchIndex = merged.findIndex((server) => server.id === 'websearch');
     expect(customIndex).toBeGreaterThan(websearchIndex);
+  });
+
+  describe('已下线的 protected builtin 存量配置（D5）', () => {
+    // 存量用户库里可能还留着 `id: 'omo'` 的配置。它已不在内置集合中，
+    // 若不丢弃就会被归一成一条 user stdio MCP 去 spawn 不存在的
+    // `openawork-virtual-omo`，启动期必然连接失败。
+    for (const source of ['system', 'user'] as const) {
+      it(`丢弃 source=${source} 的存量 omo 配置，且不产生 openawork-virtual-omo 条目`, () => {
+        const stale: ConfiguredMCPServer = {
+          id: 'omo',
+          name: 'omo',
+          transport: 'stdio',
+          command: 'openawork-virtual-omo',
+          source,
+          enabled: true,
+        };
+
+        const merged = mergeBuiltinAndConfiguredMcps([stale]);
+
+        expect(merged.find((server) => server.id === 'omo')).toBeUndefined();
+        expect(
+          merged.filter(
+            (server) => server.transport === 'stdio' && server.command === 'openawork-virtual-omo',
+          ),
+        ).toEqual([]);
+      });
+    }
+
+    it('只丢弃已下线 id，同批其它用户配置照常保留', () => {
+      const stale: ConfiguredMCPServer = {
+        id: 'omo',
+        name: 'omo',
+        transport: 'stdio',
+        command: 'openawork-virtual-omo',
+        enabled: true,
+      };
+      const keep: ConfiguredMCPServer = {
+        id: 'my-custom-mcp',
+        name: 'My Custom MCP',
+        transport: 'stdio',
+        command: '/usr/local/bin/my-mcp',
+        enabled: true,
+      };
+
+      const merged = mergeBuiltinAndConfiguredMcps([stale, keep]);
+
+      expect(merged.find((server) => server.id === 'omo')).toBeUndefined();
+      expect(merged.find((server) => server.id === 'my-custom-mcp')).toBe(keep);
+    });
+
+    it('即使传入自定义 builtin 列表也不会复活已下线 id', () => {
+      // 防线在"已下线 id 登记表"这一层，与 builtin 参数无关：
+      // 任何调用方传入的 builtin 列表都不应让 omo 重新变成可 spawn 的配置。
+      const merged = mergeBuiltinAndConfiguredMcps(
+        [
+          {
+            id: 'omo',
+            name: 'stale',
+            transport: 'stdio',
+            command: 'openawork-virtual-omo',
+            enabled: true,
+          },
+        ],
+        [],
+      );
+
+      expect(merged).toEqual([]);
+    });
   });
 
   it('accepts an explicit builtin list (useful for tests)', () => {

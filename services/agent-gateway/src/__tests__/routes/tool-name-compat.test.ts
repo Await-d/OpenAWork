@@ -7,6 +7,8 @@
 import { describe, expect, it } from 'vitest';
 import { checkPrometheusToolGuard } from '../../app/prometheus-md-only.js';
 import { checkAtlasGuard } from '../../session/atlas-guard.js';
+import { appendTaskResumeInfo } from '../../task/task-resume-info.js';
+import { isTaskToolName } from '../../task/task-tools.js';
 import {
   isEnabledToolName,
   normalizeToolNameForEnablement,
@@ -15,12 +17,13 @@ import {
 describe('tool name enablement normalization', () => {
   it('accepts a single leading functions. namespace prefix', () => {
     expect(isEnabledToolName('functions.bash', new Set(['bash']))).toBe(true);
-    expect(isEnabledToolName('functions.Agent', new Set(['call_omo_agent']))).toBe(true);
+    expect(isEnabledToolName('functions.Agent', new Set(['subagent']))).toBe(true);
   });
 
   it('keeps Claude presented names and the task alias working', () => {
     expect(isEnabledToolName('Bash', new Set(['bash']))).toBe(true);
-    expect(isEnabledToolName('Agent', new Set(['call_omo_agent']))).toBe(true);
+    // Claude Code 呈报名 `Agent` 的 canonical 已收敛为 `subagent`（261102 T-18）。
+    expect(isEnabledToolName('Agent', new Set(['subagent']))).toBe(true);
     expect(isEnabledToolName('task', new Set(['subagent']))).toBe(true);
   });
 
@@ -52,7 +55,7 @@ describe('tool name enablement normalization', () => {
 
   it('normalizes prefixed names to their canonical form', () => {
     expect(normalizeToolNameForEnablement('functions.bash')).toBe('bash');
-    expect(normalizeToolNameForEnablement('functions.Agent')).toBe('call_omo_agent');
+    expect(normalizeToolNameForEnablement('functions.Agent')).toBe('subagent');
     expect(normalizeToolNameForEnablement('task')).toBe('subagent');
     expect(normalizeToolNameForEnablement('bash')).toBe('bash');
   });
@@ -99,5 +102,44 @@ describe('canonical name feeds the pre-dispatch guards', () => {
         prompt: 'do the thing',
       }).injectSingleTaskDirective,
     ).toBe(true);
+  });
+});
+
+/**
+ * B-04（261102 批次 B / T-19）：三处曾按历史名枚举、缺规范名 `subagent` 的
+ * 手写集合已统一改用 `isTaskToolName()`。此处逐处回归，防止再次漏判。
+ */
+describe('delegation tool sets cover the canonical subagent name (B-04)', () => {
+  it('Prometheus 只读警告对 subagent 委派同样注入', () => {
+    for (const toolName of ['subagent', 'task']) {
+      expect(
+        checkPrometheusToolGuard({
+          agentId: 'prometheus',
+          toolName,
+          prompt: '子代理请协助调研',
+          workspaceRoot: '/workspace',
+        }).injectConsultWarning,
+        toolName,
+      ).toBe(true);
+    }
+  });
+
+  it('resume 提示对 subagent 委派照常追加', () => {
+    const output = 'sessionId: ses_abc123';
+    const withHint = appendTaskResumeInfo('subagent', output);
+    expect(withHint).toContain('to continue: delegate_task(session_id="ses_abc123"');
+    // 历史别名保持同一行为
+    expect(appendTaskResumeInfo('task', output)).toContain('to continue:');
+    // 非委派工具不追加
+    expect(appendTaskResumeInfo('read', output)).toBe(output);
+  });
+
+  it('规范名 subagent 与历史别名 task 同属委派工具', () => {
+    // routes/stream.ts 的 taskToolUsedInTurn 置位判定、以及三处集合都以
+    // isTaskToolName() 为唯一事实来源；直接锁定该谓词对规范名的识别。
+    expect(isTaskToolName('subagent')).toBe(true);
+    expect(isTaskToolName('task')).toBe(true);
+    expect(isTaskToolName('call_omo_agent')).toBe(false);
+    expect(isTaskToolName('read')).toBe(false);
   });
 });

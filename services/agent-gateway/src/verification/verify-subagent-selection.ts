@@ -1,13 +1,14 @@
 /**
- * 子代理选型契约验收（`Agent` = `call_omo_agent`，模型实际使用的委派入口）。
+ * 子代理选型契约验收（261102 批次 B：入口收敛为规范名 `subagent`）。
  *
  * 背景：历史上「联网新闻检索」被全部派给 `scout`。根因不是模型乱选，而是
- * ① 白名单里没有正确的委派对象；② `Agent` 工具的参数说明为空；③ scout 定义无边界。
+ * ① 白名单里没有正确的委派对象；② 委派工具的参数说明为空；③ scout 定义无边界。
  * 本脚本锁定修复后的**机制与契约**（保证后续不退化）：
  *
  *   1) 正确选项存在：`web-researcher` 通过白名单，子会话拿到它自己的系统提示词；
- *   2) 错误选择会被纠正：未知 agent 被拒，错误信息列出可用名单（模型据此自纠）；
- *   3) 模型读到的选型指引：`Agent` 工具描述 + schema 参数说明写明
+ *   2) 错误选择会被纠正：未知 agent 经 Claude Code `Agent` 适配层被拒，错误信息
+ *      列出可用名单（模型据此自纠）——D2-a 后白名单只约束 Claude Code 兼容入口；
+ *   3) 模型读到的选型指引：`subagent` 工具描述 + schema 参数说明写明
  *      「联网资讯检索派 web-researcher，不要派 scout」；
  *   4) 委派解析：`web-researcher` / `scout` 各自命中内置描述符，提示词边界不丢失。
  *
@@ -18,6 +19,11 @@
  */
 import { randomUUID } from 'node:crypto';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
+import {
+  normalizeInputForCanonical,
+  UnsupportedToolError,
+} from '../claude-code/claude-code-input-adapters.js';
+import { CLAUDE_CODE_AGENT_ALLOWED_AGENTS } from '../claude-code/claude-code-agent-allowed-agents.js';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
 import { resolveDelegatedAgent } from '../task/task-agent-resolution.js';
 import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
@@ -88,31 +94,35 @@ async function main(): Promise<void> {
               },
             };
 
-            // ── 1) 正确选项存在：web-researcher 通过白名单并落到正确 agent ──
+            // ── 1) 正确选项存在：web-researcher 通过委派并落到正确 agent ──
+            // 白名单现在只约束 Claude Code `Agent` 兼容入口（D2-a）：先经适配层
+            // 归一（校验 + canonical=subagent），再以 `subagent` 名走沙盒派发。
+            const normalizedAgentCall = normalizeInputForCanonical('Agent', {
+              description: '检索最新科技新闻',
+              prompt: '检索今天的最新科技新闻，多来源交叉比对。',
+              subagent_type: 'web-researcher',
+              run_in_background: true,
+            });
+            assert(
+              normalizedAgentCall.canonicalName === 'subagent',
+              'Claude Code Agent call should be remapped to the canonical subagent tool',
+            );
+
             const valid = await sandbox.execute(
               {
-                toolCallId: 'call-omo-selection-1',
-                toolName: 'call_omo_agent',
-                rawInput: {
-                  description: '检索最新科技新闻',
-                  prompt: '检索今天的最新科技新闻，多来源交叉比对。',
-                  subagent_type: 'web-researcher',
-                  run_in_background: true,
-                },
+                toolCallId: 'subagent-selection-1',
+                toolName: normalizedAgentCall.canonicalName,
+                rawInput: normalizedAgentCall.normalizedFields,
               },
               new AbortController().signal,
               parentSessionId,
               executionContext,
             );
             const validOutput = readOutputText(valid.output);
-            assert(valid.isError === false, 'web-researcher should pass the whitelist gate');
+            assert(valid.isError === false, 'web-researcher should pass the delegation gate');
             assert(
               validOutput.includes('web-researcher'),
               'launch output should name the delegated agent (web-researcher)',
-            );
-            assert(
-              validOutput.includes('后台 agent 任务已成功启动。'),
-              'call_omo_agent background mode should return the launch message',
             );
 
             const child = sqliteGet<{ id: string; metadata_json: string }>(
@@ -131,51 +141,63 @@ async function main(): Promise<void> {
             );
             const childSessionId = child.id;
 
-            // ── 2) 错误选择会被纠正：未知 agent 被拒且错误信息列出可用名单 ──
-            const invalid = await sandbox.execute(
-              {
-                toolCallId: 'call-omo-selection-2',
-                toolName: 'call_omo_agent',
-                rawInput: {
-                  prompt: '随便查点东西',
-                  subagent_type: 'web-researcher-typo',
-                  run_in_background: true,
-                },
-              },
-              new AbortController().signal,
-              parentSessionId,
-              executionContext,
-            );
-            const invalidOutput = readOutputText(invalid.output);
-            assert(invalid.isError === true, 'unknown agent type should be rejected');
+            // ── 2) 错误选择会被纠正：未知 agent 被 Claude Code Agent 适配层拒绝，
+            //      错误信息列出可用名单（模型据此自纠）──
+            let rejectionMessage = '';
+            let rejected = false;
+            try {
+              normalizeInputForCanonical('Agent', {
+                prompt: '随便查点东西',
+                subagent_type: 'web-researcher-typo',
+                run_in_background: true,
+              });
+            } catch (error) {
+              rejected = true;
+              rejectionMessage = error instanceof Error ? error.message : String(error);
+              assert(
+                error instanceof UnsupportedToolError,
+                'rejection should surface as UnsupportedToolError',
+              );
+            }
+            assert(rejected, 'unknown agent type should be rejected by the Agent adapter layer');
             assert(
-              invalidOutput.includes('Invalid agent type'),
+              rejectionMessage.includes('Invalid agent type'),
               'rejection output should explain the invalid agent type',
             );
             assert(
-              invalidOutput.includes('web-researcher') && invalidOutput.includes('scout'),
+              rejectionMessage.includes('web-researcher') && rejectionMessage.includes('scout'),
               'rejection output should list the allowed agents so the model can self-correct',
             );
+            // 白名单内容即 CLAUDE_CODE_AGENT_ALLOWED_AGENTS，错误信息须完整列出。
+            for (const agentId of CLAUDE_CODE_AGENT_ALLOWED_AGENTS) {
+              assert(
+                rejectionMessage.includes(agentId),
+                `rejection output should list allowed agent "${agentId}"`,
+              );
+            }
 
             // ── 3) 模型读到的选型指引 ──
             const definitions = buildGatewayToolDefinitions();
-            const agentTool = definitions.find(
-              (definition) => definition.function.name === 'Agent',
+            const subagentTool = definitions.find(
+              (definition) => definition.function.name === 'subagent',
             );
-            assert(agentTool !== undefined, 'Agent tool definition should be exposed to the model');
             assert(
-              agentTool.function.description.includes('web-researcher') &&
-                agentTool.function.description.includes('不要派 scout'),
-              'Agent tool description should route 联网资讯检索 to web-researcher (not scout)',
+              subagentTool !== undefined,
+              'subagent tool definition should be exposed to the model',
             );
-            const subagentTypeProperty = agentTool.function.parameters.properties[
+            assert(
+              subagentTool.function.description.includes('web-researcher') &&
+                subagentTool.function.description.includes('不要派 scout'),
+              'subagent tool description should route 联网资讯检索 to web-researcher (not scout)',
+            );
+            const subagentTypeProperty = subagentTool.function.parameters.properties[
               'subagent_type'
             ] as { description?: unknown } | undefined;
             assert(
               typeof subagentTypeProperty?.description === 'string' &&
                 subagentTypeProperty.description.includes('web-researcher') &&
                 subagentTypeProperty.description.includes('不要派 scout'),
-              'Agent tool subagent_type parameter should carry the selection guidance',
+              'subagent tool subagent_type parameter should carry the selection guidance',
             );
 
             // ── 4) 委派解析：两个 agent 各自命中内置描述符，边界不丢失 ──

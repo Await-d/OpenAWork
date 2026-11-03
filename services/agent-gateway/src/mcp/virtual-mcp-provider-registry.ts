@@ -3,7 +3,6 @@ import type { ConfiguredMCPServer, MCPCallInput, MCPCallOutput } from './mcp-run
 import { callCodegraphVirtualMcp, CODEGRAPH_VIRTUAL_MCP_TOOLS } from './virtual-codegraph-mcp.js';
 import { callGitBashVirtualMcp, listGitBashVirtualMcpTools } from './virtual-git-bash-mcp.js';
 import { callLspVirtualMcp, LSP_VIRTUAL_MCP_TOOLS } from './virtual-lsp-mcp.js';
-import { callOmoVirtualMcp, listOmoVirtualMcpTools } from './virtual-omo-mcp.js';
 import {
   callOpenWebSearchVirtualMcp,
   OPEN_WEBSEARCH_VIRTUAL_MCP_TOOLS,
@@ -43,12 +42,6 @@ export const VIRTUAL_MCP_PROVIDERS = [
     listTools: () => [...LSP_VIRTUAL_MCP_TOOLS],
     callTool: async (sessionId, server, input) =>
       textOutput(server.id, input.toolName, await callLspVirtualMcp(sessionId, input)),
-  },
-  {
-    id: 'omo',
-    listTools: () => listOmoVirtualMcpTools(),
-    callTool: async (sessionId, server, input) =>
-      textOutput(server.id, input.toolName, await callOmoVirtualMcp(sessionId, input)),
   },
 ] as const satisfies readonly VirtualMcpProvider[];
 

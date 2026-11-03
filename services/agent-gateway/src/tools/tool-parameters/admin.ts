@@ -54,7 +54,7 @@ export function buildAdminParameters(name: string): ToolParameters | undefined {
           server: {
             type: 'object',
             description:
-              'add/update 时的服务器定义。内置 MCP（websearch / grep_app / codegraph / git_bash / lsp / omo）只接受 name 与 disabledTools。',
+              'add/update 时的服务器定义。内置 MCP（websearch / grep_app / codegraph / git_bash / lsp / open_websearch）只接受 name 与 disabledTools。',
             properties: {
               id: {
                 type: 'string',
@@ -306,7 +306,8 @@ export function buildAdminParameters(name: string): ToolParameters | undefined {
           agent: {
             type: 'object',
             description:
-              'create 需要 label 与 systemPrompt（可含 description / aliases / canonicalRole / model / variant / fallbackModels / note / enabled）；update 只需提供要改的字段。',
+              'create 需要 label 与 systemPrompt（可含 description / aliases / canonicalRole / model / variant / fallbackModels / note / enabled）；update 只需提供要改的字段。' +
+              '内置 Agent 仅可改 model / variant / fallbackModels / systemPrompt；systemPrompt 传 null 表示恢复默认提示词，传字符串表示写入覆盖。',
             additionalProperties: true,
           },
         },

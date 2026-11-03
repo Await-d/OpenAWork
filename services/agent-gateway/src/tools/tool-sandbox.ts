@@ -52,7 +52,6 @@ import {
 } from '../workspace/workspace-safety.js';
 import { applyPatchToolDefinition } from './apply-patch-tools.js';
 import { astGrepReplaceToolDefinition } from './ast-grep-tools.js';
-import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { CHANNEL_TOOL_NAME_SET, executeChannelTool } from './channel-tools.js';
 import { CODEGRAPH_TOOL_NAME_SET, executeCodegraphTool } from './codegraph-tools.js';
 import { convertMediaToolDefinition } from './convert-media-tool.js';
@@ -270,8 +269,9 @@ import {
   handleSkillTool,
 } from './sandbox/handlers/interactive.js';
 
-// Phase 4:T-15 delegation(call_omo_agent + isTaskToolName 块)的 handler 模块。
-import { handleCallOmoAgentTool, handleTaskTool } from './sandbox/handlers/delegation.js';
+// Phase 4:T-15 delegation(isTaskToolName 块)的 handler 模块。
+// 261102 批次 B（T-20）：call_omo_agent 入口收敛为规范名 subagent，其分支体已删除。
+import { handleTaskTool } from './sandbox/handlers/delegation.js';
 
 import { consumeOncePermission, ensurePermissionForTool } from './sandbox/permission-ladder.js';
 
@@ -385,7 +385,7 @@ async function executeGatewayManagedToolImpl(
     observability,
     executionContext,
     sshResolution,
-    // call_omo_agent 委派:改写成 task 后走完整门面路径(含后置钩子)。
+    // 子代理委派(历史名 call_omo_agent 已收敛为 subagent/task):走完整门面路径(含后置钩子)。
     executeGatewayManagedTool: (input) =>
       executeGatewayManagedTool(
         sandbox,
@@ -513,9 +513,6 @@ async function executeGatewayManagedToolImpl(
 
     if (request.toolName === generateAudioToolDefinition.name)
       return await handleGenerateAudioTool(handlerContext);
-
-    if (request.toolName === callOmoAgentToolDefinition.name)
-      return await handleCallOmoAgentTool(handlerContext);
 
     if (request.toolName === TOOL_SEARCH_TOOL_NAME)
       return await handleToolSearchTool(handlerContext);

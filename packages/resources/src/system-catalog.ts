@@ -68,7 +68,6 @@ export const SYSTEM_BUILTIN_MCP_IDS = [
   'codegraph',
   'git_bash',
   'lsp',
-  'omo',
 ] as const;
 
 export type SystemBuiltinMcpId = (typeof SYSTEM_BUILTIN_MCP_IDS)[number];

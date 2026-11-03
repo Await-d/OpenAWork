@@ -9,7 +9,10 @@ describe('gateway tool definitions render contract', () => {
 
     expect(definitions.length).toBeGreaterThan(20);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toEqual(expect.arrayContaining(['bash', 'Skill', 'AskUserQuestion', 'Agent']));
+    expect(names).toEqual(expect.arrayContaining(['bash', 'Skill', 'AskUserQuestion', 'subagent']));
+    // 261102 批次 B（T-22）：`call_omo_agent` 入口已从模型可见面移除，
+    // 其余模型可见名不再存在 `Agent`（`Agent` 仅为 Claude Code 兼容呈报名）。
+    expect(names).not.toContain('call_omo_agent');
 
     for (const definition of definitions) {
       expect(definition.type).toBe('function');
@@ -54,13 +57,13 @@ describe('gateway tool definitions render contract', () => {
     expect(skill?.function.parameters.properties).toHaveProperty('query');
   });
 
-  it('Agent 工具的参数携带子代理选型指引（联网资讯检索派 web-researcher）', () => {
+  it('subagent 工具的参数携带子代理选型指引（联网资讯检索派 web-researcher）', () => {
     const definitions = buildGatewayToolDefinitions();
-    const agent = definitions.find((definition) => definition.function.name === 'Agent');
+    const agent = definitions.find((definition) => definition.function.name === 'subagent');
     const properties = agent?.function.parameters.properties ?? {};
 
     // 历史现象：模型把联网新闻检索全部派给 scout（当时没有正确选项）。
-    // 选型指引必须落在模型真正读到的位置：Agent 工具描述 + schema 参数说明。
+    // 选型指引必须落在模型真正读到的位置：subagent 工具描述 + schema 参数说明。
     expect(agent?.function.description).toContain('web-researcher');
     expect(agent?.function.description).toContain('不要派 scout');
     expect(properties['subagent_type']).toMatchObject({

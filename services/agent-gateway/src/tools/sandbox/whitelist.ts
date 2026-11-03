@@ -32,7 +32,6 @@ import {
   assertSessionWorkspacePath,
 } from '../../workspace/workspace-safety.js';
 import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from '../ast-grep-tools.js';
-import { callOmoAgentToolDefinition } from '../call-omo-agent-tools.js';
 import { CHANNEL_TOOL_DEFINITIONS } from '../channel-tools.js';
 import { CODEGRAPH_TOOL_DEFINITIONS } from '../codegraph-tools.js';
 import { convertMediaToolDefinition } from '../convert-media-tool.js';
@@ -287,7 +286,6 @@ export const TOOL_WHITELIST = new Set<string>([
   astGrepSearchToolDefinition.name,
   astGrepReplaceToolDefinition.name,
   interactiveBashToolDefinition.name,
-  callOmoAgentToolDefinition.name,
   enterPlanModeToolDefinition.name,
   exitPlanModeToolDefinition.name,
   skillMcpToolDefinition.name,

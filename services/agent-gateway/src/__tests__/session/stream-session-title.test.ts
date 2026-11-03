@@ -49,7 +49,7 @@ vi.mock('../../infra/db.js', () => ({
 }));
 
 import { persistStreamUserMessage } from '../../session/stream-session-title.js';
-import { buildDelegatedChildClientRequestId } from '../../tools/call-omo-agent-output.js';
+import { buildDelegatedChildClientRequestId } from '../../task/delegated-child-request-id.js';
 
 const ARTIFACTS_INDEX_PATH = '/tmp/openawork-stream-session-title-artifacts.json';
 const ARTIFACT_IMAGE_DIR = '/tmp/openawork-stream-session-title-fixtures';

@@ -17,10 +17,11 @@ describe('command templates decision policy', () => {
     expect(REMOVE_DEADCODE_INSTRUCTION).not.toContain('拒绝开放式表述');
   });
 
-  it('/start-work 模板以 .agentdocs/workflow 为主计划目录', () => {
+  it('/start-work 模板以 .agentdocs/workflow 为主计划目录，且不再提 .omo/plans', () => {
     expect(START_WORK_INSTRUCTION).toContain('`.agentdocs/workflow/`');
-    expect(START_WORK_INSTRUCTION).toContain('`.omo/plans/`');
     expect(START_WORK_INSTRUCTION).toContain('旧版 `.sisyphus/plans/`');
+    // `.omo/plans` 已从计划发现中移除（D6），文案不得再出现。
+    expect(START_WORK_INSTRUCTION).not.toContain('.omo');
     expect(START_WORK_INSTRUCTION).not.toContain('在 `.sisyphus/plans/` 目录下查找');
   });
 });

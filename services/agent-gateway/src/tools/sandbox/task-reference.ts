@@ -6,11 +6,11 @@
  */
 
 import type { AgentTaskManagerImpl } from '@openAwork/agent-core';
-import { buildDelegatedChildClientRequestId } from '../call-omo-agent-output.js';
 import { sqliteGet } from '../../infra/db.js';
 import { isTeamRoleLayer } from '../../handoff/capability/apply-team-layer-tools.js';
 import { resolveSessionTurnClientRequestId } from '../../handoff/store/handoff-store.js';
 import type { McpSessionScope } from '../../mcp/mcp-server-authorization.js';
+import { buildDelegatedChildClientRequestId } from '../../task/delegated-child-request-id.js';
 import { resolveDelegatedTaskReasoningEffort } from '../../task/task-thinking-effort.js';
 import { parseSessionMetadataJson } from '../../session/session-workspace-metadata.js';
 import { type SandboxExecutionContext } from './session-context.js';

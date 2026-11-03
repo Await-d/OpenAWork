@@ -5,7 +5,8 @@
  * - 只写「当前会话 owner」的 `user_settings.mcp_servers`，工具不接受 userId 参数；
  * - 写入与设置页 / `PUT /settings/mcp-servers` 完全同规（复用 `mcpServerConfigSchema`）；
  * - 内置 MCP 保护：system builtin（websearch / grep_app）与 protected virtual / adapter
- *   （codegraph / git_bash / lsp / omo）不允许模型覆盖端点，只能启停 / 调整 disabledTools；
+ *   （codegraph / git_bash / lsp / open_websearch）不允许模型覆盖端点，只能启停 /
+ *   调整 disabledTools；
  * - 从 runtime 合并结果构造内置条目时**绝不落 headers / env / oauth**（例如
  *   `EXA_API_KEY` 会以 header 形式注入内置 websearch，持久化会泄漏密钥）；
  * - 写库后立即探活（`retryMcpConnectionForUser`），把连接结果带回模型；
@@ -153,7 +154,7 @@ export const mcpManageServersToolDefinition: ToolDefinition<
     '渠道必须显式传 scope=session；会话级 add/update 仅创建待管理员确认提案，不直接生效。缺省 scope=user。' +
     '管理当前用户的 MCP 服务器配置。action=list 列举全部（含禁用项）；add/update 新增或覆盖自定义 SSE / stdio MCP；remove 移除用户配置（内置项移除后恢复默认）；enable/disable 启停。' +
     '变更类操作需要用户批准，写入后立即尝试连接并返回结果，下一轮即可使用新的 MCP 工具。' +
-    '系统内置 MCP（websearch / grep_app）与受保护内置（codegraph / git_bash / lsp / omo）不支持覆盖端点，只能启停或调整 disabledTools。' +
+    '系统内置 MCP（websearch / grep_app）与受保护内置（codegraph / git_bash / lsp / open_websearch）不支持覆盖端点，只能启停或调整 disabledTools。' +
     'update 时未提供的字段（env / headers / oauth / disabledTools / enabled）保留原值。' +
     '要验证某服务器的连通性用 action=enable(会立即连接并把结果放在返回的 connect 字段;已启用时等同于连通性探测)——没有单独的 test 动作。',
   inputSchema: mcpManageServersInputSchema,

@@ -14,7 +14,7 @@ export const PRESENTED_TO_CANONICAL: Readonly<Record<string, string>> = {
   TaskUpdate: 'task_update',
   Skill: 'skill',
   AskUserQuestion: 'question',
-  Agent: 'call_omo_agent',
+  Agent: 'subagent',
   EnterPlanMode: 'EnterPlanMode',
   ExitPlanMode: 'ExitPlanMode',
 } as const;

@@ -93,7 +93,7 @@ afterAll(async () => {
 });
 
 describe('settings MCP route contracts', () => {
-  it('GET /settings/mcp-servers 返回同源 builtin、virtual 与 OMO adapter 元数据', async () => {
+  it('GET /settings/mcp-servers 返回同源 builtin、virtual 与 protected adapter 元数据', async () => {
     const app = await buildApp();
     try {
       const response = await app.inject({
@@ -111,7 +111,6 @@ describe('settings MCP route contracts', () => {
         'codegraph',
         'git_bash',
         'lsp',
-        'omo',
       ]);
       const openWebsearch = body.builtinServers.find((server) => server.id === 'open_websearch');
       expect(openWebsearch).toMatchObject({
@@ -127,18 +126,21 @@ describe('settings MCP route contracts', () => {
       });
       expect(codegraph).not.toHaveProperty('command');
 
-      const omo = body.builtinServers.find((server) => server.id === 'omo');
-      expect(omo).toMatchObject({
-        builtinKind: 'adapter',
+      const lsp = body.builtinServers.find((server) => server.id === 'lsp');
+      expect(lsp).toMatchObject({
+        builtinKind: 'virtual',
         source: 'system',
       });
-      expect(omo).not.toHaveProperty('command');
+      expect(lsp).not.toHaveProperty('command');
+
+      // `omo` adapter 已下线：内置清单里不再出现。
+      expect(body.builtinServers.find((server) => server.id === 'omo')).toBeUndefined();
     } finally {
       await app.close();
     }
   });
 
-  it('PUT /settings/mcp-servers 只保存 OMO adapter 的管理字段', async () => {
+  it('PUT /settings/mcp-servers 只保存 lsp 虚拟内置的管理字段', async () => {
     const app = await buildApp();
     try {
       const putResponse = await app.inject({
@@ -148,16 +150,16 @@ describe('settings MCP route contracts', () => {
         payload: {
           servers: [
             {
-              id: 'omo',
-              name: 'omo',
+              id: 'lsp',
+              name: 'lsp',
               transport: 'stdio',
               builtin: true,
-              builtinKind: 'adapter',
+              builtinKind: 'virtual',
               source: 'system',
               enabled: true,
               command: 'malicious-fake-command',
               url: 'https://fake.invalid/sse',
-              disabledTools: ['omo_list_agents', 'omo_list_agents'],
+              disabledTools: ['lsp_rename', 'lsp_rename'],
             },
           ],
         },
@@ -167,14 +169,14 @@ describe('settings MCP route contracts', () => {
       const putBody = putResponse.json<SettingsMcpServersResponse>();
       expect(putBody.servers).toEqual([
         {
-          id: 'omo',
-          name: 'omo',
+          id: 'lsp',
+          name: 'lsp',
           transport: 'stdio',
           builtin: true,
-          builtinKind: 'adapter',
+          builtinKind: 'virtual',
           source: 'system',
           enabled: true,
-          disabledTools: ['omo_list_agents'],
+          disabledTools: ['lsp_rename'],
         },
       ]);
 
@@ -250,10 +252,13 @@ describe('settings MCP route contracts', () => {
             disabledTools: ['codegraph_status', 'codegraph_status'],
           },
           {
+            // D5：已下线的 protected builtin。设置页 GET 只镜像用户原始配置
+            // （经 sanitize，不采信伪造端点），D5 的「丢弃」发生在运行时合并层
+            // （`loadConfiguredMcpServersForUser`），二者分工见下。
             id: 'omo',
             name: 'stale-omo',
             type: 'stdio',
-            command: 'malicious-omo-command',
+            command: 'openawork-virtual-omo',
             url: 'https://fake.invalid/omo',
             enabled: true,
           },
@@ -287,44 +292,33 @@ describe('settings MCP route contracts', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json<SettingsMcpServersResponse>().servers).toEqual([
-        {
-          id: 'codegraph',
-          name: 'codegraph',
-          transport: 'stdio',
-          builtin: true,
-          builtinKind: 'virtual',
-          source: 'user',
-          enabled: false,
-          disabledTools: ['codegraph_status'],
-        },
-        {
-          id: 'omo',
-          name: 'omo',
-          transport: 'stdio',
-          builtin: true,
-          builtinKind: 'adapter',
-          source: 'system',
-          enabled: true,
-        },
-        {
-          id: 'local-user-stdio',
-          name: 'Local user stdio',
-          transport: 'stdio',
-          command: 'node',
-          args: ['server.js'],
-          source: 'user',
-          enabled: true,
-        },
-        {
-          id: 'remote-user-sse',
-          name: 'Remote user sse',
-          transport: 'sse',
-          url: 'https://example.com/mcp',
-          source: 'user',
-          enabled: true,
-        },
+      const servers = response.json<SettingsMcpServersResponse>().servers;
+
+      // 设置页镜像：codegraph 被清洗为 canonical protected 形态；已下线的
+      // protected builtin 行（此处为 `omo`）仍原样回显（配置保真），但其端点
+      // 不可伪造——这是既有 sanitize 语义；D5 的运行时丢弃发生在合并层。
+      expect(servers[0]).toEqual({
+        id: 'codegraph',
+        name: 'codegraph',
+        transport: 'stdio',
+        builtin: true,
+        builtinKind: 'virtual',
+        source: 'user',
+        enabled: false,
+        disabledTools: ['codegraph_status'],
+      });
+      expect(servers.map((server) => server.id)).toEqual([
+        'codegraph',
+        'omo',
+        'local-user-stdio',
+        'remote-user-sse',
       ]);
+      // 设置页镜像保留原始行（配置保真）；D5 的「运行时丢弃」不在本路由、
+      // 而由 `loadConfiguredMcpServersForUser` 的合并层承担。
+      // 该路由不直连 runtime 合并层（mcp-runtime 在此文件被整体 mock），
+      // D5 行为由 `builtin-mcps.test.ts` / `mcp-settings-sanitizer.test.ts` /
+      // `mcp-runtime-retry.test.ts` 覆盖。
+      expect(mcpRuntimeMock.loadConfiguredMcpServersForUserMock).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

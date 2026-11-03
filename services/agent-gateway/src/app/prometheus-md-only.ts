@@ -14,13 +14,25 @@
 
 import { resolve, relative, isAbsolute } from 'node:path';
 
+import { isTaskToolName } from '../task/task-tools.js';
+
 const PROMETHEUS_AGENT_IDS = new Set(['prometheus']);
 
 const ALLOWED_EXTENSIONS = ['.md'];
 
 const BLOCKED_WRITE_TOOLS = new Set(['write', 'edit', 'multiedit']);
 
-const TASK_TOOLS = new Set(['task', 'delegate_task', 'call_omo_agent']);
+/**
+ * 委派工具集合。规范名 `subagent` 与历史别名 `task` 由 `isTaskToolName()` 统一判定
+ * （历史缺陷：这里按历史名枚举且缺 `subagent`，导致 `subagent` 委派不注入只读警告；
+ * 同 `tools/sandbox/whitelist.ts` 曾记录的同类事故）。`delegate_task` 是编排器委派别名。
+ */
+const DELEGATION_TOOL_ALIASES = new Set(['delegate_task']);
+
+function isDelegationToolName(toolName: string): boolean {
+  const normalized = toolName.toLowerCase();
+  return isTaskToolName(normalized) || DELEGATION_TOOL_ALIASES.has(normalized);
+}
 
 const PLANNING_CONSULT_WARNING = `
 
@@ -112,7 +124,7 @@ export function checkPrometheusToolGuard(input: {
   }
 
   // Task delegation: inject read-only warning
-  if (TASK_TOOLS.has(input.toolName.toLowerCase())) {
+  if (isDelegationToolName(input.toolName)) {
     if (input.prompt && !input.prompt.includes('[System Directive:')) {
       return { blocked: false, injectConsultWarning: true };
     }

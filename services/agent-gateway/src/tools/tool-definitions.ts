@@ -51,7 +51,6 @@ import {
 import { modelSearchToolDefinition } from './model-search-tools.js';
 import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
 import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
-import { callOmoAgentToolDefinition } from './call-omo-agent-tools.js';
 import { skillMcpToolDefinition } from '../skill/skill-mcp-tools.js';
 import { lookAtToolDefinition } from './look-at-tools.js';
 import { generateImageToolDefinition } from './image-generation-tool.js';
@@ -93,10 +92,13 @@ import { agentManageToolDefinition } from '../agent/agent-admin-tools.js';
 import { teamWorkspaceManageToolDefinition } from '../team/team-workspace-admin-tools.js';
 import type { EffectiveSkill } from '../skill/skill-selection.js';
 
+// Claude Code 兼容呈报名：`Agent` 的 canonical 收敛为 `subagent` 后由
+// `claude-code/claude-code-tool-surface-profiles.ts` 的 `Agent: 'subagent'`
+// 映射承担（配合输入适配层的白名单校验），此处不再登记
+// `call_omo_agent: 'Agent'`——该工具入口已从模型可见面移除（261102 T-22）。
 const CLAUDE_FIRST_VISIBLE_NAME_OVERRIDES = {
   skill: 'Skill',
   question: 'AskUserQuestion',
-  call_omo_agent: 'Agent',
 } as const;
 
 export function getVisibleToolName(toolName: string): string {
@@ -199,7 +201,6 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   astGrepSearchToolDefinition,
   astGrepReplaceToolDefinition,
   interactiveBashToolDefinition,
-  callOmoAgentToolDefinition,
   skillMcpToolDefinition,
   lookAtToolDefinition,
   desktopAutomationToolDefinition,

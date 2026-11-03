@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildDelegatedChildClientRequestId } from '../../tools/call-omo-agent-output.js';
+import { buildDelegatedChildClientRequestId } from '../../task/delegated-child-request-id.js';
 
 const MAX_CLIENT_REQUEST_ID_LENGTH = 128;
 

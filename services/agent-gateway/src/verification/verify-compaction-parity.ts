@@ -4,10 +4,14 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runRealAnthropic, type AnthropicGateResult } from './verify-compaction-parity-gate.js';
 
-export const EVIDENCE_PATH = join(
-  process.cwd(),
-  '../../.omo/evidence/task-8-260816-claude-compaction-parity.log',
-);
+/**
+ * 证据落盘目录（单一事实来源）：脚本运行时会 `mkdirSync` 创建它——这是正常
+ * 副作用。历史路径指向已下线的 `.omo/evidence/`，改为中性的
+ * `.verify-evidence/`，避免生产验证脚本继续创建 omo 目录。
+ */
+export const EVIDENCE_DIR = join(process.cwd(), '../../.verify-evidence');
+
+export const EVIDENCE_PATH = join(EVIDENCE_DIR, 'task-8-260816-claude-compaction-parity.log');
 const MATRIX = 'src/__tests__/compaction/compaction-provider-parity-matrix.test.ts';
 const SELECTED = [
   'src/__tests__/compaction/task-5-recovery-http.test.ts',
@@ -86,7 +90,7 @@ function appendGateEvidence(result: AnthropicGateResult): void {
 }
 
 async function main(): Promise<void> {
-  mkdirSync(join(process.cwd(), '../../.omo/evidence'), { recursive: true });
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
   const baseline = `Baseline failing-first: bun run --filter @openAwork/agent-gateway verify:compaction-parity\n${process.env['TASK8_BASELINE_RESULT'] ?? 'recorded in the task-8 evidence before this verifier existed'}\n`;
   appendEvidence(
     `Task 8 — compaction parity verifier\nDate: ${new Date().toISOString()}\n\n${baseline}`,

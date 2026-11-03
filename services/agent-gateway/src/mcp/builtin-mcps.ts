@@ -4,7 +4,7 @@
  * `mcp_list_tools` 使用。
  *
  * 设计要点：
- * - 远程 MCP 直接声明为 SSE；codegraph / git_bash / lsp / omo 声明为
+ * - 远程 MCP 直接声明为 SSE；codegraph / git_bash / lsp 声明为
  *   OpenAWork 内置虚拟 stdio MCP，由 runtime 直接桥接到本地能力，
  *   不实际启动占位 command。
  * - 用户可以在 user_settings 里用同 id 管理内置 server。system builtin
@@ -49,6 +49,26 @@ export function getBuiltinMcpKind(id: string): BuiltinMcpKind | undefined {
 export function isProtectedBuiltinMcpId(id: string): boolean {
   const kind = getBuiltinMcpKind(id);
   return kind === 'virtual' || kind === 'adapter';
+}
+
+/**
+ * 已下线的 protected builtin id 登记表（D5）。
+ *
+ * 这些 id 曾经是 protected virtual / adapter builtin，用户的
+ * `user_settings.mcp_servers` 里可能还留着同 id 的存量配置。它们如今已不在
+ * 内置列表中，`mergeBuiltinAndConfiguredMcps` 会把这类配置当成普通用户配置
+ * 归一，结果就是一条要去 spawn 不存在的 `openawork-virtual-*` 的 stdio server
+ * ——启动期 MCP 连接必然失败。因此合并时必须**丢弃**这些孤儿配置，而不是保留。
+ *
+ * 新增条目只允许追加已真实下线的 id，不要拿它当"屏蔽任意 id"的开关：登记在
+ * 这里等于永久丢弃用户该 id 的配置。
+ */
+export const RETIRED_PROTECTED_MCP_IDS = ['omo'] as const;
+
+export type RetiredProtectedMcpId = (typeof RETIRED_PROTECTED_MCP_IDS)[number];
+
+export function isRetiredProtectedMcpId(id: string): boolean {
+  return (RETIRED_PROTECTED_MCP_IDS as readonly string[]).includes(id);
 }
 
 interface BuildBuiltinMcpServersOptions {
@@ -119,8 +139,6 @@ function buildRuntimeBuiltinMcpServer(
       return virtualBuiltinMcpServer(base, 'openawork-virtual-git-bash');
     case 'lsp':
       return virtualBuiltinMcpServer(base, 'openawork-virtual-lsp');
-    case 'omo':
-      return virtualBuiltinMcpServer(base, 'openawork-virtual-omo');
   }
 }
 
@@ -151,13 +169,18 @@ function readEnvString(env: NodeJS.ProcessEnv, key: string): string | undefined 
  *   - 用户写了同 id 配置，结果里只保留一份规范化后的配置（含 enabled=false 的禁用）
  *
  * 该函数纯粹做合并，不读 SQLite，便于单元测试。
+ *
+ * D5：`RETIRED_PROTECTED_MCP_IDS` 中登记过的 id 若出现在存量配置里（不论
+ * `source` 是 `system` 还是 `user`），一律丢弃——它们的内置实现已不存在，
+ * 留着会被归一成去 spawn 不存在的 command 的 stdio server。
  */
 export function mergeBuiltinAndConfiguredMcps(
   configured: ConfiguredMCPServer[],
   builtin: ConfiguredMCPServer[] = buildBuiltinMcpServers(),
 ): ConfiguredMCPServer[] {
   const builtinById = new Map(builtin.map((server) => [server.id, server]));
-  const normalizedConfigured = configured.map((server) => {
+  const survivingConfigured = configured.filter((server) => !isRetiredProtectedMcpId(server.id));
+  const normalizedConfigured = survivingConfigured.map((server) => {
     const builtinServer = builtinById.get(server.id);
     if (!builtinServer) {
       if (server.source === 'system') {

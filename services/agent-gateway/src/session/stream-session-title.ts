@@ -199,7 +199,7 @@ export function persistStreamUserMessage(input: PersistStreamUserMessageInput): 
 /**
  * 判定请求键是否为 task 子代理会话自身的运行键。
  *
- * 形状由 `buildDelegatedChildClientRequestId`（tools/call-omo-agent-output.ts）产出：
+ * 形状由 `buildDelegatedChildClientRequestId`（task/delegated-child-request-id.ts）产出：
  * `task:<parentClientRequestId>:child:<childSessionId>`（超长时收敛为摘要）。
  * 父侧的 `task-*` 通知键是 `task-` 前缀而非 `task:`，不会误判。
  */

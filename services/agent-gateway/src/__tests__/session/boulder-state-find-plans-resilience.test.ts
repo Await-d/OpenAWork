@@ -88,13 +88,10 @@ describe('findPrometheusPlans per-file stat resilience', () => {
     expect(plans[1]?.endsWith('older.md')).toBe(true);
   });
 
-  it('优先发现 .agentdocs/workflow，同时兼容 .omo/plans 与旧版 .sisyphus/plans', async () => {
+  it('优先发现 .agentdocs/workflow，同时兼容旧版 .sisyphus/plans', async () => {
     mocks.readdir.mockImplementation(async (dir: string) => {
       if (dir.endsWith('.agentdocs/workflow')) {
         return ['native.md'];
-      }
-      if (dir.endsWith('.omo/plans')) {
-        return ['omo.md'];
       }
       if (dir.endsWith('.sisyphus/plans')) {
         return ['legacy.md'];
@@ -105,9 +102,26 @@ describe('findPrometheusPlans per-file stat resilience', () => {
 
     const plans = await findPrometheusPlans('/workspace');
 
-    expect(plans).toHaveLength(3);
+    expect(plans).toHaveLength(2);
     expect(plans[0]).toContain('.agentdocs/workflow/native.md');
-    expect(plans[1]).toContain('.omo/plans/omo.md');
-    expect(plans[2]).toContain('.sisyphus/plans/legacy.md');
+    expect(plans[1]).toContain('.sisyphus/plans/legacy.md');
+  });
+
+  it('不再扫描已下线的 .omo/plans 目录（D6）', async () => {
+    const readdirCalls: string[] = [];
+    mocks.readdir.mockImplementation(async (dir: string) => {
+      readdirCalls.push(dir);
+      if (dir.endsWith('.omo/plans')) {
+        return ['retired.md'];
+      }
+      return [];
+    });
+    mocks.stat.mockResolvedValue({ mtimeMs: 1000 } as unknown as never);
+
+    const plans = await findPrometheusPlans('/workspace');
+
+    // 目录本身不再进入发现列表，其下计划文件因此不可能出现。
+    expect(plans).toEqual([]);
+    expect(readdirCalls.some((dir) => dir.endsWith('.omo/plans'))).toBe(false);
   });
 });

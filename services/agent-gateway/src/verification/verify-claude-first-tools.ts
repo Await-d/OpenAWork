@@ -28,6 +28,17 @@ interface SessionMetadataRow {
   metadata_json: string;
 }
 
+function readOutputText(output: unknown): string {
+  if (typeof output === 'string') {
+    return output;
+  }
+  try {
+    return JSON.stringify(output);
+  } catch {
+    return String(output);
+  }
+}
+
 async function main(): Promise<void> {
   await withTempEnv(
     {
@@ -295,27 +306,36 @@ async function verifyAgent(input: {
   );
 
   assert(result.isError === false, 'Agent tool should succeed');
-  assert(typeof result.output === 'string', 'Agent tool should return a background summary string');
+  // 261102 批次 B（T-18）：`Agent` 呈报名经输入适配层归一为规范名 `subagent`，输出
+  // 形态随之收敛到 `task` 工具的结构化输出（`taskId` / `sessionId` / `status`），
+  // 不再使用已删除的 `call_omo_agent` 文本摘要。
+  const backgroundOutput = result.output as {
+    taskId?: unknown;
+    sessionId?: unknown;
+    status?: unknown;
+    message?: unknown;
+  };
   assert(
-    String(result.output).includes('后台 agent 任务已成功启动。'),
-    'Agent tool should report that a background delegated run started',
+    typeof backgroundOutput === 'object' && backgroundOutput !== null,
+    'Agent tool should return the structured subagent output',
   );
   assert(
-    String(result.output).includes('描述：让子代理给出结论'),
-    'Agent output should include the delegated description',
+    typeof backgroundOutput.taskId === 'string' && backgroundOutput.taskId.length > 0,
+    'Agent output should include the delegated task id',
   );
   assert(
-    String(result.output).includes('Agent：explore（subagent）'),
+    typeof backgroundOutput.sessionId === 'string' && backgroundOutput.sessionId.length > 0,
+    'Agent output should include the delegated child session id',
+  );
+  assert(
+    backgroundOutput.status === 'running',
+    'Agent output should report the delegated task as running',
+  );
+  assert(
+    readOutputText(backgroundOutput.message).includes('explore'),
     'Agent output should include the delegated agent label',
   );
-  assert(
-    String(result.output).includes('状态：running'),
-    'Agent output should include the delegated task status',
-  );
-
-  const taskIdMatch = String(result.output).match(/任务 ID：([^\n]+)/u);
-  assert(taskIdMatch?.[1], 'Agent output should include the delegated task id');
-  const taskId = taskIdMatch[1];
+  const taskId = backgroundOutput.taskId;
 
   const taskManager = new AgentTaskManagerImpl();
   await waitFor(async () => {
@@ -351,17 +371,30 @@ async function verifyAgent(input: {
   );
 
   assert(syncResult.isError === false, 'sync Agent tool should succeed');
-  assert(typeof syncResult.output === 'string', 'sync Agent tool should return a string');
+  // 261102 批次 B（T-18）：同步委派同样收敛到 `subagent`/task 的结构化输出，
+  // 子会话终态文本（`<subagent sessionID="…">` 包裹 + `task_id:` 提示）落在
+  // 输出的 `message` 字段中。
+  const syncOutput = syncResult.output as {
+    message?: unknown;
+    sessionId?: unknown;
+    status?: unknown;
+    taskId?: unknown;
+  };
   assert(
-    String(syncResult.output).includes('Claude-first Agent 子代理已完成。'),
+    typeof syncOutput === 'object' && syncOutput !== null,
+    'sync Agent tool should return the structured subagent output',
+  );
+  const syncMessage = readOutputText(syncOutput.message);
+  assert(
+    syncMessage.includes('Claude-first Agent 子代理已完成。'),
     'sync Agent output should include the delegated child content',
   );
   assert(
-    String(syncResult.output).includes('<subagent sessionID="'),
+    syncMessage.includes('<subagent sessionID="'),
     'sync Agent output should use the opencode subagent result wrapper',
   );
   assert(
-    String(syncResult.output).includes('task_id:'),
+    syncMessage.includes('task_id:'),
     'sync Agent output should include the delegated session id task_id hint',
   );
 }

@@ -16,13 +16,8 @@ export const BOULDER_DIR = '.sisyphus';
 export const BOULDER_FILE = 'boulder.json';
 export const BOULDER_STATE_PATH = `${BOULDER_DIR}/${BOULDER_FILE}`;
 export const AGENTDOCS_WORKFLOW_DIR = '.agentdocs/workflow';
-export const OMO_PLANS_DIR = '.omo/plans';
 export const PROMETHEUS_PLANS_DIR = '.sisyphus/plans';
-export const PLAN_DISCOVERY_DIRS = [
-  AGENTDOCS_WORKFLOW_DIR,
-  OMO_PLANS_DIR,
-  PROMETHEUS_PLANS_DIR,
-] as const;
+export const PLAN_DISCOVERY_DIRS = [AGENTDOCS_WORKFLOW_DIR, PROMETHEUS_PLANS_DIR] as const;
 
 export interface BoulderState {
   /** Absolute path to the active plan file */
@@ -140,9 +135,10 @@ async function collectPlanFiles(directory: string, relativeDir: string, priority
  * Find executable workflow plan files for this project.
  *
  * OpenAWork's native /start-work surface uses `.agentdocs/workflow` as the
- * canonical plan directory. `.omo/plans` and the legacy `.sisyphus/plans`
- * directories are still discovered as compatibility inputs so existing
- * OmO/LazyCodex and older Sisyphus plans can be resumed deliberately.
+ * canonical plan directory. The legacy `.sisyphus/plans` directory is still
+ * discovered as a compatibility input so older Sisyphus plans can be resumed
+ * deliberately. `.omo/plans` is no longer scanned: the omo adapter was retired
+ * and plans living there must be migrated into `.agentdocs/workflow`.
  */
 export async function findPrometheusPlans(directory: string): Promise<string[]> {
   const discovered = (

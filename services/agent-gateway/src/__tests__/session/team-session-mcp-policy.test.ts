@@ -116,8 +116,12 @@ describe('team/session MCP authorization policy', () => {
   });
 
   it('keeps chat and team MCP allowlist semantics distinct', async () => {
-    // Given: user settings include a normal user MCP, a plugin-sourced OMO MCP,
-    // and an adversarial plugin override for a builtin id.
+    // Given: user settings include a normal user MCP, a plugin-sourced override
+    // for a protected virtual builtin (lsp), and an adversarial plugin override
+    // for another builtin id (websearch).
+    // NOTE: 原替身为 `omo`；D5（261102 批次 A）下线 omo 后，改用仍存活的 protected
+    // virtual builtin `lsp`，覆盖语义（user/plugin 覆盖 protected builtin 仍受 team
+    // allowlist 约束）逐字不变。
     const userServers = [
       {
         id: 'fs',
@@ -128,10 +132,10 @@ describe('team/session MCP authorization policy', () => {
         source: 'user',
       },
       {
-        id: 'omo',
-        name: 'omo-from-user-plugin',
+        id: 'lsp',
+        name: 'lsp-from-user-plugin',
         type: 'stdio',
-        command: 'openawork-virtual-omo',
+        command: 'openawork-virtual-lsp',
         builtin: true,
         enabled: true,
         source: 'plugin',
@@ -158,23 +162,23 @@ describe('team/session MCP authorization policy', () => {
     const teamRequestedFsIds = catalogServerIds(
       await listMcpToolsForUser(USER_ID, { allowedServerIds: ['fs'] }),
     );
-    const teamRequestedOmoIds = catalogServerIds(
-      await listMcpToolsForUser(USER_ID, { allowedServerIds: ['omo'] }),
+    const teamRequestedLspIds = catalogServerIds(
+      await listMcpToolsForUser(USER_ID, { allowedServerIds: ['lsp'] }),
     );
 
     // Then: undefined means no whitelist filtering, [] means system builtins only,
     // and team requested MCP only adds explicitly requested user/plugin servers.
     const expected = {
-      chat: [...systemIds, 'fs', 'omo', 'websearch'],
+      chat: [...systemIds, 'fs', 'lsp', 'websearch'],
       teamEmpty: systemIds,
       teamRequestedFs: [...systemIds, 'fs'],
-      teamRequestedOmo: [...systemIds, 'omo'],
+      teamRequestedLsp: [...systemIds, 'lsp'],
     };
     const actual = {
       chat: chatIds,
       teamEmpty: teamEmptyIds,
       teamRequestedFs: teamRequestedFsIds,
-      teamRequestedOmo: teamRequestedOmoIds,
+      teamRequestedLsp: teamRequestedLspIds,
     };
 
     console.info(`T6_POLICY_OBSERVABLE ${JSON.stringify({ expected, actual })}`);
@@ -199,15 +203,17 @@ describe('team/session MCP authorization policy', () => {
     expect(isGatewayToolEnabledForSessionMetadata('read', clarifyMode)).toBe(true);
   });
 
-  it('hard-denies user and plugin OMO servers at execution time for an empty team allowlist', async () => {
+  it('hard-denies user and plugin protected virtual builtin servers at execution time for an empty team allowlist', async () => {
     for (const source of ['user', 'plugin'] as const) {
-      // Given: a user/plugin-sourced OMO config shadows the system OMO id.
+      // Given: a user/plugin-sourced config shadows a protected virtual builtin id (lsp).
+      // NOTE: 原替身为 `omo`；D5 下线 omo 后改用仍存活的 protected virtual builtin
+      // `lsp`，保持「空 allowlist 硬拒走 allowlist 拒绝路径」的断言意图不变。
       setUserMcpServers([
         {
-          id: 'omo',
-          name: `${source}-omo`,
+          id: 'lsp',
+          name: `${source}-lsp`,
           type: 'stdio',
-          command: `${source}-provided-omo`,
+          command: `${source}-provided-lsp`,
           builtin: true,
           enabled: true,
           source,
@@ -220,7 +226,7 @@ describe('team/session MCP authorization policy', () => {
       await expect(
         callMcpToolForSession(
           'session-t6',
-          { serverId: 'omo', toolName: 'inspect', arguments: { q: 'secret' } },
+          { serverId: 'lsp', toolName: 'inspect', arguments: { q: 'secret' } },
           { allowedServerIds: [] },
         ),
       ).rejects.toThrow(/not allowed|not permitted|not authorized/i);

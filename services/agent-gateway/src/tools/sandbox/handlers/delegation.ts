@@ -2,27 +2,26 @@
  * delegation 域 handler(261009-tool-sandbox 拆分 P4 / T-15)。
  *
  * 由 `tool-sandbox.ts::executeGatewayManagedToolImpl` 原位搬出,零行为变更:
- * call_omo_agent 分支体与 `isTaskToolName(request.toolName)` 谓词块(含 task 生命周期
- * 派发 / resume / 后台注册 / 失败回滚)逐字保留。
+ * `isTaskToolName(request.toolName)` 谓词块(含 task 生命周期派发 / resume /
+ * 后台注册 / 失败回滚)逐字保留。
  * 谓词调用点仍原位保留在门面 if 链(`if (isTaskToolName(request.toolName)) return
  * handleTaskTool(handlerContext);`),handler 内以 ctx 重算同一判定(flat MCP 同款手法)。
  * 派发顺序仍由门面的 if 链决定(本模块不参与顺序决策)。
+ *
+ * 261102 批次 B（T-20）：`call_omo_agent` 分支体已删除；该入口收敛为规范名
+ * `subagent`，其白名单校验按 D2-a 迁至 Claude Code `Agent` 输入适配层
+ * （claude-code/claude-code-input-adapters.ts），本模块不再持有任何 call_omo_agent 逻辑。
  */
 
 import {
   AgentTaskManagerImpl,
   resolveSessionPermissionMode,
-  type ToolCallRequest,
   type ToolCallResult,
 } from '@openAwork/agent-core';
 import { randomUUID } from 'node:crypto';
 import { sqliteGet, sqliteRun } from '../../../infra/db.js';
 import { logGatewayWarn } from '../../../infra/gateway-logger.js';
-import {
-  appendSessionMessageV2 as appendSessionMessage,
-  listSessionMessagesV2 as listSessionMessages,
-  listSessionMessagesByRequestScope,
-} from '../../../message/message-v2-adapter.js';
+import { appendSessionMessageV2 as appendSessionMessage } from '../../../message/message-v2-adapter.js';
 import {
   normalizeUpstreamRetryMaxRetries,
   UPSTREAM_RETRY_MAX_RETRIES_KEY,
@@ -49,12 +48,6 @@ import { selectDelegatedModelForUser } from '../../../task/task-model-selection.
 import { upsertTaskParentContext } from '../../../task/task-parent-context-store.js';
 import { isTaskToolName, taskToolDefinition } from '../../../task/task-tools.js';
 import {
-  buildCallOmoAgentBackgroundOutput,
-  buildCallOmoAgentSyncOutput,
-  buildDelegatedChildClientRequestId,
-} from '../../call-omo-agent-output.js';
-import { CALL_OMO_ALLOWED_AGENTS, callOmoAgentToolDefinition } from '../../call-omo-agent-tools.js';
-import {
   buildTaskToolOutput,
   loadTaskGraphForSession,
   mapTaskStatusToToolOutputStatus,
@@ -80,134 +73,6 @@ import {
   resolveTaskGraphTurnClientRequestId,
 } from '../task-reference.js';
 import { formatToolInputValidationOutput } from '../whitelist.js';
-
-export async function handleCallOmoAgentTool(
-  ctx: SandboxHandlerContext,
-): Promise<ToolCallResult | null> {
-  const { request, rawInput, executionContext, observability } = ctx;
-  const parsed = callOmoAgentToolDefinition.inputSchema.safeParse(rawInput ?? {});
-  if (!parsed.success) {
-    return {
-      toolCallId: request.toolCallId,
-      toolName: request.toolName,
-      output: formatToolInputValidationOutput(request.toolName, parsed.error.issues),
-      isError: true,
-      durationMs: 0,
-    };
-  }
-
-  const normalizedAgent = parsed.data.subagent_type.trim().toLowerCase();
-  if (
-    !CALL_OMO_ALLOWED_AGENTS.includes(normalizedAgent as (typeof CALL_OMO_ALLOWED_AGENTS)[number])
-  ) {
-    // `general` 是历史文案里宣传过但**从未**存在于白名单的"通用执行" agent,
-    // 模型高频臆造(排障诊断 2026-10-10 #4 同款)。单独给一行指路,避免再次猜测。
-    const generalHint =
-      normalizedAgent === 'general'
-        ? ' `general` 不存在:通用研究与多步执行请改用 hephaestus(深度实施)或省略 subagent_type 走 category。'
-        : '';
-    return {
-      toolCallId: request.toolCallId,
-      toolName: request.toolName,
-      output: `Error: Invalid agent type "${parsed.data.subagent_type}". Only ${CALL_OMO_ALLOWED_AGENTS.join(', ')} are allowed.${generalHint}`,
-      isError: true,
-      durationMs: 0,
-    };
-  }
-
-  if (parsed.data.run_in_background && parsed.data.session_id) {
-    return {
-      toolCallId: request.toolCallId,
-      toolName: request.toolName,
-      output:
-        'Error: session_id is not supported in background mode. Use run_in_background=false to continue an existing session.',
-      isError: true,
-      durationMs: 0,
-    };
-  }
-
-  const delegatedRequest: ToolCallRequest = {
-    ...request,
-    toolName: taskToolDefinition.name,
-    rawInput: {
-      description: parsed.data.description ?? parsed.data.prompt.slice(0, 40),
-      prompt: parsed.data.prompt,
-      subagent_type: normalizedAgent,
-      load_skills: [],
-      run_in_background: parsed.data.run_in_background,
-      ...(parsed.data.session_id ? { session_id: parsed.data.session_id } : {}),
-    },
-  };
-  const taskResult = await ctx.executeGatewayManagedTool({
-    executionContext,
-    observability,
-    request: delegatedRequest,
-  });
-  if (!taskResult) {
-    return null;
-  }
-  if (
-    taskResult.output &&
-    typeof taskResult.output === 'object' &&
-    !Array.isArray(taskResult.output) &&
-    'sessionId' in taskResult.output &&
-    'taskId' in taskResult.output
-  ) {
-    const taskOutput = taskResult.output as {
-      errorMessage?: string;
-      sessionId: string;
-      taskId: string;
-      status?: string;
-      result?: string;
-    };
-    const childUserId = getSessionOwnerUserId(taskOutput.sessionId);
-    const childClientRequestId = buildDelegatedChildClientRequestId({
-      childSessionId: taskOutput.sessionId,
-      parentClientRequestId: executionContext?.clientRequestId,
-    });
-    const childMessages =
-      childUserId && executionContext?.clientRequestId
-        ? listSessionMessagesByRequestScope({
-            clientRequestId: childClientRequestId,
-            sessionId: taskOutput.sessionId,
-            userId: childUserId,
-          })
-        : childUserId
-          ? listSessionMessages({
-              sessionId: taskOutput.sessionId,
-              userId: childUserId,
-            })
-          : [];
-    const output = parsed.data.run_in_background
-      ? buildCallOmoAgentBackgroundOutput({
-          agent: normalizedAgent,
-          description: parsed.data.description ?? parsed.data.prompt.slice(0, 40),
-          sessionId: taskOutput.sessionId,
-          status: taskOutput.status ?? 'pending',
-          taskId: taskOutput.taskId,
-        })
-      : buildCallOmoAgentSyncOutput({
-          fallbackText:
-            taskOutput.errorMessage ??
-            taskOutput.result ??
-            `Completed ${normalizedAgent} session ${taskOutput.sessionId}.`,
-          isError: taskResult.isError,
-          messages: childMessages,
-          sessionId: taskOutput.sessionId,
-        });
-    return {
-      toolCallId: request.toolCallId,
-      toolName: request.toolName,
-      output,
-      isError: taskResult.isError,
-      durationMs: taskResult.durationMs,
-    };
-  }
-  return {
-    ...taskResult,
-    toolName: request.toolName,
-  };
-}
 
 export async function handleTaskTool(ctx: SandboxHandlerContext): Promise<ToolCallResult | null> {
   const { request, sessionId, rawInput, executionContext } = ctx;

@@ -1,4 +1,8 @@
 import { truncateQuestionLabels } from '../tools/question-label-truncator.js';
+import {
+  CLAUDE_CODE_AGENT_ALLOWED_AGENTS,
+  isClaudeCodeAllowedAgent,
+} from './claude-code-agent-allowed-agents.js';
 
 export type ClaudeCodeCompatLevel = 'high' | 'medium' | 'low';
 
@@ -72,9 +76,9 @@ export const CLAUDE_CODE_TOOL_REGISTRY: readonly ClaudeCodeToolEntry[] = [
   },
   {
     presentedName: 'Agent',
-    canonicalName: 'call_omo_agent',
+    canonicalName: 'subagent',
     compatLevel: 'medium',
-    note: 'The current gateway supports a subset of the Claude Code Agent contract via call_omo_agent.',
+    note: 'The current gateway supports a subset of the Claude Code Agent contract via the canonical subagent tool; the delegated agent must be in CLAUDE_CODE_AGENT_ALLOWED_AGENTS.',
   },
   {
     presentedName: 'EnterPlanMode',
@@ -442,12 +446,27 @@ export function normalizeInputForCanonical(
           'subagent_type is required by the gateway Agent contract.',
         );
       }
+      // D2-a：Claude Code 兼容入口继续受 9 人白名单约束（语义与迁移前逐字一致）。
+      // 原生 `subagent` / `task` 入口不走这里，仍接受任意内置 / 自定义 agent。
+      const normalizedAgent = subagent_type.trim().toLowerCase();
+      if (!isClaudeCodeAllowedAgent(normalizedAgent)) {
+        const generalHint =
+          normalizedAgent === 'general'
+            ? ' `general` 不存在:通用研究与多步执行请改用 hephaestus(深度实施)或省略 subagent_type 走 category。'
+            : '';
+        throw new UnsupportedToolError(
+          'Agent',
+          `Invalid agent type "${subagent_type}". Only ${CLAUDE_CODE_AGENT_ALLOWED_AGENTS.join(', ')} are allowed.${generalHint}`,
+        );
+      }
       return {
-        canonicalName: 'call_omo_agent',
+        canonicalName: 'subagent',
         normalizedFields: {
           ...(description !== undefined ? { description } : {}),
           ...(prompt !== undefined ? { prompt } : {}),
-          ...(subagent_type !== undefined ? { subagent_type } : {}),
+          // 规范名 `subagent` 的 schema 同时接受 `subagent_type`；下游
+          // `resolveDelegatedAgent` 优先按它解析，故保持字段名不变以兼容。
+          subagent_type: normalizedAgent,
           ...(run_in_background !== undefined ? { run_in_background } : {}),
           ...(session_id !== undefined ? { session_id } : {}),
         },

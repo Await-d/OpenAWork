@@ -16,7 +16,6 @@ describe('mcp settings schemas', () => {
       'codegraph',
       'git_bash',
       'lsp',
-      'omo',
     ]);
     expect(builtins.find((server) => server.id === 'open_websearch')).toMatchObject({
       builtin: true,
@@ -39,14 +38,8 @@ describe('mcp settings schemas', () => {
       });
       expect(builtins.find((server) => server.id === serverId)?.command).toBeUndefined();
     }
-    for (const serverId of ['omo']) {
-      expect(builtins.find((server) => server.id === serverId)).toMatchObject({
-        builtin: true,
-        builtinKind: 'adapter',
-        source: 'system',
-      });
-      expect(builtins.find((server) => server.id === serverId)?.command).toBeUndefined();
-    }
+    // `omo` adapter 已下线：不再出现在设置页的内置清单里。
+    expect(builtins.find((server) => server.id === 'omo')).toBeUndefined();
   });
 
   it('accepts adapter builtin management patches for open_websearch while stripping fake endpoints', () => {
@@ -85,30 +78,30 @@ describe('mcp settings schemas', () => {
     const parsed = mcpServersBodySchema.parse({
       servers: [
         {
-          id: 'omo',
-          name: 'omo',
+          id: 'lsp',
+          name: 'lsp',
           transport: 'stdio',
           builtin: true,
-          builtinKind: 'adapter',
+          builtinKind: 'virtual',
           source: 'system',
           enabled: true,
           command: 'malicious-command-that-must-not-persist',
           url: 'https://fake.invalid/sse',
-          disabledTools: ['omo_list_agents', 'omo_list_agents'],
+          disabledTools: ['lsp_rename', 'lsp_rename'],
         },
       ],
     });
 
     expect(parsed.servers).toEqual([
       {
-        id: 'omo',
-        name: 'omo',
+        id: 'lsp',
+        name: 'lsp',
         transport: 'stdio',
         builtin: true,
-        builtinKind: 'adapter',
+        builtinKind: 'virtual',
         source: 'system',
         enabled: true,
-        disabledTools: ['omo_list_agents'],
+        disabledTools: ['lsp_rename'],
       },
     ]);
   });
@@ -117,8 +110,8 @@ describe('mcp settings schemas', () => {
     const parsed = mcpServersBodySchema.parse({
       servers: [
         {
-          id: 'omo',
-          name: 'omo',
+          id: 'open_websearch',
+          name: 'open_websearch',
           transport: 'stdio',
           builtin: true,
           builtinKind: 'adapter',
@@ -126,20 +119,21 @@ describe('mcp settings schemas', () => {
           enabled: true,
           command: 'malicious-fake-command',
           url: 'https://fake.invalid/sse',
-          disabledTools: ['omo_list_agents'],
+          disabledTools: ['search'],
         },
       ],
     });
 
     expect(parsed.servers[0]).toEqual({
-      id: 'omo',
-      name: 'omo',
+      id: 'open_websearch',
+      // 内置项名称按 canonical 描述符归一，不采信请求里的伪造 name。
+      name: 'Open WebSearch',
       transport: 'stdio',
       builtin: true,
       builtinKind: 'adapter',
       source: 'user',
       enabled: true,
-      disabledTools: ['omo_list_agents'],
+      disabledTools: ['search'],
     });
   });
 

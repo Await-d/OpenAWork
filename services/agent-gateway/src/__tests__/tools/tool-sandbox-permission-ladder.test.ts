@@ -62,6 +62,7 @@ vi.mock('../../tools/run-background-bash-tools.js', async () => {
 import { TEST_WORKSPACE, mocks } from './tool-sandbox-test-support.js';
 import { createDefaultSandbox } from '../../tools/tool-sandbox.js';
 import { ensurePermissionForTool } from '../../tools/sandbox/permission-ladder.js';
+import { normalizeInputForCanonical } from '../../claude-code/claude-code-input-adapters.js';
 
 function executionContext(clientRequestId: string) {
   return {
@@ -722,29 +723,38 @@ describe('tool-sandbox 会话权限阶梯（permissionMode / yoloMode）', () =>
     expect(String(result.output)).not.toContain('is not allowed');
   });
 
-  it('Agent(call_omo_agent)填 subagent_type=general 时被拒且指路 hephaestus/category', async () => {
-    mocks.metadataJson = JSON.stringify({
-      yoloMode: true,
-      workingDirectory: TEST_WORKSPACE,
+  it('Claude Code Agent 填 subagent_type=general 时被适配层拒绝且指路 hephaestus/category', () => {
+    // 261102 批次 B（T-17/D2-a）：白名单校验从沙盒 call_omo_agent 分支体迁移到
+    // Claude Code `Agent` 输入适配层；此处直接断言适配层拒绝语义（含可用名单与
+    // `general` 的专用指路）。
+    expect(() =>
+      normalizeInputForCanonical('Agent', {
+        prompt: '通用多步执行任务',
+        subagent_type: 'general',
+      }),
+    ).toThrow(/Invalid agent type "general"/);
+
+    let message = '';
+    try {
+      normalizeInputForCanonical('Agent', {
+        prompt: '通用多步执行任务',
+        subagent_type: 'general',
+      });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('hephaestus');
+    expect(message).toContain('category');
+  });
+
+  it('Claude Code Agent 的合法 subagent_type 归一为规范名 subagent', () => {
+    const normalized = normalizeInputForCanonical('Agent', {
+      prompt: '检索新闻',
+      subagent_type: 'web-researcher',
     });
-    const result = await createDefaultSandbox().execute(
-      {
-        toolCallId: 'call-omo-general',
-        toolName: 'call_omo_agent',
-        rawInput: {
-          prompt: '通用多步执行任务',
-          subagent_type: 'general',
-        },
-      },
-      new AbortController().signal,
-      'session-omo-general',
-      executionContext('req-omo-general'),
-    );
-    expect(result.isError).toBe(true);
-    const output = String(result.output);
-    expect(output).toContain('Invalid agent type "general"');
-    expect(output).toContain('hephaestus');
-    expect(output).toContain('category');
+    expect(normalized.canonicalName).toBe('subagent');
+    expect(normalized.remapped).toBe(true);
+    expect(normalized.normalizedFields['subagent_type']).toBe('web-researcher');
   });
 
   it('write 缺 content(大参数截断)时参数校验失败附带分块写入指引', async () => {

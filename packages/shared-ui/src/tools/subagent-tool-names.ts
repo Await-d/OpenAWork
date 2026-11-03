@@ -8,7 +8,11 @@
  * - `subagent`：规范名（对齐上游 opencode）
  * - `task`：历史别名（存量会话 / 历史 tool_call 仍在用）
  * - `agent`：Claude Code / OpenAI functions 的呈现名
- * - `call_omo_agent`：内置子代理直调（同步 / 后台）
+ * - `call_omo_agent`：**历史别名**。服务端已停止产生该名（261102 批次 B 收敛为
+ *   `subagent`；Claude Code 呈报名 `Agent` 的 canonical 亦已改指 `subagent`），
+ *   但存量会话 / 历史 tool_call 仍带旧名——删除会让老会话的子代理卡片失去
+ *   「打开子会话」能力（`ToolCallCard.tsx` 的 taskMeta 门控失败）。与 `task`
+ *   历史别名同例，**禁止清理**。
  * - `delegate_task`：编排器委派
  *
  * 判定与提取逻辑集中在此处，避免「消息流路由 / 右栏工具面板 / shared-ui

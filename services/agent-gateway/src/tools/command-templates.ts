@@ -86,7 +86,7 @@ export const START_WORK_INSTRUCTION = `你正在启动一个 Sisyphus 工作会�
 
 ## 操作步骤
 
-1. **查找可用计划**：优先在 \`.agentdocs/workflow/\` 查找 OpenAWork 工作流计划；仅将 \`.omo/plans/\` 与旧版 \`.sisyphus/plans/\` 作为兼容候选
+1. **查找可用计划**：优先在 \`.agentdocs/workflow/\` 查找 OpenAWork 工作流计划；仅将旧版 \`.sisyphus/plans/\` 作为兼容候选
 
 2. **检查激活的 boulder 状态**：若存在 \`.sisyphus/boulder.json\` 则读取
 

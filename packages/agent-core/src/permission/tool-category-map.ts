@@ -58,7 +58,6 @@ const BASE_TOOL_TO_CATEGORY = {
   subagent: 'task_run',
   task_create: 'task',
   task_update: 'task',
-  call_omo_agent: 'task_run',
   skill: 'skill',
   skill_mcp: 'skill',
   mcp_call: 'mcp_call',
