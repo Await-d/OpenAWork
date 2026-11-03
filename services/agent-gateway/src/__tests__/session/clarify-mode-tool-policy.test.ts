@@ -17,4 +17,16 @@ describe('clarify 模式只读工具允许集', () => {
       expect(isClarifyModeToolAllowed(tool)).toBe(false);
     }
   });
+
+  /**
+   * G-06（261102 修复规范名 subagent 静默漏点）：委派工具的**规范名 `subagent`**
+   * 必须与历史别名 `task` / 兼容呈报名 `Agent` 一并放行。
+   * 修复前 `subagent` 未登记 → clarify 模式下被判不可见（而 `task` 可见），本断言失败。
+   */
+  it('委派工具的三个名字（task / subagent / Agent）在 clarify 模式下一致放行', () => {
+    expect(isClarifyModeToolAllowed('task')).toBe(true);
+    expect(isClarifyModeToolAllowed('subagent')).toBe(true);
+    expect(isClarifyModeToolAllowed('Agent')).toBe(true);
+    expect(isClarifyModeToolAllowed('subagent')).toBe(isClarifyModeToolAllowed('task'));
+  });
 });

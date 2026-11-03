@@ -32,7 +32,10 @@ const CLARIFY_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   'task_list',
   'task_get',
   'look_at',
+  // 委派工具：历史别名 `task`、规范名 `subagent`（`TASK_TOOL_NAME`）与兼容呈报名 `Agent`
+  // 同属一个工具。只登记 `task`/`Agent` 会让规范名在澄清模式被判不可见（与 `task` 不一致）。
   'task',
+  'subagent',
   'Agent',
   // 工具折叠入口：只读检索 + 经解包后按内层工具走完整权限阶梯。
   'tool_search',

@@ -93,6 +93,24 @@ describe('truncateToolOutput（模型视图：2000 行 / 50 KiB 字节语义）'
     expect(truncated.length).toBeLessThan(output.length);
     expect(truncated).toContain(NOTICE_FRAGMENT);
   });
+
+  /**
+   * G-07（261102 修复规范名 subagent 静默漏点）：委派工具的规范名 `subagent` 与
+   * 历史别名 `task` 必须走**同一截断路径**（同属一个可截断工具）。
+   *
+   * 注意（诚实标注）：`DEFAULT_MAX_BYTES` 与 `UNIVERSAL_MAX_BYTES` 当前**同为 50 KiB**，
+   * 且两者都无 `TOOL_SPECIFIC_MAX_BYTES` 覆盖 → 本断言在修复前后**都会通过**，
+   * 因此**不是历史行为回归证明**，而是**前瞻性不变量**：锁定"规范名与别名同路径"，
+   * 当未来给 `task` 单独加 `TOOL_SPECIFIC_*` 覆盖却漏掉 `subagent` 时，本断言会失败报警。
+   */
+  it('subagent 与 task 走同一截断路径（模型视图上限一致）', () => {
+    const output = 't'.repeat(250_000);
+    const viaTask = truncateToolOutput('task', output);
+    const viaSubagent = truncateToolOutput('subagent', output);
+    expect(viaSubagent).toBe(viaTask);
+    expect(viaSubagent.startsWith('t'.repeat(DEFAULT_CAP))).toBe(true);
+    expect(viaSubagent).toContain(NOTICE_FRAGMENT);
+  });
 });
 
 describe('truncateToolOutputUniversal（落盘视图：保持 200k 字符口径）', () => {

@@ -78,7 +78,9 @@ const TRUNCATABLE_TOOLS = new Set([
   'skill_mcp',
   'webfetch',
   'web_fetch',
+  // 委派工具：历史别名 `task` 与规范名 `subagent` 同属一个工具，共用同一截断上限。
   'task',
+  'subagent',
   'delegate_task',
   'mcp_call',
   'workspace_review_diff',
