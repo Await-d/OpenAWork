@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>技能 · 方案 C 网格 + 详情抽屉</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./_theme.css" />
+    <style>
+      .page--fixed {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        overflow: hidden;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 372px;
+        gap: 12px;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .split.is-collapsed {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .split.is-collapsed .drawer {
+        display: none;
+      }
+
+      .content {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        overflow: hidden;
+      }
+
+      .content-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .sk-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .sk-card {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid transparent;
+        border-radius: var(--r-md);
+        background: var(--bg-raised);
+        cursor: pointer;
+        transition:
+          background var(--t-micro),
+          border-color var(--t-micro);
+      }
+
+      .sk-card:hover,
+      .sk-card.is-active {
+        background: var(--bg-surface);
+        border-color: var(--border-emphasis);
+      }
+
+      .sk-card.is-active {
+        border-color: var(--accent-border);
+      }
+
+      .sk-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .sk-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .sk-desc {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        min-height: 34px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        line-height: 1.55;
+      }
+
+      .sk-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .sk-dl {
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+      }
+
+      /* 已安装表格 */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      thead th {
+        position: sticky;
+        top: 0;
+        padding: 8px 12px;
+        background: var(--bg-raised);
+        border-bottom: 1px solid var(--border-default);
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-align: left;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      tbody td {
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--border-subtle);
+        font-size: 12px;
+        vertical-align: middle;
+      }
+
+      tbody tr:hover {
+        background: var(--bg-raised);
+      }
+
+      /* 抽屉 */
+      .drawer {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        box-shadow: var(--shadow-lg);
+        overflow: hidden;
+      }
+
+      .drawer-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 13px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .drawer-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .drawer-body {
+        display: grid;
+        gap: 14px;
+        padding: 13px;
+      }
+
+      .drawer-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 13px;
+        border-top: 1px solid var(--border-subtle);
+        background: var(--bg-raised);
+      }
+
+      .kv {
+        display: grid;
+        gap: 1px;
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--border-subtle);
+      }
+
+      .kv > div {
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr);
+        gap: 8px;
+        padding: 8px 10px;
+        background: var(--bg-overlay);
+        font-size: 11.5px;
+      }
+
+      .kv dt {
+        color: var(--fg-subtle);
+      }
+
+      .kv dd {
+        margin: 0;
+        color: var(--fg-default);
+        overflow-wrap: anywhere;
+      }
+
+      .perm {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        color: var(--fg-default);
+        font-size: 11.5px;
+        line-height: 1.6;
+      }
+
+      .perm-icon {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        border-radius: var(--r-xs);
+        background: var(--bg-surface);
+        color: var(--fg-muted);
+        font-size: 10px;
+      }
+
+      .doc-list {
+        display: grid;
+        gap: 8px;
+        color: var(--fg-default);
+        font-size: 11.5px;
+        line-height: 1.7;
+      }
+
+      .doc-list pre {
+        margin: 0;
+        padding: 9px 11px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--bg-raised);
+        color: var(--fg-default);
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 10.5px;
+        line-height: 1.6;
+        overflow: auto;
+      }
+
+      /* 安装进度浮条 */
+      .progress-toast {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 10;
+        width: 316px;
+        display: grid;
+        gap: 10px;
+        padding: 13px 14px;
+        border: 1px solid var(--border-emphasis);
+        border-radius: var(--r-lg);
+        background: var(--bg-surface);
+        box-shadow: var(--shadow-lg);
+      }
+
+      .step {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+      }
+
+      .step-dot {
+        display: grid;
+        place-items: center;
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: var(--bg-hover);
+        color: var(--fg-subtle);
+        font-size: 9px;
+      }
+
+      .step.is-done {
+        color: var(--fg-default);
+      }
+
+      .step.is-done .step-dot {
+        background: var(--success-muted);
+        color: var(--success);
+      }
+
+      .step.is-running {
+        color: var(--fg-strong);
+      }
+
+      .step.is-running .step-dot {
+        background: var(--accent-muted);
+        color: var(--accent);
+      }
+
+      .pager-strip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding: 0 12px 12px;
+      }
+
+      [data-panel] {
+        display: none;
+      }
+
+      [data-panel].is-active {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <nav class="rail" aria-hidden="true">
+        <div class="rail-logo">A</div>
+        <button class="rail-item">◧</button>
+        <button class="rail-item">◍</button>
+        <button class="rail-item is-active">⊞</button>
+        <button class="rail-item">◫</button>
+        <div class="rail-spacer"></div>
+        <button class="rail-item">⚙</button>
+      </nav>
+
+      <div class="main">
+        <div class="demo-bar">
+          <strong>方案 C · 网格 + 详情抽屉</strong>
+          <span class="demo-sep"></span>
+          <span
+            >单条工具条承载全部筛选，详情走右侧抽屉，安装进度以浮条呈现；已安装视图用表格承载开关与更新。</span
+          >
+          <span class="demo-links">
+            <a href="./skills-a-catalog.html">A</a>
+            <a href="./skills-b-split-detail.html">B</a>
+            <a href="./skills-c-grid-drawer.html" class="is-current">C</a>
+            <a href="./index.html">索引</a>
+          </span>
+        </div>
+        <div class="page page--fixed page-narrow">
+          <div class="phead">
+            <div>
+              <h1 class="phead-title">技能</h1>
+              <p class="phead-sub">浏览技能市场、管理已安装技能与注册源。</p>
+            </div>
+            <span class="phead-spacer"></span>
+            <div class="statline">
+              <span>市场 <b>128</b></span>
+              <i class="dot"></i>
+              <span>已安装 <b>9</b></span>
+              <i class="dot"></i>
+              <span>注册源 <b>3</b></span>
+              <i class="dot"></i>
+              <span style="color: var(--contrast)"
+                >可更新 <b style="color: var(--contrast)">2</b></span
+              >
+            </div>
+            <button class="btn">刷新</button>
+          </div>
+
+          <div class="toolbar">
+            <div class="seg">
+              <button class="seg-btn is-active" data-tab="market">市场</button>
+              <button class="seg-btn" data-tab="local">本地</button>
+              <button class="seg-btn" data-tab="installed">已安装</button>
+            </div>
+            <label class="search">
+              <input class="field" placeholder="搜索技能名称、描述或标签…" />
+            </label>
+            <button class="chip is-active">全部</button>
+            <button class="chip">编程</button>
+            <button class="chip">文档</button>
+            <button class="chip">数据</button>
+            <button class="chip">运维</button>
+            <span class="phead-spacer"></span>
+            <button class="chip">仅看可安装</button>
+            <select class="select" style="width: 126px" aria-label="排序">
+              <option>按安装量</option>
+              <option>按更新时间</option>
+            </select>
+          </div>
+
+          <div class="split" id="split">
+            <section class="content">
+              <div class="panel-head">
+                <h2 class="panel-title">技能市场</h2>
+                <span class="badge">128 个结果</span>
+                <span class="phead-spacer"></span>
+                <span class="statline">点击卡片在右侧查看详情</span>
+              </div>
+
+              <div class="content-scroll">
+                <section data-panel="market" class="is-active">
+                  <div class="sk-grid">
+                    <article class="sk-card is-active">
+                      <div class="sk-head">
+                        <span class="sk-name">web-search-plus</span>
+                        <span class="badge badge-mono">v1.3.0</span>
+                        <span class="badge badge-success" style="margin-left: auto">✓</span>
+                      </div>
+                      <p class="sk-desc">多引擎检索与结果去重，附带引用整理与可信度排序。</p>
+                      <div style="display: flex; gap: 5px; flex-wrap: wrap">
+                        <span class="badge badge-aux">检索</span>
+                        <span class="badge badge-aux">网络</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">12,033 次安装</span>
+                        <button class="btn btn-sm btn-primary" style="margin-left: auto">
+                          更新
+                        </button>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">pdf-vision-extract</span>
+                        <span class="badge badge-mono">v2.0.1</span>
+                        <span class="badge badge-success" style="margin-left: auto">✓</span>
+                      </div>
+                      <p class="sk-desc">扫描件版面还原与表格抽取，支持跨页表头合并。</p>
+                      <div style="display: flex; gap: 5px; flex-wrap: wrap">
+                        <span class="badge badge-aux">文档</span>
+                        <span class="badge badge-aux">OCR</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">7,644 次安装</span>
+                        <button class="btn btn-sm" style="margin-left: auto">安装</button>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">git-commit-craft</span>
+                        <span class="badge badge-mono">v0.9.7</span>
+                      </div>
+                      <p class="sk-desc">按仓库约定生成提交信息，自动校验 scope 与类型合法性。</p>
+                      <div style="display: flex; gap: 5px; flex-wrap: wrap">
+                        <span class="badge badge-aux">编程</span>
+                        <span class="badge badge-aux">Git</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">9,880 次安装</span>
+                        <button class="btn btn-sm" style="margin-left: auto">安装</button>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">k8s-runbook</span>
+                        <span class="badge badge-mono">v1.4.2</span>
+                      </div>
+                      <p class="sk-desc">
+                        集群排障手册：按症状定位到具体资源与命令，输出处置步骤。
+                      </p>
+                      <div style="display: flex; gap: 5px; flex-wrap: wrap">
+                        <span class="badge badge-aux">运维</span>
+                        <span class="badge badge-aux">K8s</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">4,102 次安装</span>
+                        <button class="btn btn-sm" style="margin-left: auto">安装</button>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">sql-explain-critic</span>
+                        <span class="badge badge-mono">v0.7.0</span>
+                      </div>
+                      <p class="sk-desc">读执行计划找全表扫描、隐式类型转换与缺失索引。</p>
+                      <div style="display: flex; gap: 5px; flex-wrap: wrap">
+                        <span class="badge badge-aux">数据</span>
+                        <span class="badge badge-aux">SQL</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">3,517 次安装</span>
+                        <button class="btn btn-sm btn-primary" style="margin-left: auto">
+                          更新
+                        </button>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">design-token-audit</span>
+                        <span class="badge badge-mono">v1.1.0</span>
+                      </div>
+                      <p class="sk-desc">审计硬编码色值与间距，给出 token 化替换建议。</p>
+                      <div style="display: flex; gap: 5px; flex-wrap: wrap">
+                        <span class="badge badge-aux">设计</span>
+                        <span class="badge badge-aux">前端</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">2,930 次安装</span>
+                        <button class="btn btn-sm" style="margin-left: auto">安装</button>
+                      </div>
+                    </article>
+
+                    <article class="sk-card" style="opacity: 0.72">
+                      <div class="sk-head">
+                        <span class="sk-name">legacy-jquery-migrator</span>
+                        <span class="badge badge-mono">v0.2.0</span>
+                        <span class="badge" style="margin-left: auto">仅浏览</span>
+                      </div>
+                      <p class="sk-desc">实验源中的迁移脚本生成器，暂不支持在产品内直接安装。</p>
+                      <div style="display: flex; gap: 5px; flex-wrap: wrap">
+                        <span class="badge badge-aux">编程</span>
+                        <span class="badge badge-aux">迁移</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">88 次安装</span>
+                        <button class="btn btn-sm" style="margin-left: auto" disabled>
+                          仅浏览
+                        </button>
+                      </div>
+                    </article>
+                  </div>
+
+                  <div class="pager-strip">
+                    <span class="statline">显示 <b>1-24</b> / 共 <b>128</b></span>
+                    <span class="phead-spacer"></span>
+                    <button class="btn btn-sm" disabled>上一页</button>
+                    <button class="btn btn-sm btn-primary">1</button>
+                    <button class="btn btn-sm">2</button>
+                    <button class="btn btn-sm">3</button>
+                    <button class="btn btn-sm">下一页</button>
+                  </div>
+                </section>
+
+                <section data-panel="local">
+                  <div class="sk-grid">
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">repo-conventions</span>
+                        <span class="badge badge-mono">v0.1.0</span>
+                        <span class="badge badge-aux" style="margin-left: auto">工作区</span>
+                      </div>
+                      <p class="sk-desc">从 AGENTS.md 提炼本仓库的提交规范、测试门禁与体积限制。</p>
+                      <div class="sk-foot">
+                        <span class="sk-dl mono">./skills/repo-conventions</span>
+                        <button class="btn btn-sm" style="margin-left: auto">重新加载</button>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">perf-lab</span>
+                        <span class="badge badge-mono">v0.3.2</span>
+                        <span class="badge badge-aux" style="margin-left: auto">工作区</span>
+                      </div>
+                      <p class="sk-desc">本地压测与火焰图采集脚本封装，产出可比对的基线报告。</p>
+                      <div class="sk-foot">
+                        <span class="sk-dl mono">./skills/perf-lab</span>
+                        <button class="btn btn-sm" style="margin-left: auto">安装</button>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+
+                <section data-panel="installed">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style="width: 42%">技能</th>
+                        <th>版本</th>
+                        <th>来源</th>
+                        <th>状态</th>
+                        <th style="width: 158px"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          <div class="sk-name">agentdocs-orchestrator</div>
+                          <div class="sk-dl mono">github:Await-d/agentdocs-orchestrator</div>
+                        </td>
+                        <td class="sk-dl mono">v2.3.0</td>
+                        <td><span class="badge">系统预装</span></td>
+                        <td><span class="badge badge-success">已启用</span></td>
+                        <td class="sk-dl" style="text-align: right">不允许禁用</td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <div class="sk-name">web-search-plus</div>
+                          <div class="sk-dl mono">openAwork/market</div>
+                        </td>
+                        <td class="sk-dl mono">
+                          v1.2.0 <span style="color: var(--contrast)">→ v1.3.0</span>
+                        </td>
+                        <td class="sk-dl">openAwork/market</td>
+                        <td>
+                          <button
+                            class="switch"
+                            role="switch"
+                            aria-checked="true"
+                            aria-label="启用"
+                          ></button>
+                        </td>
+                        <td>
+                          <div style="display: flex; gap: 6px; justify-content: flex-end">
+                            <button class="btn btn-sm" style="color: var(--accent)">更新</button>
+                            <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                              移除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <div class="sk-name">sql-explain-critic</div>
+                          <div class="sk-dl mono">openAwork/market</div>
+                        </td>
+                        <td class="sk-dl mono">
+                          v0.6.3 <span style="color: var(--contrast)">→ v0.7.0</span>
+                        </td>
+                        <td class="sk-dl">openAwork/market</td>
+                        <td>
+                          <button
+                            class="switch"
+                            role="switch"
+                            aria-checked="true"
+                            aria-label="启用"
+                          ></button>
+                        </td>
+                        <td>
+                          <div style="display: flex; gap: 6px; justify-content: flex-end">
+                            <button class="btn btn-sm" style="color: var(--accent)">更新</button>
+                            <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                              移除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr style="opacity: 0.66">
+                        <td>
+                          <div class="sk-name">perf-lab</div>
+                          <div class="sk-dl mono">local-workspace</div>
+                        </td>
+                        <td class="sk-dl mono">v0.3.2</td>
+                        <td class="sk-dl">local-workspace</td>
+                        <td>
+                          <button
+                            class="switch"
+                            role="switch"
+                            aria-checked="false"
+                            aria-label="启用"
+                          ></button>
+                        </td>
+                        <td>
+                          <div style="display: flex; gap: 6px; justify-content: flex-end">
+                            <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                              移除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <div class="sk-name">code-review</div>
+                          <div class="sk-dl mono">local-system:~/.claude/skills</div>
+                        </td>
+                        <td class="sk-dl mono">v1.0.0</td>
+                        <td><span class="badge badge-aux">系统目录</span></td>
+                        <td>
+                          <button
+                            class="switch"
+                            role="switch"
+                            aria-checked="true"
+                            aria-label="启用"
+                          ></button>
+                        </td>
+                        <td>
+                          <div style="display: flex; gap: 6px; justify-content: flex-end">
+                            <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                              移除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 10px;
+                      flex-wrap: wrap;
+                      padding: 12px;
+                    "
+                  >
+                    <span class="statline"
+                      >9 个已安装 · <span style="color: var(--contrast)">2 个可更新</span></span
+                    >
+                    <span class="phead-spacer"></span>
+                    <button class="btn btn-sm">检查更新</button>
+                    <button class="btn btn-sm">注册源管理 · 3</button>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <!-- 详情抽屉 -->
+            <aside class="drawer" aria-label="技能详情">
+              <div class="drawer-head">
+                <span class="avatar avatar-accent">WS</span>
+                <div style="min-width: 0">
+                  <div style="color: var(--fg-strong); font-size: 13px; font-weight: 650">
+                    web-search-plus
+                  </div>
+                  <div class="sk-dl mono">v1.3.0 · openAwork/market</div>
+                </div>
+                <span class="phead-spacer"></span>
+                <button class="btn btn-icon btn-sm" id="close-drawer" aria-label="关闭抽屉">
+                  ✕
+                </button>
+              </div>
+
+              <div class="drawer-scroll">
+                <div class="drawer-body">
+                  <div style="display: flex; gap: 6px; flex-wrap: wrap">
+                    <span class="badge badge-success">✓ 已验证</span>
+                    <span class="badge badge-aux">检索</span>
+                    <span class="badge badge-aux">网络</span>
+                  </div>
+
+                  <div class="doc-list">
+                    <p style="margin: 0">
+                      多引擎检索与结果去重，附带引用整理与可信度排序；适用于需要外部事实支撑的任务。
+                    </p>
+                    <pre>
+用户：确认 zod 4 的 .strict() 是否已废弃
+→ 并发检索 4 个引擎 → 去重 → 引用排序 → 结论 + 来源</pre>
+                  </div>
+
+                  <div style="display: grid; gap: 7px">
+                    <span class="section-label">安装目标</span>
+                    <select class="select">
+                      <option>openAwork/market（官方市场）</option>
+                      <option>team/internal（团队私有源）</option>
+                    </select>
+                  </div>
+
+                  <dl class="kv">
+                    <div>
+                      <dt>已装版本</dt>
+                      <dd class="mono">v1.2.0</dd>
+                    </div>
+                    <div>
+                      <dt>作者</dt>
+                      <dd>openAwork</dd>
+                    </div>
+                    <div>
+                      <dt>许可</dt>
+                      <dd>MIT</dd>
+                    </div>
+                    <div>
+                      <dt>安装量</dt>
+                      <dd class="mono">12,033</dd>
+                    </div>
+                    <div>
+                      <dt>更新时间</dt>
+                      <dd class="mono">2026-10-28</dd>
+                    </div>
+                  </dl>
+
+                  <div style="display: grid; gap: 8px">
+                    <span class="section-label">权限清单</span>
+                    <div class="perm">
+                      <span class="perm-icon">☁</span>出站 HTTPS（引擎域名白名单）
+                    </div>
+                    <div class="perm">
+                      <span class="perm-icon">🔑</span>读取环境变量中的检索密钥
+                    </div>
+                    <div class="perm"><span class="perm-icon">💾</span>写入会话级缓存</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="drawer-foot">
+                <button class="btn">卸载</button>
+                <span class="phead-spacer"></span>
+                <button class="btn btn-primary">更新到 v1.3.0</button>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <!-- 安装进度浮条（演示 InstallProgressUI 的浮层形态） -->
+        <div class="progress-toast" id="progress-toast">
+          <div style="display: flex; align-items: center; gap: 8px">
+            <strong style="color: var(--fg-strong); font-size: 12px"
+              >正在安装 web-search-plus</strong
+            >
+            <span class="phead-spacer"></span>
+            <button class="btn btn-sm btn-ghost" id="dismiss-progress">收起</button>
+          </div>
+          <div class="step is-done"><span class="step-dot">✓</span>解析依赖</div>
+          <div class="step is-running"><span class="step-dot">●</span>下载中 · 1.8 MB / 3.2 MB</div>
+          <div class="step"><span class="step-dot">○</span>校验签名与清单</div>
+        </div>
+
+        <script>
+          document.querySelectorAll('[data-tab]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              document
+                .querySelectorAll('[data-tab]')
+                .forEach((b) => b.classList.remove('is-active'));
+              btn.classList.add('is-active');
+              const target = btn.dataset.tab;
+              document.querySelectorAll('[data-panel]').forEach((panel) => {
+                panel.classList.toggle('is-active', panel.dataset.panel === target);
+              });
+              document.querySelector('.content-scroll').scrollTop = 0;
+            });
+          });
+
+          document.querySelectorAll('.sk-card').forEach((card) => {
+            card.addEventListener('click', () => {
+              document.querySelectorAll('.sk-card').forEach((c) => c.classList.remove('is-active'));
+              card.classList.add('is-active');
+              document.getElementById('split').classList.remove('is-collapsed');
+            });
+          });
+
+          document.getElementById('close-drawer').addEventListener('click', () => {
+            document.getElementById('split').classList.add('is-collapsed');
+          });
+
+          document.getElementById('dismiss-progress').addEventListener('click', () => {
+            document.getElementById('progress-toast').style.display = 'none';
+          });
+
+          document.querySelectorAll('.switch').forEach((el) => {
+            el.addEventListener('click', (event) => {
+              event.stopPropagation();
+              el.setAttribute(
+                'aria-checked',
+                el.getAttribute('aria-checked') === 'true' ? 'false' : 'true',
+              );
+            });
+          });
+        </script>
+      </div>
+    </div>
+  </body>
+</html>

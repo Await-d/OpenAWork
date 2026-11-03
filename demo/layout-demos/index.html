@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenAWork · Agents / Skills 页布局改版方案对比</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./_theme.css" />
+    <style>
+      body {
+        overflow: auto;
+      }
+
+      .wrap {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 24px 20px 56px;
+      }
+
+      .head {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 24px;
+      }
+
+      .head h1 {
+        margin: 0;
+        color: var(--fg-strong);
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .head p {
+        margin: 0;
+        color: var(--fg-muted);
+        font-size: 12.5px;
+        line-height: 1.75;
+        max-width: 860px;
+      }
+
+      section {
+        display: grid;
+        gap: 14px;
+        margin-bottom: 34px;
+      }
+
+      .sec-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .sec-title h2 {
+        margin: 0;
+        color: var(--fg-default);
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .sec-title::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border-subtle);
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 14px;
+      }
+
+      .card {
+        display: grid;
+        gap: 10px;
+        padding: 14px;
+        border: 1px solid transparent;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        transition:
+          border-color var(--t-micro),
+          background var(--t-micro);
+      }
+
+      .card:hover {
+        border-color: var(--border-emphasis);
+        background: var(--bg-surface);
+      }
+
+      .card-top {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .tag-badge {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: var(--r-md);
+        background: var(--accent-muted);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .card h3 {
+        margin: 0;
+        color: var(--fg-strong);
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .card .pos {
+        margin: 2px 0 0;
+        color: var(--fg-muted);
+        font-size: 11px;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--fg-default);
+        font-size: 11.5px;
+        line-height: 1.7;
+      }
+
+      .tradeoff {
+        display: grid;
+        gap: 4px;
+        padding: 9px 10px;
+        border-radius: var(--r-md);
+        background: var(--bg-raised);
+        font-size: 11px;
+        line-height: 1.65;
+      }
+
+      .tradeoff b {
+        color: var(--fg-default);
+        font-weight: 600;
+      }
+
+      .tradeoff span {
+        color: var(--fg-muted);
+      }
+
+      .preview {
+        position: relative;
+        height: 296px;
+        overflow: hidden;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--bg-base);
+      }
+
+      .preview iframe {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1280px;
+        height: 800px;
+        border: 0;
+        transform: scale(0.396);
+        transform-origin: top left;
+        pointer-events: none;
+      }
+
+      .card-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .card-actions a {
+        text-decoration: none;
+      }
+
+      .notes {
+        display: grid;
+        gap: 8px;
+        padding: 14px 16px;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+      }
+
+      .notes h2 {
+        margin: 0 0 2px;
+        color: var(--fg-default);
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .notes li {
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        line-height: 1.8;
+      }
+
+      .notes ul {
+        display: grid;
+        gap: 4px;
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      code {
+        padding: 1px 5px;
+        border-radius: var(--r-xs);
+        background: var(--bg-surface);
+        color: var(--aux);
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="head">
+        <h1>Agents / Skills 页布局改版 · 方案对比</h1>
+        <p>
+          两个页面各 3 套方案，全部使用项目默认主题 <code>E · Nebula Dark</code> 的真实
+          token（逐值取自
+          <code>apps/web/src/index.css</code
+          >），并覆盖现有页面的全部功能面（筛选、编辑、启停、恢复默认、移除、市场/本地/已安装三视图、注册源、安装进度）。选一套后我按它重构页面。
+        </p>
+      </div>
+
+      <section>
+        <div class="sec-title">
+          <h2>Agent 管理 · <span class="mono">/agents</span></h2>
+          <span class="badge">现为：Hero 卡 + 筛选卡 + 列表/编辑两列</span>
+        </div>
+        <div class="cards">
+          <article class="card">
+            <div class="card-top">
+              <span class="tag-badge">A</span>
+              <span>
+                <h3>控制台三栏</h3>
+                <p class="pos">目录 · 编辑器 · 只读检视</p>
+              </span>
+            </div>
+            <div class="preview">
+              <iframe
+                src="./agents-a-command-console.html"
+                title="方案 A 预览"
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p>统计内联进标题行，工具条只留一条；编辑分区成组，右栏常驻元信息与覆盖情况。</p>
+            <div class="tradeoff">
+              <b>优点：</b><span>信息密度高，改配置时不必来回滚动，覆盖情况一眼可见。</span>
+              <b>代价：</b><span>需要 ≥1280px 才舒服；窄屏要退化为两栏／单栏。</span>
+            </div>
+            <div class="card-actions">
+              <a class="btn btn-primary btn-sm" href="./agents-a-command-console.html"
+                >打开方案 A</a
+              >
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-top">
+              <span class="tag-badge">B</span>
+              <span>
+                <h3>表格 + 编辑抽屉</h3>
+                <p class="pos">横向对比优先</p>
+              </span>
+            </div>
+            <div class="preview">
+              <iframe
+                src="./agents-b-table-drawer.html"
+                title="方案 B 预览"
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p>
+              全宽表格承载角色／模型／来源／状态／更新时间的横向对比，点行开抽屉编辑，列表上下文不丢。
+            </p>
+            <div class="tradeoff">
+              <b>优点：</b><span>Agent 变多后仍然好扫；内置 Agent 的只读约束在抽屉里最直观。</span>
+              <b>代价：</b><span>弱化了单条 Agent 的「说明」与提示词预览，需要在抽屉里展开。</span>
+            </div>
+            <div class="card-actions">
+              <a class="btn btn-primary btn-sm" href="./agents-b-table-drawer.html">打开方案 B</a>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-top">
+              <span class="tag-badge">C</span>
+              <span>
+                <h3>卡片分组 + 全屏编辑</h3>
+                <p class="pos">浏览清爽优先</p>
+              </span>
+            </div>
+            <div class="preview">
+              <iframe
+                src="./agents-c-card-gallery.html"
+                title="方案 C 预览"
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p>
+              按「自定义 / 内置」分组卡片陈列，点卡片进整页编辑视图（左侧分区导航 + 粘底操作条）。
+            </p>
+            <div class="tradeoff">
+              <b>优点：</b><span>浏览态最易读，说明文案有位置；编辑页可放更多分组与帮助文案。</span>
+              <b>代价：</b><span>编辑要跳视图；卡片密度低于列表，数量多时要靠分组与筛选兜。</span>
+            </div>
+            <div class="card-actions">
+              <a class="btn btn-primary btn-sm" href="./agents-c-card-gallery.html">打开方案 C</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-title">
+          <h2>技能 · <span class="mono">/skills</span></h2>
+          <span class="badge">现为：页头统计 + 分段 Tab + 卡片网格 / 整页详情</span>
+        </div>
+        <div class="cards">
+          <article class="card">
+            <div class="card-top">
+              <span class="tag-badge">A</span>
+              <span>
+                <h3>分类目录</h3>
+                <p class="pos">分类轨 + 精选 + 全部</p>
+              </span>
+            </div>
+            <div class="preview">
+              <iframe src="./skills-a-catalog.html" title="技能方案 A 预览" loading="lazy"></iframe>
+            </div>
+            <p>
+              左侧分类轨与注册源简报常驻，右侧「精选 / 全部技能」双层陈列，已安装改为列表 +
+              注册源侧栏。
+            </p>
+            <div class="tradeoff">
+              <b>优点：</b><span>市场有「目录感」，分类与注册源不再是两个孤立入口。</span>
+              <b>代价：</b><span>精选区需要真实精选规则支撑，否则容易显得空。</span>
+            </div>
+            <div class="card-actions">
+              <a class="btn btn-primary btn-sm" href="./skills-a-catalog.html">打开方案 A</a>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-top">
+              <span class="tag-badge">B</span>
+              <span>
+                <h3>三栏内联详情</h3>
+                <p class="pos">选择即查看，零跳转</p>
+              </span>
+            </div>
+            <div class="preview">
+              <iframe
+                src="./skills-b-split-detail.html"
+                title="技能方案 B 预览"
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p>
+              左列表、中详情（概览／README／权限／更新日志）、右元信息与安装目标；安装与更新都在当前屏完成。
+            </p>
+            <div class="tradeoff">
+              <b>优点：</b><span>最适合「装之前想看清楚」；详情不再整页替换，返回成本为零。</span>
+              <b>代价：</b><span>三栏对宽度要求最高；详情信息量大时需要好的分区。</span>
+            </div>
+            <div class="card-actions">
+              <a class="btn btn-primary btn-sm" href="./skills-b-split-detail.html">打开方案 B</a>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-top">
+              <span class="tag-badge">C</span>
+              <span>
+                <h3>网格 + 详情抽屉</h3>
+                <p class="pos">保持浏览节奏</p>
+              </span>
+            </div>
+            <div class="preview">
+              <iframe
+                src="./skills-c-grid-drawer.html"
+                title="技能方案 C 预览"
+                loading="lazy"
+              ></iframe>
+            </div>
+            <p>
+              单条工具条承载全部筛选（含「仅看可安装」），卡片网格 +
+              右侧详情抽屉，安装进度以浮条呈现。
+            </p>
+            <div class="tradeoff">
+              <b>优点：</b><span>浏览节奏不被打断；抽屉可关闭，网格立即变宽。</span> <b>代价：</b
+              ><span>抽屉里放不下完整 README，长文档仍需二次跳转。</span>
+            </div>
+            <div class="card-actions">
+              <a class="btn btn-primary btn-sm" href="./skills-c-grid-drawer.html">打开方案 C</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <div class="notes">
+        <h2>三套方案共同遵守的约束（选定后重构也按这个口径走）</h2>
+        <ul>
+          <li>
+            结构靠 <code>--bg-*</code> 层级 + 间距表达，描边只用 <code>--border-subtle</code> /
+            <code>--border-default</code>；不再出现「大圆角卡片套卡片」与 22px 圆角外壳。
+          </li>
+          <li>
+            语义色沿用 E · Nebula：靛青 = 强调/选中，琥珀 = 更新/警告，珊瑚 = 危险，靛蓝 =
+            信息/辅助。
+          </li>
+          <li>
+            全部状态仍覆盖：加载中 / 无匹配 / 保存中 / 保存成功 / 错误 / 只读（内置 Agent）/
+            依赖与权限提示。
+          </li>
+          <li>组件按职责拆文件，单文件不超过 1500 行；抽屉、列表、表单分别落到独立组件。</li>
+          <li>
+            重构时保留现有数据契约（<code>createAgentsClient</code>、<code>useSkillsApi</code>、<code>useInstalledSkills</code>）不变，只改视图层。
+          </li>
+        </ul>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent 管理 · 方案 B 表格 + 抽屉</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./_theme.css" />
+    <style>
+      .page--fixed {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        overflow: hidden;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 392px;
+        gap: 12px;
+        flex: 1;
+        min-height: 0;
+      }
+
+      /* 表格 */
+      .table-wrap {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        overflow: hidden;
+      }
+
+      .table-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        padding: 8px 12px;
+        background: var(--bg-raised);
+        border-bottom: 1px solid var(--border-default);
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-align: left;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      thead th.num,
+      tbody td.num {
+        text-align: right;
+      }
+
+      tbody td {
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--border-subtle);
+        font-size: 12px;
+        vertical-align: middle;
+      }
+
+      tbody tr {
+        cursor: pointer;
+        transition: background var(--t-micro);
+      }
+
+      tbody tr:hover {
+        background: var(--bg-hover);
+      }
+
+      tbody tr.is-active {
+        background: var(--bg-elevated);
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+
+      tbody tr.is-off td .cell-name,
+      tbody tr.is-off td .cell-id {
+        color: var(--fg-muted);
+      }
+
+      .cell-agent {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+
+      .cell-name {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 12.5px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .cell-id {
+        display: block;
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+        white-space: nowrap;
+      }
+
+      .cell-model {
+        color: var(--fg-muted);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .cell-time {
+        color: var(--fg-subtle);
+        font-size: 11px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .row-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: flex-end;
+      }
+
+      /* 抽屉 */
+      .drawer {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        box-shadow: var(--shadow-lg);
+        overflow: hidden;
+      }
+
+      .drawer-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .drawer-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .drawer-body {
+        display: grid;
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .notice {
+        padding: 9px 11px;
+        border: 1px solid var(--aux-border);
+        border-radius: var(--r-md);
+        background: var(--aux-subtle);
+        color: var(--fg-default);
+        font-size: 11px;
+        line-height: 1.65;
+      }
+
+      .drawer-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-top: 1px solid var(--border-subtle);
+        background: var(--bg-raised);
+      }
+
+      .field:disabled {
+        opacity: 0.62;
+        cursor: not-allowed;
+      }
+
+      .grid2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+      }
+
+      .group-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 9px;
+      }
+
+      .group-head::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border-subtle);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <nav class="rail" aria-hidden="true">
+        <div class="rail-logo">A</div>
+        <button class="rail-item is-active">◧</button>
+        <button class="rail-item">◍</button>
+        <button class="rail-item">⊞</button>
+        <button class="rail-item">◫</button>
+        <div class="rail-spacer"></div>
+        <button class="rail-item">⚙</button>
+      </nav>
+
+      <div class="main">
+        <div class="demo-bar">
+          <strong>方案 B · 表格 + 抽屉</strong>
+          <span class="demo-sep"></span>
+          <span
+            >全宽高密度表格承载横向对比（角色 / 模型 / 来源 / 状态 /
+            更新时间），编辑走右侧抽屉，不离开列表上下文。</span
+          >
+          <span class="demo-links">
+            <a href="./agents-a-command-console.html">A</a>
+            <a href="./agents-b-table-drawer.html" class="is-current">B</a>
+            <a href="./agents-c-card-gallery.html">C</a>
+            <a href="./index.html">索引</a>
+          </span>
+        </div>
+
+        <div class="page page--fixed page-narrow">
+          <div class="phead">
+            <div>
+              <h1 class="phead-title">Agent 管理</h1>
+              <p class="phead-sub">12 个 Agent · 内置 10 · 自定义 2 · 1 个存在本地覆盖</p>
+            </div>
+            <span class="phead-spacer"></span>
+            <button class="btn">全部恢复默认</button>
+            <button class="btn btn-primary">+ 新增 Agent</button>
+          </div>
+
+          <div class="toolbar">
+            <label class="search">
+              <input class="field" placeholder="搜索名称、别名、角色、说明或 system prompt…" />
+            </label>
+            <select class="select" style="width: 118px" aria-label="来源">
+              <option>全部来源</option>
+              <option>内置</option>
+              <option>自定义</option>
+            </select>
+            <select class="select" style="width: 118px" aria-label="角色">
+              <option>全部角色</option>
+              <option>规划</option>
+              <option>执行</option>
+              <option>研究</option>
+              <option>评审</option>
+            </select>
+            <select class="select" style="width: 108px" aria-label="状态">
+              <option>全部状态</option>
+              <option>仅启用</option>
+              <option>仅禁用</option>
+            </select>
+            <span class="phead-spacer"></span>
+            <div class="seg">
+              <button class="seg-btn is-active">表格</button>
+              <button class="seg-btn">卡片</button>
+            </div>
+          </div>
+
+          <div class="split">
+            <section class="table-wrap">
+              <div class="panel-head">
+                <h2 class="panel-title">智能体目录</h2>
+                <span class="badge">12 条</span>
+                <span class="phead-spacer"></span>
+                <span class="statline">点击任意行打开编辑抽屉</span>
+              </div>
+
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="width: 34%">名称</th>
+                      <th>角色</th>
+                      <th>模型</th>
+                      <th>来源</th>
+                      <th style="width: 92px">状态</th>
+                      <th class="num">更新时间</th>
+                      <th style="width: 68px"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">BU</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Build</span>
+                            <span class="cell-id mono">build</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">执行 / 通用</span></td>
+                      <td class="cell-model mono">claude-sonnet-4.5</td>
+                      <td>
+                        <span class="badge">内置</span>
+                        <span class="badge badge-contrast">已修改</span>
+                      </td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 Build"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">11-02 14:08</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">PL</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Plan</span>
+                            <span class="cell-id mono">plan</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">规划 / 默认</span></td>
+                      <td class="cell-model mono">gpt-5</td>
+                      <td><span class="badge">内置</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 Plan"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-29 09:12</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr class="is-active">
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">HE</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Hephaestus</span>
+                            <span class="cell-id mono">hephaestus</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">执行 / 调试</span></td>
+                      <td class="cell-model mono">claude-opus-4.1</td>
+                      <td><span class="badge">内置</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 Hephaestus"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-27 18:40</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar avatar-accent">架顾</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">架构顾问</span>
+                            <span class="cell-id mono">architect-advisor</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">规划 / 架构</span></td>
+                      <td class="cell-model mono">claude-opus-4.1</td>
+                      <td><span class="badge">自定义</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 架构顾问"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">11-02 14:08</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar avatar-accent">数据</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">数据管家</span>
+                            <span class="cell-id mono">data-steward</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">执行 / 分析</span></td>
+                      <td class="cell-model mono">gpt-5-mini</td>
+                      <td><span class="badge">自定义</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 数据管家"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-31 11:02</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">EX</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Explore</span>
+                            <span class="cell-id mono">explore</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">研究 / 探索</span></td>
+                      <td class="cell-model mono">claude-haiku-4.5</td>
+                      <td><span class="badge">内置</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 Explore"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-24 16:20</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">OR</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Oracle</span>
+                            <span class="cell-id mono">oracle</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">评审 / 分析</span></td>
+                      <td class="cell-model mono">gpt-5</td>
+                      <td><span class="badge">内置</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 Oracle"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-22 10:05</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">LB</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Librarian</span>
+                            <span class="cell-id mono">librarian</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">研究 / 资料检索</span></td>
+                      <td class="cell-model mono">gemini-2.5-pro</td>
+                      <td><span class="badge">内置</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 Librarian"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-21 08:44</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr class="is-off">
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">MO</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Momus</span>
+                            <span class="cell-id mono">momus</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">评审 / 挑刺</span></td>
+                      <td class="cell-model mono">claude-sonnet-4.5</td>
+                      <td><span class="badge">内置</span> <span class="badge">已禁用</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="false"
+                          aria-label="启用 Momus"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-19 15:31</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr class="is-off">
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">ML</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Multimodal Looker</span>
+                            <span class="cell-id mono">multimodal-looker</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">研究 / 默认</span></td>
+                      <td class="cell-model mono">gemini-2.5-flash</td>
+                      <td><span class="badge">内置</span> <span class="badge">已禁用</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="false"
+                          aria-label="启用 Multimodal Looker"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-18 12:09</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">AT</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Atlas</span>
+                            <span class="cell-id mono">atlas</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">评审 / 验收</span></td>
+                      <td class="cell-model mono">claude-sonnet-4.5</td>
+                      <td><span class="badge">内置</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 Atlas"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-17 09:58</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div class="cell-agent">
+                          <span class="avatar">SJ</span>
+                          <span style="min-width: 0">
+                            <span class="cell-name">Sisyphus Junior</span>
+                            <span class="cell-id mono">sisyphus-junior</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td><span class="badge badge-accent">执行 / 默认</span></td>
+                      <td class="cell-model mono">claude-haiku-4.5</td>
+                      <td><span class="badge">内置</span></td>
+                      <td>
+                        <button
+                          class="switch"
+                          role="switch"
+                          aria-checked="true"
+                          aria-label="启用 Sisyphus Junior"
+                        ></button>
+                      </td>
+                      <td class="cell-time num">10-16 17:12</td>
+                      <td>
+                        <div class="row-actions">
+                          <button class="btn btn-icon btn-sm">⋯</button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- 抽屉 -->
+            <aside class="drawer" aria-label="Agent 编辑抽屉">
+              <div class="drawer-head">
+                <span class="avatar">HE</span>
+                <div style="min-width: 0">
+                  <div class="cell-name">Hephaestus</div>
+                  <div class="cell-id mono">hephaestus · 内置 · 深度工程</div>
+                </div>
+                <span class="phead-spacer"></span>
+                <label class="label" style="grid-auto-flow: column; align-items: center; gap: 8px">
+                  <span>启用</span>
+                  <button
+                    class="switch"
+                    role="switch"
+                    aria-checked="true"
+                    aria-label="启用"
+                  ></button>
+                </label>
+                <button class="btn btn-icon btn-sm" aria-label="关闭抽屉">✕</button>
+              </div>
+
+              <div class="drawer-scroll">
+                <div class="drawer-body">
+                  <div class="notice">
+                    内置 Agent
+                    的名称、角色、提示词与启用状态由系统固定管理；此处仅允许调整模型配置。
+                  </div>
+
+                  <div>
+                    <div class="group-head"><span class="section-label">名称与说明</span></div>
+                    <div style="display: grid; gap: 10px">
+                      <label class="label">
+                        名称
+                        <input class="field" value="Hephaestus" disabled />
+                      </label>
+                      <label class="label">
+                        说明
+                        <input
+                          class="field"
+                          value="深度工程智能体，负责高强度实现、修复与交付。"
+                          disabled
+                        />
+                      </label>
+                      <label class="label">
+                        别名
+                        <input class="field mono" value="heph, 深工" disabled />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="group-head"><span class="section-label">模型</span></div>
+                    <div class="grid2">
+                      <label class="label">
+                        默认模型
+                        <input class="field mono" value="anthropic/claude-opus-4.1" />
+                      </label>
+                      <label class="label">
+                        Variant
+                        <input class="field mono" value="high" />
+                      </label>
+                    </div>
+                    <label class="label" style="margin-top: 10px">
+                      回退模型
+                      <input class="field mono" value="anthropic/claude-sonnet-4.5" />
+                    </label>
+                  </div>
+
+                  <div>
+                    <div class="group-head"><span class="section-label">提示词（只读）</span></div>
+                    <textarea class="textarea" disabled>
+你负责高强度工程实施：优先一次性给出可运行的完整改动，避免占位实现；遇到不确定的接口契约先读代码确认，再动手。</textarea>
+                  </div>
+                </div>
+              </div>
+
+              <div class="drawer-foot">
+                <button class="btn btn-primary">保存变更</button>
+                <button class="btn">取消</button>
+                <span class="phead-spacer"></span>
+                <button class="btn">恢复默认</button>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

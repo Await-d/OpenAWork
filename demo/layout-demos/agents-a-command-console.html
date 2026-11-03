@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent 管理 · 方案 A 控制台三栏</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./_theme.css" />
+    <style>
+      .page--fixed {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        overflow: hidden;
+      }
+
+      .workbench {
+        display: grid;
+        grid-template-columns: 296px minmax(0, 1fr) 292px;
+        gap: 12px;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .col {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        overflow: hidden;
+      }
+
+      .col-scroll {
+        overflow: auto;
+        flex: 1;
+        min-height: 0;
+      }
+
+      /* 左：目录列表 */
+      .agent-row {
+        display: grid;
+        grid-template-columns: 6px minmax(0, 1fr);
+        gap: 9px;
+        align-items: center;
+        width: 100%;
+        padding: 9px 11px;
+        border: 0;
+        border-left: 2px solid transparent;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--t-micro);
+      }
+
+      .agent-row + .agent-row {
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .agent-row:hover {
+        background: var(--bg-hover);
+      }
+
+      .agent-row.is-active {
+        border-left-color: var(--accent);
+        background: var(--bg-elevated);
+      }
+
+      .agent-name {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 12.5px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .agent-id {
+        display: block;
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .agent-tags {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 4px;
+        flex-wrap: wrap;
+      }
+
+      .agent-model {
+        color: var(--fg-subtle);
+        font-size: 10px;
+      }
+
+      /* 中：编辑器 */
+      .editor-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .editor-name {
+        color: var(--fg-strong);
+        font-size: 13.5px;
+        font-weight: 650;
+      }
+
+      .editor-body {
+        display: grid;
+        gap: 16px;
+        padding: 14px;
+      }
+
+      .group {
+        display: grid;
+        gap: 9px;
+      }
+
+      .group-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .group-head::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border-subtle);
+      }
+
+      .grid2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
+      }
+
+      .editor-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 10px 14px;
+        border-top: 1px solid var(--border-subtle);
+        background: var(--bg-raised);
+      }
+
+      .save-state {
+        color: var(--accent);
+        font-size: 11px;
+      }
+
+      /* 右：只读检视 */
+      .inspector {
+        display: grid;
+        gap: 14px;
+        padding: 12px;
+      }
+
+      .cover-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        line-height: 1.6;
+      }
+
+      .cover-row b {
+        color: var(--fg-default);
+        font-weight: 600;
+      }
+
+      .swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: var(--r-xs);
+        background: var(--aux);
+        border: 1px solid var(--border-emphasis);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <nav class="rail" aria-hidden="true">
+        <div class="rail-logo">A</div>
+        <button class="rail-item is-active">◧</button>
+        <button class="rail-item">◍</button>
+        <button class="rail-item">⊞</button>
+        <button class="rail-item">◫</button>
+        <div class="rail-spacer"></div>
+        <button class="rail-item">⚙</button>
+      </nav>
+
+      <div class="main">
+        <div class="demo-bar">
+          <strong>方案 A · 控制台三栏</strong>
+          <span class="demo-sep"></span>
+          <span
+            >左侧目录（紧凑行）· 中间分区编辑器 ·
+            右侧只读检视；顶部只保留一条工具条，统计内联进标题行，删掉 Hero
+            卡与「智能体目录」双层卡。</span
+          >
+          <span class="demo-links">
+            <a href="./agents-a-command-console.html" class="is-current">A</a>
+            <a href="./agents-b-table-drawer.html">B</a>
+            <a href="./agents-c-card-gallery.html">C</a>
+            <a href="./index.html">索引</a>
+          </span>
+        </div>
+
+        <div class="page page--fixed page-narrow">
+          <div class="phead">
+            <div>
+              <h1 class="phead-title">Agent 管理</h1>
+              <p class="phead-sub">统一定义、状态与能力来源管理；内置 Agent 仅可调整模型配置。</p>
+            </div>
+            <span class="phead-spacer"></span>
+            <div class="statline">
+              <span>全部 <b>12</b></span>
+              <i class="dot"></i>
+              <span>已启用 <b>10</b></span>
+              <i class="dot"></i>
+              <span>已禁用 <b>2</b></span>
+              <i class="dot"></i>
+              <span>自定义 <b>2</b></span>
+            </div>
+            <button class="btn">全部恢复默认</button>
+            <button class="btn btn-primary">+ 新增 Agent</button>
+          </div>
+
+          <div class="toolbar">
+            <label class="search">
+              <input class="field" placeholder="搜索名称、别名、角色、说明或 system prompt…" />
+            </label>
+            <div class="seg" role="tablist" aria-label="来源筛选">
+              <button class="seg-btn is-active">全部来源</button>
+              <button class="seg-btn">内置</button>
+              <button class="seg-btn">自定义</button>
+            </div>
+            <select class="select" style="width: 132px" aria-label="角色筛选">
+              <option>全部角色</option>
+              <option>通用</option>
+              <option>规划</option>
+              <option>执行</option>
+              <option>研究</option>
+              <option>评审</option>
+            </select>
+            <select class="select" style="width: 118px" aria-label="状态筛选">
+              <option>全部状态</option>
+              <option>仅启用</option>
+              <option>仅禁用</option>
+            </select>
+            <span class="phead-spacer"></span>
+            <span class="statline">匹配 <b>12</b> / 12</span>
+          </div>
+
+          <div class="workbench">
+            <!-- 左：目录 -->
+            <section class="col" aria-label="Agent 目录">
+              <div class="panel-head">
+                <h2 class="panel-title">目录</h2>
+                <span class="phead-spacer"></span>
+                <span class="statline">按启用 → 自定义 → 名称排序</span>
+              </div>
+              <div class="col-scroll">
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">Build</span>
+                    <span class="agent-id mono">build · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">执行 / 通用</span>
+                      <span class="badge badge-contrast">已修改</span>
+                      <span class="agent-model mono">claude-sonnet-4.5</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">Plan</span>
+                    <span class="agent-id mono">plan · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">规划 / 默认</span>
+                      <span class="agent-model mono">gpt-5</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row is-active">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">架构顾问</span>
+                    <span class="agent-id mono">architect-advisor · 自定义</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">规划 / 架构</span>
+                      <span class="agent-model mono">claude-opus-4.1</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">Hephaestus</span>
+                    <span class="agent-id mono">hephaestus · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">执行 / 调试</span>
+                      <span class="agent-model mono">claude-opus-4.1</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">数据管家</span>
+                    <span class="agent-id mono">data-steward · 自定义</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">执行 / 分析</span>
+                      <span class="agent-model mono">gpt-5-mini</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">Explore</span>
+                    <span class="agent-id mono">explore · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">研究 / 探索</span>
+                      <span class="agent-model mono">claude-haiku-4.5</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">Oracle</span>
+                    <span class="agent-id mono">oracle · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">评审 / 分析</span>
+                      <span class="agent-model mono">gpt-5</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">Librarian</span>
+                    <span class="agent-id mono">librarian · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">研究 / 资料检索</span>
+                      <span class="agent-model mono">gemini-2.5-pro</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status is-off"></span>
+                  <span>
+                    <span class="agent-name">Momus</span>
+                    <span class="agent-id mono">momus · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">评审 / 挑刺</span>
+                      <span class="badge">已禁用</span>
+                      <span class="agent-model mono">claude-sonnet-4.5</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status is-off"></span>
+                  <span>
+                    <span class="agent-name">Multimodal Looker</span>
+                    <span class="agent-id mono">multimodal-looker · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">研究 / 默认</span>
+                      <span class="badge">已禁用</span>
+                      <span class="agent-model mono">gemini-2.5-flash</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">Atlas</span>
+                    <span class="agent-id mono">atlas · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">评审 / 验收</span>
+                      <span class="agent-model mono">claude-sonnet-4.5</span>
+                    </span>
+                  </span>
+                </button>
+
+                <button class="agent-row">
+                  <span class="dot-status"></span>
+                  <span>
+                    <span class="agent-name">Sisyphus Junior</span>
+                    <span class="agent-id mono">sisyphus-junior · 内置</span>
+                    <span class="agent-tags">
+                      <span class="badge badge-accent">执行 / 默认</span>
+                      <span class="agent-model mono">claude-haiku-4.5</span>
+                    </span>
+                  </span>
+                </button>
+              </div>
+            </section>
+
+            <!-- 中：编辑器 -->
+            <section class="col" aria-label="Agent 编辑器">
+              <div class="editor-head">
+                <span class="avatar avatar-accent">架顾</span>
+                <div style="min-width: 0">
+                  <div class="editor-name">架构顾问</div>
+                  <div class="agent-id mono">architect-advisor · 自定义 · 已启用</div>
+                </div>
+                <span class="phead-spacer"></span>
+                <label class="label" style="grid-auto-flow: column; align-items: center; gap: 8px">
+                  <span>启用</span>
+                  <button
+                    class="switch"
+                    role="switch"
+                    aria-checked="true"
+                    aria-label="启用"
+                  ></button>
+                </label>
+              </div>
+
+              <div class="col-scroll">
+                <div class="editor-body">
+                  <div class="group">
+                    <div class="group-head"><span class="section-label">基础</span></div>
+                    <div class="grid2">
+                      <label class="label">
+                        名称
+                        <input class="field" value="架构顾问" />
+                      </label>
+                      <label class="label">
+                        别名（逗号分隔）
+                        <input class="field mono" value="arch, 架构审查" />
+                        <span class="hint">用于路由时按别名命中该 Agent</span>
+                      </label>
+                    </div>
+                    <label class="label">
+                      说明
+                      <input class="field" value="负责架构评审、设计权衡与长期演进建议。" />
+                    </label>
+                  </div>
+
+                  <div class="group">
+                    <div class="group-head"><span class="section-label">角色</span></div>
+                    <div class="grid2">
+                      <label class="label">
+                        核心角色
+                        <select class="select">
+                          <option>规划 · planner</option>
+                          <option>通用 · general</option>
+                          <option>执行 · executor</option>
+                          <option>研究 · researcher</option>
+                          <option>评审 · reviewer</option>
+                        </select>
+                      </label>
+                      <label class="label">
+                        预设
+                        <select class="select">
+                          <option>架构 · architect</option>
+                          <option>默认 · default</option>
+                          <option>分析 · analyst</option>
+                          <option>挑刺 · critic</option>
+                        </select>
+                        <span class="hint">预设决定角色提示词的默认取向</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div class="group">
+                    <div class="group-head"><span class="section-label">模型</span></div>
+                    <div class="grid2">
+                      <label class="label">
+                        默认模型
+                        <input class="field mono" value="anthropic/claude-opus-4.1" />
+                      </label>
+                      <label class="label">
+                        Variant
+                        <input class="field mono" value="high" />
+                      </label>
+                    </div>
+                    <label class="label">
+                      回退模型（按序尝试）
+                      <input class="field mono" value="anthropic/claude-sonnet-4.5, openai/gpt-5" />
+                    </label>
+                  </div>
+
+                  <div class="group">
+                    <div class="group-head"><span class="section-label">提示词与备注</span></div>
+                    <label class="label">
+                      System Prompt
+                      <textarea class="textarea">
+你是架构顾问。在给出结论前先确认约束条件与不变量，明确列出被否决的备选方案及其理由；对无法在现有证据下判定的问题，直接标注「需要更多信息」，不要臆测。</textarea>
+                    </label>
+                    <label class="label">
+                      备注
+                      <input class="field" value="大重构评审专用；仅在架构类任务中推荐。" />
+                    </label>
+                  </div>
+
+                  <div class="group">
+                    <div class="group-head"><span class="section-label">危险操作</span></div>
+                    <div class="danger-zone">
+                      <p>恢复默认会丢弃该 Agent 的全部本地覆盖；移除后别名与提示词一并失效。</p>
+                      <button class="btn">恢复默认</button>
+                      <button class="btn btn-danger">移除 Agent</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="editor-foot">
+                <button class="btn btn-primary">保存变更</button>
+                <button class="btn">取消</button>
+                <span class="save-state">已保存 Agent 实体 · 刚刚</span>
+                <span class="phead-spacer"></span>
+                <span class="statline">最近更新 <b>2026-11-02 14:08</b></span>
+              </div>
+            </section>
+
+            <!-- 右：只读检视 -->
+            <aside class="col" aria-label="Agent 元信息">
+              <div class="panel-head">
+                <h2 class="panel-title">元信息</h2>
+              </div>
+              <div class="col-scroll">
+                <div class="inspector">
+                  <div class="meta">
+                    <div class="meta-row">
+                      <span>ID</span><span class="mono">architect-advisor</span>
+                    </div>
+                    <div class="meta-row"><span>类型</span><span>自定义 · custom</span></div>
+                    <div class="meta-row"><span>来源</span><span>configured（用户配置）</span></div>
+                    <div class="meta-row"><span>可移除</span><span>是</span></div>
+                    <div class="meta-row">
+                      <span>创建时间</span><span class="mono">2026-10-18 09:31</span>
+                    </div>
+                    <div class="meta-row">
+                      <span>最近更新</span><span class="mono">2026-11-02 14:08</span>
+                    </div>
+                  </div>
+
+                  <div style="display: grid; gap: 8px">
+                    <span class="section-label">覆盖情况</span>
+                    <div class="cover-row">
+                      <span class="dot-status"></span><b>模型</b>已覆盖为 claude-opus-4.1
+                    </div>
+                    <div class="cover-row">
+                      <span class="dot-status"></span><b>提示词</b>已自定义（218 字符）
+                    </div>
+                    <div class="cover-row">
+                      <span class="dot-status is-off"></span><b>回退模型</b>继承默认
+                    </div>
+                  </div>
+
+                  <div style="display: grid; gap: 8px">
+                    <span class="section-label">别名</span>
+                    <div style="display: flex; gap: 5px; flex-wrap: wrap">
+                      <span class="badge badge-mono">arch</span>
+                      <span class="badge badge-mono">架构审查</span>
+                    </div>
+                  </div>
+
+                  <div style="display: grid; gap: 8px">
+                    <span class="section-label">外观</span>
+                    <div class="cover-row">
+                      <span class="swatch"></span><b>#8b9cf5</b> · Agent 标识色
+                    </div>
+                  </div>
+
+                  <div style="display: grid; gap: 8px">
+                    <span class="section-label">调用建议</span>
+                    <div class="cover-row">
+                      当任务涉及架构决策、跨模块重构或长期演进取舍时被推荐。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

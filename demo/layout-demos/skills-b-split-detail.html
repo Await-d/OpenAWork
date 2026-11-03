@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>技能 · 方案 B 三栏内联详情</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./_theme.css" />
+    <style>
+      .page--fixed {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        overflow: hidden;
+      }
+
+      .cols {
+        display: grid;
+        grid-template-columns: 316px minmax(0, 1fr) 282px;
+        gap: 12px;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .col {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        overflow: hidden;
+      }
+
+      .col-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      /* 左列：列表 */
+      .sk-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 2px 8px;
+        width: 100%;
+        padding: 9px 11px;
+        border: 0;
+        border-left: 2px solid transparent;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--t-micro);
+      }
+
+      .sk-row + .sk-row {
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .sk-row:hover {
+        background: var(--bg-hover);
+      }
+
+      .sk-row.is-active {
+        border-left-color: var(--accent);
+        background: var(--bg-elevated);
+      }
+
+      .sk-row-name {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .sk-row-name > span:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .sk-row-sub {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+      }
+
+      .sk-row-sub .src {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .sk-row-ver {
+        color: var(--fg-muted);
+        font-size: 10.5px;
+        white-space: nowrap;
+      }
+
+      .pager-strip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+        border-top: 1px solid var(--border-subtle);
+        background: var(--bg-raised);
+      }
+
+      /* 中列：详情 */
+      .detail-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 11px;
+        flex-wrap: wrap;
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .detail-title {
+        margin: 0;
+        color: var(--fg-strong);
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .detail-sub {
+        margin: 3px 0 0;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        line-height: 1.6;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .tab {
+        padding: 8px 10px;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        font-weight: 600;
+        cursor: pointer;
+        transition:
+          color var(--t-micro),
+          border-color var(--t-micro);
+      }
+
+      .tab:hover {
+        color: var(--fg-default);
+      }
+
+      .tab.is-active {
+        border-bottom-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .doc {
+        display: none;
+        gap: 14px;
+        padding: 14px;
+        color: var(--fg-default);
+        font-size: 12px;
+        line-height: 1.75;
+      }
+
+      .doc.is-active {
+        display: grid;
+      }
+
+      .doc h3 {
+        margin: 0;
+        color: var(--fg-strong);
+        font-size: 12.5px;
+        font-weight: 650;
+      }
+
+      .doc ul {
+        display: grid;
+        gap: 4px;
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .doc code {
+        padding: 1px 5px;
+        border-radius: var(--r-xs);
+        background: var(--bg-surface);
+        color: var(--aux);
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 11px;
+      }
+
+      .doc pre {
+        margin: 0;
+        padding: 10px 12px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--r-md);
+        background: var(--bg-raised);
+        color: var(--fg-default);
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 11px;
+        line-height: 1.65;
+        overflow: auto;
+      }
+
+      /* 右列 */
+      .aside-inner {
+        display: grid;
+        gap: 14px;
+        padding: 12px;
+      }
+
+      .kv {
+        display: grid;
+        gap: 1px;
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--border-subtle);
+      }
+
+      .kv > div {
+        display: grid;
+        grid-template-columns: 74px minmax(0, 1fr);
+        gap: 8px;
+        padding: 8px 10px;
+        background: var(--bg-overlay);
+        font-size: 11.5px;
+      }
+
+      .kv dt {
+        color: var(--fg-subtle);
+      }
+
+      .kv dd {
+        margin: 0;
+        color: var(--fg-default);
+        overflow-wrap: anywhere;
+      }
+
+      .perm {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        color: var(--fg-default);
+        font-size: 11.5px;
+        line-height: 1.6;
+      }
+
+      .perm-icon {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        border-radius: var(--r-xs);
+        background: var(--bg-surface);
+        color: var(--fg-muted);
+        font-size: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <nav class="rail" aria-hidden="true">
+        <div class="rail-logo">A</div>
+        <button class="rail-item">◧</button>
+        <button class="rail-item">◍</button>
+        <button class="rail-item is-active">⊞</button>
+        <button class="rail-item">◫</button>
+        <div class="rail-spacer"></div>
+        <button class="rail-item">⚙</button>
+      </nav>
+
+      <div class="main">
+        <div class="demo-bar">
+          <strong>方案 B · 三栏内联详情</strong>
+          <span class="demo-sep"></span>
+          <span
+            >选择 → 查看 →
+            安装全在同一屏完成，不再整页跳转到详情页；右栏固定承载元信息与权限清单，列表带内联分页。</span
+          >
+          <span class="demo-links">
+            <a href="./skills-a-catalog.html">A</a>
+            <a href="./skills-b-split-detail.html" class="is-current">B</a>
+            <a href="./skills-c-grid-drawer.html">C</a>
+            <a href="./index.html">索引</a>
+          </span>
+        </div>
+
+        <div class="page page--fixed page-narrow">
+          <div class="phead">
+            <div>
+              <h1 class="phead-title">技能</h1>
+              <p class="phead-sub">浏览技能市场、管理已安装技能与注册源。</p>
+            </div>
+            <span class="phead-spacer"></span>
+            <div class="statline">
+              <span>市场 <b>128</b></span>
+              <i class="dot"></i>
+              <span>已安装 <b>9</b></span>
+              <i class="dot"></i>
+              <span>注册源 <b>3</b></span>
+              <i class="dot"></i>
+              <span style="color: var(--contrast)"
+                >可更新 <b style="color: var(--contrast)">2</b></span
+              >
+            </div>
+            <button class="btn">刷新</button>
+          </div>
+
+          <div class="cols">
+            <!-- 左：列表 -->
+            <section class="col" aria-label="技能列表">
+              <div class="panel-head" style="gap: 8px">
+                <div class="seg">
+                  <button class="seg-btn is-active">市场</button>
+                  <button class="seg-btn">本地</button>
+                  <button class="seg-btn">
+                    已安装 <span class="badge badge-contrast" style="margin-left: 4px">2</span>
+                  </button>
+                </div>
+              </div>
+              <div style="padding: 0 10px 10px">
+                <label class="search">
+                  <input class="field" placeholder="搜索技能…" />
+                </label>
+              </div>
+
+              <div class="col-scroll">
+                <button class="sk-row">
+                  <span class="sk-row-name"
+                    ><span class="badge badge-success">✓</span>agentdocs-orchestrator</span
+                  >
+                  <span class="sk-row-ver mono">v2.3.0</span>
+                  <span class="sk-row-sub">
+                    <span class="badge">已安装</span>
+                    <span class="src mono">Await-d/agentdocs</span>
+                  </span>
+                </button>
+
+                <button class="sk-row is-active">
+                  <span class="sk-row-name"
+                    ><span class="badge badge-success">✓</span>web-search-plus</span
+                  >
+                  <span class="sk-row-ver mono">v1.3.0</span>
+                  <span class="sk-row-sub">
+                    <span class="badge badge-contrast">可更新</span>
+                    <span class="src mono">openAwork/market</span>
+                  </span>
+                </button>
+
+                <button class="sk-row">
+                  <span class="sk-row-name"
+                    ><span class="badge badge-success">✓</span>pdf-vision-extract</span
+                  >
+                  <span class="sk-row-ver mono">v2.0.1</span>
+                  <span class="sk-row-sub">
+                    <span class="badge">文档 / OCR</span>
+                    <span class="src mono">openAwork/market</span>
+                  </span>
+                </button>
+
+                <button class="sk-row">
+                  <span class="sk-row-name">git-commit-craft</span>
+                  <span class="sk-row-ver mono">v0.9.7</span>
+                  <span class="sk-row-sub">
+                    <span class="badge">编程 / Git</span>
+                    <span class="src mono">openAwork/market</span>
+                  </span>
+                </button>
+
+                <button class="sk-row">
+                  <span class="sk-row-name">k8s-runbook</span>
+                  <span class="sk-row-ver mono">v1.4.2</span>
+                  <span class="sk-row-sub">
+                    <span class="badge">运维 / K8s</span>
+                    <span class="src mono">openAwork/market</span>
+                  </span>
+                </button>
+
+                <button class="sk-row">
+                  <span class="sk-row-name">sql-explain-critic</span>
+                  <span class="sk-row-ver mono">v0.7.0</span>
+                  <span class="sk-row-sub">
+                    <span class="badge badge-contrast">可更新</span>
+                    <span class="src mono">openAwork/market</span>
+                  </span>
+                </button>
+
+                <button class="sk-row">
+                  <span class="sk-row-name"
+                    ><span class="badge badge-success">✓</span>secret-scanner</span
+                  >
+                  <span class="sk-row-ver mono">v3.0.0</span>
+                  <span class="sk-row-sub">
+                    <span class="badge">安全 / CI</span>
+                    <span class="src mono">team/internal</span>
+                  </span>
+                </button>
+
+                <button class="sk-row">
+                  <span class="sk-row-name">design-token-audit</span>
+                  <span class="sk-row-ver mono">v1.1.0</span>
+                  <span class="sk-row-sub">
+                    <span class="badge">设计 / 前端</span>
+                    <span class="src mono">openAwork/market</span>
+                  </span>
+                </button>
+
+                <button class="sk-row" style="opacity: 0.7">
+                  <span class="sk-row-name">legacy-jquery-migrator</span>
+                  <span class="sk-row-ver mono">v0.2.0</span>
+                  <span class="sk-row-sub">
+                    <span class="badge">仅浏览</span>
+                    <span class="src mono">labs.example.dev</span>
+                  </span>
+                </button>
+              </div>
+
+              <div class="pager-strip">
+                <span class="statline">1-24 / 128</span>
+                <span class="phead-spacer"></span>
+                <button class="btn btn-sm" disabled>‹</button>
+                <span class="statline">1 / 6</span>
+                <button class="btn btn-sm">›</button>
+              </div>
+            </section>
+
+            <!-- 中：内联详情 -->
+            <section class="col" aria-label="技能详情">
+              <div class="detail-head">
+                <span class="avatar avatar-accent">WS</span>
+                <div style="flex: 1 1 240px; min-width: 0">
+                  <h2 class="detail-title">web-search-plus</h2>
+                  <p class="detail-sub">
+                    多引擎检索与结果去重，附带引用整理与可信度排序；适用于需要外部事实支撑的任务。
+                  </p>
+                  <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px">
+                    <span class="badge badge-mono">v1.3.0</span>
+                    <span class="badge badge-success">✓ 已验证</span>
+                    <span class="badge badge-aux">检索</span>
+                    <span class="badge badge-aux">网络</span>
+                    <span class="badge badge-contrast">已装 v1.2.0 · 可更新</span>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap">
+                  <button class="btn">卸载</button>
+                  <button class="btn btn-primary">更新到 v1.3.0</button>
+                </div>
+              </div>
+
+              <div class="tabs" role="tablist">
+                <button class="tab is-active" data-doc="overview">概览</button>
+                <button class="tab" data-doc="readme">README</button>
+                <button class="tab" data-doc="permissions">权限</button>
+                <button class="tab" data-doc="changelog">更新日志</button>
+              </div>
+
+              <div class="col-scroll">
+                <div class="doc is-active" data-doc="overview">
+                  <h3>这个技能做什么</h3>
+                  <p style="margin: 0">
+                    把「先查外部资料再给结论」这件事固化成流程：并发查询多个引擎、按域名与时间加权去重，
+                    最后把引用整理成可回溯的脚注列表。
+                  </p>
+
+                  <h3>什么时候会用到</h3>
+                  <ul>
+                    <li>任务需要外部事实、版本号、库的最新用法</li>
+                    <li>需要给结论附上可点击的来源</li>
+                    <li>需要排除内容农场与过期文档</li>
+                  </ul>
+
+                  <h3>安装后如何触发</h3>
+                  <pre>
+用户：帮我确认 zod 4 的 object().strict() 是否已废弃
+Agent → 调用 skill: web-search-plus
+       → 并发检索 4 个引擎 → 去重 → 引用排序 → 结论 + 来源</pre>
+
+                  <h3>示例输出</h3>
+                  <pre>
+结论：zod 4 保留了 .strict()，但官方推荐 .object().strict() 的等价写法 .strictObject()。
+来源：
+  1. zod 官方迁移指南（zod.dev/v4/changelog） · 2026-08-14
+  2. GitHub zod#4120 · maintainer 回复</pre>
+
+                  <h3>与内置能力的差异</h3>
+                  <ul>
+                    <li>
+                      内建 <code>web_search</code> 只返回原始结果；本技能额外做去重与可信度排序
+                    </li>
+                    <li>输出带引用编号，可直接被文档与报告复用</li>
+                  </ul>
+                </div>
+
+                <div class="doc" data-doc="readme">
+                  <h3>web-search-plus</h3>
+                  <p style="margin: 0">
+                    多引擎并发检索（Brave / Tavily / SerpAPI /
+                    DuckDuckGo），支持时间窗过滤、域名白名单与黑名单。
+                  </p>
+                  <pre>
+# 安装
+openawork skill install web-search-plus
+
+# 环境变量
+SEARCH_BRAVE_KEY=...
+SEARCH_TAVILY_KEY=...</pre>
+                  <h3>配置项</h3>
+                  <ul>
+                    <li><code>engines</code>：参与并发检索的引擎列表</li>
+                    <li><code>maxResults</code>：合并后保留的结果数（默认 12）</li>
+                    <li><code>blocklist</code>：需要排除的域名</li>
+                  </ul>
+                </div>
+
+                <div class="doc" data-doc="permissions">
+                  <h3>该技能会请求的权限</h3>
+                  <ul>
+                    <li>读取环境变量 <code>SEARCH_*_KEY</code>（网络凭据）</li>
+                    <li>发起出站 HTTPS 请求（仅限已声明的引擎域名）</li>
+                    <li>写入会话级缓存目录</li>
+                  </ul>
+                  <div class="danger-zone">
+                    <p>安装即表示授予上述权限；可在「设置 → 插件 → 技能」中随时撤销。</p>
+                    <button class="btn">查看权限详情</button>
+                  </div>
+                </div>
+
+                <div class="doc" data-doc="changelog">
+                  <h3>v1.3.0 · 2026-10-28</h3>
+                  <ul>
+                    <li>新增域名黑名单与时间窗过滤</li>
+                    <li>去重改为按「标题相似度 + 域名权重」双阈值</li>
+                  </ul>
+                  <h3>v1.2.0 · 2026-09-30</h3>
+                  <ul>
+                    <li>支持并发引擎超时隔离，单引擎失败不再拖垮整体</li>
+                  </ul>
+                  <h3>v1.1.0 · 2026-09-02</h3>
+                  <ul>
+                    <li>引用脚注支持 Markdown 与纯文本两种风格</li>
+                  </ul>
+                </div>
+              </div>
+            </section>
+
+            <!-- 右：元信息 -->
+            <aside class="col" aria-label="技能元信息">
+              <div class="panel-head">
+                <h2 class="panel-title">元信息</h2>
+              </div>
+              <div class="col-scroll">
+                <div class="aside-inner">
+                  <div style="display: grid; gap: 7px">
+                    <span class="section-label">安装目标</span>
+                    <select class="select">
+                      <option>openAwork/market（官方市场）</option>
+                      <option>team/internal（团队私有源）</option>
+                    </select>
+                  </div>
+
+                  <dl class="kv">
+                    <div>
+                      <dt>版本</dt>
+                      <dd class="mono">v1.3.0</dd>
+                    </div>
+                    <div>
+                      <dt>已装版本</dt>
+                      <dd class="mono">v1.2.0</dd>
+                    </div>
+                    <div>
+                      <dt>作者</dt>
+                      <dd>openAwork</dd>
+                    </div>
+                    <div>
+                      <dt>许可</dt>
+                      <dd>MIT</dd>
+                    </div>
+                    <div>
+                      <dt>分类</dt>
+                      <dd>编程 / 网络</dd>
+                    </div>
+                    <div>
+                      <dt>安装量</dt>
+                      <dd class="mono">12,033</dd>
+                    </div>
+                    <div>
+                      <dt>更新时间</dt>
+                      <dd class="mono">2026-10-28</dd>
+                    </div>
+                    <div>
+                      <dt>来源</dt>
+                      <dd class="mono">openAwork/market</dd>
+                    </div>
+                  </dl>
+
+                  <div style="display: grid; gap: 8px">
+                    <span class="section-label">权限清单</span>
+                    <div class="perm">
+                      <span class="perm-icon">☁</span>出站 HTTPS（引擎域名白名单）
+                    </div>
+                    <div class="perm">
+                      <span class="perm-icon">🔑</span>读取环境变量中的检索密钥
+                    </div>
+                    <div class="perm"><span class="perm-icon">💾</span>写入会话级缓存</div>
+                  </div>
+
+                  <div style="display: grid; gap: 8px">
+                    <span class="section-label">依赖</span>
+                    <div class="perm"><span class="perm-icon">◇</span>无外部运行时依赖</div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      document.querySelectorAll('.tab').forEach((tab) => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.tab').forEach((t) => t.classList.remove('is-active'));
+          tab.classList.add('is-active');
+          const target = tab.dataset.doc;
+          document.querySelectorAll('.doc').forEach((doc) => {
+            doc.classList.toggle('is-active', doc.dataset.doc === target);
+          });
+        });
+      });
+
+      document.querySelectorAll('.switch').forEach((el) => {
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          el.setAttribute(
+            'aria-checked',
+            el.getAttribute('aria-checked') === 'true' ? 'false' : 'true',
+          );
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>技能 · 方案 A 分类目录</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./_theme.css" />
+    <style>
+      .catalog {
+        display: grid;
+        grid-template-columns: 176px minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+
+      .cat-rail {
+        position: sticky;
+        top: 0;
+        display: grid;
+        gap: 2px;
+        padding: 6px;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+      }
+
+      .cat-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 9px;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        font-weight: 600;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          background var(--t-micro),
+          color var(--t-micro);
+      }
+
+      .cat-item:hover {
+        background: var(--bg-hover);
+        color: var(--fg-default);
+      }
+
+      .cat-item.is-active {
+        background: var(--accent-muted);
+        color: var(--accent);
+      }
+
+      .cat-item .n {
+        margin-left: auto;
+        color: inherit;
+        opacity: 0.6;
+        font-size: 10.5px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .rail-block {
+        display: grid;
+        gap: 7px;
+        margin-top: 10px;
+        padding: 10px;
+        border-radius: var(--r-md);
+        background: var(--bg-surface);
+      }
+
+      .sk-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(252px, 1fr));
+        gap: 12px;
+      }
+
+      .sk-card {
+        display: grid;
+        gap: 9px;
+        padding: 13px;
+        border: 1px solid transparent;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        cursor: pointer;
+        transition:
+          background var(--t-micro),
+          border-color var(--t-micro);
+      }
+
+      .sk-card:hover {
+        background: var(--bg-surface);
+        border-color: var(--border-emphasis);
+      }
+
+      .sk-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .sk-name {
+        color: var(--fg-strong);
+        font-size: 12.5px;
+        font-weight: 650;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .sk-desc {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        line-height: 1.6;
+        min-height: 37px;
+      }
+
+      .sk-tags {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+
+      .sk-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-top: 9px;
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .sk-dl {
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+      }
+
+      .sk-actions {
+        display: flex;
+        gap: 6px;
+        margin-left: auto;
+      }
+
+      .featured-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 12px;
+      }
+
+      .feat-card {
+        display: grid;
+        gap: 8px;
+        padding: 14px;
+        border-radius: var(--r-lg);
+        background: linear-gradient(180deg, var(--bg-surface), var(--bg-overlay));
+        cursor: pointer;
+        transition: border-color var(--t-micro);
+        border: 1px solid transparent;
+      }
+
+      .feat-card:hover {
+        border-color: var(--accent-border);
+      }
+
+      .pager {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      /* 已安装 */
+      .installed-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .inst-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 10px 12px;
+        transition: background var(--t-micro);
+      }
+
+      .inst-row + .inst-row {
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .inst-row:hover {
+        background: var(--bg-raised);
+      }
+
+      .inst-name {
+        color: var(--fg-strong);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .inst-id {
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+      }
+
+      .inst-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+        font-size: 11px;
+      }
+
+      [data-panel] {
+        display: none;
+      }
+
+      [data-panel].is-active {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <nav class="rail" aria-hidden="true">
+        <div class="rail-logo">A</div>
+        <button class="rail-item">◧</button>
+        <button class="rail-item">◍</button>
+        <button class="rail-item is-active">⊞</button>
+        <button class="rail-item">◫</button>
+        <div class="rail-spacer"></div>
+        <button class="rail-item">⚙</button>
+      </nav>
+
+      <div class="main">
+        <div class="demo-bar">
+          <strong>方案 A · 分类目录</strong>
+          <span class="demo-sep"></span>
+          <span
+            >左侧分类轨常驻，右侧「精选 + 全部」双层陈列；已安装视图改为列表 + 注册源侧栏。</span
+          >
+          <span class="demo-links">
+            <a href="./skills-a-catalog.html" class="is-current">A</a>
+            <a href="./skills-b-split-detail.html">B</a>
+            <a href="./skills-c-grid-drawer.html">C</a>
+            <a href="./index.html">索引</a>
+          </span>
+        </div>
+
+        <div class="page page-narrow">
+          <div class="phead" style="margin-bottom: 12px">
+            <div>
+              <h1 class="phead-title">技能</h1>
+              <p class="phead-sub">浏览技能市场、管理已安装技能与注册源。</p>
+            </div>
+            <span class="phead-spacer"></span>
+            <div class="statline">
+              <span>市场 <b>128</b></span>
+              <i class="dot"></i>
+              <span>已安装 <b>9</b></span>
+              <i class="dot"></i>
+              <span>注册源 <b>3</b></span>
+              <i class="dot"></i>
+              <span style="color: var(--contrast)"
+                >可更新 <b style="color: var(--contrast)">2</b></span
+              >
+            </div>
+            <button class="btn">刷新</button>
+          </div>
+
+          <div class="toolbar" style="margin-bottom: 16px">
+            <div class="seg" role="tablist">
+              <button class="seg-btn is-active" data-tab="market">市场</button>
+              <button class="seg-btn" data-tab="local">本地</button>
+              <button class="seg-btn" data-tab="installed">
+                已安装 <span class="badge badge-contrast" style="margin-left: 4px">2</span>
+              </button>
+            </div>
+            <span class="demo-sep"></span>
+            <label class="search">
+              <input class="field" placeholder="搜索技能名称、描述或标签…" />
+            </label>
+            <button class="btn">搜索</button>
+            <span class="phead-spacer"></span>
+            <select class="select" style="width: 132px" aria-label="排序">
+              <option>按安装量</option>
+              <option>按更新时间</option>
+              <option>按名称</option>
+            </select>
+          </div>
+
+          <!-- 市场 -->
+          <section data-panel="market" class="is-active">
+            <div class="catalog">
+              <nav class="cat-rail" aria-label="技能分类">
+                <button class="cat-item is-active">全部 <span class="n">128</span></button>
+                <button class="cat-item">编程 <span class="n">42</span></button>
+                <button class="cat-item">文档 <span class="n">21</span></button>
+                <button class="cat-item">数据 <span class="n">18</span></button>
+                <button class="cat-item">运维 <span class="n">15</span></button>
+                <button class="cat-item">设计 <span class="n">12</span></button>
+                <button class="cat-item">安全 <span class="n">11</span></button>
+                <button class="cat-item">其他 <span class="n">9</span></button>
+
+                <div class="rail-block">
+                  <span class="section-label">注册源</span>
+                  <div style="display: flex; align-items: center; gap: 6px">
+                    <span class="dot-status"></span>
+                    <span style="color: var(--fg-default); font-size: 11px">官方市场</span>
+                    <span class="badge" style="margin-left: auto">62</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px">
+                    <span class="dot-status"></span>
+                    <span style="color: var(--fg-default); font-size: 11px">团队私有源</span>
+                    <span class="badge" style="margin-left: auto">48</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px">
+                    <span class="dot-status is-off"></span>
+                    <span style="color: var(--fg-muted); font-size: 11px">实验源</span>
+                    <span class="badge" style="margin-left: auto">18</span>
+                  </div>
+                  <button class="btn btn-sm" style="justify-content: center">管理注册源</button>
+                </div>
+              </nav>
+
+              <div style="display: grid; gap: 20px">
+                <div style="display: grid; gap: 10px">
+                  <div class="group-title" style="display: flex; align-items: center; gap: 9px">
+                    <h2
+                      style="
+                        margin: 0;
+                        color: var(--fg-default);
+                        font-size: 12.5px;
+                        font-weight: 650;
+                      "
+                    >
+                      精选
+                    </h2>
+                    <span class="statline">来自已启用的注册源</span>
+                  </div>
+                  <div class="featured-grid">
+                    <article class="feat-card">
+                      <div class="sk-head">
+                        <span class="avatar avatar-accent">AD</span>
+                        <span style="min-width: 0">
+                          <span class="sk-name">agentdocs-orchestrator</span>
+                          <span class="inst-id mono">Await-d/agentdocs · v2.3.0</span>
+                        </span>
+                        <span class="badge badge-success" style="margin-left: auto">✓ 已验证</span>
+                      </div>
+                      <p class="sk-desc" style="min-height: 0">
+                        按原子任务编排多代理协作：任务拆分、并行执行、状态回写与收口检查。
+                      </p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">编排</span>
+                        <span class="badge badge-aux">多代理</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">8,412 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="feat-card">
+                      <div class="sk-head">
+                        <span class="avatar">SR</span>
+                        <span style="min-width: 0">
+                          <span class="sk-name">systematic-review</span>
+                          <span class="inst-id mono">openAwork/market · v1.9.4</span>
+                        </span>
+                        <span class="badge badge-success" style="margin-left: auto">✓ 已验证</span>
+                      </div>
+                      <p class="sk-desc" style="min-height: 0">
+                        按标准与规格两条轴并行审查改动，输出可追溯的审查结论与证据。
+                      </p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">审查</span>
+                        <span class="badge badge-aux">质量</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">5,204 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="feat-card">
+                      <div class="sk-head">
+                        <span class="avatar">DB</span>
+                        <span style="min-width: 0">
+                          <span class="sk-name">db-migration-guard</span>
+                          <span class="inst-id mono">team/internal · v0.8.1</span>
+                        </span>
+                        <span class="badge" style="margin-left: auto">团队私有</span>
+                      </div>
+                      <p class="sk-desc" style="min-height: 0">
+                        迁移前检查锁表风险、索引代价与回滚脚本完整性，并生成执行清单。
+                      </p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">数据</span>
+                        <span class="badge badge-aux">迁移</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">317 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+                  </div>
+                </div>
+
+                <div style="display: grid; gap: 10px">
+                  <div style="display: flex; align-items: center; gap: 9px">
+                    <h2
+                      style="
+                        margin: 0;
+                        color: var(--fg-default);
+                        font-size: 12.5px;
+                        font-weight: 650;
+                      "
+                    >
+                      全部技能
+                    </h2>
+                    <span class="badge">128</span>
+                    <span class="phead-spacer"></span>
+                    <span class="statline">每页 24 条</span>
+                  </div>
+
+                  <div class="sk-grid">
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">web-search-plus</span>
+                        <span class="badge badge-mono">v1.2.0</span>
+                        <span class="badge badge-success" style="margin-left: auto">✓</span>
+                      </div>
+                      <p class="sk-desc">多引擎检索与结果去重，附带引用整理与可信度排序。</p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">检索</span>
+                        <span class="badge badge-aux">网络</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">12,033 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">git-commit-craft</span>
+                        <span class="badge badge-mono">v0.9.7</span>
+                      </div>
+                      <p class="sk-desc">按仓库约定生成提交信息，自动校验 scope 与类型合法性。</p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">编程</span>
+                        <span class="badge badge-aux">Git</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">9,880 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">pdf-vision-extract</span>
+                        <span class="badge badge-mono">v2.0.1</span>
+                        <span class="badge badge-success" style="margin-left: auto">✓</span>
+                      </div>
+                      <p class="sk-desc">扫描件版面还原与表格抽取，支持跨页表头合并。</p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">文档</span>
+                        <span class="badge badge-aux">OCR</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">7,644 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">k8s-runbook</span>
+                        <span class="badge badge-mono">v1.4.2</span>
+                      </div>
+                      <p class="sk-desc">
+                        集群排障手册：按症状定位到具体资源与命令，输出处置步骤。
+                      </p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">运维</span>
+                        <span class="badge badge-aux">K8s</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">4,102 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">sql-explain-critic</span>
+                        <span class="badge badge-mono">v0.6.3</span>
+                      </div>
+                      <p class="sk-desc">读执行计划找全表扫描、隐式类型转换与缺失索引。</p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">数据</span>
+                        <span class="badge badge-aux">SQL</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">3,517 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">design-token-audit</span>
+                        <span class="badge badge-mono">v1.1.0</span>
+                      </div>
+                      <p class="sk-desc">审计硬编码色值与间距，给出 token 化替换建议。</p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">设计</span>
+                        <span class="badge badge-aux">前端</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">2,930 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="sk-card">
+                      <div class="sk-head">
+                        <span class="sk-name">secret-scanner</span>
+                        <span class="badge badge-mono">v3.0.0</span>
+                        <span class="badge badge-success" style="margin-left: auto">✓</span>
+                      </div>
+                      <p class="sk-desc">提交与产物前扫描凭据泄漏，命中即给出脱敏证据。</p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">安全</span>
+                        <span class="badge badge-aux">CI</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">6,201 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm btn-primary">安装</button>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="sk-card" style="opacity: 0.72">
+                      <div class="sk-head">
+                        <span class="sk-name">legacy-jquery-migrator</span>
+                        <span class="badge badge-mono">v0.2.0</span>
+                        <span class="badge" style="margin-left: auto">仅浏览</span>
+                      </div>
+                      <p class="sk-desc">实验源中的迁移脚本生成器，暂不支持在产品内直接安装。</p>
+                      <div class="sk-tags">
+                        <span class="badge badge-aux">编程</span>
+                        <span class="badge badge-aux">迁移</span>
+                      </div>
+                      <div class="sk-foot">
+                        <span class="sk-dl">88 次安装</span>
+                        <div class="sk-actions">
+                          <button class="btn btn-sm">详情</button>
+                          <button class="btn btn-sm" disabled>仅浏览</button>
+                        </div>
+                      </div>
+                    </article>
+                  </div>
+
+                  <div class="pager">
+                    <span class="statline">显示 <b>1-24</b> / 共 <b>128</b> 个技能</span>
+                    <span class="phead-spacer"></span>
+                    <button class="btn btn-sm" disabled>上一页</button>
+                    <button class="btn btn-sm btn-primary">1</button>
+                    <button class="btn btn-sm">2</button>
+                    <button class="btn btn-sm">3</button>
+                    <button class="btn btn-sm">4</button>
+                    <span class="statline">…</span>
+                    <button class="btn btn-sm">6</button>
+                    <button class="btn btn-sm">下一页</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 本地 -->
+          <section data-panel="local">
+            <div class="panel">
+              <div class="panel-head">
+                <h2 class="panel-title">本地工作区技能</h2>
+                <span class="statline"
+                  >扫描当前工作区中的 skill.yaml，并支持直接安装或重新加载</span
+                >
+                <span class="phead-spacer"></span>
+                <button class="btn btn-sm">重新扫描</button>
+              </div>
+              <div class="panel-body" style="padding: 0">
+                <div class="sk-grid" style="padding: 12px">
+                  <article class="sk-card">
+                    <div class="sk-head">
+                      <span class="sk-name">repo-conventions</span>
+                      <span class="badge badge-mono">v0.1.0</span>
+                      <span class="badge badge-aux" style="margin-left: auto">工作区</span>
+                    </div>
+                    <p class="sk-desc">
+                      从 AGENTS.md 提炼本仓库的提交规范、测试门禁与文件体积限制。
+                    </p>
+                    <div class="sk-tags">
+                      <span class="badge badge-aux">文档</span>
+                    </div>
+                    <div class="sk-foot">
+                      <span class="sk-dl mono">./skills/repo-conventions</span>
+                      <div class="sk-actions">
+                        <button class="btn btn-sm">详情</button>
+                        <button class="btn btn-sm btn-primary">重新加载</button>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="sk-card">
+                    <div class="sk-head">
+                      <span class="sk-name">perf-lab</span>
+                      <span class="badge badge-mono">v0.3.2</span>
+                      <span class="badge badge-aux" style="margin-left: auto">工作区</span>
+                    </div>
+                    <p class="sk-desc">本地压测与火焰图采集脚本封装，产出可比对的基线报告。</p>
+                    <div class="sk-tags">
+                      <span class="badge badge-aux">性能</span>
+                    </div>
+                    <div class="sk-foot">
+                      <span class="sk-dl mono">./skills/perf-lab</span>
+                      <div class="sk-actions">
+                        <button class="btn btn-sm">详情</button>
+                        <button class="btn btn-sm btn-primary">安装</button>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 已安装 -->
+          <section data-panel="installed">
+            <div class="installed-grid">
+              <div class="panel">
+                <div class="panel-head">
+                  <h2 class="panel-title">已安装技能</h2>
+                  <span class="statline"
+                    >9 个 · <span style="color: var(--contrast)">2 个可更新</span></span
+                  >
+                  <span class="phead-spacer"></span>
+                  <button class="btn btn-sm">检查更新</button>
+                </div>
+                <div>
+                  <div class="inst-row">
+                    <span class="dot-status"></span>
+                    <span style="min-width: 0">
+                      <span class="inst-name">agentdocs-orchestrator</span>
+                      <span class="inst-id mono">github:Await-d/agentdocs-orchestrator</span>
+                    </span>
+                    <span class="badge">系统预装</span>
+                    <div class="inst-meta">
+                      <span class="mono" style="color: var(--fg-muted)">v2.3.0</span>
+                      <span class="badge badge-success">已启用</span>
+                      <span class="statline">不允许禁用</span>
+                    </div>
+                  </div>
+
+                  <div class="inst-row">
+                    <span class="dot-status"></span>
+                    <span style="min-width: 0">
+                      <span class="inst-name">web-search-plus</span>
+                      <span class="inst-id mono">openAwork/market</span>
+                    </span>
+                    <div class="inst-meta">
+                      <span class="mono" style="color: var(--fg-muted)">v1.2.0</span>
+                      <span class="mono" style="color: var(--contrast); font-weight: 600"
+                        >→ v1.3.0</span
+                      >
+                      <button
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用"
+                      ></button>
+                      <button class="btn btn-sm" style="color: var(--accent)">更新</button>
+                      <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="inst-row">
+                    <span class="dot-status"></span>
+                    <span style="min-width: 0">
+                      <span class="inst-name">sql-explain-critic</span>
+                      <span class="inst-id mono">openAwork/market</span>
+                    </span>
+                    <div class="inst-meta">
+                      <span class="mono" style="color: var(--fg-muted)">v0.6.3</span>
+                      <span class="mono" style="color: var(--contrast); font-weight: 600"
+                        >→ v0.7.0</span
+                      >
+                      <button
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用"
+                      ></button>
+                      <button class="btn btn-sm" style="color: var(--accent)">更新</button>
+                      <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="inst-row" style="opacity: 0.62">
+                    <span class="dot-status is-off"></span>
+                    <span style="min-width: 0">
+                      <span class="inst-name">perf-lab</span>
+                      <span class="inst-id mono">local-workspace</span>
+                    </span>
+                    <div class="inst-meta">
+                      <span class="mono" style="color: var(--fg-muted)">v0.3.2</span>
+                      <button
+                        class="switch"
+                        role="switch"
+                        aria-checked="false"
+                        aria-label="启用"
+                      ></button>
+                      <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="inst-row">
+                    <span class="dot-status"></span>
+                    <span style="min-width: 0">
+                      <span class="inst-name">code-review</span>
+                      <span class="inst-id mono">local-system:~/.claude/skills</span>
+                    </span>
+                    <span class="badge badge-aux">系统目录</span>
+                    <div class="inst-meta">
+                      <span class="mono" style="color: var(--fg-muted)">v1.0.0</span>
+                      <button
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用"
+                      ></button>
+                      <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="inst-row">
+                    <span class="dot-status"></span>
+                    <span style="min-width: 0">
+                      <span class="inst-name">secret-scanner</span>
+                      <span class="inst-id mono">team/internal</span>
+                    </span>
+                    <div class="inst-meta">
+                      <span class="mono" style="color: var(--fg-muted)">v3.0.0</span>
+                      <button
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用"
+                      ></button>
+                      <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div style="padding: 0 12px 12px">
+                  <span class="statline">已检查更新 · 刚刚</span>
+                </div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2 class="panel-title">注册源管理</h2>
+                  <span class="badge">3</span>
+                </div>
+                <div class="panel-body" style="display: grid; gap: 10px">
+                  <div class="sk-card" style="cursor: default">
+                    <div class="sk-head">
+                      <span class="dot-status"></span>
+                      <span class="sk-name">官方市场</span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        style="margin-left: auto"
+                      ></span>
+                    </div>
+                    <span class="inst-id mono">https://market.openawork.dev/index.json</span>
+                    <div class="sk-foot">
+                      <span class="sk-dl">62 个技能 · 同步于 11-02 13:40</span>
+                      <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="sk-card" style="cursor: default">
+                    <div class="sk-head">
+                      <span class="dot-status"></span>
+                      <span class="sk-name">团队私有源</span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        style="margin-left: auto"
+                      ></span>
+                    </div>
+                    <span class="inst-id mono">https://git.internal/team/skills.git</span>
+                    <div class="sk-foot">
+                      <span class="sk-dl">48 个技能 · 同步于 11-02 13:40</span>
+                      <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="sk-card" style="cursor: default; opacity: 0.72">
+                    <div class="sk-head">
+                      <span class="dot-status is-off"></span>
+                      <span class="sk-name">实验源</span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="false"
+                        style="margin-left: auto"
+                      ></span>
+                    </div>
+                    <span class="inst-id mono">https://labs.example.dev/skills.json</span>
+                    <div class="sk-foot">
+                      <span class="sk-dl">18 个技能 · 已停用</span>
+                      <button class="btn btn-sm btn-ghost" style="color: var(--complement)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+
+                  <label class="label">
+                    新增注册源 URL
+                    <input class="field mono" placeholder="https://example.com/skills.json" />
+                  </label>
+                  <button class="btn btn-primary" style="justify-content: center">
+                    添加注册源
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      document.querySelectorAll('[data-tab]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('[data-tab]').forEach((b) => b.classList.remove('is-active'));
+          btn.classList.add('is-active');
+          const target = btn.dataset.tab;
+          document.querySelectorAll('[data-panel]').forEach((panel) => {
+            panel.classList.toggle('is-active', panel.dataset.panel === target);
+          });
+          document.querySelector('.page').scrollTop = 0;
+        });
+      });
+
+      document.querySelectorAll('.switch').forEach((el) => {
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          el.setAttribute(
+            'aria-checked',
+            el.getAttribute('aria-checked') === 'true' ? 'false' : 'true',
+          );
+        });
+      });
+    </script>
+  </body>
+</html>

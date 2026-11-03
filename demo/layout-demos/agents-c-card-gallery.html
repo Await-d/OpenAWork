@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent 管理 · 方案 C 卡片分组 + 全屏编辑</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./_theme.css" />
+    <style>
+      .card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+        gap: 12px;
+      }
+
+      .card {
+        display: grid;
+        gap: 10px;
+        padding: 14px;
+        border: 1px solid transparent;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+        cursor: pointer;
+        text-align: left;
+        color: inherit;
+        transition:
+          background var(--t-micro),
+          border-color var(--t-micro),
+          transform var(--t-micro);
+      }
+
+      .card:hover {
+        background: var(--bg-surface);
+        border-color: var(--border-emphasis);
+      }
+
+      .card.is-selected {
+        border-color: var(--accent-border);
+        background: var(--bg-surface);
+      }
+
+      .card-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .card-name {
+        color: var(--fg-strong);
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .card-id {
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+      }
+
+      .card-desc {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        line-height: 1.6;
+        min-height: 37px;
+      }
+
+      .card-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .card-model {
+        margin-left: auto;
+        color: var(--fg-subtle);
+        font-size: 10px;
+      }
+
+      .group-block {
+        display: grid;
+        gap: 10px;
+      }
+
+      .group-title {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .group-title h2 {
+        margin: 0;
+        color: var(--fg-default);
+        font-size: 12.5px;
+        font-weight: 650;
+      }
+
+      .group-title::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border-subtle);
+      }
+
+      /* 全屏编辑视图 */
+      .edit-layout {
+        display: grid;
+        grid-template-columns: 168px minmax(0, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .side-nav {
+        position: sticky;
+        top: 0;
+        display: grid;
+        gap: 2px;
+        padding: 6px;
+        border-radius: var(--r-md);
+        background: var(--bg-overlay);
+      }
+
+      .side-nav a {
+        padding: 6px 9px;
+        border-radius: var(--r-sm);
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .side-nav a:hover {
+        background: var(--bg-hover);
+        color: var(--fg-default);
+      }
+
+      .side-nav a.is-active {
+        background: var(--accent-muted);
+        color: var(--accent);
+      }
+
+      .form-card {
+        display: grid;
+        gap: 14px;
+        padding: 16px;
+        border-radius: var(--r-lg);
+        background: var(--bg-overlay);
+      }
+
+      .grid2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+      }
+
+      .form-foot {
+        position: sticky;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+        padding: 10px 14px;
+        border-radius: var(--r-lg);
+        background: var(--bg-raised);
+        box-shadow: var(--shadow-md);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <nav class="rail" aria-hidden="true">
+        <div class="rail-logo">A</div>
+        <button class="rail-item is-active">◧</button>
+        <button class="rail-item">◍</button>
+        <button class="rail-item">⊞</button>
+        <button class="rail-item">◫</button>
+        <div class="rail-spacer"></div>
+        <button class="rail-item">⚙</button>
+      </nav>
+
+      <div class="main">
+        <div class="demo-bar">
+          <strong>方案 C · 卡片分组 + 全屏编辑</strong>
+          <span class="demo-sep"></span>
+          <span
+            >浏览态按「自定义 / 内置」分组用卡片陈列，编辑走整页视图；适合 Agent
+            数量增长后仍保持清爽。</span
+          >
+          <span class="demo-links">
+            <a href="./agents-a-command-console.html">A</a>
+            <a href="./agents-b-table-drawer.html">B</a>
+            <a href="./agents-c-card-gallery.html" class="is-current">C</a>
+            <a href="./index.html">索引</a>
+          </span>
+        </div>
+
+        <div class="page page-narrow">
+          <!-- ── 浏览态 ── -->
+          <section id="view-browse">
+            <div class="phead" style="margin-bottom: 12px">
+              <div>
+                <h1 class="phead-title">Agent 管理</h1>
+                <p class="phead-sub">浏览、启停与编辑全部 Agent 实体。</p>
+              </div>
+              <span class="phead-spacer"></span>
+              <div class="statline">
+                <span>全部 <b>12</b></span>
+                <i class="dot"></i>
+                <span>已启用 <b>10</b></span>
+                <i class="dot"></i>
+                <span>已禁用 <b>2</b></span>
+                <i class="dot"></i>
+                <span>自定义 <b>2</b></span>
+              </div>
+              <button class="btn">全部恢复默认</button>
+              <button class="btn btn-primary">+ 新增 Agent</button>
+            </div>
+
+            <div class="toolbar" style="margin-bottom: 16px">
+              <label class="search">
+                <input class="field" placeholder="搜索名称、别名、角色、说明或 system prompt…" />
+              </label>
+              <button class="chip is-active">全部角色 <span class="chip-n">12</span></button>
+              <button class="chip">规划 <span class="chip-n">3</span></button>
+              <button class="chip">执行 <span class="chip-n">4</span></button>
+              <button class="chip">研究 <span class="chip-n">3</span></button>
+              <button class="chip">评审 <span class="chip-n">4</span></button>
+              <span class="phead-spacer"></span>
+              <button class="chip">仅启用</button>
+              <button class="chip">仅禁用</button>
+            </div>
+
+            <div style="display: grid; gap: 20px">
+              <div class="group-block">
+                <div class="group-title">
+                  <h2>自定义 Agent</h2>
+                  <span class="badge badge-accent">2</span>
+                </div>
+                <div class="card-grid">
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar avatar-accent">架顾</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">架构顾问</span>
+                        <span class="card-id mono">architect-advisor</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用架构顾问"
+                      ></span>
+                    </div>
+                    <p class="card-desc">
+                      负责架构评审、设计权衡与长期演进建议，会明确列出被否决的方案与理由。
+                    </p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">规划 / 架构</span>
+                      <span class="badge badge-contrast">已修改</span>
+                      <span class="card-model mono">claude-opus-4.1</span>
+                    </div>
+                  </button>
+
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar avatar-accent">数据</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">数据管家</span>
+                        <span class="card-id mono">data-steward</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用数据管家"
+                      ></span>
+                    </div>
+                    <p class="card-desc">
+                      面向数据管道与指标口径：负责校验查询结果、汇总异常并给出可复现的排查路径。
+                    </p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">执行 / 分析</span>
+                      <span class="card-model mono">gpt-5-mini</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div class="group-block">
+                <div class="group-title">
+                  <h2>内置 Agent</h2>
+                  <span class="badge">10</span>
+                  <span class="statline">名称、角色与提示词由系统固定，仅可调整模型配置</span>
+                </div>
+                <div class="card-grid">
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar">BU</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">Build</span>
+                        <span class="card-id mono">build</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用 Build"
+                      ></span>
+                    </div>
+                    <p class="card-desc">默认主智能体，负责统筹执行与结果交付。</p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">执行 / 通用</span>
+                      <span class="badge badge-contrast">已修改</span>
+                      <span class="card-model mono">claude-sonnet-4.5</span>
+                    </div>
+                  </button>
+
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar">PL</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">Plan</span>
+                        <span class="card-id mono">plan</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用 Plan"
+                      ></span>
+                    </div>
+                    <p class="card-desc">规划智能体，负责拆解任务与安排执行顺序。</p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">规划 / 默认</span>
+                      <span class="card-model mono">gpt-5</span>
+                    </div>
+                  </button>
+
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar">HE</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">Hephaestus</span>
+                        <span class="card-id mono">hephaestus</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用 Hephaestus"
+                      ></span>
+                    </div>
+                    <p class="card-desc">深度工程智能体，负责高强度实现、修复与交付。</p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">执行 / 调试</span>
+                      <span class="card-model mono">claude-opus-4.1</span>
+                    </div>
+                  </button>
+
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar">EX</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">Explore</span>
+                        <span class="card-id mono">explore</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用 Explore"
+                      ></span>
+                    </div>
+                    <p class="card-desc">代码探索智能体，用于检索仓库结构、模式与实现线索。</p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">研究 / 探索</span>
+                      <span class="card-model mono">claude-haiku-4.5</span>
+                    </div>
+                  </button>
+
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar">OR</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">Oracle</span>
+                        <span class="card-id mono">oracle</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用 Oracle"
+                      ></span>
+                    </div>
+                    <p class="card-desc">只读顾问智能体，用于架构评审、设计权衡与谨慎复核。</p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">评审 / 分析</span>
+                      <span class="card-model mono">gpt-5</span>
+                    </div>
+                  </button>
+
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar">LB</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">Librarian</span>
+                        <span class="card-id mono">librarian</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用 Librarian"
+                      ></span>
+                    </div>
+                    <p class="card-desc">资料检索智能体，用于搜索外部文档、示例与参考实现。</p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">研究 / 资料检索</span>
+                      <span class="card-model mono">gemini-2.5-pro</span>
+                    </div>
+                  </button>
+
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar">MO</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">Momus</span>
+                        <span class="card-id mono">momus</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="false"
+                        aria-label="启用 Momus"
+                      ></span>
+                    </div>
+                    <p class="card-desc">计划/质量审阅智能体，用于挑战方案、找出风险与漏洞。</p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">评审 / 挑刺</span>
+                      <span class="badge">已禁用</span>
+                      <span class="card-model mono">claude-sonnet-4.5</span>
+                    </div>
+                  </button>
+
+                  <button class="card" data-goto-edit>
+                    <div class="card-top">
+                      <span class="avatar">AT</span>
+                      <span style="min-width: 0">
+                        <span class="card-name">Atlas</span>
+                        <span class="card-id mono">atlas</span>
+                      </span>
+                      <span class="phead-spacer"></span>
+                      <span
+                        class="switch"
+                        role="switch"
+                        aria-checked="true"
+                        aria-label="启用 Atlas"
+                      ></span>
+                    </div>
+                    <p class="card-desc">验收协调智能体，用于确认完成度与证据闭环。</p>
+                    <div class="card-foot">
+                      <span class="badge badge-accent">评审 / 验收</span>
+                      <span class="card-model mono">claude-sonnet-4.5</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── 编辑态（整页） ── -->
+          <section id="view-edit" hidden>
+            <div class="phead" style="margin-bottom: 14px">
+              <button class="btn btn-ghost btn-sm" id="back-to-browse">‹ 返回目录</button>
+              <span class="avatar avatar-accent">架顾</span>
+              <div>
+                <h1 class="phead-title">架构顾问</h1>
+                <p class="phead-sub mono" style="margin-top: 1px">
+                  architect-advisor · 自定义 · 别名 arch / 架构审查
+                </p>
+              </div>
+              <span class="phead-spacer"></span>
+              <label class="label" style="grid-auto-flow: column; align-items: center; gap: 8px">
+                <span>启用</span>
+                <button class="switch" role="switch" aria-checked="true" aria-label="启用"></button>
+              </label>
+              <button class="btn">取消</button>
+              <button class="btn btn-primary">保存变更</button>
+            </div>
+
+            <div class="edit-layout">
+              <nav class="side-nav" aria-label="编辑分区">
+                <a href="#sec-basic" class="is-active">基础信息</a>
+                <a href="#sec-role">角色与预设</a>
+                <a href="#sec-model">模型配置</a>
+                <a href="#sec-prompt">提示词与备注</a>
+                <a href="#sec-danger">危险操作</a>
+              </nav>
+
+              <div>
+                <div class="form-card" id="sec-basic">
+                  <div class="group-title"><h2>基础信息</h2></div>
+                  <div class="grid2">
+                    <label class="label">
+                      名称
+                      <input class="field" value="架构顾问" />
+                    </label>
+                    <label class="label">
+                      别名（逗号分隔）
+                      <input class="field mono" value="arch, 架构审查" />
+                      <span class="hint">路由时按别名命中该 Agent</span>
+                    </label>
+                  </div>
+                  <label class="label">
+                    说明
+                    <input class="field" value="负责架构评审、设计权衡与长期演进建议。" />
+                  </label>
+                </div>
+
+                <div class="form-card" id="sec-role" style="margin-top: 14px">
+                  <div class="group-title"><h2>角色与预设</h2></div>
+                  <div class="grid2">
+                    <label class="label">
+                      核心角色
+                      <select class="select">
+                        <option>规划 · planner</option>
+                        <option>通用 · general</option>
+                        <option>执行 · executor</option>
+                        <option>研究 · researcher</option>
+                        <option>评审 · reviewer</option>
+                      </select>
+                    </label>
+                    <label class="label">
+                      预设
+                      <select class="select">
+                        <option>架构 · architect</option>
+                        <option>默认 · default</option>
+                        <option>分析 · analyst</option>
+                        <option>挑刺 · critic</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-card" id="sec-model" style="margin-top: 14px">
+                  <div class="group-title"><h2>模型配置</h2></div>
+                  <div class="grid2">
+                    <label class="label">
+                      默认模型
+                      <input class="field mono" value="anthropic/claude-opus-4.1" />
+                    </label>
+                    <label class="label">
+                      Variant
+                      <input class="field mono" value="high" />
+                    </label>
+                  </div>
+                  <label class="label">
+                    回退模型（按序尝试）
+                    <input class="field mono" value="anthropic/claude-sonnet-4.5, openai/gpt-5" />
+                  </label>
+                </div>
+
+                <div class="form-card" id="sec-prompt" style="margin-top: 14px">
+                  <div class="group-title"><h2>提示词与备注</h2></div>
+                  <label class="label">
+                    System Prompt
+                    <textarea class="textarea">
+你是架构顾问。在给出结论前先确认约束条件与不变量，明确列出被否决的备选方案及其理由；对无法在现有证据下判定的问题，直接标注「需要更多信息」，不要臆测。</textarea>
+                  </label>
+                  <label class="label">
+                    备注
+                    <input class="field" value="大重构评审专用；仅在架构类任务中推荐。" />
+                  </label>
+                </div>
+
+                <div class="form-card" id="sec-danger" style="margin-top: 14px">
+                  <div class="group-title"><h2>危险操作</h2></div>
+                  <div class="danger-zone">
+                    <p>恢复默认会丢弃该 Agent 的全部本地覆盖；移除后别名与提示词一并失效。</p>
+                    <button class="btn">恢复默认</button>
+                    <button class="btn btn-danger">移除 Agent</button>
+                  </div>
+                </div>
+
+                <div class="form-foot">
+                  <button class="btn btn-primary">保存变更</button>
+                  <button class="btn">取消</button>
+                  <span class="save-state" style="color: var(--accent); font-size: 11px"
+                    >已保存 Agent 实体 · 刚刚</span
+                  >
+                  <span class="phead-spacer"></span>
+                  <span class="statline"
+                    >创建于 <b>2026-10-18</b> · 最近更新 <b>2026-11-02 14:08</b></span
+                  >
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const browse = document.getElementById('view-browse');
+      const edit = document.getElementById('view-edit');
+
+      function showEdit() {
+        browse.hidden = true;
+        edit.hidden = false;
+        document.querySelector('.page').scrollTop = 0;
+      }
+
+      function showBrowse() {
+        edit.hidden = true;
+        browse.hidden = false;
+        document.querySelector('.page').scrollTop = 0;
+      }
+
+      document.querySelectorAll('[data-goto-edit]').forEach((card) => {
+        card.addEventListener('click', (event) => {
+          if (event.target.closest('.switch')) {
+            return;
+          }
+          showEdit();
+        });
+      });
+
+      document.getElementById('back-to-browse').addEventListener('click', showBrowse);
+
+      // 开关可点（演示用，不落库）
+      document.querySelectorAll('.switch').forEach((el) => {
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          el.setAttribute(
+            'aria-checked',
+            el.getAttribute('aria-checked') === 'true' ? 'false' : 'true',
+          );
+        });
+      });
+
+      document.querySelectorAll('.side-nav a').forEach((link) => {
+        link.addEventListener('click', () => {
+          document
+            .querySelectorAll('.side-nav a')
+            .forEach((item) => item.classList.remove('is-active'));
+          link.classList.add('is-active');
+        });
+      });
+    </script>
+  </body>
+</html>
