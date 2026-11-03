@@ -338,6 +338,7 @@ function buildBuiltinAgentRecord(id: string, override?: StoredBuiltinOverride): 
         model: override.model,
         variant: override.variant,
         fallbackModels: override.fallbackModels,
+        systemPrompt: override.systemPrompt,
         updatedAt: override.updatedAt,
         enabled: override.enabled,
       }
@@ -348,13 +349,15 @@ function buildBuiltinAgentRecord(id: string, override?: StoredBuiltinOverride): 
     model: sanitizedOverride?.model ?? defaultBody.model,
     variant: sanitizedOverride?.variant ?? defaultBody.variant,
     fallbackModels: sanitizedOverride?.fallbackModels ?? defaultBody.fallbackModels,
+    systemPrompt: sanitizedOverride?.systemPrompt ?? defaultBody.systemPrompt,
   });
 
-  const hasModelOverrides =
+  const hasOverrides =
     (sanitizedOverride?.model ?? defaultBody.model) !== defaultBody.model ||
     (sanitizedOverride?.variant ?? defaultBody.variant) !== defaultBody.variant ||
     JSON.stringify(sanitizedOverride?.fallbackModels ?? defaultBody.fallbackModels) !==
-      JSON.stringify(defaultBody.fallbackModels);
+      JSON.stringify(defaultBody.fallbackModels) ||
+    sanitizedOverride?.systemPrompt !== undefined;
 
   return {
     id,
@@ -362,8 +365,12 @@ function buildBuiltinAgentRecord(id: string, override?: StoredBuiltinOverride): 
     source: builtin.source,
     enabled: sanitizedOverride?.enabled ?? true,
     removable: false,
-    resettable: hasModelOverrides,
-    hasOverrides: hasModelOverrides,
+    resettable: hasOverrides,
+    hasOverrides,
+    promptMetadata: {
+      defaultText: defaultBody.systemPrompt ?? undefined,
+      hasPromptOverride: currentBody.systemPrompt !== defaultBody.systemPrompt,
+    },
     createdAt: SYSTEM_CREATED_AT,
     updatedAt: sanitizedOverride?.updatedAt ?? SYSTEM_CREATED_AT,
     ...currentBody,
@@ -479,9 +486,16 @@ export function updateManagedAgentForUser(
 
   if (catalog.customAgents[agentId]) {
     const current = catalog.customAgents[agentId];
+    // 自定义 Agent 必须始终带提示词：`null` 属内置覆盖的「清除」语义，对自定义 Agent
+    // 无意义（视为未提供，保留现值），避免 `normalizeBody` 把提示词清空。
+    const { systemPrompt: customSystemPrompt, ...restInput } = input;
     current.current = normalizeBody({
       ...current.current,
-      ...input,
+      ...restInput,
+      systemPrompt:
+        customSystemPrompt === undefined || customSystemPrompt === null
+          ? current.current.systemPrompt
+          : customSystemPrompt,
       aliases: input.aliases ?? current.current.aliases,
       canonicalRole: input.canonicalRole ?? current.current.canonicalRole,
     });
@@ -501,7 +515,6 @@ export function updateManagedAgentForUser(
     'description',
     'aliases',
     'canonicalRole',
-    'systemPrompt',
     'note',
     'enabled',
   ].filter((field) => field in input);
@@ -517,15 +530,45 @@ export function updateManagedAgentForUser(
       input.fallbackModels !== undefined
         ? normalizeModelList(input.fallbackModels)
         : current.fallbackModels,
+    systemPrompt:
+      input.systemPrompt === undefined
+        ? current.systemPrompt
+        : (normalizeOptionalText(input.systemPrompt) ?? undefined),
     updatedAt: now,
   };
 
   const builtinDefault = defaultBodyForBuiltin(agentId);
+  const nextSystemPrompt = next.systemPrompt ?? undefined;
+  const defaultSystemPrompt = builtinDefault.systemPrompt ?? undefined;
+
+  // 覆盖记录只保留**与默认不同的字段**。任何「等于默认值」的字段只要落库，等上游升级
+  // 默认值之后都会变成陈旧值，把该 Agent 静默钉在旧配置上（用户并没有要固定它）。
+  // 注意 `sameAsDefault` 要求四个字段全等于默认才删整条记录，所以「改了模型但提示词
+  // 等于默认」这类组合不会被它兜住，必须逐字段归一。四个字段同理：
+  if (nextSystemPrompt === defaultSystemPrompt) {
+    delete next.systemPrompt;
+  }
+  if ((next.model ?? builtinDefault.model) === builtinDefault.model) {
+    delete next.model;
+  }
+  if ((next.variant ?? builtinDefault.variant) === builtinDefault.variant) {
+    delete next.variant;
+  }
+  // 两侧都按 `?? []` 归一，避免「默认无回退链（undefined）」与「提交空数组（[]）」
+  // 被 JSON 序列化判成不同值而落库。
+  if (
+    JSON.stringify(next.fallbackModels ?? []) ===
+    JSON.stringify(builtinDefault.fallbackModels ?? [])
+  ) {
+    delete next.fallbackModels;
+  }
+
   const sameAsDefault =
     (next.model ?? builtinDefault.model) === builtinDefault.model &&
     (next.variant ?? builtinDefault.variant) === builtinDefault.variant &&
     JSON.stringify(next.fallbackModels ?? builtinDefault.fallbackModels) ===
-      JSON.stringify(builtinDefault.fallbackModels);
+      JSON.stringify(builtinDefault.fallbackModels) &&
+    nextSystemPrompt === defaultSystemPrompt;
 
   if (sameAsDefault) {
     delete catalog.builtinOverrides[agentId];

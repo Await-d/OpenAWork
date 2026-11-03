@@ -19,7 +19,7 @@ export const AGENT_ROUTE_ERROR_MESSAGES = {
   agentExists: '目标 Agent 已存在。',
   agentNotFound: '目标 Agent 不存在。',
   builtinDeleteForbidden: '内置 Agent 不允许删除。',
-  builtinUpdateRestricted: '内置 Agent 仅允许修改模型配置。',
+  builtinUpdateRestricted: '内置 Agent 仅允许修改模型配置与系统提示词。',
   updatePayloadRequired: '至少需要提供一个可更新字段。',
 } as const;
 
@@ -90,7 +90,16 @@ export const updateManagedAgentSchema = z
     model: z.string().trim().min(1).max(200).optional(),
     variant: z.string().trim().min(1).max(80).optional(),
     fallbackModels: z.array(z.string().trim().min(1).max(200)).optional(),
-    systemPrompt: z.string().trim().max(MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS).optional(),
+    /**
+     * `undefined` = 不改动；`null` = 删除用户覆盖（仅内置 Agent，回落当前默认）；
+     * 非空字符串 = 写入覆盖。自定义 Agent 仍要求非空提示词。
+     */
+    systemPrompt: z
+      .string()
+      .trim()
+      .max(MODEL_REQUEST_SYSTEM_PROMPT_MAX_CHARS)
+      .nullable()
+      .optional(),
     note: z.string().trim().max(400).optional(),
     enabled: z.boolean().optional(),
   })

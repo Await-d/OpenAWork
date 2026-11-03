@@ -133,6 +133,31 @@ export type {
   ToolResultContent,
 } from './message-schema.js';
 
+export type {
+  ScheduleKind,
+  DeliveryMode,
+  CronExecutionStatus,
+  ScheduledTaskDefinition,
+  ScheduledTaskExecution,
+  ScheduledTaskView,
+  ScheduledTaskCreateInput,
+  ScheduledTaskUpdateInput,
+  ScheduledTaskHistoryOptions,
+  ScheduledTaskListResponse,
+  ScheduledTaskDetailResponse,
+  ScheduledTaskHistoryResponse,
+  ScheduledTaskRunResponse,
+  ScheduledTaskErrorResponse,
+} from './scheduled-tasks.js';
+export {
+  scheduleKindSchema,
+  deliveryModeSchema,
+  cronExecutionStatusSchema,
+  scheduledTaskCreateInputSchema,
+  scheduledTaskUpdateInputSchema,
+  scheduledTaskHistoryOptionsSchema,
+} from './scheduled-tasks-validation.js';
+
 export type DialogueMode = 'clarify' | 'coding' | 'programmer';
 
 export type CommandSurface = 'composer' | 'palette';
@@ -835,6 +860,13 @@ export interface ManagedAgentBody {
   deferToolLoading?: boolean;
 }
 
+export interface ManagedAgentPromptMetadata {
+  /** 当前版本的默认提示词（用户覆盖的回落目标，也是「恢复默认」的结果）。 */
+  defaultText?: string;
+  /** 是否存在用户级提示词覆盖（不能用 `hasOverrides` 代替，后者含模型字段）。 */
+  hasPromptOverride: boolean;
+}
+
 export interface ManagedAgentRecord extends ManagedAgentBody {
   id: string;
   origin: ManagedAgentOrigin;
@@ -843,6 +875,11 @@ export interface ManagedAgentRecord extends ManagedAgentBody {
   removable: boolean;
   resettable: boolean;
   hasOverrides: boolean;
+  /**
+   * 提示词覆盖状态（仅内置 Agent 会填充）：UI 用它区分「默认 / 已覆盖」并展示
+   * 「恢复提示词默认」，避免用含模型字段的 `hasOverrides` 误判提示词状态。
+   */
+  promptMetadata?: ManagedAgentPromptMetadata;
   createdAt: string;
   updatedAt: string;
 }
@@ -860,7 +897,11 @@ export interface UpdateManagedAgentInput {
   model?: string;
   variant?: string;
   fallbackModels?: string[];
-  systemPrompt?: string;
+  /**
+   * 提示词更新：`undefined` 表示不改动；`null` 表示删除用户覆盖、回落当前默认；
+   * 非空字符串表示写入覆盖（空串按删除处理）。自定义 Agent 仍要求非空提示词。
+   */
+  systemPrompt?: string | null;
   color?: string;
   note?: string;
   enabled?: boolean;

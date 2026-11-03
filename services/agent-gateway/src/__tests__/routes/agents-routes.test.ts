@@ -26,6 +26,10 @@ interface ManagedAgentFixture {
   readonly label: string;
   readonly description: string;
   readonly systemPrompt?: string;
+  readonly promptMetadata?: {
+    readonly defaultText?: string;
+    readonly hasPromptOverride: boolean;
+  };
   readonly note?: string;
 }
 
@@ -201,9 +205,90 @@ describe('agents routes error contracts', () => {
       });
 
       expect(response.statusCode).toBe(400);
+      // 文案已随「内置 Agent 允许覆盖系统提示词」变更（label 等字段仍被禁止）。
       expect(response.json()).toMatchObject({
-        error: '内置 Agent 仅允许修改模型配置。',
+        error: '内置 Agent 仅允许修改模型配置与系统提示词。',
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PUT /agents/:agentId 允许内置 agent 覆盖并清除系统提示词', async () => {
+    const app = await buildApp();
+    const authorization = bearer(app);
+    try {
+      const withPrompt = await app.inject({
+        method: 'PUT',
+        url: '/agents/build',
+        headers: { authorization, 'content-type': 'application/json' },
+        payload: { systemPrompt: '用户自定义的构建提示词' },
+      });
+      expect(withPrompt.statusCode).toBe(200);
+      const overridden = withPrompt.json<{ agent: ManagedAgentFixture }>().agent;
+      expect(overridden.systemPrompt).toBe('用户自定义的构建提示词');
+      expect(overridden.promptMetadata?.hasPromptOverride).toBe(true);
+
+      // 重新拉取确认覆盖已持久化（防止「仅改提示词被判定为默认而删除」）。
+      const listed = await app.inject({
+        method: 'GET',
+        url: '/agents',
+        headers: { authorization },
+      });
+      const build = listed.json<AgentsListResponse>().agents.find((agent) => agent.id === 'build');
+      expect(build?.systemPrompt).toBe('用户自定义的构建提示词');
+
+      // 只改模型不得丢弃已有提示词覆盖。
+      const modelOnly = await app.inject({
+        method: 'PUT',
+        url: '/agents/build',
+        headers: { authorization, 'content-type': 'application/json' },
+        payload: { model: 'gpt-5' },
+      });
+      expect(modelOnly.statusCode).toBe(200);
+      expect(modelOnly.json<{ agent: ManagedAgentFixture }>().agent.systemPrompt).toBe(
+        '用户自定义的构建提示词',
+      );
+
+      // `systemPrompt: null` → 清除覆盖、回落当前默认。
+      const cleared = await app.inject({
+        method: 'PUT',
+        url: '/agents/build',
+        headers: { authorization, 'content-type': 'application/json' },
+        payload: { systemPrompt: null },
+      });
+      expect(cleared.statusCode).toBe(200);
+      const clearedAgent = cleared.json<{ agent: ManagedAgentFixture }>().agent;
+      expect(clearedAgent.promptMetadata?.hasPromptOverride).toBe(false);
+      expect(clearedAgent.systemPrompt).not.toBe('用户自定义的构建提示词');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('自定义 Agent 传 systemPrompt: null 保留现值（null 仅对内置 Agent 表示清除）', async () => {
+    const app = await buildApp();
+    const authorization = bearer(app);
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        headers: { authorization, 'content-type': 'application/json' },
+        payload: { id: 'custom-null-guard', label: '自定义守卫', systemPrompt: '原始提示词' },
+      });
+      expect(created.statusCode).toBe(201);
+
+      const updated = await app.inject({
+        method: 'PUT',
+        url: '/agents/custom-null-guard',
+        headers: { authorization, 'content-type': 'application/json' },
+        payload: { systemPrompt: null },
+      });
+
+      expect(updated.statusCode).toBe(200);
+      // 自定义 Agent 必须始终带提示词：`null` 视为「未提供」而非清空，
+      // 否则 `normalizeBody` 会把它的提示词静默清掉。
+      expect(updated.json<{ agent: ManagedAgentFixture }>().agent.systemPrompt).toBe('原始提示词');
     } finally {
       await app.close();
     }
