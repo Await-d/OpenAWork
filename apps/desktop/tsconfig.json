@@ -7,7 +7,7 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "outDir": "./dist",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "ES2023.Array", "DOM", "DOM.Iterable"],
     "paths": {
       "@openAwork/artifacts": ["../../packages/artifacts/src/index.ts"],
       "@openAwork/logger": ["../../packages/logger/src/index.ts"],

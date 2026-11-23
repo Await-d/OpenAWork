@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import fuzzysort from 'fuzzysort';
 import { isWithinTerminalScope } from '../../../utils/terminal-scope.js';
 
@@ -58,6 +59,9 @@ export function CommandPalette({ items, isOpen, onClose }: CommandPaletteProps) 
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (isImeComposingKeyboardEvent(e)) {
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();

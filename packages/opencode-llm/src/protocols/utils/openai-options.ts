@@ -117,10 +117,18 @@ export const textVerbosity = (request: LLMRequest) => {
 
 export const serviceTier = (request: LLMRequest) => {
   const value = options(request)?.serviceTier;
-  return typeof value === 'string' && SERVICE_TIERS.has(value)
-    ? (value as OpenAIServiceTier)
-    : undefined;
+  return isServiceTier(value) ? value : undefined;
 };
+
+/**
+ * 白名单窄化（**只适用于请求侧**）。
+ *
+ * 请求侧用它是为了避免把拼错的档位原样发给上游；响应侧不能套用同一份白名单 ——
+ * 上游回显的 `service_tier` 只是元数据，任何未知值都应当被忽略，而不是让整个
+ * chunk 判为非法帧、把一条正在输出的流掐断。
+ */
+export const isServiceTier = (value: unknown): value is OpenAIServiceTier =>
+  typeof value === 'string' && SERVICE_TIERS.has(value);
 
 export const instructions = (request: LLMRequest) => {
   const value = options(request)?.instructions;

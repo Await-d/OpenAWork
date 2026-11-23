@@ -92,7 +92,7 @@ describe('planMemoryMaintenanceJobs · 周期规划', () => {
 });
 
 describe('日巡检 · 确定性识别', () => {
-  it('完全重复的两条 active 记忆 → 产生 merge 提议且正式记忆未被修改', () => {
+  it('重复项确认前不变，确认后仅保留一条active且历史条目保留', async () => {
     // 唯一索引按**原始** key 判定，故「大小写 / 空白不同、规范化后相同」的两条
     // 可同时 active —— 这正是日巡检要识别的「完全重复」。
     const firstId = seedMemory('编辑器', 'VSCode');
@@ -115,6 +115,42 @@ describe('日巡检 · 确定性识别', () => {
     expect(afterFirst?.revision).toBe(beforeFirst?.revision);
     expect(afterSecond?.value).toBe(beforeSecond?.value);
     expect(afterSecond?.revision).toBe(beforeSecond?.revision);
+    const proposal = mergeProposals[0];
+    if (!proposal) throw new Error('缺少重复提案');
+    const { commitMemoryProposal } =
+      await import('../../memory/governance/memory-commit-service.js');
+    const committed = commitMemoryProposal({
+      userId: USER_ID,
+      decidedBy: USER_ID,
+      proposalId: proposal.id,
+      now: BASE_TIME,
+    });
+    expect(committed.ok).toBe(true);
+    expect(memoryStore.listActiveMemoriesForScope(USER_ID, scope())).toHaveLength(1);
+    expect(committed.memory?.lifecycle).toBe('superseded');
+    expect(committed.memory?.supersededBy).toBe(proposal.payload.mergeIntoId);
+    expect(memoryStore.getMemoryById(USER_ID, firstId)).toBeDefined();
+    expect(memoryStore.getMemoryById(USER_ID, secondId)).toBeDefined();
+  });
+
+  it('合并提案待确认期间保留项变化，不能归档仍有用的重复项', async () => {
+    seedMemory('编辑器', 'VSCode');
+    seedMemory(' 编辑器 ', ' vscode ');
+    tasks.buildDailyPatrolSummary(USER_ID, scope(), BASE_TIME);
+    const proposal = listPendingProposals().find((entry) => entry.action === 'merge');
+    if (!proposal?.payload.mergeIntoId) throw new Error('缺少保留项');
+    memoryStore.updateMemory(USER_ID, proposal.payload.mergeIntoId, { value: 'Emacs' });
+    const { commitMemoryProposal } =
+      await import('../../memory/governance/memory-commit-service.js');
+    expect(
+      commitMemoryProposal({
+        userId: USER_ID,
+        decidedBy: USER_ID,
+        proposalId: proposal.id,
+        now: BASE_TIME,
+      }).ok,
+    ).toBe(false);
+    expect(memoryStore.listActiveMemoriesForScope(USER_ID, scope())).toHaveLength(2);
   });
 
   it('疑似临时信息 → 产生 archive 提议且记忆仍 active', () => {
@@ -139,6 +175,81 @@ describe('日巡检 · 确定性识别', () => {
 });
 
 describe('周增量 · 水位与冲突', () => {
+  it('报告写入失败时任务完成与scope水位一起回滚，下次可以重试', async () => {
+    seedMemory('运行环境', 'bun');
+    jobs.enqueueMemoryJob({
+      userId: USER_ID,
+      kind: 'weekly_semantic',
+      scope: scope(),
+      periodKey: 'report-rollback',
+      dueAt: BASE_TIME.toISOString(),
+      now: BASE_TIME,
+    });
+    dbModule.sqliteRun(`CREATE TEMP TRIGGER fail_maintenance_report BEFORE INSERT ON memory_maintenance_reports
+      BEGIN SELECT RAISE(ABORT, 'report write failed'); END`);
+    try {
+      const result = await tasks.runMemoryMaintenanceTick({
+        now: BASE_TIME,
+        owner: OWNER,
+        maxJobs: 1,
+      });
+      expect(result.failed).toBe(1);
+      expect(result.completed).toBe(0);
+      expect(result.summaries).toEqual([]);
+      expect(
+        dbModule.sqliteGet<{ status: string }>(
+          'SELECT status FROM memory_jobs WHERE period_key = ?',
+          ['report-rollback'],
+        )?.status,
+      ).toBe('retry_wait');
+      expect(
+        dbModule.sqliteGet('SELECT * FROM memory_scope_watermarks WHERE user_id = ?', [USER_ID]),
+      ).toBeUndefined();
+      expect(jobs.readMemoryMaintenanceState(USER_ID).changeWatermark).toBe(0);
+      expect(jobs.listUnnotifiedMemoryMaintenanceReports(USER_ID)).toEqual([]);
+    } finally {
+      dbModule.sqliteRun('DROP TRIGGER fail_maintenance_report');
+    }
+    const retried = await tasks.runMemoryMaintenanceTick({
+      now: new Date(BASE_TIME.getTime() + 120_000),
+      owner: OWNER,
+      maxJobs: 1,
+    });
+    expect(retried.completed).toBe(1);
+    expect(jobs.listUnnotifiedMemoryMaintenanceReports(USER_ID)).toHaveLength(1);
+    expect(
+      dbModule.sqliteGet<{ change_watermark: number }>(
+        'SELECT change_watermark FROM memory_scope_watermarks WHERE user_id = ?',
+        [USER_ID],
+      )?.change_watermark,
+    ).toBeGreaterThan(0);
+  });
+  it('不同scope的周任务不因其他scope推进用户水位而漏扫', async () => {
+    for (const path of ['/a', '/b']) {
+      memoryStore.createMemory(USER_ID, {
+        type: 'fact',
+        key: 'runtime',
+        value: 'bun',
+        scope: { type: 'workspace', id: path },
+      });
+      jobs.enqueueMemoryJob({
+        userId: USER_ID,
+        kind: 'weekly_semantic',
+        scope: { type: 'workspace', id: path },
+        periodKey: 'scope-regression',
+        dueAt: BASE_TIME.toISOString(),
+        now: BASE_TIME,
+      });
+    }
+    const result = await tasks.runMemoryMaintenanceTick({
+      now: BASE_TIME,
+      owner: OWNER,
+      maxJobs: 2,
+    });
+    expect(result.completed).toBe(2);
+    const reports = jobs.listUnnotifiedMemoryMaintenanceReports(USER_ID);
+    expect(reports.map((report) => report.scope.id).sort()).toEqual(['/a', '/b']);
+  });
   it('changeWatermark 之后无变化 → 不产生提议、不产生报告', () => {
     seedMemory('键', '值');
     const state = jobs.readMemoryMaintenanceState(USER_ID);

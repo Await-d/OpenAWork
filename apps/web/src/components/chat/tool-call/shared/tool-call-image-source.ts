@@ -1,14 +1,17 @@
 /**
  * 工具调用图片源解析（纯函数，无 React / 无副作用）。
  *
- * 覆盖三类「查阅了图片」的工具调用：
+ * 覆盖四类「与图片有关的工具调用」：
  *   - `look_at`：图片只存在于**入参**（`input.image_data` / `input.file_path`），
  *     网关最终只把分析文本写回 output，图片本身不进 output；
  *   - `desktop_automation` / `desktop_control`：截图以 artifact 形式存在，
  *     output JSON 里带 `artifactId`（见网关 desktop-screenshot-artifact.ts）；
  *   - `computer_use`：最终截图**不在 output 里**（网关刻意剥离 base64 以防撑爆
  *     上下文，见 gateway 的 runComputerUseToolWithScreenshot），只通过 tool result
- *     的 `attachments` 通道回传，因此必须由调用方把 attachments 传进来。
+ *     的 `attachments` 通道回传，因此必须由调用方把 attachments 传进来；
+ *   - 渠道「发图」（`PluginSendImage` / `WeixinSendImage` / `FeishuSendImage`）：
+ *     图片在**入参** `input.file_path`，output 只有 `{ messageId }` 回执，故缩略图
+ *     只能从入参解析——确认行旁边补一张「到底发了哪张图」。
  *
  * 解析结果供 `useToolCallImagePreview` 决定后续的读取方式（内联 data URL /
  * 远端 URL / 工作区文件 / 产物中心）。
@@ -16,6 +19,7 @@
 
 import type { InputImageContent } from '@openAwork/shared';
 import { getFilePreviewKind } from '../../../../utils/file/file-preview.js';
+import { isChannelSendImageTool } from './channel-send-input.js';
 
 export type ToolCallImageSource =
   | { kind: 'inline'; src: string; alt: string }
@@ -38,6 +42,33 @@ const BARE_BASE64_MIN_LENGTH = 128;
 const LOOK_AT_ALT = '已查看的图片';
 const DESKTOP_SCREENSHOT_ALT = '桌面截图';
 const COMPUTER_USE_SCREENSHOT_ALT = 'GUI 操作截图';
+const CHANNEL_SENT_IMAGE_ALT = '已发送的图片';
+
+/**
+ * 把「承载图片位置的字符串」解析成图片源。
+ *
+ * 顺序：data URL → inline，http(s) 地址 → remote，图片类工作区路径 → workspace，
+ * 其余（空串 / 普通文本 / 非图片扩展名）→ null。
+ *
+ * `look_at.file_path` 与渠道发图 `file_path` 的位置语义一致（网关入参 schema 都允许
+ * 「工作区绝对路径或 HTTP/HTTPS URL」），故共用这一份判定——「非图片路径不产生预览」
+ * 才不会两边各写一遍而漂移。
+ */
+function resolveImageLocation(raw: string, alt: string): ToolCallImageSource | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (INLINE_DATA_URL_PATTERN.test(trimmed)) {
+    return { kind: 'inline', src: trimmed, alt };
+  }
+  if (REMOTE_URL_PATTERN.test(trimmed)) {
+    return { kind: 'remote', src: trimmed, alt };
+  }
+  // 只认图片扩展名：文本 / PDF 之类的路径不产生图片预览。
+  if (getFilePreviewKind(trimmed) === 'image') {
+    return { kind: 'workspace', path: trimmed, alt };
+  }
+  return null;
+}
 
 /**
  * 把 `look_at` 入参解析为图片源。
@@ -65,14 +96,17 @@ function resolveLookAtSource(input: Record<string, unknown>): ToolCallImageSourc
 
   const filePath = input['file_path'];
   if (typeof filePath === 'string') {
-    const trimmedPath = filePath.trim();
-    // 只认图片扩展名：对文本 / PDF 调 look_at 不产生图片预览。
-    if (trimmedPath.length > 0 && getFilePreviewKind(trimmedPath) === 'image') {
-      return { kind: 'workspace', path: trimmedPath, alt: LOOK_AT_ALT };
-    }
+    return resolveImageLocation(filePath, LOOK_AT_ALT);
   }
 
   return null;
+}
+
+/** 渠道发图：从入参 `file_path` 解析缩略图源（输出里没有任何图片数据）。 */
+function resolveChannelSendImageSource(input: Record<string, unknown>): ToolCallImageSource | null {
+  const filePath = input['file_path'];
+  if (typeof filePath !== 'string') return null;
+  return resolveImageLocation(filePath, CHANNEL_SENT_IMAGE_ALT);
 }
 
 /**
@@ -223,6 +257,10 @@ export function resolveToolCallImageSource(
   if (normalized === 'computer_use') {
     // 截图只走 attachments：output 里的 lastScreenshot 已被网关剥离。
     return resolveComputerUseScreenshotSource(attachments);
+  }
+
+  if (isChannelSendImageTool(normalized)) {
+    return resolveChannelSendImageSource(input);
   }
 
   // 其它工具（generate_image / convert_media / read 等）已有专属卡片或并非

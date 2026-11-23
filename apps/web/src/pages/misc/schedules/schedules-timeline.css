@@ -1,0 +1,198 @@
+/* 定时任务页 · 时间轴视图 */
+
+.sch-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sch-timeline-note {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-emphasis);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+}
+
+.sch-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.sch-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.sch-group-head strong {
+  font-size: 12.5px;
+  color: var(--fg-strong);
+}
+
+.sch-group-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border-default);
+}
+
+.sch-entry {
+  display: grid;
+  grid-template-columns: 74px 20px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.sch-entry-time {
+  text-align: right;
+  padding-top: 12px;
+}
+
+.sch-entry-clock {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--fg-strong);
+}
+
+.sch-entry-time small {
+  display: block;
+  font-size: 10.5px;
+  /* 同理由：小字用 --fg-muted 才能过对比度阈值。 */
+  color: var(--fg-muted);
+}
+
+.sch-entry-rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.sch-entry-rail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-emphasis);
+}
+
+.sch-group .sch-entry:last-child .sch-entry-rail::before {
+  bottom: 50%;
+}
+
+.sch-entry-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: var(--bg-base);
+  z-index: 1;
+}
+
+.sch-entry-dot[data-kind='cron'] {
+  border-color: var(--contrast);
+}
+
+.sch-entry-dot[data-kind='every'] {
+  border-color: var(--info);
+}
+
+.sch-entry-dot[data-kind='at'] {
+  border-color: var(--accent);
+}
+
+.sch-entry-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--bg-overlay), var(--bg-raised));
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.sch-entry-card[data-disabled='true'] {
+  /* 同卡片视图：不用整体 opacity（会连带压低文字对比度），改虚线边框表达未启用。 */
+  border-style: dashed;
+  background: var(--bg-raised);
+}
+
+.sch-entry-card[data-running='true'] {
+  border-color: var(--contrast-border);
+}
+
+.sch-entry-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sch-entry-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--fg-strong);
+}
+
+.sch-entry-prompt {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sch-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px 14px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--fg-strong);
+}
+
+.sch-entry-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sch-entry-error {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--complement);
+  word-break: break-word;
+}
+
+.sch-entry-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border-default);
+  padding-top: 9px;
+}
+
+.sch-entry-history {
+  border-top: 1px dashed var(--border-emphasis);
+  padding-top: 9px;
+}
+
+@media (max-width: 700px) {
+  .sch-entry {
+    grid-template-columns: 56px 16px minmax(0, 1fr);
+    gap: 8px;
+  }
+}

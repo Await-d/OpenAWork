@@ -31,9 +31,9 @@ import type { ManagedBrowserTarget } from '@openAwork/browser-automation';
 
 import { resolveGatewayDataDir } from '../infra/storage-paths.js';
 import type { downloadFile } from './browser-download.js';
-import { createChromiumDownloader } from './chromium-downloader.js';
+import { createChromiumDownloader, sanitizeBrowserInstallText } from './chromium-downloader.js';
 import type { ChromiumDownloader } from './chromium-downloader.js';
-import { logGatewayWarn } from '../infra/gateway-logger.js';
+import { logGatewayDebug, logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 安装状态机的状态。 */
 export type BrowserInstallState = 'idle' | 'running' | 'succeeded' | 'failed' | 'unavailable';
@@ -178,6 +178,7 @@ function resolveCliFromAutomation(resolvePackageEntry: () => string): string | n
     }
     return tryResolveCli(createRequire(join(packageDir, 'package.json')));
   } catch {
+    logGatewayDebug('[browser-installer] browser automation CLI probe unavailable');
     return null;
   }
 }
@@ -192,6 +193,7 @@ function tryResolveCli(requireFn: NodeJS.Require): string | null {
     const cliPath = join(dirname(packageJsonPath), 'cli.js');
     return existsSyncSafe(cliPath) ? cliPath : null;
   } catch {
+    logGatewayDebug('[browser-installer] playwright CLI probe unavailable');
     return null;
   }
 }
@@ -215,6 +217,7 @@ function existsSyncSafe(path: string): boolean {
   try {
     return existsSync(path);
   } catch {
+    logGatewayDebug('[browser-installer] CLI file probe unavailable');
     return false;
   }
 }
@@ -251,6 +254,7 @@ class BrowserInstallerImpl implements BrowserInstaller {
   private readonly timeoutMs: number;
   private readonly downloader: ChromiumDownloader;
 
+  private activeRun: symbol | null = null;
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly state: InstallerState = {
     state: 'idle',
@@ -286,41 +290,7 @@ class BrowserInstallerImpl implements BrowserInstaller {
   }
 
   async install(): Promise<BrowserInstallStartResult> {
-    if (this.state.state === 'running') {
-      return { started: false, status: this.status() };
-    }
-
-    const browsersPath = this.resolveBrowsersPath();
-    if (!(await this.ensureBrowsersPath(browsersPath))) {
-      this.state.state = 'failed';
-      this.state.startedAt = null;
-      this.state.finishedAt = Date.now();
-      this.state.tailLog = [];
-      this.state.browsersPath = browsersPath;
-      this.state.error = `无法创建浏览器安装目录：${browsersPath}`;
-      return { started: false, status: this.status() };
-    }
-
-    let targets: ManagedBrowserTarget[];
-    try {
-      targets = await this.downloader.resolveTargets(browsersPath);
-    } catch (error) {
-      this.state.state = 'failed';
-      this.state.startedAt = null;
-      this.state.finishedAt = Date.now();
-      this.state.tailLog = [];
-      this.state.browsersPath = browsersPath;
-      this.state.error = `解析调试浏览器下载目标失败：${describeError(error)}`;
-      return { started: false, status: this.status() };
-    }
-
-    if (targets.length === 0) {
-      this.state.state = 'unavailable';
-      this.state.startedAt = null;
-      this.state.finishedAt = Date.now();
-      this.state.tailLog = [];
-      this.state.browsersPath = browsersPath;
-      this.state.error = buildInstallUnavailableMessage();
+    if (this.state.state === 'running' || this.activeRun !== null) {
       return { started: false, status: this.status() };
     }
 
@@ -329,28 +299,94 @@ class BrowserInstallerImpl implements BrowserInstaller {
     this.state.finishedAt = null;
     this.state.tailLog = [];
     this.state.error = null;
-    this.state.browsersPath = browsersPath;
-
     const controller = new AbortController();
-
+    const run = Symbol('browser-install');
+    this.activeRun = run;
+    const isCurrentRun = () =>
+      this.activeRun === run && this.state.state === 'running' && !controller.signal.aborted;
     if (this.timeoutMs > 0) {
       this.timeoutTimer = setTimeout(() => {
+        if (!isCurrentRun()) return;
         this.timeoutTimer = null;
-        if (this.state.state !== 'running') {
-          return;
-        }
         controller.abort(new Error('安装超时'));
         this.finishFailed(`安装超时（超过 ${Math.round(this.timeoutMs / 1000)} 秒未完成）。`);
       }, this.timeoutMs);
       this.timeoutTimer.unref?.();
     }
+    let handedOff = false;
+    try {
+      let browsersPath: string;
+      try {
+        browsersPath = this.resolveBrowsersPath();
+      } catch (error) {
+        this.finishFailed(describeError(error));
+        return { started: false, status: this.status() };
+      }
+      this.state.browsersPath = browsersPath;
+      const pathReady = await this.ensureBrowsersPath(browsersPath);
+      if (!isCurrentRun()) return { started: false, status: this.status() };
+      if (!pathReady) {
+        this.state.state = 'failed';
+        this.state.startedAt = null;
+        this.state.finishedAt = Date.now();
+        this.state.tailLog = [];
+        this.state.browsersPath = browsersPath;
+        this.state.error = `无法创建浏览器安装目录：${browsersPath}`;
+        return { started: false, status: this.status() };
+      }
 
-    void this.downloader
-      .ensureInstalled(browsersPath, (line) => this.pushLog(line), controller.signal)
-      .then(() => this.finishSucceeded())
-      .catch((error: unknown) => this.finishFailed(describeError(error)));
+      let targets: ManagedBrowserTarget[];
+      try {
+        targets = await this.downloader.resolveTargets(browsersPath);
+      } catch (error) {
+        if (!isCurrentRun()) return { started: false, status: this.status() };
+        logGatewayWarn('[browser-installer] failed to resolve browser download targets');
+        this.state.state = 'failed';
+        this.state.startedAt = null;
+        this.state.finishedAt = Date.now();
+        this.state.tailLog = [];
+        this.state.browsersPath = browsersPath;
+        this.state.error = `解析调试浏览器下载目标失败：${describeError(error)}`;
+        return { started: false, status: this.status() };
+      }
 
-    return { started: true, status: this.status() };
+      if (!isCurrentRun()) return { started: false, status: this.status() };
+      if (targets.length === 0) {
+        this.state.state = 'unavailable';
+        this.state.startedAt = null;
+        this.state.finishedAt = Date.now();
+        this.state.tailLog = [];
+        this.state.browsersPath = browsersPath;
+        this.state.error = buildInstallUnavailableMessage();
+        return { started: false, status: this.status() };
+      }
+
+      void this.downloader
+        .ensureInstalled(
+          browsersPath,
+          (line) => {
+            if (isCurrentRun()) this.pushLog(line);
+          },
+          controller.signal,
+        )
+        .then(() => {
+          if (isCurrentRun()) this.finishSucceeded();
+        })
+        .catch((error: unknown) => {
+          if (isCurrentRun()) this.finishFailed(describeError(error));
+        })
+        .finally(() => {
+          if (this.activeRun === run) this.activeRun = null;
+        });
+
+      handedOff = true;
+      return { started: true, status: this.status() };
+    } finally {
+      if (!handedOff && this.activeRun === run) {
+        this.clearTimeout();
+        this.activeRun = null;
+      }
+    }
   }
 
   private pushLog(rawLine: string): void {
@@ -399,16 +435,15 @@ class BrowserInstallerImpl implements BrowserInstaller {
       const stats = await stat(browsersPath);
       return stats.isDirectory();
     } catch {
+      logGatewayWarn('[browser-installer] failed to prepare browser installation directory');
       return false;
     }
   }
 }
 
 function describeError(error: unknown): string {
-  if (error instanceof Error && error.message.length > 0) {
-    return error.message;
-  }
-  return String(error);
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return sanitizeBrowserInstallText(message || '调试浏览器安装失败');
 }
 
 function defaultResetAvailabilityCache(): void {

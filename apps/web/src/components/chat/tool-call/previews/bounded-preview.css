@@ -1,0 +1,28 @@
+.bounded-preview,
+.bounded-preview-action {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bounded-preview summary {
+  overflow-wrap: anywhere;
+}
+
+.bounded-preview summary:hover,
+.bounded-preview-action:hover {
+  color: var(--text-strong);
+  background: var(--bg-hover);
+}
+
+.bounded-preview summary:active,
+.bounded-preview-action:active {
+  color: var(--accent);
+}
+
+.bounded-preview summary:focus-visible,
+.bounded-preview-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}

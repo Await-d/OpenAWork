@@ -1,4 +1,5 @@
 import type { RunArtifact } from '@openAwork/artifacts';
+import { copyTextToClipboard } from '../../components/layout/file-tree/file-tree-actions.js';
 
 type ArtifactPlatformAdapter = {
   openPath: (path: string) => Promise<void>;
@@ -16,7 +17,7 @@ export function createWebArtifactPlatformAdapter(): ArtifactPlatformAdapter {
     },
     async shareArtifact(artifact: RunArtifact): Promise<string> {
       const shareTarget = artifact.path ?? artifact.id;
-      await navigator.clipboard.writeText(shareTarget);
+      await copyTextToClipboard(shareTarget);
       return shareTarget;
     },
   };

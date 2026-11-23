@@ -50,11 +50,11 @@ describe('Settings MCP server config app mock contract integration', () => {
         disabledTools: ['codegraph_status'],
       },
       {
-        id: 'omo',
-        name: 'omo',
+        id: 'lsp',
+        name: 'lsp',
         transport: 'stdio',
         builtin: true,
-        builtinKind: 'adapter',
+        builtinKind: 'virtual',
         source: 'builtin',
         enabled: true,
       },
@@ -65,7 +65,7 @@ describe('Settings MCP server config app mock contract integration', () => {
     );
 
     expect(screen.queryByDisplayValue('openawork-virtual-codegraph')).toBeNull();
-    expect(screen.queryByDisplayValue('openawork-virtual-omo')).toBeNull();
+    expect(screen.queryByDisplayValue('openawork-virtual-lsp')).toBeNull();
     expect(screen.getAllByText('内置桥接')).toHaveLength(2);
 
     fireEvent.click(readElement(screen.getAllByLabelText('启用'), 0));
@@ -76,70 +76,70 @@ describe('Settings MCP server config app mock contract integration', () => {
     expect(codegraphPatch).not.toHaveProperty('url');
 
     fireEvent.change(readElement(screen.getAllByLabelText('禁用工具'), 1), {
-      target: { value: 'omo_list_agents, omo_read_session' },
+      target: { value: 'lsp_rename, lsp_hover' },
     });
-    const omoPatch = onUpdate.mock.calls[1]?.[1];
-    expect(onUpdate.mock.calls[1]?.[0]).toBe('omo');
-    expect(omoPatch).toMatchObject({
-      disabledTools: ['omo_list_agents', 'omo_read_session'],
+    const lspPatch = onUpdate.mock.calls[1]?.[1];
+    expect(onUpdate.mock.calls[1]?.[0]).toBe('lsp');
+    expect(lspPatch).toMatchObject({
+      disabledTools: ['lsp_rename', 'lsp_hover'],
       transport: 'stdio',
     });
-    expect(omoPatch).not.toHaveProperty('command');
-    expect(omoPatch).not.toHaveProperty('url');
+    expect(lspPatch).not.toHaveProperty('command');
+    expect(lspPatch).not.toHaveProperty('url');
   });
 
   it('keeps the app vitest shared-ui mock contract for protected user/plugin persistence', () => {
-    const userOmo: MCPServerEntry = {
-      id: 'omo',
-      name: 'user omo',
+    const userLsp: MCPServerEntry = {
+      id: 'lsp',
+      name: 'user lsp',
       transport: 'stdio',
       command: 'fake-user-command',
-      url: 'https://fake.invalid/user-omo',
+      url: 'https://fake.invalid/user-lsp',
       builtin: true,
-      builtinKind: 'adapter',
+      builtinKind: 'virtual',
       source: 'user',
       enabled: false,
-      disabledTools: ['omo_read_session'],
+      disabledTools: ['lsp_hover'],
     };
-    const pluginOmo: MCPServerEntry = {
-      id: 'omo-plugin',
-      name: 'plugin omo',
+    const pluginLsp: MCPServerEntry = {
+      id: 'lsp-plugin',
+      name: 'plugin lsp',
       transport: 'stdio',
       command: 'fake-plugin-command',
-      url: 'https://fake.invalid/plugin-omo',
+      url: 'https://fake.invalid/plugin-lsp',
       builtin: true,
-      builtinKind: 'adapter',
+      builtinKind: 'virtual',
       source: 'user',
       enabled: true,
-      disabledTools: ['omo_list_agents'],
+      disabledTools: ['lsp_rename'],
     };
-    Object.defineProperty(pluginOmo, 'source', {
+    Object.defineProperty(pluginLsp, 'source', {
       value: 'plugin',
       enumerable: true,
       configurable: true,
     });
 
-    const persisted = toPersistedMcpServers([userOmo, pluginOmo]);
-    const persistedUserOmo = readPersistedServer(persisted, 0);
-    const persistedPluginOmo = readPersistedServer(persisted, 1);
+    const persisted = toPersistedMcpServers([userLsp, pluginLsp]);
+    const persistedUserLsp = readPersistedServer(persisted, 0);
+    const persistedPluginLsp = readPersistedServer(persisted, 1);
 
-    expect(persistedUserOmo).toMatchObject({
-      id: 'omo',
+    expect(persistedUserLsp).toMatchObject({
+      id: 'lsp',
       source: 'user',
       enabled: false,
-      disabledTools: ['omo_read_session'],
+      disabledTools: ['lsp_hover'],
       transport: 'stdio',
     });
-    expect(persistedUserOmo).not.toHaveProperty('command');
-    expect(persistedUserOmo).not.toHaveProperty('url');
-    expect(persistedPluginOmo).toMatchObject({
-      id: 'omo-plugin',
+    expect(persistedUserLsp).not.toHaveProperty('command');
+    expect(persistedUserLsp).not.toHaveProperty('url');
+    expect(persistedPluginLsp).toMatchObject({
+      id: 'lsp-plugin',
       source: 'user',
       enabled: true,
-      disabledTools: ['omo_list_agents'],
+      disabledTools: ['lsp_rename'],
       transport: 'stdio',
     });
-    expect(persistedPluginOmo).not.toHaveProperty('command');
-    expect(persistedPluginOmo).not.toHaveProperty('url');
+    expect(persistedPluginLsp).not.toHaveProperty('command');
+    expect(persistedPluginLsp).not.toHaveProperty('url');
   });
 });

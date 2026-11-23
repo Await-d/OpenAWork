@@ -5,6 +5,7 @@
 ## 1. **超大文件问题（P0 - 严重）**
 
 ### ChatPage.tsx - 3717 行
+
 - **位置**：`apps/web/src/pages/chat-page/ChatPage.tsx`
 - **问题**：远超 1500 行限制，已破坏代码可维护性
 - **包含功能**：
@@ -27,6 +28,7 @@
 ## 2. **错误处理缺陷（P1 - 高）**
 
 ### 空 catch 块广泛存在
+
 - **位置**：`services/agent-gateway/src/permission/permission-contract.ts`、`browser-live/` 等
 - **示例**：
   ```typescript
@@ -42,7 +44,7 @@
 - **修复**：添加结构化日志
   ```typescript
   } catch (error) {
-    logger.warn({ err: error, context: 'parsePermissionJson' }, 
+    logger.warn({ err: error, context: 'parsePermissionJson' },
       'Permission JSON parse failed, treating as empty');
   }
   ```
@@ -52,6 +54,7 @@
 ## 3. **网关流式输出职责混乱（P1 - 高）**
 
 ### `/stream` 路由过度膨胀
+
 - **位置**：`services/agent-gateway/src/routes/stream.ts`
 - **问题**：
   - 包含模型路由、权限检查、会话管理、消息持久化、事件队列、SSE 编码等 8+ 个不同职责
@@ -76,6 +79,7 @@
 ## 4. **定时任务设计重复（P1 - 高）**
 
 ### 近 5 次提交都涉及定时任务（`.agentdocs/index.md` 被修改）
+
 - **问题**：
   - 未形成稳定的定时任务 API 边界
   - 网关端、运行器端、会话端三处都需要协调改动
@@ -94,6 +98,7 @@
 ## 5. **UI 组件层级混乱（P1 - 高）**
 
 ### 超大测试文件 useGatewayClient.test.tsx - 1648 行
+
 - **位置**：`apps/web/src/hooks/gateway/useGatewayClient.test.tsx`
 - **问题**：
   - 测试用例应被拆成多个文件（按测试维度）
@@ -110,6 +115,7 @@
 ## 6. **权限请求处理缺乏通一（P2 - 中）**
 
 ### permission-contract.ts 中的手工解析链条
+
 - **位置**：`services/agent-gateway/src/permission/permission-contract.ts` 第 107–193 行
 - **问题**：
   - `parseBlockedToolCalls` 用手工类型守卫，无 Zod schema
@@ -124,6 +130,7 @@
 ## 7. **浏览器会话管理缺少监控（P2 - 中）**
 
 ### browser-live/hub.ts 与 manager.ts 的状态一致性
+
 - **问题**：
   - `startScreencast` 成功后设置 `fanout.screencastActive = false` 是错误的
   - 状态回滚逻辑只有注释，无自动化测试
@@ -145,6 +152,7 @@
 ## 8. **消息及事件持久化缺乏事务一致性（P2 - 中）**
 
 ### stream.ts 中的多步持久化操作
+
 - **问题**：
   - `appendSessionMessageV2()` + `queueSessionRunEvent()` + `persistSessionFileDiffs()` 三个独立操作
   - 若中间失败，会产生不一致状态（消息已保存但事件未投递）
@@ -161,6 +169,7 @@
 ## 9. **工具权限校验分散（P2 - 中）**
 
 ### tool-permission-derivers.ts 中的多个空 catch
+
 - **位置**：`services/agent-gateway/src/permission/tool-permission-derivers.ts` 第 233、573、947 行
 - **问题**：
   - 每处 catch 块都有不同的隐式降级策略（有时降级到 info，有时到无权限）
@@ -173,6 +182,7 @@
 ## 10. **定时任务并发控制不足（P2 - 中）**
 
 ### OPENAWORK_CRON_MAX_CONCURRENT 环境变量
+
 - **位置**：`.env.example` 中新增此变量
 - **问题**：
   - 限制是全局的，无法按任务类型区分优先级
@@ -188,6 +198,7 @@
 ## 11. **移动端设置页面结构不清（P2 - 中）**
 
 ### apps/mobile/app/settings/[section].tsx
+
 - **问题**：动态路由参数与设置项映射不清
 - **改进**：建立 `SettingsSectionRegistry` 类似做法
 
@@ -195,14 +206,14 @@
 
 ## 综合评分
 
-| 维度 | 评分 | 说明 |
-|------|------|------|
+| 维度       | 评分 | 说明                                   |
+| ---------- | ---- | -------------------------------------- |
 | 代码模块化 | 3/10 | ChatPage 3700 行，stream.ts 超 1000 行 |
-| 错误处理 | 4/10 | 空 catch 块广泛，缺乏统一日志 |
-| 测试覆盖 | 5/10 | 有单元测试，但超大文件导致 IT 困难 |
-| 文档完整性 | 6/10 | CLAUDE.md 清晰，但架构决策未记录 |
-| 性能设计 | 7/10 | SSE 回退、重试策略较好，缺少监控 |
-| 可维护性 | 4/10 | 大量 hack 注释，设计不稳定 |
+| 错误处理   | 4/10 | 空 catch 块广泛，缺乏统一日志          |
+| 测试覆盖   | 5/10 | 有单元测试，但超大文件导致 IT 困难     |
+| 文档完整性 | 6/10 | CLAUDE.md 清晰，但架构决策未记录       |
+| 性能设计   | 7/10 | SSE 回退、重试策略较好，缺少监控       |
+| 可维护性   | 4/10 | 大量 hack 注释，设计不稳定             |
 
 ## 立即行动项（优先级）
 
@@ -210,8 +221,8 @@
 2. ✅ **统一错误处理与日志**（本周）— 影响线上诊断
 3. ✅ **stream.ts 分层**（下周）— 影响定时任务稳定性
 4. ✅ **定时任务 API 稳定化**（下周）— 影响后续版本迭代
-5. ⚠️  **权限校验统一化**（下两周）— 影响安全性
+5. ⚠️ **权限校验统一化**（下两周）— 影响安全性
 
 ---
 
-*分析时间：2024-01-* | 基于 git commit 38e81eda 及最近 git status*
+_分析时间：2024-01-_ | 基于 git commit 38e81eda 及最近 git status*

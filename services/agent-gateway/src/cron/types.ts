@@ -1,53 +1,8 @@
-export type ScheduleKind = 'at' | 'every' | 'cron';
-export type DeliveryMode = 'desktop' | 'session' | 'none';
+import type { ScheduledTaskDefinition, ScheduledTaskExecution } from '@openAwork/shared';
 
-export interface CronJobRecord {
-  id: string;
-  user_id: string;
-  name: string;
-  schedule_kind: ScheduleKind;
-  schedule_at: number | null;
-  schedule_every: number | null;
-  schedule_expr: string | null;
-  schedule_tz: string;
-  prompt: string;
-  agent_id: string | null;
-  model: string | null;
-  working_folder: string | null;
-  session_id: string | null;
-  delivery_mode: DeliveryMode;
-  delivery_target: string | null;
-  plugin_id: string | null;
-  plugin_chat_id: string | null;
-  enabled: boolean;
-  delete_after_run: boolean;
-  /**
-   * 历史列（表结构保留）。执行链路没有对应的迭代上限实现，已从 HTTP / 工具入参
-   * 移除——不要再把它当可用配置，也不要新增读取点。
-   */
-  max_iterations: number;
-  last_fired_at: number | null;
-  fire_count: number;
-  created_at: number;
-  updated_at: number;
-}
-
-export interface CronExecutionRecord {
-  id: string;
-  job_id: string;
-  started_at: number;
-  finished_at: number | null;
-  /**
-   * `skipped`：本次**到点触发**被跳过（上一次执行未结束 / 并发上限已满）。
-   *
-   * 以前这两种情况是静默 return：任务看起来「一直没跑」，历史里空无一物，
-   * 用户无从判断是没到点、被跳过、还是执行失败。跳过记录按任务每分钟最多
-   * 落一条，避免高频任务刷满历史。
-   */
-  status: 'running' | 'completed' | 'failed' | 'skipped';
-  error?: string;
-  session_id?: string;
-}
+export type { ScheduleKind, DeliveryMode } from '@openAwork/shared';
+export type CronJobRecord = ScheduledTaskDefinition;
+export type CronExecutionRecord = ScheduledTaskExecution;
 
 /**
  * 执行上下文：handler 建好「本次执行会话」后回调，调度器据此把 `session_id`

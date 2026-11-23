@@ -46,10 +46,10 @@ import {
   rehypeCodeHighlightBudget,
 } from './code-render-budget.js';
 import {
-  computeReasoningBodyMaxHeight,
-  REASONING_COLLAPSED_MAX_LINES,
-  REASONING_EXPANDED_MAX_HEIGHT,
+  createReasoningCollapsedBodyStyle,
+  createReasoningExpandedBodyStyle,
 } from '../assistant/reasoning-window.js';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 
 const CHAT_PREVIEW_MIN_HEIGHT = 360;
 const PREVIEW_RESIZE_MSG_TYPE = 'oaw-preview-resize';
@@ -571,10 +571,7 @@ function CodeBlock({
   );
 
   const handleCopy = useCallback(() => {
-    const writeText = navigator.clipboard?.writeText;
-    if (!writeText) return;
-    void writeText
-      .call(navigator.clipboard, text.replace(/\n$/, ''))
+    void copyTextToClipboard(text.replace(/\n$/, ''))
       .then(() => {
         setCopied(true);
         if (copyTimerRef.current != null) {
@@ -1051,8 +1048,7 @@ function MarkdownPreviewCodeBlock({
             data-testid="chat-markdown-code-copy"
             className="chat-markdown-code-copy"
             onClick={() => {
-              const copyRequest = navigator.clipboard?.writeText(copyableCode);
-              void copyRequest?.catch(() => undefined);
+              void copyTextToClipboard(copyableCode).catch(() => undefined);
             }}
           >
             复制
@@ -1234,8 +1230,7 @@ function StaticPreviewCodeBlock({
             data-testid="chat-markdown-code-copy"
             className="chat-markdown-code-copy"
             onClick={() => {
-              const copyRequest = navigator.clipboard?.writeText(copyableCode);
-              void copyRequest?.catch(() => undefined);
+              void copyTextToClipboard(copyableCode).catch(() => undefined);
             }}
           >
             复制代码
@@ -1319,25 +1314,13 @@ function ThinkingCodeBlock({ codeContent }: { codeContent: ReactNode }) {
   const selfFoldAvailable = lineCount > 1 && !foldDisabled && !messageFoldActive;
   const shouldCollapse = selfFoldAvailable && !expanded;
 
-  const windowStyle: CSSProperties | null = shouldCollapse
-    ? {
-        maxHeight: computeReasoningBodyMaxHeight(REASONING_COLLAPSED_MAX_LINES),
-        overflow: 'clip',
-      }
+  // 与主思考块共用同一份「贴底窗口」样式（`reasoning-window.ts`）：column-reverse 把内容
+  // 钉在容器底部，可见区始终落在最新的若干行上；展开后向上滚即可回看更早的思考。
+  const bodyStyle: CSSProperties | undefined = shouldCollapse
+    ? createReasoningCollapsedBodyStyle()
     : selfFoldAvailable
-      ? { maxHeight: REASONING_EXPANDED_MAX_HEIGHT, overflow: 'auto' }
-      : null;
-
-  // 与主思考块一致的「贴底窗口」：column-reverse 把内容钉在容器底部，超出部分从顶部
-  // 裁掉，可见区始终落在最新的若干行上；展开后向上滚即可回看更早的思考。
-  const bodyStyle: CSSProperties | undefined = windowStyle
-    ? {
-        ...windowStyle,
-        display: 'flex',
-        flexDirection: 'column-reverse',
-        position: 'relative',
-      }
-    : undefined;
+      ? createReasoningExpandedBodyStyle()
+      : undefined;
 
   return (
     <div className="assistant-reasoning-block" data-collapsed={shouldCollapse ? 'true' : undefined}>

@@ -1,3 +1,4 @@
+import { SubagentProgressProvider } from '../../components/chat/subagent-progress.js';
 import type { InputImageContent, SubagentNotice, WorkflowRuntimeState } from '@openAwork/shared';
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import type { Session, SessionTask } from '@openAwork/web-client';
@@ -34,9 +35,11 @@ import { QuickTerminalPanel } from '../../components/chat/terminal/QuickTerminal
 import { useChatSearch } from '../../components/chat/search/chat-search-overlay.js';
 
 import { CompanionStage } from '../../components/chat/companion/companion-stage.js';
-import { scrollToNextUserMessage, scrollToPrevUserMessage } from './history/scroll-user-message.js';
 import { useAppendImageGenerationSummary } from './hooks/use-append-image-generation-summary.js';
 import { useChatComposerShortcuts } from './hooks/use-chat-composer-shortcuts.js';
+import { useChatPageWindowEvents } from './hooks/use-chat-page-window-events.js';
+import { useChatComposerActions } from './hooks/use-chat-composer-actions.js';
+import { useChatImageResultSelection } from './hooks/use-chat-image-result-selection.js';
 import { useChatPageCoreState } from './hooks/use-chat-page-core-state.js';
 import { useSessionMetadataPersist } from './hooks/use-session-metadata-persist.js';
 import { useSessionRecoveryPolling } from './hooks/use-session-recovery-polling.js';
@@ -48,7 +51,6 @@ import { useMcpServerRetry } from './hooks/use-mcp-server-retry.js';
 import { useProviderFastMode } from './hooks/use-provider-fast-mode.js';
 import { useRenderMessageActions } from './hooks/use-render-message-actions.js';
 import { useEnsureMessageVisible } from './hooks/use-ensure-message-visible.js';
-import { useModelContextOverride } from './hooks/use-model-context-override.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
 import WorkspacePickerModal from '../../components/common/modal/WorkspacePickerModal.js';
 import SshWorkspacePickerModal from '../../components/common/modal/SshWorkspacePickerModal.js';
@@ -103,6 +105,7 @@ import {
 import { ChatRightPanel } from './panels/chat-right-panel.js';
 import { useBackgroundTaskPanel } from './panels/use-background-task-panel.js';
 
+import { applyContextWindowOverride } from '../../components/conversation-runtime/messages/context-usage.js';
 import { collectSubagentNotices } from '../../components/conversation-runtime/messages/subagent-notices.js';
 
 import { type SessionTodoItem } from '../../components/conversation-runtime/session/session-runtime.js';
@@ -189,9 +192,8 @@ import { useDisplayPreferencesStore } from '../../stores/settings/display-prefer
 import { CommandPalette, useCommandPalette } from '../../components/chat/misc/command-palette.js';
 import { PromptTemplatePanel } from '../../components/chat/misc/prompt-template-panel.js';
 import { useMessageMultiSelect } from '../../components/chat/message/message-multi-select.js';
-import { exportMessages, downloadExport } from '../../components/chat/message/message-export.js';
 import { useBookmarkStore } from '../../stores/chat/bookmarks.js';
-import { useChatKeyboardShortcuts } from '../../hooks/chat/useChatKeyboardShortcuts.js';
+import { useChatPageShortcuts } from './hooks/use-chat-page-shortcuts.js';
 import { useChatConversationViewProps } from './conversation/use-chat-conversation-view-props.js';
 import { ClassicChatRegion } from './layout/ClassicChatRegion.js';
 import { FusionChatRegion } from './layout/FusionChatRegion.js';
@@ -241,6 +243,9 @@ async function runProviderCatalogRefreshOnce(ctx: {
     ctx.onFinally();
   }
 }
+
+// 会话级挡位的叠加逻辑已下沉到 `conversation-runtime/messages/context-usage.ts`
+// 的 `applyContextWindowOverride`（chat / team 共用同一份，避免口径分叉）。
 
 export default function ChatPage() {
   const routeParams = useParams<{ sessionId: string }>();
@@ -455,17 +460,10 @@ export default function ChatPage() {
     requestSessionListRefresh,
   });
   const [workflowRuntime, setWorkflowRuntime] = useState<WorkflowRuntimeState | null>(null);
-  const [latestGeneratedImageResult, setLatestGeneratedImageResult] = useState<{
-    artifactId: string;
-    artifactTitle: string;
-    modelLabel: string;
-  } | null>(null);
-  const [selectedImageEditReferenceArtifactId, setSelectedImageEditReferenceArtifactId] = useState<
-    string | null
-  >(null);
   const devServerDetectedTerminalIdsRef = useRef<Set<string>>(new Set());
   const [isSessionSnapshotReady, setIsSessionSnapshotReady] = useState(false);
   const sessionMetadataDirtyRef = useRef(false);
+  const draftThinkingOverrideRef = useRef(false);
   const sessionRestoredFromCacheRef = useRef(false);
   const [showSkeletonAfterDelay, setShowSkeletonAfterDelay] = useState(false);
   const skeletonDelayTimerRef = useRef<number | null>(null);
@@ -473,7 +471,36 @@ export default function ChatPage() {
   const [retryPrompt, setRetryPrompt] = useState<RetryPrompt | null>(null);
   const [, startSessionSwitchTransition] = useTransition();
   const [sessionModesHydrated, setSessionModesHydrated] = useState(false);
+  /**
+   * 会话级上下文窗口挡位（模型弹层里的「自动压缩上下文」）。
+   *
+   * `undefined` = 本会话未覆盖，运行时回退到模型级配置（设置页里的
+   * `contextWindowOverride`）/ 模型 preset。持久化走会话 metadata（
+   * `contextWindowOverride`），与模型级配置分属两个作用域——在某个会话里
+   * 调挡位不再影响其它用同一模型的会话。
+   */
+  const [sessionContextWindowOverride, setSessionContextWindowOverride] = useState<
+    number | undefined
+  >(undefined);
   const [sessionMetadataDirty, setSessionMetadataDirty] = useState(false);
+  /**
+   * 只读来源标识（「渠道：飞书」/「定时任务」）；非来源会话为 null。
+   *
+   * 来源会话（`metadata.source` 为 channel / cron）没有「澄清 / 编程 / 程序员」对话
+   * 模式——其模式与工具面由来源侧配置决定，故顶栏必须用只读 chip 取代三模式切换器，
+   * 且 `buildSessionMetadata` 不得写入 `dialogueMode`（见 utils/session/session-origin）。
+   */
+  const [sessionOriginBadge, setSessionOriginBadge] = useState<string | null>(null);
+  /**
+   * 对话模式控件是否已可交互：已有会话路由但 metadata 尚未水合时为 false。
+   *
+   * 与 `sessionBindingPending`（use-provider-model-info）同一窗口判定。这一窗口内
+   * `dialogueMode` 还只是「用户默认值」这个假值，渲染出的切换器对来源会话既显示错误
+   * 模式又是可写的；无会话的草稿态下本地模式就是真值，故不设限。
+   * 刻意声明在 `useChatPageShortcuts` 之前：声明前访问会让 React Compiler 放弃优化整个
+   * ChatPage。
+   */
+  const dialogueModeReady = !sessionId || sessionModesHydrated;
   const [workspaceFileItems, setWorkspaceFileItems] = useState<WorkspaceFileMentionItem[]>([]);
   const sessionModelSelectionSourceRef = useRef<ModelSelectionSource | null>(null);
 
@@ -503,9 +530,6 @@ export default function ChatPage() {
   const sidePanelActiveTab = useUIStateStore((s) => s.sidePanelActiveTab);
   const setSidePanelActiveTab = useUIStateStore((s) => s.setSidePanelActiveTab);
   const resetBrowserPreviewView = useUIStateStore((s) => s.resetBrowserPreviewView);
-  const setBrowserPreviewUrlForWorkspace = useUIStateStore(
-    (s) => s.setBrowserPreviewUrlForWorkspace,
-  );
   const chatView = useUIStateStore((s) => s.chatView);
   const workspaceTreeVersion = useUIStateStore((s) => s.workspaceTreeVersion);
   const selectedWorkspacePath = useUIStateStore((s) => s.selectedWorkspacePath);
@@ -667,22 +691,25 @@ export default function ChatPage() {
   const {
     buildSessionMetadata,
     markSessionMetadataDirty,
-    clearSessionMetadataDirty,
+    clearSessionMetadataDirty: clearPersistedMetadataDirty,
     handleDialogueModeChange,
     handleToggleYolo,
     handlePermissionModeChange,
     handleToggleWebSearch: rawHandleToggleWebSearch,
+    handleContextWindowOverrideChange,
     handleManualAgentChange,
     handleClearManualAgentId,
   } = useSessionSettingsCallbacks(
     {
       dialogueMode,
+      isSourceManagedSession: sessionOriginBadge !== null,
       permissionMode,
       webSearchEnabled,
       thinkingEnabled,
       reasoningEffort,
       activeProviderId,
       activeModelId,
+      contextWindowOverride: sessionContextWindowOverride,
       // 传 ref 而不是渲染期读出的值：渲染期读 ref 会让 React Compiler 判定为
       // "Cannot access refs during render" 并放弃优化整个 ChatPage。该值只在
       // `buildSessionMetadata` 被调用时（事件 / effect 内）读取，`useCallback`
@@ -699,12 +726,18 @@ export default function ChatPage() {
       setWebSearchEnabled,
       setThinkingEnabled,
       setReasoningEffort,
+      setContextWindowOverride: setSessionContextWindowOverride,
       setManualAgentId,
       setSessionMetadataDirty,
     },
     gatewayUrl,
     token,
   );
+
+  const clearSessionMetadataDirty = useCallback(() => {
+    writeRefCurrent(draftThinkingOverrideRef, false);
+    clearPersistedMetadataDirty();
+  }, [clearPersistedMetadataDirty]);
 
   // 点击导航栏 Chat 图标时（已在 /chat 路由），清除当前会话回到欢迎页面。
   useEffect(() => {
@@ -725,6 +758,8 @@ export default function ChatPage() {
     setSessionStateStatus(null);
     setIsSessionSnapshotReady(true);
     setSessionModesHydrated(false);
+    // 回到欢迎页 = 无会话：来源标识随之清空，否则新建普通会话会残留上一个渠道会话的 chip。
+    setSessionOriginBadge(null);
     clearSessionMetadataDirty();
     // 这些共享 ref 由 useChatSessionRefs() 创建后返回，直接写 .current 会被
     // React Compiler 判为「修改函数返回值」并放弃优化整个 ChatPage——写入统一走
@@ -845,35 +880,6 @@ export default function ChatPage() {
     ? fusionChatLayout.pageRootClassName
     : 'page-root page-root-row';
   const pageRootStyle = isFusionLayout ? fusionChatLayout.pageRootStyle : classicPageRootStyle;
-  const availableImageEditReferenceArtifacts = useMemo(() => {
-    if (!latestGeneratedImageResult) {
-      return sessionImageEditReferenceArtifacts;
-    }
-
-    if (
-      sessionImageEditReferenceArtifacts.some(
-        (artifact) => artifact.artifactId === latestGeneratedImageResult.artifactId,
-      )
-    ) {
-      return sessionImageEditReferenceArtifacts;
-    }
-
-    return [
-      {
-        artifactId: latestGeneratedImageResult.artifactId,
-        title: latestGeneratedImageResult.artifactTitle,
-        updatedAt: new Date().toISOString(),
-      },
-      ...sessionImageEditReferenceArtifacts,
-    ];
-  }, [latestGeneratedImageResult, sessionImageEditReferenceArtifacts]);
-  const selectedImageEditReferenceArtifact = useMemo(
-    () =>
-      availableImageEditReferenceArtifacts.find(
-        (artifact) => artifact.artifactId === selectedImageEditReferenceArtifactId,
-      ) ?? null,
-    [availableImageEditReferenceArtifacts, selectedImageEditReferenceArtifactId],
-  );
   const composerWorkspaceCatalog = useComposerWorkspaceCatalog({
     enabled: Boolean(token),
     gatewayUrl,
@@ -932,6 +938,22 @@ export default function ChatPage() {
     gatewayUrl,
     providers,
     token,
+  });
+
+  // 「最新生成结果 + 参考图选中态」整簇：state、候选集派生、失效清理、会话回收与
+  // 「继续编辑」回调都在 hook 内。父组件只透传 setter（图片生成分支 / composer 选择器）。
+  const {
+    latestGeneratedImageResult,
+    setLatestGeneratedImageResult,
+    selectedImageEditReferenceArtifactId,
+    setSelectedImageEditReferenceArtifactId,
+    availableImageEditReferenceArtifacts,
+    selectedImageEditReferenceArtifact,
+    continueEditingLatestGeneratedImage,
+  } = useChatImageResultSelection({
+    sessionReferenceArtifacts: sessionImageEditReferenceArtifacts,
+    currentSessionId,
+    setImageGenerationMode,
   });
 
   const { webSearchAvailable } = useWebSearchAvailable({ gatewayUrl, token });
@@ -1026,8 +1048,8 @@ export default function ChatPage() {
     void currentSessionId;
     setReportedStreamUsage(null);
     setMessageRatings({});
-    setLatestGeneratedImageResult(null);
-    setSelectedImageEditReferenceArtifactId(null);
+    // 生成结果 / 参考图选中的会话级回收在 useChatImageResultSelection 内部
+    // （同一个「真实切换才回收」判据），此处不再重复写入。
     // browserPreviewUrl 是按 workspace 路径持久化的(browserPreviewUrlByWorkspace),
     // 跨 workspace 切会话自动切到对应 workspace 的 url;同 workspace 内会话共享 url。
     if (previousSessionId !== null && previousSessionId !== currentSessionId) {
@@ -1035,30 +1057,6 @@ export default function ChatPage() {
     }
     devServerDetectedTerminalIdsRef.current = new Set();
   }, [currentSessionId, resetBrowserPreviewView]);
-
-  useEffect(() => {
-    if (!selectedImageEditReferenceArtifactId) {
-      return;
-    }
-
-    if (
-      !availableImageEditReferenceArtifacts.some(
-        (artifact) => artifact.artifactId === selectedImageEditReferenceArtifactId,
-      )
-    ) {
-      setSelectedImageEditReferenceArtifactId(null);
-    }
-  }, [availableImageEditReferenceArtifacts, selectedImageEditReferenceArtifactId]);
-
-  const continueEditingLatestGeneratedImage = useCallback(() => {
-    if (!latestGeneratedImageResult) {
-      return;
-    }
-
-    setSelectedImageEditReferenceArtifactId(latestGeneratedImageResult.artifactId);
-    setImageGenerationMode(true);
-    toast('已选择最新图片作为参考图，请继续输入编辑提示词。', 'success');
-  }, [latestGeneratedImageResult, setImageGenerationMode]);
 
   useEffect(() => {
     setFileTreeRootPath(effectiveWorkingDirectory ?? null);
@@ -1174,6 +1172,7 @@ export default function ChatPage() {
    */
   const { openChildSessionInspector } = useChildSessionSelection({
     currentSessionId,
+    isPageActive,
     isFusionLayout,
     isMobileViewport,
     rightTab,
@@ -1340,14 +1339,6 @@ export default function ChatPage() {
     });
   }, [loadSavedChatDefaults, providersRefreshing, token]);
 
-  const handleContextWindowOverrideChange = useModelContextOverride({
-    activeModelId,
-    activeProviderId,
-    gatewayUrl,
-    setProviders,
-    token,
-  });
-
   useEffect(() => {
     if (!token) return;
     void loadSavedChatDefaults()
@@ -1364,8 +1355,16 @@ export default function ChatPage() {
         // 覆盖会话原本指定的模型 / 思考等级。默认值只服务于无会话的欢迎页输入框；
         // 会话确实没有绑定（metadata 无 providerId/modelId）时，由
         // `shouldAdoptSessionModelSelectionDefaults` 在水合完成后统一接管。
-        setActiveProviderId((prev) => (routeSessionIdRef.current ? prev : defaults.providerId));
-        setActiveModelId((prev) => (routeSessionIdRef.current ? prev : defaults.modelId));
+        if (!activeSessionRef.current && !routeSessionIdRef.current) {
+          if (sessionModelSelectionSourceRef.current !== 'manual') {
+            setActiveProviderId(defaults.providerId);
+            setActiveModelId(defaults.modelId);
+          }
+          if (!draftThinkingOverrideRef.current) {
+            setThinkingEnabled(defaults.thinkingEnabled);
+            setReasoningEffort(defaults.reasoningEffort);
+          }
+        }
 
         setProviders(loadedProviders);
         // Only seed chat-page image defaults from saved settings on first load.
@@ -1374,11 +1373,6 @@ export default function ChatPage() {
         if (!hasAppliedSavedImageDefaultsRef.current) {
           applySavedImageDefaults(imageDefaults);
           writeRefCurrent(hasAppliedSavedImageDefaultsRef, true);
-        }
-
-        if (!routeSessionIdRef.current) {
-          setThinkingEnabled(defaults.thinkingEnabled);
-          setReasoningEffort(defaults.reasoningEffort);
         }
       })
       .catch(() => null);
@@ -1709,6 +1703,7 @@ export default function ChatPage() {
       resetStreamState,
       restoreScrollTop,
       rightPanelStateRef,
+      savedChatDefaultsRef,
       scrollRegionRef,
       sessionId,
       sessionMetadataDirtyRef,
@@ -1731,12 +1726,14 @@ export default function ChatPage() {
       setPendingQuestions,
       setPermissionMode,
       setReasoningEffort,
+      setContextWindowOverride: setSessionContextWindowOverride,
       setRecoveredStreamSnapshot,
       setRecoveryActiveStream,
       setRightPanelState,
       setSelectedChildSessionId,
       setServerTotalTurnCount,
       setSessionModesHydrated,
+      setSessionOriginBadge,
       setSessionStateStatus,
       setSessionTasks,
       setSessionTodos,
@@ -1931,6 +1928,11 @@ export default function ChatPage() {
   });
 
   useEffect(() => {
+    // `openawork:composer-reference` 是 window 级广播：keep-alive 缓存路由下非活动
+    // 页面保持挂载，不按激活态门控时多实例会同时把引用追加进各自输入框（即非当前
+    // 会话）。未激活即不注册监听，失活清理、激活重挂。
+    if (!isPageActive) return;
+
     const handleComposerReference = (event: Event) => {
       if (!isComposerReferenceEvent(event)) {
         return;
@@ -1943,7 +1945,7 @@ export default function ChatPage() {
     return () => {
       window.removeEventListener(COMPOSER_REFERENCE_EVENT_NAME, handleComposerReference);
     };
-  }, [appendTextToComposer]);
+  }, [appendTextToComposer, isPageActive]);
 
   const { createBranchSessionFromMessage } = useChatBranchSession({
     token,
@@ -1967,7 +1969,7 @@ export default function ChatPage() {
     sendMessage,
   });
 
-  async function ensureSession(): Promise<string> {
+  async function ensureSession() {
     return runEnsureSession({
       activateSessionView,
       activeModelId,
@@ -1978,6 +1980,7 @@ export default function ChatPage() {
       clearSessionMetadataDirty,
       currentSessionId,
       currentSessionViewRef,
+      draftThinkingOverrideRef,
       gatewayUrl,
       hasAppliedSavedImageDefaultsRef,
       lastPersistedSessionMetadataSnapshotRef,
@@ -1987,7 +1990,6 @@ export default function ChatPage() {
       providers,
       reasoningEffort,
       savedChatDefaultsRef,
-      sessionMetadataDirty,
       sessionModelSelectionSourceRef,
       setActiveModelId,
       setActiveProviderId,
@@ -2039,6 +2041,30 @@ export default function ChatPage() {
     setActiveProviderId,
     setActiveModelId,
   });
+
+  /**
+   * 叠上**会话级**上下文挡位后的模型选项，仅供「上下文占用条」与「模型弹层」消费。
+   *
+   * 会话未覆盖时返回 `activeModelOption` 原引用（见模块级函数注释），其它字段不变。
+   */
+  const effectiveActiveModelOption = applyContextWindowOverride(
+    activeModelOption,
+    sessionContextWindowOverride,
+  );
+  // 模型只限制当前生效值，不把临时降档或不可配置写回用户的会话选择。
+  const effectiveThinking = normalizeChatThinkingState({
+    providerType: activeProvider?.type,
+    modelId: activeModelOption?.id ?? effectiveModelId,
+    declaredSupportsThinking: activeModelOption?.supportsThinking === true,
+    thinkingEnabled,
+    reasoningEffort,
+    reasoningOptions: activeModelOption?.reasoningOptions,
+  });
+
+  // 长生命周期 send / attach 回调通过 ref 使用最新布局与工作区，避免捕获旧路由。
+  const openBrowserPreviewRef = useRef<
+    ((url?: string, mode?: 'newTab' | 'currentTab') => void) | null
+  >(null);
 
   async function sendMessage(
     overrideText?: string,
@@ -2103,9 +2129,8 @@ export default function ChatPage() {
         setActiveStreamFirstTokenLatencyMs,
         setActiveStreamRoundStartedAt,
         setActiveStreamStartedAt,
-        setBrowserPreviewUrl,
+        openBrowserPreview: (url, mode) => openBrowserPreviewRef.current?.(url, mode),
         setChildSessions,
-        setEditorMode,
         setHasPendingFollowContent,
         setInput,
         setLatestGeneratedImageResult,
@@ -2226,6 +2251,7 @@ export default function ChatPage() {
   // 命令面板与 `/browser` 事件共用：桌面 Fusion 落到面板的「预览」一级 tab
   // （空态带地址输入，绝不伪造默认地址）；经典布局 / 移动端保持原行为。
   const openBrowserPreview = useOpenFusionBrowserPreview({
+    workspacePath: uiWorkspaceScope,
     browserPreviewUrl,
     collapseWorkspaceToPanel,
     dockOwnsWorkspacePanels,
@@ -2238,7 +2264,6 @@ export default function ChatPage() {
 
   // `/browser` 事件只在 messages 变化时重新订阅，而路由决策依赖 editorMode /
   // 布局；这里暴露最新编排，避免事件落进旧闭包（提升态下点了没反应）。
-  const openBrowserPreviewRef = useRef(openBrowserPreview);
   useEffect(() => {
     openBrowserPreviewRef.current = openBrowserPreview;
   });
@@ -2246,19 +2271,7 @@ export default function ChatPage() {
   // 聊天消息 / 工具输出 / 文件预览里的 markdown 链接点击 → 落到会话面板「预览」一级
   // tab（Fusion 桌面）或主内容区浏览器 tab（经典 / 移动端），与 `/open <url>` 的编排
   // 保持一致。事件只在当前页激活时认领；CachedRouteOutlet 会同时挂载多个页面。
-  const openLinkPreview = (url: string) => {
-    if (dockOwnsWorkspacePanels) {
-      setBrowserPreviewUrlForWorkspace(uiWorkspaceScope, url);
-      if (editorMode) {
-        collapseWorkspaceToPanel();
-      }
-      openWorkspacePanelTab('preview');
-      return;
-    }
-    setBrowserPreviewUrl(url);
-    setEditorMode(true);
-    setEditorPaneTab('browser');
-  };
+  const openLinkPreview = (url: string) => openBrowserPreview(url, 'currentTab');
   useLinkPreviewRequest(pageActivation, openLinkPreview);
 
   const { appendCommandCard, handleCompactCurrentSession, handleSaveFile, handleSplitMouseDown } =
@@ -2366,9 +2379,8 @@ export default function ChatPage() {
       setActiveStreamFirstTokenLatencyMs,
       setActiveStreamRoundStartedAt,
       setActiveStreamStartedAt,
-      setBrowserPreviewUrl,
+      openBrowserPreview: (url, mode) => openBrowserPreviewRef.current?.(url, mode),
       setChildSessions,
-      setEditorMode,
       setHasPendingFollowContent,
       setLatestUpstreamSummary,
       setMessages,
@@ -2723,32 +2735,6 @@ export default function ChatPage() {
     token,
   });
 
-  useEffect(() => {
-    const normalizedThinkingState = normalizeChatThinkingState({
-      providerType: activeProvider?.type,
-      modelId: activeModelOption?.id ?? effectiveModelId,
-      declaredSupportsThinking: activeModelOption?.supportsThinking === true,
-      thinkingEnabled,
-      reasoningEffort,
-      reasoningOptions: activeModelOption?.reasoningOptions,
-    });
-
-    if (thinkingEnabled !== normalizedThinkingState.thinkingEnabled) {
-      setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
-    }
-    if (reasoningEffort !== normalizedThinkingState.reasoningEffort) {
-      setReasoningEffort(normalizedThinkingState.reasoningEffort);
-    }
-  }, [
-    effectiveModelId,
-    activeModelOption?.id,
-    activeModelOption?.supportsThinking,
-    activeModelOption?.reasoningOptions,
-    activeProvider?.type,
-    reasoningEffort,
-    thinkingEnabled,
-  ]);
-
   /**
    * 消息 hover actions 构建器。必须保持引用稳定（依赖只在书签 / 多选 / 会话
    * 变化时更新）：它进入 useChatRenderData 的 memo 依赖，流式帧里若每帧换新，
@@ -2791,7 +2777,7 @@ export default function ChatPage() {
     modelPrices,
     activeProviderId: effectiveProviderId,
     activeModelId: effectiveModelId,
-    activeModelOption,
+    activeModelOption: effectiveActiveModelOption ?? undefined,
     // 传「是否渲染实时气泡」而非「是否流式」：`useChatRenderData` 里这个标志同时
     // 决定气泡是否存在、历史 streaming 光标归谁、以及是否优先用实时用量估算。
     // 空快照（上一轮已落库）三者都应回到历史侧的语义。
@@ -2938,55 +2924,29 @@ export default function ChatPage() {
   });
 
   // ─── Keyboard shortcuts ─────────────────────────────────────────────────
-  useChatKeyboardShortcuts(
-    {
-      onCommandPalette: commandPalette.toggle,
-      onSearch: () => chatSearch.open(),
-      onToggleDialogueMode: () => {
-        const preferred = useDisplayPreferencesStore.getState().defaultDialogueMode;
-        const nextMode: DialogueMode = dialogueMode === preferred ? 'clarify' : preferred;
-        handleDialogueModeChange(nextMode);
-      },
-      onCopyLastAssistant: () => {
-        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-        if (lastAssistant) {
-          handleCopyMessage(lastAssistant);
-          toast('已复制', 'success');
-        }
-      },
-      onToggleMultiSelect: () => {
-        if (multiSelect.multiSelect.enabled) {
-          multiSelect.disableMultiSelect();
-        } else {
-          multiSelect.enableMultiSelect();
-          requestAnimationFrame(() => multiSelect.selectAll(messages));
-        }
-      },
-      onOpenTemplates: () => setShowTemplatePanel(true),
-      onScrollToNextUser: () => scrollToNextUserMessage(scrollRegionRef.current),
-      onScrollToPrevUser: () => scrollToPrevUserMessage(scrollRegionRef.current),
-      onToggleSidebar: () => {
-        useUIStateStore.getState().toggleLeftSidebar();
-      },
-      onToggleRightPanel: () => {
-        if (isFusionLayout) {
-          fusionChatLayout.toggleReviewPanel();
-          return;
-        }
-        setRightOpen((v) => !v);
-      },
-      onToggleTerminalPanel: () => {
-        toggleTerminalPanelOpened();
-      },
-      onCycleTheme: () => {
-        // theme toggle is handled in Layout/App level via onToggleTheme prop
-        // dispatch a custom event that App.tsx listens for
-        window.dispatchEvent(new CustomEvent('app:cycle-theme'));
-      },
-      onNewSession: handleStartNewSession,
-    },
-    isPageActive,
-  );
+  useChatPageShortcuts({
+    enabled: isPageActive,
+    messages,
+    dialogueMode,
+    // 来源会话（渠道 / 定时任务）没有对话模式，metadata 未水合时也还没有真值：
+    // 两种情况下快捷键都停用，否则会改出一个假模式并白置一次 metadata 脏。
+    dialogueModeEnabled: dialogueModeReady && sessionOriginBadge === null,
+    onDialogueModeChange: handleDialogueModeChange,
+    onCopyMessage: handleCopyMessage,
+    multiSelectEnabled: multiSelect.multiSelect.enabled,
+    enableMultiSelect: multiSelect.enableMultiSelect,
+    disableMultiSelect: multiSelect.disableMultiSelect,
+    selectAll: multiSelect.selectAll,
+    scrollRegionRef,
+    isFusionLayout,
+    toggleReviewPanel: fusionChatLayout.toggleReviewPanel,
+    setRightOpen,
+    onCommandPalette: commandPalette.toggle,
+    onSearch: () => chatSearch.open(),
+    onOpenTemplates: () => setShowTemplatePanel(true),
+    onToggleTerminalPanel: toggleTerminalPanelOpened,
+    onNewSession: handleStartNewSession,
+  });
 
   // 只在真正的会话切换加载时显示骨架屏，而不是在发送新消息时显示
   // 如果距离上次流式开始不到 5 秒，说明是正常的对话流程，不显示骨架屏
@@ -2998,46 +2958,44 @@ export default function ChatPage() {
     !streaming &&
     showSkeletonAfterDelay &&
     timeSinceStreamStart > 5000;
+  // 未水合 / 来源会话都为 null：前者 `dialogueMode` 还只是用户默认值这个假值，顶栏的
+  // 会话信息里也不该把它当模式展示（与模式切换器的水合门控同一判据）。
   const dialogueModeLabel =
-    DIALOGUE_MODE_OPTIONS.find((option) => option.value === dialogueMode)?.label ?? dialogueMode;
+    sessionOriginBadge || !dialogueModeReady
+      ? null
+      : (DIALOGUE_MODE_OPTIONS.find((option) => option.value === dialogueMode)?.label ??
+        dialogueMode);
 
-  // Listen for custom events from slash commands
-  useEffect(() => {
-    const handleOpenTemplates = () => setShowTemplatePanel(true);
-    const handleExportChat = () => {
-      const content = exportMessages(messages, 'markdown');
-      downloadExport(content, `chat-export-${Date.now()}.md`, 'text/markdown');
-      toast('对话已导出为 Markdown', 'success');
-    };
-    const handleOpenBrowser = () => openBrowserPreviewRef.current();
-    const handleComposerInsert = (event: Event) => {
-      const detail = (event as CustomEvent).detail as
-        { text?: string; mode?: 'append' | 'replace' } | undefined;
-      const insertText = detail?.text;
-      if (typeof insertText !== 'string' || insertText.length === 0) return;
-      setInput((prev) => {
-        if (detail?.mode === 'replace') return insertText;
-        // append:trim 末尾,中间用换行连接
-        if (prev.trim().length === 0) return insertText;
-        return `${prev.trimEnd()}\n${insertText}`;
-      });
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    };
-    window.addEventListener('openAwork:open-templates', handleOpenTemplates);
-    window.addEventListener('openAwork:export-chat', handleExportChat);
-    window.addEventListener('openAwork:open-browser', handleOpenBrowser);
-    window.addEventListener('openawork:composer:insert', handleComposerInsert);
-    return () => {
-      window.removeEventListener('openAwork:open-templates', handleOpenTemplates);
-      window.removeEventListener('openAwork:export-chat', handleExportChat);
-      window.removeEventListener('openAwork:open-browser', handleOpenBrowser);
-      window.removeEventListener('openawork:composer:insert', handleComposerInsert);
-    };
-  }, [messages]);
+  // 窗口级自定义事件订阅（open-templates / export-chat / open-browser /
+  // composer:insert）下沉到 useChatPageWindowEvents：回调经 `messagesRef` 读最新
+  // 消息、经 `openBrowserPreviewRef` 读最新预览编排，订阅因此**不依赖** messages，
+  // 避免流式期间每个 token delta 都拆除重装监听器（拆装间隙会丢事件）。
+  // keep-alive 缓存路由下非活动页面保持挂载，故必须按 isPageActive 门控，
+  // 否则多实例共存时 export-chat 会被各导出一次、composer:insert 会插错会话。
+  useChatPageWindowEvents({
+    isPageActive,
+    messagesRef,
+    openBrowserPreviewRef,
+    setInput,
+    setShowTemplatePanel,
+    textareaRef,
+  });
 
   // P1 组装层瘦身：fusion / classic 两分支共享的 <ChatConversationView> props 只组装一次。
   // 分支差异（compact 与 topBar）由 layout/{Fusion,Classic}ChatRegion 负责。
+  const composerActions = useChatComposerActions({
+    sendMessage,
+    stopActiveMessage,
+    setActiveProviderId,
+    setActiveModelId,
+    setThinkingEnabled,
+    setReasoningEffort,
+    sessionModelSelectionSourceRef,
+    markSessionMetadataDirty,
+    markThinkingOverride: () => writeRefCurrent(draftThinkingOverrideRef, true),
+  });
   const conversationViewModel = useChatConversationViewProps({
+    ...composerActions,
     sessionId: currentSessionId,
     workspaceFileItems,
     searchMentionFiles,
@@ -3207,7 +3165,8 @@ export default function ChatPage() {
     providers,
     fastEnabled: activeProvider?.openaiFastMode === true,
     activeProvider,
-    activeModelOption,
+    // 会话级挡位优先：模型弹层里的「自动压缩上下文」必须显示本会话真正生效的值。
+    activeModelOption: effectiveActiveModelOption,
     activeModelCanConfigureThinking,
     activeModelTooltip,
     canStopCurrentSessionStream,
@@ -3217,8 +3176,8 @@ export default function ChatPage() {
     onPermissionModeChange: handlePermissionModeChange,
     webSearchEnabled,
     webSearchAvailable,
-    thinkingEnabled,
-    reasoningEffort,
+    thinkingEnabled: effectiveThinking.thinkingEnabled,
+    reasoningEffort: effectiveThinking.reasoningEffort,
     imageReferenceArtifacts: availableImageEditReferenceArtifacts,
     selectedImageEditReferenceArtifactId,
     latestGeneratedImageResult,
@@ -3240,45 +3199,13 @@ export default function ChatPage() {
     input,
     setInput,
     textareaRef,
-    onComposerSubmit: async (payload) => {
-      return sendMessage(payload.text, {
-        queuedFiles: payload.files,
-        queuedAttachmentItems: payload.attachmentItems,
-        queuedMessageId: payload.queuedMessageId,
-      });
-    },
-    onStopComposer: () => void stopActiveMessage(),
-    onComposerModelSelect: async (pid: string, mid: string) => {
-      const nextProvider = providers.find((provider) => provider.id === pid);
-      const nextModel = nextProvider?.defaultModels.find((model) => model.id === mid);
-      const normalizedThinkingState = normalizeChatThinkingState({
-        providerType: nextProvider?.type,
-        modelId: nextModel?.id ?? mid,
-        declaredSupportsThinking: nextModel?.supportsThinking === true,
-        thinkingEnabled,
-        reasoningEffort,
-        reasoningOptions: nextModel?.reasoningOptions,
-      });
-      setActiveProviderId(pid);
-      setActiveModelId(mid);
-      setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
-      setReasoningEffort(normalizedThinkingState.reasoningEffort);
-      sessionModelSelectionSourceRef.current = 'manual';
-      markSessionMetadataDirty();
-    },
+
     onRefreshProviders: refreshProviderCatalog,
     providersRefreshing,
     onFastModeToggle: handleFastModeToggle,
     onContextWindowOverrideChange: handleContextWindowOverrideChange,
     onToggleWebSearch: handleToggleWebSearch,
-    onThinkingEnabledChange: (enabled) => {
-      setThinkingEnabled(enabled);
-      markSessionMetadataDirty();
-    },
-    onReasoningEffortChange: (effort) => {
-      setReasoningEffort(effort);
-      markSessionMetadataDirty();
-    },
+
     onManualAgentChange: handleManualAgentChange,
     onClearManualAgentId: handleClearManualAgentId,
     onEditPreviousUserMessage: handleEditPreviousUserMessage,
@@ -3310,6 +3237,8 @@ export default function ChatPage() {
       activeModelOptionLabel: activeModelOption?.label,
       effectiveModelId,
       dialogueModeLabel,
+      dialogueModeReady,
+      sourceBadgeLabel: sessionOriginBadge,
       workflowRuntime,
       sessionTasks,
       editorFullScreen,
@@ -3332,15 +3261,7 @@ export default function ChatPage() {
       onToggleQuickTerminal: () =>
         setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, !quickTerminalOpen),
       browserPreviewUrl,
-      onOpenBrowser: () => {
-        startSessionSwitchTransition(() => {
-          if (!browserPreviewUrl) {
-            setBrowserPreviewUrl('http://localhost:3000');
-          }
-          setEditorMode(true);
-          setEditorPaneTab('browser');
-        });
-      },
+      onOpenBrowser: () => startSessionSwitchTransition(() => openBrowserPreview()),
       editorPaneTab,
       onActivateCodeTab: () => {
         startSessionSwitchTransition(() => {
@@ -3354,15 +3275,16 @@ export default function ChatPage() {
       },
       onActivateBrowserTab: () => {
         startSessionSwitchTransition(() => {
-          if (editorMode && editorPaneTab === 'browser' && !editorFullScreen) {
+          if (
+            !dockOwnsWorkspacePanels &&
+            editorMode &&
+            editorPaneTab === 'browser' &&
+            !editorFullScreen
+          ) {
             setEditorMode(false);
             return;
           }
-          if (!browserPreviewUrl) {
-            setBrowserPreviewUrl('http://localhost:3000');
-          }
-          setEditorMode(true);
-          setEditorPaneTab('browser');
+          openBrowserPreview();
         });
       },
     },
@@ -3376,222 +3298,37 @@ export default function ChatPage() {
         ...pageRootStyle,
       }}
     >
-      {/* ─── Command Palette ─── */}
-      <CommandPalette
-        items={commandPaletteItems}
-        isOpen={commandPalette.isOpen}
-        onClose={commandPalette.close}
-      />
+      <SubagentProgressProvider
+        parentSessionId={currentSessionId}
+        sessions={subAgentRunItems}
+        notices={subagentNotices}
+        shells={backgroundTaskPanel.rows
+          .filter((row) => row.kind === 'shell')
+          .map((row) => ({ terminalId: row.terminalId ?? row.key, startedAtMs: row.startedAtMs }))}
+      >
+        {/* ─── Command Palette ─── */}
+        <CommandPalette
+          items={commandPaletteItems}
+          isOpen={commandPalette.isOpen}
+          onClose={commandPalette.close}
+        />
 
-      {/* ─── Prompt Template Panel ─── */}
-      <PromptTemplatePanel
-        isOpen={showTemplatePanel}
-        onClose={() => setShowTemplatePanel(false)}
-        onInsert={(content) => {
-          setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${content}` : content));
-          requestAnimationFrame(() => textareaRef.current?.focus());
-        }}
-      />
+        {/* ─── Prompt Template Panel ─── */}
+        <PromptTemplatePanel
+          isOpen={showTemplatePanel}
+          onClose={() => setShowTemplatePanel(false)}
+          onInsert={(content) => {
+            setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${content}` : content));
+            requestAnimationFrame(() => textareaRef.current?.focus());
+          }}
+        />
 
-      {isFusionLayout ? (
-        <FusionChatMainShell
-          dockSplitPos={fusionDockSplitPos}
-          editorFullScreen={editorFullScreen}
-          editorMode={editorMode}
-          editorPane={
-            <ChatEditorPane
-              editorMode={editorMode}
-              splitPos={splitPos}
-              splitDragging={splitDragging}
-              editorPaneRef={editorPaneRef}
-              handleSplitMouseDown={handleSplitMouseDown}
-              fileEditor={fileEditor}
-              saving={saving}
-              handleSaveFile={handleSaveFile}
-              browserPreviewUrl={browserPreviewUrl}
-              onBrowserPreviewUrlChange={setBrowserPreviewUrl}
-              workspacePath={uiWorkspaceScope}
-              activeTab={editorPaneTab}
-              onTabChange={setEditorPaneTab}
-              fullScreen={editorFullScreen}
-              onToggleFullScreen={() => {
-                if (editorFullScreen) {
-                  // 桌面：退出放大 = 内容收回到统一面板；移动端保持原来的「退出全屏」。
-                  if (isMobileViewport) {
-                    startSessionSwitchTransition(() => setEditorFullScreen(false));
-                    return;
-                  }
-                  collapseWorkspaceToPanel();
-                  return;
-                }
-                promoteWorkspaceTab(editorPaneTab);
-              }}
-              fileTree={renderWorkspaceFileTree(editorMode)}
-            />
-          }
-          hasSession={currentSessionId !== null}
-          mobilePanel={
-            isMobileViewport && currentSessionId !== null ? (
-              <FusionMobileBottomPanel
-                activeEditorFilePath={fileEditor.activeFilePath}
-                activeTab={sidePanelActiveTab}
-                currentSessionId={currentSessionId}
-                editorMode={editorMode}
-                editorFileState={fileEditor}
-                editorOpenFilePaths={fileEditor.openFiles.map((file) => file.path)}
-                effectiveWorkingDirectory={effectiveWorkingDirectory}
-                fileBrowseRoot={fileBrowseRoot}
-                fetchTree={workspace.fetchTree}
-                gatewayUrl={gatewayUrl}
-                handleSaveFile={handleSaveFile}
-                isOpen={reviewPanelOpened}
-                onClose={() => {
-                  setReviewPanelOpened(false);
-                }}
-                onOpen={() => {
-                  setReviewPanelOpened(true);
-                }}
-                onOpenFileInEditor={handleOpenFusionEditorFile}
-                onOpenWorkspace={requestWorkspaceBindingChange}
-                onShowEditor={handleShowFusionEditor}
-                onTabChange={setSidePanelActiveTab}
-                overview={fusionContextOverview}
-                reviewRevision={reviewRefreshRevision}
-                runtimeSummary={fusionContextRuntimeSummary}
-                saving={saving}
-                token={token}
-                workspaceFileItems={workspaceFileItems}
-              />
-            ) : null
-          }
-          showDockedSidePanel={fusionChatLayout.showDockedSidePanel}
-          sidePanel={
-            <FusionDockedSidePanel
-              activeTab={sidePanelActiveTab}
-              backgroundTaskPanel={{
-                model: backgroundTaskPanel,
-                loading: sessionTerminals.loading,
-                error: sessionTerminals.error,
-                lastSyncedAtMs: sessionTerminals.lastSyncedAtMs,
-                stoppingSubAgentIds,
-                pendingKillIds: sessionTerminals.pendingKillIds,
-                onReloadTerminals: sessionTerminals.reload,
-                onOpenSession: openChildSessionInspector,
-                onStopSubagent: handleStopChildSession,
-                onStopAllSubagents: handleStopAllChildSessions,
-                onPreviewTerminal: handlePreviewBackgroundTerminalFusion,
-                onKillTerminal: sessionTerminals.killTerminal,
-              }}
-              currentSessionId={currentSessionId}
-              currentUserDisplayName={currentUserDisplayName}
-              currentUserEmail={currentUserEmail}
-              effectiveWorkingDirectory={effectiveWorkingDirectory}
-              fileEditor={fileEditor}
-              fileTree={renderWorkspaceFileTree(true)}
-              gatewayUrl={gatewayUrl}
-              handleSaveFile={handleSaveFile}
-              onOpenFullSession={(nextSessionId) => {
-                void navigate(`/chat/${nextSessionId}`);
-              }}
-              onPromoteToFullScreen={promoteWorkspaceTab}
-              onSelectChildSession={openChildSessionInspector}
-              onTabChange={setSidePanelActiveTab}
-              overview={fusionContextOverview}
-              providerCatalog={providerCatalog}
-              reviewRevision={reviewRefreshRevision}
-              runtimeSummary={fusionContextRuntimeSummary}
-              saving={saving}
-              selectedChildSessionId={selectedChildSessionId}
-              subAgentCount={subAgentRunItems.length}
-              subAgentItems={subAgentRunItems}
-              taskToolRuntimeLookup={taskToolRuntimeLookup}
-              token={token}
-              workspacePath={uiWorkspaceScope}
-              workspacePromoted={editorMode}
-            />
-          }
-          splitContainerRef={splitContainerRef}
-          splitDragging={splitDragging}
-          splitPos={splitPos}
-          terminalMaximized={terminalMaximizedForLayout}
-          terminalPosition={terminalPositionForLayout}
-          terminal={
-            <TerminalPanel
-              workspacePath={effectiveWorkingDirectory}
-              gatewayUrl={gatewayUrl}
-              token={token}
-              sessionId={currentSessionId}
-              terminals={sessionTerminals.terminals}
-              loading={sessionTerminals.loading}
-              onReload={sessionTerminals.reload}
-              onRenameTerminal={sessionTerminals.renameTerminal}
-              onDismissTerminal={sessionTerminals.dismissTerminal}
-              onKillTerminal={sessionTerminals.killTerminal}
-              shellProfiles={sessionTerminals.shellProfiles}
-            />
-          }
-        >
-          <SessionPanelFrame>
-            <WorkspacePickerModal {...localPickerProps} />
-            <SshWorkspacePickerModal {...sshPickerProps} />
-            <LatestAssistantMessageContext value={latestAssistantMessageId}>
-              <FusionChatRegion model={conversationViewModel} />
-            </LatestAssistantMessageContext>
-          </SessionPanelFrame>
-        </FusionChatMainShell>
-      ) : (
-        <>
-          <WorkspacePickerModal {...localPickerProps} />
-          <SshWorkspacePickerModal {...sshPickerProps} />
-          <LatestAssistantMessageContext value={latestAssistantMessageId}>
-            <div
-              ref={splitContainerRef}
-              data-testid="classic-chat-workbench"
-              style={classicWorkbenchSplitStyle}
-            >
-              <div
-                data-testid="classic-chat-main-column"
-                style={{
-                  flex: editorMode ? '0 0 auto' : 1,
-                  width: classicConversationHidden
-                    ? 0
-                    : editorMode
-                      ? 'calc(var(--split-pos) - 2.5px)'
-                      : undefined,
-                  opacity: classicConversationHidden ? 0 : 1,
-                  pointerEvents: classicConversationHidden ? 'none' : undefined,
-                  transition: splitDragging.current
-                    ? 'none'
-                    : 'width 240ms ease, opacity 180ms ease',
-                  minWidth: 0,
-                  minHeight: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}
-              >
-                <ClassicChatRegion model={conversationViewModel} />
-                {currentSessionId && !isFusionLayout ? (
-                  // classic overlay 不显式接线最大化：QuickTerminalPanel 缺省回落 store 的
-                  // 瞬态开关，rail 的最大化/还原在两种 presentation 下语义一致（无死控件）。
-                  <QuickTerminalPanel
-                    open={quickTerminalOpen}
-                    onRequestClose={() =>
-                      setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, false)
-                    }
-                    workspacePath={effectiveWorkingDirectory}
-                    gatewayUrl={gatewayUrl}
-                    token={token}
-                    sessionId={currentSessionId}
-                    terminals={sessionTerminals.terminals}
-                    loading={sessionTerminals.loading}
-                    onReload={sessionTerminals.reload}
-                    onRenameTerminal={sessionTerminals.renameTerminal}
-                    onDismissTerminal={sessionTerminals.dismissTerminal}
-                  />
-                ) : null}
-              </div>
+        {isFusionLayout ? (
+          <FusionChatMainShell
+            dockSplitPos={fusionDockSplitPos}
+            editorFullScreen={editorFullScreen}
+            editorMode={editorMode}
+            editorPane={
               <ChatEditorPane
                 editorMode={editorMode}
                 splitPos={splitPos}
@@ -3607,114 +3344,308 @@ export default function ChatPage() {
                 activeTab={editorPaneTab}
                 onTabChange={setEditorPaneTab}
                 fullScreen={editorFullScreen}
-                onToggleFullScreen={() =>
-                  startSessionSwitchTransition(() => {
-                    if (editorFullScreen) {
-                      setEditorFullScreen(false);
+                onToggleFullScreen={() => {
+                  if (editorFullScreen) {
+                    // 桌面：退出放大 = 内容收回到统一面板；移动端保持原来的「退出全屏」。
+                    if (isMobileViewport) {
+                      startSessionSwitchTransition(() => setEditorFullScreen(false));
                       return;
                     }
-                    setEditorMode(true);
-                    setEditorFullScreen(true);
-                  })
-                }
-                fileTree={
-                  <WorkspaceFileTreePanel
-                    workspacePath={fileBrowseRoot}
-                    sessionId={currentSessionId}
-                    onOpenFile={(path) => void fileEditor.openFile(path)}
-                    fetchTree={workspace.fetchTree}
-                    active={editorMode}
-                    variant="embedded"
-                    onSwitchWorkspace={
-                      canAdjustWorkspaceBinding ? requestWorkspaceBindingChange : undefined
-                    }
-                    style={{
-                      flex: 1,
-                      minHeight: 0,
-                      background: 'var(--bg-surface)',
-                      overflow: 'hidden',
-                    }}
-                  />
-                }
+                    collapseWorkspaceToPanel();
+                    return;
+                  }
+                  promoteWorkspaceTab(editorPaneTab);
+                }}
+                fileTree={renderWorkspaceFileTree(editorMode)}
               />
-            </div>
-          </LatestAssistantMessageContext>
-        </>
-      )}
+            }
+            hasSession={currentSessionId !== null}
+            mobilePanel={
+              isMobileViewport && currentSessionId !== null ? (
+                <FusionMobileBottomPanel
+                  activeEditorFilePath={fileEditor.activeFilePath}
+                  activeTab={sidePanelActiveTab}
+                  currentSessionId={currentSessionId}
+                  editorMode={editorMode}
+                  editorFileState={fileEditor}
+                  editorOpenFilePaths={fileEditor.openFiles.map((file) => file.path)}
+                  effectiveWorkingDirectory={effectiveWorkingDirectory}
+                  fileBrowseRoot={fileBrowseRoot}
+                  fetchTree={workspace.fetchTree}
+                  gatewayUrl={gatewayUrl}
+                  handleSaveFile={handleSaveFile}
+                  isOpen={reviewPanelOpened}
+                  onClose={() => {
+                    setReviewPanelOpened(false);
+                  }}
+                  onOpen={() => {
+                    setReviewPanelOpened(true);
+                  }}
+                  onOpenFileInEditor={handleOpenFusionEditorFile}
+                  onOpenWorkspace={requestWorkspaceBindingChange}
+                  onShowEditor={handleShowFusionEditor}
+                  onTabChange={setSidePanelActiveTab}
+                  overview={fusionContextOverview}
+                  reviewRevision={reviewRefreshRevision}
+                  runtimeSummary={fusionContextRuntimeSummary}
+                  saving={saving}
+                  token={token}
+                  workspaceFileItems={workspaceFileItems}
+                />
+              ) : null
+            }
+            showDockedSidePanel={fusionChatLayout.showDockedSidePanel}
+            sidePanel={
+              <FusionDockedSidePanel
+                activeTab={sidePanelActiveTab}
+                backgroundTaskPanel={{
+                  model: backgroundTaskPanel,
+                  loading: sessionTerminals.loading,
+                  error: sessionTerminals.error,
+                  lastSyncedAtMs: sessionTerminals.lastSyncedAtMs,
+                  stoppingSubAgentIds,
+                  pendingKillIds: sessionTerminals.pendingKillIds,
+                  onReloadTerminals: sessionTerminals.reload,
+                  onOpenSession: openChildSessionInspector,
+                  onStopSubagent: handleStopChildSession,
+                  onStopAllSubagents: handleStopAllChildSessions,
+                  onPreviewTerminal: handlePreviewBackgroundTerminalFusion,
+                  onKillTerminal: sessionTerminals.killTerminal,
+                }}
+                currentSessionId={currentSessionId}
+                currentUserDisplayName={currentUserDisplayName}
+                currentUserEmail={currentUserEmail}
+                effectiveWorkingDirectory={effectiveWorkingDirectory}
+                fileEditor={fileEditor}
+                fileTree={renderWorkspaceFileTree(true)}
+                gatewayUrl={gatewayUrl}
+                handleSaveFile={handleSaveFile}
+                onOpenFullSession={(nextSessionId) => {
+                  void navigate(`/chat/${nextSessionId}`);
+                }}
+                onPromoteToFullScreen={promoteWorkspaceTab}
+                onSelectChildSession={openChildSessionInspector}
+                onTabChange={setSidePanelActiveTab}
+                overview={fusionContextOverview}
+                providerCatalog={providerCatalog}
+                reviewRevision={reviewRefreshRevision}
+                runtimeSummary={fusionContextRuntimeSummary}
+                saving={saving}
+                selectedChildSessionId={selectedChildSessionId}
+                subAgentCount={subAgentRunItems.length}
+                subAgentItems={subAgentRunItems}
+                taskToolRuntimeLookup={taskToolRuntimeLookup}
+                token={token}
+                workspacePath={uiWorkspaceScope}
+                workspacePromoted={editorMode}
+              />
+            }
+            splitContainerRef={splitContainerRef}
+            splitDragging={splitDragging}
+            splitPos={splitPos}
+            terminalMaximized={terminalMaximizedForLayout}
+            terminalPosition={terminalPositionForLayout}
+            terminal={
+              <TerminalPanel
+                workspacePath={effectiveWorkingDirectory}
+                gatewayUrl={gatewayUrl}
+                token={token}
+                sessionId={currentSessionId}
+                terminals={sessionTerminals.terminals}
+                loading={sessionTerminals.loading}
+                onReload={sessionTerminals.reload}
+                onRenameTerminal={sessionTerminals.renameTerminal}
+                onDismissTerminal={sessionTerminals.dismissTerminal}
+                onKillTerminal={sessionTerminals.killTerminal}
+                shellProfiles={sessionTerminals.shellProfiles}
+              />
+            }
+          >
+            <SessionPanelFrame>
+              <WorkspacePickerModal {...localPickerProps} />
+              <SshWorkspacePickerModal {...sshPickerProps} />
+              <LatestAssistantMessageContext value={latestAssistantMessageId}>
+                <FusionChatRegion model={conversationViewModel} />
+              </LatestAssistantMessageContext>
+            </SessionPanelFrame>
+          </FusionChatMainShell>
+        ) : (
+          <>
+            <WorkspacePickerModal {...localPickerProps} />
+            <SshWorkspacePickerModal {...sshPickerProps} />
+            <LatestAssistantMessageContext value={latestAssistantMessageId}>
+              <div
+                ref={splitContainerRef}
+                data-testid="classic-chat-workbench"
+                style={classicWorkbenchSplitStyle}
+              >
+                <div
+                  data-testid="classic-chat-main-column"
+                  style={{
+                    flex: editorMode ? '0 0 auto' : 1,
+                    width: classicConversationHidden
+                      ? 0
+                      : editorMode
+                        ? 'calc(var(--split-pos) - 2.5px)'
+                        : undefined,
+                    opacity: classicConversationHidden ? 0 : 1,
+                    pointerEvents: classicConversationHidden ? 'none' : undefined,
+                    transition: splitDragging.current
+                      ? 'none'
+                      : 'width 240ms ease, opacity 180ms ease',
+                    minWidth: 0,
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <ClassicChatRegion model={conversationViewModel} />
+                  {currentSessionId && !isFusionLayout ? (
+                    // classic overlay 不显式接线最大化：QuickTerminalPanel 缺省回落 store 的
+                    // 瞬态开关，rail 的最大化/还原在两种 presentation 下语义一致（无死控件）。
+                    <QuickTerminalPanel
+                      open={quickTerminalOpen}
+                      onRequestClose={() =>
+                        setQuickTerminalOpenForWorkspace(effectiveWorkingDirectory, false)
+                      }
+                      workspacePath={effectiveWorkingDirectory}
+                      gatewayUrl={gatewayUrl}
+                      token={token}
+                      sessionId={currentSessionId}
+                      terminals={sessionTerminals.terminals}
+                      loading={sessionTerminals.loading}
+                      onReload={sessionTerminals.reload}
+                      onRenameTerminal={sessionTerminals.renameTerminal}
+                      onDismissTerminal={sessionTerminals.dismissTerminal}
+                    />
+                  ) : null}
+                </div>
+                <ChatEditorPane
+                  editorMode={editorMode}
+                  splitPos={splitPos}
+                  splitDragging={splitDragging}
+                  editorPaneRef={editorPaneRef}
+                  handleSplitMouseDown={handleSplitMouseDown}
+                  fileEditor={fileEditor}
+                  saving={saving}
+                  handleSaveFile={handleSaveFile}
+                  browserPreviewUrl={browserPreviewUrl}
+                  onBrowserPreviewUrlChange={setBrowserPreviewUrl}
+                  workspacePath={uiWorkspaceScope}
+                  activeTab={editorPaneTab}
+                  onTabChange={setEditorPaneTab}
+                  fullScreen={editorFullScreen}
+                  onToggleFullScreen={() =>
+                    startSessionSwitchTransition(() => {
+                      if (editorFullScreen) {
+                        setEditorFullScreen(false);
+                        return;
+                      }
+                      setEditorMode(true);
+                      setEditorFullScreen(true);
+                    })
+                  }
+                  fileTree={
+                    <WorkspaceFileTreePanel
+                      workspacePath={fileBrowseRoot}
+                      sessionId={currentSessionId}
+                      onOpenFile={(path) => void fileEditor.openFile(path)}
+                      fetchTree={workspace.fetchTree}
+                      active={editorMode}
+                      variant="embedded"
+                      onSwitchWorkspace={
+                        canAdjustWorkspaceBinding ? requestWorkspaceBindingChange : undefined
+                      }
+                      style={{
+                        flex: 1,
+                        minHeight: 0,
+                        background: 'var(--bg-surface)',
+                        overflow: 'hidden',
+                      }}
+                    />
+                  }
+                />
+              </div>
+            </LatestAssistantMessageContext>
+          </>
+        )}
 
-      {/* Classic: ChatRightPanel 作为唯一右侧面板。
+        {/* Classic: ChatRightPanel 作为唯一右侧面板。
           Fusion: ChatRightPanel 不渲染，改由 FusionSessionSidePanel 提供
           「审查 / 代码 / 预览 / Context」标签式侧面板。 */}
-      {!isFusionLayout ? (
-        <ChatRightPanel
-          rightOpen={rightOpen && !(editorMode && editorFullScreen)}
-          rightTab={rightTab}
-          setRightTab={setRightTab}
-          selectedChildSessionId={selectedChildSessionId}
-          currentUserEmail={currentUserEmail}
-          currentUserDisplayName={currentUserDisplayName}
-          gatewayUrl={gatewayUrl}
-          token={token}
-          navigate={(path: string) => void navigate(path)}
-          openChildSessionInspector={openChildSessionInspector}
-          taskToolRuntimeLookup={taskToolRuntimeLookup}
-          toolCallCards={toolCallCards}
-          toolFilter={toolFilter}
-          setToolFilter={setToolFilter}
-          compactions={compactions}
-          upstreamSummaries={rightPanelState.upstreamSummaries}
-          pendingPermissions={pendingPermissions}
-          resolveInlinePermissionActions={resolveInlinePermissionActions}
-          planTasks={planTasks}
-          planHistory={planHistory}
-          sessionTodos={sessionTodos}
-          sessionTasks={sessionTasks}
-          childSessions={childSessions}
-          pendingQuestions={pendingQuestions}
-          dagNodes={dagNodes}
-          dagEdges={dagEdges}
-          agentEvents={agentEvents}
-          mcpServers={mcpServers}
-          onRetryMcpServer={handleRetryMcpServer}
-          sharedUiThemeVars={sharedUiThemeVars}
-          resolveTaskToolRuntimeSnapshot={resolveTaskToolRuntimeSnapshot}
-          onCompactSession={() => void handleCompactCurrentSession()}
-          onOpenRecoveryStrategy={() => {
-            setRightOpen(true);
-            setRightTab('history');
-          }}
-          providerCatalog={providerCatalog}
-          attachmentItems={[]}
-          artifactsWorkspaceHref={artifactsWorkspaceHref}
-          contextUsageSnapshot={contextUsageSnapshot}
-          contentArtifactCount={contentArtifactCount}
-          contentArtifactCountStatus={contentArtifactCountStatus}
-          currentSessionId={currentSessionId}
-          dialogueMode={dialogueMode}
-          effectiveWorkingDirectory={effectiveWorkingDirectory}
-          effectiveContextMessageCount={effectiveContextMessageCount}
-          messages={messages}
-          sessionStateStatus={sessionStateStatus}
-          workspaceFileItems={workspaceFileItems}
-          permissionMode={permissionMode}
-          yoloMode={yoloMode}
-          sessionTerminals={sessionTerminals.terminals}
-          sessionTerminalsRunningCount={sessionTerminals.runningCount}
-          sessionTerminalsLoading={sessionTerminals.loading}
-          sessionTerminalsError={sessionTerminals.error}
-          sessionTerminalsPendingKillIds={sessionTerminals.pendingKillIds}
-          sessionTerminalsLastSyncedAtMs={sessionTerminals.lastSyncedAtMs}
-          onKillTerminal={sessionTerminals.killTerminal}
-          onReloadTerminals={sessionTerminals.reload}
-          backgroundTaskModel={backgroundTaskPanel}
-          stoppingSubAgentIds={stoppingSubAgentIds}
-          onStopSubagent={handleStopChildSession}
-          onStopAllSubagents={handleStopAllChildSessions}
-          onPreviewTerminal={handlePreviewBackgroundTerminal}
-          backgroundTaskPreviewTerminalId={backgroundTaskPreviewTerminalId}
-          ensureMessageVisible={ensureMessageVisible}
-        />
-      ) : null}
+        {!isFusionLayout ? (
+          <ChatRightPanel
+            rightOpen={rightOpen && !(editorMode && editorFullScreen)}
+            rightTab={rightTab}
+            setRightTab={setRightTab}
+            selectedChildSessionId={selectedChildSessionId}
+            currentUserEmail={currentUserEmail}
+            currentUserDisplayName={currentUserDisplayName}
+            gatewayUrl={gatewayUrl}
+            token={token}
+            navigate={(path: string) => void navigate(path)}
+            openChildSessionInspector={openChildSessionInspector}
+            taskToolRuntimeLookup={taskToolRuntimeLookup}
+            toolCallCards={toolCallCards}
+            toolFilter={toolFilter}
+            setToolFilter={setToolFilter}
+            compactions={compactions}
+            upstreamSummaries={rightPanelState.upstreamSummaries}
+            pendingPermissions={pendingPermissions}
+            resolveInlinePermissionActions={resolveInlinePermissionActions}
+            planTasks={planTasks}
+            planHistory={planHistory}
+            sessionTodos={sessionTodos}
+            sessionTasks={sessionTasks}
+            childSessions={childSessions}
+            pendingQuestions={pendingQuestions}
+            dagNodes={dagNodes}
+            dagEdges={dagEdges}
+            agentEvents={agentEvents}
+            mcpServers={mcpServers}
+            onRetryMcpServer={handleRetryMcpServer}
+            sharedUiThemeVars={sharedUiThemeVars}
+            resolveTaskToolRuntimeSnapshot={resolveTaskToolRuntimeSnapshot}
+            onCompactSession={() => void handleCompactCurrentSession()}
+            onOpenRecoveryStrategy={() => {
+              setRightOpen(true);
+              setRightTab('history');
+            }}
+            providerCatalog={providerCatalog}
+            attachmentItems={[]}
+            artifactsWorkspaceHref={artifactsWorkspaceHref}
+            contextUsageSnapshot={contextUsageSnapshot}
+            contentArtifactCount={contentArtifactCount}
+            contentArtifactCountStatus={contentArtifactCountStatus}
+            currentSessionId={currentSessionId}
+            dialogueMode={dialogueModeLabel === null ? undefined : dialogueMode}
+            effectiveWorkingDirectory={effectiveWorkingDirectory}
+            effectiveContextMessageCount={effectiveContextMessageCount}
+            messages={messages}
+            sessionStateStatus={sessionStateStatus}
+            workspaceFileItems={workspaceFileItems}
+            permissionMode={permissionMode}
+            yoloMode={yoloMode}
+            sessionTerminals={sessionTerminals.terminals}
+            sessionTerminalsRunningCount={sessionTerminals.runningCount}
+            sessionTerminalsLoading={sessionTerminals.loading}
+            sessionTerminalsError={sessionTerminals.error}
+            sessionTerminalsPendingKillIds={sessionTerminals.pendingKillIds}
+            sessionTerminalsLastSyncedAtMs={sessionTerminals.lastSyncedAtMs}
+            onKillTerminal={sessionTerminals.killTerminal}
+            onReloadTerminals={sessionTerminals.reload}
+            backgroundTaskModel={backgroundTaskPanel}
+            stoppingSubAgentIds={stoppingSubAgentIds}
+            onStopSubagent={handleStopChildSession}
+            onStopAllSubagents={handleStopAllChildSessions}
+            onPreviewTerminal={handlePreviewBackgroundTerminal}
+            backgroundTaskPreviewTerminalId={backgroundTaskPreviewTerminalId}
+            ensureMessageVisible={ensureMessageVisible}
+          />
+        ) : null}
+      </SubagentProgressProvider>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
+import { isImeComposingKeyboardEvent } from '../utils/ime-composition.js';
 
 export interface ModelPriceEntry {
   id: string;
@@ -38,6 +39,7 @@ function PriceCell({ value, onSave }: { value: number | undefined; onSave: (v: n
           setEditing(false);
         }}
         onKeyDown={(e) => {
+          if (isImeComposingKeyboardEvent(e)) return;
           if (e.key === 'Enter') {
             const n = parseFloat(draft);
             if (!isNaN(n)) onSave(n);

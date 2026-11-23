@@ -12,7 +12,12 @@
  * - 行组件从 `./background-task-rows.js` 导入（NodeNext 需要 `.js` 后缀）。
  */
 import React, { useId, useState } from 'react';
+import { ShellLoadMore, useProgressiveShells } from '../../../components/chat/shell-progress.js';
 import type { CSSProperties } from 'react';
+import {
+  SubagentLoadMore,
+  useProgressiveSubagents,
+} from '../../../components/chat/subagent-progress.js';
 import {
   BackgroundTaskConfirmDialog,
   type BackgroundTaskPendingConfirm,
@@ -330,6 +335,26 @@ function TaskSection({
 
 // ── 导出的面板主体（冻结签名，勿改） ──────────────────────────────
 
+/** 同一子会话优先展示可操作的运行任务，其次排队任务，最后是最近一次历史任务。 */
+function selectSessionTaskRows(rows: readonly BackgroundTaskRow[]) {
+  const rank = (row: BackgroundTaskRow) =>
+    row.state === 'running' ? 0 : row.state === 'pending' ? 1 : 2;
+  const selected = new Map<string, BackgroundTaskRow>();
+  for (const row of rows) {
+    const sessionId = row.sessionId;
+    if (!sessionId) continue;
+    const previous = selected.get(sessionId);
+    if (
+      !previous ||
+      rank(row) < rank(previous) ||
+      (rank(row) === rank(previous) && (row.createdAtMs ?? 0) > (previous.createdAtMs ?? 0))
+    ) {
+      selected.set(sessionId, row);
+    }
+  }
+  return selected;
+}
+
 export function BackgroundTaskPanel(props: {
   model: BackgroundTaskPanelModel;
   loading: boolean;
@@ -363,7 +388,22 @@ export function BackgroundTaskPanel(props: {
   // 破坏性确认：初始焦点给「取消」，避免回车直接触发停止 / 终止。
 
   const subagentRows: BackgroundTaskRow[] = model.rows.filter((row) => row.kind === 'subagent');
+  const unboundRows = subagentRows.filter((row) => !row.sessionId);
+  const boundRows = subagentRows.filter((row) => Boolean(row.sessionId));
+  const sessionRows = selectSessionTaskRows(boundRows);
+  // 保留所有任务的真实创建时间供分页聚合，续跑不能改变子会话最初创建的排序。
+  const progress = useProgressiveSubagents(boundRows, (row) => ({
+    sessionId: row.sessionId ?? '',
+    createdAt: row.createdAtMs,
+  }));
+  const visibleSessionRows = progress.visible.filter(
+    (row) => sessionRows.get(row.sessionId ?? '') === row,
+  );
   const shellRows: BackgroundTaskRow[] = model.rows.filter((row) => row.kind === 'shell');
+  const shellProgress = useProgressiveShells(shellRows, (row) => ({
+    terminalId: row.terminalId ?? row.key,
+    startedAtMs: row.startedAtMs,
+  }));
   const hasRows = model.rows.length > 0;
   const showSkeleton = !hasRows && error === null && loading;
   const showErrorState = !hasRows && error !== null;
@@ -412,11 +452,12 @@ export function BackgroundTaskPanel(props: {
           <TaskSection
             testId="background-task-subagent-section"
             title="子代理任务"
-            count={subagentRows.length}
+            count={sessionRows.size + unboundRows.length}
             emptyTestId="background-task-subagent-empty"
             emptyText="暂无运行中的子代理任务"
           >
-            {subagentRows.map((row) => {
+            {/* 未绑定任务不属于 Provider 的子会话集合，必须独立于分页保留。 */}
+            {[...unboundRows, ...visibleSessionRows].map((row) => {
               const childSessionId = row.sessionId ?? '';
               return (
                 <SubagentTaskRow
@@ -435,6 +476,7 @@ export function BackgroundTaskPanel(props: {
               );
             })}
           </TaskSection>
+          <SubagentLoadMore progress={progress} />
 
           <TaskSection
             testId="background-task-shell-section"
@@ -443,7 +485,7 @@ export function BackgroundTaskPanel(props: {
             emptyTestId="background-task-shell-empty"
             emptyText="暂无后台命令"
           >
-            {shellRows.map((row) => {
+            {shellProgress.visible.map((row) => {
               const terminalId = row.terminalId ?? '';
               return (
                 <ShellTaskRow
@@ -465,6 +507,7 @@ export function BackgroundTaskPanel(props: {
         </>
       ) : null}
 
+      <ShellLoadMore progress={shellProgress} />
       <BackgroundTaskConfirmDialog
         pending={pendingConfirm}
         onConfirm={handleConfirm}

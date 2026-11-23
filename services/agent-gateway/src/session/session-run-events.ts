@@ -13,6 +13,7 @@ import { appendSessionEvent, translateRunEventToSessionEvent } from './session-e
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { getSessionOwnerUserId } from '../infra/session-owner-cache.js';
 import { logGatewayError, logGatewayWarn } from '../infra/gateway-logger.js';
+import { commitScopeEviction, noteScopeWrite, planScopeEviction } from './scope-recency-index.js';
 
 type RunEventHandler = (event: RunEvent, meta?: PublishRunEventMeta) => void;
 
@@ -104,26 +105,48 @@ function resolveSessionRunEventRetention(): number {
   return Math.floor(parsed);
 }
 
-function pruneSessionRunEventScopes(sessionId: string, maxScopes: number): void {
-  // Keep the `maxScopes` scopes whose latest row id is highest (most recently
-  // active, which includes any in-flight run), delete every older scope's
-  // rows wholesale. Scope = distinct non-null client_request_id.
-  sqliteRun(
-    `DELETE FROM session_run_events
-      WHERE session_id = ?
-        AND client_request_id IS NOT NULL
-        AND client_request_id NOT IN (
-          SELECT client_request_id FROM (
-            SELECT client_request_id, MAX(id) AS last_id
-              FROM session_run_events
-             WHERE session_id = ? AND client_request_id IS NOT NULL
-             GROUP BY client_request_id
-             ORDER BY last_id DESC
-             LIMIT ?
-          )
-        )`,
-    [sessionId, sessionId, maxScopes],
+/**
+ * 该会话的 scope 列表，**由新到旧**（按各 scope 的最大行 id）。
+ *
+ * 仅在会话尚未被 `scope-recency-index` 播种时调用一次；命中
+ * `idx_session_run_events_request_seq`，是索引有序的分组遍历，无临时 B-tree。
+ */
+function loadRunEventScopesNewestFirst(sessionId: string): string[] {
+  const rows = sqliteAll<{ client_request_id: string }>(
+    `SELECT client_request_id FROM (
+       SELECT client_request_id, MAX(id) AS last_id
+         FROM session_run_events
+        WHERE session_id = ? AND client_request_id IS NOT NULL
+        GROUP BY client_request_id
+        ORDER BY last_id DESC
+     )`,
+    [sessionId],
   );
+  return rows.map((row) => row.client_request_id);
+}
+
+function pruneSessionRunEventScopes(sessionId: string, maxScopes: number): void {
+  // Keep the `maxScopes` most recently written scopes (order tracked in memory,
+  // seeded from the DB on first use after a restart), delete every older
+  // scope's rows wholesale. Scope = distinct non-null client_request_id.
+  //
+  // The old shape (`NOT IN (SELECT ... GROUP BY client_request_id)`) re-scanned
+  // every row of the session on each prune — 2.3s of event-loop stall on a
+  // 254k-row session. Evicting by explicit scope id keeps the cost proportional
+  // to the rows actually deleted.
+  const evicted = planScopeEviction(sessionId, maxScopes, () =>
+    loadRunEventScopesNewestFirst(sessionId),
+  );
+  if (evicted.length === 0) return;
+  sqliteTransaction(() => {
+    for (const scopeId of evicted) {
+      sqliteRun(`DELETE FROM session_run_events WHERE session_id = ? AND client_request_id = ?`, [
+        sessionId,
+        scopeId,
+      ]);
+    }
+  });
+  commitScopeEviction(sessionId, evicted);
 }
 
 function maybePruneSessionRunEvents(sessionId: string): void {
@@ -470,6 +493,9 @@ function persistRunEventRow(
       JSON.stringify(event),
     ],
   );
+  // Feed the in-memory scope recency index (see scope-recency-index.ts): pruning
+  // then evicts by scope id instead of re-scanning the whole session.
+  noteScopeWrite(sessionId, meta?.clientRequestId);
   mirrorDisplayableRunEventAsMessage({ sessionId, userId, event, meta, occurredAt, seq });
   if (userId) {
     const notificationScope = meta?.clientRequestId ?? event.eventId ?? runId ?? event.type;
@@ -860,4 +886,7 @@ export function deleteSessionRunEventsByRequest(input: {
   // The cursor must re-derive from the (now truncated) table, not from a stale
   // in-memory high-water mark.
   runEventSeqCursors.delete(buildRunEventQueueKey(input.sessionId, input.clientRequestId));
+  // The scope has no rows left: drop it from the recency index so it stops
+  // occupying one of the retained scope slots.
+  commitScopeEviction(input.sessionId, [input.clientRequestId]);
 }

@@ -35,6 +35,8 @@ export interface BackgroundTaskRow {
   agent?: string;
   command?: string;
   cwd?: string;
+  /** 原始任务创建时间；与开始时间、排队时长无关。 */
+  createdAtMs?: number;
   startedAtMs: number;
   endedAtMs?: number;
   /** subagent：startedAt - createdAt（排队时长） */
@@ -116,7 +118,7 @@ interface RawBackgroundTaskRow {
   outputBytesTotal?: number;
   terminalKind?: 'foreground' | 'background' | 'tmux';
   errorMessage?: string;
-  /** 仅用于 subagent 排队时长计算，不进入最终行。 */
+  /** subagent 原始创建时间，同时用于排队时长计算。 */
   createdAtMs?: number;
 }
 
@@ -291,6 +293,9 @@ function finalizeRow(raw: RawBackgroundTaskRow, now: number): BackgroundTaskRow 
 
   if (raw.detail !== undefined) {
     row.detail = raw.detail;
+  }
+  if (raw.createdAtMs !== undefined) {
+    row.createdAtMs = raw.createdAtMs;
   }
   if (raw.taskId !== undefined) {
     row.taskId = raw.taskId;

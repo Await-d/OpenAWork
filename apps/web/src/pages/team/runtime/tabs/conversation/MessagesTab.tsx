@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, type CSSProperties } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type {
   AgentTeamsMessageCard,
   AgentTeamsSidebarTeam,
@@ -552,6 +553,7 @@ export function MessagesTab({
                       value={replyInput}
                       onChange={(e) => setReplyInput(e.target.value)}
                       onKeyDown={(e) => {
+                        if (isImeComposingKeyboardEvent(e)) return;
                         if (e.key === 'Enter') handleReply();
                         if (e.key === 'Escape') {
                           setReplyingTo(null);
@@ -729,6 +731,7 @@ export function MessagesTab({
               value={broadcastInput}
               onChange={(e) => setBroadcastInput(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposingKeyboardEvent(e)) return;
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleBroadcast();

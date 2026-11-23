@@ -130,6 +130,29 @@ describe('POST /sessions/:sessionId/clarify/confirm', () => {
     await app.close();
   });
 
+  it('来源会话（渠道 / 定时任务）即使带着脏 clarify 也不写模式与审计字段', async () => {
+    // 本入口是内部直写，不走 `PATCH /sessions/:id` 的字段级拒写，必须自己有守卫：
+    // 否则一次误触发就会把 dialogueMode 与审计字段写回来源会话（脏值复活）。
+    mocks.parseSessionMetadataJson.mockReturnValue({
+      clarificationState: buildAwaitingConfirmStateJson(),
+      dialogueMode: 'clarify',
+      source: 'channel',
+    });
+    mocks.sqliteGet.mockReturnValue(buildSessionRow('{}'));
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/clarify/confirm`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, switched: false });
+    expect(mocks.sqliteRun).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   it('会话不存在（或非本人）返回 404 且不写库', async () => {
     mocks.sqliteGet.mockReturnValue(undefined);
 

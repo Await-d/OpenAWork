@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 
 /** 「已复制」提示停留时长，与消息侧代码块一致。 */
 const COPY_FEEDBACK_MS = 1500;
@@ -12,8 +13,9 @@ const COPY_FEEDBACK_MS = 1500;
  * 直接用会退化成浏览器默认按钮。这里的按钮走预览自己的 `.oaw-preview-btn`
  * （`preview-surface.css`），与图表 / SVG 工具栏同源。
  *
- * 剪贴板不可用时（http 非安全上下文、权限被拒）静默失败：复制是辅助功能，
- * 不该因此弹一个错误打断用户。
+ * 复制走公共封装：`navigator.clipboard` 在非安全上下文（http 内网访问）下不存在，
+ * 直接调用会抛错；封装会在这种情况下回落 `execCommand('copy')`。彻底失败（如权限被拒）
+ * 仍静默：复制是辅助功能，不该因此弹一个错误打断用户。
  */
 export function CopyButton({
   text,
@@ -41,13 +43,7 @@ export function CopyButton({
   );
 
   const handleCopy = useCallback(() => {
-    const clipboard = navigator.clipboard;
-    if (!clipboard?.writeText) {
-      return;
-    }
-
-    void clipboard
-      .writeText(text)
+    void copyTextToClipboard(text)
       .then(() => {
         setCopied(true);
         if (timerRef.current !== null) {

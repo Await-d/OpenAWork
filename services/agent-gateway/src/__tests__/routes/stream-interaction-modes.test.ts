@@ -144,6 +144,31 @@ describe('resolveStreamInteractionModes · 对话模式解析', () => {
     expect(modes.dialogueMode).toBeUndefined();
   });
 
+  it('渠道会话忽略请求级与 metadata 的 dialogueMode（来源会话没有对话模式）', () => {
+    // 通道侧入站回合由服务端自建请求、不带 dialogueMode，此前只能靠 metadata 兜底：
+    // 一旦 metadata 被网页端误写成 clarify，澄清只读白名单会连渠道回复工具一起过滤掉。
+    const modes = resolveStreamInteractionModes({
+      metadataJson: JSON.stringify({ source: 'channel', dialogueMode: 'clarify' }),
+      requestData: buildRequest({ dialogueMode: 'clarify' }),
+    });
+
+    expect(modes.dialogueMode).toBeUndefined();
+  });
+
+  it('定时任务会话同样忽略 dialogueMode，但权限档位照常解析', () => {
+    const modes = resolveStreamInteractionModes({
+      metadataJson: JSON.stringify({
+        source: 'cron',
+        dialogueMode: 'clarify',
+        permissionMode: 'yolo',
+      }),
+      requestData: buildRequest(),
+    });
+
+    expect(modes.dialogueMode).toBeUndefined();
+    expect(modes.yoloMode).toBe(true);
+  });
+
   it('接受 programmer 并拒绝枚举外取值', () => {
     expect(buildRequest({ dialogueMode: 'programmer' }).dialogueMode).toBe('programmer');
     expect(

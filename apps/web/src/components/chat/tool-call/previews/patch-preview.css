@@ -1,0 +1,78 @@
+.patch-preview {
+  min-width: 0;
+  color: var(--fg-default);
+}
+
+.patch-preview p {
+  margin: var(--spacing-2) 0;
+  color: var(--fg-muted);
+}
+
+.patch-preview-file > summary {
+  cursor: pointer;
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.patch-preview-file > summary:hover {
+  background: var(--bg-hover);
+}
+
+.patch-preview-file > summary:active {
+  background: var(--accent-subtle);
+}
+
+.patch-preview-file > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.patch-preview-path {
+  margin-inline: var(--spacing-2);
+  font-family: var(--font-mono, monospace);
+}
+
+.patch-preview-added {
+  color: var(--success);
+  margin-inline-end: var(--spacing-1);
+}
+
+.patch-preview-removed {
+  color: var(--complement);
+}
+
+.patch-preview-hunk {
+  min-width: 0;
+  overflow: auto;
+}
+
+.patch-preview-hunk > pre {
+  margin: 0;
+  padding: var(--spacing-2);
+  color: var(--aux);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.patch-preview-hunk > .patch-preview-lines {
+  color: var(--fg-default);
+  padding: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.patch-preview-lines > span {
+  display: block;
+  padding-inline: var(--spacing-2);
+}
+
+.patch-preview-lines > [data-kind='added'] {
+  color: var(--success);
+  background: var(--success-subtle, var(--accent-subtle));
+}
+
+.patch-preview-lines > [data-kind='removed'] {
+  color: var(--complement);
+  background: var(--complement-subtle);
+}

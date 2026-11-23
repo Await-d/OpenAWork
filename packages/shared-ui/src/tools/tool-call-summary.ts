@@ -2,6 +2,7 @@ import type { ToolDiffFileView } from './ToolDiffCollection.js';
 import { summarizeSnapshotDiff } from './UnifiedCodeDiff.js';
 import type { TaskToolMeta } from './tool-call-card-shared.js';
 import { isSubagentToolName } from './subagent-tool-names.js';
+import { readFileSnapshot } from './file-change-result.js';
 
 /**
  * 工具卡片摘要层：把工具入参压成「标题后缀 + 摘要行」，以及输出体积判定。
@@ -246,11 +247,9 @@ export function buildSnapshotSummary(
 }
 
 export function buildDiffFileView(record: Record<string, unknown>): ToolDiffFileView | undefined {
-  const beforeText = readNonEmptyString(record['before']) ?? '';
-  const afterText = readNonEmptyString(record['after']) ?? '';
-  if (beforeText.length === 0 && afterText.length === 0) {
-    return undefined;
-  }
+  const snapshot = readFileSnapshot(record);
+  if (!snapshot) return undefined;
+  const { before: beforeText, after: afterText } = snapshot;
 
   const filePath =
     readNonEmptyString(record['file']) ??

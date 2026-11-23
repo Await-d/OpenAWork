@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
 import type * as CatalogModule from '../../agent/agent-catalog.js';
+import { buildDynamicOrchestratorPrompt } from '../../agent/dynamic-agent-prompt-builder.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
@@ -50,6 +51,22 @@ afterAll(async () => {
 });
 
 describe('agent-catalog · 系统提示词覆盖', () => {
+  it('Sisyphus 默认按意图交付，动态段不再按关键词强制委派', () => {
+    const prompt = catalog
+      .listManagedAgentsForUser(USER_ID)
+      .find(({ id }) => id === 'sisyphus')?.systemPrompt;
+    const dynamic = buildDynamicOrchestratorPrompt();
+
+    expect(prompt).toContain('直接回答，不调用工具');
+    expect(prompt).toContain('按需只读调查');
+    expect(prompt).toContain('实施不等于授权提交、推送或发布');
+    expect(prompt).not.toContain('有专家时绝不独自工作');
+    expect(dynamic).toContain('下列条目只用于在已决定委派后匹配角色');
+    expect(dynamic).toContain('`explore`');
+    expect(dynamic).toContain('`librarian`');
+    expect(dynamic).not.toMatch(/分类前检查|立即启动 librarian|完整的实施周期|2\+ 模块涉及/);
+  });
+
   it('仅修改 systemPrompt 后重新读取仍返回覆盖值（防被误判为默认而删除）', () => {
     const defaultPrompt = readBuiltin().systemPrompt;
     expect(defaultPrompt).toBeTruthy();

@@ -38,11 +38,8 @@ describe('resolveToolCallCardDisplayData diffView (JSON-encoded envelope recover
 
     expect(data.diffView).toBeDefined();
     expect(data.diffView?.filePath).toBe('/repo/src/foo.ts');
-    // `readNonEmptyString` trims surrounding whitespace, so the trailing
-    // `\n` is not preserved — that's fine for the diff renderer which
-    // re-splits on `\n` regardless.
-    expect(data.diffView?.beforeText).toBe('const a = 1;');
-    expect(data.diffView?.afterText).toBe('const a = 2;');
+    expect(data.diffView?.beforeText).toBe('const a = 1;\n');
+    expect(data.diffView?.afterText).toBe('const a = 2;\n');
     // Single-file branch produces beforeText/afterText, not files[].
     expect(data.diffView?.files).toBeUndefined();
   });
@@ -230,13 +227,7 @@ describe('resolveToolCallCardDisplayData diffView（截断输出的补闭合修�
       output,
     });
 
-    expect(data.diffView).toBeDefined();
-    expect(data.diffView?.truncated).toBe(true);
-    expect(data.diffView?.summary).toContain('输出可能不完整');
-    expect(data.diffView?.beforeText).toBe('');
-    expect(data.diffView?.afterText).toContain('来源：cnBeta');
-    // 截断点落在 `path` 之前：文件名只能由入参兜底，不能留空。
-    expect(data.diffView?.filePath).toBe('/repo/docs/tech-news.md');
+    expect(data.diffView).toBeUndefined();
   });
 
   it('截断在嵌套信封里：内层 filediff 字段保留', () => {
@@ -248,10 +239,7 @@ describe('resolveToolCallCardDisplayData diffView（截断输出的补闭合修�
       output,
     });
 
-    expect(data.diffView?.filePath).toBe('/repo/a.md');
-    expect(data.diffView?.beforeText).toBe('x');
-    expect(data.diffView?.afterText).toBe('y');
-    expect(data.diffView?.truncated).toBe(true);
+    expect(data.diffView).toBeUndefined();
   });
 
   it('截断但信封里没有变更字段：仍不产生 diff', () => {

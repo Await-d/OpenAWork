@@ -1,12 +1,14 @@
 import type { RunEvent } from '@openAwork/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
+import type * as ScopeRecencyModule from '../../session/scope-recency-index.js';
 import type * as SessionRunEventsModule from '../../session/session-run-events.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 let dbModule: typeof DbModule;
+let scopeRecency: typeof ScopeRecencyModule;
 let sessionRunEvents: typeof SessionRunEventsModule;
 
 const SESSION_ID = 'sess-retention';
@@ -17,9 +19,13 @@ beforeAll(async () => {
   await dbModule.connectDb();
   await dbModule.migrate();
   sessionRunEvents = await import('../../session/session-run-events.js');
+  scopeRecency = await import('../../session/scope-recency-index.js');
 });
 
 beforeEach(() => {
+  // The recency index is process-global: start every case from a clean slate so
+  // scope ordering cannot leak in from the previous test.
+  scopeRecency.__resetScopeRecencyIndexForTesting();
   dbModule.sqliteRun('DELETE FROM session_entry', []);
   dbModule.sqliteRun('DELETE FROM session_run_events', []);
   dbModule.sqliteRun('DELETE FROM notifications', []);
@@ -55,6 +61,13 @@ function writeScope(clientRequestId: string, deltaCount: number): void {
     };
     sessionRunEvents.persistSessionRunEventForRequest(SESSION_ID, event, { clientRequestId });
   }
+}
+
+function scopeRowCount(clientRequestId: string): number {
+  return sessionRunEvents.listSessionRunEventsByRequest({
+    sessionId: SESSION_ID,
+    clientRequestId,
+  }).length;
 }
 
 function distinctScopeCount(): number {
@@ -105,5 +118,52 @@ describe('session_run_events 每会话 scope 保留裁剪', () => {
     }
 
     expect(distinctScopeCount()).toBe(8);
+  });
+
+  it('进程重启（内存次序索引为空）后按 DB 播种，仍收敛到上限', () => {
+    // 关掉裁剪，让 6 个 scope 完整落库。
+    sessionRunEvents.__setSessionRunEventRetentionForTesting(0, 1);
+    for (let r = 0; r < 6; r++) {
+      writeScope(`boot-${r}`, 3);
+    }
+    expect(distinctScopeCount()).toBe(6);
+
+    // 模拟进程重启：内存次序索引清空，DB 仍是唯一真相。
+    scopeRecency.__resetScopeRecencyIndexForTesting();
+
+    sessionRunEvents.__setSessionRunEventRetentionForTesting(3, 1);
+    writeScope('boot-6', 1);
+
+    // 播种后按 DB 的 MAX(id) 次序收敛：最旧的 4 个被整段淘汰。
+    expect(distinctScopeCount()).toBe(3);
+    for (const stale of ['boot-0', 'boot-1', 'boot-2', 'boot-3']) {
+      expect(scopeRowCount(stale)).toBe(0);
+    }
+    for (const recent of ['boot-4', 'boot-5']) {
+      expect(scopeRowCount(recent)).toBe(3);
+    }
+    expect(scopeRowCount('boot-6')).toBe(1);
+  });
+
+  it('续写（复用同一 client_request_id）的 scope 视为最新，不会被优先淘汰', () => {
+    sessionRunEvents.__setSessionRunEventRetentionForTesting(3, 1);
+
+    for (const scope of ['r-0', 'r-1', 'r-2']) {
+      writeScope(scope, 2);
+    }
+    expect(distinctScopeCount()).toBe(3);
+
+    // 第 4 个 scope 挤掉最旧的 r-0。
+    writeScope('r-3', 2);
+    expect(distinctScopeCount()).toBe(3);
+    expect(scopeRowCount('r-0')).toBe(0);
+
+    // 失败重试会复用同一个 request id：续写 r-0 后它变成最新，淘汰的应是 r-1。
+    writeScope('r-0', 2);
+    expect(distinctScopeCount()).toBe(3);
+    expect(scopeRowCount('r-0')).toBe(2);
+    expect(scopeRowCount('r-1')).toBe(0);
+    expect(scopeRowCount('r-2')).toBe(2);
+    expect(scopeRowCount('r-3')).toBe(2);
   });
 });

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="carbon" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>消息字符上限浏览器验收</title>
+    <style>
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/message-limits-browser-entry.tsx"></script>
+  </body>
+</html>

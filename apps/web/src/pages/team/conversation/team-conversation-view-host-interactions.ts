@@ -50,7 +50,7 @@ export function useTeamConversationViewInteractions(input: {
 
   // Copy last assistant message helper.
   const handleCopyLastAssistant = useCallback(() => {
-    const lastAssistant = [...state.messages].reverse().find((m) => m.role === 'assistant');
+    const lastAssistant = state.messages.findLast((m) => m.role === 'assistant');
     if (lastAssistant) {
       void copyExportToClipboard([lastAssistant], 'text');
     }

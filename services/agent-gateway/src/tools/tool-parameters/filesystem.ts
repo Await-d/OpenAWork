@@ -136,7 +136,10 @@ export function buildFilesystemParameters(name: string): ToolParameters | undefi
         type: 'object',
         properties: {
           pattern: { type: 'string', description: '在文件内容中搜索的正则表达式' },
-          path: { type: 'string', description: '可选的要搜索的工作区目录路径' },
+          path: {
+            type: 'string',
+            description: '可选的搜索路径。若指定，须使用工作区内的绝对路径。',
+          },
           include: {
             type: 'string',
             description: '可选的 glob 模式，限定被包含的文件',

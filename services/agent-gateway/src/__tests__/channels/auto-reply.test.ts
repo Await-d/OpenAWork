@@ -14,6 +14,8 @@ interface FakeServiceOptions {
   supportsStreaming?: boolean;
   pluginType?: string;
   sendMessage?: (chatId: string, content: string) => Promise<{ messageId: string }>;
+  /** 显式提供才模拟「该渠道支持主动消息」（QQ 才有）。 */
+  sendWakeupMessage?: (chatId: string, content: string) => Promise<{ messageId: string }>;
   replyMessage?: (messageId: string, content: string) => Promise<{ messageId: string }>;
   sendStreamingMessage?: (
     chatId: string,
@@ -31,6 +33,8 @@ class FakeService implements MessagingChannelService {
   readonly pluginId: string;
   readonly pluginType: string;
   readonly supportsStreaming: boolean;
+  /** 只有显式传了才存在，用来区分「QQ 有主动消息」与「其它渠道没有」。 */
+  sendWakeupMessage?: (chatId: string, content: string) => Promise<{ messageId: string }>;
   private opts: FakeServiceOptions;
 
   constructor(pluginId: string, opts: FakeServiceOptions) {
@@ -38,6 +42,9 @@ class FakeService implements MessagingChannelService {
     this.opts = opts;
     this.pluginType = opts.pluginType ?? 'telegram';
     this.supportsStreaming = opts.supportsStreaming ?? false;
+    if (opts.sendWakeupMessage) {
+      this.sendWakeupMessage = opts.sendWakeupMessage;
+    }
   }
 
   async start(): Promise<void> {}
@@ -87,6 +94,11 @@ function makeInstance(id: string, replyLanguage: ChannelReplyLanguage = 'zh-CN')
     createdAt: 0,
     updatedAt: 0,
   };
+}
+
+/** QQ 实例：被动回复（带 `msg_id`）+ 有主动消息能力。 */
+function makeQQInstance(id: string): ChannelInstance {
+  return { ...makeInstance(id), type: 'qq' };
 }
 
 function makeStreamingInstance(
@@ -195,6 +207,101 @@ describe('AutoReplyPipeline error isolation', () => {
     expect(sendMessage).toHaveBeenCalledWith('chat-1', 'the answer');
   });
 
+  it('非流式渠道运行超过阈值时先发「仍在处理」回执，结束后再发完整结果', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const id = 'tg-pending-notice';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const run = createDeferred<string>();
+    const pipeline = new AutoReplyPipeline({
+      pendingNoticeDelayMs: 20,
+      resolveChannel: () => makeInstance(id),
+      onAgentRun: async () => run.promise,
+    });
+
+    const handling = pipeline.handle(messageEvent(id));
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith('chat-1', expect.stringContaining('**仍在处理中**'));
+    });
+
+    run.resolve('最终结果');
+    await handling;
+    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual([
+      expect.stringContaining('**仍在处理中**'),
+      '最终结果',
+    ]);
+  });
+
+  it('短任务不发「仍在处理」回执（定时器在结束时被取消）', async () => {
+    const sendMessage = vi.fn(async () => ({ messageId: 'ok' }));
+    const id = 'tg-pending-notice-fast';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const pipeline = new AutoReplyPipeline({
+      pendingNoticeDelayMs: 20,
+      resolveChannel: () => makeInstance(id),
+      onAgentRun: async () => 'quick answer',
+    });
+
+    await pipeline.handle(messageEvent(id));
+    // 给阈值定时器留出触发机会：若没被取消，这里会多出一条回执。
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith('chat-1', 'quick answer');
+  });
+
+  it('QQ 被动回复失败时改用主动消息兜底投递结果', async () => {
+    const replyMessage = vi.fn(async (_messageId: string, _content: string) => {
+      throw new Error('msg_id expired');
+    });
+    const sendWakeupMessage = vi.fn(async (_chatId: string, _content: string) => ({
+      messageId: 'wake-1',
+    }));
+    const id = 'qq-passive-expired';
+    await installFakeService(id, new FakeService(id, { replyMessage, sendWakeupMessage }));
+
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeQQInstance(id),
+      onAgentRun: async () => '最终结果',
+    });
+
+    const event = messageEvent(id);
+    if (event.type === 'message') {
+      event.message.id = 'chat-1|msg-9';
+    }
+
+    await expect(pipeline.handle(event)).resolves.toBeUndefined();
+    expect(replyMessage).toHaveBeenCalledWith('chat-1|msg-9', '最终结果');
+    // 被动回复失败不能把结果吞掉：结果只在会话里可见、IM 里收不到才是最差的结果。
+    expect(sendWakeupMessage).toHaveBeenCalledWith('chat-1', '最终结果');
+  });
+
+  it('QQ 被动回复与主动消息都失败时落库两次错误且 handle 不 reject', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const replyMessage = vi.fn(async (_messageId: string, _content: string) => {
+      throw new Error('msg_id expired');
+    });
+    const sendWakeupMessage = vi.fn(async (_chatId: string, _content: string) => {
+      throw new Error('wakeup quota exhausted');
+    });
+    const id = 'qq-both-failed';
+    await installFakeService(id, new FakeService(id, { replyMessage, sendWakeupMessage }));
+
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeQQInstance(id),
+      onAgentRun: async () => '最终结果',
+    });
+
+    const event = messageEvent(id);
+    if (event.type === 'message') {
+      event.message.id = 'chat-1|msg-9';
+    }
+
+    await expect(pipeline.handle(event)).resolves.toBeUndefined();
+    // 结果投递与随后的「错误通知」投递都会尝试兜底，故只断言「至少尝试过」。
+    expect(sendWakeupMessage).toHaveBeenCalled();
+    expect(sendWakeupMessage).toHaveBeenCalledWith('chat-1', expect.any(String));
+    expect(consoleSpy).toHaveBeenCalled();
+  });
+
   it('图片附件会作为 inputParts 传给 channel session 运行', async () => {
     const sendMessage = vi.fn(async () => ({ messageId: 'ok' }));
     const id = 'tg-image-input';
@@ -238,7 +345,7 @@ describe('AutoReplyPipeline error isolation', () => {
     expect(sendMessage).toHaveBeenCalledWith('chat-1', '看到了图片');
   });
 
-  it('同一通道会话的自动回复串行执行，避免上一轮运行中时下一条消息被会话冲突丢弃', async () => {
+  it('关闭插话开关时同一通道会话的自动回复串行执行，避免上一轮运行中时下一条消息被会话冲突丢弃', async () => {
     const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
     const id = 'tg-serialized-session';
     await installFakeService(id, new FakeService(id, { sendMessage }));
@@ -248,6 +355,7 @@ describe('AutoReplyPipeline error isolation', () => {
       return message === 'first' ? firstRun.promise : secondRun.promise;
     });
     const pipeline = new AutoReplyPipeline({
+      interruptOnNewMessage: false,
       resolveChannel: () => makeInstance(id),
       onAgentRun,
     });
@@ -278,7 +386,92 @@ describe('AutoReplyPipeline error isolation', () => {
     ]);
   });
 
-  it('上一轮未结束时回执排队状态，并在开始执行时记录队列深度与等待时长', async () => {
+  it('新消息打断同一会话正在执行的轮次：上一轮被 abort 且不发回复，最新这条立刻开跑', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const id = 'tg-interrupt-running';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const firstRun = createDeferred<string>();
+    const secondRun = createDeferred<string>();
+    const firstSignals: AbortSignal[] = [];
+    const onAgentRun = vi.fn(
+      ({ message, signal }: { readonly message: string; readonly signal?: AbortSignal }) => {
+        if (message === 'first') {
+          if (signal) firstSignals.push(signal);
+          // 真实实现会在 abort 时停下本轮，并以作废结果 settle（router 拿到 cancelled）。
+          signal?.addEventListener('abort', () => firstRun.resolve('已作废的上一轮答复'), {
+            once: true,
+          });
+          return firstRun.promise;
+        }
+        return secondRun.promise;
+      },
+    );
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    const first = pipeline.handle(messageEvent(id, 'first'));
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    const second = pipeline.handle(messageEvent(id, 'second'));
+    await vi.waitFor(() => {
+      expect(firstSignals[0]?.aborted).toBe(true);
+    });
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(2);
+    });
+
+    secondRun.resolve('reply second');
+    await Promise.all([first, second]);
+
+    // 被抢占那一轮的答复必须丢弃：用户只应看到「已打断上一轮」与最新一条的答案。
+    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual([
+      expect.stringContaining('**已打断上一轮**'),
+      'reply second',
+    ]);
+  });
+
+  it('排队中的消息被更新的消息抢占：整轮跳过，一条回复都不发', async () => {
+    const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
+    const id = 'tg-interrupt-queued';
+    await installFakeService(id, new FakeService(id, { sendMessage }));
+    const firstRun = createDeferred<string>();
+    const onAgentRun = vi.fn(({ message }: { readonly message: string }) =>
+      message === 'first' ? firstRun.promise : Promise.resolve(`reply ${message}`),
+    );
+    const pipeline = new AutoReplyPipeline({
+      resolveChannel: () => makeInstance(id),
+      onAgentRun,
+    });
+
+    const first = pipeline.handle(messageEvent(id, 'first'));
+    await vi.waitFor(() => {
+      expect(onAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    // 第二条抢占第一条后排队；第三条再把第二条一起打断。让出一个宏任务，
+    // 确保每条的入队都已完成，再发下一条。
+    const second = pipeline.handle(messageEvent(id, 'second'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const third = pipeline.handle(messageEvent(id, 'third'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    firstRun.resolve('已作废的上一轮答复');
+    await Promise.all([first, second, third]);
+
+    // 只有最新一条真正执行：'second' 被跳过，不产生任何调用。
+    expect(onAgentRun.mock.calls.map((call) => call[0]?.message)).toEqual(['first', 'third']);
+    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual([
+      expect.stringContaining('**已打断上一轮**'),
+      expect.stringContaining('**已打断上一轮**'),
+      'reply third',
+    ]);
+  });
+
+  it('关闭插话开关时上一轮未结束会回执排队状态，并在开始执行时记录队列深度与等待时长', async () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
     const id = 'tg-queued-feedback';
@@ -288,6 +481,7 @@ describe('AutoReplyPipeline error isolation', () => {
       return message === 'first' ? firstRun.promise : Promise.resolve('reply second');
     });
     const pipeline = new AutoReplyPipeline({
+      interruptOnNewMessage: false,
       resolveChannel: () => makeInstance(id),
       onAgentRun,
     });
@@ -412,7 +606,7 @@ describe('AutoReplyPipeline error isolation', () => {
     expect(secondSendMessage).toHaveBeenCalledWith('chat-1', 'reply second');
   });
 
-  it('同一通道会话队列超过上限时回复忙碌提示，避免无限积压 agent run', async () => {
+  it('关闭插话开关时同一通道会话队列超过上限才回复忙碌提示，避免无限积压 agent run', async () => {
     const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const sendMessage = vi.fn(async (_chatId: string, _content: string) => ({ messageId: 'ok' }));
     const id = 'tg-queue-depth-limit';
@@ -422,6 +616,7 @@ describe('AutoReplyPipeline error isolation', () => {
       return message === 'msg-1' ? firstRun.promise : Promise.resolve(`reply ${message}`);
     });
     const pipeline = new AutoReplyPipeline({
+      interruptOnNewMessage: false,
       resolveChannel: () => makeInstance(id),
       onAgentRun,
     });
@@ -453,7 +648,7 @@ describe('AutoReplyPipeline error isolation', () => {
     expect(sendMessage).toHaveBeenCalledWith('chat-1', 'reply msg-10');
   });
 
-  it('streaming 自动回复也在同一通道会话内串行创建 handle 和运行 agent', async () => {
+  it('关闭插话开关时 streaming 自动回复也在同一通道会话内串行创建 handle 和运行 agent', async () => {
     const finishes: string[] = [];
     const updates: string[] = [];
     const sendStreamingMessage = vi.fn(
@@ -490,6 +685,7 @@ describe('AutoReplyPipeline error isolation', () => {
       },
     );
     const pipeline = new AutoReplyPipeline({
+      interruptOnNewMessage: false,
       resolveChannel: () => makeStreamingInstance(id),
       onAgentRun,
     });
@@ -519,7 +715,7 @@ describe('AutoReplyPipeline error isolation', () => {
     expect(finishes).toEqual(['stream first', 'stream second']);
   });
 
-  it('streaming handle 创建失败不会毒化同一通道会话后续队列任务', async () => {
+  it('关闭插话开关时 streaming handle 创建失败不会毒化同一通道会话后续队列任务', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const finishes: string[] = [];
     let createAttempts = 0;
@@ -541,6 +737,7 @@ describe('AutoReplyPipeline error isolation', () => {
       new FakeService(id, { supportsStreaming: true, sendStreamingMessage }),
     );
     const pipeline = new AutoReplyPipeline({
+      interruptOnNewMessage: false,
       resolveChannel: () => makeStreamingInstance(id),
       onAgentRun: async ({ message }) => `reply ${message}`,
     });

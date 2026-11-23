@@ -35,14 +35,15 @@ export default function ArtifactsPage() {
 
   return (
     <div className="page-root">
-      <div className="page-header">
+      {/* 页头 <header> + 主标题 <h1>：landmark 与 heading-one 无障碍要求。 */}
+      <header className="page-header">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span className="page-title">产物工作区</span>
+          <h1 className="page-title">产物工作区</h1>
           <span style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.6 }}>
             直接浏览会话内的内容型 artifact，支持保存版本、回滚与实时预览。
           </span>
         </div>
-      </div>
+      </header>
 
       <div
         className="page-content"

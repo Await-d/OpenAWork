@@ -70,6 +70,172 @@ describe('deduplicateOverlappingMessages', () => {
     expect(ids(deduplicateOverlappingMessages([user, a, b]))).toEqual(['u', 'a', 'b']);
   });
 
+  it.each([
+    ['part id', 'shared-part', 'call-b'],
+    ['toolCallId', 'part-b', 'shared-call'],
+  ])('不同请求共享 %s 时保留两个回合', (_identity, partId, toolCallId) => {
+    const first = message({
+      clientRequestId: 'req-a',
+      id: 'round-a',
+      parts: [toolPart('shared-part', 'shared-call')],
+      status: 'streaming',
+    });
+    const second = message({
+      clientRequestId: 'req-b',
+      id: 'round-b',
+      parts: [toolPart(partId, toolCallId)],
+      status: 'completed',
+    });
+
+    expect(deduplicateOverlappingMessages([first, second])).toEqual([first, second]);
+  });
+
+  it.each([
+    ['part id', 'shared-part', 'call-b'],
+    ['toolCallId', 'part-b', 'shared-call'],
+  ])('任一侧缺少请求标识时仍按 %s 合并', (_identity, partId, toolCallId) => {
+    for (const missingRequestId of [undefined, '']) {
+      for (const requestIds of [
+        ['req-a', missingRequestId],
+        [missingRequestId, 'req-a'],
+      ]) {
+        const first = message({
+          clientRequestId: requestIds[0],
+          id: 'local',
+          parts: [toolPart('shared-part', 'shared-call')],
+          status: 'streaming',
+        });
+        const second = message({
+          clientRequestId: requestIds[1],
+          id: 'server',
+          parts: [toolPart(partId, toolCallId)],
+          status: 'completed',
+        });
+
+        expect(deduplicateOverlappingMessages([first, second])).toEqual([second]);
+      }
+    }
+  });
+
+  it('消息 id 相同时即使请求标识不同仍合并', () => {
+    const local = message({ clientRequestId: 'req-a', id: 'same', status: 'streaming' });
+    const snapshot = message({ clientRequestId: 'req-b', id: 'same', status: 'completed' });
+
+    expect(deduplicateOverlappingMessages([local, snapshot])).toEqual([snapshot]);
+  });
+
+  it.each(['part', 'tool'] as const)('%s 键冲突时无请求副本替换最早候选', (key) => {
+    const first = message({
+      clientRequestId: 'ra',
+      id: 'a',
+      parts: [toolPart('p', 'shared-call')],
+      status: 'streaming',
+    });
+    const second = message({
+      clientRequestId: 'rb',
+      id: 'b',
+      parts: [toolPart(key === 'part' ? 'p' : 'b-part', key === 'part' ? 'b-call' : 'shared-call')],
+      status: 'completed',
+    });
+    const copy = message({
+      id: 'copy-a',
+      parts: [
+        toolPart(
+          key === 'part' ? 'p' : 'copy-part',
+          key === 'part' ? 'copy-p-call' : 'shared-call',
+        ),
+        toolPart('q', 'copy-call'),
+      ],
+      status: 'completed',
+    });
+
+    expect(deduplicateOverlappingMessages([first, second, copy])).toEqual([copy, second]);
+  });
+
+  it.each(['part', 'tool'] as const)('替换共享 %s 键的候选后保留其他候选索引', (key) => {
+    const first = message({
+      clientRequestId: 'ra',
+      id: 'a',
+      parts: [toolPart('p', 'shared-call')],
+      status: 'streaming',
+    });
+    const second = message({
+      clientRequestId: 'rb',
+      id: 'b',
+      parts: [toolPart(key === 'part' ? 'p' : 'b-part', key === 'part' ? 'b-call' : 'shared-call')],
+    });
+    const replacement = message({
+      clientRequestId: 'rb',
+      id: 'b2',
+      parts: [toolPart('x', 'call-x'), toolPart('y', 'call-y')],
+    });
+    const copy = message({
+      id: 'copy-a',
+      parts: [
+        toolPart(
+          key === 'part' ? 'p' : 'copy-part',
+          key === 'part' ? 'copy-p-call' : 'shared-call',
+        ),
+      ],
+      status: 'completed',
+    });
+
+    expect(deduplicateOverlappingMessages([first, second, replacement, copy])).toEqual([
+      copy,
+      replacement,
+    ]);
+  });
+
+  it('同键最早候选请求冲突时继续查找后续有效候选', () => {
+    const first = message({ clientRequestId: 'ra', id: 'a', parts: [toolPart('p', 'call')] });
+    const second = message({
+      clientRequestId: 'rb',
+      id: 'b',
+      parts: [toolPart('p', 'call')],
+      status: 'streaming',
+    });
+    const replacement = message({ id: 'b', parts: second.parts, status: 'completed' });
+    const copy = message({
+      clientRequestId: 'rc',
+      id: 'copy-b',
+      parts: [toolPart('p', 'call'), toolPart('q', 'call-q')],
+    });
+
+    expect(deduplicateOverlappingMessages([first, second, replacement, copy])).toEqual([
+      first,
+      copy,
+    ]);
+  });
+
+  it.each(['part', 'tool'] as const)('跨 %s 键选择最早位置，不受输入 part 顺序影响', (key) => {
+    const first = message({
+      id: 'a',
+      parts: [toolPart('p', 'call-a')],
+      status: 'streaming',
+    });
+    const second = message({ id: 'b', parts: [toolPart('q', 'call-b')] });
+    const copy = message({
+      id: 'copy-a',
+      parts: [toolPart('q', 'call-b'), toolPart(key === 'part' ? 'p' : 'r', 'call-a')],
+      status: 'completed',
+    });
+
+    expect(deduplicateOverlappingMessages([first, second, copy])).toEqual([copy, second]);
+  });
+
+  it('精确请求匹配优先于位置更早的 part 或工具候选', () => {
+    const first = message({ id: 'a', parts: [toolPart('p', 'call')] });
+    const second = message({ clientRequestId: 'rb', id: 'b', status: 'streaming' });
+    const copy = message({
+      clientRequestId: 'rb',
+      id: 'copy-b',
+      parts: first.parts,
+      status: 'completed',
+    });
+
+    expect(deduplicateOverlappingMessages([first, second, copy])).toEqual([first, copy]);
+  });
+
   it('替换后新消息的 part 键会重新登记，后续消息仍能命中', () => {
     const first = message({ id: 'a' });
     const second = message({

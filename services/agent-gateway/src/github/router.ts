@@ -7,7 +7,7 @@ import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
-import { extractMessageText } from '../session/session-message-store.js';
+import { extractChannelReplyText } from '../channels/channel-reply-text.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
   listSessionMessagesV2 as listSessionMessages,
@@ -90,12 +90,14 @@ function persistTriggers(userId: string): void {
   );
 }
 
-function extractFinalAssistantText(sessionId: string, userId: string): string {
+export function extractFinalAssistantText(sessionId: string, userId: string): string {
   const messages = listSessionMessages({ sessionId, userId });
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg && msg.role === 'assistant') {
-      const text = extractMessageText(msg);
+      // 复用渠道正文提取：GitHub 回写是面向仓库协作者的外发内容，同样不得把
+      // reasoning / 工具入参与输出贴到 PR 评论或 commit status 上。
+      const text = extractChannelReplyText(msg);
       if (text.length > 0) {
         return text;
       }

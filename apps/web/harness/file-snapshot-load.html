@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="carbon" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>文件快照 · 按需加载完整内容验收</title>
+    <style>
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family: var(--font-sans, system-ui);
+      }
+      .file-snapshot-harness {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-6);
+        padding: var(--spacing-4);
+        min-width: 0;
+      }
+      .file-snapshot-harness section {
+        min-width: 0;
+        max-width: 100%;
+        padding: var(--spacing-3);
+        border-radius: var(--radius-md);
+        background: var(--bg-raised);
+      }
+      .file-snapshot-harness h1 {
+        font-size: 20px;
+        margin: 0;
+      }
+      .file-snapshot-harness h2 {
+        font-size: 12px;
+        color: var(--fg-muted);
+        margin: 0 0 var(--spacing-3);
+      }
+      /* 与真实消息列同宽的容器：375px 视口下必须能换行而不是撑出横向滚动。 */
+      [data-surface='preview'] {
+        min-width: 0;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/file-snapshot-load-entry.tsx"></script>
+  </body>
+</html>

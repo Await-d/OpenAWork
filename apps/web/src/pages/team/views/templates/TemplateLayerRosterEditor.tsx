@@ -10,6 +10,7 @@
  */
 
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import {
   TEAM_RUNTIME_LAYER_ORDER,
   type FixedTeamMemberSlot,
@@ -955,6 +956,7 @@ function DetailPopover({
           onChange={(e) => setName(e.target.value)}
           onBlur={commitName}
           onKeyDown={(e) => {
+            if (isImeComposingKeyboardEvent(e)) return;
             if (e.key === 'Enter') e.currentTarget.blur();
           }}
           style={{

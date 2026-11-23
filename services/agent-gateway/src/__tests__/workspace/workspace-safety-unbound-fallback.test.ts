@@ -230,4 +230,46 @@ describe('assertSessionWorkingDirectory unbound fallback', () => {
       }),
     ).toBe('/workspace/project/temp/render-status-health.mjs');
   });
+
+  it('未绑定会话的相对路径回退到默认工作区（与工具执行根同口径）', async () => {
+    mocks.sqliteGet.mockReturnValue({
+      metadata_json: '{}',
+      user_id: 'user-1',
+      role_layer: null,
+      team_parent_session_id: null,
+    });
+    mocks.resolveSessionWorkspacePath.mockReturnValue(null);
+
+    const { assertSessionWorkspacePath } = await import('../../workspace/workspace-safety.js');
+
+    // 修复前：workingDirectory 为 null 时相对路径没有任何基准，
+    // `resolveWorkspaceEntryPath` 直接返回 null → `Forbidden workspace path`；
+    // 而同一会话的 bash 却以默认工作区为 cwd 正常执行（口径不一致）。
+    expect(
+      assertSessionWorkspacePath({
+        path: 'services/agent-gateway/src',
+        sessionId: 'plain-chat-session',
+      }),
+    ).toBe('/home/tester/Documents/OpenAWork/services/agent-gateway/src');
+  });
+
+  it('未绑定会话的相对路径越界（..）仍被拒绝', async () => {
+    mocks.sqliteGet.mockReturnValue({
+      metadata_json: '{}',
+      user_id: 'user-1',
+      role_layer: null,
+      team_parent_session_id: null,
+    });
+    mocks.resolveSessionWorkspacePath.mockReturnValue(null);
+
+    const { assertSessionWorkspacePath } = await import('../../workspace/workspace-safety.js');
+
+    // 回退只提供解析基准，不放开越界：`..` 逃逸仍要按 forbidden 拒绝。
+    expect(() =>
+      assertSessionWorkspacePath({
+        path: '../outside-project/secret.ts',
+        sessionId: 'plain-chat-session',
+      }),
+    ).toThrow(/Forbidden workspace path/);
+  });
 });

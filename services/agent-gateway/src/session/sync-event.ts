@@ -8,7 +8,13 @@
  * - Idempotent: duplicate event IDs are ignored
  */
 
-import { sqliteGet, sqliteRun, sqliteTransaction, sqliteAll, sqliteAfterCommit } from '../infra/db.js';
+import {
+  sqliteGet,
+  sqliteRun,
+  sqliteTransaction,
+  sqliteAll,
+  sqliteAfterCommit,
+} from '../infra/db.js';
 import { randomUUID } from 'node:crypto';
 import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';

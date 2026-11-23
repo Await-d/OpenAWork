@@ -5,6 +5,7 @@ import { QRCodeDisplay } from '@openAwork/shared-ui';
 import { PinInput } from '../../../components/common/modal/PinInput.js';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { logger } from '../../../utils/log/logger.js';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import {
   authenticateDesktopGateway,
   DESKTOP_DEFAULT_EMAIL,
@@ -441,7 +442,7 @@ export function DesktopTabContent() {
         logger.error('copy pairing payload failed', err);
       },
       run: async () => {
-        await navigator.clipboard.writeText(pairingQr.qrData);
+        await copyTextToClipboard(pairingQr.qrData);
       },
     });
   }, [pairingQr]);

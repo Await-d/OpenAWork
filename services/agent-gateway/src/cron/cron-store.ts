@@ -181,39 +181,52 @@ export function getCronJobById(id: string): CronJobRecord | undefined {
   return row ? rowToCronJob(row) : undefined;
 }
 
-/** 执行历史 upsert + 按任务裁剪保留窗口。 */
+/**
+ * 执行历史 upsert + 按任务裁剪保留窗口。
+ *
+ * **两步必须在同一事务内**：它们是「写一条执行记录」这一逻辑写入的两个部分。
+ * 原先拆成两条独立语句，若裁剪步骤失败（锁超时、磁盘满、SQL 漂移……），upsert
+ * 会留在库里、裁剪却不发生——既留下超额行，也可能把一条正在 `running` 的记录
+ * 悄悄覆盖成 `completed`，且没有任何补偿路径（历史上 `deleteCronJob` 也是出于
+ * 同一理由用 `sqliteTransaction` 包住「删定义 + 清历史」）。
+ *
+ * 事务用的是 `infra/db.ts` 的**同步** `sqliteTransaction`：回调同步执行、内部
+ * 禁止 await（BEGIN IMMEDIATE / COMMIT / ROLLBACK 之间必须是同步块）。
+ */
 export function recordCronExecution(userId: string, exec: CronExecutionRecord): void {
-  sqliteRun(
-    `INSERT INTO cron_job_executions (id, job_id, user_id, started_at, finished_at, status, error, session_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       finished_at = excluded.finished_at,
-       status = excluded.status,
-       error = excluded.error,
-       session_id = excluded.session_id`,
-    [
-      exec.id,
-      exec.job_id,
-      userId,
-      exec.started_at,
-      exec.finished_at,
-      exec.status,
-      exec.error ?? null,
-      exec.session_id ?? null,
-    ],
-  );
+  sqliteTransaction(() => {
+    sqliteRun(
+      `INSERT INTO cron_job_executions (id, job_id, user_id, started_at, finished_at, status, error, session_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         finished_at = excluded.finished_at,
+         status = excluded.status,
+         error = excluded.error,
+         session_id = excluded.session_id`,
+      [
+        exec.id,
+        exec.job_id,
+        userId,
+        exec.started_at,
+        exec.finished_at,
+        exec.status,
+        exec.error ?? null,
+        exec.session_id ?? null,
+      ],
+    );
 
-  sqliteRun(
-    `DELETE FROM cron_job_executions
-      WHERE job_id = ?
-        AND id NOT IN (
-          SELECT id FROM cron_job_executions
-           WHERE job_id = ?
-           ORDER BY started_at DESC, id DESC
-           LIMIT ?
-        )`,
-    [exec.job_id, exec.job_id, CRON_EXECUTION_RETENTION_PER_JOB],
-  );
+    sqliteRun(
+      `DELETE FROM cron_job_executions
+       WHERE job_id = ?
+         AND id NOT IN (
+           SELECT id FROM cron_job_executions
+            WHERE job_id = ?
+            ORDER BY started_at DESC, id DESC
+            LIMIT ?
+         )`,
+      [exec.job_id, exec.job_id, CRON_EXECUTION_RETENTION_PER_JOB],
+    );
+  });
 }
 
 export function listCronExecutionsForJob(jobId: string, limit = 100): CronExecutionRecord[] {

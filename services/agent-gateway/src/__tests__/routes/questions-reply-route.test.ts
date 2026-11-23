@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { resumeAnsweredQuestionRequest } from '../../routes/stream-runtime.js';
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────
 //
@@ -22,9 +23,8 @@ const mocks = vi.hoisted(() => ({
   sqliteRun: vi.fn(),
   publishSessionRunEvent: vi.fn(),
   setPersistedSessionStateStatus: vi.fn(),
-  resumeAnsweredQuestionRequest: vi.fn(async () => undefined),
+  resumeAnsweredQuestionRequest: vi.fn<typeof resumeAnsweredQuestionRequest>(async () => undefined),
   parseSessionMetadataJson: vi.fn(() => ({})),
-  shouldExitPlanModeFromAnswers: vi.fn(() => false),
 }));
 
 vi.mock('../../infra/db.js', () => ({
@@ -48,13 +48,15 @@ vi.mock('../../session/session-workspace-metadata.js', () => ({
   parseSessionMetadataJson: mocks.parseSessionMetadataJson,
 }));
 
-vi.mock('../../tools/plan-mode-tools.js', () => ({
-  shouldExitPlanModeFromAnswers: mocks.shouldExitPlanModeFromAnswers,
-}));
-
-vi.mock('../../routes/stream.js', () => ({
-  setPersistedSessionStateStatus: mocks.setPersistedSessionStateStatus,
-}));
+vi.mock('../../routes/stream.js', async () => {
+  const { z } = await import('zod');
+  return {
+    setPersistedSessionStateStatus: mocks.setPersistedSessionStateStatus,
+    streamRequestSchema: z
+      .object({ clientRequestId: z.string().min(1), message: z.string() })
+      .passthrough(),
+  };
+});
 
 vi.mock('../../routes/stream-runtime.js', () => ({
   resumeAnsweredQuestionRequest: mocks.resumeAnsweredQuestionRequest,
@@ -80,6 +82,7 @@ import {
   createGrillState,
 } from '@openAwork/agent-core';
 import { questionsRoutes } from '../../routes/questions.js';
+import { buildExitPlanModeQuestionInput } from '../../tools/plan-mode-tools.js';
 
 const SESSION_ID = 'session-abc';
 const USER_ID = 'test-user';
@@ -91,11 +94,12 @@ const CONFIRM_QUESTION_JSON = JSON.stringify([
     nodeId: '__grill_confirm__',
     round: 1,
     options: [
-      { label: '确认', description: '共识达成，进入执行', recommended: true },
+      { label: '确认', description: '记录共识', recommended: true },
       { label: '需修改', description: '仍有未决项需要调整' },
     ],
   },
 ]);
+const EXIT_PLAN_QUESTIONS_JSON = JSON.stringify(buildExitPlanModeQuestionInput({}).questions);
 
 /** 决策节点已全部结算、只剩确认节点的 grill 状态（终局确认轮的前置态）。 */
 function buildAwaitingConfirmStateJson(): string {
@@ -112,7 +116,7 @@ function buildAwaitingConfirmStateJson(): string {
 }
 
 /**
- * 找出「设计完成切换模式」写入的那条会话元数据更新。
+ * 找出模式切换写入的那条会话元数据更新。
  * 以审计字段 `dialogueModeSwitch` 为标识——clarificationState 的写入也可能
  * 顺带带着当前 dialogueMode，只有模式切换才会写审计字段。
  */
@@ -126,6 +130,21 @@ function findAutoSwitchMetadataUpdate(): [string, unknown[]] | undefined {
       typeof params?.[0] === 'string' && (params[0] as string).includes('"dialogueModeSwitch"')
     );
   }) as [string, unknown[]] | undefined;
+}
+
+function readPersistedClarification() {
+  const update = mocks.sqliteRun.mock.calls.find(
+    ([sql]) => typeof sql === 'string' && sql.includes('UPDATE sessions SET metadata_json'),
+  );
+  expect(update?.[1]?.[1]).toBe(SESSION_ID);
+  const metadata = JSON.parse(update?.[1]?.[0] as string) as {
+    dialogueMode?: string;
+    clarificationState: string;
+  };
+  return {
+    dialogueMode: metadata.dialogueMode,
+    state: JSON.parse(metadata.clarificationState) as { confirmedAt?: number },
+  };
 }
 
 const ANSWERED_PAYLOAD_JSON = JSON.stringify({
@@ -178,7 +197,6 @@ describe('questions reply route', () => {
     mocks.setPersistedSessionStateStatus.mockReset();
     mocks.resumeAnsweredQuestionRequest.mockReset().mockResolvedValue(undefined);
     mocks.parseSessionMetadataJson.mockReset().mockReturnValue({});
-    mocks.shouldExitPlanModeFromAnswers.mockReset().mockReturnValue(false);
   });
 
   it('synchronously sets state_status="running" before firing the resume when answered with payload', async () => {
@@ -466,7 +484,7 @@ describe('questions reply route', () => {
     await app.close();
   });
 
-  it('澄清模式确认共识 → 会话自动切换到编程模式并在响应里回传 dialogueMode', async () => {
+  it('澄清模式确认共识 → 持久化 confirmedAt，保持澄清模式', async () => {
     mocks.parseSessionMetadataJson.mockReturnValue({
       clarificationState: buildAwaitingConfirmStateJson(),
       dialogueMode: 'clarify',
@@ -483,20 +501,16 @@ describe('questions reply route', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ ok: true, dialogueMode: 'coding' });
-
-    const switchUpdate = findAutoSwitchMetadataUpdate();
-    expect(switchUpdate).toBeDefined();
-    const metadata = JSON.parse((switchUpdate as [string, unknown[]])[1][0] as string) as {
-      dialogueMode?: string;
-      dialogueModeSwitch?: { from?: string; reason?: string; to?: string };
-    };
-    expect(metadata.dialogueMode).toBe('coding');
-    expect(metadata.dialogueModeSwitch).toMatchObject({
-      from: 'clarify',
-      reason: 'clarification_confirmed',
-      to: 'coding',
+    expect(response.json()).toEqual({ ok: true });
+    expect(readPersistedClarification()).toMatchObject({
+      dialogueMode: 'clarify',
+      state: { confirmedAt: expect.any(Number) },
     });
+    expect(findAutoSwitchMetadataUpdate()).toBeUndefined();
+    expect(mocks.resumeAnsweredQuestionRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.resumeAnsweredQuestionRequest.mock.calls[0]?.[0]).not.toHaveProperty(
+      'dialogueModeAfterApproval',
+    );
 
     await app.close();
   });
@@ -571,7 +585,7 @@ describe('questions reply route', () => {
     await app.close();
   });
 
-  it('模型把 recommended 标在「需修改」上 → 点「需修改」不得被当成确认', async () => {
+  it('模型把 recommended 标在非肯定选项上 → 点击该选项不得被当成确认', async () => {
     const mislabeledConfirmJson = JSON.stringify([
       {
         header: '确认',
@@ -602,6 +616,7 @@ describe('questions reply route', () => {
     expect(response.statusCode).toBe(200);
     // 选项里没有"肯定"文案（引擎默认的「确认」被保留）→ 该点击不构成确认。
     expect(response.json()).toEqual({ ok: true });
+    expect(readPersistedClarification().state).not.toHaveProperty('confirmedAt');
     expect(findAutoSwitchMetadataUpdate()).toBeUndefined();
 
     await app.close();
@@ -634,16 +649,24 @@ describe('questions reply route', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ ok: true, dialogueMode: 'coding' });
-    expect(findAutoSwitchMetadataUpdate()).toBeDefined();
+    expect(response.json()).toEqual({ ok: true });
+    expect(readPersistedClarification()).toMatchObject({
+      dialogueMode: 'clarify',
+      state: { confirmedAt: expect.any(Number) },
+    });
+    expect(findAutoSwitchMetadataUpdate()).toBeUndefined();
 
     await app.close();
   });
 
-  it('澄清模式批准 ExitPlanMode 计划 → 自动切换到编程模式', async () => {
+  it('澄清模式批准 ExitPlanMode 计划 → 自动切换并以编程模式续跑', async () => {
     mocks.parseSessionMetadataJson.mockReturnValue({ dialogueMode: 'clarify' });
-    mocks.shouldExitPlanModeFromAnswers.mockReturnValueOnce(true);
-    mocks.sqliteGet.mockReturnValue(buildPendingQuestionRow({ tool_name: 'ExitPlanMode' }));
+    mocks.sqliteGet.mockReturnValue(
+      buildPendingQuestionRow({
+        tool_name: 'ExitPlanMode',
+        questions_json: EXIT_PLAN_QUESTIONS_JSON,
+      }),
+    );
 
     const app = await createApp();
     const response = await app.inject({
@@ -654,6 +677,9 @@ describe('questions reply route', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ ok: true, dialogueMode: 'coding' });
+    expect(mocks.resumeAnsweredQuestionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ dialogueModeAfterApproval: 'coding', sessionId: SESSION_ID }),
+    );
 
     const switchUpdate = findAutoSwitchMetadataUpdate();
     expect(switchUpdate).toBeDefined();
@@ -661,6 +687,40 @@ describe('questions reply route', () => {
       dialogueModeSwitch?: { reason?: string };
     };
     expect(metadata.dialogueModeSwitch).toMatchObject({ reason: 'plan_approved' });
+
+    await app.close();
+  });
+
+  it('ExitPlanMode 选择继续规划 → 保持澄清和计划模式，不以编程模式续跑', async () => {
+    mocks.parseSessionMetadataJson.mockReturnValue({ dialogueMode: 'clarify', planMode: true });
+    mocks.sqliteGet.mockReturnValue(
+      buildPendingQuestionRow({
+        tool_name: 'ExitPlanMode',
+        questions_json: EXIT_PLAN_QUESTIONS_JSON,
+      }),
+    );
+
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/sessions/${SESSION_ID}/questions/reply`,
+      payload: { requestId: REQUEST_ID, status: 'answered', answers: [['Continue planning']] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    const metadataUpdate = mocks.sqliteRun.mock.calls.find(
+      ([sql]) => typeof sql === 'string' && sql.includes('UPDATE sessions SET metadata_json'),
+    );
+    expect(JSON.parse(metadataUpdate?.[1]?.[0] as string)).toMatchObject({
+      dialogueMode: 'clarify',
+      planMode: true,
+    });
+    expect(findAutoSwitchMetadataUpdate()).toBeUndefined();
+    expect(mocks.resumeAnsweredQuestionRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.resumeAnsweredQuestionRequest.mock.calls[0]?.[0]).not.toHaveProperty(
+      'dialogueModeAfterApproval',
+    );
 
     await app.close();
   });

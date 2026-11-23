@@ -72,12 +72,22 @@ src/
 - **权限 / 提问暂停不得呈现为「停止」**：`resolveSessionStopCapability`（`src/components/conversation-runtime/session/session-runtime.ts`）在 `remoteSessionBusyState === 'paused'` 时必须返回 `'none'`——composer 主按钮随之显示专属等待态（「待处理」+ 时钟图标，禁用），**禁止**退化成停止按钮（⏹ +「尝试停止」），否则用户会误以为会话已停止。暂停期间取消运行走审批卡 / 问题面板的拒绝入口。配套：`formatStopReasonLabel('tool_permission')` 固定映射「等待权限」（`src/components/conversation-runtime/messages/message-format.ts`），不得原样透传或显示「已停止」。
 - **`terminal_output` 状态更新必须合并**（`src/components/conversation-runtime/terminals/use-session-terminals.ts`）：高输出命令/终端每 ~100ms 一条事件，逐条更新 ChatPage 顶层 state 会让整页持续重渲染。`applyRunEvent` 对 `terminal_output` 只入队（同一终端保留最新一条），按 `TERMINAL_OUTPUT_STATE_FLUSH_MS`（250ms）统一 flush；`terminal_started` / `terminal_exited` 立即生效且**先 flush 待处理输出**（否则旧 tail 会丢）。终端的实时数据面走各自 WS/SSE 流，不受该合并影响。
 - **流式渲染只重建尾部**：team 侧 token 级 setter 必须走 `conversation-runtime/stream/use-coalesced-stream-setters`（每帧至多一次提交；`use-team-conversation-state.ts` 是唯一接线处）；历史 entry / 分组不得依赖 `streamBuffer` / `streamingSegments`（`useTeamRenderGroups` 的引用稳定不变量）。chat 侧流式消息组走 `reconcileChatRenderGroups` 前缀复用（`use-chat-render-data.ts` 的流式分组缓存，成对保存 entries/groups）。`MessageRow` 是 memo 组件，显示偏好读取必须走 `useDisplayPreferencesStore` + `useShallow` 单订阅（禁止恢复为每字段一个 hook 订阅），ChatPage 的 `buildRenderMessageActions` 等传入回调必须保持引用稳定，否则整列表 memo 全部失效。
+- **顶栏会话标签必须自动入视，且不能退回 `scrollIntoView`**（`components/layout/fusion/use-scroll-active-titlebar-tab.ts`）：`.titlebar-tab-strip__tab-list` 是单行横向滚动容器，切换会话后若不把激活标签滚进视野，用户只能靠手动滚动才知道自己在哪个会话上。实现刻意只改容器自身的 `scrollLeft`——`scrollIntoView` 会连带滚动所有可滚动祖先（整页都可能被带走）；激活标签已完整可见时**不写值**，否则会重置用户手动滚过的位置。配套不变量：点击标签时 `selectTab`（同步 store）先于 `navigate`（transition）生效，中间一帧 location 仍指向旧会话，路由同步 effect 若在这帧把 `activeTabId` 抢回去，标签会闪一下、自动入视来回滚（`TitlebarTabStrip` 的 `pendingSelectSessionIdRef` 就是挡这一帧的，勿删）。
+- **提问工具的流内显隐只有一个裁决处**：`AskUserQuestion`（网关名 `question`）在**等待回答期间**不得在消息流里产出任何工具条目——包括入参未收全时的骨架卡，唯一入口是 composer 上方的 `InlineQuestionPanel`。判据收在 `tool-call/shared/question-tool-suppression.ts` 的 `shouldSuppressQuestionToolCall`，`tool-call-display.tsx`、`ChatPageSections.tsx` 的 `renderToolCallContent`（**必须早于 `isToolInputPending`**）与 `AssistantPartsContent` 的 parts 预过滤三处共用同一函数。**结算后必须恢复可见**（有 `output` / `isError` / `completed` / `failed` 任一信号即不再抑制）：历史会话没有 pending 面板，那条只读问答摘要（`question-answer-preview`）是回看「当时问了什么、答了什么」的唯一依据，禁止为了「干净」把已结算的条目也藏掉。
 
 ## 约定
 
 - 页面组件保持轻量——业务逻辑放在 hooks 或 shared-ui 组件中。
 - 禁止从 `dist/` 直接导入——使用 `@openAwork/*` workspace 包。
 - 所有本地导入使用 `.js` 扩展名（NodeNext）。
+
+## 浏览器基线
+
+采用任何新的 Web 平台特性（CSS 属性 / JS API / HTML 元素）之前，先读
+[`BROWSER-BASELINE.md`](./BROWSER-BASELINE.md)：那里定义了本产物的最低引擎版本
+（Chrome 111 / Safari 16.2 / Firefox 121）、各运行时（含 Tauri WebView）的落地差异，以及
+「可安全使用 / 必须带回退 / 禁止使用」三张清单。`vite.config.ts` 的 `build.target`
+由该文档推导，两者必须保持一致。
 
 ## 常用命令
 

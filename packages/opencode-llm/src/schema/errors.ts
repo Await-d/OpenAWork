@@ -171,8 +171,25 @@ export class TransportReason extends Schema.Class<TransportReason>('LLM.Error.Tr
   operation: Schema.optional(TransportOperation),
   code: Schema.optional(Schema.String),
 }) {
+  /**
+   * 只有**连接/响应头阶段**（`operation === 'request'`）的传输失败可重试。
+   *
+   * 判据是「上游有没有投递」而不是「是不是网络错」——与上游 `packages/ai` 的
+   * `delivery: not-sent` / `recovery: retry-connect` 语义一致：
+   *
+   * - `'request'`：`http.ts` 的响应头超时、`executor.ts` 的 `toHttpError` 连接阶段失败
+   *   （ECONNREFUSED / DNS / TLS / 客户端自身超时）。此刻一个字节都还没吐出来，
+   *   重试不会重复输出，也不会让用户白等一轮 —— 这正是「上游真的挂了」要自动重试的场景。
+   * - `'read'`：分片静默（默认 15 分钟）与整次预算到顶。流已经吐了一半，重试会产生
+   *   重复内容；即使是「干净」的静默，重试也只是再等一个同样长的窗口，故不重试。
+   * - `'write'` 与**缺失 `operation`**（websocket 连接/收发失败、`httpStreamError` 的
+   *   流读取失败、「本轮输出可能不完整」那类不明阶段失败）一律不重试：阶段未知就按
+   *   「可能已投递」的保守假设处理。
+   *
+   * 重试上限由调用方决定（`executor.ts` 的 `MAX_RETRIES`，连接阶段共 3 次尝试）。
+   */
   get retryable() {
-    return false;
+    return this.operation === 'request';
   }
 }
 

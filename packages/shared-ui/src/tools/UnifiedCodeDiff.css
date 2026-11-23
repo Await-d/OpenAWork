@@ -1,0 +1,43 @@
+/**
+ * diff 底部的「展开」按钮样式。
+ *
+ * 此前这两个按钮（折叠展开 / 600 行上限展开）是裸 `<button>`，用浏览器默认外观：
+ * 灰底、系统字体、没有 hover 与 focus 反馈，夹在等宽字体的代码行之间非常突兀。
+ * 组件其余部分是内联样式，但内联写不了 `:hover` / `:focus-visible`，因此单开这个小
+ * 文件承载交互态——与 `AudioPlayer.css` / `VideoPlayer.css` 的做法一致。
+ */
+
+.diff-expand-button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 6px 12px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-overlay) 88%, var(--accent) 12%);
+  color: color-mix(in oklch, var(--accent) 78%, var(--fg-strong) 22%);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.diff-expand-button:hover {
+  background: color-mix(in srgb, var(--bg-overlay) 74%, var(--accent) 26%);
+  color: var(--accent);
+}
+
+.diff-expand-button:active {
+  background: color-mix(in srgb, var(--bg-overlay) 66%, var(--accent) 34%);
+}
+
+.diff-expand-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 4px var(--accent-subtle);
+}

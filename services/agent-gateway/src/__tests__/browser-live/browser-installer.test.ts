@@ -27,6 +27,13 @@ import {
 } from '../../browser-live/browser-installer.js';
 import type { DownloadFileOptions } from '../../browser-live/browser-download.js';
 
+vi.mock('../../infra/gateway-logger.js', () => ({
+  logGatewayDebug: vi.fn(),
+  logGatewayWarn: vi.fn(),
+}));
+
+import { logGatewayDebug, logGatewayWarn } from '../../infra/gateway-logger.js';
+
 const EXECUTABLE_RELATIVE_PATH = join('chrome-linux64', 'chrome');
 
 const tempDirs: string[] = [];
@@ -134,12 +141,20 @@ describe('resolvePlaywrightCliPath', () => {
     );
   });
 
-  it('automation 包解析失败时返回 null（模拟 CLI 缺席）', () => {
+  it('automation 包解析失败时 debug 记录并返回 null，不泄漏异常中的凭据', () => {
+    vi.mocked(logGatewayDebug).mockClear();
+    vi.mocked(logGatewayWarn).mockClear();
     expect(
       resolvePlaywrightCliPathFromAutomation(() => {
-        throw new Error('module not found');
+        throw new Error('module not found https://user:secret@example.test/?token=private');
       }),
     ).toBeNull();
+    expect(logGatewayDebug).toHaveBeenCalledWith(
+      '[browser-installer] browser automation CLI probe unavailable',
+    );
+    expect(logGatewayWarn).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(logGatewayDebug).mock.calls)).not.toContain('secret');
+    expect(JSON.stringify(vi.mocked(logGatewayDebug).mock.calls)).not.toContain('private');
   });
 });
 
@@ -152,6 +167,39 @@ describe('buildInstallUnavailableMessage', () => {
 });
 
 describe('browserInstaller', () => {
+  it('安装目录创建失败时 warn 并保留 failed 返回', async () => {
+    vi.mocked(logGatewayWarn).mockClear();
+    const browsersPath = join(await makeTempDir(), 'not-a-directory');
+    await writeFile(browsersPath, 'file');
+    const installer = createBrowserInstaller({ resolveBrowsersPath: () => browsersPath });
+    const result = await installer.install();
+    expect(result.started).toBe(false);
+    expect(result.status.state).toBe('failed');
+    expect(logGatewayWarn).toHaveBeenCalledWith(
+      '[browser-installer] failed to prepare browser installation directory',
+    );
+  });
+
+  it('下载目标解析失败时 warn，不把异常凭据写入服务端日志', async () => {
+    vi.mocked(logGatewayWarn).mockClear();
+    const browsersPath = await makeBrowsersDir();
+    const installer = createBrowserInstaller({
+      resolveBrowsersPath: () => browsersPath,
+      resolveDownloadTargets: async () => {
+        throw new Error('https://user:secret@example.test/?token=private');
+      },
+    });
+    const result = await installer.install();
+    expect(result.status.state).toBe('failed');
+    expect(result.status.error).not.toContain('secret');
+    expect(result.status.error).not.toContain('private');
+    expect(logGatewayWarn).toHaveBeenCalledWith(
+      '[browser-installer] failed to resolve browser download targets',
+    );
+    expect(JSON.stringify(vi.mocked(logGatewayWarn).mock.calls)).not.toContain('secret');
+    expect(JSON.stringify(vi.mocked(logGatewayWarn).mock.calls)).not.toContain('private');
+  });
+
   it('idle → running → succeeded，并在成功时失效探针缓存', async () => {
     const browsersPath = await makeBrowsersDir();
     const reset = vi.fn();
@@ -178,6 +226,48 @@ describe('browserInstaller', () => {
     expect(reset).toHaveBeenCalledTimes(1);
   });
 
+  it('目标准备也受总deadline约束，晚到结果不得启动下载且结束后可重试', async () => {
+    const browsersPath = await makeBrowsersDir();
+    let resolveTargets: (targets: ManagedBrowserTarget[]) => void = () => undefined;
+    const pending = new Promise<ManagedBrowserTarget[]>((resolve) => {
+      resolveTargets = resolve;
+    });
+    const download = vi.fn(writeZip);
+    const installer = createBrowserInstaller({
+      resolveBrowsersPath: () => browsersPath,
+      resolveDownloadTargets: vi.fn().mockReturnValueOnce(pending).mockResolvedValue([]),
+      downloadFile: download,
+      timeoutMs: 30,
+    });
+    const first = installer.install();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const timedOut = installer.status();
+    expect(timedOut.state).toBe('failed');
+    expect(timedOut.error).toContain('安装超时');
+    expect((await installer.install()).started).toBe(false);
+    resolveTargets([makeTarget(browsersPath)]);
+    expect((await first).started).toBe(false);
+    expect(installer.status()).toEqual(timedOut);
+    expect(download).not.toHaveBeenCalled();
+    expect((await installer.install()).status.state).toBe('unavailable');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(installer.status().state).toBe('unavailable');
+  });
+
+  it('准备目录期间同步占位，并发 install 只能启动一次', async () => {
+    const browsersPath = await makeBrowsersDir();
+    const installer = createBrowserInstaller({
+      resolveBrowsersPath: () => browsersPath,
+      resolveDownloadTargets: async () => [],
+    });
+    const first = installer.install();
+    expect(installer.status().state).toBe('running');
+    const second = await installer.install();
+    expect(second.started).toBe(false);
+    expect(second.status.state).toBe('running');
+    await first;
+  });
+
   it('单飞：running 期间第二次 install 不启动且返回 started:false', async () => {
     const browsersPath = await makeBrowsersDir();
     const installer = createBrowserInstaller({
@@ -199,6 +289,71 @@ describe('browserInstaller', () => {
 
     await waitForState(installer, (state) => state === 'failed');
     expect(installer.status().error).toContain('安装超时');
+  });
+
+  it('超时后旧下载未结束仍拒绝重试，旧进度不得污染失败快照', async () => {
+    const browsersPath = await makeBrowsersDir();
+    let release: () => void = () => undefined;
+    let report: DownloadFileOptions['onProgress'];
+    const installer = createBrowserInstaller({
+      resolveBrowsersPath: () => browsersPath,
+      resolveDownloadTargets: async () => [makeTarget(browsersPath)],
+      downloadFile: async (_url, _destination, options) => {
+        report = options?.onProgress;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        throw new Error('旧下载结束');
+      },
+      resetAvailabilityCache: () => undefined,
+      timeoutMs: 40,
+    });
+    await installer.install();
+    await waitForState(installer, (state) => state === 'failed');
+    const failed = installer.status();
+    const retry = await installer.install();
+    expect(retry.started).toBe(false);
+    report?.({ receivedBytes: 99, totalBytes: 100, percent: 99 });
+    expect(installer.status()).toEqual(failed);
+    const oldReport = report;
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect((await installer.install()).started).toBe(true);
+    const nextRun = installer.status();
+    oldReport?.({ receivedBytes: 100, totalBytes: 100, percent: 100 });
+    expect(installer.status()).toEqual(nextRun);
+    await waitForState(installer, (state) => state === 'failed');
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+
+  it('下载失败的共享日志和错误均脱敏，unknown 不调用自定义字符串化', async () => {
+    const browsersPath = await makeBrowsersDir();
+    const url = 'https://private-user:private-password@example.test/file?signature=private-query';
+    const installer = createBrowserInstaller({
+      resolveBrowsersPath: () => browsersPath,
+      resolveDownloadTargets: async () => [makeTarget(browsersPath, { downloadUrls: [url] })],
+      downloadFile: async () => {
+        throw new Error(`下载失败 ${url}`);
+      },
+    });
+    await installer.install();
+    await waitForState(installer, (state) => state === 'failed');
+    const shared = JSON.stringify(installer.status());
+    for (const secret of ['private-user', 'private-password', 'private-query']) {
+      expect(shared).not.toContain(secret);
+    }
+    const toString = vi.fn(() => {
+      throw new Error('不应字符串化');
+    });
+    const unknownInstaller = createBrowserInstaller({
+      resolveBrowsersPath: () => browsersPath,
+      resolveDownloadTargets: async () => {
+        throw Object.assign(new Error(''), { toString });
+      },
+    });
+    expect((await unknownInstaller.install()).status.state).toBe('failed');
+    expect(toString).not.toHaveBeenCalled();
   });
 
   it('下载失败 → failed，error 取最后一个镜像的错误', async () => {

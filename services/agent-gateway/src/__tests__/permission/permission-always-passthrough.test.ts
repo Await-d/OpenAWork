@@ -7,12 +7,17 @@
  * widens to.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   mapPermissionRequestRow,
+  parseApprovedPermissionResumePayload,
   parsePermissionAlwaysJson,
+  parsePermissionRequestClientRequestId,
 } from '../../permission/permission-contract.js';
+
 import { createPermissionAskedEvent } from '../../session/session-permission-events.js';
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('parsePermissionAlwaysJson', () => {
   it('parses a valid JSON array of patterns', () => {
@@ -32,6 +37,29 @@ describe('parsePermissionAlwaysJson', () => {
   it('filters non-string and empty entries', () => {
     // JSON.parse will yield mixed array; only non-empty strings should survive.
     expect(parsePermissionAlwaysJson('["ls *", 42, "", null, "git *"]')).toEqual(['ls *', 'git *']);
+  });
+});
+
+describe('权限解析失败日志', () => {
+  it.each([
+    { operation: 'always', parse: parsePermissionAlwaysJson, fallback: [] },
+    { operation: 'resume', parse: parseApprovedPermissionResumePayload, fallback: null },
+    {
+      operation: 'client-request-id',
+      parse: parsePermissionRequestClientRequestId,
+      fallback: null,
+    },
+  ])('$operation 保留降级返回且不记录原文或解析器回显', ({ operation, parse, fallback }) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const raw = '{"token":"private-credential","message":"private-user-content"';
+
+    expect(parse(raw)).toEqual(fallback);
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[permission-contract] invalid permission JSON', {
+      operation,
+      rawLength: raw.length,
+      errorType: 'syntax',
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private-');
   });
 });
 

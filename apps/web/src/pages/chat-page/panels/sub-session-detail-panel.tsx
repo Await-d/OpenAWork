@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import {
   ChatMessageGroupList,
   type ChatProviderDescriptor,
@@ -703,6 +704,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
               onChange={(event) => setRenameValue(event.target.value)}
               onBlur={() => void commitRename()}
               onKeyDown={(event) => {
+                if (isImeComposingKeyboardEvent(event)) return;
                 if (event.key === 'Enter') {
                   event.preventDefault();
                   void commitRename();
@@ -1259,6 +1261,7 @@ const SubSessionDetailPanel = React.memo(function SubSessionDetailPanel({
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
+              if (isImeComposingKeyboardEvent(event)) return;
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 void handleSend();

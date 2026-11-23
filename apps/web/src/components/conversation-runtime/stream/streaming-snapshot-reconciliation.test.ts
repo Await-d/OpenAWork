@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  contentFromParts,
+  normalizeChatMessages,
+  parseAssistantTraceContent,
   partsFromOrderedAssistantContent,
   readAssistantTracePayload,
   reconcileSnapshotChatMessages,
@@ -8,6 +11,69 @@ import {
 import { appendStreamingTextDelta, upsertStreamingToolSegment } from './streaming-segments.js';
 
 describe('实时消息与快照同步', () => {
+  it('跨消息 ID 的已完成快照按持久化顺序只保留一次工具前正文', () => {
+    const localId = 'assistant-local';
+    const persistedId = 'assistant-persisted';
+    const text = '我查一下官网，确认它现在是做什么的。';
+    const tool = { toolCallId: 'fetch-1', toolName: 'webfetch', input: {} };
+    const attachments = [{ type: 'input_image' as const, artifactId: 'preview-1' }];
+    const parts = upsertStreamingToolSegment(appendStreamingTextDelta([], text, localId), {
+      ...tool,
+      status: 'running',
+      attachments,
+    });
+    const event = {
+      id: 'local-event',
+      type: 'event' as const,
+      payload: {
+        kind: 'tool' as const,
+        status: 'success' as const,
+        title: '工具事件',
+        message: '',
+      },
+    };
+    const local: ChatMessage = {
+      id: localId,
+      role: 'assistant',
+      status: 'completed',
+      content: contentFromParts(parts),
+      parts: [...parts, event],
+    };
+    const snapshot = normalizeChatMessages([
+      {
+        id: persistedId,
+        role: 'assistant',
+        status: 'final',
+        content: [
+          { type: 'text', text },
+          { type: 'tool_call', ...tool },
+          { type: 'tool_result', ...tool, output: '网页内容', isError: false },
+        ],
+      },
+    ]);
+
+    const messages = reconcileSnapshotChatMessages([local], snapshot);
+
+    expect(messages).toHaveLength(1);
+    const [message] = messages;
+    expect(message?.id).toBe(persistedId);
+    expect.soft(message?.parts).toEqual([
+      { type: 'text', id: `${persistedId}:text`, text },
+      expect.objectContaining({
+        type: 'tool',
+        ...tool,
+        status: 'completed',
+        output: '网页内容',
+        attachments,
+      }),
+      event,
+    ]);
+    expect(parseAssistantTraceContent(message?.content ?? '')).toMatchObject({
+      text,
+      toolCalls: [{ ...tool, status: 'completed', output: '网页内容' }],
+    });
+  });
+
   it('同一消息同步快照后首段文本只保留一次', () => {
     const id = 'assistant-1';
     const content = '这是实时回答';

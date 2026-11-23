@@ -50,18 +50,7 @@ export interface ChatPageDerivationsDeps {
   readonly chatSearch: ReturnType<typeof useChatSearch>;
   readonly childSessions: Session[];
   readonly collapseWorkspaceToPanel: () => void;
-  readonly compactions: {
-    id: string;
-    summary: string;
-    trigger: 'manual' | 'automatic';
-    phase?: 'started' | 'completed' | 'failed' | undefined;
-    occurredAt: number;
-    compactedMessages?: number | undefined;
-    representedMessages?: number | undefined;
-    cause?:
-      'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow' | undefined;
-    strategy?: 'runtime_replace' | 'summary_only' | 'replay' | 'synthetic_continue' | undefined;
-  }[];
+  readonly compactions: ChatRightPanelState['compactions'];
   readonly contentArtifactCount: number;
   readonly contentArtifactCountStatus: 'idle' | 'loading' | 'ready' | 'error';
   readonly contextUsageSnapshot: ChatContextUsageSnapshot | null;
@@ -446,7 +435,7 @@ export function useChatPageDerivations(deps: ChatPageDerivationsDeps) {
       shortcut: '⌘⇧C',
       icon: '📋',
       onExecute: () => {
-        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+        const lastAssistant = messages.findLast((m) => m.role === 'assistant');
         if (lastAssistant) {
           handleCopyMessage(lastAssistant);
           toast('已复制最后一条助手消息', 'success');

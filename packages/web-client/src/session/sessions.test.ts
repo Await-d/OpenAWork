@@ -10,6 +10,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('createSessionsClient.create', () => {
+  it('保留新网关的建会话模型配置与显式关闭状态', async () => {
+    const modelConfig = {
+      providerId: 'provider-1',
+      modelId: 'gpt-5',
+      thinkingEnabled: false,
+      reasoningEffort: 'high',
+    };
+    globalThis.fetch = vi.fn(async () => Response.json({ sessionId: 'session-1', modelConfig }));
+    await expect(createSessionsClient('https://gateway.test').create('token')).resolves.toEqual({
+      id: 'session-1',
+      modelConfig,
+    });
+  });
+
+  it('旧网关只返回 sessionId 时仍可创建会话', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ sessionId: 'session-1' }));
+    await expect(createSessionsClient('https://gateway.test').create('token')).resolves.toEqual({
+      id: 'session-1',
+    });
+  });
+});
+
 describe('createSessionsClient.getRecoveryResult', () => {
   it('getResult 成功时返回 session 详情', async () => {
     globalThis.fetch = vi.fn(async () => {

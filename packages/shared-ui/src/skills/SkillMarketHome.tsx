@@ -1,6 +1,7 @@
 import { color, font, radius, spacing } from '../tokens.js';
 import type { CSSProperties, ReactNode } from 'react';
 import { useState } from 'react';
+import { isImeComposingKeyboardEvent } from '../utils/ime-composition.js';
 
 export interface MarketSkill {
   id: string;
@@ -245,6 +246,7 @@ export function SkillMarketHome({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposingKeyboardEvent(e)) return;
             if (e.key === 'Enter') handleSearch();
           }}
           placeholder="搜索技能…"

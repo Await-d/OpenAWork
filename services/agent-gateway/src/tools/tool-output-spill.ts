@@ -15,6 +15,7 @@
  */
 
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { resolveGatewayToolOutputsDir } from '../infra/storage-paths.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
@@ -89,6 +90,12 @@ export function deleteSpilledToolOutputsForSession(sessionId: string): void {
       `[tool-output-spill] 清理失败：${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+/** 持久化清理任务负责记录并重试故障。 */
+export async function removeSessionSpillDirectory(sessionId: string): Promise<void> {
+  const dir = resolveSessionSpillDir(sessionId);
+  if (dir) await rm(dir, { recursive: true, force: true });
 }
 
 /**

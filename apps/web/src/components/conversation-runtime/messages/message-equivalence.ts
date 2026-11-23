@@ -6,6 +6,23 @@ import { readAssistantTracePayload } from './trace-codec.js';
 
 const SNAPSHOT_RECONCILE_TIME_TOLERANCE_MS = 15_000;
 
+type TraceReader = typeof readAssistantTracePayload;
+
+/** 仅在一次快照对账内复用解析结果，避免跨调用缓存可变消息。 */
+export function createSnapshotMessageComparator(): (
+  left: ChatMessage,
+  right: ChatMessage,
+) => boolean {
+  const traces = new WeakMap<Parameters<TraceReader>[0], ReturnType<TraceReader>>();
+  const readTrace: TraceReader = (message) => {
+    if (traces.has(message)) return traces.get(message)!;
+    const trace = readAssistantTracePayload(message);
+    traces.set(message, trace);
+    return trace;
+  };
+  return (left, right) => compareSnapshotMessages(left, right, readTrace);
+}
+
 export function hasUserMessageBetween(
   messages: ChatMessage[],
   candidateIndex: number,
@@ -40,6 +57,12 @@ export function areMessagesSeparatedByUserTurn(
 export function areStronglyIdenticalMessages(left: ChatMessage, right: ChatMessage): boolean {
   if (left.id === right.id) return true;
   if (left.role !== right.role) return false;
+  if (
+    left.clientRequestId &&
+    right.clientRequestId &&
+    left.clientRequestId !== right.clientRequestId
+  )
+    return false;
   if (
     left.clientRequestId &&
     right.clientRequestId &&
@@ -99,6 +122,14 @@ export function hasOverlappingPartIds(
 }
 
 export function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMessage): boolean {
+  return compareSnapshotMessages(left, right, readAssistantTracePayload);
+}
+
+function compareSnapshotMessages(
+  left: ChatMessage,
+  right: ChatMessage,
+  readTrace: TraceReader,
+): boolean {
   if (left.role !== right.role) {
     return false;
   }
@@ -112,6 +143,12 @@ export function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMess
     left.clientRequestId !== right.clientRequestId
   ) {
     return false;
+  }
+
+  // Matching text cannot override different user attachments or display content.
+  // The user comparator owns the time bound: image identity alone is not a turn identity.
+  if (left.role === 'user') {
+    return areLikelySameNearbyUserMessage(left, right);
   }
 
   // Fast path: exact content match.
@@ -128,8 +165,8 @@ export function areSnapshotMessagesEquivalent(left: ChatMessage, right: ChatMess
   // have the same text but different tool call states serialized into the content JSON.
   // Compare by the displayable text portion to catch these cases.
   if (left.role === 'assistant') {
-    const leftTrace = readAssistantTracePayload(left);
-    const rightTrace = readAssistantTracePayload(right);
+    const leftTrace = readTrace(left);
+    const rightTrace = readTrace(right);
     if (leftTrace && rightTrace) {
       const leftText = leftTrace.text.trim();
       const rightText = rightTrace.text.trim();
@@ -222,8 +259,31 @@ export function areLikelySameNearbyUserMessage(left: ChatMessage, right: ChatMes
     return false;
   }
 
+  if (
+    left.clientRequestId &&
+    right.clientRequestId &&
+    left.clientRequestId !== right.clientRequestId
+  ) {
+    return false;
+  }
+
   if (left.content !== right.content) {
     return false;
+  }
+
+  const sharesIdentity =
+    left.id === right.id ||
+    Boolean(left.clientRequestId && left.clientRequestId === right.clientRequestId);
+  if (!sharesIdentity) {
+    const leftCreatedAt = getComparableCreatedAt(left.createdAt);
+    const rightCreatedAt = getComparableCreatedAt(right.createdAt);
+    if (
+      leftCreatedAt !== null &&
+      rightCreatedAt !== null &&
+      Math.abs(leftCreatedAt - rightCreatedAt) > SNAPSHOT_RECONCILE_TIME_TOLERANCE_MS
+    ) {
+      return false;
+    }
   }
 
   const leftRawContent = Array.isArray(left.rawContent) ? left.rawContent : [];
@@ -252,12 +312,16 @@ function areInputImagesEquivalent(
 
   return left.every((item, index) => {
     const candidate = right[index];
+    // Preview URLs are local presentation data when a stable image ID exists.
+    // Keep comparing both ID fields so a conflicting artifact cannot fall back
+    // to a coincidentally matching file ID or URL.
+    const hasStableIdentity = Boolean(item.artifactId || item.fileId);
     return (
       candidate?.artifactId === item.artifactId &&
       candidate?.detail === item.detail &&
       candidate?.fileId === item.fileId &&
       candidate?.fileName === item.fileName &&
-      candidate?.imageUrl === item.imageUrl &&
+      (hasStableIdentity || candidate?.imageUrl === item.imageUrl) &&
       candidate?.mimeType === item.mimeType
     );
   });

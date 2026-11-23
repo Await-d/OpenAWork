@@ -32,10 +32,10 @@ export function LayoutFusion({ shared, theme, onToggleTheme }: LayoutFusionProps
         background: 'var(--bg-base)',
       }}
     >
-      {/* 顶部标签页标题栏 */}
-      <div key="fusion-titlebar" className="layout-titlebar-fusion">
+      {/* 顶部标签页标题栏：用 <header> 作为 banner landmark（样式走 .layout-titlebar-fusion 类） */}
+      <header key="fusion-titlebar" className="layout-titlebar-fusion">
         <TitlebarTabStrip {...fusionLayout.titlebarProps} />
-      </div>
+      </header>
 
       <div
         key={fusionLayout.layoutModeKey}
@@ -61,7 +61,7 @@ export function LayoutFusion({ shared, theme, onToggleTheme }: LayoutFusionProps
           }}
         >
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', minWidth: 0 }}>
-            <div
+            <main
               className="outlet-content-wrap"
               style={{
                 flex: 1,
@@ -72,7 +72,7 @@ export function LayoutFusion({ shared, theme, onToggleTheme }: LayoutFusionProps
               }}
             >
               <CachedRouteOutlet />
-            </div>
+            </main>
           </div>
         </div>
       </div>

@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from 'react';
 import { extractTableData, toCsv, toDelimitedText } from './markdown-table-data.js';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 import './markdown-blocks.css';
 
 /** 复制成功提示的停留时长，与代码块保持一致。 */
@@ -65,13 +66,11 @@ export const ChatMarkdownTable = memo(function ChatMarkdownTable({
   const csvText = useMemo(() => (table ? toCsv(table) : ''), [table]);
 
   const handleCopy = useCallback(() => {
-    const writeText = navigator.clipboard?.writeText;
-    if (!writeText || pasteableText === '') {
+    if (pasteableText === '') {
       return;
     }
 
-    void writeText
-      .call(navigator.clipboard, pasteableText)
+    void copyTextToClipboard(pasteableText)
       .then(() => {
         setCopied(true);
         if (copyTimerRef.current != null) {

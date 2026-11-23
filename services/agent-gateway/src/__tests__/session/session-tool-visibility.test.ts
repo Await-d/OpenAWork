@@ -397,6 +397,52 @@ describe('filterEnabledGatewayToolsForDialogueMode — 本轮模式收敛工具�
   });
 });
 
+/**
+ * 来源托管会话（渠道 / 定时任务）本就没有对话模式：其 metadata 里的
+ * `dialogueMode` 只可能是网页端误写的脏值。若让澄清只读收敛在该值上生效，
+ * 澄清白名单（不含任何渠道回复工具）会把渠道会话的回复工具整套过滤掉 ——
+ * 表现为「渠道里再也回不了消息」。这里锁定豁免范围：非配置类工具豁免，
+ * 配置类管理工具保留 fail-closed。
+ */
+describe('来源会话不受澄清只读收敛（防脏 dialogueMode 让渠道失能）', () => {
+  it('渠道会话即使带 dialogueMode=clarify，渠道回复工具仍可见', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata('PluginSendMessage', {
+        source: 'channel',
+        dialogueMode: 'clarify',
+      }),
+    ).toBe(true);
+  });
+
+  it('定时任务会话同样不受澄清收敛', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata('read', { source: 'cron', dialogueMode: 'clarify' }),
+    ).toBe(true);
+  });
+
+  it('配置类管理工具保留 fail-closed：不得因脏值在来源会话里多开配置入口', () => {
+    expect(
+      isGatewayToolEnabledForSessionMetadata(SKILL_MANAGE_TOOL_NAME, {
+        source: 'channel',
+        channelLlmToolsEnabled: true,
+        channelExtensionManagementEnabled: true,
+        dialogueMode: 'clarify',
+      }),
+    ).toBe(false);
+    expect(
+      isGatewayToolEnabledForSessionMetadata(MCP_MANAGE_SERVERS_TOOL_NAME, {
+        source: 'channel',
+        dialogueMode: 'clarify',
+      }),
+    ).toBe(false);
+  });
+
+  it('普通会话的澄清收敛不受影响', () => {
+    expect(isGatewayToolEnabledForSessionMetadata('bash', { dialogueMode: 'clarify' })).toBe(false);
+    expect(isGatewayToolEnabledForSessionMetadata('read', { dialogueMode: 'clarify' })).toBe(true);
+  });
+});
+
 describe('session tool visibility', () => {
   it('disables desktop control tools for channel-managed sessions', () => {
     const metadata = { source: 'channel' };

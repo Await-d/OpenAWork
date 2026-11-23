@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="carbon" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>压缩胶囊对齐测量</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family: var(--font-sans, system-ui);
+      }
+      .compaction-align-harness {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        padding: 16px;
+      }
+      .compaction-align-harness h1 {
+        font-size: 18px;
+        margin: 0;
+      }
+      .compaction-align-harness section {
+        min-width: 0;
+        border-radius: 8px;
+        background: var(--bg-raised);
+      }
+      .compaction-align-harness h2 {
+        font-size: 11px;
+        color: var(--fg-muted);
+        margin: 0;
+        padding: 8px 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/compaction-align-entry.tsx"></script>
+  </body>
+</html>

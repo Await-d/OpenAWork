@@ -325,8 +325,7 @@ export function BrowserBookmarksDropdown(props: {
             </div>
           ) : (
             bookmarks
-              .slice()
-              .sort((a, b) => b.createdAt - a.createdAt)
+              .toSorted((a, b) => b.createdAt - a.createdAt)
               .map((bm) => (
                 <div
                   key={bm.id}

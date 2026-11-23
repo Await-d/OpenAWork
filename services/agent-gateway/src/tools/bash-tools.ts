@@ -141,6 +141,8 @@ const DISALLOWED_PATTERNS: ReadonlyArray<{
   message: string;
   /** Skip this check entirely on PowerShell (semantics differ from bash). */
   powerShellExempt?: boolean;
+  /** Only inspect expandable text for POSIX command substitution. */
+  commandSubstitution?: boolean;
 }> = [
   {
     pattern: /(?:^|\s)sudo(?:\s|$)/,
@@ -154,25 +156,32 @@ const DISALLOWED_PATTERNS: ReadonlyArray<{
     pattern: /`/,
     message: 'Backtick command substitution is not allowed.',
     powerShellExempt: true,
+    commandSubstitution: true,
   },
   {
     pattern: /\$\(/,
     message: 'Command substitution `$(...)` is not allowed.',
+    commandSubstitution: true,
   },
   {
     pattern: /[\r\n]/,
     message:
-      'Multi-line commands are not allowed; chain with && (bash/pwsh) or `; if ($?) { ... }` (Windows PowerShell 5.1). For multi-line logic, write a script file with the write tool and then run it with a single-line command (e.g. python3 script.py).',
+      'Multi-line commands are not allowed; chain with && (bash/pwsh) or `; if ($?) { ... }` (Windows PowerShell 5.1). For multi-line logic, write a script file with the write tool and then run it with a single-line command. A workspace path such as `temp/<name>.py` is writable — `.gitignore` alone does not block writes (only `.agentignore` and built-in sensitive patterns do); avoid `/tmp` (outside the workspace).',
     powerShellExempt: true,
   },
 ];
 
 interface ShellSafetyOptions {
   isPowerShell: boolean;
+  shellName?: string;
 }
 
 export function assertSafeShellCommand(command: string, options: ShellSafetyOptions): void {
-  for (const { pattern, message, powerShellExempt } of DISALLOWED_PATTERNS) {
+  const hasPosixQuoting =
+    !options.isPowerShell &&
+    (options.shellName === undefined || /^(?:ba|da|a|z|k)?sh(?:\.exe)?$/.test(options.shellName));
+  const expandableCommand = hasPosixQuoting ? maskShellSingleQuotedText(command) : command;
+  for (const { pattern, message, powerShellExempt, commandSubstitution } of DISALLOWED_PATTERNS) {
     if (options.isPowerShell && powerShellExempt) {
       continue;
     }
@@ -183,8 +192,50 @@ export function assertSafeShellCommand(command: string, options: ShellSafetyOpti
     ) {
       continue;
     }
-    if (pattern.test(command)) throw new Error(message);
+    if (pattern.test(commandSubstitution ? expandableCommand : command)) throw new Error(message);
   }
+}
+
+/**
+ * Single-quoted arguments are literal data (e.g. JS passed to `bun -e`).
+ * Track double quotes and escapes so an escaped apostrophe cannot hide a
+ * later substitution. Expansions, special quotes and array subscripts have
+ * additional shell-dependent rules; keep the raw checks for those contexts.
+ * Keep all other text intact; the other deny-list checks still use raw input.
+ */
+function maskShellSingleQuotedText(command: string): string {
+  let quote: 'single' | 'double' | undefined;
+  const characters = [...command];
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index];
+    const next = characters[index + 1];
+    if (quote === 'single') {
+      characters[index] = ' ';
+      if (character === "'") {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === '\\') {
+      if (quote !== 'double' || (next !== undefined && '$`"\\\n'.includes(next))) {
+        index += 1;
+      }
+    } else if (character === '"') {
+      quote = quote === 'double' ? undefined : 'double';
+    } else if (
+      (character === '$' &&
+        (next === '{' ||
+          next === '[' ||
+          (quote === undefined && (next === "'" || next === '"')))) ||
+      (quote === undefined && (character === '[' || (character === '(' && next === '(')))
+    ) {
+      return command;
+    } else if (quote === undefined && character === "'") {
+      quote = 'single';
+      characters[index] = ' ';
+    }
+  }
+  return characters.join('');
 }
 
 function looksLikeBashCommandSubstitution(command: string): boolean {
@@ -465,7 +516,10 @@ export async function resolveBashPreflight(
   sessionId?: string,
 ): Promise<BashPreflight> {
   const shellChoice = pickShell();
-  assertSafeShellCommand(input.command, { isPowerShell: shellChoice.isPowerShell });
+  assertSafeShellCommand(input.command, {
+    isPowerShell: shellChoice.isPowerShell,
+    shellName: shellChoice.name,
+  });
   const cwd = await resolveBashWorkdir(input.workdir, sessionId);
   return { cwd, shellChoice };
 }

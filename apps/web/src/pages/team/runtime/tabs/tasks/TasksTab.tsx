@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, type CSSProperties } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { useTeamTabState } from '../../../hooks/team-session-view-state-context.js';
 import type { AgentTeamsSidebarTeam, AgentTeamsTaskCard } from '../../data/team-runtime-types.js';
 import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
@@ -388,6 +389,7 @@ function LaneColumn({
               value={newTitle}
               onChange={(event) => setNewTitle(event.target.value)}
               onKeyDown={(event) => {
+                if (isImeComposingKeyboardEvent(event)) return;
                 if (event.key === 'Enter') {
                   onAddTask(lane.id);
                 }

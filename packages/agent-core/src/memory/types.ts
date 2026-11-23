@@ -225,6 +225,8 @@ export interface MemoryProposalPayload {
   body?: string;
   ruleId?: string;
   ruleRevision?: number;
+  mergeIntoId?: string;
+  dependencies?: Array<{ memoryId: string; revision: number }>;
 }
 
 export interface MemoryProposal {
@@ -283,7 +285,7 @@ export interface MemoryRevisionRecord {
   memoryId: string;
   userId: string;
   revision: number;
-  operation: 'create' | 'update' | 'archive' | 'restore';
+  operation: 'create' | 'update' | 'archive' | 'restore' | 'merge';
   before: MemoryEntry | null;
   after: MemoryEntry | null;
   proposalId: string | null;

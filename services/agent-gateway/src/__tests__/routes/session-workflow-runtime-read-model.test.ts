@@ -81,6 +81,32 @@ describe('session workflow runtime read model', () => {
     });
   });
 
+  it('来源会话（渠道 / 定时任务）的脏 clarify 不投影成「规划中」', () => {
+    // dialogueMode 对来源会话没有语义：脏值只影响状态投影，这里锁住它不生效；
+    // 真实的工作流进度（activePlan / activeLoop）与对话模式无关，必须照常投影。
+    const polluted = toPublicSessionResponse(
+      {
+        ...BASE_SESSION,
+        metadata_json: JSON.stringify({ source: 'channel', dialogueMode: 'clarify' }),
+      },
+      [],
+    );
+    expect(polluted.workflowRuntime.mode).toBe('normal');
+
+    const withPlan = toPublicSessionResponse(
+      {
+        ...BASE_SESSION,
+        metadata_json: JSON.stringify({
+          source: 'channel',
+          dialogueMode: 'clarify',
+          activeWorkflowPlanPath: '.agentdocs/workflow/plan.md',
+        }),
+      },
+      [],
+    );
+    expect(withPlan.workflowRuntime.mode).toBe('execution');
+  });
+
   it('从 metadata 暴露已记录的工作流证据 artifact', () => {
     const response = toPublicSessionResponse(
       {

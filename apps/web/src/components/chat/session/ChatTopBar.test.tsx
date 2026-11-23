@@ -8,6 +8,7 @@ function renderTopBar(props: Partial<ChatTopBarProps> = {}) {
     <ChatTopBar
       {...props}
       dialogueMode={props.dialogueMode ?? 'coding'}
+      dialogueModeReady={props.dialogueModeReady ?? true}
       onChangeDialogueMode={props.onChangeDialogueMode ?? (() => undefined)}
       rightOpen={props.rightOpen ?? false}
       onToggleRightOpen={props.onToggleRightOpen ?? (() => undefined)}
@@ -143,6 +144,82 @@ describe('ChatTopBar — 审批方式档位标识', () => {
 
     expect(screen.queryByTestId('chat-top-bar-yolo-chip')).toBeNull();
     expect(screen.queryByTestId('chat-top-bar-auto-edit-chip')).toBeNull();
+  });
+});
+
+describe('ChatTopBar — 来源会话只读标识', () => {
+  it('提供 sourceBadgeLabel 时渲染只读 chip 并隐藏三模式切换器', () => {
+    renderTopBar({ sourceBadgeLabel: '渠道：飞书' });
+
+    const chip = screen.getByTestId('chat-top-bar-source-chip');
+    expect(chip.tagName).toBe('SPAN');
+    expect(chip.getAttribute('data-readonly')).toBe('true');
+    expect(chip.textContent).toContain('渠道：飞书');
+    expect(screen.queryByTestId('dialogue-mode-toggle')).toBeNull();
+  });
+
+  it('来源会话不渲染「确认转换」按钮（即便调用方传了回调）', () => {
+    renderTopBar({
+      dialogueMode: 'clarify',
+      sourceBadgeLabel: '定时任务',
+      onConfirmClarifySwitch: vi.fn(),
+    });
+
+    expect(screen.getByTestId('chat-top-bar-source-chip').textContent).toContain('定时任务');
+    expect(screen.queryByTestId('dialogue-mode-switch-button')).toBeNull();
+  });
+
+  it('未提供来源标识时行为不变：渲染切换器、不渲染 chip', () => {
+    renderTopBar({ dialogueMode: 'clarify' });
+
+    expect(screen.getByTestId('dialogue-mode-toggle')).not.toBeNull();
+    expect(screen.queryByTestId('chat-top-bar-source-chip')).toBeNull();
+  });
+
+  it('显式传 null 与缺省等价（非来源会话）', () => {
+    renderTopBar({ sourceBadgeLabel: null });
+
+    expect(screen.getByTestId('dialogue-mode-toggle')).not.toBeNull();
+    expect(screen.queryByTestId('chat-top-bar-source-chip')).toBeNull();
+  });
+});
+
+/**
+ * metadata 未水合的窗口：`dialogueMode` 还只是「用户默认值」这个假值，此刻渲染出的
+ * 切换器对来源会话既显示错误模式又可写，故整个窗口内不渲染任何模式控件。
+ */
+describe('ChatTopBar — 模式控件的水合门控', () => {
+  it('未水合时不渲染切换器与「确认转换」', () => {
+    renderTopBar({
+      dialogueMode: 'clarify',
+      dialogueModeReady: false,
+      onConfirmClarifySwitch: vi.fn(),
+    });
+
+    expect(screen.queryByTestId('dialogue-mode-toggle')).toBeNull();
+    expect(screen.queryByTestId('dialogue-mode-switch-button')).toBeNull();
+    // 也不应误渲染成来源 chip：未水合时根本还不知道来源。
+    expect(screen.queryByTestId('chat-top-bar-source-chip')).toBeNull();
+  });
+
+  it('水合后（草稿态 / 已加载）恢复渲染', () => {
+    renderTopBar({ dialogueModeReady: true });
+    expect(screen.getByTestId('dialogue-mode-toggle')).not.toBeNull();
+
+    cleanup();
+    renderTopBar({
+      dialogueMode: 'clarify',
+      dialogueModeReady: true,
+      onConfirmClarifySwitch: vi.fn(),
+    });
+    expect(screen.getByTestId('dialogue-mode-switch-button')).not.toBeNull();
+  });
+
+  it('来源会话优先显示只读 chip（badge 与未水合互斥：badge 只可能在水合后产生）', () => {
+    renderTopBar({ dialogueModeReady: false, sourceBadgeLabel: '渠道：飞书' });
+
+    expect(screen.getByTestId('chat-top-bar-source-chip').textContent).toContain('渠道：飞书');
+    expect(screen.queryByTestId('dialogue-mode-toggle')).toBeNull();
   });
 });
 

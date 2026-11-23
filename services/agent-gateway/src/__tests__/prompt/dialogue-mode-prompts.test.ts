@@ -4,7 +4,7 @@
  * 锁定跨模式约定，防止后续改提示词时被无意移除：
  *   1. 澄清模式的方案文档必须按 agentdocs-orchestrator 工作流规范组织
  *      （`.agentdocs/workflow/` 落盘路径 + 复杂度评估 + `T-XX` 原子任务）；
- *   2. 澄清模式的共识确认门控与"确认后自动切换到编程模式"说明；
+ *   2. 澄清模式先邀请制定方案，再审批已完成的方案；
  *   3. coding / programmer 承接澄清方案时先落盘计划并登记 `.agentdocs/index.md`；
  *   4. 三个模式声明【指令优先级】（多来源提示词冲突时的裁决顺序）；
  *   5. coding / programmer 共用同一份公共工程纪律与【模式回流】片段（SSOT）；
@@ -34,11 +34,16 @@ describe('对话模式提示词：agentdocs 工作流规范', () => {
     expect(prompt).toContain('验证策略');
   });
 
-  it('澄清模式保留共识确认门控与自动切换说明', () => {
+  it('澄清模式主动邀请制定方案，方案完成后再提交审批', () => {
     const prompt = DIALOGUE_MODE_SYSTEM_PROMPTS.clarify;
 
+    expect(prompt).toContain('当轮必须用 AskUserQuestion');
     expect(prompt).toContain('__grill_confirm__');
-    expect(prompt).toContain('已自动切换到编程模式');
+    expect(prompt).toContain('制定方案');
+    expect(prompt).toContain('暂不制定');
+    expect(prompt).toContain('EnterPlanMode');
+    expect(prompt).toContain('ExitPlanMode({ plan })');
+    expect(prompt).toContain('只有用户批准开始实现，才自动切换到编程模式');
   });
 
   it('澄清模式声明只读：方案文档先在对话定稿，落盘交给编程模式', () => {

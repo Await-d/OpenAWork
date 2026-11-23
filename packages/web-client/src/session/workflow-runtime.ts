@@ -147,6 +147,19 @@ function buildEvidenceState(
   };
 }
 
+/**
+ * 来源托管会话（渠道 `channel` / 定时任务 `cron`）：它们**没有**对话模式。
+ *
+ * 规则本身与网关 `services/agent-gateway/src/session/session-runtime-policy.ts` 的
+ * `isSourceManagedSessionMetadata` 同源。这里刻意**内联**而非导出/导入：本包新增导出会
+ * 击穿网页端大量 `vi.mock('@openAwork/web-client')` 的局部工厂——凡是导入链经过本模块的
+ * 测试都会整体报「No "X" export is defined on the mock」。
+ */
+function isSourceManagedMetadata(metadata: Record<string, unknown>): boolean {
+  const source = metadata['source'];
+  return source === 'channel' || source === 'cron';
+}
+
 function buildWorkflowRuntimeState(metadataJson: string | undefined): WorkflowRuntimeState {
   const metadata = readMetadataObject(metadataJson);
   const activePlan = buildPlanState(metadata);
@@ -156,10 +169,12 @@ function buildWorkflowRuntimeState(metadataJson: string | undefined): WorkflowRu
     ...(activeLoop ? { activeLoop } : {}),
     ...(activePlan ? { activePlan } : {}),
     evidence: buildEvidenceState(metadata, activeLoop),
+    // 来源会话的 `dialogueMode` 只可能是上游误写的脏值，不得把它投影成「规划中」
+    //（clarify → planning）。真实进度（activePlan / activeLoop）与对话模式无关，照常投影。
     mode: resolveMode({
       activeLoop,
       activePlan,
-      mode: dialogueMode(metadata['dialogueMode']),
+      mode: isSourceManagedMetadata(metadata) ? undefined : dialogueMode(metadata['dialogueMode']),
     }),
   };
 }

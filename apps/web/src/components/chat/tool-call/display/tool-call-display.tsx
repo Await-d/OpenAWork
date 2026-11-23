@@ -1,4 +1,5 @@
 import type { InputImageContent } from '@openAwork/shared';
+import { shellToolTerminalId, useShellProgress } from '../../shell-progress.js';
 import { isSubagentToolName } from '@openAwork/shared-ui';
 import type { ToolCallCardProps } from '@openAwork/shared-ui';
 import { BatchToolCallCard } from '../cards/batch-tool-call-card.js';
@@ -12,6 +13,9 @@ import { GenerateAudioToolCard } from '../cards/generate-audio-tool-card.js';
 import { ExtractVideoFrameToolCard } from '../cards/extract-video-frame-tool-card.js';
 import { InlineToolCall } from './inline-tool-call.js';
 import { isInlineTool } from '../shared/inline-tool-set.js';
+import { isToolInputPending } from '../shared/pending-tool-input.js';
+import { shouldSuppressQuestionToolCall } from '../shared/question-tool-suppression.js';
+import { ToolCallPendingCard } from './tool-call-pending-card.js';
 
 /* ── Router: pick inline vs block ── */
 
@@ -38,10 +42,52 @@ export interface ToolCallDisplayProps {
    * 目前只有 `computer_use` 消费它（最终截图不在 output 里）；其余卡片忽略。
    */
   attachments?: readonly InputImageContent[];
+  fileDiffs?: unknown;
+  /** 当前消息所属会话 id（可选，仅供文件变更卡按需加载完整快照）。 */
+  sessionId?: string | undefined;
 }
 
 export function ToolCallDisplay(props: ToolCallDisplayProps) {
   const normalized = props.toolName.trim().toLowerCase();
+  const shellProgress = useShellProgress();
+  // 提问工具在「等待回答」期间的唯一入口是 composer 上方的专属面板
+  // （`InlineQuestionPanel`），消息流里再画一条工具条目会让同一件事出现两份，
+  // 且必然产生「先工具调用、后跳成提问面板」的时序跳变。裁决与「结算后必须恢复
+  // 可见」的理由见 `question-tool-suppression.ts`。必须放在下面
+  // `isToolInputPending` 之前：骨架卡同样属于「流内工具条目」。
+  if (
+    shouldSuppressQuestionToolCall({
+      toolName: props.toolName,
+      isError: props.isError,
+      output: props.output,
+      status: props.status,
+    })
+  ) {
+    return null;
+  }
+  // 流式入参还没收全（`tool_call_delta` 只到了半截 JSON）：此刻渲染真实卡片只会
+  // 把原始格式铺给用户，等尾部的 `}` 到了又跳成正常内容。统一换成骨架占位，
+  // 参数收全 / `tool_result` 到达后自动回落下面的真实卡片路由。
+  if (
+    isToolInputPending({
+      input: props.input,
+      isError: props.isError,
+      output: props.output,
+      status: props.status,
+    })
+  ) {
+    return <ToolCallPendingCard embedded={props.embedded === true} toolName={props.toolName} />;
+  }
+  const terminalId = shellToolTerminalId(props.toolName, props.input, props.output);
+  if (
+    terminalId &&
+    !props.pendingPermissionRequestId &&
+    !props.approvalActions &&
+    shellProgress?.knownIds.has(terminalId) &&
+    !shellProgress.visibleIds.has(terminalId)
+  ) {
+    return null;
+  }
 
   if (isSubagentToolName(normalized)) {
     return null; // Task tools handled separately by TaskToolInline
@@ -56,6 +102,7 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
         output={props.output}
         status={props.status}
         isError={props.isError}
+        sessionId={props.sessionId}
         renderToolCallDisplay={(p) => <ToolCallDisplay {...p} />}
       />
     );
@@ -157,12 +204,14 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
         status={props.status}
         isError={props.isError}
         embedded={props.embedded === true}
+        sessionId={props.sessionId}
       />
     );
   }
 
   return (
     <BlockToolCall
+      fileDiffs={props.fileDiffs}
       approvalActions={props.approvalActions}
       pendingPermissionRequestId={props.pendingPermissionRequestId}
       kind={props.kind}
@@ -173,6 +222,7 @@ export function ToolCallDisplay(props: ToolCallDisplayProps) {
       isError={props.isError}
       durationMs={props.durationMs}
       embedded={props.embedded === true}
+      sessionId={props.sessionId}
     />
   );
 }

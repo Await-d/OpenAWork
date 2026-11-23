@@ -1,3 +1,4 @@
+import { parseServerTimestamp, toServerIsoString } from '@openAwork/shared';
 import type {
   SessionTask,
   SharedSessionDetailRecord,
@@ -276,7 +277,7 @@ export function buildWorkspaceGroupsProjection(input: {
 
   const workspaceGroups = Array.from(groups.values()).map((group) => ({
     ...group,
-    sessions: [...group.sessions].sort((left, right) =>
+    sessions: group.sessions.toSorted((left, right) =>
       left.title.localeCompare(right.title, 'zh-CN'),
     ),
   }));
@@ -408,8 +409,8 @@ export function buildMessageCardsProjection(input: {
   >;
 }): AgentTeamsMessageCard[] {
   return input.messages.length > 0
-    ? [...input.messages]
-        .sort((left, right) => right.timestamp - left.timestamp)
+    ? input.messages
+        .toSorted((left, right) => right.timestamp - left.timestamp)
         .map((message) => {
           const from = input.memberNameById.get(message.memberId) ?? '团队成员';
           const fromAccent =
@@ -647,7 +648,7 @@ export function buildTimelineProjection(input: {
               `${handoff.toRoleLayer ?? '下一层'} 层交接状态已更新为 ${handoff.state}。`,
           ),
           id: `handoff-${handoff.id}`,
-          timestamp: new Date(handoff.updatedAt).toISOString(),
+          timestamp: toServerIsoString(handoff.updatedAt) ?? String(handoff.updatedAt ?? ''),
           type:
             handoff.state === 'completed'
               ? 'turn_complete'
@@ -671,7 +672,7 @@ export function buildTimelineProjection(input: {
             : '运行时任务',
           detail: formatTimelineDetail(buildTaskDetail(task)),
           id: `runtime-task-${task.id}`,
-          timestamp: new Date(task.updatedAt).toISOString(),
+          timestamp: toServerIsoString(task.updatedAt) ?? String(task.updatedAt ?? ''),
           type: mapTimelineEventTypeFromRuntimeTask(task.status),
         }) satisfies AgentTeamsTimelineEvent,
     ),
@@ -859,7 +860,7 @@ export function buildOverviewCardsProjection(input: {
 }): AgentTeamsOverviewCard[] {
   const runtimeStartCandidates = [
     ...input.scopedMessages.map((message) => message.timestamp),
-    ...input.scopedAuditLogs.map((log) => new Date(log.createdAt).getTime()),
+    ...input.scopedAuditLogs.map((log) => parseServerTimestamp(log.createdAt) ?? 0),
     ...input.scopedSharedSessions.map((session) => new Date(session.shareCreatedAt).getTime()),
     ...(input.selectedSessionScope
       ? []

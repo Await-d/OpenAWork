@@ -49,6 +49,7 @@ import {
   sessionRenameToolDefinition,
 } from './session-management-tools.js';
 import { modelSearchToolDefinition } from './model-search-tools.js';
+import { permissionGetToolDefinition } from '../permission/permission-get-tool.js';
 import { astGrepReplaceToolDefinition, astGrepSearchToolDefinition } from './ast-grep-tools.js';
 import { interactiveBashToolDefinition } from './interactive-bash-tools.js';
 import { skillMcpToolDefinition } from '../skill/skill-mcp-tools.js';
@@ -196,6 +197,7 @@ const MODEL_VISIBLE_GATEWAY_TOOLS = [
   sessionSearchToolDefinition,
   sessionInfoToolDefinition,
   sessionRenameToolDefinition,
+  permissionGetToolDefinition,
   sessionMoveToolDefinition,
   modelSearchToolDefinition,
   astGrepSearchToolDefinition,

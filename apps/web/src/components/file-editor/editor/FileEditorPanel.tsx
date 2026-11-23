@@ -24,6 +24,7 @@ import { EditorTabBar } from '../tabs/EditorTabBar.js';
 import { FileBreadcrumb } from '../tabs/FileBreadcrumb.js';
 import { FilePreviewPane } from '../preview/FilePreviewPane.js';
 import { MonacoErrorBoundary } from './MonacoErrorBoundary.js';
+import { WorkspaceFileExportButton } from './workspace-file-export-button.js';
 
 const MonacoEditor = lazy(() =>
   import('@monaco-editor/react').then((m) => ({ default: m.default })),
@@ -775,6 +776,13 @@ export function FileEditorPanel({
               )}
               {saveError && (
                 <span style={{ fontSize: 11, color: 'var(--danger)' }}>{saveError}</span>
+              )}
+              {workspacePath && (
+                <WorkspaceFileExportButton
+                  key={`${workspacePath}:${activeFile.path}`}
+                  path={activeFile.path}
+                  workspaceRoot={workspacePath}
+                />
               )}
               {isDirty(activeFile.path) && !activeFile.truncated && (
                 <button

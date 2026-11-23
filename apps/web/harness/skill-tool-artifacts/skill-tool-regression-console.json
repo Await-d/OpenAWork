@@ -1,0 +1,86 @@
+[
+  {
+    "harness": "patch-tool",
+    "mode": "dark",
+    "width": 375,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "patch-tool",
+    "mode": "dark",
+    "width": 768,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "patch-tool",
+    "mode": "dark",
+    "width": 1440,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "patch-tool",
+    "mode": "light",
+    "width": 375,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "patch-tool",
+    "mode": "light",
+    "width": 768,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "patch-tool",
+    "mode": "light",
+    "width": 1440,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "list-directory",
+    "mode": "dark",
+    "width": 375,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "list-directory",
+    "mode": "dark",
+    "width": 768,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "list-directory",
+    "mode": "dark",
+    "width": 1440,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "list-directory",
+    "mode": "light",
+    "width": 375,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "list-directory",
+    "mode": "light",
+    "width": 768,
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  {
+    "harness": "list-directory",
+    "mode": "light",
+    "width": 1440,
+    "consoleErrors": [],
+    "pageErrors": []
+  }
+]

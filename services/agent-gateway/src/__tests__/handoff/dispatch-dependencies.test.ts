@@ -21,10 +21,14 @@ describe('任务依赖与责任范围', () => {
 `);
     expect(packages.map((pkg) => pkg.taskMarkers.taskId)).toEqual(['T001', 'T002']);
     expect(packages[1]?.dependsOn).toEqual(['T001']);
-    expect(validateParsedTasks(parseAllTasks(`
+    expect(
+      validateParsedTasks(
+        parseAllTasks(`
 - [ ] t001 [src/a.ts] 新增入口 - 可启动
 - [ ] T001 [src/b.ts] 新增调用 - 可运行
-`)).join('；')).toContain('重复');
+`),
+      ).join('；'),
+    ).toContain('重复');
   });
 
   it.each(['src/./login.ts', 'src/module/../login.ts'])('同文件路径别名 %s 也必须串行', (alias) => {

@@ -20,8 +20,10 @@ import type { ChatBackendUsageSnapshot } from '../../../components/conversation-
 import type { StreamingThinkingBlock } from '../../../components/conversation-runtime/stream/streaming-thinking.js';
 import type { StreamFrameHandle } from '../../../components/conversation-runtime/stream/stream-frame-controller.js';
 import { useDisplayPreferencesStore } from '../../../stores/settings/display-preferences.js';
+import type { SavedChatDefaults } from '../../../utils/chat/chat-session-defaults.js';
 import { readRefCurrent } from '../../../utils/ref/ref-current.js';
 import { extractWorkingDirectory } from '../../../utils/session/session-metadata.js';
+import { buildSessionOriginBadgeLabel } from '../../../utils/session/session-origin.js';
 import { fetchSessionRecoveryOnce } from '../../../utils/session/session-recovery-flight.js';
 import type { SessionViewCacheReturn } from '../conversation/snapshot/use-session-view-cache.js';
 import {
@@ -97,6 +99,7 @@ export interface ChatSessionSwitchDeps {
   readonly resetStreamState: () => void;
   readonly restoreScrollTop: (top: number) => void;
   readonly rightPanelStateRef: RefObject<ChatRightPanelState>;
+  readonly savedChatDefaultsRef: RefObject<SavedChatDefaults | null>;
   readonly scrollRegionRef: RefObject<HTMLDivElement | null>;
   readonly sessionId: string | undefined;
   readonly sessionMetadataDirtyRef: RefObject<boolean>;
@@ -108,6 +111,8 @@ export interface ChatSessionSwitchDeps {
   readonly setActiveModelId: Dispatch<SetStateAction<string>>;
   readonly setActiveProviderId: Dispatch<SetStateAction<string>>;
   readonly setChildSessions: Dispatch<SetStateAction<Session[]>>;
+  /** 会话级上下文挡位的本地状态写入（undefined = 本会话未覆盖）。 */
+  readonly setContextWindowOverride: Dispatch<SetStateAction<number | undefined>>;
   readonly setCurrentSessionId: Dispatch<SetStateAction<string | null>>;
   readonly setDialogueMode: Dispatch<SetStateAction<DialogueMode>>;
   readonly setIsSessionLoading: Dispatch<SetStateAction<boolean>>;
@@ -127,6 +132,8 @@ export interface ChatSessionSwitchDeps {
   readonly setSelectedChildSessionId: Dispatch<SetStateAction<string | null>>;
   readonly setServerTotalTurnCount: Dispatch<SetStateAction<number | null>>;
   readonly setSessionModesHydrated: Dispatch<SetStateAction<boolean>>;
+  /** 只读来源标识（渠道 / 定时任务）；非来源会话写 null。见 utils/session/session-origin。 */
+  readonly setSessionOriginBadge: Dispatch<SetStateAction<string | null>>;
   readonly setSessionStateStatus: Dispatch<
     SetStateAction<'idle' | 'running' | 'paused' | null | undefined>
   >;
@@ -212,12 +219,14 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     setPendingQuestions,
     setPermissionMode,
     setReasoningEffort,
+    setContextWindowOverride,
     setRecoveredStreamSnapshot,
     setRecoveryActiveStream,
     setRightPanelState,
     setSelectedChildSessionId,
     setServerTotalTurnCount,
     setSessionModesHydrated,
+    setSessionOriginBadge,
     setSessionStateStatus,
     setSessionTasks,
     setSessionTodos,
@@ -275,8 +284,10 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
   const isFreshBootstrapStream =
     shouldPreserveBootstrapState ||
     shouldPreserveFreshBootstrapStream({
+      activeSessionId: activeSessionRef.current,
       isStreaming: streamingRef.current,
       loadedSessionId: currentLoadedSessionIdRef.current,
+      requestedSessionId,
     });
 
   // 「保留本地流」只在**确实还是同一个会话**时成立。
@@ -321,7 +332,14 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
       setSessionStateStatus(null);
       setIsSessionSnapshotReady(true);
       setSessionModesHydrated(false);
+      setSessionOriginBadge(null);
       clearSessionMetadataDirty();
+      const defaults = deps.savedChatDefaultsRef.current;
+      sessionModelSelectionSourceRef.current = null;
+      setActiveProviderId(defaults?.providerId ?? '');
+      setActiveModelId(defaults?.modelId ?? '');
+      setThinkingEnabled(defaults?.thinkingEnabled ?? false);
+      setReasoningEffort(defaults?.reasoningEffort ?? 'medium');
       lastPersistedSessionMetadataSnapshotRef.current = null;
       resetStreamState();
       setDialogueMode(useDisplayPreferencesStore.getState().defaultDialogueMode);
@@ -403,6 +421,9 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
     setIsSessionSnapshotReady(true);
     clearSessionMetadataDirty();
     setSessionModesHydrated(true);
+    // 新建会话（bootstrap）必然不是来源会话：清掉上一个会话可能残留的来源标识，
+    // 否则新建的普通会话会顶着上一个渠道会话的只读 chip，且模式切换器不渲染。
+    setSessionOriginBadge(null);
     return () => {
       cancelled = true;
     };
@@ -550,6 +571,8 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
   setRecoveryActiveStream(null);
   setIsSessionSnapshotReady(false);
   setSessionModesHydrated(false);
+  // 来源标识先清空，等 recovery 带回本会话的 metadata 再按 source 重新判定。
+  setSessionOriginBadge(null);
   // 必须同时重置 ref 和 state —— 如果只 setSessionMetadataDirty(false)，
   // sessionMetadataDirtyRef.current 会保留上一个会话的 dirty 标记，
   // 导致 recovery 回调中 if (!sessionMetadataDirtyRef.current) 判断为 false，
@@ -564,6 +587,9 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
   setWebSearchEnabled(webSearchAvailable);
   setThinkingEnabled(false);
   setReasoningEffort('medium');
+  // 会话级上下文挡位必须随会话一起清掉：不清就会把上一个会话的挡位带到新会话，
+  // 而那时新会话的模型可能完全不同。具体值由 recovery 回调重新水合。
+  setContextWindowOverride(undefined);
   setActiveProviderId('');
   setActiveModelId('');
 
@@ -666,6 +692,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
             setWebSearchEnabled(metadata.webSearchEnabled && webSearchAvailable);
             setThinkingEnabled(metadata.thinkingEnabled);
             setReasoningEffort(metadata.reasoningEffort);
+            setContextWindowOverride(metadata.contextWindowOverride);
           }
           // 模型选择必须无条件从 metadata 恢复 —— 这是会话绑定的核心数据。
           // 即使 sessionMetadataDirtyRef 在异步窗口中被设为 true（极端竞态），
@@ -680,6 +707,7 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
           lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot({
             dialogueMode: metadata.dialogueMode,
             agentId: metadata.agentId,
+            contextWindowOverride: metadata.contextWindowOverride,
             permissionMode: metadata.permissionMode,
             yoloMode: metadata.yoloMode,
             webSearchEnabled: metadata.webSearchEnabled,
@@ -694,6 +722,9 @@ export function runChatSessionSwitchEffect(deps: ChatSessionSwitchDeps): (() => 
             clearSessionMetadataDirty();
           }
           setSessionModesHydrated(true);
+          // 无条件按服务端 metadata 判定来源：渠道 / 定时任务会话在这里亮出只读 chip，
+          // 顶栏因此不会渲染可写的三模式切换器（见 utils/session/session-origin）。
+          setSessionOriginBadge(buildSessionOriginBadgeLabel(metadata.origin));
           setIsSessionLoading(false);
           // 清除骨架屏延迟定时器
           if (skeletonDelayTimerRef.current !== null) {

@@ -2,9 +2,19 @@
 
 ## 进行中的任务
 
-### 🟢 261103-消息媒体渲染融合方案 - 消息内媒体渲染收敛为「图片拼贴 + 非图片卡片 + 共享灯箱」（**Phase 1–4 全部交付，仅 1 项登记延后**）
+- 会话删除性能优化：[实施与验证](workflow/261118-会话删除性能优化.md)（索引子树查询、有界停流、可恢复磁盘清理）。
+- 派工助手：[详细实施方案](workflow/261118-派工助手.md)（个人文本版本已接入 Web 和桌面，定向测试通过，端到端验收待完成）。
+- 提问未回答继续执行：[定位与修复](workflow/261117-提问未回答继续执行修复.md)（排查运行器暂停边界与自动续跑）。
+- 会话渲染性能优化：[实施与验证](workflow/261115-会话渲染性能优化.md)（用户已授权，列表/工具输出/Markdown/流计算分阶段优化）。
+- 低风险工具免审批：[完成记录](workflow/261114-低风险工具免审批.md)（407 项测试及网关构建通过）。
+- 消息字符上限动态配置：[交付记录](workflow/done/261114-消息字符上限动态配置.md)（已完成；设置 → 连接；默认 32768、范围 1024～200000；数据库邮箱匹配 ADMIN_EMAIL 才可写；外部动态校验与内部续跑结构校验分离）。
 
-**状态**: **Phase 1（图片拼贴）/ 2（文件卡片）/ 3（媒体卡片收敛）/ 4（灯箱增强）全部交付并验证**（2026-11-03；Full orchestration score **+7**；T-01…T-13 / T-16 / T-18 共 **16 项 ✅**，仅 T-17 媒体加载骨架按裁决延后）。门禁：`apps/web` **316 文件 / 3357 例通过**、`shared-ui` **27 文件 / 255 例通过**、`prettier` 全过、ESLint 与 web `lint`（React Compiler）exit 0、**两侧 `tsc` 均 0 错误**；**未执行 shared-ui build**（已证 desktop/web 均走源码 alias）。设计原型 `docs/media-render-demo/` 已交付并获用户确认方向（用户对 A/B/C 三方案「都喜欢」→ 采用融合路线，不三选一）。
+### ✅ 261103-消息媒体渲染融合方案 - 消息内媒体渲染收敛为「图片拼贴 + 非图片卡片 + 共享灯箱」（2026-11-03 完成并归档；T-01…T-18 全部交付）
+
+**状态**: **Phase 1（图片拼贴）/ 2（文件卡片）/ 3（媒体卡片收敛）/ 4（灯箱增强）全部交付并验证**（2026-11-03；Full orchestration score **+7**；T-01…T-18 **全部 18 项 ✅**，T-17 媒体加载骨架已由统一状态组件收口）。门禁：`apps/web`（chat + 聊天页 + team + office-preview + file-editor + utils）**513 文件 / 5077 例通过**、`shared-ui` **27 文件 / 255 例通过**、`prettier` 全过、ESLint 与 web `lint`（React Compiler）exit 0、**两侧 `tsc` 均 0 错误**；**未执行 shared-ui build**（已证 desktop/web 均走源码 alias）。设计原型 `docs/media-render-demo/` 已交付并获用户确认方向（用户对 A/B/C 三方案「都喜欢」→ 采用融合路线，不三选一）。
+**第二轮修复（2026-11-03，用户追问「是否全部正确接入」后）**: ① **F-1 功能性 Bug** —— 取流误用 `GET /artifacts/:id`（SQLite **内容型**表），而上传附件是**磁盘型**产物（`routes/artifacts.ts:364-365` 明示「两者不可互换」），导致**文件卡片下载必然失败、音视频附件永不播放**（静默降级）；**单测因全量 mock 而完全没发现**。修复：新增 `use-session-artifact-blob.ts` 走 `downloadFromSession`，并把 `sessionId` 穿到 6 处渲染调用点（team feed 用 `layerData.sessionIds[0]`），补**端点契约测试**显式断言 `get` 未被调用。② **F-2** 结构化媒体路径（`VideoContentBlock` / `AudioContentBlock`）收进统一卡片骨架 `media-card-status`，消除「480px 内联框 vs 卡片壳」两套观感。③ **F-3** 接入 `pdfjs-dist@6.5.438`（**按需加载** + worker 走 `?url`）补齐消息内 PDF 预览，PDF 卡片「预览」按钮**点了才取流**。
+**第三轮收尾（2026-11-03，用户指示「继续完成方案中的内容，允许开启多个成员」）**: 三条互不重叠的线并行 —— ① **媒体层颜色收敛（D-9）**：新增 9 个媒体层 token（`mediaScrim` / `mediaGradient` / `mediaBadgeBg` / `mediaTextContrast` / `mediaTextStrong` / `mediaTextMuted` / `mediaTextSubtle` / `mediaTextFaint` / `mediaControlBg`），`VideoPlayer` 硬编码残留**归零**；关键判断是「媒体 chrome 压在画面之上，**不能**映射到会随主题翻转的 `--fg-strong`，否则亮色主题下变深色字压暗视频、不可读」；同时清掉 `variant="compact"` 死路径（二次核实零消费方）。② **桌面端导出一致性**：追出「下载套路重复」实为**跨端不一致缺陷** —— 消息卡片自造 anchor，桌面端（Tauri）不弹原生保存对话框，与仓库其余导出不一致；给 `exportFile` 向后兼容新增 Blob 变体、卡片改用它，并补 `cancelled` 不算失败 + 32MiB 降级保护（Tauri 的 `Vec<u8>` 走 JSON 数字数组，50MB ≈ 数千万 number）。③ **PDF 接进文件编辑器**：成员侦察**推翻了协调者的派活描述** —— 真缺口只是 `OfficePreview` 的 `renderable` 白名单早退（它本来就拉 `ArrayBuffer`），已在白名单放行 pdf 并复用 `PdfPreview`（未复制 pdfjs 逻辑）。另收口 **T-17**（核实后确认已由 F-2 的统一状态组件交付）与删除 `gallery-layout` 的零消费死字段 `fit` / `aspectRatio`。
+**收尾复查（用户指示「有问题的先修复」）**: 按 `AGENTS.md`「单文件 1500 行上限、1300–1500 为预警区、应主动评估拆分」的规则，把 `ChatPageSections.tsx` 的「附件与媒体渲染」整个职责域抽成 `apps/web/src/components/chat/session/message-media-attachments.tsx`（主文件 **1462 → 1282 行**，退出预警区），并同步修正一处随抽取失效的源码断言测试（断言意图不变、只是路径变了）。最终门禁：`apps/web` **完整套件 700 文件 / 7145 例通过**（限定范围子集 513 文件 / 5077 例）、`shared-ui` **27 文件 / 255 例通过**、双侧 `tsc` **0 错误**、`prettier` / 根 ESLint / React Compiler 全过。另记录：`apps/web/src/pages/chat-page/ChatPage.tsx` 当前 **3644 行**，远超该规则硬限（属并行工作流的活跃文件，本任务未触碰，仅登记）。
 **已落地**: ① **图片拼贴**：新增 `gallery-layout.ts` 纯函数（1 张 `contain` 16:10 / 2 张等宽 / 3 张 1 大 2 小 / 4 张 2×2 / 5–9 张 3 列 / **>9 张折叠为前 8 张 + `+N`**），图集改布局表驱动 + `data-*` 落 CSS；② **文件卡片**：`- <name> (artifact:<id>)` 从正文还原为卡片（以 **`[附件]` 段**为界解析，段外不误判、解析失败返回原文），新增 `media-file-badge.ts` 自绘扩展名徽章；③ **媒体卡片收敛**：`MediaReferenceCard` 按扩展名分流（音视频→播放器 / 其余→文件卡片），含「非媒体不取流 / 取流中占位 / 失败回落卡片」三条降级；`AudioPlayer` **删掉 32 根 `Math.sin` 假波形**、`VideoPlayer` **新增进度条**，两侧同构（`role="slider"` + aria + 指针四事件 + `touch-action: none` + 键盘 ←→/Home/End + 共用 `seekFromClientX`）；④ **灯箱**：底部缩略图条 + 键盘提示浮层。
 **并行执行（本轮实证）**: **团队成员可真实写码**（先前「subagent 只读」的判断被证伪）。两名成员并行改 `AudioPlayer` / `VideoPlayer`（互不重叠），协调者同时改 `apps/web` 侧卡片与 mock 桶转发。
 **并行纪律（两条实证教训）**: ① **同一文件的多处编辑必须串行** —— 曾并行发「加 import」+「改函数体」导致后者基于旧快照覆盖前者，症状是「测试失败但不报错」；② **`index.md` 等共享文件会被并行工作流用旧快照覆盖** —— 本条目的上一版更新就因此丢失，改完需复核（同 E-02 的 `UpdateBanner.tsx` 被并行改坏属同类）。
@@ -62,6 +72,15 @@
 ---
 
 ## 已完成的任务
+
+- 自动压缩超时与恢复修复：[交付记录](workflow/done/261118-自动压缩超时与恢复修复.md)（30 文件 / 270 项回归、网关构建与类型检查、ESLint / Prettier 通过；独立复审无阻断）。
+
+### 自动压缩维护约束（2026-11-18）
+
+- 总截止时间必须覆盖插件等待与 PTL 重试；自动摘要失败和取消不得推进历史边界，取消不得累计冷却失败。PTL 降级必须覆盖原消息范围，禁止截半后宣称全量摘要。
+- completed reservation 重放必须读取当前会话元数据并检查边界；overflow 续跑依据恢复成功，LLM 冷却不可阻断本地恢复。手动无新增内容是正常完成，计数为 0。
+
+- 工具调用可视化收尾：[交付记录](workflow/done/261115-工具调用可视化收尾.md)（Skill Markdown/资源/加载状态、list 渐进加载、patch 空行保真；Web 7356 项、浏览器 848 项通过）。Skill 名称按非空 name → skill → 历史 skillId，成功只表示指令已加载；补丁省略 @@ 时首条正文仍需开启隐式片段并保留后续裸空行。
 
 ### ✅ 261103-Agent 管理页与技能页布局落地（方案 A + B） - `/agents` 改控制台三栏、`/skills` 改三栏内联详情（2026-11-03 完成并归档）
 
@@ -1299,6 +1318,13 @@
 - [261103-Agent管理页与技能页布局落地（方案A+B）](workflow/done/261103-Agent管理页与技能页布局落地（方案A+B）.md)
 
 ## 项目记忆
+
+### Linux 本机网关部署（2026-11-14）
+
+- **部署入口**：`scripts/native-gateway/install.sh` / `update.sh` / `gateway.sh` 使用用户级 systemd，配置在 `~/.config/openawork-gateway/gateway.env`；操作及迁移说明见 [本机部署手册](../docs/native-gateway-deployment.md)，完成方案见 [归档](workflow/done/261114-本机网关安装与数据迁移.md)。
+- **systemd 路径陷阱**：249 版本的 `WorkingDirectory` / `EnvironmentFile` 不剥离外层引号，必须使用原始绝对路径并转义 `%`；`ExecStart` / `Environment` 则要按词法规则引用。真实 parser 回归见 `scripts/native-gateway/unit.test.sh`。
+- **浏览器配置**：本机实时预览使用 `OPENAWORK_BROWSER_LIVE=1`，无需 `DESKTOP_AUTOMATION`；显式独立 `PLAYWRIGHT_BROWSERS_PATH` 可避免继承失效容器挂载。迁移工具只改结构化路径，正文、凭据和 MCP 命令参数原样保留。
+
 
 ### 控制台页面布局与共享表面（2026-11-03）
 

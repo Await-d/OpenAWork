@@ -171,6 +171,13 @@ async function main(): Promise<void> {
               answers: [['workspace']],
             });
 
+            // 对齐回答路由：先结算问题，再调用恢复入口。未结算应继续保持暂停。
+            sqliteRun(
+              `UPDATE question_requests SET status = 'answered', answer_json = ?
+               WHERE id = ? AND status = 'pending'`,
+              [JSON.stringify([['workspace']]), pendingQuestion.id],
+            );
+
             await resumeAnsweredQuestionRequest({
               payload: {
                 clientRequestId: parsedPayload.clientRequestId ?? 'child-question-req-1',

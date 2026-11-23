@@ -10,6 +10,7 @@ import {
   type ApprovedPermissionResumePayload,
   type BlockedToolCallResumeEntry,
 } from '../routes/stream.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export type {
   PendingPermissionRequest,
@@ -60,8 +61,10 @@ export function parsePermissionAlwaysJson(raw: string | null): string[] {
         (value): value is string => typeof value === 'string' && value.length > 0,
       );
     }
-  } catch {
-    // fall through to empty array
+  } catch (error) {
+    // 预期错误：JSON 字符串格式不合法时，记录警告但继续返回空数组（兼容历史数据）。
+    // 这是有意的防御性编程，不应作为异常中断。
+    logPermissionJsonParseFailure('always', raw, error);
   }
   return [];
 }
@@ -187,7 +190,9 @@ export function parseApprovedPermissionResumePayload(
           }
         : {}),
     };
-  } catch {
+  } catch (error) {
+    // JSON 或恢复请求 schema 不合法时，不恢复执行。
+    logPermissionJsonParseFailure('resume', payloadJson, error);
     return null;
   }
 }
@@ -200,7 +205,27 @@ export function parsePermissionRequestClientRequestId(payloadJson: string | null
   try {
     const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
     return typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
-  } catch {
+  } catch (error) {
+    // 预期错误：payload JSON 格式不合法，返回 null 继续流程。
+    logPermissionJsonParseFailure('client-request-id', payloadJson, error);
     return null;
   }
+}
+
+// 解析器异常可能回显凭据或用户正文，仅记录固定分类和长度。
+function logPermissionJsonParseFailure(
+  operation: 'always' | 'resume' | 'client-request-id',
+  rawJson: string,
+  error: unknown,
+): void {
+  logGatewayWarn('[permission-contract] invalid permission JSON', {
+    operation,
+    rawLength: rawJson.length,
+    errorType:
+      error instanceof SyntaxError
+        ? 'syntax'
+        : error instanceof z.ZodError
+          ? 'schema'
+          : 'invalid-value',
+  });
 }

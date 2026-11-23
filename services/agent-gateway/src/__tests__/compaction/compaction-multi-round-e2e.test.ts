@@ -22,6 +22,7 @@ import type { Message } from '@openAwork/shared';
 import type { ModelRouteConfig } from '../../provider/model-router.js';
 
 const sqliteRunMock = vi.hoisted(() => vi.fn());
+const sqliteGetMock = vi.hoisted(() => vi.fn());
 const sqliteTransactionMock = vi.hoisted(() => vi.fn(<T>(fn: () => T): T => fn()));
 const appendMarkerMock = vi.hoisted(() => vi.fn());
 const callCompactionLlmMock = vi.hoisted(() =>
@@ -37,7 +38,7 @@ vi.mock('../../infra/db.js', () => ({
   sqliteTransaction: sqliteTransactionMock,
   // unused but referenced by indirect imports
   sqliteAll: vi.fn(() => []),
-  sqliteGet: vi.fn(),
+  sqliteGet: sqliteGetMock,
   WORKSPACE_ROOT: '/tmp/workspace',
 }));
 
@@ -92,6 +93,10 @@ const ROUTE: ModelRouteConfig = {
 beforeEach(() => {
   callCompactionLlmMock.mockReset();
   sqliteRunMock.mockReset();
+  sqliteGetMock.mockReset();
+  sqliteGetMock.mockImplementation((sql: string) =>
+    sql.includes('llm_error_message = ?') ? { status: 'reserved' } : undefined,
+  );
   sqliteTransactionMock.mockClear();
   appendMarkerMock.mockReset();
 });
@@ -176,7 +181,7 @@ describe('executeSessionCompaction — three-round anchor propagation', () => {
     expect(sqliteTransactionMock).toHaveBeenCalledTimes(3);
   });
 
-  it('clears any prior anchor when a round produces empty messagesToSummarize', async () => {
+  it('preserves the prior anchor when a round produces empty messagesToSummarize', async () => {
     // First round: produces v1.
     callCompactionLlmMock.mockResolvedValueOnce({
       summary: 'v1: initial',
@@ -194,9 +199,7 @@ describe('executeSessionCompaction — three-round anchor propagation', () => {
     expect(r1.metadata['lastCompactionLlmSummary']).toBe('v1: initial');
 
     // Round 2 with everything kept verbatim: nothing to summarize, the
-    // executor must short-circuit AND must NOT call the LLM. The
-    // metadata then resets `lastCompactionLlmSummary` to '' so future
-    // rounds know the previous anchor is gone.
+    // executor must short-circuit without changing the persisted anchor.
     const r2 = await executeSessionCompaction({
       messages: [userMessage('m1', 'block')],
       metadataJson: r1.metadataJson,
@@ -207,8 +210,10 @@ describe('executeSessionCompaction — three-round anchor propagation', () => {
       userId: 'user-1',
     });
     expect(callCompactionLlmMock).toHaveBeenCalledTimes(1); // unchanged
-    expect(r2.summary).toBe('');
-    expect(r2.metadata['lastCompactionLlmSummary']).toBe('');
+    expect(r2.summary).toBeUndefined();
+    expect(r2.committed).toBe(false);
+    expect(r2.metadataJson).toBe(r1.metadataJson);
+    expect(r2.metadata['lastCompactionLlmSummary']).toBe('v1: initial');
   });
 
   it('keeps the prior anchor when the LLM call itself fails (circuit-breaker counter ticks up)', async () => {
@@ -244,12 +249,10 @@ describe('executeSessionCompaction — three-round anchor propagation', () => {
     // Failure → consecutiveCompactionFailures ticks up.
     expect(r2.llmErrorMessage).toContain('503');
     expect(r2.metadata['consecutiveCompactionFailures']).toBe(1);
-    // The fallback structured summary should now be the round-2
-    // anchor — but the next live LLM call would still see v1 as the
-    // anchor input (round 2's structured-summary fallback overwrote
-    // `lastCompactionLlmSummary` though, so we just verify the
-    // failure was recorded without a successful summary leaking
-    // into the metadata as a "real" v2).
+    expect(r2.committed).toBe(false);
+    expect(r2.summary).toBeUndefined();
+    expect(r2.metadata['lastCompactionLlmSummary']).toBe('v1: initial');
+    expect(appendMarkerMock).toHaveBeenCalledTimes(1);
     expect(r2.llmSummary).toBeUndefined();
   });
 

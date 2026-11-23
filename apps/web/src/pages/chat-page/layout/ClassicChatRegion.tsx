@@ -60,6 +60,7 @@ export function ClassicChatRegion({ model }: ClassicChatRegionProps): ReactEleme
             rightOpen={rightOpen}
             onToggleRightOpen={chrome.onToggleRightOpen}
             hideRightPanelToggle={false}
+            dialogueModeReady={chrome.dialogueModeReady}
             editorFullScreen={chrome.editorFullScreen}
             onToggleEditorFullScreen={chrome.onToggleEditorFullScreen}
             terminalsChip={
@@ -106,6 +107,7 @@ export function ClassicChatRegion({ model }: ClassicChatRegionProps): ReactEleme
             onActivateBrowserTab={chrome.onActivateBrowserTab}
             todoController={chrome.todoController}
             todoDetailsId={chrome.todoDetailsId}
+            sourceBadgeLabel={chrome.sourceBadgeLabel}
             workspaceBinding={chrome.workspaceBinding}
             reviewPanelOpened={chrome.reviewPanelOpened}
             onToggleReviewPanel={chrome.onToggleReviewPanel}

@@ -26,6 +26,7 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@openAwork/web-client')>();
   return {
     ...actual,
+    createMessageLimitsClient: () => ({ read: async () => ({ maxChars: 32768 }) }),
     createComposerQueueClient: () => ({
       clear: async () => 0,
       claim: async () => ({ claimed: true }),
@@ -88,7 +89,12 @@ const CLIENT_COMMAND = {
  * `runSendMessage` 解构了数十个 deps，未用到的留空即可——它们在这几条路径上根本不会被
  * 访问。缺失字段用断言绕过而非补齐几十个 stub，测试意图因此保持在「这条出口有没有清理」。
  */
-function createDeps(overrides: Partial<SendMessageDeps> = {}): SendMessageDeps {
+type PreviewTestDeps = SendMessageDeps & {
+  setBrowserPreviewUrl: ReturnType<typeof vi.fn>;
+  setEditorMode: ReturnType<typeof vi.fn>;
+};
+
+function createDeps(overrides: Partial<SendMessageDeps> = {}): PreviewTestDeps {
   return {
     activeSessionRef: { current: 'session-1' },
     streamFrameHandleRef: { current: null },
@@ -104,13 +110,14 @@ function createDeps(overrides: Partial<SendMessageDeps> = {}): SendMessageDeps {
     remoteSessionBusyState: null,
     requestSessionListRefresh: vi.fn(),
     setBrowserPreviewUrl: vi.fn(),
+    openBrowserPreview: vi.fn(),
     setEditorMode: vi.fn(),
     setStreamError: vi.fn(),
     streaming: false,
     streamingRef: { current: false },
     token: 'token-1',
     ...overrides,
-  } as unknown as SendMessageDeps;
+  } as unknown as PreviewTestDeps;
 }
 
 beforeEach(() => {
@@ -122,6 +129,22 @@ beforeEach(() => {
 });
 
 describe('待发队列的消费清理', () => {
+  it('/open 规范化地址后仅调用布局预览入口', async () => {
+    const deps = createDeps();
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    await runSendMessage(deps, '/open localhost:5173');
+    expect(deps.openBrowserPreview).toHaveBeenCalledExactlyOnceWith(
+      'http://localhost:5173',
+      'newTab',
+    );
+    expect(deps.setBrowserPreviewUrl).not.toHaveBeenCalled();
+    expect(deps.setEditorMode).not.toHaveBeenCalled();
+    expect(dispatch.mock.calls.some(([event]) => event.type === 'openawork:browser:open-url')).toBe(
+      false,
+    );
+    dispatch.mockRestore();
+  });
+
   it('内置 /open 命令消费队列条目后，会删掉服务端记录', async () => {
     const result = await runSendMessage(createDeps(), '/open https://example.com', {
       queuedMessageId: 'queued-open',
@@ -177,7 +200,7 @@ describe('待发队列的消费清理', () => {
         dialogueMode: 'coding',
         effectiveAgentId: '',
         effectiveModelId: 'gpt-5-mini',
-        ensureSession: async () => 'session-1',
+        ensureSession: async () => ({ sessionId: 'session-1' }),
         reasoningEffort: undefined,
         scrollToBottom: vi.fn(),
         sessionModesHydrated: false,
@@ -239,7 +262,7 @@ describe('待发队列的消费清理', () => {
         dialogueMode: 'coding',
         effectiveAgentId: '',
         effectiveModelId: 'gpt-5-mini',
-        ensureSession: async () => 'session-1',
+        ensureSession: async () => ({ sessionId: 'session-1' }),
         reasoningEffort: undefined,
         resetStreamState: vi.fn(),
         scrollToBottom: vi.fn(),
@@ -295,7 +318,7 @@ describe('待发队列的消费清理', () => {
     // SESSION_ALREADY_RUNNING——用户看到「第一次没反应,再点一次报错」。
     const result = await runSendMessage(
       createDeps({
-        ensureSession: async () => 'session-1',
+        ensureSession: async () => ({ sessionId: 'session-1' }),
         streamingRef: { current: true },
       }),
       '第一次还没提交状态',

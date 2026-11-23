@@ -169,7 +169,7 @@ export function recoverActiveAssistantStream(
 
   const activeStreamStartedAt = hasActiveStream ? (input.activeStreamStartedAt ?? null) : null;
 
-  const activeRunId = [...input.runEvents].reverse().find((event) => {
+  const activeRunId = input.runEvents.findLast((event) => {
     if (typeof event.runId !== 'string' || event.runId.length === 0) {
       return false;
     }

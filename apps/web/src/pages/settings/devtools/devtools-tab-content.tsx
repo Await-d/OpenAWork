@@ -1,5 +1,6 @@
 import React from 'react';
 import type { WorkerEntry } from '@openAwork/shared-ui';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import type {
   DevtoolsChannelAuditRecord,
   DevtoolsChannelRecord,
@@ -71,11 +72,9 @@ interface DevtoolsTabContentProps {
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
-    if (!navigator.clipboard?.writeText) {
-      return false;
-    }
-
-    await navigator.clipboard.writeText(text);
+    // 走公共封装：非安全上下文（http 内网访问）下 `navigator.clipboard` 不存在，
+    // 封装会回落 `execCommand('copy')`，避免 devtools 复制按钮在内网部署下全量失效。
+    await copyTextToClipboard(text);
     return true;
   } catch (_error) {
     return false;

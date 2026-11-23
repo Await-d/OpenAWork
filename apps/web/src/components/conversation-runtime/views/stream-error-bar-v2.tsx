@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 import { formatChatUpstreamSummaryLabel } from './upstream-summary-label.js';
 import './stream-error-bar-v2.css';
 
@@ -40,7 +41,7 @@ export function ChatStreamErrorBarV2({
   const handleCopy = async () => {
     if (!streamError) return;
     try {
-      await navigator.clipboard.writeText(streamError);
+      await copyTextToClipboard(streamError);
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     } catch (err) {

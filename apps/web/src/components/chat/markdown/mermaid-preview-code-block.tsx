@@ -8,6 +8,7 @@ import {
   type SvgIntrinsicSize,
 } from './mermaid-diagram-meta.js';
 import { useMarkdownThemeTokens } from './use-markdown-theme.js';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 import { loadMermaidOnce } from '../../../utils/lazy/lazy-assets.js';
 
 type MermaidApi = (typeof import('mermaid'))['default'];
@@ -143,7 +144,7 @@ export const MermaidPreviewCodeBlock = memo(function MermaidPreviewCodeBlock({
   }, [intrinsic, fitToViewport]);
 
   const handleCopy = useCallback(() => {
-    void navigator.clipboard?.writeText(code).catch(() => undefined);
+    void copyTextToClipboard(code).catch(() => undefined);
   }, [code]);
 
   const handleDownloadSvg = useCallback(() => {

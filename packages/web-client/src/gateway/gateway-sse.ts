@@ -1,5 +1,6 @@
 import { dispatchStreamEvent } from './gateway-ws.js';
 import type { GatewayStreamEvent, SendMessageOptions, StreamEventHandler } from './gateway-ws.js';
+import { createRandomUuid } from '../utils/random-uuid.js';
 
 /**
  * 浏览器端 SSE 客户端。
@@ -25,7 +26,7 @@ export class GatewaySSEClient {
 
   connectAndStream(sessionId: string, message: string, options: SendMessageOptions = {}): void {
     this.es?.close();
-    const clientRequestId = options.clientRequestId ?? crypto.randomUUID();
+    const clientRequestId = options.clientRequestId ?? createRandomUuid();
     const agentId = options.agentId?.trim() || undefined;
 
     const params = new URLSearchParams({

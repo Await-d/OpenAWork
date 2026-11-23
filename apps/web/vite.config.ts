@@ -276,6 +276,11 @@ export default defineConfig({
     },
   },
   build: {
+    // 浏览器基线见 apps/web/BROWSER-BASELINE.md —— 该文件是唯一真相源，此处 target 由它推导。
+    // 下限由 color-mix()（365 个文件，色彩系统地基）与 :has()（3 个文件）共同决定：
+    // Chrome 111 / Safari 16.2 / Firefox 121；es2022 与三者取交集，不会放宽基线。
+    // 注意：target 只做语法降级，不 polyfill JS API 与 CSS 特性。
+    target: ['es2022', 'chrome111', 'safari16.2', 'firefox121'],
     outDir: useDevReact ? 'dist-diagnostics' : 'dist',
     minify: useDevReact ? false : 'esbuild',
     sourcemap: true,

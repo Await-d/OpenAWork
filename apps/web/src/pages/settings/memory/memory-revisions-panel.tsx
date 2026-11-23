@@ -6,7 +6,6 @@ import {
   REVISION_OPERATION_LABELS,
   REVISION_ORIGIN_LABELS,
   formatRelativeTime,
-  sortRevisionsDescending,
 } from './memory-proposal-presentation.js';
 
 const REVISION_ROW: CSSProperties = {
@@ -33,8 +32,8 @@ export interface MemoryRevisionsPanelProps {
 }
 
 /**
- * 单条记忆的历史版本列表（可展开），提供「回滚到此版本」。
- * 回滚失败显示冲突提示（来自服务端 409 文案），不伪造成功。
+ * 展示变更前后快照；仅允许撤销最新变更，恢复该次变更前状态。
+ * 回滚失败显示服务端原因，不伪造成功。
  */
 export function MemoryRevisionsPanel({
   memoryId,
@@ -56,7 +55,7 @@ export function MemoryRevisionsPanel({
         if (cancelled) {
           return;
         }
-        setRevisions(sortRevisionsDescending(next));
+        setRevisions(next.toSorted((a, b) => b.revision - a.revision));
         setStatus('loaded');
       })
       .catch((err: unknown) => {
@@ -74,12 +73,19 @@ export function MemoryRevisionsPanel({
   const handleRollback = (revisionId: string) => {
     setRollingBackId(revisionId);
     setRollbackError(null);
-    void rollback(revisionId).then((result) => {
-      setRollingBackId(null);
-      if (!result.ok) {
-        setRollbackError(result.error ?? '回滚失败');
-      }
-    });
+    void rollback(revisionId)
+      .then(async (result) => {
+        if (!result.ok) {
+          setRollbackError(result.error ?? '回滚失败');
+          return;
+        }
+        const next = await listRevisions(memoryId);
+        setRevisions(next.toSorted((a, b) => b.revision - a.revision));
+      })
+      .catch((err: unknown) => {
+        setRollbackError(err instanceof Error ? err.message : '回滚或刷新历史失败');
+      })
+      .finally(() => setRollingBackId(null));
   };
 
   return (
@@ -120,30 +126,36 @@ export function MemoryRevisionsPanel({
                 {formatRelativeTime(revision.createdAt)}
               </span>
             </div>
-            {revision.payload.value && (
+            <details>
+              <summary style={{ fontSize: 11 }}>查看变更前后快照</summary>
               <pre
                 style={{
                   margin: 0,
                   fontSize: 11,
-                  color: 'var(--fg-default)',
                   whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  maxHeight: 120,
-                  overflowY: 'auto',
+                  overflowWrap: 'anywhere',
                 }}
               >
-                {revision.payload.value}
+                {`变更前：\n${revision.before === null ? '不存在（此操作创建了记忆）' : JSON.stringify(revision.before, null, 2)}\n变更后：\n${revision.after === null ? '不存在' : JSON.stringify(revision.after, null, 2)}`}
               </pre>
+            </details>
+            <div style={{ fontSize: 11, color: 'var(--fg-default)' }}>
+              {revision.payload === null
+                ? '回滚影响：撤销创建，停用并归档该记忆，不删除历史。'
+                : `回滚影响：恢复变更前的「${revision.payload.key}」及其内容、优先级、作用域和启用状态，生成新版本。`}
+            </div>
+            {revision.id !== revisions[0]?.id && (
+              <div style={MUTED}>仅可回滚最新变更；此记录之后已有修改。</div>
             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 type="button"
                 style={{ ...BS, opacity: rollingBackId === revision.id ? 0.6 : 1 }}
-                disabled={rollingBackId === revision.id}
+                disabled={rollingBackId !== null || revision.id !== revisions[0]?.id}
                 onClick={() => handleRollback(revision.id)}
-                aria-label={`回滚到版本 ${String(revision.revision)}`}
+                aria-label={`回滚版本 ${String(revision.revision)} 的变更`}
               >
-                {rollingBackId === revision.id ? '回滚中…' : '回滚到此版本'}
+                {rollingBackId === revision.id ? '回滚中…' : '回滚此次变更'}
               </button>
             </div>
           </div>

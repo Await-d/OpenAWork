@@ -19,6 +19,13 @@ import { createSessionsClient } from '@openAwork/web-client';
 import { validateImageGenerationSize } from '@openAwork/shared';
 import type { DialogueMode, InputImageContent } from '@openAwork/shared';
 import {
+  buildSessionOriginBadgeLabel,
+  isSourceManagedSession,
+  readSessionOrigin,
+  UNKNOWN_SESSION_ORIGIN,
+} from '../utils/session-origin';
+import type { SessionOrigin } from '../utils/session-origin';
+import {
   buildChatStreamToken,
   shouldApplyChatSessionMutation,
   shouldApplyChatStreamMutation,
@@ -121,6 +128,19 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   const [attachments, setAttachments] = useState<MobileAttachmentItem[]>([]);
   const [artifactHistory, setArtifactHistory] = useState<MobileAttachmentItem[]>([]);
   const [dialogueMode, setDialogueMode] = useState<DialogueMode>('coding');
+  /**
+   * 会话来源（`metadata.source`）。渠道 / 定时任务会话**没有**「澄清 / 编程 / 程序员」
+   * 模式：其模式与工具面由来源侧配置决定，模式栏必须退化为只读标识。
+   * 判定与文案真源在 @openAwork/web-client 的 session-origin（与 Web 端共用同一份）。
+   */
+  const [sessionOrigin, setSessionOrigin] = useState<SessionOrigin>(UNKNOWN_SESSION_ORIGIN);
+  /**
+   * 本会话的来源是否已判定（随历史/会话详情一起拿到）。
+   *
+   * 未判定前不渲染模式选择器：此刻 `dialogueMode` 只是本地默认值这个假值，对渠道 /
+   * 定时任务会话会短暂显示出一个可点击的错误模式（与 Web 端的水合门控同一取舍）。
+   */
+  const [sessionOriginResolved, setSessionOriginResolved] = useState(false);
   const [imageGenerationMode, setImageGenerationMode] = useState(false);
   const [imageGenerationBusy, setImageGenerationBusy] = useState(false);
   const { hasConfiguredImageModel, imageDefaults, imageModelLabel, setImageDefaults } =
@@ -175,7 +195,12 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
   const statusSyncIntervalMs = isRuntimeActive
     ? MOBILE_STATUS_ACTIVE_POLL_MS
     : MOBILE_STATUS_IDLE_POLL_MS;
-  const streamOptions = useMemo(() => ({ dialogueMode }), [dialogueMode]);
+  // 来源托管会话（渠道 / 定时任务）没有对话模式：不把本地模式塞进 stream 请求。
+  // 网关侧对来源会话也会忽略请求级 `dialogueMode`，这里只是不再发无意义的字段。
+  const streamOptions = useMemo(
+    () => (isSourceManagedSession(sessionOrigin) ? {} : { dialogueMode }),
+    [dialogueMode, sessionOrigin],
+  );
   const searchMatches = useMemo(
     () => findChatMessageMatches(messages, searchQuery),
     [messages, searchQuery],
@@ -209,6 +234,9 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     setActiveSearchResultIndex(-1);
     setShowRestoreFocus(false);
     resetImageViewer();
+    // 会话来源未知：等本次历史加载带回 metadata 再按 source 重判，避免上一会话的标识串台。
+    setSessionOrigin(UNKNOWN_SESSION_ORIGIN);
+    setSessionOriginResolved(false);
     isNearBottomRef.current = true;
     lastContentHeightRef.current = 0;
   }, [resetImageViewer]);
@@ -424,6 +452,8 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
     applySessionResetState();
     if (!accessToken) {
       setHistoryLoading(false);
+      // 无凭据不会再有「来源答案」：放开模式栏（fail-open），不要永久隐藏控件。
+      setSessionOriginResolved(true);
       return;
     }
 
@@ -437,12 +467,18 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
         const msgs: Message[] = normalizeMobileChatMessages(session.messages ?? []);
         setMessages((previous) => reconcileMobileChatMessages(previous, msgs));
         setSubagentNotices(collectMobileSubagentNotices(session.messages ?? []));
+        // 来源随历史一起拿到：渠道 / 定时任务会话据此把模式栏切成只读。
+        setSessionOrigin(readSessionOrigin(session.metadata_json));
       } catch (error) {
         if (handleAuthError(error)) return;
         console.warn('Failed to load mobile chat history', error);
       } finally {
+        // 就绪标记放在 finally 且带时效守卫：成功、失败、抛错都要**放开**模式栏。
+        // 只认成功路径会让一次网络失败把控件永久隐藏（比短暂显示假模式更糟）；
+        // 与本仓 Web 端 recovery 失败路径置「已就绪」的既有做法一致。
         if (canApplySessionMutation(requestSessionId)) {
           setHistoryLoading(false);
+          setSessionOriginResolved(true);
         }
       }
     })();
@@ -1047,6 +1083,8 @@ export function ChatScreen({ sessionId }: ChatScreenProps) {
           imageGenerationMode={imageGenerationMode}
           imageModelConfigured={hasConfiguredImageModel}
           modeLabel={draftSummary.modeLabel}
+          sourceBadgeLabel={buildSessionOriginBadgeLabel(sessionOrigin)}
+          dialogueModeReady={sessionOriginResolved}
           onChangeDialogueMode={setDialogueMode}
           onToggleImageGenerationMode={() => setImageGenerationMode((prev) => !prev)}
           sending={sending}

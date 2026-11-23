@@ -339,6 +339,274 @@
   margin-left: auto;
 }
 
+/* ── 折叠行上的 web 摘要：域名 + 结果量 ──
+   状态码徽章（`.tool-call-block-web-status`）已移到折叠行，这三段共同替代原先
+   「展开体里单列一整行完整 URL」的做法。字号压到 10px 与 elapsed 同级，
+   保证标题仍是折叠行的视觉主体。 */
+
+.tool-call-block-web-host {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.tool-call-block-web-host::before {
+  content: '·';
+  margin-right: 4px;
+  color: var(--fg-subtle);
+}
+
+.tool-call-block-web-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+.tool-call-block-web-count::before {
+  content: '·';
+  margin-right: 4px;
+  color: var(--fg-subtle);
+}
+
+/* ── 结构化 API 结果卡片（webfetch 命中 GitHub 一类接口） ──
+   视觉与 `.tool-call-block-search-item` 同族：静息无边框，hover 才浮出表面色。 */
+
+.tool-call-block-web-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 0;
+}
+
+.tool-call-block-web-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    background var(--dur-micro) var(--ease-micro),
+    border-color var(--dur-micro) var(--ease-micro);
+}
+
+a.tool-call-block-web-result:hover {
+  background: color-mix(in oklch, var(--bg-surface) 60%, transparent);
+  border-color: color-mix(in oklch, var(--border-subtle) 80%, transparent);
+}
+
+a.tool-call-block-web-result:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 头像方块：抓来的 `avatar_url` 会引入外链请求（内网 / 离线直接裂图），
+   这里用首字母色块——确定性取色，零网络依赖。`data-tone` 只分 6 档。 */
+.tool-call-block-web-result-avatar {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg-on-accent);
+  background: var(--bg-elevated);
+}
+
+.tool-call-block-web-result-avatar[data-tone='0'] {
+  background: color-mix(in oklch, var(--accent) 78%, var(--bg-elevated));
+}
+
+.tool-call-block-web-result-avatar[data-tone='1'] {
+  background: color-mix(in oklch, var(--aux) 78%, var(--bg-elevated));
+}
+
+.tool-call-block-web-result-avatar[data-tone='2'] {
+  background: color-mix(in oklch, var(--success) 78%, var(--bg-elevated));
+}
+
+.tool-call-block-web-result-avatar[data-tone='3'] {
+  background: color-mix(in oklch, var(--contrast) 78%, var(--bg-elevated));
+}
+
+.tool-call-block-web-result-avatar[data-tone='4'] {
+  background: color-mix(in oklch, var(--complement) 78%, var(--bg-elevated));
+}
+
+.tool-call-block-web-result-avatar[data-tone='5'] {
+  background: color-mix(in oklch, var(--accent) 50%, var(--contrast) 50%);
+}
+
+.tool-call-block-web-result-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tool-call-block-web-result-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tool-call-block-web-result-owner {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+
+.tool-call-block-web-result-slash {
+  margin: 0 -3px;
+  color: var(--fg-subtle);
+}
+
+.tool-call-block-web-result-name {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+
+a.tool-call-block-web-result:hover .tool-call-block-web-result-name {
+  color: var(--accent);
+}
+
+.tool-call-block-web-result-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 17px;
+}
+
+.tool-call-block-web-result-chip i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.tool-call-block-web-result-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-default);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tool-call-block-web-result-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 1px;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-call-block-web-result-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.tool-call-block-web-result-stat svg {
+  flex-shrink: 0;
+  color: var(--fg-subtle);
+}
+
+.tool-call-block-web-result-stat-label {
+  color: var(--fg-subtle);
+}
+
+.tool-call-block-web-results-more {
+  padding: 3px 8px;
+  font-size: 10px;
+  color: var(--fg-subtle);
+}
+
+/* ── 原始响应折叠区 ──
+   结构化识别只取卡片需要的字段，保留这个入口让「解析器是否漏字段」可核对。
+   默认收起：它正是需要被收进抽屉的那部分内容。 */
+
+.tool-call-block-web-raw {
+  margin-top: 4px;
+}
+
+.tool-call-block-web-raw > summary {
+  cursor: pointer;
+  padding: 1px 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  list-style: none;
+  user-select: none;
+}
+
+.tool-call-block-web-raw > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call-block-web-raw > summary::before {
+  content: '▸ ';
+  display: inline-block;
+  width: 12px;
+  font-size: 9px;
+}
+
+.tool-call-block-web-raw[open] > summary::before {
+  content: '▾ ';
+}
+
+.tool-call-block-web-raw-body {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow: auto;
+}
+
 .tool-call-block-search-results {
   display: flex;
   flex-direction: column;

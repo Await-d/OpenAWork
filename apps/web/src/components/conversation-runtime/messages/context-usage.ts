@@ -2,6 +2,7 @@ export interface ChatContextUsageSnapshot {
   estimated: boolean;
   maxTokens: number;
   usedTokens: number;
+  autoCompactThresholdTokens?: number | null;
 }
 
 export function resolveEffectiveContextWindow(
@@ -22,14 +23,31 @@ export function resolveEffectiveContextWindow(
     : undefined;
 }
 
+/**
+ * 把**会话级**上下文挡位叠加到模型选项上，供「上下文占用条 / 模型弹层」使用。
+ *
+ * 优先级与会话运行时（网关 `resolveStreamModelRoute`）一致：
+ * 会话级 > 模型级（`user_settings.providers` 里该模型的 `contextWindowOverride`）> 模型 preset。
+ * 会话未覆盖时**原样返回同一引用**，避免让下游 memo 因新对象而失效。
+ */
+export function applyContextWindowOverride<T extends { contextWindowOverride?: number }>(
+  option: T | null | undefined,
+  sessionOverride: number | undefined,
+): T | null | undefined {
+  if (!option || sessionOverride === undefined) return option;
+  return { ...option, contextWindowOverride: sessionOverride };
+}
+
 export function buildChatContextUsageSnapshot({
   contextWindow,
+  autoCompactThresholdTokens,
   historicalTokens,
   preferHistoricalEstimate = false,
   reportedTotalTokens,
   streamingTotalTokens,
 }: {
   contextWindow?: number;
+  autoCompactThresholdTokens?: number | null;
   historicalTokens: number;
   preferHistoricalEstimate?: boolean;
   reportedTotalTokens?: number;
@@ -45,6 +63,7 @@ export function buildChatContextUsageSnapshot({
   const safeStreamingTotalTokens =
     streamingTotalTokens !== undefined ? Math.max(0, streamingTotalTokens) : undefined;
   const estimatedUsedTokens = Math.max(safeHistoricalTokens, safeStreamingTotalTokens ?? 0);
+  const budget = autoCompactThresholdTokens === undefined ? {} : { autoCompactThresholdTokens };
 
   if (
     !preferHistoricalEstimate &&
@@ -56,6 +75,7 @@ export function buildChatContextUsageSnapshot({
       estimated: false,
       maxTokens: contextWindow,
       usedTokens: safeReportedTotalTokens,
+      ...budget,
     };
   }
 
@@ -63,5 +83,6 @@ export function buildChatContextUsageSnapshot({
     estimated: true,
     maxTokens: contextWindow,
     usedTokens: estimatedUsedTokens,
+    ...budget,
   };
 }

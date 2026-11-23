@@ -1,6 +1,7 @@
 import type { DialogueMode } from '@openAwork/shared';
 import type { GatewayToolDefinition } from '../tools/tool-definitions.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
+import { isSourceManagedSessionMetadata } from './session-runtime-policy.js';
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
 import { isTaskToolName } from '../task/task-tools.js';
 import {
@@ -22,6 +23,26 @@ interface ChannelToolPermissionsLike {
   allowShell?: boolean;
   allowSubAgents?: boolean;
 }
+
+/**
+ * 「配置类管理工具」：能改用户级配置（MCP / 记忆 / 技能 / 插件 / Agent / 团队 / 定时），
+ * 越权面最大。
+ *
+ * 用途：来源托管会话（渠道 / 定时任务）本就没有对话模式，其 metadata 里的
+ * `dialogueMode: 'clarify'` 只可能是上游误写的脏值，正常情况下不应参与任何判定。
+ * 但这类工具对**澄清只读收敛**保留 fail-closed——即便脏值存在也不放开配置入口；
+ * 其余工具（文件 / 检索 / 渠道回复等）则一律按来源自身策略判定，否则澄清只读白名单
+ *（不含任何渠道回复工具）会让渠道会话彻底无法回消息。
+ */
+const CONFIG_MANAGE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  AGENT_MANAGE_TOOL_NAME,
+  MCP_MANAGE_SERVERS_TOOL_NAME,
+  MEMORY_MANAGE_TOOL_NAME,
+  PLUGIN_MANAGE_TOOL_NAME,
+  SCHEDULE_MANAGE_TOOL_NAME,
+  SKILL_MANAGE_TOOL_NAME,
+  TEAM_WORKSPACE_MANAGE_TOOL_NAME,
+]);
 
 type ChannelToolsLike = Record<string, boolean>;
 
@@ -367,8 +388,20 @@ export function isGatewayToolEnabledForSessionMetadata(
   metadata: Record<string, unknown>,
 ): boolean {
   // Clarify mode: only allow read-only + questioning tools
-  const dialogueMode = metadata['dialogueMode'];
-  if (dialogueMode === 'clarify' && !isClarifyModeToolAllowed(toolName)) {
+  //
+  // 来源托管会话（渠道 / 定时任务）**没有**对话模式：其工具面由渠道 allowlist /
+  // permissions（或定时任务自身配置）决定，metadata 里的 `dialogueMode: 'clarify'`
+  // 只可能是上游误写的脏值。若让该值生效，澄清只读白名单（不含任何渠道回复工具）
+  // 会把渠道会话的回复工具整套过滤掉 —— 表现为「渠道里再也回不了消息」。
+  // 故对来源会话豁免该收敛，但**配置类管理工具**例外：那类工具保留 fail-closed，
+  // 不因脏值而在来源会话里多开一个改配置的入口。
+  const clarifyConvergenceExempt =
+    isSourceManagedSessionMetadata(metadata) && !CONFIG_MANAGE_TOOL_NAMES.has(toolName);
+  if (
+    metadata['dialogueMode'] === 'clarify' &&
+    !isClarifyModeToolAllowed(toolName) &&
+    !clarifyConvergenceExempt
+  ) {
     return false;
   }
 

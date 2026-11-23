@@ -477,3 +477,51 @@ describe('InlineQuestionPanel — 轮次上下文', () => {
     expect(screen.queryByText(/第 \d+ 轮/)).toBeNull();
   });
 });
+
+/**
+ * 输入法（IME）组合态回归。
+ *
+ * 中文 / 日文 / 韩文输入法在候选词上按 Enter 是「确认选词」，不是「确认答案」。
+ * 自定义回答的 textarea 原本会对任何 Enter 直接 `preventDefault()` 并收起输入框，
+ * 后果有两个：候选词确认被吞掉（输入法候选窗口失效）、半成品答案被当成最终答案。
+ *
+ * `fireEvent` 的返回值是 `dispatchEvent` 的结果：被 `preventDefault()` 拦下时返回
+ * false。所以「组合态返回 true」本身就是「没有偷走这次按键」的证据。
+ */
+describe('InlineQuestionPanel — 输入法组合态的 Enter', () => {
+  function renderWithOpenCustomInput(): HTMLTextAreaElement {
+    render(
+      <InlineQuestionPanel
+        answers={[[]]}
+        customInputs={['半成品答案']}
+        request={makeRequest()}
+        onDismiss={vi.fn()}
+        onSubmit={vi.fn()}
+        onToggleOption={vi.fn()}
+        onCustomInputChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('自定义回答'));
+    const textarea = document.querySelector<HTMLTextAreaElement>('textarea.iqp-custom-input');
+    expect(textarea).not.toBeNull();
+    return textarea as HTMLTextAreaElement;
+  }
+
+  it('isComposing 为真时 Enter 只确认候选词，不收起输入框也不 preventDefault', () => {
+    const textarea = renderWithOpenCustomInput();
+    expect(fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true })).toBe(true);
+    expect(document.querySelector('textarea.iqp-custom-input')).not.toBeNull();
+  });
+
+  it('keyCode 为 229 时 Enter 同样不收起输入框（Chromium 的候选词确认）', () => {
+    const textarea = renderWithOpenCustomInput();
+    expect(fireEvent.keyDown(textarea, { key: 'Process', keyCode: 229 })).toBe(true);
+    expect(document.querySelector('textarea.iqp-custom-input')).not.toBeNull();
+  });
+
+  it('普通 Enter 仍按原语义确认自定义答案（收起输入框）', () => {
+    const textarea = renderWithOpenCustomInput();
+    expect(fireEvent.keyDown(textarea, { key: 'Enter' })).toBe(false);
+    expect(document.querySelector('textarea.iqp-custom-input')).toBeNull();
+  });
+});

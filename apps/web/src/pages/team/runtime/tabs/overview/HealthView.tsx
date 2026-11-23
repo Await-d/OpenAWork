@@ -9,6 +9,7 @@
  * 数据来源：useHandoffStore.handoffs
  */
 
+import { formatServerDateTime } from '@openAwork/shared';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   useHandoffStore,
@@ -1016,7 +1017,7 @@ function FailedRow({
   onRetry?: (handoffId: string) => void | Promise<void>;
   retryBusy?: boolean;
 }) {
-  const dateStr = new Date(entry.endedAt ?? entry.updatedAt).toLocaleString();
+  const dateStr = formatServerDateTime(entry.endedAt ?? entry.updatedAt);
   const preferredTab = resolvePreferredTabForLayer(entry.toRoleLayer);
   const failureReason = entry.failureReason?.trim();
   const safeFailureReason = failureReason ? redactSensitiveText(failureReason) : null;

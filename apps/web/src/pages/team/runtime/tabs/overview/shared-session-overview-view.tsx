@@ -1,3 +1,4 @@
+import { parseServerTimestamp } from '@openAwork/shared';
 import { type CSSProperties } from 'react';
 import type { Message } from '@openAwork/shared';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
@@ -154,14 +155,14 @@ export function SharedSessionOverviewView({
       detail: comment.content,
       id: `comment-${comment.id}`,
       tag: '共享评论',
-      timestamp: Date.parse(comment.createdAt),
+      timestamp: parseServerTimestamp(comment.createdAt) ?? Number.NaN,
       title: comment.authorEmail,
     })),
     ...sharedAuditLogs.map((log) => ({
       detail: formatTimelineDetail(log.detail ?? log.summary, 200),
       id: `audit-${log.id}`,
       tag: ACTION_LABELS[log.action] ?? log.action,
-      timestamp: Date.parse(log.createdAt),
+      timestamp: parseServerTimestamp(log.createdAt) ?? Number.NaN,
       title: log.actorEmail ?? log.actorUserId ?? '系统',
     })),
   ]

@@ -400,3 +400,41 @@ describe('非法与边界字符类不得抛错（用户可控 ignore 文件）',
     expectPaths(manager, [['x'], ['a', 'b']], false);
   });
 });
+
+describe('shouldProtect：精确读写边界不受 .gitignore 影响', () => {
+  it('.gitignore 命中的路径只影响搜索可见性，不阻断读写', async () => {
+    const manager = await createManager({ gitignore: ['temp/', 'dist/'] });
+    for (const segments of [['temp'], ['temp', 'probe.py'], ['dist'], ['dist', 'x.js']]) {
+      const target = join(root, ...segments);
+      // 搜索仍要过滤：`temp/`、`dist/` 不该污染 grep / glob / 文件树。
+      expect(manager.shouldIgnore(target), segments.join('/')).toBe(true);
+      // 精确读写必须放行，否则「写脚本到 temp/ 再单行执行」这条补救路径没有落点。
+      expect(manager.shouldProtect(target), segments.join('/')).toBe(false);
+    }
+  });
+
+  it('内置敏感模式仍然硬拒绝读写（.env / node_modules / .git）', async () => {
+    const manager = await createManager();
+    for (const segments of [
+      ['.env'],
+      ['.env.production'],
+      ['node_modules', 'x', 'index.js'],
+      ['.git', 'config'],
+    ]) {
+      const target = join(root, ...segments);
+      expect(manager.shouldProtect(target), segments.join('/')).toBe(true);
+    }
+  });
+
+  it('.agentignore 显式声明的路径仍然阻断读写（用户意图优先于 gitignore 放宽）', async () => {
+    const manager = await createManager({ agentignore: ['temp/'] });
+    expect(manager.shouldProtect(join(root, 'temp', 'probe.py'))).toBe(true);
+    expect(manager.shouldProtect(join(root, 'dist', 'x.js'))).toBe(false);
+  });
+
+  it('safe env 模板仍可读写（.env.example 不被 .env.* 基线拦截）', async () => {
+    const manager = await createManager();
+    expect(manager.shouldProtect(join(root, '.env.example'))).toBe(false);
+    expect(manager.shouldProtect(join(root, '.env.example.bak'))).toBe(true);
+  });
+});

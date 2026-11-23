@@ -1,9 +1,13 @@
-import type { Message } from '@openAwork/shared';
+import type { CompactionTokenEstimate, Message } from '@openAwork/shared';
 import { sqliteRun, sqliteTransaction } from '../infra/db.js';
 import { appendCompactionMarkerMessageV2 as appendCompactionMarkerMessage } from '../message/message-v2-adapter.js';
 import { findToolPartByCallID, updatePart } from '../message/message-store-v2.js';
 import type { ToolPart } from '../message/message-v2-schema.js';
 import { mergeCompactionMetadata, readPersistedCompactionMemory } from './compaction-metadata.js';
+import {
+  buildCompactionTokenEstimate,
+  estimateCompactionHistoryTokens,
+} from './compaction-token-estimate.js';
 import { buildDurableCompactionSummary } from '../session/session-message-store.js';
 import { stringifyToolResultOutput } from '../tools/tool-result-contract.js';
 
@@ -25,6 +29,7 @@ export interface PersistCompactionProjectionInput {
 export interface PersistCompactionProjectionResult {
   readonly metadataJson: string;
   readonly summary: string;
+  readonly historyTokenEstimate?: CompactionTokenEstimate;
   readonly signature?: string;
   readonly projectedMessages: Message[];
 }
@@ -115,7 +120,8 @@ export function persistCompactionProjection(
   };
   const metadataJson = JSON.stringify(metadata);
 
-  sqliteTransaction(() => {
+  const historyTokenEstimate = sqliteTransaction(() => {
+    const before = estimateCompactionHistoryTokens(input);
     if (input.kind === 'tool_output') {
       persistToolOutputProjection({
         messages: input.projectedMessages,
@@ -141,12 +147,14 @@ export function persistCompactionProjection(
         ...(tailStartMessageId ? { tailStartMessageId } : {}),
       });
     }
+    return buildCompactionTokenEstimate(before, () => estimateCompactionHistoryTokens(input));
   });
 
   return {
     metadataJson,
     projectedMessages: input.projectedMessages,
     summary,
+    ...(historyTokenEstimate ? { historyTokenEstimate } : {}),
     ...(durableSummary?.signature ? { signature: durableSummary.signature } : {}),
   };
 }

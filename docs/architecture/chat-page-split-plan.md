@@ -1,5 +1,15 @@
 # ChatPage.tsx 拆分计划
 
+> **2026-11-02 决策追加（D-03，取代本计划的目标预期）**：本计划的域 D/A/C/B/E **已全部抽出**，抽取路线已触顶。实测 `ChatPage.tsx` 为 **3612 行**（`wc -l` 复核；R-03 时实测 3604，此后 R-04b 补 `composer-reference` 激活态门控 +8 行。较本文件历史快照的 7347 行已大幅下降，但**未**达 AGENTS 的 1500 行硬上限）。
+>
+> 量化依据（2026-11-02 盘点，详见 `.agentdocs/workflow/250115-修复设计缺陷优化方案.md` 的 W-06/W-06d）：
+>
+> - 可零行为变更整簇搬走的自治域（A 档）**只剩 3 项、合计约 110 行**（图片结果域 44 已落地；后台终端预览跳转 35 可搬但 handler 直写 store、无协调收益；window 事件簇 30 已按正确性修复抽出）。**即使全做仍约 3494 行，超硬上限 2.3 倍**。
+> - 剩余体积不是「还没拆的域」，而是三处结构事实，**拆文件净减 ≈0**：① `useChatConversationViewProps` 入参占 **299 行**（ChatPage.tsx L2955–L3253，`wc` 实测）的纯透传对象字面量；② `runSessionAttachEffect` **78 个入参**（ChatPage.tsx L2279–L2356，逐行实测）（装配必须发生在持有状态的组件内，搬进 hook 只把入参列表换位置）；③ `isSessionSnapshotReady` / `sessionModesHydrated` / `sessionMetadataDirty` 各被 **7 / 10 / 7** 处跨域消费（`grep -c` 实测），是**多个域共用的协调信号，不是某个域的私有状态**——搬进任何域 hook 都是把协调层伪装成域，必然行为漂移。
+> - 一句话：**行数随持有者走，不随文件走。**
+>
+> **结论**：≥1500 行目标**不能靠继续抽取 hook 达成**，故按 D-03 登记为**组装层例外**。若要真正达标，唯一路径是第十节之外的「**数据流重构**」——让子组件**就近取数**（`ChatSessionPane` 自取会话数据、`ChatComposerPane` 自订阅 composer/队列、侧栏/终端/编辑器各自取数，`ChatPage` 只留路由 + 核心状态 + 布局）。代价：改 20+ 组件签名、调整共享 hook 调用位置、验证重复派生不产生分叉与帧率退化，预估 2-3 工作日 / 3-4 个 PR，**须另立项目**，不在本缺陷修复方案内实施。
+
 > **状态**：域 D / A / C / B / E **均已抽出**（B = `conversation/render/use-chat-streaming.ts`、E = `hooks/use-chat-retry-and-edit.ts`，两者均已被 `ChatPage.tsx` import 并调用）；ChatPage 现保留组装层与跨域协调外壳
 > **创建时间**：2026-05-21
 > **最近更新**：2026-09-21（状态复核）

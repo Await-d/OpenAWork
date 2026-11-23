@@ -12,8 +12,16 @@ import { useComposerInputHistoryStore } from '../../../stores/chat/composer-inpu
 import { useChatQueueStore } from '../../../stores/chat/chat-queue.js';
 import { useUnifiedComposerState } from './use-unified-composer-state.js';
 import { notifyQueuedMessageSendRejected } from '../../../utils/chat/composer-queue-events.js';
+import { logger } from '../../../utils/log/logger.js';
 
 let hydrationGate: { promise: Promise<void>; resolve: () => void } | null = null;
+/**
+ * 可控 reject 的队列水合闸门：置上后 `list` 会等到用例显式 reject。
+ *
+ * 用于制造「卸载之后才 reject」的时序——生产里 fetch 在组件卸载 / 测试结束后才失败，
+ * 迟到的 catch 会把日志写进已关闭的 worker，导致 EnvironmentTeardownError。
+ */
+let queueListGate: { promise: Promise<void>; reject: (error: unknown) => void } | null = null;
 
 vi.mock('../../../pages/chat-page/conversation/composer/queued-composer-file-store.js', () => ({
   restoreQueuedComposerFiles: async () => {
@@ -60,6 +68,7 @@ const { fakeInputHistory, fakeQueue } = vi.hoisted(() => ({
     entriesBySession: new Map<string, string[]>(),
   },
   fakeQueue: {
+    messageMaxChars: 32768,
     /** 置 true 后 enqueue 一律失败，用于验证「入队落库失败」的回滚路径。 */
     enqueueShouldFail: false,
     enqueueCalls: [] as Array<{ itemId: string; sessionId: string }>,
@@ -84,6 +93,15 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@openAwork/web-client')>();
   return {
     ...actual,
+    createMessageLimitsClient: () => ({
+      read: async () => ({
+        maxChars: fakeQueue.messageMaxChars,
+        minChars: 1024,
+        hardMaxChars: 200000,
+        defaultMaxChars: 32768,
+        canEdit: false,
+      }),
+    }),
     createComposerInputHistoryClient: () => ({
       append: async (_token: string, sessionId: string, entries: readonly string[]) => {
         fakeInputHistory.appendCalls.push({ entries: [...entries], sessionId });
@@ -206,6 +224,9 @@ vi.mock('@openAwork/web-client', async (importOriginal) => {
       },
       list: async (_token: string, sessionId: string) => {
         fakeQueue.listCalls += 1;
+        if (queueListGate) {
+          await queueListGate.promise;
+        }
         return (fakeQueue.itemsBySession.get(sessionId) ?? []).map((item) => ({ ...item }));
       },
       releaseClaim: async (_token: string, sessionId: string, itemId: string, clientId: string) => {
@@ -295,6 +316,17 @@ function createDeferred<T>() {
   };
 }
 
+/**
+ * 等 reject 之后的微任务 / 宏任务链跑完。
+ *
+ * 断言「不再记录日志」时不能直接用 `waitFor`——条件一开始就成立会立刻通过，
+ * 反而盖住「取消门缺失时迟到 catch 仍会写日志」的回归。必须给 reject 后的链路
+ * 留出真实的执行窗口。
+ */
+async function flushRejection(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function UnifiedComposerStateHarness(props: HarnessProps) {
   const {
     initialInput,
@@ -368,6 +400,9 @@ function UnifiedComposerStateHarness(props: HarnessProps) {
       <span data-testid="attachment-count">{state.attachmentItems.length}</span>
       {/* 队列条数探针：断言「条目是否还在」比匹配文本更稳，也不会被输入框残留干扰。 */}
       <span data-testid="queue-count">{state.queuedComposerPreviews.length}</span>
+      <span data-testid="queue-limit-paused">
+        {String(state.queuedComposerPreviews[0]?.exceedsMessageLimit ?? false)}
+      </span>
       <span data-testid="stream-error">{state.streamError ?? ''}</span>
       <button
         type="button"
@@ -395,6 +430,7 @@ function UnifiedComposerStateHarness(props: HarnessProps) {
 afterEach(() => {
   cleanup();
   hydrationGate = null;
+  queueListGate = null;
   useComposerInputHistoryStore.setState((state) => ({ ...state, historyByScope: {} }));
   useChatQueueStore.setState({ queuesByScope: {} });
   fakeInputHistory.appendCalls.length = 0;
@@ -411,6 +447,7 @@ afterEach(() => {
   fakeQueue.releaseCalls.length = 0;
   fakeQueue.updateAttachmentsCalls.length = 0;
   fakeQueue.claimSessionRunning = false;
+  fakeQueue.messageMaxChars = 32768;
   fakeArtifacts.downloadContentByArtifactId.clear();
   fakeArtifacts.downloadCalls.length = 0;
   fakeArtifacts.removeCalls.length = 0;
@@ -419,7 +456,48 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it('超限文本不能直接发送或排队，且保留完整草稿', async () => {
+  const onSubmit = vi.fn(async () => true);
+  const text = '字'.repeat(32769);
+  const view = render(
+    <UnifiedComposerStateHarness initialInput={text} sessionId="limit-test" onSubmit={onSubmit} />,
+  );
+  fireEvent.click(view.getByText('send'));
+  fireEvent.click(view.getByText('queue'));
+  await flushRejection();
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(fakeQueue.enqueueCalls).toHaveLength(0);
+  expect((view.getByLabelText('composer') as HTMLTextAreaElement).value).toBe(text);
+});
+
 describe('useUnifiedComposerState', () => {
+  it('降低上限后保留队首并暂停认领，提高上限后恢复发送', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const view = render(
+      <UnifiedComposerStateHarness
+        initialInput={'字'.repeat(2048)}
+        sessionId="limit-queue"
+        streaming
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.click(view.getByText('queue'));
+    await waitFor(() => expect(view.getByTestId('queue-count').textContent).toBe('1'));
+    fakeQueue.messageMaxChars = 1024;
+    fireEvent(window, new Event('openawork:message-limits-saved'));
+    await waitFor(() => expect(view.getByTestId('queue-limit-paused').textContent).toBe('true'));
+    view.rerender(
+      <UnifiedComposerStateHarness initialInput="" sessionId="limit-queue" onSubmit={onSubmit} />,
+    );
+    await flushRejection();
+    expect(fakeQueue.claimAttempts).toBe(0);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(backendQueue('limit-queue')).toHaveLength(1);
+    fakeQueue.messageMaxChars = 4096;
+    fireEvent(window, new Event('openawork:message-limits-saved'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(view.getByTestId('queue-limit-paused').textContent).toBe('false');
+  });
   const SCOPE_A = 'user@example.com:session-1';
   const SCOPE_B = 'user@example.com:session-2';
 
@@ -1256,5 +1334,52 @@ describe('useUnifiedComposerState', () => {
     const payload = onSubmit.mock.calls[0]?.[0];
     expect(payload?.text).toBe('跨端恢复的消息');
     expect(payload?.files?.map((file) => file.name)).toEqual(['远端图片.png']);
+  });
+
+  it('卸载后迟到的队列水合失败不再记录日志（避免 teardown 期间写 console）', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    let rejectList!: (error: unknown) => void;
+    queueListGate = {
+      promise: new Promise<void>((_resolve, reject) => {
+        rejectList = reject;
+      }),
+      reject: (error: unknown) => rejectList(error),
+    };
+
+    const view = render(<UnifiedComposerStateHarness initialInput="草稿" sessionId="session-1" />);
+
+    // 卸载（生产里是切走会话 / 测试结束），此时队列水合的 list 仍在飞行。
+    view.unmount();
+    // 请求在卸载之后才 reject。
+    queueListGate.reject(new Error('网关不可达'));
+    // 跑完 reject 之后的链路再断言，否则断言会在 catch 执行前通过（失去回归价值）。
+    await flushRejection();
+
+    const hydrationWarns = warnSpy.mock.calls.filter(
+      (call) => call[0] === '待发队列水合失败，保留本地数据',
+    );
+    expect(hydrationWarns).toHaveLength(0);
+  });
+
+  it('未卸载时的队列水合失败仍会记录日志（证明取消门没有吞掉有效日志）', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    let rejectList!: (error: unknown) => void;
+    queueListGate = {
+      promise: new Promise<void>((_resolve, reject) => {
+        rejectList = reject;
+      }),
+      reject: (error: unknown) => rejectList(error),
+    };
+
+    render(<UnifiedComposerStateHarness initialInput="草稿" sessionId="session-1" />);
+
+    // 组件仍在挂载状态，请求失败必须留下可诊断的日志。
+    queueListGate.reject(new Error('网关不可达'));
+    await flushRejection();
+
+    const hydrationWarns = warnSpy.mock.calls.filter(
+      (call) => call[0] === '待发队列水合失败，保留本地数据',
+    );
+    expect(hydrationWarns).toHaveLength(1);
   });
 });

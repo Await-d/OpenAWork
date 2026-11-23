@@ -136,7 +136,7 @@ export const runBashInBackgroundToolDefinition: ToolDefinition<
     '在后台启动一条 bash 命令并立即返回 terminalId，命令在后台持续运行直到自然退出或被 bash_kill 终止。' +
     '\n\n用途：长时间任务（dev server、watch、批量数据处理、抓取日志等）。' +
     '\n约束：' +
-    '\n- 命令同样受安全规则限制（不允许 sudo / 反引号 / $() / 多行 / PATH=*）。' +
+    '\n- 命令同样受安全规则限制（不允许 sudo / 命令替换 / 多行 / PATH=*；单引号参数内的反引号与 $() 字面量允许）。' +
     '\n- 若需要在退出后查看完整输出，调 bash_output(terminalId)。' +
     '\n- 想要中断，调 bash_kill(terminalId)。' +
     '\n- 与前台 bash 共享同一终端登记表，前端可见。',

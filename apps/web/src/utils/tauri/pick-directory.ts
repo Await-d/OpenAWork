@@ -112,6 +112,6 @@ export async function pickDirectory(): Promise<string | null> {
     return null;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`打开系统目录选择器失败：${reason}`);
+    throw new Error(`打开系统目录选择器失败：${reason}`, { cause: error });
   }
 }

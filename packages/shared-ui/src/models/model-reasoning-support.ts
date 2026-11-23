@@ -491,7 +491,7 @@ export const REASONING_EFFORT_RANK: Record<SupportedReasoningEffort, number> = {
 export function sortSupportedReasoningEfforts(
   efforts: readonly SupportedReasoningEffort[],
 ): SupportedReasoningEffort[] {
-  return [...efforts].sort((a, b) => REASONING_EFFORT_RANK[a] - REASONING_EFFORT_RANK[b]);
+  return efforts.toSorted((a, b) => REASONING_EFFORT_RANK[a] - REASONING_EFFORT_RANK[b]);
 }
 
 export function getSupportedReasoningEffortsForModel(

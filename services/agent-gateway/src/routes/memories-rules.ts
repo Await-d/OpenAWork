@@ -141,7 +141,7 @@ export async function memoriesRulesRoutes(app: FastifyInstance): Promise<void> {
         reason: '结构化规则变更（待确认）。',
       });
 
-      if (result.outcome !== 'created' || !result.proposal) {
+      if ((result.outcome !== 'created' && result.outcome !== 'duplicate') || !result.proposal) {
         step.fail('memory_rule_proposal_failed');
         return reply
           .status(400)

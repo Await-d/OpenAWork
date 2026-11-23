@@ -59,7 +59,7 @@ function normalizeReasoningEffort(
     return selected;
   }
   const targetRank = EFFORT_RANK[selected];
-  const sortedDesc = [...supportedEfforts].sort((a, b) => EFFORT_RANK[b] - EFFORT_RANK[a]);
+  const sortedDesc = supportedEfforts.toSorted((a, b) => EFFORT_RANK[b] - EFFORT_RANK[a]);
   for (const effort of sortedDesc) {
     if (EFFORT_RANK[effort] <= targetRank) {
       return effort;

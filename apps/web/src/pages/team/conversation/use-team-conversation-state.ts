@@ -30,7 +30,7 @@
  * - `docs/chat-conversation-reuse-plan.md` v1.5 D5 决策
  * - `docs/team-architecture-l1-3-streaming-handoff-spec.md` §1.3
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
 import type {
   ChatMessagePart,
@@ -233,6 +233,26 @@ export function useTeamConversationState(
     setHasPendingFollowContent,
   });
 
+  /**
+   * 会话级上下文窗口挡位（模型弹层里的「自动压缩上下文」）。
+   *
+   * 真相源是会话 metadata（`contextWindowOverride`）：本字段只做本地镜像，
+   * 用于弹层即时回显；写入成功后由 `handleContextWindowOverrideChange` 直接 set。
+   * `undefined` = 本会话未覆盖 → 运行时回退到模型级配置 / 模型 preset。
+   *
+   * 与 chat 侧同契约：挡位是**会话级**设置，写会话 metadata，
+   * 不再改 `user_settings.providers`（那是该用户下所有会话共享的默认值）。
+   */
+  const [sessionContextWindowOverride, setSessionContextWindowOverride] = useState<
+    number | undefined
+  >(undefined);
+  useEffect(() => {
+    const raw = sessionMetadata?.['contextWindowOverride'];
+    setSessionContextWindowOverride(
+      typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : undefined,
+    );
+  }, [sessionMetadata]);
+
   // ─── 派生 ────────────────────────────────────────────────────────
   const remoteSessionBusyState = useMemo<'running' | 'paused' | null>(() => {
     if (sessionStateStatus === 'running') return 'running';
@@ -414,6 +434,9 @@ export function useTeamConversationState(
     attachToSessionStream,
     replyPermission,
     replyQuestion,
+    sessionId,
+    sessionContextWindowOverride,
+    setSessionContextWindowOverride,
     loadProviders,
     onScroll: scrollManagerHandleScroll,
     scrollToBottom,

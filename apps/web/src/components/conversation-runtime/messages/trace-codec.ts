@@ -421,10 +421,25 @@ function spliceLocalOnlyParts(
 export function reconcilePartsById(
   existingParts: ChatMessagePart[],
   incomingParts: ChatMessagePart[],
+  { preferSnapshotText = false }: { preferSnapshotText?: boolean } = {},
 ): ChatMessagePart[] {
   const incomingById = new Map(incomingParts.map((part) => [part.id, part]));
-  const existingIds = new Set(existingParts.map((part) => part.id));
   const incomingIds = new Set(incomingById.keys());
+  if (preferSnapshotText && incomingParts.some((part) => part.type === 'text')) {
+    const localTextParts = existingParts.filter((part) => part.type === 'text');
+    // 正文分片仍共享 ID 时，沿用原有的顺序和前缀合并规则。
+    if (localTextParts.length > 0 && localTextParts.every((part) => !incomingIds.has(part.id))) {
+      // 正文 ID 随消息 ID 改变，无法逐段对齐。采用快照顺序，同时保留本地非正文分片。
+      const localNonTextParts = existingParts.filter((part) => part.type !== 'text');
+      const localById = new Map(localNonTextParts.map((part) => [part.id, part]));
+      const snapshotOrder = incomingParts.map((part) => {
+        const local = localById.get(part.id);
+        return local ? mergePartWithSnapshot(local, part) : part;
+      });
+      return spliceLocalOnlyParts(snapshotOrder, localNonTextParts, incomingIds);
+    }
+  }
+  const existingIds = new Set(existingParts.map((part) => part.id));
   const hasSnapshotOnlyPart = incomingParts.some((part) => !existingIds.has(part.id));
   if (hasSnapshotOnlyPart) {
     // A snapshot sharing *no* part ID with the live accumulator is a different

@@ -8,15 +8,15 @@ import {
 import { parseAssistantEventContent } from './card-codec.js';
 import {
   areLikelySameNearbyUserMessage,
-  areLogicalMessageDuplicates,
   areMessagesSeparatedByUserTurn,
   areSameAssistantMessageContent,
-  areSnapshotMessagesEquivalent,
-  areStronglyIdenticalMessages,
+  createSnapshotMessageComparator,
   hasOverlappingPartIds,
   hasUserMessageBetween,
 } from './message-equivalence.js';
 import { buildReadableAssistantText } from './reasoning-content.js';
+import { SnapshotDuplicateIndex } from './snapshot-duplicate-index.js';
+import { extractInputImages } from './message-content.js';
 import {
   contentFromParts,
   createAssistantTraceContent,
@@ -55,6 +55,7 @@ export function reconcileSnapshotChatMessages(
   if (previousMessages.length === 0 || snapshotMessages.length === 0) {
     return snapshotMessages.length === 0 ? previousMessages : snapshotMessages;
   }
+  const areSnapshotMessagesEquivalent = createSnapshotMessageComparator();
 
   // Build an index of previous messages by ID for O(1) lookup.
   const previousById = new Map<string, { message: ChatMessage; index: number }>();
@@ -62,6 +63,9 @@ export function reconcileSnapshotChatMessages(
     const message = previousMessages[index]!;
     previousById.set(message.id, { message, index });
   }
+  // A recent-turn snapshot can start partway through the locally loaded transcript.
+  // An exact match for its first row anchors the older prefix without relying on timestamps.
+  const previousWindowStart = previousById.get(snapshotMessages[0]!.id)?.index ?? 0;
 
   // Track which previous messages have been matched so we can preserve unmatched
   // assistant event cards near their original anchors without duplicating them later.
@@ -81,7 +85,12 @@ export function reconcileSnapshotChatMessages(
       matchedPreviousIndices.add(previousEntry.index);
       const previousMessage = previousEntry.message;
 
-      if (previousMessage.status === 'streaming' && snapshotMessage.status !== 'streaming') {
+      if (previousMessage.role === 'user' && snapshotMessage.role === 'user') {
+        reconciledSnapshotEntries.push({
+          matchedPreviousIndex: previousEntry.index,
+          message: mergeUserSnapshot(previousMessage, snapshotMessage),
+        });
+      } else if (previousMessage.status === 'streaming' && snapshotMessage.status !== 'streaming') {
         // Snapshot has a finalized version (e.g. completed/error), prefer it.
         // Still keep a locally known cancelled/error terminal if the snapshot
         // only brought a generic completed payload.
@@ -121,15 +130,26 @@ export function reconcileSnapshotChatMessages(
       // snapshot does not include.
       let foundEquivalent = false;
       for (let offset = -1; offset <= 5 && !foundEquivalent; offset++) {
-        const candidateIndex = reconciledSnapshotEntries.length + offset;
+        const candidateIndex = previousWindowStart + snapshotIndex + offset;
         if (
-          candidateIndex >= 0 &&
+          candidateIndex >= previousWindowStart &&
           candidateIndex < previousMessages.length &&
           !matchedPreviousIndices.has(candidateIndex) &&
-          !hasUserMessageBetween(previousMessages, candidateIndex, snapshotIndex)
+          !hasUserMessageBetween(
+            previousMessages,
+            candidateIndex,
+            previousWindowStart + snapshotIndex,
+          )
         ) {
           const candidate = previousMessages[candidateIndex]!;
+          if (
+            candidate.clientRequestId &&
+            snapshotMessage.clientRequestId &&
+            candidate.clientRequestId !== snapshotMessage.clientRequestId
+          )
+            continue;
           const matchedByParts = hasOverlappingPartIds(candidate.parts, snapshotMessage.parts);
+          const matchedByUserRequest = shareUserRequestId(candidate, snapshotMessage);
           const matchedByNearbyUserMessage = areLikelySameNearbyUserMessage(
             candidate,
             snapshotMessage,
@@ -139,6 +159,7 @@ export function reconcileSnapshotChatMessages(
             snapshotMessage,
           );
           if (
+            matchedByUserRequest ||
             matchedByParts ||
             matchedByNearbyUserMessage ||
             matchedByAssistantContent ||
@@ -147,7 +168,12 @@ export function reconcileSnapshotChatMessages(
             matchedPreviousIndices.add(candidateIndex);
             const mergedParts =
               matchedByParts && candidate.parts && snapshotMessage.parts
-                ? reconcilePartsById(candidate.parts, snapshotMessage.parts)
+                ? reconcilePartsById(candidate.parts, snapshotMessage.parts, {
+                    preferSnapshotText:
+                      candidate.role === 'assistant' &&
+                      snapshotMessage.role === 'assistant' &&
+                      snapshotMessage.status === 'completed',
+                  })
                 : undefined;
             const mergedMessage =
               mergedParts !== undefined
@@ -171,13 +197,13 @@ export function reconcileSnapshotChatMessages(
                   : snapshotMessage;
             reconciledSnapshotEntries.push({
               matchedPreviousIndex: candidateIndex,
-              // Keep the server identity/terminal metadata, but retain the
-              // live part order whenever both sides describe the same trace.
-              message:
-                mergedParts !== undefined
-                  ? mergedMessage
+              // Keep the server identity and terminal metadata for the matched trace.
+              message: matchedByUserRequest
+                ? mergeUserSnapshot(candidate, snapshotMessage)
+                : mergedParts !== undefined
+                  ? preserveUserImagePreviews(candidate, mergedMessage)
                   : matchedByParts || matchedByNearbyUserMessage || matchedByAssistantContent
-                    ? mergedMessage
+                    ? preserveUserImagePreviews(candidate, mergedMessage)
                     : candidate,
             });
             foundEquivalent = true;
@@ -193,7 +219,14 @@ export function reconcileSnapshotChatMessages(
   }
 
   const reconciled: ChatMessage[] = [];
-  let nextPreviousIndex = 0;
+  for (let index = 0; index < previousWindowStart; index++) {
+    const message = previousMessages[index]!;
+    if (!matchedPreviousIndices.has(index) && message.status !== 'streaming') {
+      preservedPreviousIndices.add(index);
+      reconciled.push(message);
+    }
+  }
+  let nextPreviousIndex = previousWindowStart;
 
   const preserveInterleavedAssistantEventsBefore = (matchedPreviousIndex: number) => {
     while (nextPreviousIndex < matchedPreviousIndex) {
@@ -241,6 +274,7 @@ export function reconcileSnapshotChatMessages(
       const alreadyPresent = reconciled.some(
         (existing) =>
           existing.id !== previousMessage.id &&
+          !shareUserRequestId(existing, previousMessage) &&
           areSnapshotMessagesEquivalent(existing, previousMessage) &&
           !areMessagesSeparatedByUserTurn(existing, previousMessage, previousMessages),
       );
@@ -282,21 +316,18 @@ export function reconcileSnapshotChatMessages(
   // 最终去重：实时提交、快照刷新和恢复投影可能给同一回合分配不同
   // message id。仅按 id 去重会把这些逻辑副本一起交给渲染层。
   const snapshotMessageIds = new Set(snapshotMessages.map((message) => message.id));
+  const duplicateIndexLookup = new SnapshotDuplicateIndex(
+    snapshotMessageIds,
+    areSnapshotMessagesEquivalent,
+  );
   const deduplicated: ChatMessage[] = [];
   for (const message of reconciled) {
-    const duplicateIndex = deduplicated.findIndex((existing) => {
-      // 两条消息都来自权威快照时，它们是各自独立持久化的消息：只有强身份
-      // 才能判为重复。模糊等价仅用于把本地乐观副本与其快照孪生配对，
-      // 否则同一回合的相邻两轮（文本相同且时间接近）会被错误合并而丢失。
-      if (snapshotMessageIds.has(existing.id) && snapshotMessageIds.has(message.id)) {
-        return areStronglyIdenticalMessages(existing, message);
-      }
-      return areLogicalMessageDuplicates(existing, message);
-    });
+    const duplicateIndex = duplicateIndexLookup.find(message, deduplicated);
     const hasUserTurnBetween =
       duplicateIndex >= 0 &&
       areMessagesSeparatedByUserTurn(deduplicated[duplicateIndex]!, message, reconciled);
     if (duplicateIndex < 0 || hasUserTurnBetween) {
+      duplicateIndexLookup.register(deduplicated.length, message);
       deduplicated.push(message);
       continue;
     }
@@ -304,10 +335,62 @@ export function reconcileSnapshotChatMessages(
     // Keep the first entry's position, but let the later snapshot contribute
     // terminal status/output and the newer ordered parts.
     const existing = deduplicated[duplicateIndex]!;
-    deduplicated[duplicateIndex] = chooseMoreCompleteMessage(existing, message);
+    const replacement = shareUserRequestId(existing, message)
+      ? snapshotMessageIds.has(message.id)
+        ? mergeUserSnapshot(existing, message)
+        : mergeUserSnapshot(message, existing)
+      : chooseMoreCompleteMessage(existing, message);
+    deduplicated[duplicateIndex] = replacement;
+    duplicateIndexLookup.replace(duplicateIndex, existing, replacement);
   }
 
   return recycleUnchangedMessageReferences(previousMessages, deduplicated);
+}
+
+/** 完整且非空的请求 ID 才能确认不同消息 ID 的用户副本。 */
+function shareUserRequestId(left: ChatMessage, right: ChatMessage): boolean {
+  return (
+    left.role === 'user' &&
+    right.role === 'user' &&
+    Boolean(left.clientRequestId && left.clientRequestId === right.clientRequestId)
+  );
+}
+
+/** 用户正文与 rawContent 整体采用快照，已定义元数据覆盖本地兜底。 */
+function mergeUserSnapshot(previous: ChatMessage, snapshot: ChatMessage): ChatMessage {
+  // 归一化会显式写入 undefined；这些缺失元数据不能擦除本地兜底。
+  const definedSnapshot = Object.fromEntries(
+    Object.entries(snapshot).filter(([, value]) => value !== undefined),
+  );
+  return preserveUserImagePreviews(previous, {
+    ...previous,
+    ...definedSnapshot,
+    content: snapshot.content,
+    rawContent: snapshot.rawContent,
+  });
+}
+
+/** 服务端未携带预览时保留已确认同图的本地预览。 */
+function preserveUserImagePreviews(previous: ChatMessage, snapshot: ChatMessage): ChatMessage {
+  if (previous.role !== 'user' || snapshot.role !== 'user' || !snapshot.rawContent) return snapshot;
+  const localImages = extractInputImages(previous.rawContent ?? []);
+  let imageIndex = 0;
+  let changed = false;
+  const rawContent = snapshot.rawContent.map((item) => {
+    if (!item || typeof item !== 'object' || item.type !== 'input_image') return item;
+    const local = localImages[imageIndex++];
+    if (
+      item.imageUrl ||
+      !local?.imageUrl ||
+      !(item.artifactId || item.fileId) ||
+      item.artifactId !== local.artifactId ||
+      item.fileId !== local.fileId
+    )
+      return item;
+    changed = true;
+    return { ...item, imageUrl: local.imageUrl };
+  });
+  return changed ? { ...snapshot, rawContent } : snapshot;
 }
 
 /**
@@ -317,9 +400,7 @@ export function reconcileSnapshotChatMessages(
  * `providerUsage`），所以引用回收时**必须**逐项比对，否则会复用缺字段的旧对象，
  * 让用量 / 模型标签 / 耗时展示停在旧值。
  *
- * `rawContent` 刻意不在列：它是 user 消息的原始内容数组，每次归一化都是新引用，
- * 按引用比较会永不命中；其信息已被 `content` 完整覆盖（渲染只读 `content`，
- * `rawContent` 仅用于导出）。
+ * `rawContent` 在 isSameMessageRevision 中逐项浅比较，避免序列化大型媒体。
  */
 const RECYCLED_SCALAR_FIELDS = [
   'role',
@@ -418,7 +499,36 @@ function isSameMessageRevision(previous: ChatMessage, next: ChatMessage): boolea
   if (previous.content !== next.content) {
     return false;
   }
+  if (!haveEquivalentRawContent(previous.rawContent, next.rawContent)) return false;
   return haveEquivalentParts(previous.parts, next.parts);
+}
+
+/** 原始内容只检查字段值/引用；嵌套对象换引用时保守地放弃回收。 */
+function haveEquivalentRawContent(
+  previous: ChatMessage['rawContent'],
+  next: ChatMessage['rawContent'],
+): boolean {
+  if (previous === next) return true;
+  if (!previous || !next || previous.length !== next.length) return false;
+  return previous.every((item, index) => {
+    const candidate = next[index];
+    if (item === candidate) return true;
+    if (
+      !item ||
+      !candidate ||
+      typeof item !== 'object' ||
+      typeof candidate !== 'object' ||
+      item.type !== candidate.type
+    )
+      return false;
+    const left: Readonly<Record<string, unknown>> = { ...item };
+    const right: Readonly<Record<string, unknown>> = { ...candidate };
+    // undefined 与缺字段等价，符合归一化/预览补齐的可选字段契约。
+    return (
+      Object.keys(left).every((key) => Object.is(left[key], right[key])) &&
+      Object.keys(right).every((key) => Object.is(left[key], right[key]))
+    );
+  });
 }
 
 /**

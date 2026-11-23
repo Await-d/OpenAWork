@@ -35,6 +35,18 @@ describe('ToolCallImagePreview', () => {
     expect(screen.getByRole('img').getAttribute('src')).toBe('https://example.com/photo.png');
   });
 
+  it('远端缩略图不带 Referer（与灯箱口径一致，避免防盗链图床图裂）', () => {
+    // 渠道发图 / look_at 的 `remote` 源都是外部 CDN 地址：缩略图这一层若带站点
+    // Referer，会被防盗链拒绝，出现「缩略图裂、点开大图正常」的割裂。
+    render(
+      <ToolCallImagePreview
+        source={{ kind: 'remote', src: 'https://cdn.example.com/photo.png', alt: '已发送的图片' }}
+      />,
+    );
+
+    expect(screen.getByRole('img').getAttribute('referrerpolicy')).toBe('no-referrer');
+  });
+
   it('点击缩略图打开 ImageLightbox', () => {
     render(
       <ToolCallImagePreview

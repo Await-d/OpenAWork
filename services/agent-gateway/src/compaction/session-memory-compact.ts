@@ -18,11 +18,15 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { Message } from '@openAwork/shared';
+import type { CompactionTokenEstimate, Message } from '@openAwork/shared';
 import { sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
 import { appendCompactionMarkerMessageV2 as appendCompactionMarkerMessage } from '../message/message-v2-adapter.js';
 import { mergeCompactionMetadata } from './compaction-metadata.js';
 import { estimateMessageTokens } from './compaction-tail-budget.js';
+import {
+  buildCompactionTokenEstimate,
+  estimateCompactionHistoryTokens,
+} from './compaction-token-estimate.js';
 import { readSessionMemoryContent, isSessionMemoryEmpty } from './session-memory-store.js';
 
 // ─── Configuration ───────────────────────────────────────────────────────────
@@ -57,6 +61,7 @@ export interface SessionMemoryCompactResult {
   preCompactTokenEstimate: number;
   /** Post-compact token estimate. */
   postCompactTokenEstimate: number;
+  historyTokenEstimate?: CompactionTokenEstimate;
   signature: string;
   committed: boolean;
 }
@@ -314,7 +319,7 @@ export async function trySessionMemoryCompaction(input: {
   let committed = false;
   let persistedMetadataJson = metadataJson;
 
-  sqliteTransaction(() => {
+  const historyTokenEstimate = sqliteTransaction(() => {
     const existingMarker = sqliteGet<SessionMemoryMarkerRow>(
       `SELECT id FROM message_v2
        WHERE session_id = ? AND user_id = ?
@@ -337,6 +342,7 @@ export async function trySessionMemoryCompaction(input: {
     );
 
     const tailStartMessageId = messagesToKeep[0]?.id;
+    const before = estimateCompactionHistoryTokens(input);
     appendCompactionMarkerMessage({
       clientRequestId: markerClientRequestId,
       sessionId: input.sessionId,
@@ -348,6 +354,7 @@ export async function trySessionMemoryCompaction(input: {
       ...(tailStartMessageId ? { tailStartMessageId } : {}),
     });
     committed = true;
+    return buildCompactionTokenEstimate(before, () => estimateCompactionHistoryTokens(input));
   });
 
   return {
@@ -358,6 +365,7 @@ export async function trySessionMemoryCompaction(input: {
     metadataJson: persistedMetadataJson,
     preCompactTokenEstimate,
     postCompactTokenEstimate,
+    ...(historyTokenEstimate ? { historyTokenEstimate } : {}),
     signature,
   };
 }

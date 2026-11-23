@@ -12,10 +12,11 @@ import {
   handleStreamRequest,
   loadSessionContext,
   stopStreamSchema,
-  streamRequestSchema,
+  createExternalStreamRequestSchema,
   createStreamErrorChunk,
 } from './stream.js';
 import { formatStreamRequestIssues } from './stream-request-issues.js';
+import { encodeStreamEvent } from './stream-sse-encoder.js';
 import {
   buildRunEventEnvelope,
   deriveRunEventBookend,
@@ -435,7 +436,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             }
           }
 
-          const body = streamRequestSchema.safeParse(parsed);
+          const body = createExternalStreamRequestSchema().safeParse(parsed);
           if (!body.success) {
             wl.fail(stepParse, 'invalid request schema');
             wl.fail(stepRoute, 'invalid request schema');
@@ -546,7 +547,14 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
             );
             wl.flush(ctx, 500);
           }
-        })();
+        })().catch((error: unknown) => {
+          request.log.error({ err: error }, 'WebSocket 请求校验失败。');
+          safeSendWs(socket, {
+            type: 'error',
+            code: 'WS_STREAM_ERROR',
+            message: STREAM_PLUGIN_ERROR_MESSAGES.wsStreamError,
+          });
+        });
       });
     },
   );
@@ -570,7 +578,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
     wl.succeed(authStep);
     const { id: sessionId } = request.params as { id: string };
     const parseStep = wl.startChild(routeStep, 'stream.sse.parse-query', undefined, { sessionId });
-    const query = streamRequestSchema.safeParse(request.query);
+    const query = createExternalStreamRequestSchema().safeParse(request.query);
 
     if (!query.success) {
       wl.fail(parseStep, 'invalid query');
@@ -637,7 +645,7 @@ export async function streamRoutes(app: FastifyInstance): Promise<void> {
 
     const safeWriteChunk = (chunk: RunEvent) => {
       if (clientClosed) return;
-      if (!safeWriteReplyRaw(reply, `data: ${JSON.stringify(chunk)}\n\n`)) {
+      if (!safeWriteReplyRaw(reply, encodeStreamEvent(chunk))) {
         // Mark client as gone so subsequent writes are skipped.
         onClientClose();
       }

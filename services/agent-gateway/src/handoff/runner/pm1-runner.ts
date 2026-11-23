@@ -961,14 +961,26 @@ async function runPm1(input: Parameters<HandoffTaskRunner>[0]): Promise<void> {
       const workingDir =
         typeof meta['workingDirectory'] === 'string' ? meta['workingDirectory'] : null;
       if (workingDir) {
-        projectContext = await collectPlanningProjectContext(workingDir);
-        projectContext = await investigatePlanningProject({
-          directory: workingDir,
-          intent: sourceIntent,
-          initialContext: projectContext,
-          signal: input.signal,
-          callLlm,
-        });
+        // 工作目录不可读（不存在 / 无权限）不该让整条 handoff 失败，但也不能静默
+        // 降级 —— 那会让规划模型以为没有项目就是事实，凭空臆造项目结构。这里把
+        // 「目录不可用」明确写进规划输入，把不确定性交给下游。
+        // PlanningFailure（如「调查证据不足」）仍按原语义向上抛，不在此降级：
+        // 那是对**已有证据**的真实判定，吞掉它会让失败被掩盖。
+        try {
+          projectContext = await collectPlanningProjectContext(workingDir);
+          projectContext = await investigatePlanningProject({
+            directory: workingDir,
+            intent: sourceIntent,
+            initialContext: projectContext,
+            signal: input.signal,
+            callLlm,
+          });
+        } catch (dirErr) {
+          if (dirErr instanceof PlanningFailure) throw dirErr;
+          const dirMessage = dirErr instanceof Error ? dirErr.message : String(dirErr);
+          logGatewayWarn(`[pm1-runner] 团队工作目录不可用：${workingDir} — ${dirMessage}`);
+          projectContext = `（团队工作目录 ${workingDir} 当前不可读：${dirMessage}。本次规划没有任何项目文件依据；若该目录本应有内容，请检查它是否已挂载进网关容器。）`;
+        }
       }
     }
   } catch (ctxErr) {

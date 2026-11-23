@@ -228,7 +228,7 @@ export function TimingView({
       map.set(entry.toRoleLayer, list);
     }
     return LAYER_ORDER.map((layer) => {
-      const values = (map.get(layer) ?? []).slice().sort((a, b) => a - b);
+      const values = (map.get(layer) ?? []).toSorted((a, b) => a - b);
       const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
       return {
         layer,

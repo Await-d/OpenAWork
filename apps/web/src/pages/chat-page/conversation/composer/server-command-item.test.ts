@@ -15,9 +15,14 @@ const commandClientMocks = vi.hoisted(() => {
   return { createCommandsClient, execute };
 });
 
-vi.mock('@openAwork/web-client', () => ({
-  createCommandsClient: commandClientMocks.createCommandsClient,
-}));
+vi.mock('@openAwork/web-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@openAwork/web-client')>();
+  return {
+    // 保留真实的 id 生成器：本文件用 spyOn(crypto, 'randomUUID') 固化执行 id。
+    createRandomUuid: actual.createRandomUuid,
+    createCommandsClient: commandClientMocks.createCommandsClient,
+  };
+});
 
 const startWorkDoneCommand: CommandDescriptor = {
   id: 'slash-start-work-done',

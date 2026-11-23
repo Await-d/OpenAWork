@@ -30,6 +30,18 @@ describe('describeInvalidStreamEvent', () => {
     expect(message).not.toContain('…');
   });
 
+  it('帧里的 \\uXXXX 转义还原成可读文本后再截断', () => {
+    // 真实上游（Python `json.dumps` 默认 ensure_ascii）返回的 502 帧：原样贴出来
+    // 就是一串 `\u4E0A\u6E38...`，用户与日志都读不出「上游在返回完整响应前关闭了
+    // 流式连接，请重试」。
+    const frame =
+      '{"error":{"message":"\\u4E0A\\u6E38\\u5728\\u8FD4\\u56DE\\u5B8C\\u6574\\u54CD\\u5E94\\u524D\\u5173\\u95ED\\u4E86\\u6D41\\u5F0F\\u8FDE\\u63A5\\uFF0C\\u8BF7\\u91CD\\u8BD5","type":"upstream_error","code":502}}';
+    const message = describeInvalidStreamEvent('custom/openai-compatible-chat', frame);
+
+    expect(message).toContain('上游在返回完整响应前关闭了流式连接，请重试');
+    expect(message).not.toContain('\\u4E0A');
+  });
+
   it('错误对象同时保留结构化 raw，供上层程序化读取', () => {
     const frame = '{"choices":[]}';
     const error = eventError('route', describeInvalidStreamEvent('route', frame), frame);

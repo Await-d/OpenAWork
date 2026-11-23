@@ -11,6 +11,7 @@ import {
   TOOL_EXPAND_CATEGORY_LABELS,
   useDisplayPreferencesStore,
   type MessageLayoutMode,
+  type MetaLineScope,
   type ToolExpandCategory,
   type ToolExpandOverrides,
 } from './display-preferences.js';
@@ -35,6 +36,7 @@ const SYNC_META_STORAGE_KEY = 'openAwork-display-preferences-sync';
 const REMOTE_SAVE_DEBOUNCE_MS = 500;
 
 const MESSAGE_LAYOUT_MODES = ['unified', 'split'] as const satisfies readonly MessageLayoutMode[];
+const META_LINE_SCOPES = ['latest', 'all'] as const satisfies readonly MetaLineScope[];
 const DIALOGUE_MODES = [
   'clarify',
   'coding',
@@ -194,6 +196,9 @@ function applyRemoteValues(raw: Record<string, unknown>): void {
 
     if (isOneOf(raw['messageLayout'], MESSAGE_LAYOUT_MODES)) {
       store.setMessageLayout(raw['messageLayout']);
+    }
+    if (isOneOf(raw['metaLineScope'], META_LINE_SCOPES)) {
+      store.setMetaLineScope(raw['metaLineScope']);
     }
     const overrides = sanitizeToolExpandOverrides(raw['toolExpandedOverrides']);
     if (overrides) {

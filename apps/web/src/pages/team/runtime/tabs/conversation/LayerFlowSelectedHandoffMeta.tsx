@@ -1,3 +1,4 @@
+import { formatServerTime } from '@openAwork/shared';
 import type { HandoffEntry } from '../../../../../stores/team/team-events.js';
 import { getRoleLayerIdentity } from '../../data/role-layer-identity.js';
 import { STATE_COLOR, STATE_LABELS } from './layer-flow-state.js';
@@ -50,7 +51,7 @@ export function LayerFlowSelectedHandoffMeta({ entry }: LayerFlowSelectedHandoff
         {STATE_LABELS[entry.state] ?? entry.state}
       </span>
       <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-        {new Date(entry.updatedAt).toLocaleTimeString('zh-CN')}
+        {formatServerTime(entry.updatedAt)}
       </span>
     </span>
   );

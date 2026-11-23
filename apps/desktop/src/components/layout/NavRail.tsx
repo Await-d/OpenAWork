@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from 'react-router';
+import { railIcon } from '../../../../web/src/components/layout/nav/RailIcon.js';
 
 function IconMessages() {
   return (
@@ -58,6 +59,7 @@ function IconSettings() {
 const navItems = [
   { path: '/sessions', icon: <IconMessages />, label: 'Sessions' },
   { path: '/artifacts', icon: <IconBox />, label: 'Artifacts' },
+  { path: '/dispatches', icon: railIcon('Dispatches'), label: '个人派工' },
 ];
 
 export default function NavRail() {
@@ -80,6 +82,7 @@ export default function NavRail() {
             key={item.path}
             type="button"
             aria-label={item.label}
+            aria-current={active ? 'page' : undefined}
             title={item.label}
             onClick={() => void navigate(item.path)}
             className="size-9 rounded-lg flex items-center justify-center transition-colors duration-150"

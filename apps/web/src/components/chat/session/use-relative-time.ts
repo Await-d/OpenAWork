@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { parseServerTimestamp } from '@openAwork/shared';
 import { formatRelativeTime } from '../../layout/notification/format-time.js';
 
 /**
@@ -13,16 +14,17 @@ export function useRelativeTime(
 ): string | null {
   const [relativeTime, setRelativeTime] = useState<string | null>(() => {
     if (timestamp === undefined) return null;
-    const date = typeof timestamp === 'number' ? new Date(timestamp) : new Date(timestamp);
-    if (Number.isNaN(date.getTime())) return null;
-    return formatRelativeTime(date);
+    const parsed = parseServerTimestamp(timestamp);
+    if (parsed === null) return null;
+    return formatRelativeTime(new Date(parsed));
   });
 
   useEffect(() => {
     if (!enabled || timestamp === undefined) return;
 
-    const date = typeof timestamp === 'number' ? new Date(timestamp) : new Date(timestamp);
-    if (Number.isNaN(date.getTime())) return;
+    const parsed = parseServerTimestamp(timestamp);
+    if (parsed === null) return;
+    const date = new Date(parsed);
 
     // 立即更新一次
     setRelativeTime(formatRelativeTime(date));

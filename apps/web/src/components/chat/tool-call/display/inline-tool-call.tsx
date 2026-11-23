@@ -1,17 +1,17 @@
 import { resolveToolVisualStatus, type ToolCallCardProps } from '@openAwork/shared-ui';
-import { useMemo } from 'react';
+import { useMemo, type KeyboardEvent } from 'react';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
 import { useToolCallExpandState } from '../shared/use-tool-call-expand-state.js';
 import { ToolIcon } from './tool-icon';
 import { colorizeSummary, getToolCategory } from '../shared/colorize-summary.js';
 import { extractErrorSummary } from '../shared/extract-error-summary.js';
-import {
-  parseMaybeJsonPayload,
-  resolveLspMcpToolName,
-  resolveMcpLspPayload,
-} from '../shared/lsp-mcp-view.js';
+import { resolveMcpBuiltinToolName, unwrapMcpPayload } from '../shared/mcp-builtin-alias.js';
 import { buildLspInlineSummary } from '../shared/lsp-summary.js';
-import { naturalLanguageSummary } from '../shared/natural-language-summary.js';
+import {
+  toolCallSummary,
+  toolDisplayName,
+  ToolCallStatus,
+} from '../shared/tool-call-presentation.js';
 import { ToolApprovalActions } from '../shared/tool-approval-actions.js';
 import {
   extractTodosFromOutput,
@@ -19,8 +19,11 @@ import {
   TodoListPreview,
 } from '../previews/todo-list-preview.js';
 import { ToolInputPreview } from '../io/tool-input-preview.js';
+import { resolveToolInputSection } from '../shared/tool-input-fields.js';
 import { ToolOutputPreview } from '../io/tool-output-preview.js';
 import { ToolCardExpansionProvider } from '../shared/tool-card-expansion.js';
+import { extractSkillContent } from '../previews/skill-content-preview.js';
+import { ExpandableOutput } from '../shared/expandable-output.js';
 
 /* ── InlineToolCall ── */
 
@@ -34,6 +37,7 @@ export function InlineToolCall({
   status,
   isError,
   embedded = false,
+  sessionId,
 }: {
   approvalActions?: ToolCallCardProps['approvalActions'];
   pendingPermissionRequestId?: string;
@@ -48,6 +52,8 @@ export function InlineToolCall({
    * 这里隐藏整行 header，只渲染输出本体（入参不展示——用户口径：入参不重要）。
    */
   embedded?: boolean;
+  /** 当前消息所属会话 id（仅供文件变更卡按需加载完整快照，可选）。 */
+  sessionId?: string | undefined;
 }) {
   const normalized = toolName.trim().toLowerCase();
   const visualState = resolveToolVisualStatus({
@@ -63,15 +69,15 @@ export function InlineToolCall({
   //
   // 虚拟 LSP MCP（`mcp__lsp__find_references`）映射回内置名 `lsp_find_references`，
   // 这样位置描述与状态汇总直接复用同一套纯函数，不会出现两套文案口径。
-  const lspMcpInner = resolveLspMcpToolName(toolName, input);
-  const lspToolName = lspMcpInner ? `lsp_${lspMcpInner}` : toolName;
+  const builtinToolName = resolveMcpBuiltinToolName(toolName, input);
+  const lspToolName = builtinToolName ?? toolName;
   const isLsp = lspToolName.trim().toLowerCase().startsWith('lsp_');
 
   const summary = useMemo(() => {
     if (isLsp) {
       // MCP 通道的 output 是 `{ content: [{ type: 'text', text }] }` 包装，摘要函数
       // 认的是内层载荷（`path:line:col` 文本 / 诊断 map），否则只会显示「✓ 完成」。
-      const lspOutput = lspMcpInner ? parseMaybeJsonPayload(resolveMcpLspPayload(output)) : output;
+      const lspOutput = builtinToolName ? unwrapMcpPayload(output) : output;
       return buildLspInlineSummary({
         toolName: lspToolName,
         input,
@@ -80,8 +86,8 @@ export function InlineToolCall({
         ...(isError !== undefined ? { isError } : {}),
       });
     }
-    return naturalLanguageSummary(toolName, input, output);
-  }, [isLsp, lspMcpInner, lspToolName, toolName, input, output, visualState, isError]);
+    return toolCallSummary(toolName, input, output, visualState);
+  }, [isLsp, builtinToolName, lspToolName, toolName, input, output, visualState, isError]);
 
   // 所有 inline 工具都可展开，保证用户总能查看原始入参与输出。LSP 也不例外：
   // 摘要里的位置与状态只是入口，真正的定义 / 引用 / 诊断内容在展开体里。
@@ -134,12 +140,16 @@ export function InlineToolCall({
   // LSP 也归入「摘要已表达入参」：`file:line:char → "newName"` 就在标题里，
   // 展开区再铺一遍参数只会把输出区推得更远。
   const hideParams =
-    normalized === 'read' || normalized === 'question' || normalized === 'askuserquestion' || isLsp;
+    normalized === 'read' ||
+    normalized === 'question' ||
+    normalized === 'askuserquestion' ||
+    isLsp ||
+    (normalized === 'skill' && visualState === 'completed' && extractSkillContent(output) !== null);
   // read 展开态：路径 + 行区间已经在预览的 meta 行里（带「点击预览」），摘要不再
   // 重复展示同一个路径（用户口径：两处合成一处，且保留 meta 的点击预览）。
   const summaryText =
     normalized === 'read' && showOutputPanel
-      ? naturalLanguageSummary(toolName, input, output, { omitPath: true })
+      ? toolCallSummary(toolName, input, output, visualState, { omitPath: true })
       : summary;
 
   return (
@@ -153,16 +163,26 @@ export function InlineToolCall({
                 role: 'button',
                 tabIndex: 0,
                 onClick: toggleExpanded,
+                'aria-expanded': expanded,
+                onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    toggleExpanded();
+                  }
+                },
                 style: { cursor: 'pointer' },
               }
             : {})}
         >
           <ToolIcon kind={kind} toolName={toolName} status={visualState} size={13} />
+          <ToolCallStatus status={visualState} toolName={toolName} />
           <span className="tool-call-inline-name" data-tool-category={getToolCategory(toolName)}>
-            {toolName}
+            {toolDisplayName(toolName)}
           </span>
           <span className="tool-call-inline-summary">{colorizeSummary(summaryText)}</span>
-          {errorSummary && (
+          {/* 展开后由失败卡自己的标题行承载同一句结论，pill 收起——与
+              `collapsedSummary` 的既有约定一致（展开态不再重复折叠态摘要）。 */}
+          {errorSummary && !expanded && (
             <span className="tool-call-error-summary" title={errorSummary}>
               {errorSummary}
             </span>
@@ -183,13 +203,28 @@ export function InlineToolCall({
               <>
                 {hasInput && !embedded && !hideParams && (
                   <div className="tool-call-inline-section" data-inline-row="true">
-                    <div className="tool-call-inline-section-label">参数</div>
+                    {/* 渠道发送类展示的是消息正文，标题用「内容」（与预览同一规则源）。 */}
+                    <div className="tool-call-inline-section-label">
+                      {resolveToolInputSection(toolName, input, kind).title}
+                    </div>
                     <ToolInputPreview toolName={toolName} input={input} kind={kind} />
                   </div>
                 )}
                 {hasOutput && (
                   <div className="tool-call-inline-section">
-                    <ToolOutputPreview toolName={toolName} output={output} input={input} />
+                    {normalized === 'skill' &&
+                    visualState !== 'completed' &&
+                    extractSkillContent(output) !== null ? (
+                      <ExpandableOutput text={String(output)} />
+                    ) : (
+                      <ToolOutputPreview
+                        toolName={toolName}
+                        output={output}
+                        input={input}
+                        isError={isError === true || visualState === 'failed'}
+                        sessionId={sessionId}
+                      />
+                    )}
                   </div>
                 )}
               </>

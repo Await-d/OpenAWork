@@ -1,6 +1,7 @@
 import { color } from '../tokens.js';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { PermissionDecision, PermissionRiskLevel } from '@openAwork/shared';
+import { isImeComposingNativeEvent } from '../utils/ime-composition.js';
 
 export type { PermissionDecision } from '@openAwork/shared';
 
@@ -425,6 +426,7 @@ export function PermissionPrompt({
 
     const handler = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      if (isImeComposingNativeEvent(event)) return;
       const target = event.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;

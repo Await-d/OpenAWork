@@ -72,6 +72,27 @@ function createProposal(
 }
 
 describe('createMemoryProposal', () => {
+  it('同正文不同作用域、动作或目标不能互相去重', () => {
+    const first = createProposal();
+    const second = createProposal({ scope: { type: 'workspace', id: '/project' } });
+    const third = createProposal({
+      action: 'update',
+      targetMemoryId: 'target-a',
+      expectedRevision: 1,
+    });
+    const fourth = createProposal({
+      action: 'update',
+      targetMemoryId: 'target-b',
+      expectedRevision: 1,
+    });
+    expect([first, second, third, fourth].map((entry) => entry.outcome)).toEqual([
+      'created',
+      'created',
+      'created',
+      'created',
+    ]);
+  });
+
   it('创建提议后正式记忆表无变化（确认前 0 写入）', () => {
     const before = countMemories();
     const result = createProposal();

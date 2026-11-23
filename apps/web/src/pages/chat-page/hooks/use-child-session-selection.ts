@@ -24,6 +24,12 @@ import type { SubAgentRunItem } from '../panels/sub-agent-run-list.js';
 export interface UseChildSessionSelectionOptions {
   /** 当前会话 id；切换会话时清除显式选择保护。 */
   readonly currentSessionId: string | null;
+  /**
+   * 页面是否处于激活态。`CachedRouteOutlet` 的 keep-alive 路由下非活动页面保持挂载，
+   * 可同时存在多个 ChatPage 实例；Alt+↑/↓ 是 **window 级**监听，不门控时非活动实例
+   * 也会一起切换子代理面板（R-04 同类）。未激活即不注册监听。
+   */
+  readonly isPageActive: boolean;
   readonly isFusionLayout: boolean;
   readonly isMobileViewport: boolean;
   readonly rightTab: RightPanelTabId;
@@ -68,6 +74,7 @@ export function useChildSessionSelection(
 ): ChildSessionSelectionController {
   const {
     currentSessionId,
+    isPageActive,
     isFusionLayout,
     isMobileViewport,
     rightTab,
@@ -173,7 +180,10 @@ export function useChildSessionSelection(
   ]);
 
   useEffect(() => {
-    if (subAgentRunItems.length < 2) {
+    // keep-alive 缓存路由下非活动页面保持挂载：不按激活态门控时，各实例会同时
+    // 响应 Alt+↑/↓ 并把非当前会话的面板切走。未激活即不注册监听（依赖并入
+    // effect，失活即清理、激活即重挂）。与 subAgentRunItems<2 早退同一层。
+    if (!isPageActive || subAgentRunItems.length < 2) {
       return;
     }
 
@@ -203,7 +213,7 @@ export function useChildSessionSelection(
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [openChildSessionInspector, selectedChildSessionId, subAgentRunItems]);
+  }, [isPageActive, openChildSessionInspector, selectedChildSessionId, subAgentRunItems]);
 
   return { openChildSessionInspector, selectChildSession };
 }

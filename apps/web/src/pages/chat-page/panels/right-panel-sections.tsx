@@ -1,4 +1,8 @@
 import React from 'react';
+import {
+  SubagentLoadMore,
+  useProgressiveSubagents,
+} from '../../../components/chat/subagent-progress.js';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import { PlanHistoryPanel } from '@openAwork/shared-ui';
 import type { AlwaysScopeLevel, HistoricalPlan } from '@openAwork/shared-ui';
@@ -7,6 +11,7 @@ import {
   buildUpstreamSummaryGroupContextText,
   findUpstreamSummaryGroupByKey,
   formatCompactionCauseLabel,
+  formatCompactionHistoryEstimate,
   formatCompactionShortLabel,
   formatUpstreamSummaryGroupHeadline,
   formatUpstreamSummaryMetricLine,
@@ -19,6 +24,22 @@ import {
   type UpstreamSummaryItem,
   type UpstreamSummaryRequestGroup,
 } from './chat-overview-model.js';
+
+function CompactionHistoryRow({ item }: { item: CompactionItem }) {
+  const cause = formatCompactionCauseLabel(item.cause, item.strategy);
+  const estimate = formatCompactionHistoryEstimate(item);
+  return (
+    <div style={{ fontSize: 12, color: 'var(--fg-strong)' }}>
+      <div style={{ ...PANEL_SECTION_LABEL_STYLE, marginBottom: 4, color: 'var(--fg-strong)' }}>
+        {formatCompactionShortLabel(item)}
+      </div>
+      {cause ? <div style={{ color: 'var(--fg-muted)', lineHeight: 1.5 }}>{cause}</div> : null}
+      {estimate ? (
+        <div style={{ color: 'var(--fg-muted)', lineHeight: 1.5 }}>{estimate}</div>
+      ) : null}
+    </div>
+  );
+}
 
 // 概览正文已抽到独立文件（含其专属 helper）；这里保留同名再导出，经典右栏
 // (`chat-right-panel.tsx`) 与测试仍可从 `right-panel-sections.js` 取到。
@@ -250,6 +271,10 @@ export function ChatHistoryTabContent(props: {
     sharedUiThemeVars,
   } = props;
   const { mainTodos, tempTodos } = splitSessionTodosByLane(sessionTodos);
+  const childProgress = useProgressiveSubagents(childSessions, (session) => ({
+    sessionId: session.id,
+    createdAt: session.createdAt,
+  }));
 
   const hasChildSessions = childSessions.length > 0;
   const hasSessionTasks = sessionTasks.length > 0;
@@ -281,7 +306,7 @@ export function ChatHistoryTabContent(props: {
           {hasChildSessions && (
             <>
               <div style={PANEL_SECTION_EYEBROW_STYLE}>子会话</div>
-              {childSessions.map((session) => (
+              {childProgress.visible.map((session) => (
                 <button
                   key={session.id}
                   type="button"
@@ -304,6 +329,7 @@ export function ChatHistoryTabContent(props: {
                   {session.title ?? '未命名'} · {session.id.slice(0, 8)}…
                 </button>
               ))}
+              <SubagentLoadMore progress={childProgress} />
             </>
           )}
           {hasChildSessions && hasSessionTasks && (
@@ -621,22 +647,7 @@ export function ChatHistoryTabContent(props: {
             <>
               <div style={PANEL_SECTION_EYEBROW_STYLE}>会话压缩</div>
               {compactions.map((item) => (
-                <div key={item.id} style={{ fontSize: 12, color: 'var(--fg-strong)' }}>
-                  <div
-                    style={{
-                      ...PANEL_SECTION_LABEL_STYLE,
-                      marginBottom: 4,
-                      color: 'var(--fg-strong)',
-                    }}
-                  >
-                    {formatCompactionShortLabel(item)}
-                  </div>
-                  {formatCompactionCauseLabel(item.cause, item.strategy) ? (
-                    <div style={{ color: 'var(--fg-muted)', lineHeight: 1.5 }}>
-                      {formatCompactionCauseLabel(item.cause, item.strategy)}
-                    </div>
-                  ) : null}
-                </div>
+                <CompactionHistoryRow key={item.id} item={item} />
               ))}
             </>
           )}

@@ -46,7 +46,7 @@ export function ModelSelect({ value, options, editable, placeholder, onChange, s
   const known = options.some((opt) => encode(opt) === current);
 
   // 按「供应商名 → 模型名」排序，模型名用数字感知比较，便于用户在下拉里快速定位。
-  const sortedOptions = [...options].sort((a, b) => {
+  const sortedOptions = options.toSorted((a, b) => {
     const byProvider = a.providerName.localeCompare(b.providerName, undefined, {
       numeric: true,
       sensitivity: 'base',

@@ -27,6 +27,9 @@ export function requireCompactionSummary(result: SessionCompactionResult): strin
   if (result.retryable) {
     throw new ApiError(409, 'BadRequest', message);
   }
+  if (result.committed === false && !result.llmErrorMessage && result.durableSummary === null) {
+    return '没有新增可压缩内容。';
+  }
   throw ApiError.internal(message);
 }
 
@@ -169,9 +172,15 @@ async function executeCompactCommand(params: {
     phase: 'completed' as const,
     cause: 'manual' as const,
     strategy,
-    compactedMessages: compaction.durableSummary?.newlySummarizedMessages ?? params.messages.length,
+    compactedMessages:
+      compaction.durableSummary?.newlySummarizedMessages ??
+      (compaction.committed === false ? 0 : params.messages.length),
     representedMessages:
-      compaction.durableSummary?.totalRepresentedMessages ?? params.messages.length,
+      compaction.durableSummary?.totalRepresentedMessages ??
+      (compaction.committed === false ? 0 : params.messages.length),
+    ...(compaction.historyTokenEstimate
+      ? { historyTokenEstimate: compaction.historyTokenEstimate }
+      : {}),
     runId: commandRunId,
     eventId: `${params.sessionId}:${params.commandId}:${executionId}:compaction:completed`,
     occurredAt: completedAt,

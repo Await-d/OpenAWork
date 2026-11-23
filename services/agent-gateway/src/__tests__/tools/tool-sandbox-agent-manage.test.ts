@@ -125,6 +125,30 @@ describe('tool-sandbox · agent_manage 接线与门控', () => {
     ).toBe(true);
   });
 
+  it('yolo 档位：内置 Agent 可覆盖提示词，摘要返回覆盖状态', async () => {
+    mocks.metadataJson = JSON.stringify({
+      workingDirectory: TEST_WORKSPACE,
+      permissionMode: 'yolo',
+    });
+
+    const result = await executeAgentTool(
+      { action: 'update', agentId: 'general', agent: { systemPrompt: '模型写入的通用提示词' } },
+      'yolo-session',
+    );
+
+    // 修复前该调用会被 catalog 的 forbiddenFields 拒绝（`systemPrompt` 曾被禁用）。
+    expect(result.isError).toBe(false);
+    const output = JSON.parse(String(result.output)) as {
+      ok: boolean;
+      agent: { id: string; systemPromptPreview?: string; hasPromptOverride?: boolean };
+    };
+    expect(output.ok).toBe(true);
+    expect(output.agent.id).toBe('general');
+    expect(output.agent.systemPromptPreview).toContain('模型写入的通用提示词');
+    // 模型需要能判断「当前是默认还是已覆盖」，否则无法决定是否要清除。
+    expect(output.agent.hasPromptOverride).toBe(true);
+  });
+
   it('team 后台会话：权限层自动免审批，但工具内守卫仍拒绝', async () => {
     mocks.requireBoundWorkspace = true;
     mocks.roleLayer = 'executor';

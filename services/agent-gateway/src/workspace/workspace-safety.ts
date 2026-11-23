@@ -548,11 +548,24 @@ export function assertSessionWorkspacePath(input: {
 
   // 仅未绑定：盘符根 / 占位路径改写为桌面默认目录。已绑定绝不改写。
   const rewrittenPath = rewriteUnboundPlaceholderPath(input.sessionId, input.path);
+  // 相对路径的解析基准必须与**工具执行根**同口径（`routes/stream.ts`：
+  // `workingDirectory ?? resolveUnboundSessionWorkspaceFallback()`）。
+  // 此前 `workingDirectory` 为 null 时相对路径没有任何基准，`resolveWorkspaceEntryPath`
+  // 直接返回 null → `Forbidden workspace path`；而同一个会话里 bash 却能在默认目录下
+  // 正常执行。于是「`grep path="services/x"` 被拒、`bash grep services/x` 成功」，
+  // 报错还把它说成权限问题（2026-11-18 排障 #6/#14）。已绑定会话不受影响。
+  const relativePathBase = workingDirectory ?? resolveUnboundSessionWorkspaceFallback();
   const effectivePath = isWorkspaceAbsolutePath(rewrittenPath)
     ? rewrittenPath
-    : resolveWorkspaceEntryPath(rewrittenPath, workingDirectory);
+    : resolveWorkspaceEntryPath(rewrittenPath, relativePathBase);
   if (!effectivePath) {
-    throw new Error(`Forbidden workspace path: ${rewrittenPath}`);
+    // 保留 `Forbidden workspace path:` 前缀（客户端失败卡按它做结构化解析），
+    // 但对相对路径补一句基准说明——否则模型会朝「权限不足」的方向反复重试。
+    throw new Error(
+      isWorkspaceAbsolutePath(rewrittenPath)
+        ? `Forbidden workspace path: ${rewrittenPath}`
+        : `Forbidden workspace path: ${rewrittenPath}（相对路径按 ${relativePathBase} 解析；目标在别处时请改用绝对路径）`,
+    );
   }
   assertWorkspacePathSupportedByCurrentHost(effectivePath);
 

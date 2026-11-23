@@ -19,7 +19,7 @@ import {
   listMemoryProposals,
   listMemoryProposalRelations,
 } from '../memory/governance/memory-proposal-store.js';
-import { memoryProposalDecisionSchema } from '@openAwork/agent-core';
+import { memoryProposalDecisionSchema, type MemoryEntry } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet } from '../infra/db.js';
 
 /**
@@ -82,10 +82,71 @@ interface MemoryRevisionRow {
   user_id: string;
   revision: number;
   operation: string;
+  before_json: string | null;
+  after_json: string | null;
   proposal_id: string | null;
   actor_kind: string;
   actor_id: string | null;
   created_at: string;
+}
+
+const revisionSnapshotSchema = z
+  .object({
+    id: z.string(),
+    userId: z.string(),
+    key: z.string(),
+    value: z.string(),
+    enabled: z.boolean(),
+    changeSeq: z.number().int().nonnegative().optional(),
+  })
+  .passthrough();
+
+function readRevisionSnapshot(
+  json: string | null,
+  row: MemoryRevisionRow,
+): MemoryEntry | null | undefined {
+  if (json === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  const result = revisionSnapshotSchema.safeParse(parsed);
+  if (!result.success || result.data.userId !== row.user_id || result.data.id !== row.memory_id) {
+    return undefined;
+  }
+  return result.data as unknown as MemoryEntry;
+}
+
+function revisionResponse(row: MemoryRevisionRow): Record<string, unknown> | null {
+  const before = readRevisionSnapshot(row.before_json, row);
+  const after = readRevisionSnapshot(row.after_json, row);
+  if (before === undefined || after === undefined) return null;
+  const changeSeq = after?.changeSeq ?? before?.changeSeq;
+  const origin =
+    row.actor_kind === 'maintenance'
+      ? 'periodic'
+      : row.actor_kind === 'channel'
+        ? 'channel'
+        : row.proposal_id !== null
+          ? 'proposal'
+          : 'manual';
+  return {
+    id: row.id,
+    memoryId: row.memory_id,
+    revision: row.revision,
+    operation: row.operation,
+    proposalId: row.proposal_id,
+    actorKind: row.actor_kind,
+    actorId: row.actor_id,
+    origin,
+    createdAt: row.created_at,
+    ...(changeSeq !== undefined ? { changeSeq } : {}),
+    before,
+    after,
+    payload: before,
+  };
 }
 
 /** 由 JWT 构造提议 actor。路由层恒为 `user`（维护任务不经路由确认提议）。 */
@@ -182,7 +243,8 @@ export async function memoriesProposalsRoutes(app: FastifyInstance): Promise<voi
       const limit = query.limit ?? 50;
 
       const rows = sqliteAll<MemoryRevisionRow>(
-        `SELECT id, memory_id, user_id, revision, operation, proposal_id, actor_kind, actor_id, created_at
+        `SELECT id, memory_id, user_id, revision, operation, before_json, after_json,
+                proposal_id, actor_kind, actor_id, created_at
          FROM memory_revisions
          WHERE user_id = ? AND memory_id = ?
          ORDER BY revision DESC, created_at DESC
@@ -191,16 +253,7 @@ export async function memoriesProposalsRoutes(app: FastifyInstance): Promise<voi
       );
       step.succeed(undefined, { count: rows.length });
       return reply.send({
-        revisions: rows.map((row) => ({
-          id: row.id,
-          memoryId: row.memory_id,
-          revision: row.revision,
-          operation: row.operation,
-          proposalId: row.proposal_id,
-          actorKind: row.actor_kind,
-          actorId: row.actor_id,
-          createdAt: row.created_at,
-        })),
+        revisions: rows.map(revisionResponse).filter((revision) => revision !== null),
       });
     },
   );

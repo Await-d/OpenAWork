@@ -58,7 +58,7 @@ export function buildLanes(layers: LayerMessages[]): LayerLane[] {
     .map(([layer, instances]) => ({
       layer,
       identity: getRoleLayerIdentity(layer),
-      instances: [...instances].sort(compareInstances),
+      instances: instances.toSorted(compareInstances),
       messageCount: instances.reduce(
         (sum, item) => sum + item.messages.length + (item.streamingMessage ? 1 : 0),
         0,

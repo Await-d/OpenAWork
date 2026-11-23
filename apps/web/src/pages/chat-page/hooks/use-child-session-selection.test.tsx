@@ -25,6 +25,8 @@ interface RenderInput {
   items: SubAgentRunItem[];
   /** 该会话上次查看的子会话（`uiState.activeChildSessionIdBySession` 的投影）。 */
   rememberedChildSessionId?: string | null;
+  /** 页面激活态；keep-alive 缓存路由下非活动实例必须不响应 Alt+↑/↓。 */
+  isPageActive?: boolean;
 }
 
 function renderSelection(initial: RenderInput) {
@@ -34,12 +36,18 @@ function renderSelection(initial: RenderInput) {
   const onExplicitChildSessionSelected = vi.fn();
 
   const hook = renderHook(
-    ({ currentSessionId, items, rememberedChildSessionId = null }: RenderInput) => {
+    ({
+      currentSessionId,
+      items,
+      rememberedChildSessionId = null,
+      isPageActive = true,
+    }: RenderInput) => {
       const [selectedChildSessionId, setSelectedChildSessionId] = useState<string | null>(null);
       const [rightTab, setRightTab] = useState<RightPanelTabId>('overview');
 
       const controller = useChildSessionSelection({
         currentSessionId,
+        isPageActive,
         isFusionLayout: false,
         isMobileViewport: false,
         rememberedChildSessionId,
@@ -181,6 +189,55 @@ describe('useChildSessionSelection', () => {
 
     act(() => {
       hook.result.current.controller.selectChildSession('ses_b');
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true }));
+    });
+
+    expect(hook.result.current.selectedChildSessionId).toBe('ses_a');
+    expect(setRightOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('非活动页面（isPageActive=false）不响应 Alt+↓ 键盘导航', () => {
+    const { hook, setRightOpen } = renderSelection({
+      currentSessionId: 's1',
+      items: [buildItem('ses_a'), buildItem('ses_b')],
+      isPageActive: false,
+    });
+
+    act(() => {
+      hook.result.current.controller.selectChildSession('ses_b');
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true }));
+    });
+
+    // 未注册 window 监听：选中态与面板开合均不被键盘改动。
+    expect(hook.result.current.selectedChildSessionId).toBe('ses_b');
+    expect(setRightOpen).not.toHaveBeenCalled();
+  });
+
+  it('激活态切换（false→true）后才开始响应 Alt+↓', () => {
+    const { hook, setRightOpen } = renderSelection({
+      currentSessionId: 's1',
+      items: [buildItem('ses_a'), buildItem('ses_b')],
+      isPageActive: false,
+    });
+
+    act(() => {
+      hook.result.current.controller.selectChildSession('ses_b');
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true }));
+    });
+    expect(hook.result.current.selectedChildSessionId).toBe('ses_b');
+
+    act(() => {
+      hook.rerender({
+        currentSessionId: 's1',
+        items: [buildItem('ses_a'), buildItem('ses_b')],
+        isPageActive: true,
+      });
     });
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true }));

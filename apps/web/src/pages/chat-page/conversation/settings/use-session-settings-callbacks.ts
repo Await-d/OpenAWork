@@ -7,6 +7,12 @@ import { writeRefCurrent } from '../../../../utils/ref/ref-current.js';
 
 export interface SessionSettingsState {
   dialogueMode: DialogueMode;
+  /**
+   * 会话是否由来源托管（渠道 / 定时任务）。为 true 时 `buildSessionMetadata`
+   * **不写** `dialogueMode`：这些会话没有对话模式，写入不仅无意义，还会让网关的
+   * 澄清只读白名单把渠道回复工具全部收敛掉（见 utils/session/session-origin）。
+   */
+  isSourceManagedSession: boolean;
   /** 工具调用审批方式档位（ask / auto-edit / yolo）——审批语义的唯一事实来源。 */
   permissionMode: ComposerPermissionMode;
   webSearchEnabled: boolean;
@@ -14,6 +20,15 @@ export interface SessionSettingsState {
   reasoningEffort: ReasoningEffort;
   activeProviderId: string;
   activeModelId: string;
+  /**
+   * 会话级上下文窗口挡位（token 数）。
+   *
+   * 与模型级挡位（`user_settings.providers` 里模型的 `contextWindowOverride`）
+   * 分属两个作用域：模型级是该用户下所有会话共享的默认值，本字段只影响当前会话。
+   * `undefined` / 缺席表示「本会话未覆盖」——落库时写 `null`，网关按
+   * 「显式 null = 清除」处理，随后回退到模型级 / 模型 preset。
+   */
+  contextWindowOverride?: number | undefined;
   /**
    * 模型选择来源的「最新值 ref」（`'defaults' | 'manual' | ...`）。
    *
@@ -35,6 +50,7 @@ export interface SessionSettingsSetters {
   setWebSearchEnabled: (value: boolean | ((prev: boolean) => boolean)) => void;
   setThinkingEnabled: (value: boolean) => void;
   setReasoningEffort: (value: ReasoningEffort) => void;
+  setContextWindowOverride: (value: number | undefined) => void;
   setManualAgentId: (value: string) => void;
   setSessionMetadataDirty: (value: boolean) => void;
 }
@@ -50,6 +66,11 @@ export interface SessionSettingsCallbacksReturn {
   handleToggleWebSearch: () => void;
   handleThinkingEnabledChange: (enabled: boolean) => void;
   handleReasoningEffortChange: (effort: ReasoningEffort) => void;
+  /**
+   * 写入会话级上下文挡位并标记 metadata 脏（由 ChatPage 的 dirty 副作用
+   * 统一 PATCH）。`undefined` = 清除本会话覆盖，回退到模型级配置。
+   */
+  handleContextWindowOverrideChange: (value: number | undefined) => Promise<void>;
   handleManualAgentChange: (agentId: string) => void;
   handleClearManualAgentId: () => void;
 }
@@ -62,12 +83,14 @@ export function useSessionSettingsCallbacks(
 ): SessionSettingsCallbacksReturn {
   const {
     dialogueMode,
+    isSourceManagedSession,
     permissionMode,
     webSearchEnabled,
     thinkingEnabled,
     reasoningEffort,
     activeProviderId,
     activeModelId,
+    contextWindowOverride,
     modelSelectionSourceRef,
     manualAgentId,
     effectiveWorkingDirectory,
@@ -79,6 +102,7 @@ export function useSessionSettingsCallbacks(
     setWebSearchEnabled,
     setThinkingEnabled,
     setReasoningEffort,
+    setContextWindowOverride,
     setManualAgentId,
     setSessionMetadataDirty,
   } = setters;
@@ -86,7 +110,10 @@ export function useSessionSettingsCallbacks(
   const buildSessionMetadata = useCallback(
     (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
       const metadata: Record<string, unknown> = {
-        dialogueMode,
+        // 来源会话（渠道 / 定时任务）没有对话模式：省略该键即字段级「不写」，
+        // 否则会把界面上的假模式（默认值）落库，进而被网关的澄清只读白名单
+        // 收敛掉渠道回复工具。load 路径同理不会带回该键，快照对比不会反复 PATCH。
+        ...(isSourceManagedSession ? {} : { dialogueMode }),
         // 档位为规范字段；yoloMode 是派生的布尔投影，供尚未迁移的老读者消费。
         permissionMode,
         yoloMode: permissionMode === 'yolo',
@@ -103,15 +130,19 @@ export function useSessionSettingsCallbacks(
       // 清空选择时必须**显式写 null**（服务端按「显式 null = 清除绑定」处理）：
       // 省略该键只会保留旧绑定，会话级回退仍会把它当成角色来源。
       metadata['agentId'] = manualAgentId.trim() || null;
+      // 会话级上下文挡位：显式 write-null 才能表达「清除本会话覆盖」；
+      // 省略该键会保留上一次的会话级值（服务端是增量 PATCH 语义）。
+      metadata['contextWindowOverride'] = contextWindowOverride ?? null;
       if (effectiveWorkingDirectory) metadata['workingDirectory'] = effectiveWorkingDirectory;
       return { ...metadata, ...overrides };
     },
     [
       activeModelId,
-      modelSelectionSourceRef,
       activeProviderId,
+      contextWindowOverride,
       dialogueMode,
       effectiveWorkingDirectory,
+      isSourceManagedSession,
       manualAgentId,
       permissionMode,
       reasoningEffort,
@@ -188,6 +219,19 @@ export function useSessionSettingsCallbacks(
     [setManualAgentId, markSessionMetadataDirty],
   );
 
+  const handleContextWindowOverrideChange = useCallback(
+    (value: number | undefined): Promise<void> => {
+      // 挡位是会话级设置：不再写 `PUT /settings/providers/model-context`（那是
+      // 模型级全局配置，一旦在某会话里改动会连带所有用同一模型的会话）。
+      // 返回 Promise 只为满足 composer 的异步写入契约；实际落库由 ChatPage 的
+      // dirty-metadata 副作用在下一拍统一 PATCH。
+      setContextWindowOverride(value);
+      markSessionMetadataDirty();
+      return Promise.resolve();
+    },
+    [markSessionMetadataDirty, setContextWindowOverride],
+  );
+
   const handleClearManualAgentId = useCallback(() => {
     setManualAgentId('');
     markSessionMetadataDirty();
@@ -203,6 +247,7 @@ export function useSessionSettingsCallbacks(
     handleToggleWebSearch,
     handleThinkingEnabledChange,
     handleReasoningEffortChange,
+    handleContextWindowOverrideChange,
     handleManualAgentChange,
     handleClearManualAgentId,
   };

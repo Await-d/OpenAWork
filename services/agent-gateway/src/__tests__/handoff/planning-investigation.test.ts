@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -59,6 +59,9 @@ describe('PM1 自主只读调查', () => {
     const directory = await mkdtemp(join(tmpdir(), 'pm1-investigate-'));
     try {
       await writeFile(join(directory, '.env'), 'SECRET=hidden');
+      // 目录里必须有一个普通文件：只有隐藏文件时会被「空目录」短路直接返回，
+      // 就走不到下面的重复动作保护了。
+      await writeFile(join(directory, 'index.ts'), 'export const ok = true;');
       await expect(
         investigatePlanningProject({
           directory,
@@ -71,6 +74,55 @@ describe('PM1 自主只读调查', () => {
           },
         }),
       ).rejects.toThrow('项目调查无进展');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('空目录直接返回「没有可调查的项目文件」，不消耗任何模型调用', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pm1-empty-'));
+    try {
+      let calls = 0;
+      const result = await investigatePlanningProject({
+        directory,
+        intent: '调研一个空工作区',
+        initialContext: '项目快照：（空）',
+        signal: new AbortController().signal,
+        callLlm: async () => {
+          calls += 1;
+          return JSON.stringify({ action: 'list', path: '.' });
+        },
+      });
+
+      // 空目录若进入调查循环，模型只能反复请求 `.`，重复超限后会抛
+      // 「项目调查无进展」——那是不可自动重试的终局失败，会把整条 handoff 拖死。
+      expect(result).toContain('没有可调查的项目文件');
+      expect(calls).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('只有隐藏文件与依赖目录时同样视为无可调查内容', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pm1-hidden-'));
+    try {
+      await writeFile(join(directory, '.env'), 'SECRET=hidden');
+      await mkdir(join(directory, 'node_modules'));
+      await mkdir(join(directory, 'dist'));
+      let calls = 0;
+      const result = await investigatePlanningProject({
+        directory,
+        intent: '调研',
+        initialContext: '',
+        signal: new AbortController().signal,
+        callLlm: async () => {
+          calls += 1;
+          return JSON.stringify({ action: 'list', path: '.' });
+        },
+      });
+
+      expect(result).toContain('没有可调查的项目文件');
+      expect(calls).toBe(0);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -161,6 +213,8 @@ describe('PM1 自主只读调查', () => {
   it('调查动作持续非 JSON 时失败并保留原始输出片段', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'pm1-garbage-'));
     try {
+      // 目录里要有可调查文件，否则会被「空目录」短路，走不到 JSON 修复重试这条路径。
+      await writeFile(join(directory, 'index.ts'), 'export const ok = true;');
       let calls = 0;
       const failure = investigatePlanningProject({
         directory,

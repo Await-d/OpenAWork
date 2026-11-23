@@ -250,6 +250,129 @@ describe('系统收口：用户不处理也不会永久滞留', () => {
   });
 });
 
+describe('与底层待办对账：用户已处理但通知没收口', () => {
+  beforeEach(() => {
+    dbModule.sqliteRun('DELETE FROM permission_requests', []);
+    dbModule.sqliteRun('DELETE FROM question_requests', []);
+  });
+
+  function insertPendingPermission(requestId: string, sessionId = SESSION): void {
+    dbModule.sqliteRun(
+      `INSERT OR REPLACE INTO permission_requests
+         (id, session_id, tool_name, scope, reason, risk_level, status)
+       VALUES (?, ?, 'bash', 'bash', '原因', 'medium', 'pending')`,
+      [requestId, sessionId],
+    );
+  }
+
+  function insertPendingQuestion(requestId: string, sessionId = SESSION): void {
+    dbModule.sqliteRun(
+      `INSERT OR REPLACE INTO question_requests
+         (id, session_id, user_id, tool_name, title, questions_json, status)
+       VALUES (?, ?, ?, 'ask', '标题', '[]', 'pending')`,
+      [requestId, sessionId, USER],
+    );
+  }
+
+  /** 造一条已过对账宽限期的通知：只有这类行参与对账。 */
+  function insertAged(input: {
+    dedupeKey?: string | null;
+    eventType: string;
+    id: string;
+    sessionId?: string;
+  }): void {
+    const kind =
+      input.eventType === 'permission_asked' || input.eventType === 'question_asked'
+        ? 'actionable'
+        : 'informational';
+    dbModule.sqliteRun(
+      `INSERT INTO notifications
+         (id, user_id, session_id, event_type, kind, title, body, status, dedupe_key, created_at)
+       VALUES (?, ?, ?, ?, ?, 'title', 'body', 'unread', ?, datetime('now', '-5 minutes'))`,
+      [input.id, USER, input.sessionId ?? SESSION, input.eventType, kind, input.dedupeKey ?? null],
+    );
+  }
+
+  it('底层提问已消解 → 对账把通知收成 expired', () => {
+    insertAged({ dedupeKey: 'question_asked:req-gone', eventType: 'question_asked', id: 'r-1' });
+
+    notificationStore.reconcileActionableNotifications(USER);
+
+    expect(statusOf('r-1')).toBe('expired');
+  });
+
+  it('底层待办仍在 → 通知保留', () => {
+    insertPendingQuestion('req-live');
+    insertAged({ dedupeKey: 'question_asked:req-live', eventType: 'question_asked', id: 'r-2' });
+
+    notificationStore.reconcileActionableNotifications(USER);
+
+    expect(statusOf('r-2')).toBe('unread');
+  });
+
+  it('审批类同口径：请求仍在则保留，已裁决则收口', () => {
+    insertPendingPermission('req-perm-live');
+    insertAged({
+      dedupeKey: 'permission_asked:req-perm-live',
+      eventType: 'permission_asked',
+      id: 'r-3',
+    });
+    insertAged({
+      dedupeKey: 'permission_asked:req-perm-gone',
+      eventType: 'permission_asked',
+      id: 'r-4',
+    });
+
+    notificationStore.reconcileActionableNotifications(USER);
+
+    expect(statusOf('r-3')).toBe('unread');
+    expect(statusOf('r-4')).toBe('expired');
+  });
+
+  it('无法定位 requestId 的存量通知：同会话仍有同类 pending 时不误清', () => {
+    insertPendingQuestion('req-other');
+    insertAged({ eventType: 'question_asked', id: 'r-legacy' });
+
+    notificationStore.reconcileActionableNotifications(USER);
+
+    expect(statusOf('r-legacy')).toBe('unread');
+  });
+
+  it('对账不跨会话：别的会话 pending 保不住本会话的通知', () => {
+    seedSession('other-session');
+    insertPendingQuestion('req-cross', 'other-session');
+    insertAged({ dedupeKey: 'question_asked:req-cross', eventType: 'question_asked', id: 'r-5' });
+
+    notificationStore.reconcileActionableNotifications(USER);
+
+    expect(statusOf('r-5')).toBe('expired');
+  });
+
+  it('宽限期内的新通知不参与对账', () => {
+    insert({ id: 'r-fresh', eventType: 'question_asked' });
+
+    notificationStore.reconcileActionableNotifications(USER);
+
+    expect(statusOf('r-fresh')).toBe('unread');
+  });
+
+  it('提问回答后对应通知转 acted（dedupe_key 匹配）', () => {
+    insert({ id: 'r-act', eventType: 'question_asked' });
+    dbModule.sqliteRun(
+      `UPDATE notifications SET dedupe_key = 'question_asked:req-answered' WHERE id = 'r-act'`,
+      [],
+    );
+
+    notificationStore.markQuestionNotificationsActedByRequestIds({
+      requestIds: ['req-answered'],
+      sessionId: SESSION,
+      userId: USER,
+    });
+
+    expect(statusOf('r-act')).toBe('acted');
+  });
+});
+
 describe('用户处理：acted / archived 语义', () => {
   it('审批提交后对应通知转 acted（而非仅 read）', () => {
     insert({

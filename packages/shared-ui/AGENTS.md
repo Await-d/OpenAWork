@@ -26,7 +26,7 @@ src/
 ├── RegistrySourceManager.tsx
 ├── PermissionPrompt.tsx / PermissionConfirmDialog.tsx / PermissionHistory.tsx
 ├── PlanPanel.tsx / PlanHistoryPanel.tsx / RootCausePanel.tsx
-├── CronManager.tsx / ScheduleManagerUI.tsx
+├── ScheduleManagerUI.tsx          # 定时任务（CronManager.tsx 已于 261103 随零消费方清理删除）
 ├── UsageDashboard.tsx / BudgetAlert.tsx
 ├── DiagnosticCard.tsx / LogViewer.tsx
 ├── OAuthButton.tsx / QRCodeDisplay.tsx / QRCodeScanner.tsx

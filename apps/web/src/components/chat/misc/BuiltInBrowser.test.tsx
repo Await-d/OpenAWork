@@ -223,6 +223,25 @@ describe('BuiltInBrowser', () => {
   });
 
   /**
+   * 回归：输入法组合态下按 Enter 属于「确认候选词」，不能当成地址栏导航。
+   *
+   * 中文 / 日文输入法选词时回车会冒泡到地址栏 keydown，若不加组合态守卫，
+   * 半成品网址会被直接提交出去。
+   */
+  it('IME 组合态下按 Enter 不导航，普通 Enter 才导航', () => {
+    render(<BuiltInBrowser workspacePath="E:\\01.Projects\\OpenAWork" />);
+
+    const input = screen.getByPlaceholderText('输入网址或搜索…');
+    fireEvent.change(input, { target: { value: 'example.test' } });
+
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(screen.getByTitle('内置浏览器').getAttribute('src')).toBe('about:blank');
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByTitle('内置浏览器').getAttribute('src')).toBe('https://example.test');
+  });
+
+  /**
    * 回归：关掉最后一个标签必须重建内容区。
    *
    * 旧实现只重置 `tabs`、没有同步 `activeTabId`，iframe 的 key（含 `activeTabId`）

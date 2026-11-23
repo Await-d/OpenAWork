@@ -226,7 +226,7 @@ describe('任务5权限/问题恢复真实 stream seam', { timeout: 30_000 }, ()
     assertRecoveryRequests();
   });
 
-  it('无历史的连续 413 在真实 HTTP 路径上到达既定轮数上限后停止', async () => {
+  it('无历史可压缩时在首次 413 后停止，不重复发送同一超限上下文', async () => {
     seedEmptySession();
     queueNoHistory413Responses(11);
     const sessionContext = loadSessionContext(SESSION_ID, USER_ID);
@@ -253,12 +253,11 @@ describe('任务5权限/问题恢复真实 stream seam', { timeout: 30_000 }, ()
       writeChunk: () => undefined,
     });
 
-    expect(upstream.requests).toHaveLength(11);
-    expect(
-      upstream.requests.filter(
-        (body) => (JSON.parse(body) as { stream?: boolean }).stream === true,
-      ),
-    ).toHaveLength(11);
+    // Both runners may use streaming transport; distinguish the independent title prompt.
+    expect(upstream.requests).toHaveLength(2);
+    expect(upstream.requests.filter((body) => !body.includes('你是一个标题生成器'))).toHaveLength(
+      1,
+    );
     expect(result.stopReason).toBe('error');
     expect(result.statusCode).toBe(200);
   });

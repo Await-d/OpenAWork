@@ -49,6 +49,7 @@ function createHarness(handleSessionId = 'A') {
       deps.streamingSegmentsRef.current = [];
       deps.streamThinkingBlocksRef.current = [];
     }),
+    savedChatDefaultsRef: ref(null),
     restoreScrollTop: vi.fn(),
     rightPanelStateRef: ref(createInitialChatRightPanelState()),
     scrollRegionRef: ref(null),
@@ -79,12 +80,14 @@ function createHarness(handleSessionId = 'A') {
     setPendingQuestions: vi.fn(),
     setPermissionMode: vi.fn(),
     setReasoningEffort: vi.fn(),
+    setContextWindowOverride: vi.fn(),
     setRecoveredStreamSnapshot: vi.fn(),
     setRecoveryActiveStream: vi.fn(),
     setRightPanelState: vi.fn(),
     setSelectedChildSessionId: vi.fn(),
     setServerTotalTurnCount: vi.fn(),
     setSessionModesHydrated: vi.fn(),
+    setSessionOriginBadge: vi.fn(),
     setSessionStateStatus: vi.fn(),
     setSessionTasks: vi.fn(),
     setSessionTodos: vi.fn(),

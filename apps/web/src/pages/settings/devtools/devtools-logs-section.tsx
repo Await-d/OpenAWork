@@ -1,3 +1,4 @@
+import { formatServerTime } from '@openAwork/shared';
 import React from 'react';
 import type { CSSProperties } from 'react';
 import type { DevtoolsSourceState, SettingsDevLogRecord } from '../state/settings-types.js';
@@ -262,9 +263,7 @@ export function DevtoolsLogsSection({
                 const key = buildLogKey(log);
                 const isActive = selectedLogKey === key || (!selectedLogKey && index === 0);
                 const isError = log.level === 'error';
-                const ts = log.createdAt
-                  ? new Date(log.createdAt).toLocaleTimeString('zh-CN', { hour12: false })
-                  : null;
+                const ts = log.createdAt ? formatServerTime(log.createdAt) : null;
 
                 return (
                   <button

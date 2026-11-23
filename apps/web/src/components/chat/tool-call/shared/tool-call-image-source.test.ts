@@ -69,6 +69,19 @@ describe('resolveToolCallImageSource — look_at', () => {
     ).toBeNull();
   });
 
+  it('file_path 是 http(s) / data URL 时按对应源解析（与渠道发图共用判定）', () => {
+    expect(resolveToolCallImageSource('look_at', { file_path: REMOTE_IMAGE_URL })).toEqual({
+      kind: 'remote',
+      src: REMOTE_IMAGE_URL,
+      alt: '已查看的图片',
+    });
+    expect(resolveToolCallImageSource('look_at', { file_path: PNG_DATA_URL })).toEqual({
+      kind: 'inline',
+      src: PNG_DATA_URL,
+      alt: '已查看的图片',
+    });
+  });
+
   it('image_data 与 file_path 皆无 → null', () => {
     expect(resolveToolCallImageSource('look_at', {})).toBeNull();
     expect(resolveToolCallImageSource('look_at', { prompt: '这张图里有什么？' })).toBeNull();
@@ -263,6 +276,65 @@ describe('resolveToolCallImageSource — computer_use', () => {
       resolveToolCallImageSource('desktop_control', {}, JSON.stringify({ success: true }), [
         SCREENSHOT_ATTACHMENT,
       ]),
+    ).toBeNull();
+  });
+});
+
+describe('resolveToolCallImageSource — 渠道发图', () => {
+  it('http(s) file_path → remote 源（缩略图从入参取，输出里没有图片）', () => {
+    for (const toolName of ['WeixinSendImage', 'PluginSendImage', 'FeishuSendImage']) {
+      expect(resolveToolCallImageSource(toolName, { file_path: REMOTE_IMAGE_URL })).toEqual({
+        kind: 'remote',
+        src: REMOTE_IMAGE_URL,
+        alt: '已发送的图片',
+      });
+    }
+  });
+
+  it('图片类工作区 file_path → workspace 源', () => {
+    expect(
+      resolveToolCallImageSource('WeixinSendImage', { file_path: '/workspace/assets/cat.jpeg' }),
+    ).toEqual({
+      kind: 'workspace',
+      path: '/workspace/assets/cat.jpeg',
+      alt: '已发送的图片',
+    });
+  });
+
+  it('data URL file_path → inline 源', () => {
+    expect(resolveToolCallImageSource('PluginSendImage', { file_path: PNG_DATA_URL })).toEqual({
+      kind: 'inline',
+      src: PNG_DATA_URL,
+      alt: '已发送的图片',
+    });
+  });
+
+  it('非图片 file_path（文本 / 无扩展名）→ null', () => {
+    expect(
+      resolveToolCallImageSource('WeixinSendImage', { file_path: '/workspace/notes.md' }),
+    ).toBeNull();
+    expect(
+      resolveToolCallImageSource('WeixinSendImage', { file_path: '/workspace/blob' }),
+    ).toBeNull();
+  });
+
+  it('缺 file_path / file_path 非字符串 → null', () => {
+    expect(resolveToolCallImageSource('WeixinSendImage', { content: '看这张' })).toBeNull();
+    expect(resolveToolCallImageSource('WeixinSendImage', { file_path: 42 })).toBeNull();
+  });
+
+  it('工具名大小写与首尾空白不影响判定', () => {
+    expect(
+      resolveToolCallImageSource('  weixinSendImage ', { file_path: REMOTE_IMAGE_URL })?.kind,
+    ).toBe('remote');
+  });
+
+  it('其它渠道发送工具（发消息 / 发文件）即便带图片 file_path 也不渲染缩略图', () => {
+    expect(
+      resolveToolCallImageSource('PluginSendMessage', { file_path: REMOTE_IMAGE_URL }),
+    ).toBeNull();
+    expect(
+      resolveToolCallImageSource('WeixinSendFile', { file_path: REMOTE_IMAGE_URL }),
     ).toBeNull();
   });
 });

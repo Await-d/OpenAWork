@@ -84,13 +84,13 @@ describe('MCPServerConfig shared-ui real public boundary', () => {
         disabledTools: ['codegraph_status'],
       },
       {
-        id: 'omo',
-        name: 'omo',
+        id: 'lsp',
+        name: 'lsp',
         transport: 'stdio',
-        command: 'openawork-virtual-omo',
-        url: 'https://fake.invalid/omo',
+        command: 'openawork-virtual-lsp',
+        url: 'https://fake.invalid/lsp',
         builtin: true,
-        builtinKind: 'adapter',
+        builtinKind: 'virtual',
         source: 'builtin',
         enabled: true,
       },
@@ -102,12 +102,12 @@ describe('MCPServerConfig shared-ui real public boundary', () => {
 
     // When: the locked rows render and their editable management fields are changed.
     expect(screen.queryByDisplayValue('openawork-virtual-codegraph')).toBeNull();
-    expect(screen.queryByDisplayValue('openawork-virtual-omo')).toBeNull();
+    expect(screen.queryByDisplayValue('openawork-virtual-lsp')).toBeNull();
     expect(screen.getAllByText('内置桥接')).toHaveLength(2);
 
     fireEvent.click(readElement(screen.getAllByLabelText('启用'), 0));
     fireEvent.change(readElement(screen.getAllByLabelText('禁用工具'), 1), {
-      target: { value: 'omo_list_agents, omo_read_session' },
+      target: { value: 'lsp_rename, lsp_hover' },
     });
 
     // Then: enabled and disabledTools persist, but the patch never reintroduces command/url.
@@ -121,72 +121,72 @@ describe('MCPServerConfig shared-ui real public boundary', () => {
     expect(codegraphPatch).not.toHaveProperty('command');
     expect(codegraphPatch).not.toHaveProperty('url');
 
-    const [omoId, omoPatch] = readUpdateCall(onUpdate.mock.calls, 1);
-    expect(omoId).toBe('omo');
-    expect(omoPatch).toMatchObject({
-      disabledTools: ['omo_list_agents', 'omo_read_session'],
+    const [lspId, lspPatch] = readUpdateCall(onUpdate.mock.calls, 1);
+    expect(lspId).toBe('lsp');
+    expect(lspPatch).toMatchObject({
+      disabledTools: ['lsp_rename', 'lsp_hover'],
       transport: 'stdio',
     });
-    expect(omoPatch).not.toHaveProperty('command');
-    expect(omoPatch).not.toHaveProperty('url');
+    expect(lspPatch).not.toHaveProperty('command');
+    expect(lspPatch).not.toHaveProperty('url');
   });
 
-  it('preserves explicit user/plugin trust when persisting protected adapter rows', () => {
-    // Given: protected OMO rows came from user/plugin state but contain spoofed endpoint fields.
-    const userOmo: MCPServerEntry = {
-      id: 'omo',
-      name: 'user omo',
+  it('preserves explicit user/plugin trust when persisting protected virtual rows', () => {
+    // Given: protected virtual rows came from user/plugin state but contain spoofed endpoint fields.
+    const userLsp: MCPServerEntry = {
+      id: 'lsp',
+      name: 'user lsp',
       transport: 'stdio',
       command: 'fake-user-command',
-      url: 'https://fake.invalid/user-omo',
+      url: 'https://fake.invalid/user-lsp',
       builtin: true,
-      builtinKind: 'adapter',
+      builtinKind: 'virtual',
       source: 'user',
       enabled: false,
-      disabledTools: ['omo_read_session'],
+      disabledTools: ['lsp_hover'],
     };
-    const pluginOmo: MCPServerEntry = {
-      id: 'omo-plugin',
-      name: 'plugin omo',
+    const pluginLsp: MCPServerEntry = {
+      id: 'lsp-plugin',
+      name: 'plugin lsp',
       transport: 'stdio',
       command: 'fake-plugin-command',
-      url: 'https://fake.invalid/plugin-omo',
+      url: 'https://fake.invalid/plugin-lsp',
       builtin: true,
-      builtinKind: 'adapter',
+      builtinKind: 'virtual',
       source: 'user',
       enabled: true,
-      disabledTools: ['omo_list_agents'],
+      disabledTools: ['lsp_rename'],
     };
-    Object.defineProperty(pluginOmo, 'source', {
+    Object.defineProperty(pluginLsp, 'source', {
       value: 'plugin',
       enumerable: true,
       configurable: true,
     });
 
     // When: the settings persistence helper prepares rows for the backend.
-    const persisted = toPersistedMcpServers([userOmo, pluginOmo]);
-    const persistedUserOmo = readPersistedServer(persisted, 0);
-    const persistedPluginOmo = readPersistedServer(persisted, 1);
+    const persisted = toPersistedMcpServers([userLsp, pluginLsp]);
+    const persistedUserLsp = readPersistedServer(persisted, 0);
+    const persistedPluginLsp = readPersistedServer(persisted, 1);
 
     // Then: fake endpoints are stripped, but protected rows never gain system trust.
-    expect(persistedUserOmo).toMatchObject({
-      id: 'omo',
+    expect(persistedUserLsp).toMatchObject({
+      id: 'lsp',
       source: 'user',
       enabled: false,
-      disabledTools: ['omo_read_session'],
+      disabledTools: ['lsp_hover'],
       transport: 'stdio',
     });
-    expect(persistedUserOmo).not.toHaveProperty('command');
-    expect(persistedUserOmo).not.toHaveProperty('url');
-    expect(persistedPluginOmo).toMatchObject({
-      id: 'omo-plugin',
+    expect(persistedUserLsp).not.toHaveProperty('command');
+    expect(persistedUserLsp).not.toHaveProperty('url');
+    expect(persistedPluginLsp).toMatchObject({
+      id: 'lsp-plugin',
       source: 'user',
       enabled: true,
-      disabledTools: ['omo_list_agents'],
+      disabledTools: ['lsp_rename'],
       transport: 'stdio',
     });
-    expect(persistedPluginOmo).not.toHaveProperty('command');
-    expect(persistedPluginOmo).not.toHaveProperty('url');
+    expect(persistedPluginLsp).not.toHaveProperty('command');
+    expect(persistedPluginLsp).not.toHaveProperty('url');
   });
 
   it('Given multiple rows When removing each row Then dispatches the matching MCP server id', () => {
@@ -202,11 +202,11 @@ describe('MCPServerConfig shared-ui real public boundary', () => {
         enabled: true,
       },
       {
-        id: 'omo',
-        name: 'omo',
+        id: 'lsp',
+        name: 'lsp',
         transport: 'stdio',
         builtin: true,
-        builtinKind: 'adapter',
+        builtinKind: 'virtual',
         source: 'builtin',
         enabled: true,
       },
@@ -223,13 +223,13 @@ describe('MCPServerConfig shared-ui real public boundary', () => {
 
     expect(document.querySelectorAll('[data-mcp-row]')).toHaveLength(3);
     expect(document.querySelector('[data-mcp-row="codegraph"]')).not.toBeNull();
-    expect(document.querySelector('[data-mcp-row="omo"]')).not.toBeNull();
+    expect(document.querySelector('[data-mcp-row="lsp"]')).not.toBeNull();
     expect(document.querySelector('[data-mcp-row="fs"]')).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '移除' }));
     fireEvent.click(readElement(screen.getAllByRole('button', { name: '禁用' }), 0));
     fireEvent.click(readElement(screen.getAllByRole('button', { name: '禁用' }), 1));
 
-    expect(onRemove.mock.calls).toEqual([['fs'], ['codegraph'], ['omo']]);
+    expect(onRemove.mock.calls).toEqual([['fs'], ['codegraph'], ['lsp']]);
   });
 });

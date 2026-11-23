@@ -16,7 +16,6 @@ import { resolveSessionWorkspacePath } from '../session/session-workspace-resolu
 import { resolveFrozenWorkspaceContext } from '../session/workspace-context-snapshot.js';
 import {
   appendSessionMessageV2 as appendSessionMessage,
-  approveToolPermission,
   listSessionMessagesV2 as listSessionMessages,
   rejectToolPermission,
 } from '../message/message-v2-adapter.js';
@@ -30,18 +29,14 @@ import {
   mergeFileDiffs,
   traceFileDiffs,
 } from '../tools/modified-files-summary.js';
-import {
-  createDefaultSandbox,
-  recordBlockedToolCallsForPendingRequest,
-  reconcileResumedTaskChildSession,
-} from '../tools/tool-sandbox.js';
+import { reconcileResumedTaskChildSession } from '../tools/tool-sandbox.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tools/tool-result-contract.js';
 import {
   CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
-  DIALOGUE_MODE_SYSTEM_PROMPTS,
   LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
   YOLO_MODE_SYSTEM_PROMPT,
 } from './stream-system-prompts.js';
+import { resolveDialogueModePromptForRequest } from '../prompt/resolve-dialogue-mode-prompt.js';
 import { calculateTokenUsageCost, KeywordDetectorImpl } from '@openAwork/agent-core';
 import { buildCapabilityContext } from './capabilities.js';
 import {
@@ -75,7 +70,11 @@ import {
   streamRequestSchema,
 } from './stream.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
-import { buildSingleToolPartialOutputWriter } from './single-tool-live-output.js';
+import {
+  deferBlockedToolCalls,
+  replayBlockedToolCalls,
+  type ResumedToolResult,
+} from './blocked-tool-call-resume.js';
 import { publishTeamUsageEvent } from './stream-team-events.js';
 import {
   clearInFlightStreamRequest,
@@ -126,7 +125,7 @@ import {
   buildCompanionPrompt,
   loadCompanionSettingsForUser,
 } from '../workspace/companion-settings.js';
-import type { InputImageContent } from '@openAwork/shared';
+import type { DialogueMode, InputImageContent } from '@openAwork/shared';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 export function resolveBlockedCalls(
@@ -142,14 +141,6 @@ export function resolveBlockedCalls(
       rawInput: payload.rawInput,
     },
   ];
-}
-
-function hasResidualPendingPermissionRequests(sessionId: string): boolean {
-  const row = sqliteGet<{ id: string }>(
-    `SELECT id FROM permission_requests WHERE session_id = ? AND status = 'pending' LIMIT 1`,
-    [sessionId],
-  );
-  return Boolean(row);
 }
 
 /**
@@ -277,6 +268,8 @@ async function waitForSessionStreamSlot(input: {
 }
 
 async function continueFromApprovedToolResult(input: {
+  replayCalls?: BlockedToolCallResumeEntry[];
+  dialogueModeAfterApproval?: DialogueMode;
   initialToolResults: Array<{
     attachments?: InputImageContent[];
     isError: boolean;
@@ -294,9 +287,12 @@ async function continueFromApprovedToolResult(input: {
     throw new Error('目标会话不存在。');
   }
 
+  const savedRequest = streamRequestSchema.parse(input.payload.requestData);
   const requestData = resolveStreamRequestUpstreamRetry({
     metadataJson: sessionContext.metadataJson,
-    requestData: streamRequestSchema.parse(input.payload.requestData),
+    requestData: input.dialogueModeAfterApproval
+      ? { ...savedRequest, dialogueMode: input.dialogueModeAfterApproval }
+      : savedRequest,
     userId: input.userId,
   });
   const settingsRow = sqliteGet<{ value: string }>(
@@ -345,6 +341,19 @@ async function continueFromApprovedToolResult(input: {
       }),
   });
   const sessionMeta = parseSessionMetadataJson(sessionContext.metadataJson);
+  // 来源托管会话（渠道 / 定时任务）**没有**对话模式：本路径（审批续跑 / 后台派遣）的取值
+  // 此前只用 `requestData.dialogueMode`，而 `/stream` 走 `resolveStreamInteractionModes`
+  // 的「请求级 > metadata」回落。两者不同源会导致同一个会话在恢复轮与正常轮拿到不同的
+  // 对话模式：请求未带 dialogueMode 时恢复正常轮丢失 metadata 里的模式（澄清只读白名单
+  // 与模式提示词都不生效），请求误带时来源会话又会踩注入「澄清」的坑。
+  // 现统一经 `resolveStreamInteractionModes` 解析（`stream.ts:1039` 同源），来源会话归零
+  // 语义由该函数内部的 `isSourceManagedSessionMetadata` 分支保证，无需在此重复判定。
+  // 一次解析同时取 dialogueMode 与 yoloMode，避免两处独立投影漂移。
+  const interactionModes = resolveStreamInteractionModes({
+    metadataJson: sessionContext.metadataJson,
+    requestData,
+  });
+  const effectiveDialogueMode = interactionModes.dialogueMode;
   const runtimePolicy = resolveSessionRuntimePolicy(sessionMeta);
   const resumedUser = loadSessionUser(input.sessionId, input.userId);
   const companionPrompt = resumedUser
@@ -360,22 +369,18 @@ async function continueFromApprovedToolResult(input: {
   const detection = detector.detect(requestData.message);
   const injectedPrompt = detection.injectedPrompt ?? null;
   const lspGuidance = runtimePolicy.includeLspGuidance
-    ? requestData.dialogueMode === 'clarify'
+    ? effectiveDialogueMode === 'clarify'
       ? CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
       : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
     : null;
-  const dialogueModePrompt =
-    requestData.dialogueMode !== undefined
-      ? DIALOGUE_MODE_SYSTEM_PROMPTS[requestData.dialogueMode]
-      : null;
-  // 与 stream.ts 的 resolveStreamInteractionModes 共用同一优先级（请求 permissionMode 规范键
-  // > 请求 yoloMode 旧布尔 > 会话 metadata 解析结果），避免两条入口的 YOLO 提示词投影漂移。
-  const yoloModePrompt = resolveStreamInteractionModes({
-    metadataJson: sessionContext.metadataJson,
-    requestData,
-  }).yoloMode
-    ? YOLO_MODE_SYSTEM_PROMPT
-    : null;
+  const dialogueModePrompt = resolveDialogueModePromptForRequest({
+    userId: input.userId,
+    dialogueMode: effectiveDialogueMode,
+    effectiveAgentId: route.effectiveAgentId,
+  });
+  // YOLO 档位复用上方同一次 `resolveStreamInteractionModes` 解析（请求 permissionMode 规范键
+  // > 请求 yoloMode 旧布尔 > 会话 metadata 解析结果），避免两条入口的投影漂移。
+  const yoloModePrompt = interactionModes.yoloMode ? YOLO_MODE_SYSTEM_PROMPT : null;
   const webSearchEnabled =
     requestData.webSearchEnabled ?? isWebSearchEnabled(sessionContext.metadataJson);
   const filteredTools = filterEnabledGatewayToolsForDialogueMode(
@@ -389,10 +394,9 @@ async function continueFromApprovedToolResult(input: {
       ),
       sessionContext.metadataJson,
     ),
-    // 本轮提示词由 `requestData.dialogueMode` 决定（恢复轮沿用原始请求）。工具面必须
-    // 跟同一模式收敛：澄清完成会在回复响应前把会话元数据切成 coding，若只按元数据
-    // 过滤，恢复出的那一轮会带着"澄清（只读）"提示词却拿到写/执行工具。
-    requestData.dialogueMode,
+    // 提示词与工具面按同一有效模式收敛。普通恢复沿用请求模式；方案批准触发切换时，
+    // 上方用服务端落库的新模式覆盖旧请求的澄清模式。
+    effectiveDialogueMode,
   );
   // 团队层（pm1/pm2/executor/reviewer 后台执行经此路径）：与 stream.ts 一致地
   //   1) 注入按会话绑定的 flat MCP 工具，2) 施加 toolset 门控 + 内置指令注入。
@@ -604,7 +608,7 @@ async function continueFromApprovedToolResult(input: {
       // after that (older) message id would silently delete the siblings' results.
       // Idempotency for retried resumes comes from the deterministic
       // clientRequestId keying instead of transcript truncation.
-      for (const initialToolResult of input.initialToolResults) {
+      const persistResult = async (initialToolResult: ResumedToolResult): Promise<void> => {
         const observability =
           input.payload.observability ??
           buildStreamToolObservability({
@@ -682,12 +686,55 @@ async function continueFromApprovedToolResult(input: {
             diffs: resumedFileDiffs,
           });
         }
+      };
+      for (const result of input.initialToolResults) await persistResult(result);
+
+      const replayCalls = input.replayCalls ?? [];
+      // 迟到回答的旧调用既不能执行，也不能转移到新轮次的待决交互。
+      // 权限批准仍保留执行已获批调用的语义。
+      if (
+        input.resumedAfterApproval === true ||
+        !hasTurnContinuationAfterPause({
+          anchorCallId: input.payload.toolCallId,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        })
+      ) {
+        if (input.dialogueModeAfterApproval && replayCalls.length > 0) {
+          // 方案审批只批准方案。切换前的兄弟调用不得借新模式重放或转交另一项待决交互。
+          const completedCallIds = new Set(
+            listSessionMessages(input).flatMap((message) =>
+              message.content.flatMap((part) =>
+                part.type === 'tool_result' && !part.pendingPermissionRequestId && !part.isError
+                  ? [part.toolCallId]
+                  : [],
+              ),
+            ),
+          );
+          for (const { toolCallId, toolName } of replayCalls) {
+            if (completedCallIds.has(toolCallId)) continue;
+            await persistResult({
+              isError: true,
+              output: '模式切换前的工具调用未执行；如仍需要，请在编程模式下重新发起。',
+              toolCallId,
+              toolName,
+            });
+          }
+        } else if (hasPendingSessionInteraction(input.sessionId)) {
+          deferBlockedToolCalls({ calls: replayCalls, sessionId: input.sessionId });
+        } else {
+          await replayBlockedToolCalls({
+            ...input,
+            calls: replayCalls,
+            onResult: persistResult,
+            signal: abortController.signal,
+          });
+        }
       }
 
-      // D-6 gate: if other permission requests for this session are still pending
-      // (e.g. a held-back sibling needed its own approval), hold the turn instead of
-      // sending a partial tool_result set upstream.
-      if (hasResidualPendingPermissionRequests(input.sessionId)) {
+      // 权限和提问共用续跑入口。只要还有 pending/deciding 交互，就先保存
+      // 已完成的工具结果并保持暂停，不能把尚未回答的问题交给模型继续推断。
+      if (hasPendingSessionInteraction(input.sessionId)) {
         writeChunk({
           type: 'done',
           stopReason: 'tool_permission',
@@ -796,9 +843,7 @@ async function continueFromApprovedToolResult(input: {
                     lastRoundUsage: { inputTokens: renderedMessageTokens },
                     requestKind: 'conversation',
                   });
-                  if (proactiveResult.triggered) {
-                    sessionContext.metadataJson = proactiveResult.metadataJson;
-                  }
+                  sessionContext.metadataJson = proactiveResult.metadataJson;
                   return proactiveResult.triggered;
                 },
               }
@@ -816,6 +861,7 @@ async function continueFromApprovedToolResult(input: {
               round,
               runId,
               usage: result.usage,
+              context: { userId: input.userId, route, autoCompact: compactionSettings.auto },
             }),
           );
           persistMonthlyUsageRecord({
@@ -880,8 +926,8 @@ async function continueFromApprovedToolResult(input: {
               upstreamError: result.upstreamError,
             },
           });
-          if (overflowResult.triggered) {
-            sessionContext.metadataJson = overflowResult.metadataJson;
+          sessionContext.metadataJson = overflowResult.metadataJson;
+          if (overflowResult.recovered || overflowResult.syntheticContinuationPrompt) {
             overflowTriggered = true;
             if (overflowResult.syntheticContinuationPrompt) {
               syntheticContinuationPrompt = overflowResult.syntheticContinuationPrompt;
@@ -1036,7 +1082,9 @@ async function continueFromApprovedToolResult(input: {
       sessionId: input.sessionId,
     });
     void import('../handoff/workflow/inbound-delivery-dispatcher.js')
-      .then(({ dispatchInboundDeliveries }) => dispatchInboundDeliveries({ sessionId: input.sessionId }))
+      .then(({ dispatchInboundDeliveries }) =>
+        dispatchInboundDeliveries({ sessionId: input.sessionId }),
+      )
       .catch((error) => logGatewayWarn(`[team-inbound] idle wake failed: ${String(error)}`));
   }
 }
@@ -1133,80 +1181,9 @@ export async function resumeApprovedPermissionRequest(input: {
   try {
     blockedCalls = resolveBlockedCalls(input.payload);
 
-    const sandbox = createDefaultSandbox([], { userId: input.userId });
-    const executionContext = createStreamExecutionContext(
-      input.payload.clientRequestId,
-      input.payload.nextRound,
-      streamRequestSchema.parse(input.payload.requestData),
-      input.userId,
-    );
-    const initialToolResults: Array<{
-      attachments?: InputImageContent[];
-      isError: boolean;
-      output: unknown;
-      toolCallId: string;
-      toolName: string;
-    }> = [];
-
-    // 批准恢复路径没有打开的 WS/SSE：走 publish（持久化 + 广播），attach 订阅者
-    // 才能收到实时事件（与 continueFromApprovedToolResult 内同一口径）。
-    const writeResumeChunk = (chunk: RunEvent) => {
-      publishSessionRunEvent(input.sessionId, chunk, {
-        clientRequestId: input.payload.clientRequestId,
-      });
-    };
-
-    for (const [index, call] of blockedCalls.entries()) {
-      // V2: Transition ToolPart from pending → running before executing
-      approveToolPermission({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        callID: call.toolCallId,
-        title: call.toolName,
-      });
-
-      const toolResult = await sandbox.execute(
-        {
-          toolCallId: call.toolCallId,
-          toolName: call.toolName,
-          rawInput: call.rawInput,
-        },
-        new AbortController().signal,
-        input.sessionId,
-        {
-          ...executionContext,
-          // 被批准的 bash 同样实时推送 stdout（与正常轮同一条数据通道）。
-          onPartialOutput: buildSingleToolPartialOutputWriter({
-            toolCallId: call.toolCallId,
-            toolName: call.toolName,
-            clientRequestId: input.payload.clientRequestId,
-            writeChunk: writeResumeChunk,
-          }),
-        },
-      );
-
-      if (toolResult.pendingPermissionRequestId) {
-        // A held-back sibling still needs its own approval: keep this call and
-        // everything after it with the new pending request. The residual-pending
-        // gate inside continueFromApprovedToolResult then holds the turn.
-        recordBlockedToolCallsForPendingRequest(
-          toolResult.pendingPermissionRequestId,
-          blockedCalls.slice(index),
-        );
-        break;
-      }
-
-      initialToolResults.push({
-        ...(toolResult.attachments ? { attachments: toolResult.attachments } : {}),
-        isError: toolResult.isError,
-        output: toolResult.output,
-        toolCallId: call.toolCallId,
-        toolName: call.toolName,
-      });
-    }
-
     resumeResult = await continueFromApprovedToolResult({
-      initialToolResults,
+      initialToolResults: [],
+      replayCalls: blockedCalls,
       payload: input.payload,
       resumedAfterApproval: true,
       sessionId: input.sessionId,
@@ -1220,15 +1197,6 @@ export async function resumeApprovedPermissionRequest(input: {
     });
   } catch (error) {
     clearInternalTeamResumeRequest(input.payload.clientRequestId);
-    // V2: Transition ToolPart to error state on failure
-    for (const call of blockedCalls) {
-      rejectToolPermission({
-        sessionId: input.sessionId,
-        userId: input.userId,
-        callID: call.toolCallId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
     await reconcileResumedTaskChildSession({
       childSessionId: input.sessionId,
       pendingInteraction: false,
@@ -1410,6 +1378,12 @@ export async function continueSessionFromHistory(input: {
     throw new Error(`目标会话不存在：${input.sessionId}`);
   }
 
+  if (hasPendingSessionInteraction(input.sessionId)) {
+    setPersistedSessionStateStatus({ ...input, status: 'paused' });
+    input.writeChunk?.({ type: 'done', stopReason: 'tool_permission' });
+    return { statusCode: 200, stopReason: 'tool_permission' };
+  }
+
   const user = loadSessionUser(input.sessionId, input.userId);
   if (!user) {
     throw new Error(`Session user not found: ${input.userId}`);
@@ -1441,6 +1415,7 @@ export async function continueSessionFromHistory(input: {
 export async function resumeAnsweredQuestionRequest(input: {
   payload: ApprovedPermissionResumePayload;
   answerOutput: string;
+  dialogueModeAfterApproval?: DialogueMode;
   sessionId: string;
   userId: string;
 }): Promise<void> {
@@ -1456,7 +1431,14 @@ export async function resumeAnsweredQuestionRequest(input: {
 
   let resumeResult: { pendingInteraction: boolean; statusCode: number };
   try {
+    // 回答替代提问锚点的执行结果；迟到回答只入库，不重放已经翻篇的兄弟调用。
     resumeResult = await continueFromApprovedToolResult({
+      ...(input.dialogueModeAfterApproval
+        ? { dialogueModeAfterApproval: input.dialogueModeAfterApproval }
+        : {}),
+      replayCalls: resolveBlockedCalls(input.payload).filter(
+        (call) => call.toolCallId !== input.payload.toolCallId,
+      ),
       initialToolResults: [
         {
           isError: false,

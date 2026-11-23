@@ -478,6 +478,36 @@ describe('stream error contracts', () => {
     expect(explicitWithOverride.requestOverrides.maxTokens).toBe(8192);
   });
 
+  it('会话级 contextWindowOverride 优先于模型级挡位（不再跨会话串味）', async () => {
+    // 模型级挡位（user_settings.providers 里该模型的 contextWindowOverride）
+    // 是该用户下所有会话共享的默认值；会话 metadata 一旦写了同名键，必须由它生效。
+    providerCatalogMocks.getProviderForSelection.mockResolvedValue({
+      provider: {
+        ...chatProvider,
+        defaultModels: [{ ...chatProvider.defaultModels[0]!, contextWindowOverride: 200_000 }],
+      },
+      modelId: 'gpt-4o',
+    });
+    const requestData = streamRequestSchema.parse({
+      clientRequestId: 'req-session-context-window',
+      message: 'hello',
+    });
+
+    const modelLevelOnly = await resolveStreamModelRoute({
+      metadataJson: '{}',
+      requestData,
+      userId: USER_ID,
+    });
+    expect(modelLevelOnly.contextWindowOverride).toBe(200_000);
+
+    const sessionOverrides = await resolveStreamModelRoute({
+      metadataJson: JSON.stringify({ contextWindowOverride: 400_000 }),
+      requestData,
+      userId: USER_ID,
+    });
+    expect(sessionOverrides.contextWindowOverride).toBe(400_000);
+  });
+
   it('请求显式指定与会话绑定一致的 provider/model 时以请求为准', async () => {
     providerCatalogMocks.getProviderForSelection.mockResolvedValueOnce({
       provider: chatProvider,
@@ -623,5 +653,13 @@ describe('stream · 自助管理工具空参数拦截登记守卫', () => {
       (tool) => !toolsRequiringNonEmptyArgs.has(tool),
     );
     expect(missing).toEqual([]);
+  });
+
+  it('委派工具的规范名与历史别名必须同时登记（261102 规范名收敛遗留）', () => {
+    // 模型可见名是规范名 `subagent`（`TASK_TOOL_NAME`），历史别名 `task` 仍可能来自存量调用；
+    // 只登记别名会让规范名的空参调用漏过前置拦截，白跑一次 sandbox 往返。
+    // 该断言在补登记之前会失败（旧集合只有 `task`）。
+    expect(toolsRequiringNonEmptyArgs.has('task')).toBe(true);
+    expect(toolsRequiringNonEmptyArgs.has('subagent')).toBe(true);
   });
 });

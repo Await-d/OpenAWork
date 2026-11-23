@@ -21,8 +21,8 @@ export function mergeOptimisticUserMessage(
     return deduplicatedMessages;
   }
 
-  const hasServerEquivalent = [...deduplicatedMessages]
-    .reverse()
+  const hasServerEquivalent = deduplicatedMessages
+    .toReversed()
     .some((message) => areEquivalentOptimisticUserMessage(message, optimisticUserMessage));
 
   return hasServerEquivalent

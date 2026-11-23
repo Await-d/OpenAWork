@@ -1,4 +1,5 @@
 import { memo, type CSSProperties } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type { SessionRow } from '../state/session-page-types.js';
 import {
   isNestedInteractiveTarget,
@@ -131,6 +132,7 @@ export const SessionCard = memo(function SessionCard({
               value={renameValue}
               onChange={(e) => onRenameChange(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposingKeyboardEvent(e)) return;
                 e.stopPropagation();
                 if (e.key === 'Enter') onRenameCommit(s.id);
                 if (e.key === 'Escape') onRenameCancel();

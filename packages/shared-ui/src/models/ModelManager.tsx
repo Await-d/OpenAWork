@@ -1,4 +1,4 @@
-import type { CSSProperties, ChangeEvent, KeyboardEvent, ReactNode } from 'react';
+import type { CSSProperties, ChangeEvent, KeyboardEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { tokens, color } from '../tokens.js';
 import { compareModelsByName } from './model-picker-search.js';
@@ -89,8 +89,7 @@ export interface ModelManagerProps {
   style?: CSSProperties;
 }
 
-const DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO = 0.95;
-const DEFAULT_AUTO_COMPACT_TARGET_RATIO = 0.6;
+const MAX_COMPACTION_OUTPUT_RESERVE_TOKENS = 20_000;
 const DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS = 13_000;
 const MIN_AUTOMATIC_PRESERVE_RECENT_TOKENS = 10_000;
 const MAX_AUTOMATIC_PRESERVE_RECENT_TOKENS = 40_000;
@@ -134,78 +133,49 @@ function formatPrice(price: number | undefined): string {
   return `$${price.toFixed(2)}`;
 }
 
-function formatRatio(value: number | undefined, fallback: string): string {
-  if (value === undefined) return fallback;
-  return `${Math.round(value * 100)}%`;
+function isCompactionRatio(value: number | undefined): value is number {
+  return value !== undefined && value > 0 && value < 1;
 }
 
-function resolveThresholdRatio(value: number | undefined): number {
-  return value ?? DEFAULT_AUTO_COMPACT_THRESHOLD_RATIO;
+function positiveTokenCount(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) && value >= 1
+    ? Math.floor(value)
+    : undefined;
 }
 
-function resolveTargetRatio(value: number | undefined): number {
-  return value ?? DEFAULT_AUTO_COMPACT_TARGET_RATIO;
+function formatCompactionTokens(value: number): string {
+  return `${value.toLocaleString('zh-CN')} tokens`;
 }
 
-function formatWindowEstimate(contextWindow: number | undefined, ratio: number): string | null {
-  if (!contextWindow) {
-    return null;
-  }
-
-  return formatContext(Math.round(contextWindow * ratio));
-}
-
-function resolveTargetWindow(
-  contextWindow: number | undefined,
-  ratio: number | undefined,
-): number | undefined {
-  if (
-    !contextWindow ||
-    ratio === undefined ||
-    !Number.isFinite(ratio) ||
-    ratio <= 0 ||
-    ratio >= 1
-  ) {
-    return contextWindow ? DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS : undefined;
-  }
-  return Math.max(
-    MIN_AUTOMATIC_PRESERVE_RECENT_TOKENS,
-    Math.min(MAX_AUTOMATIC_PRESERVE_RECENT_TOKENS, Math.floor(contextWindow * ratio)),
+function buildAutoCompactEstimate(model: AIModelConfigItem) {
+  const contextWindow = positiveTokenCount(resolveEffectiveContextWindow(model));
+  const outputReserve = Math.min(
+    positiveTokenCount(model.maxOutputTokens) ?? MAX_COMPACTION_OUTPUT_RESERVE_TOKENS,
+    MAX_COMPACTION_OUTPUT_RESERVE_TOKENS,
   );
-}
-
-function buildAutoCompactSummary(model: AIModelConfigItem): string {
-  const thresholdRatio = resolveThresholdRatio(model.autoCompactThresholdRatio);
-  const targetRatio = resolveTargetRatio(model.autoCompactTargetRatio);
-  const contextWindow = resolveEffectiveContextWindow(model);
-  const thresholdText = formatRatio(thresholdRatio, '');
-  const targetWindowTokens = resolveTargetWindow(contextWindow, model.autoCompactTargetRatio);
-  const targetText = targetWindowTokens
-    ? formatContext(targetWindowTokens)
-    : formatRatio(targetRatio, '');
-  const thresholdWindow = formatWindowEstimate(contextWindow, thresholdRatio);
-  const targetWindow = targetWindowTokens ? formatContext(targetWindowTokens) : null;
-
-  if (thresholdWindow && targetWindow) {
-    return `按当前 ${formatContext(contextWindow)} 上下文，约在 ${thresholdWindow} 时触发，压缩后回到约 ${targetWindow}。`;
-  }
-
-  return `预计使用达到 ${thresholdText} 时触发，压缩后回到约 ${targetText}。`;
-}
-
-function getAutoCompactWarning(model: AIModelConfigItem): string | null {
-  const thresholdRatio = resolveThresholdRatio(model.autoCompactThresholdRatio);
-  const targetRatio = resolveTargetRatio(model.autoCompactTargetRatio);
-
-  if (targetRatio >= thresholdRatio) {
-    return '目标比例应低于阈值，否则触发压缩后几乎没有回收空间。';
-  }
-
-  if (thresholdRatio - targetRatio < 0.1) {
-    return '阈值与目标过近，压缩后释放的上下文空间可能偏少。';
-  }
-
-  return null;
+  const thresholdRatio = model.autoCompactThresholdRatio;
+  const targetRatio = model.autoCompactTargetRatio;
+  const unknown = '模型窗口未知，无法估算';
+  const trigger =
+    contextWindow === undefined
+      ? unknown
+      : formatCompactionTokens(
+          Math.floor(
+            Math.max(0, contextWindow - outputReserve) *
+              (isCompactionRatio(thresholdRatio) ? thresholdRatio : 1),
+          ),
+        );
+  const recentBudget = !isCompactionRatio(targetRatio)
+    ? `${formatCompactionTokens(DEFAULT_AUTOMATIC_PRESERVE_RECENT_TOKENS)}（默认）`
+    : contextWindow === undefined
+      ? unknown
+      : formatCompactionTokens(
+          Math.max(
+            MIN_AUTOMATIC_PRESERVE_RECENT_TOKENS,
+            Math.min(MAX_AUTOMATIC_PRESERVE_RECENT_TOKENS, Math.floor(contextWindow * targetRatio)),
+          ),
+        );
+  return { trigger, recentBudget };
 }
 
 function parseRatioInput(raw: string): number | undefined | null {
@@ -334,52 +304,12 @@ function CapabilityDot({ label }: { label: string }) {
   );
 }
 
-function InlineNotice({
-  children,
-  tone = 'info',
-}: {
-  children: ReactNode;
-  tone?: 'info' | 'warning';
-}) {
-  const palette =
-    tone === 'warning'
-      ? {
-          background: 'rgba(245, 158, 11, 0.12)',
-          border: 'rgba(245, 158, 11, 0.25)',
-          color: 'var(--fg-default)',
-        }
-      : {
-          background: 'rgba(59, 130, 246, 0.1)',
-          border: 'rgba(59, 130, 246, 0.22)',
-          color: 'var(--fg-default)',
-        };
-
-  return (
-    <div
-      style={{
-        marginTop: 6,
-        padding: '0.45rem 0.55rem',
-        borderRadius: tokens.radius.sm,
-        border: `1px solid ${palette.border}`,
-        background: palette.background,
-        color: palette.color,
-        fontSize: 10,
-        lineHeight: 1.45,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
 function ModelRatioInput({
   ariaLabel,
-  fallbackLabel,
   onCommit,
   value,
 }: {
   ariaLabel: string;
-  fallbackLabel: string;
   onCommit?: (next: number | undefined) => void;
   value?: number;
 }) {
@@ -423,7 +353,7 @@ function ModelRatioInput({
         minWidth: 92,
       }}
     >
-      <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>{fallbackLabel}</span>
+      <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>阈值倍率</span>
       <input
         aria-label={ariaLabel}
         type="number"
@@ -431,7 +361,8 @@ function ModelRatioInput({
         min={0.01}
         max={0.99}
         step={0.01}
-        placeholder={fallbackLabel === '阈值' ? '默认 0.95' : '默认 0.60'}
+        placeholder="不乘倍率"
+        readOnly={!onCommit}
         value={draft}
         onBlur={commit}
         onChange={(event) => setDraft(event.target.value)}
@@ -776,8 +707,8 @@ export function ModelManager({
             自动压缩会按模型上下文预算判断，而不是按固定消息条数触发。
           </div>
           <div style={{ fontSize: 11, color: tokens.color.muted, lineHeight: 1.5 }}>
-            阈值表示预计使用达到多少时开始压缩；目标预算用于控制保留的近期上下文。留空会跟随后端默认值（阈值
-            95%，近期上下文约 13K tokens）。
+            估算阈值为模型窗口减去输出预留（默认及上限均为 20,000 tokens），再乘以已设置的阈值倍率。
+            服务端运行时发现的窗口上限或覆盖配置可能改变实际触发阈值。
           </div>
         </div>
       </div>
@@ -825,7 +756,7 @@ export function ModelManager({
       ) : (
         (() => {
           // 表格行按模型名称统一降序展示（与聊天选择器 / 设置下拉一致）。
-          const sortedModels = [...provider.defaultModels].sort(compareModelsByName);
+          const sortedModels = provider.defaultModels.toSorted(compareModelsByName);
           // 搜索过滤
           const search = modelSearch.trim().toLowerCase();
           const filteredModels = search
@@ -1096,8 +1027,7 @@ export function ModelManager({
                         <td style={mutedStyle}>{formatPrice(model.outputPricePerMillion)}</td>
                         <td style={cellStyle}>
                           {(() => {
-                            const summary = buildAutoCompactSummary(model);
-                            const warning = getAutoCompactWarning(model);
+                            const { trigger, recentBudget } = buildAutoCompactEstimate(model);
 
                             return (
                               <>
@@ -1110,8 +1040,7 @@ export function ModelManager({
                                   }}
                                 >
                                   <ModelRatioInput
-                                    ariaLabel={`${model.label} 自动压缩阈值`}
-                                    fallbackLabel="阈值"
+                                    ariaLabel={`${model.label} 自动压缩阈值倍率`}
                                     value={model.autoCompactThresholdRatio}
                                     onCommit={
                                       onUpdateModel
@@ -1126,20 +1055,15 @@ export function ModelManager({
                                 </div>
                                 <div
                                   style={{
-                                    marginTop: 6,
+                                    marginTop: tokens.spacing.xs,
                                     fontSize: 10,
-                                    color: 'var(--fg-muted)',
+                                    color: tokens.color.muted,
                                     lineHeight: 1.45,
                                   }}
                                 >
-                                  当前：阈值{' '}
-                                  {formatRatio(model.autoCompactThresholdRatio, '默认 95%')} · 目标{' '}
-                                  {formatRatio(model.autoCompactTargetRatio, '默认 60%')}
+                                  <div>估算触发阈值：{trigger}</div>
+                                  <div>近期原文保留预算：{recentBudget}</div>
                                 </div>
-                                <InlineNotice tone="info">{summary}</InlineNotice>
-                                {warning ? (
-                                  <InlineNotice tone="warning">{`提醒：${warning}`}</InlineNotice>
-                                ) : null}
                               </>
                             );
                           })()}

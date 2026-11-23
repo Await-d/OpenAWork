@@ -83,8 +83,8 @@ describe('tool-sandbox MCP execution scope', () => {
     mocks.listMcpToolsForSessionMock.mockResolvedValue([]);
     mocks.getConfiguredMcpServerForSessionMock.mockReset();
     mocks.getConfiguredMcpServerForSessionMock.mockReturnValue({
-      id: 'omo',
-      name: 'OMO',
+      id: 'lsp',
+      name: 'lsp',
       transport: 'stdio',
       enabled: true,
     });
@@ -124,10 +124,10 @@ describe('tool-sandbox MCP execution scope', () => {
     mocks.callMcpToolForSessionMock.mockImplementationOnce(
       async (_sessionId: string, _input: unknown, scope?: McpCallScope) => {
         if (scope?.allowedServerIds?.length === 0) {
-          throw new Error('MCP server omo is not allowed for this session');
+          throw new Error('MCP server lsp is not allowed for this session');
         }
         return {
-          serverId: 'omo',
+          serverId: 'lsp',
           toolName: 'inspect',
           content: [{ type: 'text', text: 'should not execute' }],
           isError: false,
@@ -139,7 +139,7 @@ describe('tool-sandbox MCP execution scope', () => {
     const result = await sandbox.execute(
       {
         toolCallId: 'call-flat-mcp-team-empty',
-        toolName: 'mcp__omo__inspect',
+        toolName: 'mcp__lsp__inspect',
         rawInput: { q: 'secret' },
       },
       new AbortController().signal,
@@ -153,7 +153,7 @@ describe('tool-sandbox MCP execution scope', () => {
 
     expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledWith(
       'session-1',
-      { serverId: 'omo', toolName: 'inspect', arguments: { q: 'secret' } },
+      { serverId: 'lsp', toolName: 'inspect', arguments: { q: 'secret' } },
       { allowedServerIds: [] },
     );
     expect(result.isError).toBe(true);

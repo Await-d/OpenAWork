@@ -11,12 +11,19 @@ import { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ManagedBrowserTarget } from '@openAwork/browser-automation';
 
 import type { DownloadFileOptions } from '../../browser-live/browser-download.js';
 import { createChromiumDownloader } from '../../browser-live/chromium-downloader.js';
+
+vi.mock('../../infra/gateway-logger.js', () => ({
+  logGatewayDebug: vi.fn(),
+  logGatewayWarn: vi.fn(),
+}));
+
+import { logGatewayDebug, logGatewayWarn } from '../../infra/gateway-logger.js';
 
 const INSTALLATION_COMPLETE = 'INSTALLATION_COMPLETE';
 const EXECUTABLE_RELATIVE_PATH = join('chrome-linux64', 'chrome');
@@ -138,6 +145,8 @@ describe('createChromiumDownloader.ensureInstalled', () => {
   });
 
   it('首个镜像失败后回退到下一个镜像并最终安装成功', async () => {
+    vi.mocked(logGatewayWarn).mockClear();
+    vi.mocked(logGatewayDebug).mockClear();
     const browsersPath = await makeTempDir();
     const target = makeTarget(browsersPath, {
       downloadUrls: [
@@ -177,6 +186,13 @@ describe('createChromiumDownloader.ensureInstalled', () => {
     expect(lines.some((line) => line.includes('mirror-a'))).toBe(true);
     expect(lines.some((line) => line.includes('mirror-b'))).toBe(true);
     expect(await pathExists(join(target.directory, INSTALLATION_COMPLETE))).toBe(true);
+    expect(logGatewayDebug).toHaveBeenCalledWith(
+      '[chromium-downloader] browser installation probe unavailable',
+    );
+    expect(logGatewayWarn).toHaveBeenCalledWith(
+      '[chromium-downloader] browser mirror download failed',
+      { mirrorIndex: 1, mirrorCount: 2 },
+    );
   });
 
   it('全部镜像失败时抛出最后错误并清理临时目录 / zip', async () => {
@@ -204,6 +220,83 @@ describe('createChromiumDownloader.ensureInstalled', () => {
     expect(entries.some((entry) => entry.includes('.tmp-'))).toBe(false);
     expect(entries.some((entry) => entry.includes('.download-'))).toBe(false);
     expect(entries).toEqual([]);
+  });
+
+  it('镜像地址、日志及最终错误不泄漏 URL 凭据和任意查询参数', async () => {
+    const browsersPath = await makeTempDir();
+    const url =
+      'https://mirror-user:mirror-pass@example.test/file?signature=private-signature#private-fragment';
+    const lines: string[] = [];
+    const downloader = createChromiumDownloader({
+      resolveTargets: async () => [makeTarget(browsersPath, { downloadUrls: [url] })],
+      downloadFile: async () => {
+        throw new Error(`下载失败 ${url} Bearer private-bearer`);
+      },
+    });
+    await expect(
+      downloader.ensureInstalled(
+        browsersPath,
+        (line) => lines.push(line),
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('下载失败 https://example.test/file Bearer [REDACTED]');
+    const text = lines.join('\n');
+    for (const secret of [
+      'mirror-user',
+      'mirror-pass',
+      'private-signature',
+      'private-fragment',
+      'private-bearer',
+    ]) {
+      expect(text).not.toContain(secret);
+    }
+  });
+
+  it('解压期间取消不得覆盖旧目录，且清理所有临时产物', async () => {
+    const browsersPath = await makeTempDir();
+    const target = makeTarget(browsersPath);
+    await mkdir(target.directory, { recursive: true });
+    await writeFile(join(target.directory, 'old-installation'), 'keep');
+    const controller = new AbortController();
+    const downloader = createChromiumDownloader({
+      resolveTargets: async () => [target],
+      downloadFile: async (_url, destination) => {
+        await writeFile(destination, 'zip');
+      },
+      extractZip: async (_zipPath, directory) => {
+        await writeExecutable(directory, target.executableRelativePath);
+        controller.abort(new Error('安装超时'));
+      },
+    });
+    await expect(
+      downloader.ensureInstalled(browsersPath, () => undefined, controller.signal),
+    ).rejects.toThrow('安装超时');
+    expect(await pathExists(join(target.directory, 'old-installation'))).toBe(true);
+    expect(await readdir(browsersPath)).toEqual(['chromium-1208']);
+  });
+
+  it('解压产物校验失败时 warn，保留失败并清理临时文件', async () => {
+    vi.mocked(logGatewayWarn).mockClear();
+    const browsersPath = await makeTempDir();
+    const target = makeTarget(browsersPath);
+    const downloader = createChromiumDownloader({
+      resolveTargets: async () => [target],
+      downloadFile: async (_url, destination) => {
+        await writeFile(destination, 'zip-bytes');
+      },
+      extractZip: async (_zipPath, directory) => {
+        const executable = join(directory, target.executableRelativePath);
+        await mkdir(dirname(executable), { recursive: true });
+        await writeFile(executable, '');
+      },
+    });
+    await expect(
+      downloader.ensureInstalled(browsersPath, () => undefined, new AbortController().signal),
+    ).rejects.toThrow('解压产物无效');
+    expect(logGatewayWarn).toHaveBeenCalledWith(
+      '[chromium-downloader] browser target installation failed',
+    );
+    expect(await readdir(browsersPath)).toEqual([]);
   });
 
   it('按 ~5% 步长节流上报进度行', async () => {

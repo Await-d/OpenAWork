@@ -37,11 +37,15 @@ import { shouldStreamLocalReasoningBlock } from '../assistant/assistant-reasonin
 import { AssistantReasoningBlock } from '../assistant/assistant-reasoning-block.js';
 import { createReasoningExpandedBodyStyle } from '../assistant/reasoning-window.js';
 import { CollapsibleAssistantContent } from '../message/collapsible-assistant-content.js';
+import { CollapsibleUserContent } from '../message/collapsible-user-content.js';
 import { FoldDisabledContext } from '../markdown/fold-policy.js';
 import { renderMessageMediaAttachments } from './message-media-attachments.js';
 import { ModifiedFilesSummaryCard } from '../misc/modified-files-summary-card.js';
 import StreamingMarkdownContent from '../markdown/streaming-markdown-content.js';
 import { TaskToolInline } from '../tool-call/display/task-tool-inline.js';
+import { isToolInputPending } from '../tool-call/shared/pending-tool-input.js';
+import { shouldSuppressQuestionToolCall } from '../tool-call/shared/question-tool-suppression.js';
+import { ToolCallPendingCard } from '../tool-call/display/tool-call-pending-card.js';
 import {
   GroupedToolCallPill,
   groupConsecutiveTools,
@@ -78,7 +82,7 @@ export { ModelPicker, ModelSettingsPopover } from '../model-picker/model-picker-
 const MarkdownMessageContent = React.lazy(() => import('../markdown/markdown-message-content.js'));
 
 export function renderChatMessageContent(m: ChatMessage) {
-  if (m.role !== 'assistant') return m.content;
+  if (m.role !== 'assistant') return <CollapsibleUserContent content={m.content} />;
   return renderAssistantMessageContentValue(m.content, { messageId: m.id });
 }
 
@@ -131,8 +135,12 @@ export function renderChatMessageContentWithOptions(
     // 附件与媒体的渲染整体落在 `message-media-attachments.tsx`：该职责域此前一直堆在
     // 本文件里（图集 + 文件卡片 + 下载），把本文件推到 1462 行 —— 已按 `AGENTS.md`
     // 「1300–1500 为预警区间，应主动评估拆分」抽出，主文件回落到 1300 行以下。
-    // 返回 `null` 表示没有正文之外的额外内容，此时保持既有的「原样返回正文字符串」快路径。
-    return renderMessageMediaAttachments(m, options?.sessionId) ?? m.content;
+    // 返回 `null` 表示没有正文之外的额外内容，此时交给用户消息正文折叠渲染。
+    const mediaAttachments = renderMessageMediaAttachments(m, options?.sessionId);
+    if (mediaAttachments !== null) return mediaAttachments;
+    // 用户消息正文长度不受约束（粘贴整段日志 / 源码很常见），超长时必须默认折叠，
+    // 否则一条几万字符的消息会把整个会话页撑开，后面的对话被推到几屏之外。
+    return <CollapsibleUserContent content={m.content} />;
   }
   return renderAssistantMessageContentValue(m, { ...options, messageId: m.id });
 }
@@ -168,6 +176,7 @@ function renderToolCallContent(input: {
   };
   /** tool result 的图片附件（`computer_use` 最终截图），其余工具为空。 */
   attachments?: readonly InputImageContent[];
+  fileDiffs?: unknown;
   durationMs?: number;
   isError?: boolean;
   kind?: 'agent' | 'mcp' | 'skill' | 'tool';
@@ -182,7 +191,37 @@ function renderToolCallContent(input: {
   toolCallId?: string;
   toolName: string;
   toolInput: Record<string, unknown>;
+  /** 会话 id：透给工具卡，供文件变更卡「按需加载完整快照」。 */
+  sessionId?: string | undefined;
 }) {
+  // 提问工具在「等待回答」期间不产出任何流内条目（含骨架卡）——唯一入口是 composer
+  // 上方的 `InlineQuestionPanel`。这道闸必须放在 `isToolInputPending` **之前**，否则
+  // 入参没收全时会先闪一张骨架卡，正是「先工具调用、后跳成提问面板」的根源。
+  // 裁决口径与「结算后必须恢复可见」的理由见 `question-tool-suppression.ts`。
+  if (
+    shouldSuppressQuestionToolCall({
+      toolName: input.toolName,
+      isError: input.isError,
+      output: input.output,
+      status: input.status,
+    })
+  ) {
+    return null;
+  }
+
+  // 流式入参未收全：先给骨架占位，不要拿半截 JSON（`input.raw`）去渲染真实卡片。
+  // 子代理（task）也走这里：它不经 `ToolCallDisplay`，否则会漏掉同一道闸。
+  if (
+    isToolInputPending({
+      input: input.toolInput,
+      isError: input.isError,
+      output: input.output,
+      status: input.status,
+    })
+  ) {
+    return <ToolCallPendingCard key={input.reactKey} toolName={input.toolName} />;
+  }
+
   if (isSubagentToolName(input.toolName)) {
     return (
       <TaskToolInline
@@ -205,6 +244,7 @@ function renderToolCallContent(input: {
     <ToolCallDisplay
       approvalActions={input.approvalActions}
       attachments={input.attachments}
+      fileDiffs={input.fileDiffs}
       key={input.reactKey}
       input={input.toolInput}
       isError={input.isError}
@@ -215,6 +255,7 @@ function renderToolCallContent(input: {
       durationMs={input.durationMs}
       toolCallId={input.toolCallId}
       toolName={input.toolName}
+      sessionId={input.sessionId}
     />
   );
 }
@@ -299,6 +340,7 @@ function renderAssistantMessageContentValue(
       toolName: copiedToolCard.toolName,
       toolInput: copiedToolCard.input,
       output: copiedToolCard.output,
+      fileDiffs: copiedToolCard.fileDiffs,
       isError: copiedToolCard.isError,
       onOpenChildSession: options?.onOpenChildSession,
       pendingPermissionRequestId: copiedToolCard.pendingPermissionRequestId,
@@ -311,6 +353,7 @@ function renderAssistantMessageContentValue(
       selectedChildSessionId: options?.selectedChildSessionId,
       status: copiedToolCard.status,
       taskRuntimeLookup: options?.taskRuntimeLookup,
+      sessionId: options?.sessionId,
     });
   }
 
@@ -365,6 +408,7 @@ function renderAssistantMessageContentValue(
             ? (payload['input'] as Record<string, unknown>)
             : {},
         output: payload['output'],
+        fileDiffs: payload['fileDiffs'],
         isError: payload['isError'] === true,
         pendingPermissionRequestId:
           typeof payload['pendingPermissionRequestId'] === 'string'
@@ -381,6 +425,7 @@ function renderAssistantMessageContentValue(
             : undefined,
         resumedAfterApproval: payload['resumedAfterApproval'] === true,
         taskRuntimeLookup: options?.taskRuntimeLookup,
+        sessionId: options?.sessionId,
         status:
           payload['status'] === 'running' ||
           payload['status'] === 'paused' ||
@@ -442,6 +487,7 @@ function renderAssistantMessageContentValue(
         streaming={options?.streaming}
         onOpenChildSession={options?.onOpenChildSession}
         selectedChildSessionId={options?.selectedChildSessionId}
+        sessionId={options?.sessionId}
         taskRuntimeLookup={options?.taskRuntimeLookup}
       />
     );
@@ -468,7 +514,20 @@ function AssistantPartsContent({
   message: ChatMessage;
   options?: ChatToolRenderOptions;
 }) {
-  const parts = message.parts ?? [];
+  // 等待回答的提问工具在流内不产出条目（唯一入口是 composer 上方的专属面板），
+  // 先在数据层剔除：既避免它参与分组 / 高度估算，也让「只剩这一个工具」的消息
+  // 能走到下面的空内容短路（否则会留下一个空的 `assistant-rich-content` 空壳）。
+  // 判据与 `renderToolCallContent` 共用同一纯函数（幂等，重复判定无副作用）。
+  const parts = (message.parts ?? []).filter(
+    (part) =>
+      part.type !== 'tool' ||
+      !shouldSuppressQuestionToolCall({
+        toolName: part.toolName,
+        isError: part.isError,
+        output: part.output,
+        status: part.status,
+      }),
+  );
   const streaming = options?.streaming === true;
   const showReasoningBlock = useDisplayPreferencesStore((s) => s.showReasoningBlock);
   const reasoningExpandedByDefault = useDisplayPreferencesStore(
@@ -547,6 +606,12 @@ function AssistantPartsContent({
     });
   };
 
+  // 过滤后全空（典型：这条消息只有一次尚未回答的提问调用）时不要留下一个
+  // 空的 `assistant-rich-content` 空壳——专属提问面板在 composer 上方独立渲染。
+  if (parts.length === 0 && !message.modifiedFilesSummary) {
+    return null;
+  }
+
   return (
     <div className="assistant-rich-content" style={{ minWidth: 0, gap: 4 }}>
       {groupedParts.map((item, idx) => {
@@ -619,6 +684,7 @@ function AssistantPartsContent({
                 toolName: tp.toolName,
                 input: tp.input,
                 output: tp.output,
+                fileDiffs: tp.fileDiffs,
                 isError: tp.isError,
                 kind: tp.kind,
                 status: tp.status,
@@ -634,6 +700,7 @@ function AssistantPartsContent({
           return renderToolCallContent({
             reactKey: part.id,
             attachments: part.attachments,
+            fileDiffs: part.fileDiffs,
             kind: part.kind,
             toolCallId: part.toolCallId,
             toolName: part.toolName,
@@ -651,6 +718,7 @@ function AssistantPartsContent({
             selectedChildSessionId: options?.selectedChildSessionId,
             status: part.status,
             taskRuntimeLookup: options?.taskRuntimeLookup,
+            sessionId: options?.sessionId,
           });
         }
         if (item.type === 'event') {
@@ -699,6 +767,7 @@ function AssistantTraceContent({
   reasoningBlocksDurationsMs,
   resolveInlinePermissionActions,
   selectedChildSessionId,
+  sessionId,
   streaming = false,
   taskRuntimeLookup,
 }: {
@@ -710,6 +779,8 @@ function AssistantTraceContent({
   reasoningBlocksDurationsMs?: number[];
   resolveInlinePermissionActions?: ChatToolRenderOptions['resolveInlinePermissionActions'];
   selectedChildSessionId?: string | null;
+  /** 当前消息所属会话 id（透给工具卡，供文件变更卡按需加载完整快照）。 */
+  sessionId?: string | undefined;
   streaming?: boolean;
   taskRuntimeLookup?: TaskToolRuntimeLookup;
 }) {
@@ -839,6 +910,7 @@ function AssistantTraceContent({
           toolName: toolCall.toolName,
           toolInput: toolCall.input,
           output: toolCall.output,
+          fileDiffs: toolCall.fileDiffs,
           isError: toolCall.isError,
           onOpenChildSession,
           pendingPermissionRequestId: toolCall.pendingPermissionRequestId,
@@ -851,6 +923,7 @@ function AssistantTraceContent({
           selectedChildSessionId,
           status: toolCall.status,
           taskRuntimeLookup,
+          sessionId,
         });
       })}
       {payload.modifiedFilesSummary && (
@@ -883,6 +956,7 @@ function HiddenReasoningNotice({
         type="button"
         onClick={onToggle}
         aria-label={label}
+        aria-expanded={expanded}
         style={{
           all: 'unset',
           display: 'inline-flex',
@@ -905,8 +979,7 @@ function HiddenReasoningNotice({
         }}
       >
         <span style={{ fontWeight: 600, color: 'var(--fg-default)' }}>{label}</span>
-        <span>{streaming ? '生成中' : '已完成'}</span>
-        <span style={{ marginLeft: 4, fontSize: 10 }}>{expanded ? '▼' : '▶'}</span>
+        {streaming && <span>生成中</span>}
       </button>
       {expanded && content && (
         <div
@@ -918,7 +991,7 @@ function HiddenReasoningNotice({
               不变、块内滚动回看更早的思考。缺了这层限高，点开「思考过程」就会把整条消息
               撑成好几屏（且没有块内滚动），与「显示推理过程」时的展开态完全不一致。 */}
           <div className="assistant-reasoning-body" style={createReasoningExpandedBodyStyle()}>
-            {/* 思考占位展开后的正文同样自带折叠语义（▶/▼），不再叠加消息级「展开全部」，
+            {/* 思考占位展开后的正文由标题按钮控制折叠，不再叠加消息级「展开全部」，
                 内部的围栏块也不再自折叠 */}
             <FoldDisabledContext value={true}>
               <AssistantRichContentBody content={content} foldMode="disabled" streaming={false} />

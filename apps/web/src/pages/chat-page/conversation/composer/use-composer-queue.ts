@@ -2,7 +2,11 @@ import { useCallback } from 'react';
 import { resolveFileMimeType } from '../../../../components/conversation-runtime/attachments/attachment-upload.js';
 import { sanitizeComposerPlainText } from '../../../../components/conversation-runtime/messages/support.js';
 import type { AttachmentItem } from '@openAwork/shared-ui';
-import type { QueuedComposerMessage } from './queued-composer-state.js';
+import { createRandomUuid } from '@openAwork/web-client';
+import {
+  formatQueuedAttachmentCountLabel,
+  type QueuedComposerMessage,
+} from './queued-composer-state.js';
 import type { ComposerMenuState } from '../../../../components/conversation-runtime/messages/support.js';
 import {
   persistQueuedComposerFiles,
@@ -175,7 +179,7 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
           type,
         })),
         files: [...attachedFiles],
-        id: crypto.randomUUID(),
+        id: createRandomUuid(),
         requiresAttachmentRebind,
         text: nextText,
       };
@@ -253,7 +257,9 @@ export function useComposerQueue(opts: ComposerQueueOptions): ComposerQueueRetur
       setComposerMenu(null);
       setStreamError(
         queueItem.requiresAttachmentRebind && queueItem.attachmentItems.length > 0
-          ? `已恢复待发文本，原有 ${queueItem.attachmentItems.length} 个附件需要重新选择后再发送。`
+          ? `已恢复待发文本，原有 ${formatQueuedAttachmentCountLabel(
+              queueItem.attachmentItems.length,
+            )}需要重新选择后再发送。`
           : null,
       );
       requestAnimationFrame(() => {

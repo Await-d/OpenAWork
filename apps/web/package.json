@@ -8,7 +8,7 @@
     "build": "tsc -b tsconfig.build.json && cross-env NODE_OPTIONS=--max-old-space-size=8192 vite build",
     "preview": "vite preview",
     "preview:ci": "vite --host 127.0.0.1 --port 4173 --strictPort",
-    "test": "vitest run --passWithNoTests",
+    "test": "cross-env NODE_ENV=test vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",

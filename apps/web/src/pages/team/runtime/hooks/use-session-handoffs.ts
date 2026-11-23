@@ -72,7 +72,7 @@ function makeSignature(handoffsMap: Map<string, { updatedAt?: number }>): string
 }
 
 function sortHandoffs(records: HandoffRecord[]): HandoffRecord[] {
-  return [...records].sort((left, right) => left.createdAt.localeCompare(right.createdAt, 'zh-CN'));
+  return records.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt, 'zh-CN'));
 }
 
 function isHandoffRelevantToSession(record: HandoffRecord, sessionId: string): boolean {

@@ -4,6 +4,8 @@ import type {
   ToolCallObservabilityAnnotation,
 } from './message-schema.js';
 
+export type * from './dispatch.js';
+
 export type {
   TeamInitPhase,
   TeamInitProjectKind,
@@ -202,6 +204,15 @@ export type TeamRuntimeLayer = 'reception' | 'pm1' | 'pm2' | 'executor' | 'revie
  * 用于团队模板中按成员/层独立配置思考模式。
  */
 export type TeamReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** Model and thinking settings confirmed when a main-chat session is created. */
+export interface CreatedSessionModelConfig {
+  providerId: string;
+  modelId: string;
+  modelLabel?: string;
+  thinkingEnabled: boolean;
+  reasoningEffort?: TeamReasoningEffort;
+}
 
 export type TeamMemberSpecialty =
   | 'intake'
@@ -1552,6 +1563,12 @@ export interface StreamSessionChildChunk {
   occurredAt?: number;
 }
 
+export interface CompactionTokenEstimate {
+  /** Estimated model-facing conversation history, excluding system prompts and tool schemas. */
+  before: number;
+  after: number;
+}
+
 export interface StreamCompactionChunk {
   type: 'compaction';
   summary: string;
@@ -1561,6 +1578,9 @@ export interface StreamCompactionChunk {
   strategy?: 'runtime_replace' | 'summary_only' | 'replay' | 'synthetic_continue';
   compactedMessages?: number;
   representedMessages?: number;
+  historyTokenEstimate?: CompactionTokenEstimate;
+  /** Identifies one compaction attempt when several happen in the same model round. */
+  attemptId?: string;
   eventId?: string;
   runId?: string;
   occurredAt?: number;
@@ -1574,6 +1594,8 @@ export interface StreamUsageChunk {
   reasoningTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  contextBudget?: { windowTokens: number; autoCompactThresholdTokens: number | null };
+  requestInputTokens?: number;
   round: number;
   eventId?: string;
   runId?: string;
@@ -1903,3 +1925,14 @@ export {
   normalizeChannelCapabilityContextToolPromptInjections,
   resolveChannelCapabilityToolGroup,
 } from './channel-capability-tool-groups.js';
+
+export type { ServerTimestampInput } from './server-timestamp.js';
+export {
+  SQLITE_UTC_DATETIME_PATTERN,
+  formatServerDate,
+  formatServerDateTime,
+  formatServerTime,
+  parseServerTimestamp,
+  toServerDate,
+  toServerIsoString,
+} from './server-timestamp.js';

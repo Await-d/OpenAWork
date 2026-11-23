@@ -255,7 +255,10 @@ function assertAccessibleWorkspacePath(
     throw new Error(`Forbidden workspace path: ${path}`);
   }
 
-  if (defaultIgnoreManager.shouldIgnore(safePath)) {
+  // 精确访问（read / write）用 `shouldProtect`：`.gitignore` 只表达「不进版本库」，
+  // 不构成读写禁止（`temp/` / `dist/` 这类目录必须可写可读，否则官方推荐的
+  // 「写脚本再单行执行」补救路径无落点）。内置敏感模式仍硬拒绝。
+  if (defaultIgnoreManager.shouldProtect(safePath)) {
     throw new Error(formatAgentIgnoreDenial(target, safePath));
   }
 
@@ -274,7 +277,8 @@ function assertWritableWorkspacePath(
     throw new Error(`Forbidden workspace path: ${path}`);
   }
 
-  if (defaultIgnoreManager.shouldIgnore(safePath)) {
+  // 写语义同上：只用安全类规则判定（跳过 `.gitignore`）。
+  if (defaultIgnoreManager.shouldProtect(safePath)) {
     throw new Error(formatAgentIgnoreDenial(target, safePath));
   }
 

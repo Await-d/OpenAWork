@@ -10,6 +10,7 @@ import {
   type ChatMessage,
 } from '../../conversation-runtime/messages/support.js';
 import { ImageLightbox, type ImageLightboxItem } from '../image/image-lightbox.js';
+import { CollapsibleUserContent } from '../message/collapsible-user-content.js';
 import { MediaReferenceCard } from '../media/media-reference-card.js';
 import { renderMediaContent } from '../media/media-renderer.js';
 import { resolveGalleryLayout } from './gallery-layout.js';
@@ -203,7 +204,7 @@ export function renderMessageMediaAttachments(
 
   return (
     <div style={{ display: 'grid', gap: 'var(--spacing-2)' }}>
-      {bodyText ? <span>{bodyText}</span> : null}
+      {bodyText ? <CollapsibleUserContent content={bodyText} /> : null}
       {inputImages.length > 0 && <UserAttachedImagesGallery images={inputImages} />}
       {fileReferences.length > 0 && (
         <div style={{ display: 'grid', gap: 'var(--spacing-2)' }}>

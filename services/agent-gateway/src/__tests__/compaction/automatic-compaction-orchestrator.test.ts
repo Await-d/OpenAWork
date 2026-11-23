@@ -120,6 +120,7 @@ describe('provider 无关自动压缩统一编排', () => {
         metadataJson: '{"ok":1}',
         metadata: {},
         summary: '摘要',
+        historyTokenEstimate: { before: 80_000, after: 20_000 },
       };
     });
     mocks.publishSessionRunEvent.mockImplementation((_id: string, event: { phase?: string }) =>
@@ -133,6 +134,14 @@ describe('provider 无关自动压缩统一编排', () => {
 
     expect(result).toEqual({ triggered: true, metadataJson: '{"ok":1}' });
     expect(order).toEqual(['started', 'persisted', 'completed']);
+    expect(mocks.publishSessionRunEvent).toHaveBeenLastCalledWith(
+      's',
+      expect.objectContaining({
+        phase: 'completed',
+        historyTokenEstimate: { before: 80_000, after: 20_000 },
+      }),
+      expect.anything(),
+    );
   });
 
   it('使用模型目标比例计算自动保留预算', async () => {
@@ -240,11 +249,183 @@ describe('provider 无关自动压缩统一编排', () => {
       kind: 'proactive',
       input: { ...context(), round: 2, lastRoundUsage: { inputTokens: 80_000 } },
     });
-    expect(failed).toEqual({ triggered: true, metadataJson: '{"fallback":true}' });
+    expect(failed).toEqual({ triggered: false, metadataJson: '{"fallback":true}' });
     const phases = mocks.publishSessionRunEvent.mock.calls.map((call) => call[1].phase);
     expect(phases).toContain('failed');
     expect(phases).not.toContain('completed');
   });
+
+  it.each(['proactive', 'overflow'] as const)(
+    '%s 的 busy/noop 不发布成功或失败事件',
+    async (kind) => {
+      for (const retryable of [false, true]) {
+        mocks.publishSessionRunEvent.mockClear();
+        mocks.executeSessionCompaction.mockResolvedValue({
+          committed: false,
+          retryable,
+          durableSummary: null,
+          metadataJson: '{"fresh":true}',
+          ...(retryable ? { llmErrorMessage: 'busy' } : {}),
+        });
+        const result =
+          kind === 'proactive'
+            ? await orchestrateAutomaticCompaction({
+                ...context(),
+                round: 1,
+                lastRoundUsage: { inputTokens: 80_000 },
+              })
+            : await orchestrateAutomaticCompaction({
+                ...context(),
+                round: 1,
+                roundResult: { overflow: true, stopReason: 'error' },
+              });
+        expect(result).toMatchObject({ triggered: false, metadataJson: '{"fresh":true}' });
+        expect(mocks.publishSessionRunEvent.mock.calls.map((call) => call[1].phase)).not.toContain(
+          'completed',
+        );
+        expect(mocks.publishSessionRunEvent.mock.calls.map((call) => call[1].phase)).not.toContain(
+          'failed',
+        );
+      }
+    },
+  );
+
+  it('失败保留原始错误文本且不恢复 overflow', async () => {
+    mocks.executeSessionCompaction.mockResolvedValue({
+      committed: true,
+      summary: 'legacy fallback',
+      llmErrorMessage: 'upstream unavailable',
+      metadataJson: '{"cooldown":true}',
+    });
+    const result = await orchestrateAutomaticCompaction({
+      ...context(),
+      round: 1,
+      roundResult: { overflow: true, stopReason: 'error' },
+    });
+    expect(result).toEqual({
+      triggered: false,
+      recovered: false,
+      metadataJson: '{"cooldown":true}',
+    });
+    expect(mocks.publishSessionRunEvent).toHaveBeenCalledWith(
+      's',
+      expect.objectContaining({ phase: 'failed', summary: 'upstream unavailable' }),
+      expect.anything(),
+    );
+  });
+
+  it('synthetic continuation 成功明确 recovered', async () => {
+    const result = await orchestrateAutomaticCompaction({
+      ...context(),
+      round: 1,
+      roundResult: { overflow: true, stopReason: 'error' },
+    });
+    expect(result).toMatchObject({
+      triggered: true,
+      recovered: true,
+      syntheticContinuationPrompt: expect.any(String),
+    });
+  });
+
+  it('LLM 冷却不阻断本地 reactive 投影', async () => {
+    mocks.isAutoCompactCircuitBreakerTripped.mockReturnValue(true);
+    mocks.parseContextLimitError.mockReturnValue({ currentTokens: 120_000, maxTokens: 100_000 });
+    mocks.reactiveCompactByTokenGap.mockReturnValue({
+      recovered: true,
+      tokensFreed: 30_000,
+      remainingMessages: [message('a1', 'assistant')],
+      droppedGroups: 1,
+      droppedMessages: 1,
+    });
+    mocks.persistCompactionProjection.mockReturnValue({
+      metadataJson: '{"local":true}',
+      signature: 'local',
+    });
+    const result = await orchestrateAutomaticCompaction({
+      ...context(),
+      round: 1,
+      roundResult: { overflow: true, stopReason: 'error', upstreamError: new Error('context') },
+    });
+    expect(result).toEqual({ triggered: true, recovered: true, metadataJson: '{"local":true}' });
+    expect(mocks.executeSessionCompaction).not.toHaveBeenCalled();
+  });
+
+  it('await 后取消直接传播且不发布失败或投影', async () => {
+    const controller = new AbortController();
+    mocks.trySessionMemoryCompaction.mockImplementation(async () => {
+      controller.abort();
+      return null;
+    });
+    await expect(
+      orchestrateAutomaticCompaction({
+        ...context(),
+        signal: controller.signal,
+        round: 1,
+        roundResult: { overflow: true, stopReason: 'error' },
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(mocks.executeSessionCompaction).not.toHaveBeenCalled();
+    expect(mocks.publishSessionRunEvent).not.toHaveBeenCalled();
+  });
+
+  it.each(['tool_output', 'session_memory'] as const)(
+    'LLM 冷却仍允许 %s 本地恢复',
+    async (kind) => {
+      mocks.isAutoCompactCircuitBreakerTripped.mockReturnValue(true);
+      mocks.parseContextLimitError.mockReturnValue({ currentTokens: 120_000, maxTokens: 100_000 });
+      if (kind === 'tool_output') {
+        mocks.aggressiveTruncateToolOutputs.mockReturnValue({
+          success: true,
+          sufficient: true,
+          truncatedCount: 1,
+          messages: [message('a1', 'assistant')],
+        });
+        mocks.persistCompactionProjection.mockReturnValue({
+          metadataJson: '{"local":true}',
+          signature: 'local',
+        });
+      } else {
+        mocks.trySessionMemoryCompaction.mockResolvedValue({
+          success: true,
+          committed: true,
+          messagesToKeep: [message('a1', 'assistant')],
+          metadataJson: '{"local":true}',
+          signature: 'local',
+        });
+      }
+      const result = await orchestrateAutomaticCompaction({
+        ...context(),
+        round: 1,
+        roundResult: { overflow: true, stopReason: 'error', upstreamError: new Error('context') },
+      });
+      expect(result).toEqual({ triggered: true, recovered: true, metadataJson: '{"local":true}' });
+      expect(mocks.executeSessionCompaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['proactive', 'overflow'] as const)(
+    '%s 原样传播 AbortError 且不发布失败',
+    async (kind) => {
+      const error = new DOMException('caller cancelled', 'AbortError');
+      mocks.executeSessionCompaction.mockRejectedValue(error);
+      const result =
+        kind === 'proactive'
+          ? orchestrateAutomaticCompaction({
+              ...context(),
+              round: 1,
+              lastRoundUsage: { inputTokens: 80_000 },
+            })
+          : orchestrateAutomaticCompaction({
+              ...context(),
+              round: 1,
+              roundResult: { overflow: true, stopReason: 'error' },
+            });
+      await expect(result).rejects.toBe(error);
+      expect(mocks.publishSessionRunEvent.mock.calls.map((call) => call[1].phase)).not.toContain(
+        'failed',
+      );
+    },
+  );
 
   it('session-memory 子请求在编排入口前被拒绝，且不读取会话消息', async () => {
     const result = await orchestrateAutomaticCompaction({

@@ -96,8 +96,9 @@ export default function ResourcesPage() {
     setSelectedId(null);
   }
 
+  // 主内容 landmark 由布局壳提供，页面内用 section（避免嵌套 main）。
   return (
-    <main className="resources-page" aria-labelledby="resources-title">
+    <section className="resources-page" aria-labelledby="resources-title">
       <ResourcesCommandBar
         catalogCount={catalogItems.length}
         featureCount={featureItems.length}
@@ -136,6 +137,6 @@ export default function ResourcesPage() {
           isBusy={mutating || isUploadPending}
         />
       </section>
-    </main>
+    </section>
   );
 }

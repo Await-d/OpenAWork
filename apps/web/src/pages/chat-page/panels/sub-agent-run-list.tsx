@@ -1,4 +1,9 @@
 import React, { useId, useState } from 'react';
+import { ShellLoadMore, useProgressiveShells } from '../../../components/chat/shell-progress.js';
+import {
+  SubagentLoadMore,
+  useProgressiveSubagents,
+} from '../../../components/chat/subagent-progress.js';
 import type { Session, SessionTask } from '@openAwork/web-client';
 import type { BackgroundTaskRow, BackgroundTaskState } from './background-task-model.js';
 import { formatTaskStateLabel } from './background-task-rows.js';
@@ -16,6 +21,7 @@ import { sessionSubviewKey } from '../../../stores/ui/session-subview-buckets.js
 
 export interface SubAgentRunItem {
   sessionId: string;
+  createdAt?: number;
   shortSessionId: string;
   status: SubAgentRunStatus;
   taskLabel: string;
@@ -230,6 +236,7 @@ export function buildSubAgentRunItems(
 
     itemsBySessionId.set(sessionId, {
       sessionId,
+      createdAt: childSession?.createdAt ?? Math.min(...groupedTasks.map((task) => task.createdAt)),
       shortSessionId,
       status: resolveSubAgentRunStatus({
         task: aggregatedTask,
@@ -265,6 +272,7 @@ export function buildSubAgentRunItems(
     const fallbackLabel = normalizeTitle(session.title, `子代理 ${sequence ?? shortSessionId}`);
     itemsBySessionId.set(session.id, {
       sessionId: session.id,
+      createdAt: session.createdAt,
       shortSessionId,
       status: resolveSubAgentRunStatus({
         task: null,
@@ -690,12 +698,21 @@ export function SubAgentRunList({
   // 终止后台命令是破坏性操作：与完整面板 / 常驻胶囊共用同一确认弹窗（禁止各自实现一套）。
   const [pendingConfirm, setPendingConfirm] = useState<BackgroundTaskPendingConfirm | null>(null);
   const listId = useId();
+  const progress = useProgressiveSubagents(items, (item) => item, sessionId ?? null);
 
   const toggleCollapsed = () => {
     setSubagentRunListCollapsed(sessionId ?? null, !collapsed);
   };
 
   const shells = shellItems ?? [];
+  const shellProgress = useProgressiveShells(
+    shells,
+    (row) => ({
+      terminalId: row.terminalId ?? row.key,
+      startedAtMs: row.startedAtMs,
+    }),
+    sessionId ?? null,
+  );
 
   // 浮动栏的显示条件：只要有任何子代理（含已完成 / 失败 / 取消的历史子代理）或后台命令
   // 就在主对话区左侧悬浮显示，方便随时跳查。子代理判断已经在 `buildSubAgentRunItems`
@@ -1001,7 +1018,7 @@ export function SubAgentRunList({
             子代理 {items.length}
           </div>
         )}
-        {items.map((item) => (
+        {progress.visible.map((item) => (
           <SubAgentItemCard
             key={item.sessionId}
             item={item}
@@ -1011,6 +1028,7 @@ export function SubAgentRunList({
             stopping={stoppingSessionIds?.has(item.sessionId) ?? false}
           />
         ))}
+        <SubagentLoadMore progress={progress} />
         {showGroupHeaders && (
           <div
             data-testid="sub-agent-run-list-group-header"
@@ -1020,7 +1038,7 @@ export function SubAgentRunList({
             后台命令 {shells.length}
           </div>
         )}
-        {shells.map((row) => (
+        {shellProgress.visible.map((row) => (
           <ShellItemCard
             key={row.key}
             row={row}
@@ -1040,6 +1058,7 @@ export function SubAgentRunList({
         ))}
       </div>
 
+      {!collapsed && <ShellLoadMore progress={shellProgress} />}
       <BackgroundTaskConfirmDialog
         pending={pendingConfirm}
         onConfirm={handleConfirm}

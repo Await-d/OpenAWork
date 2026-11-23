@@ -5,7 +5,8 @@
  * - 复用 `agent-catalog` 的 create/update/remove/reset（与 `/agents` 路由同源）；
  *   校验 schema 与错误映射直接取自路由（`createManagedAgentSchema` /
  *   `updateManagedAgentSchema` / `mapAgentCatalogError`），避免两套规则漂移；
- * - 内置 Agent 只允许改模型配置（catalog 自身的 `builtinUpdateRestricted` 语义）；
+ * - 内置 Agent 只允许改模型配置与系统提示词（catalog 自身的 `builtinUpdateRestricted` 语义；
+ *   系统提示词传 `null` 表示删除覆盖、回落当前默认）；
  * - team / cron / channel 会话拒绝（Agent 影响用户级能力面）；
  * - 只读 list 免审批；变更类默认 ask，永久允许按动作隔离。
  */
@@ -73,7 +74,7 @@ export const agentManageToolDefinition: ToolDefinition<typeof agentManageInputSc
     name: AGENT_MANAGE_TOOL_NAME,
     description:
       '管理当前用户的自定义 Agent。action=list 列举；create 新建（需要 label 与 systemPrompt）；update 修改；delete 删除；reset 恢复默认。' +
-      '变更类操作需要用户批准。内置 Agent 只允许修改模型配置（model / variant / fallbackModels 等）。',
+      '变更类操作需要用户批准。内置 Agent 只允许修改模型配置（model / variant / fallbackModels 等）与系统提示词（systemPrompt；传 null 表示恢复默认提示词）。',
     inputSchema: agentManageInputSchema,
     outputSchema: z.string(),
     timeout: 30000,
@@ -158,6 +159,9 @@ function toAgentSummary(agent: ManagedAgentRecord): Record<string, unknown> {
       systemPrompt.length > SYSTEM_PROMPT_PREVIEW_CHARS
         ? `${systemPrompt.slice(0, SYSTEM_PROMPT_PREVIEW_CHARS)}…`
         : systemPrompt,
+    // 模型需要知道「当前用默认还是已覆盖」才能决定是否清除提示词覆盖
+    //（仅内置 Agent 有 `promptMetadata`，自定义 Agent 恒为 false）。
+    hasPromptOverride: agent.promptMetadata?.hasPromptOverride ?? false,
   };
 }
 

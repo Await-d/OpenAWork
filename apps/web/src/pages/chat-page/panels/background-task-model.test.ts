@@ -11,6 +11,23 @@ import {
 const BASE_MS = 1_700_000_000_000;
 const NOW_MS = BASE_MS + 60_000;
 
+it('为所有子代理状态保留真实创建时间，不从开始时间或排队时长倒推', () => {
+  for (const status of ['pending', 'running', 'completed'] as const) {
+    const rows = buildRows({
+      tasks: [
+        makeTask({
+          id: 'created-time',
+          status,
+          createdAt: BASE_MS,
+          startedAt: BASE_MS + 10_000,
+        }),
+      ],
+    });
+    expect(rows[0]?.createdAtMs).toBe(BASE_MS);
+    expect(rows[0]?.startedAtMs).toBe(BASE_MS + 10_000);
+  }
+});
+
 function makeTask(overrides: Partial<SessionTask> & { readonly id: string }): SessionTask {
   return {
     blockedBy: [],

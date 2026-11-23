@@ -9,7 +9,8 @@
  *
  * `support.test.ts` 侧重端到端回归场景，这里按分支固定这些判定边界。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { normalizeChatMessages } from './normalize-chat-messages.js';
 import {
   reconcileSnapshotChatMessages,
   toSharedMessageSnapshot,
@@ -34,6 +35,137 @@ function assistantMessage(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('reconcileSnapshotChatMessages', () => {
+  it('保留快照窗口之前无时间戳的同文历史，不把最新回答折叠到旧回合', () => {
+    const older = assistantMessage({ id: 'older', content: '已完成' });
+    const user: ChatMessage = { id: 'user', role: 'user', content: '再做一次' };
+    const latest = assistantMessage({ id: 'latest', content: '已完成' });
+
+    expect(reconcileSnapshotChatMessages([older, user], [user, latest])).toEqual([
+      older,
+      user,
+      latest,
+    ]);
+  });
+
+  it('大型媒体值相同的独立规范化快照复用引用且不序列化媒体', () => {
+    const raw = () => [
+      {
+        id: 'user',
+        role: 'user',
+        createdAt: 1_000,
+        content: [
+          { type: 'text', text: '检查附件' },
+          { type: 'input_audio', audioUrl: `data:audio/wav;base64,${'A'.repeat(1_000_000)}` },
+        ],
+      },
+    ];
+    const previous = normalizeChatMessages(raw());
+    const snapshot = normalizeChatMessages(raw());
+    const stringify = vi.spyOn(JSON, 'stringify');
+    try {
+      const result = reconcileSnapshotChatMessages(previous, snapshot);
+      expect(result).toBe(previous);
+      expect(result[0]).toBe(previous[0]);
+      expect(stringify).not.toHaveBeenCalled();
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+  it('真实数组同 ID 更新同时采用正文与已定义服务端元数据，保留缺省本地字段', () => {
+    const previous = normalizeChatMessages([
+      {
+        id: 'user',
+        role: 'user',
+        content: [{ type: 'text', text: '旧正文' }],
+        model: 'local-model',
+        providerId: 'local-provider',
+        agentId: 'local-agent',
+        tokenEstimate: 1,
+      },
+    ]);
+    const snapshot = normalizeChatMessages([
+      {
+        id: 'user',
+        role: 'user',
+        content: [{ type: 'text', text: '新正文' }],
+        clientRequestId: 'server-request',
+        model: 'server-model',
+        tokenEstimate: 20,
+        durationMs: 0,
+      },
+    ]);
+    const result = reconcileSnapshotChatMessages(previous, snapshot);
+    expect(result[0]).toMatchObject({
+      content: '新正文',
+      rawContent: [{ type: 'text', text: '新正文' }],
+      clientRequestId: 'server-request',
+      model: 'server-model',
+      tokenEstimate: 20,
+      providerId: 'local-provider',
+      agentId: 'local-agent',
+      durationMs: 0,
+    });
+    expect(
+      reconcileSnapshotChatMessages(
+        result,
+        normalizeChatMessages([
+          {
+            id: 'user',
+            role: 'user',
+            content: '字符串新正文',
+          },
+        ]),
+      )[0],
+    ).toMatchObject({ content: '字符串新正文', rawContent: undefined });
+  });
+
+  it.each([
+    [
+      { type: 'text', text: '问题 ' },
+      { type: 'text', text: '问题' },
+    ],
+    [
+      { type: 'input_audio', audioUrl: 'old.wav' },
+      { type: 'input_audio', audioUrl: 'new.wav' },
+    ],
+    [
+      { type: 'input_video', videoUrl: 'old.mp4' },
+      { type: 'input_video', videoUrl: 'new.mp4' },
+    ],
+    [
+      { type: 'input_image', artifactId: 'old' },
+      { type: 'input_image', artifactId: 'new' },
+    ],
+  ])('rawContent 独有变化不可被引用回收丢弃：%j', (before, after) => {
+    const raw = (item: unknown) => [
+      {
+        id: 'user',
+        role: 'user',
+        createdAt: 1_000,
+        content: [{ type: 'text', text: '问题' }, item],
+      },
+    ];
+    const previous = normalizeChatMessages(raw(before));
+    const snapshot = normalizeChatMessages(raw(after));
+    expect(previous[0]?.content).toBe(snapshot[0]?.content);
+    const result = reconcileSnapshotChatMessages(previous, snapshot);
+    expect(result).not.toBe(previous);
+    expect(result[0]?.rawContent).toEqual(snapshot[0]?.rawContent);
+    expect(reconcileSnapshotChatMessages(result, normalizeChatMessages(raw(after)))).toBe(result);
+  });
+  it('不同轮次共享分片时不得由附近匹配吞掉本地轮次', () => {
+    const parts: ChatMessagePart[] = [{ id: 'shared-text', type: 'text', text: '同文' }];
+    const previous = assistantMessage({
+      id: 'local-round',
+      clientRequestId: 'req:assistant:1',
+      parts,
+    });
+    const snapshot = assistantMessage({ id: 'server-final', clientRequestId: 'req', parts });
+    expect(reconcileSnapshotChatMessages([previous], [snapshot]).map((m) => m.id)).toEqual([
+      'server-final',
+      'local-round',
+    ]);
+  });
   it('任一侧为空时直接返回另一侧引用', () => {
     const previous: ChatMessage[] = [assistantMessage({ id: 'local' })];
     const snapshot: ChatMessage[] = [assistantMessage({ id: 'server' })];

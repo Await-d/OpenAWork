@@ -11,18 +11,13 @@ import type {
   RunEvent,
 } from '@openAwork/shared';
 import { trackEvent } from '../telemetry/telemetry-service.js';
-import {
-  AgentTaskManagerImpl,
-  AgentTaskStoreImpl,
-  HashAnchoredEditorImpl,
-} from '@openAwork/agent-core';
+import { AgentTaskManagerImpl, HashAnchoredEditorImpl } from '@openAwork/agent-core';
 import { z } from 'zod';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseQuery } from '../infra/parse-request.js';
-import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../infra/db.js';
-import { invalidateSessionOwnerCache } from '../infra/session-owner-cache.js';
+import { WORKSPACE_ROOT, sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { buildSqlitePlaceholders, chunkSqliteBindValues } from '../infra/sqlite-batch.js';
 import { filterVisibleSessionMessages } from '../session/session-message-store.js';
 import {
@@ -30,7 +25,6 @@ import {
   parseSessionParentId,
 } from '../session/session-descendant-tree.js';
 import {
-  deleteSessionMessageSearchDocumentsForSession,
   hydrateLegacySessionMessagesForSearch,
   searchSessionMessages,
 } from '../session/session-search-store.js';
@@ -41,15 +35,12 @@ import {
   upsertSessionMessageRating,
 } from '../session/session-message-rating-store.js';
 import {
-  collectSessionBackupStoragePaths,
   captureBeforeWriteBackup,
-  garbageCollectBackupStoragePaths,
   getSessionFileBackup,
   readSessionFileBackupContent,
 } from '../session/session-file-backup-store.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { buildFileDiff } from '../tools/file-diff-format.js';
-import { deleteSpilledToolOutputsForSession } from '../tools/tool-output-spill.js';
 import { registerSessionSharedReadRoutes } from './session-shared-read-routes.js';
 import { registerSessionClientErrorRoutes } from './session-client-error-routes.js';
 import { registerSessionComposerInputHistoryRoutes } from './session-composer-input-history.js';
@@ -80,6 +71,7 @@ import {
   sanitizeSessionMetadataJson,
   validateSessionMetadataPatch,
 } from '../session/session-workspace-metadata.js';
+import { isSourceManagedSessionMetadata } from '../session/session-runtime-policy.js';
 import { getSshService } from '../ssh/ssh-service.js';
 import { renameSessionTitle } from '../session/session-title.js';
 import {
@@ -93,9 +85,6 @@ import { cancelPendingPermissionRequestsForSession } from './permissions.js';
 import { cancelPendingQuestionRequestsForSession } from './questions.js';
 import { expireActionableNotificationsForSession } from '../session/notification-store.js';
 import { stopDirectChildSessions } from '../session/stop-child-sessions.js';
-import { resetDoomLoopHistory } from '../session/doom-loop-detector.js';
-import { clearExternalAccessTracking } from '../workspace/external-directory-guard.js';
-import { clearSubstateTrackingForSession } from '../handoff/store/substate-store.js';
 import {
   getLatestSessionRunEventSeqByRequest,
   listSessionRunEvents,
@@ -105,13 +94,12 @@ import {
 } from '../session/session-run-events.js';
 import {
   getAnyInFlightStreamRequestForSession,
-  stopAllInFlightStreamRequestsForSession,
+  stopSessionStreamsForDeletion,
 } from './stream-cancellation.js';
 import { reconcileSessionRuntime } from '../session/session-runtime-reconciler.js';
-import { deleteSessionWithMalformedRecovery } from '../session/session-delete-recovery.js';
-import { purgeComposerQueueAttachments } from '../session/composer-queue-artifact-purge.js';
-import { purgeSessionDiskArtifactsForSessions } from '../session/session-disk-artifact-purge.js';
-import { listComposerQueueItems } from '../session/composer-queue-store.js';
+import { createSessionDeletionCleanupWorker } from '../session/session-deletion-cleanup.js';
+import { loadSessionDeletionTree } from '../session/session-deletion-tree.js';
+import { deleteSessionTree } from '../session/session-tree-delete.js';
 import {
   buildSessionFileChangesProjection,
   buildSessionTurnDiffReadModel,
@@ -132,7 +120,6 @@ import {
   type SessionFileReviewDecision,
   type SessionFileReviewDecisionRecord,
 } from '../session/session-file-review-decision-store.js';
-import { isSqliteMalformedError } from '../infra/sqlite-error-utils.js';
 import {
   compareSessionSnapshots,
   createRequestSnapshotRef,
@@ -165,10 +152,14 @@ import { countUserMessages } from '../message/message-store-v2.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
 import { buildWorkflowRuntimeState } from '../session/workflow-runtime-state.js';
 import { logGatewayError, logGatewayWarn } from '../infra/gateway-logger.js';
+import { resolveCreatedSessionModelConfig } from '../session/created-session-model-config.js';
 
 const createSessionSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({}),
   workingDirectory: z.string().optional(),
+  resolveModelConfig: z
+    .object({ useDefaultModel: z.boolean(), useDefaultThinking: z.boolean() })
+    .optional(),
 });
 
 export interface SessionRow {
@@ -1158,8 +1149,13 @@ function buildSafeSessionSelectColumns(options?: { includeMessages?: boolean }):
     'state_status',
     'metadata_json',
     'title',
-    'created_at',
-    'updated_at',
+    // 时间列一律投影为**带 `Z` 的 ISO 8601**：库里的 `datetime('now')` 是 UTC、
+    // 空格分隔、无时区后缀，客户端 `new Date(str)` 会按本地时区解释（东八区下整体
+    // 少 8 小时）。SQLite 对无后缀文本一律按 UTC 解释，因此 `strftime` 与本机时区
+    // 无关，输出即真实时刻（源值为 NULL 时仍为 NULL）。改这里等于一次修好所有
+    // 消费方（Web / 桌面 / 移动端 / 第三方脚本）——不要把时间改成"显示层再减 8 小时"。
+    `strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at`,
+    `strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at`,
   ];
   const optionalColumns = [
     'team_parent_session_id',
@@ -1318,57 +1314,13 @@ function readRuntimeSessionParentSessionId(session: SessionRow): string | null {
   return session.team_parent_session_id ?? parseSessionParentId(session.metadata_json);
 }
 
-function buildSessionDeletionRows(sessions: SessionRow[], rootSessionId: string): SessionRow[] {
-  const rowsById = new Map(sessions.map((session) => [session.id, session]));
-  const childrenByParent = new Map<string, string[]>();
-
-  const linkChild = (parentSessionId: string | null | undefined, childId: string): void => {
-    if (!parentSessionId || parentSessionId === childId) {
-      return;
-    }
-    const existingChildren = childrenByParent.get(parentSessionId) ?? [];
-    existingChildren.push(childId);
-    childrenByParent.set(parentSessionId, existingChildren);
-  };
-
-  for (const session of sessions) {
-    // Two distinct parent links must BOTH be followed or the tree leaks rows:
-    //   1. metadata.parentSessionId — subagent / message-tree children.
-    //   2. team_parent_session_id (a real column) — team-layer children
-    //      (pm1/pm2/executor/reviewer) created by `createTeamSession`, which
-    //      never writes metadata.parentSessionId. There is NO FK CASCADE on
-    //      this column, so without following it here, deleting a reception root
-    //      deletes only the root row and orphans every team descendant (plus
-    //      their CASCADE-linked message_v2 / handoff_records / inbound rows).
-    linkChild(parseSessionParentId(session.metadata_json), session.id);
-    linkChild(session.team_parent_session_id ?? null, session.id);
-  }
-
-  const queue: Array<{ depth: number; sessionId: string }> = [
-    { depth: 0, sessionId: rootSessionId },
-  ];
-  const visited = new Set<string>();
-  const deletionRows: Array<{ depth: number; row: SessionRow }> = [];
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current || visited.has(current.sessionId)) {
-      continue;
-    }
-
-    visited.add(current.sessionId);
-    const row = rowsById.get(current.sessionId);
-    if (!row) {
-      continue;
-    }
-
-    deletionRows.push({ depth: current.depth, row });
-    for (const childSessionId of childrenByParent.get(current.sessionId) ?? []) {
-      queue.push({ depth: current.depth + 1, sessionId: childSessionId });
-    }
-  }
-
-  return deletionRows.sort((left, right) => right.depth - left.depth).map(({ row }) => row);
+function loadSessionDeletionRows(rootSessionId: string, userId: string): SessionRow[] {
+  return loadSessionDeletionTree<SessionRow>({
+    columns: buildSafeSessionSelectColumns({ includeMessages: false }),
+    hasTeamParentColumn: resolveExistingSessionColumns().has('team_parent_session_id'),
+    rootSessionId,
+    userId,
+  });
 }
 
 function findSessionDeletionBlocker(
@@ -1397,89 +1349,6 @@ function findSessionDeletionBlocker(
   }
 
   return null;
-}
-
-async function deleteSessionTree(input: {
-  sessionsToDelete: ReadonlyArray<SessionRow>;
-  userId: string;
-}): Promise<void> {
-  const backupStoragePaths: string[] = [];
-  // 已成功删除 DB 行的会话：磁盘产物统一在 finally 里一次批量回收。
-  // `removeMany` 每次都会全量重写 `artifacts-index.json`，会话树（父 + 多个
-  // 子会话）逐会话调用会把写放大变成 O(会话数)。
-  const deletedSessionIds: string[] = [];
-
-  try {
-    for (const session of input.sessionsToDelete) {
-      const taskGraphProjectRoot = resolveTaskGraphProjectRootForDelete(session.id);
-      const candidatePaths = collectSessionBackupStoragePaths({
-        sessionId: session.id,
-        userId: input.userId,
-      });
-      // Purge per-session in-memory state that keys on sessionId. These maps
-      // never evict on their own, so without this a deleted session leaks one
-      // entry per map for the process lifetime (unbounded over many sessions).
-      clearSubstateTrackingForSession(session.id);
-      clearExternalAccessTracking(session.id);
-      resetDoomLoopHistory(session.id);
-
-      // 待发队列的附件跨端副本（磁盘型产物）不随 FK 级联消失：级联只清队列行，
-      // 磁盘文件必须在这里按条目回收，否则会话删除后副本永久残留。
-      purgeComposerQueueAttachments(
-        listComposerQueueItems({ sessionId: session.id, userId: input.userId }).flatMap(
-          (item) => item.attachmentItems,
-        ),
-      );
-
-      try {
-        sqliteTransaction(() => {
-          // `event_log` 没有指向 sessions 的外键（aggregate_id 只是文本），
-          // 级联不会带走它：不删的话每个已删除会话都会留下**全量事件**，
-          // 而 part 创建事件携带完整 part（含 base64 图片），既占空间也会把
-          // event_log 的全局 50k 行配额挤占掉。`event_sequences` 同理，
-          // 每个会话一行、无回收路径。
-          sqliteRun('DELETE FROM event_log WHERE aggregate_id = ?', [session.id]);
-          sqliteRun('DELETE FROM event_sequences WHERE aggregate_id = ?', [session.id]);
-          sqliteRun('DELETE FROM sessions WHERE id = ? AND user_id = ?', [
-            session.id,
-            input.userId,
-          ]);
-          deleteSessionMessageSearchDocumentsForSession(session.id);
-        });
-      } catch (error) {
-        if (!isSqliteMalformedError(error)) {
-          throw error;
-        }
-
-        deleteSessionWithMalformedRecovery({ sessionId: session.id, userId: input.userId });
-      }
-      // The session row is gone — drop its cached owner so later writes do
-      // not resolve a stale user_id through the owner cache.
-      invalidateSessionOwnerCache(session.id);
-      const { invalidateSessionExtensionConnections } =
-        await import('../session-extension/session-extension-service.js');
-      await invalidateSessionExtensionConnections(input.userId, session.id);
-
-      // 磁盘型产物（artifacts-index.json + 文件）同样不随 FK 级联消失：
-      // DB 行删除后它们再无消费者。收集起来，循环结束后一次批量回收——
-      // 放在 finally 里可保证「中途某个会话的任务图删除失败」时，已删会话
-      // 的产物仍被回收。
-      deletedSessionIds.push(session.id);
-
-      // 工具输出 spill 目录（超限结果的全文落盘）随会话树一起清理。
-      deleteSpilledToolOutputsForSession(session.id);
-
-      backupStoragePaths.push(...candidatePaths);
-      // 跨主机场景下任务图根不可解析（null）：会话本体照常删除，
-      // 残留任务图交由备份 GC 处理，不阻塞删除。
-      if (taskGraphProjectRoot !== null) {
-        await taskStore.deleteGraph(taskGraphProjectRoot, session.id);
-      }
-    }
-  } finally {
-    await purgeSessionDiskArtifactsForSessions({ sessionIds: deletedSessionIds });
-    await garbageCollectBackupStoragePaths(backupStoragePaths);
-  }
 }
 
 /**
@@ -1724,7 +1593,7 @@ const childSessionQuerySchema = z.object({
 });
 
 const taskManager = new AgentTaskManagerImpl();
-const taskStore = new AgentTaskStoreImpl();
+const SESSION_DELETE_STOP_TIMEOUT_MS = 1_500;
 const SESSION_ROUTE_ERROR_MESSAGES = {
   backupNotFound: '目标备份不存在。',
   deleteBlocked: '仅当相关会话全部处于空闲状态时才能删除。',
@@ -2210,6 +2079,9 @@ async function buildSessionRecoveryReadModel(input: {
 }
 
 export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
+  const deletionCleanup = createSessionDeletionCleanupWorker();
+  app.addHook('onReady', async () => deletionCleanup.schedule());
+  app.addHook('onClose', () => deletionCleanup.close());
   app.post(
     '/sessions',
     { onRequest: [requireAuth] },
@@ -2242,6 +2114,13 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         step.fail('forbidden path');
         return reply.status(403).send({ error: SESSION_ROUTE_ERROR_MESSAGES.workspaceForbidden });
       }
+      const modelConfig = body.resolveModelConfig
+        ? await resolveCreatedSessionModelConfig(
+            user.sub,
+            metadataPatch.data,
+            body.resolveModelConfig,
+          )
+        : undefined;
       const requestedParentSessionId = extractParentSessionIdFromMetadata(
         normalizedMetadata.metadata,
       );
@@ -2264,6 +2143,21 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
+      if (modelConfig) {
+        // Replace the whole tuple so stale labels or efforts cannot survive a model change.
+        const sessionMetadata = normalizedMetadata.metadata;
+        delete sessionMetadata['modelLabel'];
+        delete sessionMetadata['reasoningEffort'];
+        Object.assign(sessionMetadata, modelConfig, {
+          modelSelectionSource:
+            !body.resolveModelConfig?.useDefaultModel &&
+            modelConfig.providerId === metadataPatch.data.providerId &&
+            modelConfig.modelId === metadataPatch.data.modelId
+              ? 'manual'
+              : 'defaults',
+        });
+      }
+
       const id = randomUUID();
       sqliteRun(
         'INSERT INTO sessions (id, user_id, messages_json, state_status, metadata_json) VALUES (?, ?, ?, ?, ?)',
@@ -2284,7 +2178,7 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       invalidateUserWorkspaceAllowlist(user.sub);
       trackEvent(user.sub, 'session_created', { sessionSource: 'manual' });
       step.succeed(undefined, { sessionId: id });
-      return reply.status(201).send({ sessionId: id });
+      return reply.status(201).send({ sessionId: id, ...(modelConfig ? { modelConfig } : {}) });
     },
   );
 
@@ -3662,29 +3556,26 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
       const { sessionId } = request.params as { sessionId: string };
       const { step } = startRequestWorkflow(request, 'session.delete', undefined, { sessionId });
 
-      const session = sqliteGet<{ id: string }>(
-        'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-        [sessionId, user.sub],
-      );
-      if (!session) {
+      const sessionsToDelete = loadSessionDeletionRows(sessionId, user.sub);
+      if (sessionsToDelete.length === 0) {
         throw ApiError.notFound('目标会话不存在。');
       }
 
-      const sessions = sqliteAll<SessionRow>(
-        `SELECT ${buildSafeSessionSelectColumns()} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`,
-        [user.sub],
-      );
-      const sessionsToDelete = buildSessionDeletionRows(sessions, sessionId);
-      await Promise.all(
-        sessionsToDelete.map((candidate) =>
-          stopAllInFlightStreamRequestsForSession({ sessionId: candidate.id, userId: user.sub }),
-        ),
-      );
-      const reconciledSessionsToDelete = await reconcileSessionRuntimeRowsForResponse(
-        sessionsToDelete,
-        user.sub,
-      );
-      const blockingSession = findSessionDeletionBlocker(reconciledSessionsToDelete, user.sub);
+      const timedOutSessionId = await stopSessionStreamsForDeletion({
+        sessionIds: new Set(sessionsToDelete.map(({ id }) => id)),
+        userId: user.sub,
+        timeoutMs: SESSION_DELETE_STOP_TIMEOUT_MS,
+      });
+      const timedOutSession = sessionsToDelete.find(({ id }) => id === timedOutSessionId);
+      if (!timedOutSession) {
+        await reconcileSessionRuntimeRowsForResponse(sessionsToDelete, user.sub);
+      }
+      // 停流期间可能有新子会话或新一轮运行。提交前重新读取并检查，中间不让出执行权。
+      const currentSessions = loadSessionDeletionRows(sessionId, user.sub);
+      if (currentSessions.length === 0) throw ApiError.notFound('目标会话不存在。');
+      const blockingSession = timedOutSession
+        ? { reason: 'stream', session: timedOutSession }
+        : findSessionDeletionBlocker(currentSessions, user.sub);
       if (blockingSession) {
         step.fail('session not deletable', {
           blockReason: blockingSession.reason,
@@ -3699,10 +3590,18 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      await deleteSessionTree({ sessionsToDelete: reconciledSessionsToDelete, userId: user.sub });
-      step.succeed(undefined, { deletedCount: reconciledSessionsToDelete.length });
+      const sessions = currentSessions.map(({ id }) => ({
+        id,
+        taskGraphProjectRoot: resolveTaskGraphProjectRootForDelete(id),
+      }));
+      deleteSessionTree({ sessions, userId: user.sub });
+      deletionCleanup.schedule();
+      const { invalidateSessionExtensionConnections } =
+        await import('../session-extension/session-extension-service.js');
+      for (const { id } of sessions) await invalidateSessionExtensionConnections(user.sub, id);
+      step.succeed(undefined, { deletedCount: sessions.length });
       return reply.send({
-        deletedSessionIds: reconciledSessionsToDelete.map((candidate) => candidate.id),
+        deletedSessionIds: sessions.map(({ id }) => id),
         ok: true,
       });
     },
@@ -3746,6 +3645,16 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
           });
         }
         const currentMetadata = parseSessionMetadataJson(session.metadata_json);
+        // 来源托管会话（渠道 / 定时任务）的对话模式由来源侧配置决定，网页端一律不得改写：
+        // 该键被误写成 `clarify` 后，澄清只读白名单会把渠道回复工具整套过滤掉（表现为
+        // 「渠道里再也回不了消息」）。此处做**字段级拒写**——剥掉该键后本次 patch 的
+        // 其余字段照常生效，旧客户端也不会因此整条请求 400。
+        if (
+          isSourceManagedSessionMetadata(currentMetadata) &&
+          Object.hasOwn(metadataPatch.data, 'dialogueMode')
+        ) {
+          delete metadataPatch.data.dialogueMode;
+        }
         // 合并后的元数据决定本会话是否处于 SSH 远程工作区模式：patch 里可能
         // 只带 workingDirectory（远端路径），SSH 身份来自已存的 metadata。
         const mergedMetadataForPolicy = { ...currentMetadata, ...metadataPatch.data };
@@ -3761,6 +3670,12 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         // `resolveStreamModelRoute` 的会话级回退继续使用。
         const isExplicitAgentClear =
           Object.hasOwn(metadataPatch.data, 'agentId') && metadataPatch.data['agentId'] === null;
+        // 显式传 `contextWindowOverride: null` 表示清除会话级上下文挡位，回退到
+        // 模型级配置（`user_settings.providers` 里该模型的 contextWindowOverride）。
+        // 不清键的话 `resolveStreamModelRoute` 会一直把它当会话级覆盖使用。
+        const isExplicitContextWindowOverrideClear =
+          Object.hasOwn(metadataPatch.data, 'contextWindowOverride') &&
+          metadataPatch.data['contextWindowOverride'] === null;
         const requestedWorkingDirectory = getRequestedWorkingDirectory(metadataPatch.data, {
           sshSession: mergedSshConnectionId !== null,
         });
@@ -3821,6 +3736,9 @@ export async function sessionsRoutes(app: FastifyInstance): Promise<void> {
         }
         if (isExplicitAgentClear) {
           delete normalizedMetadata.metadata['agentId'];
+        }
+        if (isExplicitContextWindowOverrideClear) {
+          delete normalizedMetadata.metadata['contextWindowOverride'];
         }
 
         nextMetadataJson = JSON.stringify(normalizedMetadata.metadata);

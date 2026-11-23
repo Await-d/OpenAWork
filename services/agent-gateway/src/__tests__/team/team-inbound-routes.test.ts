@@ -112,8 +112,20 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
     const app = await buildApp();
     const events: unknown[] = [];
     const unsubscribe = teamEventsBus.subscribeToTeamEvents((event) => events.push(event));
-    dbModule.sqliteRun("CREATE TRIGGER reject_inbound_history BEFORE INSERT ON message_v2 BEGIN SELECT RAISE(ABORT, 'history unavailable'); END");
-    const submit = () => app.inject({ method: 'POST', url: `/team/sessions/${SESSION_ID}/inbound-messages`, headers: { authorization: bearer(app) }, payload: { messageType: 'user_input', payload: { text: '事务输入' }, clientIdempotencyKey: 'atomic-input' } });
+    dbModule.sqliteRun(
+      "CREATE TRIGGER reject_inbound_history BEFORE INSERT ON message_v2 BEGIN SELECT RAISE(ABORT, 'history unavailable'); END",
+    );
+    const submit = () =>
+      app.inject({
+        method: 'POST',
+        url: `/team/sessions/${SESSION_ID}/inbound-messages`,
+        headers: { authorization: bearer(app) },
+        payload: {
+          messageType: 'user_input',
+          payload: { text: '事务输入' },
+          clientIdempotencyKey: 'atomic-input',
+        },
+      });
     try {
       expect((await submit()).statusCode).toBe(500);
       expect(countRows('session_inbound_messages')).toBe(0);
@@ -123,7 +135,11 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
       dbModule.sqliteRun('DROP TRIGGER reject_inbound_history');
       expect((await submit()).statusCode).toBe(201);
       expect(countRows('message_v2')).toBe(1);
-    } finally { unsubscribe(); dbModule.sqliteRun('DROP TRIGGER IF EXISTS reject_inbound_history'); await app.close(); }
+    } finally {
+      unsubscribe();
+      dbModule.sqliteRun('DROP TRIGGER IF EXISTS reject_inbound_history');
+      await app.close();
+    }
   });
 
   it('相同客户端key发送到两个会话不会互相复用', async () => {
@@ -131,11 +147,26 @@ describe('POST /team/sessions/:sessionId/inbound-messages', () => {
     const app = await buildApp();
     try {
       for (const id of [SESSION_ID, 's-inbound-second']) {
-        expect((await app.inject({ method: 'POST', url: `/team/sessions/${id}/inbound-messages`, headers: { authorization: bearer(app) }, payload: { messageType: 'user_input', payload: { text: id }, clientIdempotencyKey: 'same-key' } })).statusCode).toBe(201);
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: `/team/sessions/${id}/inbound-messages`,
+              headers: { authorization: bearer(app) },
+              payload: {
+                messageType: 'user_input',
+                payload: { text: id },
+                clientIdempotencyKey: 'same-key',
+              },
+            })
+          ).statusCode,
+        ).toBe(201);
       }
       expect(countRows('session_inbound_messages')).toBe(2);
       expect(countRows('message_v2')).toBe(2);
-    } finally { await app.close(); }
+    } finally {
+      await app.close();
+    }
   });
 
   it.each(['参考图片解释布局', ''])(

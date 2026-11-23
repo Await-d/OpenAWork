@@ -226,3 +226,58 @@ describe('slimMessagesForRecovery — slim 开关', () => {
     expect(output.stdout as string).not.toContain('truncated');
   });
 });
+
+/**
+ * 整文件快照（`write` / `edit` / `multi_edit`）的结构保留。
+ *
+ * 这类输出的顶层同时带 `before` / `after` 两份源码快照，前端 `UnifiedCodeDiff`
+ * 靠它们画 diff。修复前它会走「整体上限」分支：序列化一旦超过 4000 字符就被
+ * 折叠成**截断的 JSON 字符串**，前端既认不出形状也画不出 diff，用户只看到
+ * 「内容已截断 · 省略 N 字符」加一坨原始 JSON。
+ */
+describe('slimMessagesForRecovery — 整文件快照结构保留', () => {
+  const fileSnapshot = (size: number) => ({
+    before: 'a'.repeat(size),
+    after: 'b'.repeat(size),
+    created: false,
+    filediff: {
+      file: '/tmp/x.js',
+      before: 'a'.repeat(size),
+      after: 'b'.repeat(size),
+      additions: 3,
+      deletions: 4,
+    },
+    success: true,
+    path: '/tmp/x.js',
+    bytes: size,
+  });
+
+  it('超过整体上限时仍保留对象结构，而不是折叠成截断字符串', () => {
+    const [slimMsg] = slimMessagesForRecovery([toolResultMessage(fileSnapshot(2539))]);
+    const output = (slimMsg!.content[0] as { output: unknown }).output;
+    expect(typeof output).toBe('object');
+    expect(output).not.toBeNull();
+    const snapshot = output as Record<string, unknown>;
+    // 两份快照必须都还在，且仍是字符串（前端据此判定能否画 diff）。
+    expect(typeof snapshot['before']).toBe('string');
+    expect(typeof snapshot['after']).toBe('string');
+  });
+
+  it('阈值内的快照原样保留，不引入截断标记', () => {
+    const [slimMsg] = slimMessagesForRecovery([toolResultMessage(fileSnapshot(2539))]);
+    const snapshot = (slimMsg!.content[0] as { output: Record<string, unknown> }).output;
+    expect(snapshot['before']).toBe('a'.repeat(2539));
+    expect(snapshot['after']).toBe('b'.repeat(2539));
+    expect(snapshot['before'] as string).not.toContain('truncated');
+  });
+
+  it('超大快照保留结构并按字节预算裁剪，总量仍受 64KB 上限约束', () => {
+    const [slimMsg] = slimMessagesForRecovery([toolResultMessage(fileSnapshot(200_000))]);
+    const output = (slimMsg!.content[0] as { output: unknown }).output;
+    expect(typeof output).toBe('object');
+    const bytes = Buffer.byteLength(JSON.stringify(output), 'utf8');
+    expect(bytes).toBeLessThanOrEqual(OUTPUT_HARD_CAP_BYTES);
+    const snapshot = output as Record<string, unknown>;
+    expect(snapshot['before'] as string).toContain('truncated');
+  });
+});

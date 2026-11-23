@@ -267,13 +267,22 @@ export const OpenAIChatEvent = Schema.StructWithRest(
     // Error-only bodies carry no `choices`; tolerate their absence.
     choices: optionalArray(OpenAIChatChoice),
     usage: optionalNull(OpenAIChatUsage),
-    service_tier: optionalNull(OpenAIOptions.OpenAIServiceTier),
+    // 响应侧**不能**套请求侧白名单：`service_tier` 只是上游回显的元数据，兼容网关
+    // 返回 `standard` / 数字 / 自定义档位都很常见。用 `Schema.Literals` 解码会让这类
+    // 帧整体判为非法，正在输出的流被当场掐断（实测：自定义 provider 偶发
+    // `Invalid custom/openai-compatible-chat stream event`）。这里接受任意字符串，
+    // 由 `step()` 用 `isServiceTier` 窄化后再写进 providerMetadata。
+    service_tier: optionalNull(Schema.Union([OpenAIOptions.OpenAIServiceTier, Schema.String])),
     // 200-with-error-body responses (rate limits, quota, invalid request) come
     // back as a top-level `error` object instead of an HTTP failure.
     error: Schema.optional(
       Schema.Struct({
         type: optionalNull(Schema.String),
-        code: optionalNull(Schema.String),
+        // 错误码可能不是字符串：兼容网关把连接中断上报成
+        // `{"error":{"message":"...","type":"upstream_error","code":502}}`。
+        // 只收字符串时整帧判成非法流事件，`step()` 走不到 `event.error` 分支，
+        // 上游原话（中文）反而被埋进 `Invalid ... stream event` 的转义 JSON 里。
+        code: optionalNull(Schema.Union([Schema.String, Schema.Number])),
         message: optionalNull(Schema.String),
       }),
     ),
@@ -1115,7 +1124,11 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       mapUsage(event.usage, state.providerMetadataKey) ??
       (choiceUsage ? mapUsage(choiceUsage, state.providerMetadataKey) : undefined) ??
       state.usage;
-    const serviceTier = event.service_tier ?? state.serviceTier;
+    // 未知档位（白名单外）直接忽略并沿用上一次的已知值，绝不因为一个元数据字段
+    // 让整条流失败。
+    const serviceTier = OpenAIOptions.isServiceTier(event.service_tier)
+      ? event.service_tier
+      : state.serviceTier;
     // 200-with-error body: OpenAI-compatible gateways report rate limits and
     // quota errors as a top-level `error` object instead of an HTTP failure.
     if (event.error) {
@@ -1123,7 +1136,9 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       const code = event.error.code ?? undefined;
       const message = event.error.message ?? undefined;
       if (type !== undefined || code !== undefined || message !== undefined) {
-        const label = [code ?? type, message]
+        // 数字错误码也要进标签：只留原话会丢掉最能定位问题的那个码。
+        const codeLabel = code === undefined ? undefined : String(code);
+        const label = [codeLabel ?? type, message]
           .filter((value): value is string => typeof value === 'string' && value.length > 0)
           .join(': ');
         return [

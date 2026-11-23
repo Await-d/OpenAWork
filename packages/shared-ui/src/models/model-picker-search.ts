@@ -128,7 +128,7 @@ export function buildFilteredModelGroups(
   return Array.from(grouped.values())
     .map((group) => ({
       ...group,
-      models: [...group.models].sort(compareModelsByName),
+      models: group.models.toSorted(compareModelsByName),
     }))
     .sort(compareProviderGroups);
 }

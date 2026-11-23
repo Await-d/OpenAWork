@@ -1,3 +1,4 @@
+import { parseServerTimestamp } from '@openAwork/shared';
 import { UNBOUND_WORKSPACE_LABEL } from '../../../utils/session/session-grouping.js';
 
 export type HomeSessionTimeGroupKey = 'today' | 'yesterday' | 'earlier';
@@ -171,7 +172,7 @@ export function groupSessionsByTime<TSession extends HomeSessionLike>(
     yesterday: [],
   };
 
-  for (const session of [...sessions].sort(compareSessionsByUpdatedAt)) {
+  for (const session of sessions.toSorted(compareSessionsByUpdatedAt)) {
     buckets[getTimeGroupKey(session.updated_at, now)].push(session);
   }
 
@@ -207,13 +208,13 @@ function getTimeGroupKey(value: string, now: Date): HomeSessionTimeGroupKey {
   return 'earlier';
 }
 
+/**
+ * 会话 `updated_at` 来自 SQLite `datetime('now')`：UTC、空格分隔、**不带时区后缀**。
+ * 直接 `new Date(value)` 会被按本地时区解释（东八区下整体少 8 小时），因此统一走
+ * `@openAwork/shared` 的 `parseServerTimestamp`：无时区文本按 UTC 解析。
+ */
 function parseTimestamp(value: string | null | undefined): number | null {
-  if (!value) {
-    return null;
-  }
-
-  const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? null : timestamp;
+  return parseServerTimestamp(value);
 }
 
 function startOfLocalDay(value: Date): Date {

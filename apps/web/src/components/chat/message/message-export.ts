@@ -1,5 +1,7 @@
+import { parseServerTimestamp } from '@openAwork/shared';
 import type { ChatMessage } from '../../conversation-runtime/messages/support.js';
 import { readAssistantTracePayload } from '../../conversation-runtime/messages/support.js';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 
 export type ExportFormat = 'markdown' | 'json' | 'text';
 
@@ -42,7 +44,7 @@ export async function copyExportToClipboard(
 ): Promise<boolean> {
   const content = exportMessages(messages, format);
   try {
-    await navigator.clipboard.writeText(content);
+    await copyTextToClipboard(content);
     return true;
   } catch {
     return false;
@@ -195,9 +197,9 @@ function exportAsPlainText(messages: ChatMessage[]): string {
 }
 
 function formatTimestamp(value: number | string): string {
-  const date = typeof value === 'number' ? new Date(value) : new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString('zh-CN', {
+  const parsed = parseServerTimestamp(value);
+  if (parsed === null) return '';
+  return new Date(parsed).toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

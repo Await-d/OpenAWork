@@ -7,6 +7,7 @@ import type {
   WorkflowRuntimeState,
   WorkflowRuntimeVerificationStatus,
 } from '@openAwork/shared';
+import { isSourceManagedSessionMetadata } from './session-runtime-policy.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -167,10 +168,15 @@ export function buildWorkflowRuntimeState(metadataJson: string | undefined): Wor
     ...(activeLoop ? { activeLoop } : {}),
     ...(activePlan ? { activePlan } : {}),
     evidence: buildEvidenceState(metadata, activeLoop),
+    // 来源托管会话（渠道 / 定时任务）没有对话模式：该键只可能是上游误写的脏值，
+    // 不能让它把运行状态投影成「规划中」（clarify → planning）。真实的工作流进度
+    //（activePlan / activeLoop）仍然照常投影 —— 那些字段与对话模式无关。
     mode: resolveMode({
       activeLoop,
       activePlan,
-      mode: dialogueMode(metadata['dialogueMode']),
+      mode: isSourceManagedSessionMetadata(metadata)
+        ? undefined
+        : dialogueMode(metadata['dialogueMode']),
     }),
   };
 }

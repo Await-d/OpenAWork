@@ -12,6 +12,7 @@
  * 并展示原因），而不是静默放行。
  */
 
+import { parseServerTimestamp } from '@openAwork/shared';
 import type { FileChangeSourceKind } from '@openAwork/shared';
 import type {
   SessionFileDiffEntry,
@@ -51,27 +52,9 @@ export interface AffectedChangeDetection {
 
 // ─── 时间与快照排序 ────────────────────────────────────────────────────
 
-/**
- * SQLite `datetime('now')` 的输出形态：UTC、秒级、空格分隔、无时区后缀。
- * `snapshot_trees.created_at` 就是这种格式。
- */
-const SQLITE_UTC_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
-
 export function toTimestamp(value: string | number | undefined): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string') {
-    // `Date.parse('2026-07-15 10:05:00')` 在 V8 中按**本地时区**解释，而
-    // `snapshot_trees.created_at` 来自 SQLite `datetime('now')`（UTC）。
-    // 非 UTC 时区下会整体偏移一个时区，导致受影响快照判定与恢复基线错位。
-    const normalized = SQLITE_UTC_DATETIME_PATTERN.test(value)
-      ? `${value.replace(' ', 'T')}Z`
-      : value;
-    const parsed = Date.parse(normalized);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
+  // 解析语义统一收口在 `@openAwork/shared`：无时区 SQLite 文本按 UTC 解析。
+  return parseServerTimestamp(value);
 }
 
 export function sortSnapshotsByCreatedAt(input: {
@@ -92,7 +75,7 @@ export function sortSnapshotsByCreatedAt(input: {
   const originalIndexByTreeHash = new Map(
     input.originalOrder.map((snapshot, index) => [snapshot.treeHash, index] as const),
   );
-  return [...input.snapshots].sort((left, right) => {
+  return input.snapshots.toSorted((left, right) => {
     const leftTimestamp = toTimestamp(left.createdAt);
     const rightTimestamp = toTimestamp(right.createdAt);
     if (leftTimestamp !== null && rightTimestamp !== null && leftTimestamp !== rightTimestamp) {

@@ -166,7 +166,7 @@ export function pickModelForLayer(
 /** 选取池中"最便宜"的模型（single 策略 / 兜底用）。 */
 export function pickCheapest(pool: ModelCandidate[]): ModelCandidate | null {
   if (pool.length === 0) return null;
-  return [...pool].sort(
+  return pool.toSorted(
     (a, b) =>
       (a.inputPricePerMillion ?? 0) +
       (a.outputPricePerMillion ?? 0) -

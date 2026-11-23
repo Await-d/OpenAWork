@@ -1,4 +1,5 @@
 import type { DialogueMode, InputImageContent, RunEvent } from '@openAwork/shared';
+import { createRandomUuid } from '../utils/random-uuid.js';
 
 export type GatewayStreamEvent = RunEvent;
 
@@ -151,7 +152,7 @@ export class GatewayWebSocketClient {
   }
 
   send(message: string, options: SendMessageOptions = {}): void {
-    const clientRequestId = options.clientRequestId ?? crypto.randomUUID();
+    const clientRequestId = options.clientRequestId ?? createRandomUuid();
     const agentId = options.agentId?.trim() || undefined;
     const payload = JSON.stringify({
       ...(agentId ? { agentId } : {}),

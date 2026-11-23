@@ -1,3 +1,4 @@
+import { formatServerDateTime } from '@openAwork/shared';
 import type { CSSProperties } from 'react';
 import { getRoleLayerIdentity } from '../../data/role-layer-identity.js';
 import type { HandoffEntry } from '../../../../../stores/team/team-events.js';
@@ -74,7 +75,7 @@ export function LayerFlowHandoffHeader({
         </span>
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 10, color: 'var(--fg-muted)' }}>
-          {new Date(entry.updatedAt).toLocaleString('zh-CN')}
+          {formatServerDateTime(entry.updatedAt)}
         </span>
       </div>
       {entry.summary ? (

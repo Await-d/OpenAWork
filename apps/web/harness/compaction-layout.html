@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="carbon" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>压缩提示位置</title>
+    <style>
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family: var(--font-sans, system-ui);
+      }
+      .compaction-harness {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        max-width: 900px;
+      }
+      .compaction-harness h1 {
+        font-size: 16px;
+        margin: 0 0 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/compaction-layout-entry.tsx"></script>
+  </body>
+</html>

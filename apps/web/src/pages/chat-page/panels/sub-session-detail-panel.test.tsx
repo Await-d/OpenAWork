@@ -10,9 +10,19 @@ const { useSubSessionDetailMock } = vi.hoisted(() => ({
   useSubSessionDetailMock: vi.fn(),
 }));
 
+const { streamMock } = vi.hoisted(() => ({ streamMock: vi.fn() }));
+
 vi.mock('../hooks/use-sub-session-detail.js', () => ({
   useSubSessionDetail: useSubSessionDetailMock,
 }));
+
+// 只替身 `useGatewayClient`：真实实现的 `stream` 会开 WebSocket 连网关，jsdom 下无法收敛。
+// `formatGatewayStreamErrorMessage` 等其余导出保持真实实现，错误文案口径不漂移。
+vi.mock('../../../hooks/gateway/useGatewayClient.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../hooks/gateway/useGatewayClient.js')>();
+  return { ...actual, useGatewayClient: () => ({ stream: streamMock }) };
+});
 
 const CLIENT_HEIGHT = 400;
 const SESSION_ID = 'child-session-1';
@@ -181,6 +191,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useSubSessionDetailMock.mockReset();
+  streamMock.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -448,5 +459,32 @@ describe('SubSessionDetailPanel 模型与思考等级展示', () => {
     expect(screen.queryByText(/思考/)).toBeNull();
     // 会话 id 与计数仍正常渲染
     expect(screen.getByText('child-se…on-1')).not.toBeNull();
+  });
+});
+
+describe('SubSessionDetailPanel 输入法组合态', () => {
+  it('组合态按 Enter 不发送消息，半成品文本留在输入框', () => {
+    renderPanelHarness();
+    const textarea = screen.getByLabelText('向子代理追加消息') as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: 'nihao' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true });
+
+    // 这次 Enter 属于输入法候选窗口：既不能发送，也不能把半成品发出去
+    expect(streamMock).not.toHaveBeenCalled();
+    expect(textarea.value).toBe('nihao');
+  });
+
+  it('普通 Enter 发送消息并清空输入框', () => {
+    renderPanelHarness();
+    const textarea = screen.getByLabelText('向子代理追加消息') as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: '继续处理' } });
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    expect(streamMock).toHaveBeenCalledTimes(1);
+    expect(streamMock.mock.calls[0]?.[0]).toBe(SESSION_ID);
+    expect(streamMock.mock.calls[0]?.[1]).toBe('继续处理');
+    expect(textarea.value).toBe('');
   });
 });

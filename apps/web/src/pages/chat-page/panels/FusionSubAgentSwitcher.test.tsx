@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FusionSubAgentSwitcher } from './FusionSubAgentSwitcher.js';
 import type { SubAgentRunItem } from './sub-agent-run-list.js';
+import { SubagentProgressProvider } from '../../../components/chat/subagent-progress.js';
 
 afterEach(() => {
   cleanup();
@@ -161,11 +162,11 @@ describe('FusionSubAgentSwitcher', () => {
     const chips = screen.getAllByRole('tab');
 
     expect(chips.map((chip) => chip.getAttribute('data-status'))).toEqual([
-      'running',
-      'pending',
+      'cancelled',
       'completed',
       'failed',
-      'cancelled',
+      'pending',
+      'running',
     ]);
     expect(
       chips.map((chip) => chip.querySelector('.fusion-sub-agent-switcher__dot')),
@@ -211,11 +212,45 @@ describe('FusionSubAgentSwitcher', () => {
 
     const chips = screen.getAllByRole('tab');
     expect(chips).toHaveLength(2);
-    expect(chips.map((chip) => chip.getAttribute('data-status'))).toEqual(['running', 'paused']);
+    expect(chips.map((chip) => chip.getAttribute('data-status'))).toEqual(['paused', 'running']);
 
     // 再点一次恢复全部
     fireEvent.click(screen.getByRole('button', { name: /仅显示活跃子代理/ }));
     expect(screen.getAllByRole('tab')).toHaveLength(4);
+  });
+
+  it('仅活跃且活跃项在共享窗口之外时提示加载更多，加载后显示较早的活跃项', () => {
+    const items = [
+      makeItem('older-running', { status: 'running', createdAt: 1 }),
+      makeItem('older-paused', { status: 'paused', createdAt: 2 }),
+      ...Array.from({ length: 5 }, (_, index) =>
+        makeItem(`newer-completed-${index}`, { status: 'completed', createdAt: index + 3 }),
+      ),
+    ];
+    render(
+      <SubagentProgressProvider sessions={items}>
+        <FusionSubAgentSwitcher items={items} selectedSessionId={null} onSelectSession={vi.fn()} />
+      </SubagentProgressProvider>,
+    );
+
+    expect(screen.getAllByRole('tab')).toHaveLength(5);
+    fireEvent.click(screen.getByRole('button', { name: /仅显示活跃子代理/ }));
+
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.queryByText('暂无活跃子代理')).toBeNull();
+    expect(screen.getByText('活跃子代理在已加载范围之外，请加载更多')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /加载更多子代理/ }));
+
+    expect(screen.getAllByRole('tab').map((chip) => chip.getAttribute('data-status'))).toEqual([
+      'paused',
+      'running',
+    ]);
+    expect(screen.queryByText('活跃子代理在已加载范围之外，请加载更多')).toBeNull();
+    expect(screen.queryByRole('button', { name: /加载更多子代理/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /仅显示活跃子代理/ }));
+    expect(screen.getAllByRole('tab')).toHaveLength(7);
   });
 
   it('仅活跃且无活跃项时展示空态提示', () => {

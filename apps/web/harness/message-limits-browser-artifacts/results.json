@@ -1,0 +1,1391 @@
+{
+  "visualReview": {
+    "inspectedScreenshots": ["dark-375-initial.png", "light-1440-save-error.png"],
+    "findings": [
+      "375px 暗色初始截图未发现文字裁剪、按钮重叠或对齐问题；保存按钮自动换至第二行。",
+      "1440px 亮色错误状态未见控件遮挡或裁剪；错误反馈呈灰色、视觉突出程度较弱，可作为后续体验优化项。",
+      "图片审阅对保存按钮状态的猜测不作为证据；Playwright 实际检查确认失败后保存按钮 enabled，草稿为 77777。"
+    ],
+    "toolErrors": [
+      "首次审阅 light-375-save-error.png 时多模态工具返回 No multimodal response text returned；随后成功审阅另两张截图。"
+    ]
+  },
+  "serverLifecycle": { "url": "http://127.0.0.1:5197", "ownServerStopped": true },
+  "testType": "Chromium actual component + real auth store/hook/client + Playwright mocked HTTP; not real gateway integration",
+  "base": "http://127.0.0.1:5197",
+  "chromium": "145.0.7632.6",
+  "checks": [
+    {
+      "name": "dark/375 initial GET and server value",
+      "passed": true,
+      "detail": {
+        "reads": 1
+      }
+    },
+    {
+      "name": "dark/375 unchanged save disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 no horizontal overflow",
+      "passed": true,
+      "detail": {
+        "pageWidth": 375,
+        "viewport": 375,
+        "sectionWidth": 343,
+        "sectionScrollWidth": 343,
+        "controls": [
+          {
+            "text": "",
+            "x": 28,
+            "right": 228,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 200,
+            "height": 32
+          },
+          {
+            "text": "恢复默认值",
+            "x": 236,
+            "right": 321.359375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 85.359375,
+            "height": 32
+          },
+          {
+            "text": "保存字符上限",
+            "x": 28,
+            "right": 125.234375,
+            "y": 147.5,
+            "bottom": 179.5,
+            "width": 97.234375,
+            "height": 32
+          }
+        ],
+        "section": {
+          "x": 16,
+          "right": 359
+        },
+        "background": "rgb(8, 9, 10)",
+        "color": "rgb(184, 188, 196)",
+        "accent": "#00b4ff"
+      }
+    },
+    {
+      "name": "dark/375 controls fit and have useful size",
+      "passed": true,
+      "detail": [
+        {
+          "text": "",
+          "x": 28,
+          "right": 228,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 200,
+          "height": 32
+        },
+        {
+          "text": "恢复默认值",
+          "x": 236,
+          "right": 321.359375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 85.359375,
+          "height": 32
+        },
+        {
+          "text": "保存字符上限",
+          "x": 28,
+          "right": 125.234375,
+          "y": 147.5,
+          "bottom": 179.5,
+          "width": 97.234375,
+          "height": 32
+        }
+      ]
+    },
+    {
+      "name": "dark/375 controls do not overlap",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 real theme tokens resolved",
+      "passed": true,
+      "detail": {
+        "background": "rgb(8, 9, 10)",
+        "color": "rgb(184, 188, 196)",
+        "accent": "#00b4ff"
+      }
+    },
+    {
+      "name": "dark/375 keyboard focus visible",
+      "passed": true,
+      "detail": {
+        "focused": true,
+        "outline": "rgb(0, 180, 255) solid 2px",
+        "shadow": "rgba(0, 180, 255, 0.07) 0px 0px 0px 3px"
+      }
+    },
+    {
+      "name": "dark/375 valid PUT body 65536",
+      "passed": true,
+      "detail": {
+        "maxChars": 65536
+      }
+    },
+    {
+      "name": "dark/375 save reflected and clean",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 1023 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 1023 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 200001 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 200001 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 restore is unsaved draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 explicit default save PUT",
+      "passed": true,
+      "detail": {
+        "maxChars": 32768
+      }
+    },
+    {
+      "name": "dark/375 failed save preserves editable draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 read-only has disabled input and no actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/375 read-only no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 initial GET and server value",
+      "passed": true,
+      "detail": {
+        "reads": 1
+      }
+    },
+    {
+      "name": "dark/768 unchanged save disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 no horizontal overflow",
+      "passed": true,
+      "detail": {
+        "pageWidth": 768,
+        "viewport": 768,
+        "sectionWidth": 736,
+        "sectionScrollWidth": 736,
+        "controls": [
+          {
+            "text": "",
+            "x": 28,
+            "right": 228,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 200,
+            "height": 32
+          },
+          {
+            "text": "恢复默认值",
+            "x": 236,
+            "right": 321.359375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 85.359375,
+            "height": 32
+          },
+          {
+            "text": "保存字符上限",
+            "x": 329.359375,
+            "right": 426.59375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 97.234375,
+            "height": 32
+          }
+        ],
+        "section": {
+          "x": 16,
+          "right": 752
+        },
+        "background": "rgb(8, 9, 10)",
+        "color": "rgb(184, 188, 196)",
+        "accent": "#00b4ff"
+      }
+    },
+    {
+      "name": "dark/768 controls fit and have useful size",
+      "passed": true,
+      "detail": [
+        {
+          "text": "",
+          "x": 28,
+          "right": 228,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 200,
+          "height": 32
+        },
+        {
+          "text": "恢复默认值",
+          "x": 236,
+          "right": 321.359375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 85.359375,
+          "height": 32
+        },
+        {
+          "text": "保存字符上限",
+          "x": 329.359375,
+          "right": 426.59375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 97.234375,
+          "height": 32
+        }
+      ]
+    },
+    {
+      "name": "dark/768 controls do not overlap",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 real theme tokens resolved",
+      "passed": true,
+      "detail": {
+        "background": "rgb(8, 9, 10)",
+        "color": "rgb(184, 188, 196)",
+        "accent": "#00b4ff"
+      }
+    },
+    {
+      "name": "dark/768 keyboard focus visible",
+      "passed": true,
+      "detail": {
+        "focused": true,
+        "outline": "rgb(0, 180, 255) solid 2px",
+        "shadow": "rgba(0, 180, 255, 0.07) 0px 0px 0px 3px"
+      }
+    },
+    {
+      "name": "dark/768 valid PUT body 65536",
+      "passed": true,
+      "detail": {
+        "maxChars": 65536
+      }
+    },
+    {
+      "name": "dark/768 save reflected and clean",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 1023 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 1023 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 200001 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 200001 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 restore is unsaved draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 explicit default save PUT",
+      "passed": true,
+      "detail": {
+        "maxChars": 32768
+      }
+    },
+    {
+      "name": "dark/768 failed save preserves editable draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 read-only has disabled input and no actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/768 read-only no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 initial GET and server value",
+      "passed": true,
+      "detail": {
+        "reads": 1
+      }
+    },
+    {
+      "name": "dark/1440 unchanged save disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 no horizontal overflow",
+      "passed": true,
+      "detail": {
+        "pageWidth": 1440,
+        "viewport": 1440,
+        "sectionWidth": 928,
+        "sectionScrollWidth": 928,
+        "controls": [
+          {
+            "text": "",
+            "x": 268,
+            "right": 468,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 200,
+            "height": 32
+          },
+          {
+            "text": "恢复默认值",
+            "x": 476,
+            "right": 561.359375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 85.359375,
+            "height": 32
+          },
+          {
+            "text": "保存字符上限",
+            "x": 569.359375,
+            "right": 666.59375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 97.234375,
+            "height": 32
+          }
+        ],
+        "section": {
+          "x": 256,
+          "right": 1184
+        },
+        "background": "rgb(8, 9, 10)",
+        "color": "rgb(184, 188, 196)",
+        "accent": "#00b4ff"
+      }
+    },
+    {
+      "name": "dark/1440 controls fit and have useful size",
+      "passed": true,
+      "detail": [
+        {
+          "text": "",
+          "x": 268,
+          "right": 468,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 200,
+          "height": 32
+        },
+        {
+          "text": "恢复默认值",
+          "x": 476,
+          "right": 561.359375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 85.359375,
+          "height": 32
+        },
+        {
+          "text": "保存字符上限",
+          "x": 569.359375,
+          "right": 666.59375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 97.234375,
+          "height": 32
+        }
+      ]
+    },
+    {
+      "name": "dark/1440 controls do not overlap",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 real theme tokens resolved",
+      "passed": true,
+      "detail": {
+        "background": "rgb(8, 9, 10)",
+        "color": "rgb(184, 188, 196)",
+        "accent": "#00b4ff"
+      }
+    },
+    {
+      "name": "dark/1440 keyboard focus visible",
+      "passed": true,
+      "detail": {
+        "focused": true,
+        "outline": "rgb(0, 180, 255) solid 2px",
+        "shadow": "rgba(0, 180, 255, 0.07) 0px 0px 0px 3px"
+      }
+    },
+    {
+      "name": "dark/1440 valid PUT body 65536",
+      "passed": true,
+      "detail": {
+        "maxChars": 65536
+      }
+    },
+    {
+      "name": "dark/1440 save reflected and clean",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 1023 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 1023 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 200001 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 200001 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 restore is unsaved draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 explicit default save PUT",
+      "passed": true,
+      "detail": {
+        "maxChars": 32768
+      }
+    },
+    {
+      "name": "dark/1440 failed save preserves editable draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 read-only has disabled input and no actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dark/1440 read-only no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 initial GET and server value",
+      "passed": true,
+      "detail": {
+        "reads": 1
+      }
+    },
+    {
+      "name": "light/375 unchanged save disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 no horizontal overflow",
+      "passed": true,
+      "detail": {
+        "pageWidth": 375,
+        "viewport": 375,
+        "sectionWidth": 343,
+        "sectionScrollWidth": 343,
+        "controls": [
+          {
+            "text": "",
+            "x": 28,
+            "right": 228,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 200,
+            "height": 32
+          },
+          {
+            "text": "恢复默认值",
+            "x": 236,
+            "right": 321.359375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 85.359375,
+            "height": 32
+          },
+          {
+            "text": "保存字符上限",
+            "x": 28,
+            "right": 125.234375,
+            "y": 147.5,
+            "bottom": 179.5,
+            "width": 97.234375,
+            "height": 32
+          }
+        ],
+        "section": {
+          "x": 16,
+          "right": 359
+        },
+        "background": "rgb(244, 245, 246)",
+        "color": "rgb(42, 45, 52)",
+        "accent": "#0077cc"
+      }
+    },
+    {
+      "name": "light/375 controls fit and have useful size",
+      "passed": true,
+      "detail": [
+        {
+          "text": "",
+          "x": 28,
+          "right": 228,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 200,
+          "height": 32
+        },
+        {
+          "text": "恢复默认值",
+          "x": 236,
+          "right": 321.359375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 85.359375,
+          "height": 32
+        },
+        {
+          "text": "保存字符上限",
+          "x": 28,
+          "right": 125.234375,
+          "y": 147.5,
+          "bottom": 179.5,
+          "width": 97.234375,
+          "height": 32
+        }
+      ]
+    },
+    {
+      "name": "light/375 controls do not overlap",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 real theme tokens resolved",
+      "passed": true,
+      "detail": {
+        "background": "rgb(244, 245, 246)",
+        "color": "rgb(42, 45, 52)",
+        "accent": "#0077cc"
+      }
+    },
+    {
+      "name": "light/375 keyboard focus visible",
+      "passed": true,
+      "detail": {
+        "focused": true,
+        "outline": "rgb(0, 119, 204) solid 2px",
+        "shadow": "rgba(0, 119, 204, 0.05) 0px 0px 0px 3px"
+      }
+    },
+    {
+      "name": "light/375 valid PUT body 65536",
+      "passed": true,
+      "detail": {
+        "maxChars": 65536
+      }
+    },
+    {
+      "name": "light/375 save reflected and clean",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 1023 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 1023 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 200001 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 200001 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 restore is unsaved draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 explicit default save PUT",
+      "passed": true,
+      "detail": {
+        "maxChars": 32768
+      }
+    },
+    {
+      "name": "light/375 failed save preserves editable draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 read-only has disabled input and no actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/375 read-only no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 initial GET and server value",
+      "passed": true,
+      "detail": {
+        "reads": 1
+      }
+    },
+    {
+      "name": "light/768 unchanged save disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 no horizontal overflow",
+      "passed": true,
+      "detail": {
+        "pageWidth": 768,
+        "viewport": 768,
+        "sectionWidth": 736,
+        "sectionScrollWidth": 736,
+        "controls": [
+          {
+            "text": "",
+            "x": 28,
+            "right": 228,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 200,
+            "height": 32
+          },
+          {
+            "text": "恢复默认值",
+            "x": 236,
+            "right": 321.359375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 85.359375,
+            "height": 32
+          },
+          {
+            "text": "保存字符上限",
+            "x": 329.359375,
+            "right": 426.59375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 97.234375,
+            "height": 32
+          }
+        ],
+        "section": {
+          "x": 16,
+          "right": 752
+        },
+        "background": "rgb(244, 245, 246)",
+        "color": "rgb(42, 45, 52)",
+        "accent": "#0077cc"
+      }
+    },
+    {
+      "name": "light/768 controls fit and have useful size",
+      "passed": true,
+      "detail": [
+        {
+          "text": "",
+          "x": 28,
+          "right": 228,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 200,
+          "height": 32
+        },
+        {
+          "text": "恢复默认值",
+          "x": 236,
+          "right": 321.359375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 85.359375,
+          "height": 32
+        },
+        {
+          "text": "保存字符上限",
+          "x": 329.359375,
+          "right": 426.59375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 97.234375,
+          "height": 32
+        }
+      ]
+    },
+    {
+      "name": "light/768 controls do not overlap",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 real theme tokens resolved",
+      "passed": true,
+      "detail": {
+        "background": "rgb(244, 245, 246)",
+        "color": "rgb(42, 45, 52)",
+        "accent": "#0077cc"
+      }
+    },
+    {
+      "name": "light/768 keyboard focus visible",
+      "passed": true,
+      "detail": {
+        "focused": true,
+        "outline": "rgb(0, 119, 204) solid 2px",
+        "shadow": "rgba(0, 119, 204, 0.05) 0px 0px 0px 3px"
+      }
+    },
+    {
+      "name": "light/768 valid PUT body 65536",
+      "passed": true,
+      "detail": {
+        "maxChars": 65536
+      }
+    },
+    {
+      "name": "light/768 save reflected and clean",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 1023 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 1023 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 200001 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 200001 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 restore is unsaved draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 explicit default save PUT",
+      "passed": true,
+      "detail": {
+        "maxChars": 32768
+      }
+    },
+    {
+      "name": "light/768 failed save preserves editable draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 read-only has disabled input and no actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/768 read-only no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 initial GET and server value",
+      "passed": true,
+      "detail": {
+        "reads": 1
+      }
+    },
+    {
+      "name": "light/1440 unchanged save disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 no horizontal overflow",
+      "passed": true,
+      "detail": {
+        "pageWidth": 1440,
+        "viewport": 1440,
+        "sectionWidth": 928,
+        "sectionScrollWidth": 928,
+        "controls": [
+          {
+            "text": "",
+            "x": 268,
+            "right": 468,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 200,
+            "height": 32
+          },
+          {
+            "text": "恢复默认值",
+            "x": 476,
+            "right": 561.359375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 85.359375,
+            "height": 32
+          },
+          {
+            "text": "保存字符上限",
+            "x": 569.359375,
+            "right": 666.59375,
+            "y": 107.5,
+            "bottom": 139.5,
+            "width": 97.234375,
+            "height": 32
+          }
+        ],
+        "section": {
+          "x": 256,
+          "right": 1184
+        },
+        "background": "rgb(244, 245, 246)",
+        "color": "rgb(42, 45, 52)",
+        "accent": "#0077cc"
+      }
+    },
+    {
+      "name": "light/1440 controls fit and have useful size",
+      "passed": true,
+      "detail": [
+        {
+          "text": "",
+          "x": 268,
+          "right": 468,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 200,
+          "height": 32
+        },
+        {
+          "text": "恢复默认值",
+          "x": 476,
+          "right": 561.359375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 85.359375,
+          "height": 32
+        },
+        {
+          "text": "保存字符上限",
+          "x": 569.359375,
+          "right": 666.59375,
+          "y": 107.5,
+          "bottom": 139.5,
+          "width": 97.234375,
+          "height": 32
+        }
+      ]
+    },
+    {
+      "name": "light/1440 controls do not overlap",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 real theme tokens resolved",
+      "passed": true,
+      "detail": {
+        "background": "rgb(244, 245, 246)",
+        "color": "rgb(42, 45, 52)",
+        "accent": "#0077cc"
+      }
+    },
+    {
+      "name": "light/1440 keyboard focus visible",
+      "passed": true,
+      "detail": {
+        "focused": true,
+        "outline": "rgb(0, 119, 204) solid 2px",
+        "shadow": "rgba(0, 119, 204, 0.05) 0px 0px 0px 3px"
+      }
+    },
+    {
+      "name": "light/1440 valid PUT body 65536",
+      "passed": true,
+      "detail": {
+        "maxChars": 65536
+      }
+    },
+    {
+      "name": "light/1440 save reflected and clean",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 1023 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 1023 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 200001 prevents save",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 200001 Enter sends no PUT",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 restore is unsaved draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 explicit default save PUT",
+      "passed": true,
+      "detail": {
+        "maxChars": 32768
+      }
+    },
+    {
+      "name": "light/1440 failed save preserves editable draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 read-only has disabled input and no actions",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "light/1440 read-only no overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "no browser exceptions",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "name": "no unexpected console errors",
+      "passed": true,
+      "detail": []
+    }
+  ],
+  "requests": [
+    {
+      "tag": "dark/375",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/375",
+      "method": "PUT",
+      "body": {
+        "maxChars": 65536
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "dark/375",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/375",
+      "method": "PUT",
+      "body": {
+        "maxChars": 32768
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "dark/375",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/375",
+      "method": "PUT",
+      "body": {
+        "maxChars": 77777
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 500
+    },
+    {
+      "tag": "dark/375",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/768",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/768",
+      "method": "PUT",
+      "body": {
+        "maxChars": 65536
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "dark/768",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/768",
+      "method": "PUT",
+      "body": {
+        "maxChars": 32768
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "dark/768",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/768",
+      "method": "PUT",
+      "body": {
+        "maxChars": 77777
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 500
+    },
+    {
+      "tag": "dark/768",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/1440",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/1440",
+      "method": "PUT",
+      "body": {
+        "maxChars": 65536
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "dark/1440",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/1440",
+      "method": "PUT",
+      "body": {
+        "maxChars": 32768
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "dark/1440",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "dark/1440",
+      "method": "PUT",
+      "body": {
+        "maxChars": 77777
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 500
+    },
+    {
+      "tag": "dark/1440",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/375",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/375",
+      "method": "PUT",
+      "body": {
+        "maxChars": 65536
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "light/375",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/375",
+      "method": "PUT",
+      "body": {
+        "maxChars": 32768
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "light/375",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/375",
+      "method": "PUT",
+      "body": {
+        "maxChars": 77777
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 500
+    },
+    {
+      "tag": "light/375",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/768",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/768",
+      "method": "PUT",
+      "body": {
+        "maxChars": 65536
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "light/768",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/768",
+      "method": "PUT",
+      "body": {
+        "maxChars": 32768
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "light/768",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/768",
+      "method": "PUT",
+      "body": {
+        "maxChars": 77777
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 500
+    },
+    {
+      "tag": "light/768",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/1440",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/1440",
+      "method": "PUT",
+      "body": {
+        "maxChars": 65536
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "light/1440",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/1440",
+      "method": "PUT",
+      "body": {
+        "maxChars": 32768
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 200
+    },
+    {
+      "tag": "light/1440",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    },
+    {
+      "tag": "light/1440",
+      "method": "PUT",
+      "body": {
+        "maxChars": 77777
+      },
+      "authorization": "Bearer message-limits-browser-fixture",
+      "status": 500
+    },
+    {
+      "tag": "light/1440",
+      "method": "GET",
+      "authorization": "Bearer message-limits-browser-fixture"
+    }
+  ],
+  "screenshots": [
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-375-initial.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-375-invalid.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-375-save-error.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-375-readonly.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-768-initial.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-768-invalid.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-768-save-error.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-768-readonly.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-1440-initial.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-1440-invalid.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-1440-save-error.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/dark-1440-readonly.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-375-initial.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-375-invalid.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-375-save-error.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-375-readonly.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-768-initial.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-768-invalid.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-768-save-error.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-768-readonly.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-1440-initial.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-1440-invalid.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-1440-save-error.png",
+    "/home/await/project/OpenAWork/apps/web/harness/message-limits-browser-artifacts/light-1440-readonly.png"
+  ],
+  "browserErrors": [],
+  "expectedConsoleErrors": [
+    "dark/375: Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "dark/768: Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "dark/1440: Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "light/375: Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "light/768: Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "light/1440: Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+  ],
+  "unexpectedConsoleErrors": [],
+  "summary": {
+    "passed": 110,
+    "failed": 0
+  }
+}

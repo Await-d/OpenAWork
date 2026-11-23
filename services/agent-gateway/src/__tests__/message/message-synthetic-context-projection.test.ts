@@ -66,4 +66,24 @@ describe('toModelMessages synthetic context projection', () => {
       },
     ]);
   });
+
+  it.each([
+    '请用中文进行思考。你必须全程使用中文思考，绝对不要切换到英文。',
+    '日本語で思考してください。必ず日本語のみで思考してください。',
+    '한국어로 생각하세요. 한국어로만 사고하세요.',
+  ])('drops an old gateway language directive without altering user text', (hint) => {
+    const directive = `[${hint}]`;
+    expect(
+      toModelMessages([
+        userMessage({ id: 'latest-user', syntheticContext: `\n${directive}`, text: directive }),
+      ]),
+    ).toEqual([{ role: 'user', content: directive }]);
+  });
+
+  it('keeps the current response-language hint', () => {
+    const hint = '[如无其他语言要求，请用中文回复。]';
+    expect(
+      toModelMessages([userMessage({ id: 'latest-user', syntheticContext: hint, text: '继续' })]),
+    ).toEqual([{ role: 'user', content: `${hint}\n继续` }]);
+  });
 });

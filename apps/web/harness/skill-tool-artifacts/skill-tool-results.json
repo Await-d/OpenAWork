@@ -1,0 +1,1724 @@
+{
+  "chromium": "145.0.7632.6",
+  "passed": 391,
+  "failed": 0,
+  "results": [
+    {
+      "name": "dark/375 collapsed no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "dark/375 success-name state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-skill state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/375 loading state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failure state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/375 cancelled state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/375 error-override state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/375 outer focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/375 Enter opens real Skill",
+      "passed": true
+    },
+    {
+      "name": "dark/375 Space closes real Skill",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-name Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-name Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-name resources",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-name duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-name raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-name raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-name raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-skill Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-skill Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-skill resources",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-skill duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-skill raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-skill raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "dark/375 success-skill raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failure no success document",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failure parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "dark/375 cancelled no success document",
+      "passed": true
+    },
+    {
+      "name": "dark/375 cancelled parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "dark/375 error override detail",
+      "passed": true
+    },
+    {
+      "name": "dark/375 malformed fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "dark/375 malformed fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "dark/375 plain fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "dark/375 plain fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "dark/375 malformed raw preserved",
+      "passed": true
+    },
+    {
+      "name": "dark/375 plain raw preserved",
+      "passed": true
+    },
+    {
+      "name": "dark/375 truncation notice visible",
+      "passed": true
+    },
+    {
+      "name": "dark/375 long tail initially omitted",
+      "passed": true
+    },
+    {
+      "name": "dark/375 long expansion reveals tail",
+      "passed": true
+    },
+    {
+      "name": "dark/375 long expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "dark/375 Skill expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "dark/375 list-401 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-401 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-401 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/375 list-401 budget 401",
+      "passed": true,
+      "detail": "actual=401"
+    },
+    {
+      "name": "dark/375 list-401 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-401 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-401 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "dark/375 list-801 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-801 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-801 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/375 list-801 budget 800",
+      "passed": true,
+      "detail": "actual=800"
+    },
+    {
+      "name": "dark/375 list-801 more available at 800",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-801 more focus at 800",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/375 list-801 budget 801",
+      "passed": true,
+      "detail": "actual=801"
+    },
+    {
+      "name": "dark/375 list-801 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-801 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "dark/375 nested collapse leaves tail",
+      "passed": true
+    },
+    {
+      "name": "dark/375 nested reopens all loaded rows",
+      "passed": true
+    },
+    {
+      "name": "dark/375 list-801 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "dark/375 known empty and unread distinguished",
+      "passed": true
+    },
+    {
+      "name": "dark/375 empty directories noninteractive",
+      "passed": true
+    },
+    {
+      "name": "dark/375 final no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "dark/375 theme applied",
+      "passed": true,
+      "detail": "rgb(8, 9, 10)"
+    },
+    {
+      "name": "dark/375 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/375 no console errors",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/768 collapsed no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "dark/768 success-name state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-skill state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/768 loading state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failure state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/768 cancelled state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/768 error-override state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/768 outer focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/768 Enter opens real Skill",
+      "passed": true
+    },
+    {
+      "name": "dark/768 Space closes real Skill",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-name Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-name Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-name resources",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-name duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-name raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-name raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-name raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-skill Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-skill Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-skill resources",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-skill duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-skill raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-skill raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "dark/768 success-skill raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failure no success document",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failure parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "dark/768 cancelled no success document",
+      "passed": true
+    },
+    {
+      "name": "dark/768 cancelled parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "dark/768 error override detail",
+      "passed": true
+    },
+    {
+      "name": "dark/768 malformed fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "dark/768 malformed fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "dark/768 plain fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "dark/768 plain fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "dark/768 malformed raw preserved",
+      "passed": true
+    },
+    {
+      "name": "dark/768 plain raw preserved",
+      "passed": true
+    },
+    {
+      "name": "dark/768 truncation notice visible",
+      "passed": true
+    },
+    {
+      "name": "dark/768 long tail initially omitted",
+      "passed": true
+    },
+    {
+      "name": "dark/768 long expansion reveals tail",
+      "passed": true
+    },
+    {
+      "name": "dark/768 long expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "dark/768 Skill expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "dark/768 list-401 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-401 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-401 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/768 list-401 budget 401",
+      "passed": true,
+      "detail": "actual=401"
+    },
+    {
+      "name": "dark/768 list-401 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-401 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-401 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "dark/768 list-801 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-801 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-801 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/768 list-801 budget 800",
+      "passed": true,
+      "detail": "actual=800"
+    },
+    {
+      "name": "dark/768 list-801 more available at 800",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-801 more focus at 800",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/768 list-801 budget 801",
+      "passed": true,
+      "detail": "actual=801"
+    },
+    {
+      "name": "dark/768 list-801 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-801 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "dark/768 nested collapse leaves tail",
+      "passed": true
+    },
+    {
+      "name": "dark/768 nested reopens all loaded rows",
+      "passed": true
+    },
+    {
+      "name": "dark/768 list-801 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "dark/768 known empty and unread distinguished",
+      "passed": true
+    },
+    {
+      "name": "dark/768 empty directories noninteractive",
+      "passed": true
+    },
+    {
+      "name": "dark/768 final no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "dark/768 theme applied",
+      "passed": true,
+      "detail": "rgb(8, 9, 10)"
+    },
+    {
+      "name": "dark/768 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/768 no console errors",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/1440 collapsed no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "dark/1440 success-name state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-skill state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 loading state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failure state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 cancelled state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 error-override state summary",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 outer focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/1440 Enter opens real Skill",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 Space closes real Skill",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-name Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-name Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-name resources",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-name duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-name raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-name raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-name raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-skill Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-skill Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-skill resources",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-skill duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-skill raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-skill raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 success-skill raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failure no success document",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failure parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 cancelled no success document",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 cancelled parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 error override detail",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 malformed fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 malformed fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 plain fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 plain fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 malformed raw preserved",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 plain raw preserved",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 truncation notice visible",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 long tail initially omitted",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 long expansion reveals tail",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 long expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "dark/1440 Skill expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "dark/1440 list-401 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-401 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-401 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/1440 list-401 budget 401",
+      "passed": true,
+      "detail": "actual=401"
+    },
+    {
+      "name": "dark/1440 list-401 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-401 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-401 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "dark/1440 list-801 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-801 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-801 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/1440 list-801 budget 800",
+      "passed": true,
+      "detail": "actual=800"
+    },
+    {
+      "name": "dark/1440 list-801 more available at 800",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-801 more focus at 800",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/1440 list-801 budget 801",
+      "passed": true,
+      "detail": "actual=801"
+    },
+    {
+      "name": "dark/1440 list-801 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-801 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 nested collapse leaves tail",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 nested reopens all loaded rows",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 list-801 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "dark/1440 known empty and unread distinguished",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 empty directories noninteractive",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 final no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "dark/1440 theme applied",
+      "passed": true,
+      "detail": "rgb(8, 9, 10)"
+    },
+    {
+      "name": "dark/1440 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/1440 no console errors",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/375 collapsed no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "light/375 success-name state summary",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-skill state summary",
+      "passed": true
+    },
+    {
+      "name": "light/375 loading state summary",
+      "passed": true
+    },
+    {
+      "name": "light/375 failure state summary",
+      "passed": true
+    },
+    {
+      "name": "light/375 cancelled state summary",
+      "passed": true
+    },
+    {
+      "name": "light/375 error-override state summary",
+      "passed": true
+    },
+    {
+      "name": "light/375 outer focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/375 Enter opens real Skill",
+      "passed": true
+    },
+    {
+      "name": "light/375 Space closes real Skill",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-name Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-name Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-name resources",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-name duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-name raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-name raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-name raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-skill Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-skill Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-skill resources",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-skill duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-skill raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-skill raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "light/375 success-skill raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "light/375 failure no success document",
+      "passed": true
+    },
+    {
+      "name": "light/375 failure parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "light/375 cancelled no success document",
+      "passed": true
+    },
+    {
+      "name": "light/375 cancelled parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "light/375 error override detail",
+      "passed": true
+    },
+    {
+      "name": "light/375 malformed fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "light/375 malformed fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "light/375 plain fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "light/375 plain fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "light/375 malformed raw preserved",
+      "passed": true
+    },
+    {
+      "name": "light/375 plain raw preserved",
+      "passed": true
+    },
+    {
+      "name": "light/375 truncation notice visible",
+      "passed": true
+    },
+    {
+      "name": "light/375 long tail initially omitted",
+      "passed": true
+    },
+    {
+      "name": "light/375 long expansion reveals tail",
+      "passed": true
+    },
+    {
+      "name": "light/375 long expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "light/375 Skill expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "light/375 list-401 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-401 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-401 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/375 list-401 budget 401",
+      "passed": true,
+      "detail": "actual=401"
+    },
+    {
+      "name": "light/375 list-401 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-401 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-401 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "light/375 list-801 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-801 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-801 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/375 list-801 budget 800",
+      "passed": true,
+      "detail": "actual=800"
+    },
+    {
+      "name": "light/375 list-801 more available at 800",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-801 more focus at 800",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/375 list-801 budget 801",
+      "passed": true,
+      "detail": "actual=801"
+    },
+    {
+      "name": "light/375 list-801 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-801 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "light/375 nested collapse leaves tail",
+      "passed": true
+    },
+    {
+      "name": "light/375 nested reopens all loaded rows",
+      "passed": true
+    },
+    {
+      "name": "light/375 list-801 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "light/375 known empty and unread distinguished",
+      "passed": true
+    },
+    {
+      "name": "light/375 empty directories noninteractive",
+      "passed": true
+    },
+    {
+      "name": "light/375 final no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=375; viewport=375"
+    },
+    {
+      "name": "light/375 theme applied",
+      "passed": true,
+      "detail": "rgb(244, 245, 246)"
+    },
+    {
+      "name": "light/375 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/375 no console errors",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/768 collapsed no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "light/768 success-name state summary",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-skill state summary",
+      "passed": true
+    },
+    {
+      "name": "light/768 loading state summary",
+      "passed": true
+    },
+    {
+      "name": "light/768 failure state summary",
+      "passed": true
+    },
+    {
+      "name": "light/768 cancelled state summary",
+      "passed": true
+    },
+    {
+      "name": "light/768 error-override state summary",
+      "passed": true
+    },
+    {
+      "name": "light/768 outer focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/768 Enter opens real Skill",
+      "passed": true
+    },
+    {
+      "name": "light/768 Space closes real Skill",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-name Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-name Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-name resources",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-name duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-name raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-name raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-name raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-skill Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-skill Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-skill resources",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-skill duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-skill raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-skill raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "light/768 success-skill raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "light/768 failure no success document",
+      "passed": true
+    },
+    {
+      "name": "light/768 failure parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "light/768 cancelled no success document",
+      "passed": true
+    },
+    {
+      "name": "light/768 cancelled parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "light/768 error override detail",
+      "passed": true
+    },
+    {
+      "name": "light/768 malformed fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "light/768 malformed fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "light/768 plain fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "light/768 plain fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "light/768 malformed raw preserved",
+      "passed": true
+    },
+    {
+      "name": "light/768 plain raw preserved",
+      "passed": true
+    },
+    {
+      "name": "light/768 truncation notice visible",
+      "passed": true
+    },
+    {
+      "name": "light/768 long tail initially omitted",
+      "passed": true
+    },
+    {
+      "name": "light/768 long expansion reveals tail",
+      "passed": true
+    },
+    {
+      "name": "light/768 long expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "light/768 Skill expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "light/768 list-401 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-401 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-401 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/768 list-401 budget 401",
+      "passed": true,
+      "detail": "actual=401"
+    },
+    {
+      "name": "light/768 list-401 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-401 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-401 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "light/768 list-801 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-801 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-801 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/768 list-801 budget 800",
+      "passed": true,
+      "detail": "actual=800"
+    },
+    {
+      "name": "light/768 list-801 more available at 800",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-801 more focus at 800",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/768 list-801 budget 801",
+      "passed": true,
+      "detail": "actual=801"
+    },
+    {
+      "name": "light/768 list-801 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-801 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "light/768 nested collapse leaves tail",
+      "passed": true
+    },
+    {
+      "name": "light/768 nested reopens all loaded rows",
+      "passed": true
+    },
+    {
+      "name": "light/768 list-801 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "light/768 known empty and unread distinguished",
+      "passed": true
+    },
+    {
+      "name": "light/768 empty directories noninteractive",
+      "passed": true
+    },
+    {
+      "name": "light/768 final no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=768; viewport=768"
+    },
+    {
+      "name": "light/768 theme applied",
+      "passed": true,
+      "detail": "rgb(244, 245, 246)"
+    },
+    {
+      "name": "light/768 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/768 no console errors",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/1440 collapsed no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "light/1440 success-name state summary",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-skill state summary",
+      "passed": true
+    },
+    {
+      "name": "light/1440 loading state summary",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failure state summary",
+      "passed": true
+    },
+    {
+      "name": "light/1440 cancelled state summary",
+      "passed": true
+    },
+    {
+      "name": "light/1440 error-override state summary",
+      "passed": true
+    },
+    {
+      "name": "light/1440 outer focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/1440 Enter opens real Skill",
+      "passed": true
+    },
+    {
+      "name": "light/1440 Space closes real Skill",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-name Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-name Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-name resources",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-name duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-name raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-name raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-name raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-skill Markdown heading",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-skill Markdown bold/list/code/table/link",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-skill resources",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-skill duplicate parameters hidden",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-skill raw disclosure opens",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-skill raw envelope retained",
+      "passed": true
+    },
+    {
+      "name": "light/1440 success-skill raw Space closes",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failure no success document",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failure parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "light/1440 cancelled no success document",
+      "passed": true
+    },
+    {
+      "name": "light/1440 cancelled parameters and raw retained",
+      "passed": true
+    },
+    {
+      "name": "light/1440 error override detail",
+      "passed": true
+    },
+    {
+      "name": "light/1440 malformed fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "light/1440 malformed fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "light/1440 plain fallback no success preview",
+      "passed": true
+    },
+    {
+      "name": "light/1440 plain fallback parameters",
+      "passed": true
+    },
+    {
+      "name": "light/1440 malformed raw preserved",
+      "passed": true
+    },
+    {
+      "name": "light/1440 plain raw preserved",
+      "passed": true
+    },
+    {
+      "name": "light/1440 truncation notice visible",
+      "passed": true
+    },
+    {
+      "name": "light/1440 long tail initially omitted",
+      "passed": true
+    },
+    {
+      "name": "light/1440 long expansion reveals tail",
+      "passed": true
+    },
+    {
+      "name": "light/1440 long expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "light/1440 Skill expanded no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "light/1440 list-401 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-401 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-401 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/1440 list-401 budget 401",
+      "passed": true,
+      "detail": "actual=401"
+    },
+    {
+      "name": "light/1440 list-401 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-401 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-401 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "light/1440 list-801 initial budget 400",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-801 more available at 400",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-801 more focus at 400",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/1440 list-801 budget 800",
+      "passed": true,
+      "detail": "actual=800"
+    },
+    {
+      "name": "light/1440 list-801 more available at 800",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-801 more focus at 800",
+      "passed": true,
+      "detail": "{\"active\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/1440 list-801 budget 801",
+      "passed": true,
+      "detail": "actual=801"
+    },
+    {
+      "name": "light/1440 list-801 no remaining pagination",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-801 final entry visible",
+      "passed": true
+    },
+    {
+      "name": "light/1440 nested collapse leaves tail",
+      "passed": true
+    },
+    {
+      "name": "light/1440 nested reopens all loaded rows",
+      "passed": true
+    },
+    {
+      "name": "light/1440 list-801 no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "light/1440 known empty and unread distinguished",
+      "passed": true
+    },
+    {
+      "name": "light/1440 empty directories noninteractive",
+      "passed": true
+    },
+    {
+      "name": "light/1440 final no page overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440; viewport=1440"
+    },
+    {
+      "name": "light/1440 theme applied",
+      "passed": true,
+      "detail": "rgb(244, 245, 246)"
+    },
+    {
+      "name": "light/1440 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/1440 no console errors",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/light backgrounds differ",
+      "passed": true
+    }
+  ],
+  "diagnostics": [
+    {
+      "prefix": "dark/375",
+      "exceptions": [],
+      "consoleErrors": []
+    },
+    {
+      "prefix": "dark/768",
+      "exceptions": [],
+      "consoleErrors": []
+    },
+    {
+      "prefix": "dark/1440",
+      "exceptions": [],
+      "consoleErrors": []
+    },
+    {
+      "prefix": "light/375",
+      "exceptions": [],
+      "consoleErrors": []
+    },
+    {
+      "prefix": "light/768",
+      "exceptions": [],
+      "consoleErrors": []
+    },
+    {
+      "prefix": "light/1440",
+      "exceptions": [],
+      "consoleErrors": []
+    }
+  ],
+  "screenshots": [
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-dark-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-401-dark-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-801-dark-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-dark-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-401-dark-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-801-dark-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-dark-1440.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-401-dark-1440.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-801-dark-1440.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-light-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-401-light-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-801-light-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-light-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-401-light-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-801-light-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-light-1440.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-401-light-1440.png",
+    "/home/await/project/OpenAWork/apps/web/harness/skill-tool-artifacts/skill-tool-list-801-light-1440.png"
+  ],
+  "limitations": [
+    "cancelled wire status requires props assertion",
+    "No gateway or LLM exercised; actual ToolCallDisplay with deterministic fixtures",
+    "Python Playwright unavailable; repository Bun Playwright used"
+  ]
+}

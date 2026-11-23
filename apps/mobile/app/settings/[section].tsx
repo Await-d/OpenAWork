@@ -18,6 +18,7 @@ import {
   createUsageClient,
 } from '@openAwork/web-client';
 import { Screen } from '../../src/components/Screen';
+import { MemoryApprovalPanel } from '../../src/components/memory/MemoryApprovalPanel';
 import { SurfaceCard } from '../../src/components/ui';
 import { useBottomNavContentInset } from '../../src/layout/use-bottom-nav-inset';
 import { useAuthStore } from '../../src/store/auth';
@@ -326,12 +327,10 @@ export default function SettingsSectionScreen() {
             (value) => ({ ok: true as const, value }),
             (error: unknown) => ({ ok: false as const, error }),
           ),
-          client
-            .countPendingProposals(accessToken)
-            .then(
-              (value) => ({ ok: true as const, value }),
-              (error: unknown) => ({ ok: false as const, error }),
-            ),
+          client.countPendingProposals(accessToken).then(
+            (value) => ({ ok: true as const, value }),
+            (error: unknown) => ({ ok: false as const, error }),
+          ),
         ]);
 
         const list = listResult.ok
@@ -382,9 +381,7 @@ export default function SettingsSectionScreen() {
             : [
                 {
                   title: listResult.ok ? '暂无记忆' : '记忆列表读取失败',
-                  subtitle: listResult.ok
-                    ? '对话沉淀后将出现在这里'
-                    : '稍后下拉刷新重试',
+                  subtitle: listResult.ok ? '对话沉淀后将出现在这里' : '稍后下拉刷新重试',
                   trailing: listResult.ok ? '空' : '错误',
                   tone: listResult.ok ? 'default' : 'danger',
                 } satisfies Row,
@@ -413,7 +410,7 @@ export default function SettingsSectionScreen() {
             rows: [
               {
                 title: '待确认记忆',
-                subtitle: '系统只提出建议，未修改任何正式记忆；请在 Web 或桌面端确认。',
+                subtitle: '系统只提出建议，未修改正式记忆；可在下方查看完整内容并逐条确认。',
                 trailing: pendingTrailing,
                 tone: pendingResult.ok && pendingResult.value > 0 ? 'warning' : 'default',
               },
@@ -803,6 +800,10 @@ export default function SettingsSectionScreen() {
               </View>
             ))
           : null}
+
+        {sectionKey === 'memory' && accessToken && gatewayUrl ? (
+          <MemoryApprovalPanel gatewayUrl={gatewayUrl} token={accessToken} />
+        ) : null}
 
         {sectionKey === 'about' ? (
           <View style={styles.group}>

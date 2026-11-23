@@ -2,7 +2,11 @@
  * FusionSidebarChatGroupSection — 融合侧栏 Chat 会话分组列表。
  *
  * 由 FusionSidebar 主文件拆出：渲染工作区分组标题（可折叠、含计数与
- * 新建会话入口）以及组内会话行；置顶分区使用图钉图标且不提供新建入口。
+ * 新建会话入口）以及组内会话行。
+ *
+ * 置顶不改分组结构：置顶会话仍留在它所属的工作区里，只是排在组内最前面
+ * （排序由 `groupSessionsByWorkspace` 的 `pinnedSessionIds` 完成）。因此这里
+ * 没有「置顶分区」这一特殊分组——每个分组标题都是真实工作区，都能新建会话。
  *
  * 分组标题额外承载两项工作区元信息：用户自定义名称（别名）与 SSH 远程标识——
  * 远端目录与同名本地目录仅靠路径无法区分，必须在标题上显式标注来源。
@@ -169,14 +173,7 @@ export function FusionSidebarChatGroupSection({
                   aria-hidden="true"
                   style={{ flexShrink: 0, color: 'var(--accent)' }}
                 >
-                  {group.isPinnedGroup ? (
-                    <>
-                      <line x1="12" y1="17" x2="12" y2="22" />
-                      <path d="M5 17H19V15L17 9V4H18V2H6V4H7V9L5 15V17Z" />
-                    </>
-                  ) : (
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                  )}
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
                 <span
                   style={{
@@ -235,41 +232,39 @@ export function FusionSidebarChatGroupSection({
                   {group.sessionCount}
                 </span>
               </button>
-              {!group.isPinnedGroup && (
-                <button
-                  type="button"
-                  title={`在 ${groupDisplayName} 中新建会话`}
-                  aria-label={`在 ${groupDisplayName} 中新建会话`}
-                  onClick={() => onCreateSession(group.workspacePath, group.sshConnectionId)}
-                  className="sidebar-icon-button"
-                  style={{
-                    flexShrink: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 20,
-                    height: 20,
-                    borderRadius: 5,
-                    padding: 0,
-                    marginRight: 4,
-                  }}
+              <button
+                type="button"
+                title={`在 ${groupDisplayName} 中新建会话`}
+                aria-label={`在 ${groupDisplayName} 中新建会话`}
+                onClick={() => onCreateSession(group.workspacePath, group.sshConnectionId)}
+                className="sidebar-icon-button"
+                style={{
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 20,
+                  height: 20,
+                  borderRadius: 5,
+                  padding: 0,
+                  marginRight: 4,
+                }}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
                 >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                </button>
-              )}
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
             </div>
             {/* 分组下的会话列表：缩进 + 引导线，与组标题形成层级 */}
             <div

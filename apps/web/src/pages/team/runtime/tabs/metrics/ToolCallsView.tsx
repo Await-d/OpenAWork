@@ -57,7 +57,7 @@ interface ToolStatsDerived extends ToolCallStats {
 }
 
 function deriveStats(stats: ToolCallStats): ToolStatsDerived {
-  const sorted = stats.durations.slice().sort((a, b) => a - b);
+  const sorted = stats.durations.toSorted((a, b) => a - b);
   return {
     ...stats,
     failureRate: stats.invocations > 0 ? stats.failures / stats.invocations : 0,
@@ -553,8 +553,7 @@ function ToolRow({ tool }: { tool: ToolStatsDerived }) {
       {tool.errorSamples.length > 0 ? (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {tool.errorSamples
-            .slice()
-            .sort((a, b) => b.count - a.count)
+            .toSorted((a, b) => b.count - a.count)
             .map((sample) => (
               <span
                 key={sample.errorType}

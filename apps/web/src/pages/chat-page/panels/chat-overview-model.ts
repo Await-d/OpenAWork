@@ -6,7 +6,7 @@
  * 流式诊断 / 待办分栏规则，避免两处措辞与判定漂移。
  */
 
-import type { UpstreamStreamSummary } from '@openAwork/shared';
+import type { CompactionTokenEstimate, UpstreamStreamSummary } from '@openAwork/shared';
 
 /** 待办条目：会话待办本身 + 分栏标记（主待办 / 临时待办）。 */
 export interface SessionTodoItem {
@@ -24,6 +24,7 @@ export interface CompactionItem {
   occurredAt: number;
   compactedMessages?: number;
   representedMessages?: number;
+  historyTokenEstimate?: CompactionTokenEstimate;
   cause?: 'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow';
   strategy?: 'runtime_replace' | 'summary_only' | 'replay' | 'synthetic_continue';
 }
@@ -73,6 +74,21 @@ export function formatCompactionShortLabel(item: CompactionItem): string {
     return `${triggerLabel} · 压缩 ${item.compactedMessages} 条`;
   }
   return `${triggerLabel} · 已压缩历史`;
+}
+
+export function formatCompactionHistoryEstimate(item: CompactionItem): string | null {
+  if (item.phase !== 'completed' || !item.historyTokenEstimate) return null;
+  const { before, after } = item.historyTokenEstimate;
+  if (!Number.isSafeInteger(before) || before < 0 || !Number.isSafeInteger(after) || after < 0) {
+    return null;
+  }
+  const transition = `会话历史估算：${before.toLocaleString()} → ${after.toLocaleString()} token`;
+  const saved = before - after;
+  if (saved === 0) return `${transition} · 无变化`;
+  if (saved < 0) return `${transition} · 增加 ${(-saved).toLocaleString()} token`;
+  const percent = (saved / before) * 100;
+  const label = percent < 1 ? '不到 1%' : `约 ${Math.round(percent)}%`;
+  return `${transition} · 释放 ${saved.toLocaleString()} token（${label}）`;
 }
 
 export function formatCompactionCauseLabel(

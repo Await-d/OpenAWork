@@ -4,6 +4,18 @@ import { hasActivePendingPermissionRequest } from './message-coercion.js';
 import { PENDING_PERMISSION_OUTPUT_MARKERS } from '../../../utils/permission/pending-permission-state.js';
 import { createAssistantTraceContent, readAssistantTracePayload } from './trace-codec.js';
 
+/**
+ * 入参「尚未收全」的兜底键。
+ *
+ * `parseToolCallInputText` 在流式入参还不是合法 JSON 时，会把**半截原文**塞进
+ * 这个键（形如 `{ raw: '{"patchText":"*** Begin Patch…' }`）。渲染层据此判定该
+ * 工具调用还没收完，改为 loading 占位——否则卡片会直接铺出半截原始格式
+ * （见 `chat/tool-call/shared/pending-tool-input.ts`）。
+ *
+ * 收敛成常量而不是各处写字面量：判定侧一旦与解析侧不同步，占位就会静默失效。
+ */
+export const INCOMPLETE_TOOL_INPUT_KEY = 'raw';
+
 interface CopiedToolCardSections {
   inputText?: string;
   isError?: boolean;
@@ -38,7 +50,7 @@ function parseCopiedToolCardInput(value: string | undefined): Record<string, unk
   }
 
   const normalized = value.trim();
-  return normalized.length > 0 ? { raw: normalized } : {};
+  return normalized.length > 0 ? { [INCOMPLETE_TOOL_INPUT_KEY]: normalized } : {};
 }
 
 function looksLikeWaitingStateOutput(value: unknown): boolean {
@@ -402,7 +414,7 @@ export function parseToolCallInputText(inputText: string): Record<string, unknow
       return parsed as Record<string, unknown>;
     }
   } catch {
-    return { raw: normalized };
+    return { [INCOMPLETE_TOOL_INPUT_KEY]: normalized };
   }
-  return { raw: normalized };
+  return { [INCOMPLETE_TOOL_INPUT_KEY]: normalized };
 }

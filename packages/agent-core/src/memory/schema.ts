@@ -136,6 +136,15 @@ export const memoryProposalPayloadSchema = z
     body: z.string().trim().min(1).max(8000).optional(),
     ruleId: z.string().trim().min(1).max(200).optional(),
     ruleRevision: z.number().int().min(0).optional(),
+    mergeIntoId: z.string().trim().min(1).max(200).optional(),
+    dependencies: z
+      .array(
+        z
+          .object({ memoryId: z.string().min(1).max(200), revision: z.number().int().min(1) })
+          .strict(),
+      )
+      .max(100)
+      .optional(),
   })
   .strict();
 
@@ -186,6 +195,7 @@ export const memoryRuleDraftSchema = z
     scope: memoryScopeSchema,
     name: z.string().trim().min(1).max(200),
     body: z.string().trim().min(1).max(8000),
+    expectedRevision: z.number().int().min(0).optional(),
   })
   .strict();
 

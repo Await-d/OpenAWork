@@ -200,12 +200,36 @@ describe('tool permission derivers · skill / skill_mcp / mcp_call / flat MCP', 
     });
   });
 
-  it('flat MCP：服务器已移除（查询抛错）时返回 null', () => {
-    mocks.getConfiguredMcpServerForSession.mockImplementationOnce(() => {
-      throw new Error('server removed');
-    });
-    expect(buildToolPermissionRequestContext(ctx('mcp__github__create_issue', {}))).toBeNull();
-  });
+  it.each(['mcp__github__create_issue', 'mcp_call'])(
+    '%s：配置解析失败产出安全警告并明确拒绝',
+    (toolName) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      vi.stubEnv('DEBUG_DERIVER', '');
+      mocks.getConfiguredMcpServerForSession.mockImplementationOnce(() => {
+        throw new Error('private-credential private-user-content');
+      });
+      try {
+        expect(
+          buildToolPermissionRequestContext(
+            ctx(toolName, { serverId: 'github', toolName: 'create_issue', arguments: {} }),
+          ),
+        ).toMatchObject({ denialReason: expect.stringContaining('无法验证 MCP'), always: [] });
+        expect(warn).toHaveBeenCalledExactlyOnceWith(
+          '[tool-permission-derivers] MCP permission derivation failed',
+          {
+            sessionId: 'session-1',
+            serverId: 'github',
+            entrypoint: toolName === 'mcp_call' ? 'legacy' : 'flat',
+            errorType: 'error',
+          },
+        );
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('private-');
+      } finally {
+        warn.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
 });
 
 describe('tool permission derivers · mcp_manage_servers', () => {

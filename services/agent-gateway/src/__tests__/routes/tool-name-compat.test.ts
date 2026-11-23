@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { checkPrometheusToolGuard } from '../../app/prometheus-md-only.js';
-import { checkAtlasGuard } from '../../session/atlas-guard.js';
+import { buildAtlasPostProcessReminder, checkAtlasGuard } from '../../session/atlas-guard.js';
 import { appendTaskResumeInfo } from '../../task/task-resume-info.js';
 import { isTaskToolName } from '../../task/task-tools.js';
 import {
@@ -103,6 +103,16 @@ describe('canonical name feeds the pre-dispatch guards', () => {
       }).injectSingleTaskDirective,
     ).toBe(true);
   });
+
+  it('Sisyphus no longer receives a delegation warning after direct edits', async () => {
+    const input = { toolName: 'edit', sessionId: 'session', workspaceRoot: '/workspace' };
+    await expect(buildAtlasPostProcessReminder({ ...input, agentId: 'sisyphus' })).resolves.toBe(
+      '',
+    );
+    await expect(buildAtlasPostProcessReminder({ ...input, agentId: 'atlas' })).resolves.toContain(
+      '委派必需',
+    );
+  });
 });
 
 /**
@@ -135,8 +145,6 @@ describe('delegation tool sets cover the canonical subagent name (B-04)', () => 
   });
 
   it('规范名 subagent 与历史别名 task 同属委派工具', () => {
-    // routes/stream.ts 的 taskToolUsedInTurn 置位判定、以及三处集合都以
-    // isTaskToolName() 为唯一事实来源；直接锁定该谓词对规范名的识别。
     expect(isTaskToolName('subagent')).toBe(true);
     expect(isTaskToolName('task')).toBe(true);
     expect(isTaskToolName('call_omo_agent')).toBe(false);

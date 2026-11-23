@@ -14,6 +14,24 @@
 
 /* ── Tool call inline display (read/grep/glob/webfetch etc.) ── */
 
+.tool-call-status-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+
+.tool-call-status-label[data-status='running'] {
+  color: var(--fg-default);
+}
+
+.tool-call-status-label[data-status='failed'] {
+  color: var(--danger);
+}
+
+.tool-call-status-label[data-status='paused'] {
+  color: var(--fg-default);
+}
+
 .tool-call-inline {
   display: flex;
   align-items: center;
@@ -551,6 +569,88 @@
   .tool-call-block-running-hint {
     animation: none;
     opacity: 0.8;
+  }
+}
+
+/* ── Pending tool call（流式入参未收全时的占位）──
+ *
+ * `tool_call_delta` 只陆续送来参数 JSON 的片段，协议层在还没收全时只能把半截
+ * 原文塞进 `input.raw`。这种内容一律不进卡片本体，由 `ToolCallPendingCard`
+ * 顶替：头部结构与 `.tool-call-block-header` 对齐（图标 + 标题 + 状态），下方是
+ * 设计规范里的骨架屏 shimmer —— 视觉上从「骨架」平滑换成真实卡片，避免先铺
+ * 一坨原始 JSON 再跳成文件变更的两次闪烁。 */
+
+.tool-call-pending {
+  opacity: 0.9;
+}
+
+.tool-call-pending-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tool-call-pending-title {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.tool-call-pending-hint {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--fg-muted);
+  letter-spacing: 0.01em;
+  animation: tool-call-pulse-text 1.5s ease-in-out infinite;
+}
+
+.tool-call-pending-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 4px 20px;
+}
+
+.tool-call-pending-skel-line {
+  height: 8px;
+  width: 100%;
+  max-width: 320px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface) 25%,
+    var(--bg-elevated) 50%,
+    var(--bg-surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: tool-call-pending-shimmer 1.5s ease-in-out infinite;
+}
+
+.tool-call-pending-skel-line[data-width='short'] {
+  max-width: 180px;
+}
+
+@keyframes tool-call-pending-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* 嵌在 batch 子行里：外层子行已经提供缩进，不再叠一层。 */
+.tool-call-pending[data-embedded='true'] .tool-call-pending-skeleton {
+  padding-left: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-call-pending-hint,
+  .tool-call-pending-skel-line {
+    animation: none;
   }
 }
 

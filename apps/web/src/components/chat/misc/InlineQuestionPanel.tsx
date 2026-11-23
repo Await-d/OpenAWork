@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type { PendingQuestionRequest } from '@openAwork/web-client';
 import { OptionSelectIndicator } from '../../common/display/OptionSelectIndicator.js';
 import { QuestionOptionPreview } from '../../common/display/QuestionOptionPreview.js';
@@ -564,6 +565,7 @@ function QuestionBlock({
               rows={3}
               onChange={(e) => onCustomInputChange(questionIndex, e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposingKeyboardEvent(e)) return;
                 if (e.key === 'Enter' && !e.shiftKey && customInput.trim()) {
                   e.preventDefault();
                   setShowCustomInput(false);

@@ -3,6 +3,7 @@ import type { Session } from '../../../hooks/workspace/useSessions.js';
 import {
   extractDialogueMode,
   extractSessionIcon,
+  isSourceManagedSessionMetadata,
 } from '../../../utils/session/session-metadata.js';
 import type { WorkspaceSessionTreeNode } from '../../../utils/session/session-grouping.js';
 import {
@@ -91,8 +92,12 @@ export function SessionSidebarSessionRow({
     () => extractSessionIcon(session.metadata_json),
     [session.metadata_json],
   );
+  // 来源会话（渠道 / 定时任务）没有对话模式：别让假模式的字形冒充它，直接走默认会话图标。
   const dialogueMode = useMemo(
-    () => extractDialogueMode(session.metadata_json),
+    () =>
+      isSourceManagedSessionMetadata(session.metadata_json)
+        ? undefined
+        : extractDialogueMode(session.metadata_json),
     [session.metadata_json],
   );
 

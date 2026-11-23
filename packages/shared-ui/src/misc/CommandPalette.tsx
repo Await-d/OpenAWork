@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { isImeComposingNativeEvent } from '../utils/ime-composition.js';
 
 export interface CommandItem {
   id: string;
@@ -67,6 +68,9 @@ export function CommandPalette({
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isImeComposingNativeEvent(event)) {
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         onClose();

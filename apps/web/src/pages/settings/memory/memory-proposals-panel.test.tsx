@@ -125,13 +125,152 @@ describe('MemoryProposalsPanel', () => {
       <MemoryProposalsPanel {...createProps({ proposals: [proposal], pendingCount: 1, decide })} />,
     );
     fireEvent.click(screen.getByRole('button', { name: '修改后接受' }));
-    fireEvent.change(screen.getByLabelText('编辑提议键'), { target: { value: '代码规范' } });
+    expect((screen.getByLabelText('编辑提议键') as HTMLInputElement).readOnly).toBe(true);
     fireEvent.change(screen.getByLabelText('编辑提议内容'), { target: { value: '使用类型导入' } });
     fireEvent.click(screen.getByRole('button', { name: '提交修改后的内容' }));
     await waitFor(() => {
       expect(decide).toHaveBeenCalledWith('proposal-1', {
         decision: 'approve',
-        payload: { name: '代码规范', body: '使用类型导入' },
+        payload: { name: '代码规则', body: '使用类型导入' },
+      });
+    });
+  });
+
+  it('更新规则提议按 payload.ruleId 暴露版本入口', async () => {
+    const listRevisions = vi.fn(async () => []);
+    const proposal: MemoryProposal = {
+      ...PROPOSAL,
+      action: 'rule',
+      // 规则提议不写 targetMemoryId；ruleId 携带在载荷里，作为历史查询的 memoryId。
+      targetMemoryId: null,
+      payload: { name: '代码规则', body: '正文', ruleId: 'rule-99', ruleRevision: 1 },
+    };
+    render(
+      <MemoryProposalsPanel
+        {...createProps({ proposals: [proposal], pendingCount: 1, listRevisions })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '查看历史版本' }));
+    await waitFor(() => {
+      expect(listRevisions).toHaveBeenCalledWith('rule-99');
+    });
+  });
+
+  it('新建规则提议（尚无 ruleId）不暴露版本入口', () => {
+    const proposal: MemoryProposal = {
+      ...PROPOSAL,
+      action: 'rule',
+      // 新建规则：规则还不存在，没有历史可看。即便后端误填 targetMemoryId 也不得暴露入口。
+      targetMemoryId: 'rule-as-memory',
+      payload: { name: '代码规则', body: '正文' },
+    };
+    render(<MemoryProposalsPanel {...createProps({ proposals: [proposal], pendingCount: 1 })} />);
+
+    expect(screen.queryByRole('button', { name: '查看历史版本' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /回滚版本/ })).toBeNull();
+  });
+
+  it('冲突更新保留替代与暂不处理，不提供未实现的两者并存', () => {
+    render(
+      <MemoryProposalsPanel
+        {...createProps({
+          proposals: [
+            {
+              ...PROPOSAL,
+              action: 'update',
+              targetMemoryId: 'memory-old',
+              relations: [
+                { kind: 'conflict', memoryId: 'memory-old', key: '旧键', value: '旧内容' },
+              ],
+            },
+          ],
+          pendingCount: 1,
+        })}
+      />,
+    );
+    expect(screen.getByRole('button', { name: '用新内容替代' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '暂不处理' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /两者并存/ })).toBeNull();
+    expect(screen.queryByText(/两者并存/)).toBeNull();
+  });
+
+  it('合并说明保留与归档语义，展示保留ID及依赖版本且不允许编辑', () => {
+    const payload = {
+      ...PROPOSAL.payload,
+      mergeIntoId: 'memory-kept',
+      dependencies: [{ memoryId: 'memory-kept', revision: 3 }],
+    };
+    render(
+      <MemoryProposalsPanel
+        {...createProps({
+          proposals: [
+            { ...PROPOSAL, action: 'merge', targetMemoryId: 'memory-duplicate', payload },
+          ],
+          pendingCount: 1,
+        })}
+      />,
+    );
+    expect(screen.getByText(/保留指定条目，归档重复项/)).toBeTruthy();
+    expect(screen.getByText(/目标 ID：memory-duplicate/)).toBeTruthy();
+    expect(JSON.parse(screen.getByLabelText('批准完整载荷').textContent ?? '')).toEqual(payload);
+    expect(screen.queryByRole('button', { name: '修改后接受' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '提交修改后的内容' })).toBeNull();
+  });
+
+  it('完整展示每条批准载荷、false、角色层与目标版本，批量仍逐条可见', () => {
+    const payload = {
+      ...PROPOSAL.payload,
+      enabled: false,
+      roleLayers: ['reviewer', 'worker'],
+      priority: 0,
+      workspaceRoot: '/workspace/project',
+    };
+    render(
+      <MemoryProposalsPanel
+        {...createProps({
+          proposals: [
+            {
+              ...PROPOSAL,
+              action: 'update',
+              targetMemoryId: 'memory-42',
+              expectedRevision: 7,
+              payload,
+            },
+            { ...PROPOSAL, id: 'proposal-2' },
+          ],
+          pendingCount: 2,
+        })}
+      />,
+    );
+    const previews = screen.getAllByLabelText('批准完整载荷');
+    expect(previews).toHaveLength(2);
+    expect(JSON.parse(previews[0]?.textContent ?? '')).toEqual(payload);
+    expect(JSON.parse(previews[1]?.textContent ?? '')).toEqual(PROPOSAL.payload);
+    expect(screen.getByText(/目标 ID：memory-42 · expectedRevision：7/)).toBeTruthy();
+  });
+
+  it('编辑后预览与实际提交一致，保留未编辑的完整字段', async () => {
+    const decide = vi.fn(async () => ({ ok: true }));
+    const payload = { ...PROPOSAL.payload, enabled: false, roleLayers: ['reviewer'], priority: 0 };
+    render(
+      <MemoryProposalsPanel
+        {...createProps({ proposals: [{ ...PROPOSAL, payload }], pendingCount: 1, decide })}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '修改后接受' }));
+    fireEvent.change(screen.getByLabelText('编辑提议键'), { target: { value: ' 新键 ' } });
+    fireEvent.change(screen.getByLabelText('编辑提议内容'), { target: { value: ' 新内容 ' } });
+    const expectedPayload = { ...payload, key: '新键', value: '新内容' };
+    expect(JSON.parse(screen.getByLabelText('编辑后完整载荷').textContent ?? '')).toEqual(
+      expectedPayload,
+    );
+    expect(JSON.parse(screen.getByLabelText('批准完整载荷').textContent ?? '')).toEqual(payload);
+    fireEvent.click(screen.getByRole('button', { name: '提交修改后的内容' }));
+    await waitFor(() => {
+      expect(decide).toHaveBeenCalledWith(PROPOSAL.id, {
+        decision: 'approve',
+        payload: expectedPayload,
       });
     });
   });

@@ -1,18 +1,7 @@
-import { createContext, type ReactNode, useContext, useState } from 'react';
+import { createContext, type ReactNode, useContext } from 'react';
 import { isSubagentResultSectionVisible } from '@openAwork/shared';
 import { FoldDisabledContext, MessageFoldContext } from '../markdown/fold-policy.js';
-
-/**
- * Threshold above which an assistant message body is collapsed by
- * default. Picked to roughly match a screen height of plain prose:
- * shorter answers stay fully visible, while long reports / file
- * dumps get a "展开全部" affordance so they don't push subsequent
- * messages off-screen.
- *
- * Lives at the character level (not lines) so the heuristic is
- * cheap and stable across markdown structures.
- */
-const FOLD_CHAR_THRESHOLD = 1500;
+import { MessageFoldShell, shouldFoldMessageContent } from './message-fold-shell.js';
 
 /**
  * Provider-supplied id of the most recent non-streaming assistant
@@ -52,9 +41,8 @@ export function CollapsibleAssistantContent({
 }) {
   const latestAssistantId = useContext(LatestAssistantMessageContext);
   const isLatest = messageId !== undefined && messageId === latestAssistantId;
-  const isLong = content.length > FOLD_CHAR_THRESHOLD;
+  const isLong = shouldFoldMessageContent(content);
   const hasVisibleResults = isSubagentResultSectionVisible(content);
-  const [expanded, setExpanded] = useState(false);
 
   // 最新一条已完成回复整体不折叠时，块级折叠（代码块 / Markdown 预览块）也必须跟着
   // 禁用：它承载着用户刚问的问题的答案，若在 finalize 瞬间把块收起来，刚读完的内容
@@ -70,29 +58,9 @@ export function CollapsibleAssistantContent({
 
   return (
     <MessageFoldContext value={true}>
-      <div className="chat-markdown-fold-container" data-expanded={expanded ? 'true' : 'false'}>
-        <div className="chat-markdown-fold-body">{children}</div>
-        {!expanded && (
-          <button
-            type="button"
-            className="chat-markdown-fold-expand"
-            onClick={() => setExpanded(true)}
-            aria-label="展开全部消息内容"
-          >
-            展开全部 · {content.length.toLocaleString()} 字符
-          </button>
-        )}
-        {expanded && (
-          <button
-            type="button"
-            className="chat-markdown-fold-collapse"
-            onClick={() => setExpanded(false)}
-            aria-label="收起消息内容"
-          >
-            收起
-          </button>
-        )}
-      </div>
+      <MessageFoldShell content={content} scope="assistant">
+        {children}
+      </MessageFoldShell>
     </MessageFoldContext>
   );
 }

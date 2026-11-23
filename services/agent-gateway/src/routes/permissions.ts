@@ -14,7 +14,13 @@ import { requireAuth } from '../infra/auth.js';
 import { ApiError } from '../infra/error-response.js';
 import { parseBody } from '../infra/parse-request.js';
 import { clearInternalTeamResumeRequest } from '../team/team-resume-context.js';
-import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
+import {
+  sqliteAll,
+  sqliteGet,
+  sqliteRun,
+  sqliteRunWithChanges,
+  sqliteTransaction,
+} from '../infra/db.js';
 import {
   createPermissionAskedEvent,
   createPermissionRepliedEvent,
@@ -34,7 +40,11 @@ import {
   notifyChannelPermissionResumeFailure,
 } from '../channels/channel-session-notice.js';
 import { persistWorkspacePermanentPermission } from '../workspace/workspace-safety.js';
-import { appendPermissionDecisionLog } from '../session/permission-decision-log-store.js';
+import {
+  appendPermissionDecisionLog,
+  listPermissionDecisionLogs,
+  PERMISSION_DECISION_REASONS,
+} from '../session/permission-decision-log-store.js';
 import { upsertPermissionGrant } from '../permission/permission-grants-store.js';
 import {
   cascadeApproveCoveredPendingPermissions,
@@ -297,6 +307,45 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.get(
+    '/sessions/:sessionId/permissions/decisions',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { sessionId } = request.params as { sessionId: string };
+      const { step } = startRequestWorkflow(request, 'permission.decisions.list', undefined, {
+        sessionId,
+      });
+
+      if (!ownsSession(sessionId, user.sub)) {
+        // Same wording as the sibling endpoints: a non-owner learns nothing about
+        // whether the session exists, and never sees any of its rows.
+        step.fail('session not found');
+        return reply.status(404).send({ error: '目标会话不存在。' });
+      }
+
+      const query = (request.query ?? {}) as { limit?: unknown; beforeId?: unknown };
+      const limit = parsePermissionsDecisionsLimit(query.limit);
+      const beforeId = parsePermissionsDecisionsBeforeId(query.beforeId);
+
+      const rows = listPermissionDecisionLogs({ sessionId, limit, beforeId });
+      const decisions = rows.map((row) => ({
+        id: row.id,
+        requestId: row.request_id,
+        sessionId: row.session_id,
+        toolName: row.tool_name,
+        scope: row.scope,
+        decision: row.decision,
+        reason: row.reason,
+        workspaceRoot: row.workspace_root,
+        createdAt: row.created_at,
+      }));
+
+      step.succeed(undefined, { count: decisions.length });
+      return reply.send({ decisions });
+    },
+  );
+
   app.post(
     '/sessions/:sessionId/permissions/requests',
     { onRequest: [requireAuth] },
@@ -412,98 +461,110 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(409).send({ error: '权限请求已处理，无法重复提交。' });
       }
 
-      sqliteRun(
-        `UPDATE permission_requests
+      sqliteTransaction(() => {
+        const changes = sqliteRunWithChanges(
+          `UPDATE permission_requests
          SET status = ?, decision = ?, updated_at = datetime('now')
-         WHERE id = ? AND session_id = ?`,
-        [
-          body.decision === 'reject' ? 'rejected' : 'approved',
-          body.decision,
-          body.requestId,
-          sessionId,
-        ],
-      );
+         WHERE id = ? AND session_id = ? AND status = 'pending'`,
+          [
+            body.decision === 'reject' ? 'rejected' : 'approved',
+            body.decision,
+            body.requestId,
+            sessionId,
+          ],
+        );
 
-      appendPermissionDecisionLog({
-        requestId: body.requestId,
-        sessionId,
-        toolName: permissionRequest.tool_name,
-        scope: permissionRequest.scope,
-        decision: body.decision,
-      });
-
-      if (body.decision === 'permanent') {
-        // Use always patterns (from opencode ctx.ask always) for broad approval.
-        // e.g. approving edit with always:["*"] → write rule { permission: "edit", pattern: "*" }
-        // Legacy rows without an `always_json` (column added later) fall back
-        // to the original request scope so we never silently broaden a
-        // permanent grant to "*" just because the column was missing.
-        // If the client provides `alwaysOverride`, use that instead — this
-        // allows the UI to let users pick a narrower or broader scope.
-        const category = resolvePermissionReplyCategory(permissionRequest.tool_name);
-        const alwaysPatterns = resolveAlwaysPatterns(permissionRequest, body.alwaysOverride);
-        for (const pattern of alwaysPatterns) {
-          // Durable, user-scoped grant first: this is the source of truth for
-          // cross-session permanent approval and must not depend on the
-          // (best-effort) workspace config file write below.
-          upsertPermissionGrant({ userId: user.sub, toolName: category, scope: pattern });
-          try {
-            persistWorkspacePermanentPermission({
-              sessionId,
-              toolName: category,
-              scope: pattern,
-            });
-          } catch (error) {
-            request.log.error(
-              { err: error, requestId: body.requestId, sessionId },
-              'failed to persist permanent permission',
-            );
-            throw ApiError.internal('保存永久权限规则失败。');
-          }
+        if (changes === 0) {
+          throw ApiError.conflict('权限请求已处理，无法重复提交。');
         }
-      } else if (body.decision === 'session') {
-        // Mirror opencode's `permission.ask reply='always'` semantics: when
-        // the user picks 本会话允许, push every `always` pattern into the set
-        // of approved scopes for this session so subsequent requests in the
-        // same category whose scope matches one of those patterns auto-resolve
-        // without re-prompting (e.g. approving `ls -la` covers `ls /tmp`,
-        // `ls -a` etc. via the arity pattern `ls *`).
-        //
-        // We persist as synthetic `permission_requests` rows (status='approved',
-        // decision='session', scope=<pattern>) — `findApprovedPermission` then
-        // matches via wildcard. Synthetic rows are keyed by (tool_name, scope)
-        // to stay idempotent if the same broad approval is granted twice.
-        // If the client provides `alwaysOverride`, use that instead.
-        const category = resolvePermissionReplyCategory(permissionRequest.tool_name);
-        const alwaysPatterns = resolveAlwaysPatterns(permissionRequest, body.alwaysOverride);
-        for (const pattern of alwaysPatterns) {
-          const existing = sqliteGet<{ id: string }>(
-            `SELECT id FROM permission_requests
+
+        appendPermissionDecisionLog({
+          requestId: body.requestId,
+          sessionId,
+          toolName: permissionRequest.tool_name,
+          scope: permissionRequest.scope,
+          decision: body.decision,
+          reason:
+            body.decision === 'reject'
+              ? PERMISSION_DECISION_REASONS.USER_REJECTED
+              : PERMISSION_DECISION_REASONS.USER_APPROVED,
+        });
+
+        if (body.decision === 'permanent') {
+          // Use always patterns (from opencode ctx.ask always) for broad approval.
+          // e.g. approving edit with always:["*"] → write rule { permission: "edit", pattern: "*" }
+          // Legacy rows without an `always_json` (column added later) fall back
+          // to the original request scope so we never silently broaden a
+          // permanent grant to "*" just because the column was missing.
+          // If the client provides `alwaysOverride`, use that instead — this
+          // allows the UI to let users pick a narrower or broader scope.
+          const category = resolvePermissionReplyCategory(permissionRequest.tool_name);
+          const alwaysPatterns = resolveAlwaysPatterns(permissionRequest, body.alwaysOverride);
+          for (const pattern of alwaysPatterns) {
+            // Durable, user-scoped grant first: this is the source of truth for
+            // cross-session permanent approval and must not depend on the
+            // (best-effort) workspace config file write below.
+            upsertPermissionGrant({ userId: user.sub, toolName: category, scope: pattern });
+          }
+        } else if (body.decision === 'session') {
+          // Mirror opencode's `permission.ask reply='always'` semantics: when
+          // the user picks 本会话允许, push every `always` pattern into the set
+          // of approved scopes for this session so subsequent requests in the
+          // same category whose scope matches one of those patterns auto-resolve
+          // without re-prompting (e.g. approving `ls -la` covers `ls /tmp`,
+          // `ls -a` etc. via the arity pattern `ls *`).
+          //
+          // We persist as synthetic `permission_requests` rows (status='approved',
+          // decision='session', scope=<pattern>) — `findApprovedPermission` then
+          // matches via wildcard. Synthetic rows are keyed by (tool_name, scope)
+          // to stay idempotent if the same broad approval is granted twice.
+          // If the client provides `alwaysOverride`, use that instead.
+          const category = resolvePermissionReplyCategory(permissionRequest.tool_name);
+          const alwaysPatterns = resolveAlwaysPatterns(permissionRequest, body.alwaysOverride);
+          for (const pattern of alwaysPatterns) {
+            const existing = sqliteGet<{ id: string }>(
+              `SELECT id FROM permission_requests
              WHERE session_id = ? AND tool_name = ? AND scope = ?
                AND status = 'approved' AND decision = 'session'
              LIMIT 1`,
-            [sessionId, category, pattern],
-          );
-          if (existing) continue;
-          // Avoid clashing with the original row that has scope = literal command.
-          if (category === permissionRequest.tool_name && pattern === permissionRequest.scope) {
-            continue;
-          }
-          sqliteRun(
-            `INSERT INTO permission_requests
+              [sessionId, category, pattern],
+            );
+            if (existing) continue;
+            // Avoid clashing with the original row that has scope = literal command.
+            if (category === permissionRequest.tool_name && pattern === permissionRequest.scope) {
+              continue;
+            }
+            sqliteRun(
+              `INSERT INTO permission_requests
              (id, session_id, tool_name, scope, reason, risk_level, preview_action, request_payload_json, expires_at, always_json, status, decision)
              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'approved', 'session')`,
-            [
-              randomUUID(),
-              sessionId,
-              category,
-              pattern,
-              permissionRequest.reason,
-              permissionRequest.risk_level,
-              permissionRequest.preview_action,
-              JSON.stringify([pattern]),
-            ],
-          );
+              [
+                randomUUID(),
+                sessionId,
+                category,
+                pattern,
+                permissionRequest.reason,
+                permissionRequest.risk_level,
+                permissionRequest.preview_action,
+                JSON.stringify([pattern]),
+              ],
+            );
+          }
+        }
+      });
+
+      // 工作区文件仅为镜像；数据库授权已提交，镜像失败不能中断通知和恢复。
+      if (body.decision === 'permanent') {
+        const category = resolvePermissionReplyCategory(permissionRequest.tool_name);
+        for (const pattern of resolveAlwaysPatterns(permissionRequest, body.alwaysOverride)) {
+          try {
+            persistWorkspacePermanentPermission({ sessionId, toolName: category, scope: pattern });
+          } catch {
+            request.log.warn(
+              { requestId: body.requestId, sessionId },
+              'failed to mirror committed permanent permission to workspace',
+            );
+          }
         }
       }
 
@@ -553,12 +614,26 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
           [sessionId, body.requestId],
         );
         for (const pending of otherPending) {
-          sqliteRun(
+          const changes = sqliteRunWithChanges(
             `UPDATE permission_requests
              SET status = 'rejected', decision = 'reject', updated_at = datetime('now')
              WHERE id = ? AND session_id = ? AND status = 'pending'`,
             [pending.id, sessionId],
           );
+          // Idempotency gate: only rows that actually transitioned from pending
+          // get an audit row / event, so a replayed reject cannot double-log.
+          // Mirrors the approve cascade in `permission-reply-always.ts`.
+          if (changes === 0) {
+            continue;
+          }
+          appendPermissionDecisionLog({
+            requestId: pending.id,
+            sessionId,
+            toolName: pending.tool_name,
+            scope: pending.scope,
+            decision: 'reject',
+            reason: PERMISSION_DECISION_REASONS.USER_REJECTED,
+          });
           const pendingClientRequestId = parsePermissionRequestClientRequestId(
             pending.request_payload_json,
           );
@@ -668,6 +743,43 @@ export async function permissionsRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ ok: true });
     },
   );
+}
+
+/** Default / hard cap for `GET /sessions/:sessionId/permissions/decisions`. */
+export const PERMISSION_DECISIONS_DEFAULT_LIMIT = 50;
+export const PERMISSION_DECISIONS_MAX_LIMIT = 200;
+
+/**
+ * Parse the `limit` query param. Missing/blank → default. Non-numeric or
+ * non-finite → default (never a full-table scan, never interpolated into SQL).
+ * Values above the cap are CLAMPED to the cap rather than rejected: a client
+ * asking for "more" simply gets the maximum page size, which keeps the endpoint
+ * forgiving without ever widening the result set unexpectedly.
+ */
+function parsePermissionsDecisionsLimit(raw: unknown): number {
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return PERMISSION_DECISIONS_DEFAULT_LIMIT;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return PERMISSION_DECISIONS_DEFAULT_LIMIT;
+  }
+  return Math.min(Math.floor(parsed), PERMISSION_DECISIONS_MAX_LIMIT);
+}
+
+/**
+ * Parse the `beforeId` keyset cursor. Missing/blank/invalid → `undefined`
+ * (first page). Returned as a number so it is always bound as a parameter.
+ */
+function parsePermissionsDecisionsBeforeId(raw: unknown): number | undefined {
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return Math.floor(parsed);
 }
 
 function ownsSession(sessionId: string, userId: string): boolean {

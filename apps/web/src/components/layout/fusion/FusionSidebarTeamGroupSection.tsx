@@ -6,6 +6,7 @@
  */
 
 import { useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { BaseSessionRow, DeleteIcon, RenameIcon } from '../sidebar/BaseSessionRow.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { TeamWorkspaceGroup } from '../../../hooks/workspace/useTeamSidebarSessions.js';
@@ -190,6 +191,7 @@ export function FusionSidebarTeamGroupSection({
                 value={workspaceRenameValue}
                 onChange={(event) => onWorkspaceRenameChange(event.target.value)}
                 onKeyDown={(event) => {
+                  if (isImeComposingKeyboardEvent(event)) return;
                   event.stopPropagation();
                   if (event.key === 'Enter' || event.key === 'Escape') {
                     onWorkspaceRenameCommit(group.id);

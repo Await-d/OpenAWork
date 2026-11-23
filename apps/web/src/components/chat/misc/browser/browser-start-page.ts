@@ -55,8 +55,7 @@ export function bookmarksToQuickLinks(
 ): BrowserQuickLink[] {
   return bookmarks
     .filter((bookmark) => NAVIGABLE_URL_PATTERN.test(bookmark.url))
-    .slice()
-    .sort((left, right) => right.createdAt - left.createdAt)
+    .toSorted((left, right) => right.createdAt - left.createdAt)
     .slice(0, limit)
     .map((bookmark) => ({
       url: bookmark.url,

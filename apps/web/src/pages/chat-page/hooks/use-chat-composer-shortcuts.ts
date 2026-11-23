@@ -107,7 +107,7 @@ export function useChatComposerShortcuts(deps: UseChatComposerShortcutsDeps) {
   );
 
   const handleEditPreviousUserMessage = useCallback(() => {
-    const previousUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+    const previousUserMessage = messages.findLast((message) => message.role === 'user');
     if (!previousUserMessage) {
       return;
     }
@@ -131,7 +131,7 @@ export function useChatComposerShortcuts(deps: UseChatComposerShortcutsDeps) {
         return;
       }
     }
-    const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+    const lastUser = messages.findLast((message) => message.role === 'user');
     if (lastUser) {
       handleRetryMessage(lastUser.id);
     }

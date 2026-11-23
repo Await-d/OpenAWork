@@ -15,8 +15,10 @@ import {
 import {
   buildBusyMessage,
   buildChannelCommandActionsUnavailableMessage,
+  buildInterruptedMessage,
   buildLocalizedErrorMessage,
   buildNoChannelConfigurationMessage,
+  buildPendingMessage,
   buildQueuedMessage,
 } from './channel-localization.js';
 import { channelLogInfo, channelLogWarn, summarizeChannelMessage } from './channel-log.js';
@@ -29,6 +31,24 @@ export type { ChannelCommandActions, ChannelCommandContext } from './channel-com
 
 export interface AutoReplyOptions {
   commandActions?: ChannelCommandActions;
+  /**
+   * 非流式渠道「仍在处理」回执的延迟（毫秒）；`0` 表示关闭。
+   *
+   * 默认 `CHANNEL_PENDING_NOTICE_DELAY_MS`（10s）。抽成选项是为了可测：验证这条
+   * 回执必须能推进到阈值，而不必在单测里真等 10 秒。
+   */
+  pendingNoticeDelayMs?: number;
+  /**
+   * 收到新消息时是否打断同一通道会话正在执行（含仍在排队）的轮次，默认开启。
+   *
+   * 渠道的插话语义是「最新意图优先」：IM 里用户连发几条时，前一轮往往已经不再
+   * 是他想说的话，却会让后面每条都只能收到「仍在处理中 / 已排队」回执。开启后
+   * 新消息会中断前一轮并立刻开跑。
+   *
+   * 抽成选项有两个目的：可测（单测要断言旧排队语义），以及在「不希望被打断」的
+   * 部署里回退到纯排队行为。
+   */
+  interruptOnNewMessage?: boolean;
   resolveChannel?: (pluginId: string) => ChannelInstance | undefined;
   onAgentRun: (params: {
     sessionKey: string;
@@ -40,6 +60,12 @@ export interface AutoReplyOptions {
     inputParts?: InputImageContent[];
     messageId: string;
     onPartialText?: (text: string) => Promise<void> | void;
+    /**
+     * 本轮被更新的入站消息抢占时 abort。实现方必须据此真正停下本轮
+     * （渠道走 `stopAnyInFlightStreamRequestForSession`），否则会话运行锁不释放，
+     * 新一轮会撞 `SESSION_ALREADY_RUNNING`。
+     */
+    signal?: AbortSignal;
   }) => Promise<string>;
 }
 
@@ -50,12 +76,35 @@ interface AutoReplySendContext {
   readonly service: MessagingChannelService;
 }
 
+/**
+ * 一个通道会话（pluginId + chatId）上的串行执行链。
+ *
+ * 串行是必须的：同一会话两个轮次并发会撞内核的 `SESSION_ALREADY_RUNNING`。在此之上
+ * 叠加「最新意图优先」——每条入站消息自己持一个 `AbortController`：`active` 是正在
+ * 跑的那一轮，`waiting` 是已入队但还没轮到的那些。抢占时把两者一起 abort，于是
+ * 正在跑的那轮停下、排队的那些在轮到时直接跳过，最新这条立刻接上。
+ */
 interface SessionTaskChain {
-  readonly promise: Promise<void>;
-  readonly queuedCount: number;
+  promise: Promise<void>;
+  /** 当前正在执行的轮次控制器；没有轮次在跑时为 `undefined`。 */
+  active?: AbortController;
+  /** 已入队、尚未开始执行的轮次控制器。 */
+  readonly waiting: Set<AbortController>;
 }
 
 const MAX_SESSION_TASK_QUEUE_DEPTH = 8;
+
+/**
+ * 非流式渠道的「本轮仍在执行」回执延迟阈值。
+ *
+ * 短任务（普通问答）在这个阈值内就结束了，不会多发消息；超过它仍没结果，才补一条
+ * 回执让等待可见。设为 10s 的取舍：小于它用户通常还能接受，大于它「是不是没收到」
+ * 的疑虑显著上升；再小会明显刷屏（每次问答都多一条）。
+ *
+ * QQ 这类被动回复限制：同一 `msg_id` 允许的回复次数有限（实现里按 `msg_seq` 递增，
+ * 上限 5 条），所以「回执 + 最终结果」= 2 条是安全的，但不能无限追加。
+ */
+const CHANNEL_PENDING_NOTICE_DELAY_MS = 10_000;
 
 export class AutoReplyPipeline {
   private options: AutoReplyOptions;
@@ -200,31 +249,54 @@ export class AutoReplyPipeline {
       service.supportsStreaming &&
       !!service.sendStreamingMessage;
 
-    // 前一/前几轮还没跑完：这条消息只会进入串行队列等待。等待期原本没有任何
-    // 日志、也没有任何用户可见反馈，用户侧与「机器人挂了」无法区分。这里补一条
-    // 回执让等待可见。队列已满（接下来会被拒绝并回 busy）时不发，避免同一轮收到
-    // 两条相互矛盾的提示。
+    // 同一通道会话上一轮还没跑完时，这条消息怎么处理取决于插话开关：
+    //  - 开启（默认）：「最新意图优先」——打断正在执行与仍在排队的轮次，立刻开跑。
+    //    等待期原本没有任何用户可见反馈，用户侧与「机器人挂了」无法区分；这里补一条
+    //    回执说明「上一轮已被打断」，让「新消息真的换掉了旧轮」可观测。
+    //  - 关闭：保持旧的纯排队语义，回一条「已排队」。队列已满（接下来会被拒绝并回
+    //    busy）时不发，避免同一轮收到两条相互矛盾的提示。
     const queuedAhead = this.pendingSessionTaskCount(sessionKey);
-    if (queuedAhead > 0 && queuedAhead < MAX_SESSION_TASK_QUEUE_DEPTH) {
-      channelLogInfo('auto-reply queued behind running session task', {
-        pluginId,
-        chatId: message.chatId,
-        sessionKey,
-        queuedAhead,
-      });
-      // 不 await：回执自身的发送耗时不能推迟入队时刻，否则后到的消息会抢先。
-      void this.safeSend(pluginId, () =>
-        this.sendChannelReply({
-          channel,
-          content: buildQueuedMessage(replyLanguage),
-          message: event,
-          service,
-        }),
-      );
+    const interruptEnabled = this.options.interruptOnNewMessage !== false;
+    if (queuedAhead > 0) {
+      if (interruptEnabled) {
+        const interrupted = this.interruptSessionTasks(sessionKey);
+        if (interrupted > 0) {
+          channelLogInfo('auto-reply interrupted running session task', {
+            pluginId,
+            chatId: message.chatId,
+            sessionKey,
+            interrupted,
+          });
+          // 不 await：回执自身的发送耗时不能推迟入队时刻，否则后到的消息会抢先。
+          void this.safeSend(pluginId, () =>
+            this.sendChannelReply({
+              channel,
+              content: buildInterruptedMessage(replyLanguage),
+              message: event,
+              service,
+            }),
+          );
+        }
+      } else if (queuedAhead < MAX_SESSION_TASK_QUEUE_DEPTH) {
+        channelLogInfo('auto-reply queued behind running session task', {
+          pluginId,
+          chatId: message.chatId,
+          sessionKey,
+          queuedAhead,
+        });
+        void this.safeSend(pluginId, () =>
+          this.sendChannelReply({
+            channel,
+            content: buildQueuedMessage(replyLanguage),
+            message: event,
+            service,
+          }),
+        );
+      }
     }
 
     const enqueuedAt = Date.now();
-    const enqueued = await this.enqueueSessionTask(sessionKey, async () => {
+    const enqueued = await this.enqueueSessionTask(sessionKey, async (signal) => {
       const startedAt = Date.now();
       channelLogInfo('auto-reply agent run started', {
         pluginId,
@@ -250,10 +322,27 @@ export class AutoReplyPipeline {
             senderName: message.senderName,
             ...(inputParts.length > 0 ? { inputParts } : {}),
             messageId: message.id,
+            signal,
             onPartialText: async (text) => {
+              // 已被更新的消息抢占：这一轮的文本作废，继续推中间态只会把用户
+              // 刚发来的新消息挤下去。
+              if (signal.aborted) {
+                return;
+              }
               await handle.update(text);
             },
           });
+          if (signal.aborted) {
+            // 本轮被更新的入站消息抢占：结果作废，且不得再发任何内容 —— 否则
+            // 用户会同时收到「被打断那轮的答复」和「新消息的答复」。
+            channelLogInfo('auto-reply streaming response discarded after interruption', {
+              pluginId,
+              chatId: message.chatId,
+              sessionKey,
+              durationMs: Date.now() - startedAt,
+            });
+            return;
+          }
           await handle.finish(response);
           channelLogInfo('auto-reply streaming response finished', {
             pluginId,
@@ -270,6 +359,10 @@ export class AutoReplyPipeline {
             durationMs: Date.now() - startedAt,
             error: err instanceof Error ? err.message : String(err),
           });
+          if (signal.aborted) {
+            // 被抢占的中断不向用户回任何内容：他刚发的那条正在处理。
+            return;
+          }
           // The recovery `finish` reuses the same (possibly broken) upstream
           // connection, so it can itself throw — guard it so the failure is
           // logged rather than re-thrown into `handle`'s wrapper.
@@ -283,6 +376,16 @@ export class AutoReplyPipeline {
           );
         }
       } else {
+        // 非流式渠道（QQ 官方 API 不支持编辑已发送消息）：整轮跑完才有一条回复，
+        // 含工具链的长任务期间用户侧完全静默。超时仍未结束时先补一条「仍在处理」，
+        // 让等待可见；任务结束（成功或失败）即取消，短任务不会多发消息。
+        const pendingNotice = this.schedulePendingNotice({
+          channel,
+          message: event,
+          service,
+          replyLanguage,
+          pluginId,
+        });
         try {
           const response = await this.options.onAgentRun({
             sessionKey,
@@ -293,7 +396,19 @@ export class AutoReplyPipeline {
             senderName: message.senderName,
             ...(inputParts.length > 0 ? { inputParts } : {}),
             messageId: message.id,
+            signal,
           });
+          pendingNotice.cancel();
+          if (signal.aborted) {
+            // 被抢占：这一轮的结果作废，一条都不发（新消息的答复紧随其后）。
+            channelLogInfo('auto-reply response discarded after interruption', {
+              pluginId,
+              chatId: message.chatId,
+              sessionKey,
+              durationMs: Date.now() - startedAt,
+            });
+            return;
+          }
           channelLogInfo('auto-reply agent response ready', {
             pluginId,
             chatId: message.chatId,
@@ -303,6 +418,7 @@ export class AutoReplyPipeline {
           });
           await this.sendChannelReply({ channel, content: response, message: event, service });
         } catch (err) {
+          pendingNotice.cancel();
           channelLogWarn('auto-reply agent run failed', {
             pluginId,
             chatId: message.chatId,
@@ -310,6 +426,10 @@ export class AutoReplyPipeline {
             durationMs: Date.now() - startedAt,
             error: err instanceof Error ? err.message : String(err),
           });
+          if (signal.aborted) {
+            // 主动打断不是故障：不回错误文案（用户刚发的那条正在处理）。
+            return;
+          }
           await this.safeSend(pluginId, () =>
             this.sendChannelReply({
               channel,
@@ -351,38 +471,95 @@ export class AutoReplyPipeline {
 
   /** 该通道会话当前仍未跑完的轮次数（正在执行的 1 + 排队的 N）。 */
   private pendingSessionTaskCount(sessionKey: string): number {
-    return this.sessionTaskChains.get(sessionKey)?.queuedCount ?? 0;
+    const chain = this.sessionTaskChains.get(sessionKey);
+    if (!chain) {
+      return 0;
+    }
+
+    return (chain.active ? 1 : 0) + chain.waiting.size;
   }
 
+  /**
+   * 打断该通道会话上正在执行与仍在排队的轮次，返回被打断的轮次数。
+   *
+   * abort 只是让实现方停下（渠道侧会真正取消内核轮次并等它 settle）；正在执行的那
+   * 一轮此时从 `active` 摘掉，避免同一条消息在 settle 前被重复计数/重复 abort。
+   * 排队的那些直接清空集合 —— 它们各自持有的 controller 已被 abort，轮到执行时会
+   * 自查并跳过，不做任何回复。
+   */
+  private interruptSessionTasks(sessionKey: string): number {
+    const chain = this.sessionTaskChains.get(sessionKey);
+    if (!chain) {
+      return 0;
+    }
+
+    let interrupted = 0;
+    if (chain.active) {
+      chain.active.abort();
+      chain.active = undefined;
+      interrupted += 1;
+    }
+    for (const controller of chain.waiting) {
+      controller.abort();
+      interrupted += 1;
+    }
+    chain.waiting.clear();
+
+    return interrupted;
+  }
+
+  /**
+   * 把一轮排进该通道会话的串行链。返回 `false` 表示队列已满、这条消息不会被处理。
+   *
+   * `task` 收到本轮专属的 `AbortSignal`：被更新的入站消息抢占时 abort，实现方须据此
+   * 停下本轮（否则会话运行锁不释放，新一轮会撞 `SESSION_ALREADY_RUNNING`）。
+   */
   private async enqueueSessionTask(
     sessionKey: string,
-    task: () => Promise<void>,
+    task: (signal: AbortSignal) => Promise<void>,
   ): Promise<boolean> {
-    const existing = this.sessionTaskChains.get(sessionKey);
-    const queuedCount = existing?.queuedCount ?? 0;
-    if (queuedCount >= MAX_SESSION_TASK_QUEUE_DEPTH) {
+    if (this.pendingSessionTaskCount(sessionKey) >= MAX_SESSION_TASK_QUEUE_DEPTH) {
       return false;
     }
 
-    const previous = existing?.promise ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(task);
-    this.sessionTaskChains.set(sessionKey, { promise: current, queuedCount: queuedCount + 1 });
+    const chain: SessionTaskChain = this.sessionTaskChains.get(sessionKey) ?? {
+      promise: Promise.resolve(),
+      waiting: new Set<AbortController>(),
+    };
+    this.sessionTaskChains.set(sessionKey, chain);
+
+    const controller = new AbortController();
+    chain.waiting.add(controller);
+    const current = chain.promise
+      .catch(() => undefined)
+      .then(async () => {
+        chain.waiting.delete(controller);
+        if (controller.signal.aborted) {
+          // 入队后被更新的消息抢占：整轮跳过，一条回复都不发。
+          channelLogInfo('auto-reply superseded queued message skipped', {
+            sessionKey,
+          });
+          return;
+        }
+
+        chain.active = controller;
+        try {
+          await task(controller.signal);
+        } finally {
+          // 只清理自己登记的那一轮：抢占可能已经把它摘掉并让位给新轮。
+          if (chain.active === controller) {
+            chain.active = undefined;
+          }
+        }
+      });
+    chain.promise = current;
 
     try {
       await current;
       return true;
     } finally {
-      const latest = this.sessionTaskChains.get(sessionKey);
-      if (latest) {
-        const nextQueuedCount = latest.queuedCount - 1;
-        if (nextQueuedCount <= 0) {
-          this.sessionTaskChains.delete(sessionKey);
-        } else {
-          this.sessionTaskChains.set(sessionKey, {
-            promise: latest.promise,
-            queuedCount: nextQueuedCount,
-          });
-        }
+      if (chain.promise === current && !chain.active && chain.waiting.size === 0) {
+        this.sessionTaskChains.delete(sessionKey);
       }
     }
   }
@@ -458,6 +635,49 @@ export class AutoReplyPipeline {
     });
   }
 
+  /**
+   * 非流式渠道的「仍在处理」回执：超时仍未结束才发，只发一次，任务结束即取消。
+   *
+   * 回执是装饰性中间态，发送失败只记日志（走 `safeSend`），绝不影响最终回复；这也
+   * 保证「回执把 QQ 被动回复次数用光导致正式回复发不出」不会发生 —— 同一条
+   * `msg_id` 的 `msg_seq` 上限是 5，本路径最多消耗 1 次。
+   */
+  private schedulePendingNotice(context: {
+    readonly channel: ChannelInstance | undefined;
+    readonly message: ChannelEvent & { readonly type: 'message' };
+    readonly service: MessagingChannelService;
+    readonly replyLanguage: ChannelReplyLanguage;
+    readonly pluginId: string;
+  }): { cancel: () => void } {
+    const delayMs = this.options.pendingNoticeDelayMs ?? CHANNEL_PENDING_NOTICE_DELAY_MS;
+    if (delayMs <= 0) {
+      return { cancel: () => undefined };
+    }
+
+    const timer = setTimeout(() => {
+      channelLogInfo('auto-reply pending notice sent', {
+        pluginId: context.pluginId,
+        pluginType: context.channel?.type,
+        chatId: context.message.message.chatId,
+        delayMs,
+      });
+      void this.safeSend(context.pluginId, () =>
+        this.sendChannelReply({
+          channel: context.channel,
+          content: buildPendingMessage(context.replyLanguage),
+          message: context.message,
+          service: context.service,
+        }),
+      );
+    }, delayMs);
+
+    return {
+      cancel: () => {
+        clearTimeout(timer);
+      },
+    };
+  }
+
   private async sendChannelReply(context: AutoReplySendContext): Promise<{ messageId: string }> {
     const message = context.message.message;
     channelLogInfo('sending channel reply', {
@@ -488,11 +708,47 @@ export class AutoReplyPipeline {
       });
       return result;
     } catch (err) {
+      const replyError = err instanceof Error ? err.message : String(err);
+
+      // QQ 的回复是「被动回复」（带 `msg_id`），平台侧有时效；agent 跑几分钟时这次
+      // 回复会被拒绝。此时改走主动消息兜底 —— 否则结果只在会话里可见、在 IM 里永远
+      // 收不到，用户看到的就是「回了一条『仍在处理中』然后再无下文」。
+      // 只在原路径**失败之后**才触发，正常发送完全不受影响；主动消息受配额限制，
+      // 兜底自身也可能失败，那时仍按原错误抛出并落库。
+      if (
+        shouldReplyToQQReferencedMessage(context.channel, message.id) &&
+        context.service.sendWakeupMessage
+      ) {
+        try {
+          const fallback = await context.service.sendWakeupMessage(message.chatId, context.content);
+          channelLogInfo('channel reply delivered via wakeup fallback', {
+            pluginId: context.message.pluginId,
+            pluginType: context.channel?.type,
+            chatId: message.chatId,
+            messageId: fallback.messageId,
+            replyError,
+          });
+          return fallback;
+        } catch (fallbackErr) {
+          const fallbackError =
+            fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          this.recordIssue({
+            channelId: context.message.pluginId,
+            message: `回复投递失败：被动回复（${replyError}）；主动消息兜底也失败（${fallbackError}）`,
+            source: 'channel_delivery',
+            ...(fallbackErr instanceof Error && fallbackErr.stack
+              ? { stack: fallbackErr.stack }
+              : {}),
+          });
+          throw err;
+        }
+      }
+
       // agent 已经跑完、结果也已落库，但回复发不出去 —— 消息在会话里可见、在 IM 里
       // 不可见。不记这一笔的话排查会得出「什么都没发生」的错误结论。
       this.recordIssue({
         channelId: context.message.pluginId,
-        message: `回复投递失败：${err instanceof Error ? err.message : String(err)}`,
+        message: `回复投递失败：${replyError}`,
         source: 'channel_delivery',
         ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
       });

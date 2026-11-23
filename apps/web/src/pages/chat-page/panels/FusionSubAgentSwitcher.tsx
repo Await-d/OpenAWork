@@ -2,6 +2,10 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 import { useHorizontalWheelScroll } from '../../../hooks/use-horizontal-wheel-scroll.js';
 import { getStatusLabel, isActiveStatus, type SubAgentRunItem } from './sub-agent-run-list.js';
 import './FusionSubAgentSwitcher.css';
+import {
+  SubagentLoadMore,
+  useProgressiveSubagents,
+} from '../../../components/chat/subagent-progress.js';
 
 export interface FusionSubAgentSwitcherProps {
   readonly items: readonly SubAgentRunItem[];
@@ -40,13 +44,16 @@ export function FusionSubAgentSwitcher({
   const [activeOnly, setActiveOnly] = useState(false);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const { attachRef: attachRailRef } = useHorizontalWheelScroll<HTMLDivElement>();
+  const progress = useProgressiveSubagents(items, (item) => item);
 
   if (items.length <= 1) {
     return null;
   }
 
   const activeItems = items.filter((item) => isActiveStatus(item.status));
-  const visibleItems = activeOnly ? activeItems : items;
+  const visibleItems = activeOnly
+    ? progress.visible.filter((item) => isActiveStatus(item.status))
+    : progress.visible;
   const selectedIndex = visibleItems.findIndex((item) => item.sessionId === selectedSessionId);
   const tabbableIndex = selectedIndex >= 0 ? selectedIndex : 0;
 
@@ -116,7 +123,9 @@ export function FusionSubAgentSwitcher({
         aria-label="子代理切换"
       >
         {visibleItems.length === 0 ? (
-          <span className="fusion-sub-agent-switcher__empty">暂无活跃子代理</span>
+          <span className="fusion-sub-agent-switcher__empty">
+            {activeItems.length > 0 ? '活跃子代理在已加载范围之外，请加载更多' : '暂无活跃子代理'}
+          </span>
         ) : (
           visibleItems.map((item, index) => {
             const isSelected = index === selectedIndex;
@@ -155,6 +164,7 @@ export function FusionSubAgentSwitcher({
           })
         )}
       </div>
+      <SubagentLoadMore progress={progress} />
     </div>
   );
 }

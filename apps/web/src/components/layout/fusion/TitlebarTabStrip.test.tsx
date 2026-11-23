@@ -5,6 +5,11 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { TitlebarTabStrip } from './TitlebarTabStrip.js';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import { writeWorkspaceAlias } from '../../../utils/workspace-alias.js';
+import { ACTIVE_TAB_SCROLL_MARGIN_PX } from './use-scroll-active-titlebar-tab.js';
+import {
+  installTabScrollLayout,
+  installTrackedScrollLeft,
+} from './titlebar-tab-scroll.test-utils.js';
 
 const OPENAWORK_PATH = '/home/await/project/OpenAWork';
 
@@ -175,7 +180,7 @@ describe('TitlebarTabStrip', () => {
     expect(screen.queryByText('治理')).toBeNull();
     expect(screen.queryByRole('tablist', { name: 'Chat 会话标签' })).toBeNull();
     expect(screen.queryByText('Chat 会话一')).toBeNull();
-    expect(screen.getByRole('tab', { name: '首页' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '首页' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '工具菜单' })).not.toBeNull();
   });
 
@@ -189,7 +194,7 @@ describe('TitlebarTabStrip', () => {
       expect(screen.getByLabelText('全局工作台控制')).not.toBeNull();
       expect(screen.getByLabelText('Team 工作台上下文')).not.toBeNull();
       expect(screen.getByLabelText('Team 工作台层级').textContent).toContain('worksp…');
-      expect(screen.getByRole('tab', { name: '首页' })).not.toBeNull();
+      expect(screen.getByRole('button', { name: '首页' })).not.toBeNull();
       expect(screen.queryByRole('tablist', { name: 'Chat 会话标签' })).toBeNull();
       expect(screen.queryByRole('button', { name: '工具菜单' })).not.toBeNull();
     } finally {
@@ -202,7 +207,7 @@ describe('TitlebarTabStrip', () => {
 
     renderTitlebar('/team/workspace-alpha');
 
-    fireEvent.click(screen.getByRole('tab', { name: '首页' }));
+    fireEvent.click(screen.getByRole('button', { name: '首页' }));
 
     expect(screen.getByTestId('location-probe').textContent).toBe('/chat');
   });
@@ -211,7 +216,7 @@ describe('TitlebarTabStrip', () => {
     renderTitlebar('/chat');
 
     const homeSlot = document.querySelector('.titlebar-tab-strip__home-slot');
-    const homeButton = screen.getByRole('tab', { name: '首页' });
+    const homeButton = screen.getByRole('button', { name: '首页' });
 
     expect(homeSlot?.contains(homeButton)).toBe(true);
     expect(homeButton.getAttribute('title')).toBe('OpenAWork · 返回首页');
@@ -343,7 +348,7 @@ describe('TitlebarTabStrip', () => {
     expect(useUIStateStore.getState().closedSessionTabIds).toEqual(['chat-session-1']);
 
     // 路由离开被删除会话（回到首页）后放行标记，避免长期压制同名会话。
-    fireEvent.click(screen.getByRole('tab', { name: '首页' }));
+    fireEvent.click(screen.getByRole('button', { name: '首页' }));
 
     await waitFor(() => {
       expect(useUIStateStore.getState().closedSessionTabIds).toEqual([]);
@@ -382,5 +387,37 @@ describe('TitlebarTabStrip', () => {
     renderTitlebar('/chat');
 
     expect(screen.queryByLabelText('窗口控制')).toBeNull();
+  });
+
+  it('切换会话时把激活标签自动滚进标签栏可视区', () => {
+    const firstTabId = useUIStateStore.getState().addSessionTab('chat-session-1', 'Chat 会话一');
+    const secondTabId = useUIStateStore.getState().addSessionTab('chat-session-2', 'Chat 会话二');
+    useUIStateStore.getState().selectTab(firstTabId);
+
+    const scroll = installTrackedScrollLeft();
+    const restoreLayout = installTabScrollLayout(
+      { left: 0, right: 200 },
+      {
+        [firstTabId]: { left: 0, right: 100 },
+        [secondTabId]: { left: 220, right: 320 },
+      },
+      () => scroll.read(),
+    );
+
+    try {
+      renderTitlebar('/chat/chat-session-1');
+
+      // 激活的第一个标签本来就在可视区内：不该动滚动位置。
+      expect(scroll.read()).toBe(0);
+
+      fireEvent.click(screen.getByText('Chat 会话二'));
+
+      // 只写一次：不能被路由同步的那一帧抢回旧标签、再把滚动拉回去。
+      expect(scroll.history()).toEqual([120 + ACTIVE_TAB_SCROLL_MARGIN_PX]);
+      expect(scroll.read()).toBe(120 + ACTIVE_TAB_SCROLL_MARGIN_PX);
+    } finally {
+      restoreLayout();
+      scroll.restore();
+    }
   });
 });

@@ -9,6 +9,7 @@ import type {
 } from '@openAwork/shared';
 import { hasActivePendingPermissionRequest } from '../../../components/conversation-runtime/messages/support.js';
 import { isNonTerminalStreamErrorCode } from '../../../hooks/gateway/stream-error-classification.js';
+import type { CompactionItem } from '../panels/chat-overview-model.js';
 import type {
   AgentVizEvent,
   DAGNodeInfo,
@@ -72,17 +73,7 @@ export interface ChatRightPanelState {
     runId?: string;
     summary: UpstreamStreamSummary;
   }>;
-  compactions: Array<{
-    id: string;
-    summary: string;
-    trigger: 'manual' | 'automatic';
-    phase?: 'started' | 'completed' | 'failed';
-    occurredAt: number;
-    compactedMessages?: number;
-    representedMessages?: number;
-    cause?: 'manual' | 'usage_overflow' | 'provider_overflow' | 'proactive_near_overflow';
-    strategy?: 'runtime_replace' | 'summary_only' | 'replay' | 'synthetic_continue';
-  }>;
+  compactions: CompactionItem[];
   currentGoal: string;
 }
 
@@ -339,6 +330,7 @@ export function applyChatRightPanelEvent(
           ? { representedMessages: existing.representedMessages }
           : {}),
       ...(event.cause ? { cause: event.cause } : existing?.cause ? { cause: existing.cause } : {}),
+      ...(event.historyTokenEstimate ? { historyTokenEstimate: event.historyTokenEstimate } : {}),
       ...(event.strategy
         ? { strategy: event.strategy }
         : existing?.strategy
@@ -468,12 +460,17 @@ export function applyChatRightPanelEvent(
 }
 
 function resolveCompactionPanelId(event: Extract<RunEvent, { type: 'compaction' }>): string {
+  const eventId = typeof event.eventId === 'string' ? event.eventId.trim() : '';
+  const automaticRound = eventId.match(
+    /^(.*:auto-compact:\d+)(?::[^:]+)?:(?:started|completed|failed)$/,
+  )?.[1];
+  if (event.trigger === 'automatic' && automaticRound) return `compaction:${automaticRound}`;
+
   const runId = typeof event.runId === 'string' ? event.runId.trim() : '';
   if (runId.length > 0) {
     return `compaction:${runId}`;
   }
 
-  const eventId = typeof event.eventId === 'string' ? event.eventId.trim() : '';
   if (eventId.length > 0) {
     return `compaction:${eventId.replace(/:compaction:(?:started|completed|failed|request-failed)$/, ':compaction')}`;
   }

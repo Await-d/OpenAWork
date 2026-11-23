@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { useBookmarkStore, type MessageBookmark } from '../../../stores/chat/bookmarks.js';
 
 interface BookmarksPanelProps {
@@ -227,6 +228,7 @@ function BookmarkItem({
             placeholder="添加备注…"
             autoFocus
             onKeyDown={(e) => {
+              if (isImeComposingKeyboardEvent(e)) return;
               if (e.key === 'Enter') {
                 e.preventDefault();
                 onSaveNote(noteValue);

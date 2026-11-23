@@ -2,6 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2020",
+    // 刻意排除 tsconfig.base.json 里的 ES2023.Array：mobile 跑在 Hermes 上，
+    // 不保证存在 toSorted / toReversed / findLast。web 侧需要它们，mobile 不需要。
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-native",

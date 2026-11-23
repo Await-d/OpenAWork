@@ -14,6 +14,52 @@ import { ToolOutputPreview } from './tool-output-preview.js';
 
 afterEach(cleanup);
 
+/**
+ * 失败卡接管的边界：`isError` 为真时业务预览要让位，但三类输出必须**放行**给原预览，
+ * 否则是功能倒退（bash 终端画面、diff 卡、提问流程提示）。
+ */
+describe('ToolOutputPreview · 失败卡接管边界', () => {
+  const AGENTIGNORE =
+    'Access denied: file "/repo/.omo/x.ts" is protected by agentignore rules. 该类路径受 agentignore 保护。请勿重复尝试读取或写入。';
+
+  it('isError 时字符串错误渲染结构化失败卡', () => {
+    const { container } = render(
+      <ToolOutputPreview toolName="write" output={AGENTIGNORE} isError />,
+    );
+    expect(container.querySelector('.tool-failure-card')).not.toBeNull();
+    expect(container.querySelector('.tool-failure-headline')?.textContent).toBe(
+      'agentignore 保护路径',
+    );
+  });
+
+  it('bash 失败信封不接管（保留终端卡路径）', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="bash"
+        output={{ command: 'ls', cwd: '/repo', exitCode: 1, output: 'boom' }}
+        isError
+      />,
+    );
+    expect(container.querySelector('.tool-failure-card')).toBeNull();
+  });
+
+  it('question 族的 is_error 语义不是失败，不得渲染失败卡', () => {
+    const { container } = render(
+      <ToolOutputPreview
+        toolName="question"
+        output={'Question request "q-1" has been created. Ask the user to answer it.'}
+        isError
+      />,
+    );
+    expect(container.querySelector('.tool-failure-card')).toBeNull();
+  });
+
+  it('未传 isError 时行为与改造前一致（不渲染失败卡）', () => {
+    const { container } = render(<ToolOutputPreview toolName="write" output={AGENTIGNORE} />);
+    expect(container.querySelector('.tool-failure-card')).toBeNull();
+  });
+});
+
 describe('extractMcpResult', () => {
   it('解析对象形态的 MCP 结果', () => {
     const view = extractMcpResult({ content: [{ type: 'text', text: 'hello' }], isError: false });

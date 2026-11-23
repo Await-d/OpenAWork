@@ -212,8 +212,69 @@ describe('过期收敛（软约束）', () => {
 });
 
 describe('permissions routes error contracts', () => {
-  it('POST /sessions/:sessionId/permissions/reply 在永久权限写入失败时返回中文 500', async () => {
-    seedPendingPermissionRequest('perm-1');
+  it('审计写入失败时不保留已批准状态，允许用户安全重试', async () => {
+    seedPendingPermissionRequest('perm-audit-failure');
+    dbModule.sqliteRun(
+      `CREATE TRIGGER fail_permission_audit BEFORE INSERT ON permission_decision_logs
+       BEGIN SELECT RAISE(ABORT, 'audit write failed'); END`,
+      [],
+    );
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app) },
+        payload: { requestId: 'perm-audit-failure', decision: 'once' },
+      });
+      expect(response.statusCode).toBe(500);
+      expect(readPermissionRow('perm-audit-failure')).toEqual({
+        status: 'pending',
+        decision: null,
+      });
+      expect(mocks.resumeApprovedPermissionRequest).not.toHaveBeenCalled();
+    } finally {
+      dbModule.sqliteRun('DROP TRIGGER fail_permission_audit', []);
+      await app.close();
+    }
+  });
+
+  it('第二条永久授权写入失败时回滚状态、审计与先前授权', async () => {
+    seedPermissionRequestRow({
+      id: 'perm-grant-failure',
+      scope: 'ls -la',
+      always: ['ls *', 'pwd *'],
+    });
+    dbModule.sqliteRun(
+      `CREATE TRIGGER fail_permission_grant BEFORE INSERT ON permission_grants
+       WHEN NEW.scope = 'pwd *'
+       BEGIN SELECT RAISE(ABORT, 'grant write failed'); END`,
+      [],
+    );
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/sessions/${SESSION_ID}/permissions/reply`,
+        headers: { authorization: bearer(app) },
+        payload: { requestId: 'perm-grant-failure', decision: 'permanent' },
+      });
+      expect(response.statusCode).toBe(500);
+      expect(readPermissionRow('perm-grant-failure')).toEqual({
+        status: 'pending',
+        decision: null,
+      });
+      expect(dbModule.sqliteAll('SELECT id FROM permission_grants')).toEqual([]);
+      expect(dbModule.sqliteAll('SELECT id FROM permission_decision_logs')).toEqual([]);
+      expect(mocks.persistWorkspacePermanentPermission).not.toHaveBeenCalled();
+    } finally {
+      dbModule.sqliteRun('DROP TRIGGER fail_permission_grant', []);
+      await app.close();
+    }
+  });
+
+  it('workspace 镜像失败仍完成已提交永久授权的通知和恢复', async () => {
+    seedPendingPermissionRequest('perm-1', buildPermissionResumePayload('mirror-failure'));
     mocks.persistWorkspacePermanentPermission.mockImplementation(() => {
       throw new Error('disk full');
     });
@@ -233,13 +294,11 @@ describe('permissions routes error contracts', () => {
         },
       });
 
-      expect(response.statusCode).toBe(500);
-      expect(response.json()).toMatchObject({
-        name: 'InternalError',
-        data: {
-          message: '保存永久权限规则失败。',
-        },
-      });
+      expect(response.statusCode).toBe(200);
+      expect(readPermissionRow('perm-1')).toEqual({ status: 'approved', decision: 'permanent' });
+      expect(repliedRequestIds()).toContain('perm-1');
+      expect(mocks.resumeApprovedPermissionRequest).toHaveBeenCalledTimes(1);
+      expect(dbModule.sqliteAll('SELECT id FROM permission_grants')).toHaveLength(1);
     } finally {
       await app.close();
     }

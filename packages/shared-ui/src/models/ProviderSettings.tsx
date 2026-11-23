@@ -312,7 +312,7 @@ export function ProviderSettings({
       : [];
     const visibleModels = showingSearchResults
       ? []
-      : [...(visibleProvider?.defaultModels ?? [])].sort(compareModelsByName);
+      : (visibleProvider?.defaultModels ?? []).toSorted(compareModelsByName);
     const contextLabel = formatContextWindow(
       // 挡位是权威值：配置后直接生效（可高于模型预设），与网关解析口径一致。
       selectedModel?.contextWindowOverride ?? selectedModel?.contextWindow,

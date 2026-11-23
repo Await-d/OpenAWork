@@ -90,6 +90,21 @@ const PANEL_STYLE: CSSProperties = {
   background: 'var(--bg-surface)',
 };
 
+/**
+ * 面板头部（项目名 + 路径 + 图标按钮）。
+ *
+ * **高度必须恒定**：头部下方就是会话列表，任何一行内容（标题 / 路径 / 编辑态
+ * 输入框）增高都会把整列会话往下推。而切换会话时头部文案会经历
+ * 「未选择工作区 →(1 行) 正在解析工作区… →(2 行) 已落定」，行数一变高度就跳，
+ * 视觉上就是「切会话时整栏抖一下」。因此这里把高度锁死：
+ *
+ * - 头部 `height` 固定 = 上下 padding(8×2) + 标题行(17) + 行距(1) + 路径行(15)；
+ * - 两行各自固定 `height` + `lineHeight`，不再由内容决定。
+ *
+ * 副作用是「无路径」的两态（未选择工作区 / 正在解析）会在原本路径的位置留一行
+ * 空白——这比每次切换都撑动整个列表要好，且 `minHeight` 抬起时代码已经默认
+ * 接受这两态占用同样的垂直空间。
+ */
 const PANEL_HEADER_STYLE: CSSProperties = {
   flexShrink: 0,
   display: 'flex',
@@ -98,12 +113,22 @@ const PANEL_HEADER_STYLE: CSSProperties = {
   gap: 8,
   padding: '8px 12px',
   borderBottom: '1px solid var(--border-subtle)',
-  minHeight: 44,
+  height: 49,
 };
+
+/**
+ * 标题行（项目名 / InlineEditor 展示态）。
+ *
+ * `height` + `lineHeight` 双固定：`whiteSpace: nowrap` 只保证不换行，行高仍会
+ * 跟着字体度量变化，固定 `lineHeight` 才能让两行高度与 padding 精确相加。
+ */
+const PANEL_TITLE_LINE_HEIGHT = 17;
+const PANEL_SUBTITLE_LINE_HEIGHT = 15;
 
 const PANEL_TITLE_STYLE: CSSProperties = {
   fontSize: 13,
   fontWeight: 800,
+  lineHeight: `${PANEL_TITLE_LINE_HEIGHT}px`,
   color: 'var(--fg-strong)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
@@ -112,6 +137,7 @@ const PANEL_TITLE_STYLE: CSSProperties = {
 
 const PANEL_SUBTITLE_STYLE: CSSProperties = {
   fontSize: 11,
+  lineHeight: `${PANEL_SUBTITLE_LINE_HEIGHT}px`,
   color: 'var(--fg-subtle)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
@@ -502,7 +528,6 @@ export function FusionSidebar({
     groupedSessionTrees: searchedSessionTreeGroups,
     sessionCountByWorkspace,
     isSearching: isSearchingSessions,
-    isPinned,
   });
   const chatSessionNodes = chatGroups.flatMap((group) => group.roots);
   const peekGroupKey = getWorkspaceGroupKey(peekWorkspacePath);
@@ -719,6 +744,7 @@ export function FusionSidebar({
           <>
             <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 1 }}>
               <span style={PANEL_TITLE_STYLE}>团队空间</span>
+              {/* 行高固定 ⇒ 高度不再随文案长短变化，头部保持恒定 */}
               <span style={PANEL_SUBTITLE_STYLE}>
                 {teamLoading ? '加载中…' : `${teamWorkspaceGroups.length} 个工作空间`}
               </span>
@@ -792,13 +818,18 @@ export function FusionSidebar({
                 disabled={isWorkspaceHeaderPending}
                 style={{ ...PANEL_TITLE_STYLE, width: '100%' }}
                 buttonStyle={{ ...PANEL_TITLE_STYLE, padding: '1px 2px' }}
+                // 展示态锁死高度：内联样式会压掉 shared-ui 默认的 `padding: 2px 4px`，
+                // 让标题行严格等于 17px，头部高度才能在任意工作区名/解析态下保持不变。
+                displayStyle={{ height: PANEL_TITLE_LINE_HEIGHT, padding: 0, lineHeight: '17px' }}
                 inputStyle={{ fontSize: 13, fontWeight: 800 }}
               />
               {/* 副行是纯展示：切换/新建工作区的动作统一由右侧 ＋ 按钮触发，
-                  两处都挂同一个 picker 会让「哪里能点」变得不可预期。 */}
-              {workspaceSubtitleText ? (
-                <span style={PANEL_PATH_STYLE}>{workspaceSubtitleText}</span>
-              ) : null}
+                  两处都挂同一个 picker 会让「哪里能点」变得不可预期。
+
+                  行高与高度固定（不写 `? :` 条件渲染）：此前「未选择工作区 / 正在解析」
+                  不渲染副行，切会话时头部会在 1 行 / 2 行之间来回跳，把下面的会话列表
+                  整列推上推下。缺失路径时渲染 `\u00a0` 占位，保证行数恒定。 */}
+              <span style={PANEL_PATH_STYLE}>{workspaceSubtitleText || '\u00a0'}</span>
             </div>
             <div style={PANEL_HEADER_ACTIONS_STYLE}>
               <button
@@ -1036,7 +1067,9 @@ export function FusionSidebar({
   );
 
   return (
-    <div
+    // <aside> 提供 complementary landmark：侧栏内容（Rail + 会话面板）此前全在
+    // div 里，axe 会把「会话列表加载失败」这类文案判成「内容不在 landmark 内」。
+    <aside
       className="fusion-sidebar"
       data-compact-viewport={compactViewport ? 'true' : 'false'}
       style={{
@@ -1225,6 +1258,6 @@ export function FusionSidebar({
           />,
           document.body,
         )}
-    </div>
+    </aside>
   );
 }

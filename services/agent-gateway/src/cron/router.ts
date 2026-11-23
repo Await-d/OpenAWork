@@ -1,5 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import {
+  scheduledTaskCreateInputSchema,
+  scheduledTaskUpdateInputSchema,
+  scheduledTaskHistoryOptionsSchema,
+} from '@openAwork/shared';
 import { requireAuth } from '../infra/auth.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
 import { parseQuery } from '../infra/parse-request.js';
@@ -13,6 +18,7 @@ import {
   upsertCronJob,
 } from './cron-store.js';
 import { CronScheduler, type CronSchedulerPersistence } from './scheduler.js';
+import { publishCronJobsChanged } from './cron-events-bus.js';
 import { isValidCronExpression } from './cron-expression.js';
 import { collectScheduleIssues } from './schedule-validation.js';
 import { attachExecutionPreviews } from './delivery.js';
@@ -89,63 +95,20 @@ cronScheduler.setPersistenceErrorListener((label, error) => {
   });
 });
 
-/**
- * 创建 / 更新共用的字段定义（**不带默认值**）。
- *
- * 关键约束：PATCH 的 schema 不能由 `jobSchema.partial()` 生成。Zod 的 `.partial()`
- * 只是把字段包成 optional，字段自身的 `.default()` 仍会在缺省时填充——实测
- * `jobSchema.partial().parse({ enabled: false })` 会带回
- * `schedule_expr: null` / `schedule_tz: 'UTC'` / `delivery_mode: 'none'`。
- * 结果就是「改投递方式」或「停用」顺手把调度表达式清空，任务从此永不触发
- * （`scheduleJob` 见空表达式直接 return），而界面仍显示「已启用」。
- * 因此下面拆成两份：创建用默认值补齐，更新只认显式传入的字段。
- */
-const scheduleExprField = z
-  .string()
-  .nullable()
-  .refine((value) => value === null || value === undefined || isValidCronExpression(value), {
-    message: 'schedule_expr 必须是合法的 5 段 cron 表达式（分 时 日 月 周）。',
-  });
-
-const jobBaseFields = {
-  name: z.string().min(1),
-  schedule_kind: z.enum(['at', 'every', 'cron']),
-  schedule_at: z.number().nullable(),
-  schedule_every: z.number().int().positive().nullable(),
-  schedule_expr: scheduleExprField,
-  schedule_tz: z.string(),
-  prompt: z.string().min(1),
-  agent_id: z.string().nullable(),
-  model: z.string().nullable(),
-  working_folder: z.string().nullable(),
-  session_id: z.string().nullable(),
-  delivery_mode: z.enum(['desktop', 'session', 'none']),
-  delivery_target: z.string().nullable(),
-  plugin_id: z.string().nullable(),
-  plugin_chat_id: z.string().nullable(),
-  enabled: z.boolean(),
-  delete_after_run: z.boolean(),
+/** 表达式可执行性属于网关；wire 形状与默认值来自共享契约。 */
+const scheduleExpressionCheck = {
+  message: 'schedule_expr 必须是合法的 5 段 cron 表达式（分 时 日 月 周）。',
 };
-
-const jobSchema = z.object({
-  ...jobBaseFields,
-  schedule_at: jobBaseFields.schedule_at.default(null),
-  schedule_every: jobBaseFields.schedule_every.default(null),
-  schedule_expr: jobBaseFields.schedule_expr.default(null),
-  schedule_tz: jobBaseFields.schedule_tz.default('UTC'),
-  agent_id: jobBaseFields.agent_id.default(null),
-  model: jobBaseFields.model.default(null),
-  working_folder: jobBaseFields.working_folder.default(null),
-  session_id: jobBaseFields.session_id.default(null),
-  delivery_mode: jobBaseFields.delivery_mode.default('none'),
-  delivery_target: jobBaseFields.delivery_target.default(null),
-  plugin_id: jobBaseFields.plugin_id.default(null),
-  plugin_chat_id: jobBaseFields.plugin_chat_id.default(null),
-  enabled: jobBaseFields.enabled.default(true),
-  delete_after_run: jobBaseFields.delete_after_run.default(false),
-});
-/** 更新只接受显式字段：不注入任何默认值（见上方注释）。 */
-const jobPatchSchema = z.object(jobBaseFields).partial();
+const validScheduleExpression = (input: { schedule_expr?: string | null }): boolean =>
+  input.schedule_expr == null || isValidCronExpression(input.schedule_expr);
+const jobSchema = scheduledTaskCreateInputSchema.refine(
+  validScheduleExpression,
+  scheduleExpressionCheck,
+);
+const jobPatchSchema = scheduledTaskUpdateInputSchema.refine(
+  validScheduleExpression,
+  scheduleExpressionCheck,
+);
 const authUserSchema = z.object({
   sub: z.string().min(1),
   email: z.string().email(),
@@ -313,6 +276,10 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
         scheduleKind: job.schedule_kind,
       });
 
+      // `addJob` 内部已同步完成落库（先落库后改内存，失败会抛错至此处之前），
+      // 故发出事件时任务定义确已持久化。
+      publishCronJobsChanged({ userId: user.sub, reason: 'created', jobId: job.id });
+
       return reply.status(201).send({ job: toView(job) });
     },
   );
@@ -373,6 +340,10 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       const applyStep = child('apply', undefined, { jobId: id });
       cronScheduler.updateJob(id, body.data);
       applyStep.succeed();
+
+      // `updateJob` 返回即表示落库成功（失败会冒泡）。PATCH 是通用更新入口，
+      // 启停以外的字段变化统一归为 `updated`。
+      publishCronJobsChanged({ userId: user.sub, reason: 'updated', jobId: id });
 
       const readbackStep = child('readback', undefined, { jobId: id });
       const updatedJob = cronScheduler.getJob(id);
@@ -445,6 +416,10 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       cronScheduler.removeJob(id);
       removeStep.succeed();
       step.succeed(undefined, { jobId: id });
+
+      // `removeJob` 先删库再清内存，返回即落库成功（失败会冒泡）。
+      publishCronJobsChanged({ userId: user.sub, reason: 'deleted', jobId: id });
+
       return reply.status(204).send();
     },
   );
@@ -467,24 +442,7 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       }
       lookupStep.succeed();
       const query = parseQuery(
-        z.object({
-          limit: z.coerce.number().min(1).max(100).default(100),
-          // 摘要要逐条读执行会话的消息（`listMessagesWithParts` 默认全量），
-          // 成本远高于查执行表。列表页刷新会对每个任务调一次本接口、只取最新一条
-          // 判「上次是否失败」，必须能显式关掉摘要，否则任务数 × 5 次全量会话读取。
-          //
-          // **不能用 `z.coerce.boolean()`**：它走 `Boolean(value)`，而 `Boolean('0')`
-          // 与 `Boolean('false')` 都是 `true`——`?preview=0` 会静默失效、摘要照旧生成。
-          // 这里显式解析字符串。
-          preview: z
-            .union([z.boolean(), z.string()])
-            .optional()
-            .transform((value) => {
-              if (value === undefined) return true;
-              if (typeof value === 'boolean') return value;
-              return value !== '0' && value.toLowerCase() !== 'false';
-            }),
-        }),
+        scheduledTaskHistoryOptionsSchema,
         (request as FastifyRequest & { query: unknown }).query,
       );
 
@@ -523,6 +481,7 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       cronScheduler.updateJob(id, { enabled: true });
       applyStep.succeed();
       step.succeed(undefined, { jobId: id });
+      publishCronJobsChanged({ userId: user.sub, reason: 'enabled', jobId: id });
       const enabledJob = cronScheduler.getJob(id);
       return reply.send({ ok: true, job: enabledJob ? toView(enabledJob) : null });
     },
@@ -549,6 +508,7 @@ export async function cronRoutes(app: FastifyInstance): Promise<void> {
       cronScheduler.updateJob(id, { enabled: false });
       applyStep.succeed();
       step.succeed(undefined, { jobId: id });
+      publishCronJobsChanged({ userId: user.sub, reason: 'disabled', jobId: id });
       const disabledJob = cronScheduler.getJob(id);
       return reply.send({ ok: true, job: disabledJob ? toView(disabledJob) : null });
     },

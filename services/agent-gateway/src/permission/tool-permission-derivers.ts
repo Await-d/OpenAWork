@@ -15,6 +15,7 @@
  */
 import { join } from 'node:path';
 import { WORKSPACE_ROOT } from '../infra/db.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 import { parseFlatMcpToolName } from '../mcp/mcp-tool-naming.js';
 import { getConfiguredMcpServerForSession, getMcpServerFingerprint } from '../mcp/mcp-runtime.js';
 import { parseMcpCallRawInput } from '../mcp/mcp-tool-input.js';
@@ -42,6 +43,12 @@ import type { PermissionRiskLevel } from './permission-contract.js';
 export interface PermissionRequestContext {
   scope: string;
   reason: string;
+  /** 派生失败必须拒绝，不能按 null 的免审批语义继续执行。 */
+  denialReason?: string;
+  /** 仅覆盖内置 ask；必须先评估工作区规则，再经过 permission.evaluate。 */
+  approvalDefault?: 'allow';
+  /** 新增专用派生器时，旧 JSON 作用域规则仍须有效（只用于规则匹配）。 */
+  ruleScopeAliases?: string[];
   riskLevel: PermissionRiskLevel;
   previewAction: string;
   /** Patterns to auto-approve when user selects "always" (matches opencode ctx.ask always). */
@@ -230,11 +237,9 @@ function flatMcpPermissionDeriver(
       previewAction: `调用 ${flatMcp.serverId}/${flatMcp.toolName} ${previewArguments}`,
       always: [`${flatMcp.serverId}:${flatMcp.toolName}:*`, `${flatMcp.serverId}:*`],
     };
-  } catch {
-    // If the server is no longer configured (user removed it mid-turn),
-    // fall through to the generic permission prompt so the LLM gets a
-    // deterministic error rather than a silent null.
-    return null;
+  } catch (error) {
+    logDeriverResolutionFailure(ctx, flatMcp.serverId, error);
+    return failedMcpPermissionContext(flatMcp.serverId, flatMcp.toolName);
   }
 }
 
@@ -328,10 +333,15 @@ const channelReadPermissionDeriver: ToolPermissionDeriver = (ctx) => {
 };
 
 const skillPermissionDeriver: ToolPermissionDeriver = (ctx) => {
-  const name = typeof ctx.rawInput.name === 'string' ? ctx.rawInput.name.trim() : '';
+  const rawName =
+    typeof ctx.rawInput.name === 'string' && ctx.rawInput.name.trim()
+      ? ctx.rawInput.name
+      : ctx.rawInput.skill;
+  const name = typeof rawName === 'string' ? rawName.trim() : '';
   if (!name) return null;
   return {
     scope: name,
+    approvalDefault: 'allow',
     reason: '需要加载技能内容并注入会话上下文',
     riskLevel: 'medium',
     previewAction: `加载技能 ${name}`,
@@ -421,6 +431,8 @@ const bashOutputPermissionDeriver: ToolPermissionDeriver = (ctx) => {
     typeof ctx.rawInput.terminal_id === 'string' ? ctx.rawInput.terminal_id.trim() : '';
   return {
     scope: terminalId || 'terminal:*',
+    // 执行层 dispatchBashOutput 强制校验用户和当前会话归属。
+    approvalDefault: 'allow',
     reason: '需要读取后台命令输出',
     riskLevel: 'low',
     previewAction: terminalId ? `读取后台命令输出 ${terminalId}` : '读取后台命令输出',
@@ -433,6 +445,8 @@ const bashKillPermissionDeriver: ToolPermissionDeriver = (ctx) => {
     typeof ctx.rawInput.terminal_id === 'string' ? ctx.rawInput.terminal_id.trim() : '';
   return {
     scope: terminalId || 'terminal:*',
+    // 执行层 dispatchBashKill 在 killTerminal 前强制校验会话归属。
+    approvalDefault: 'allow',
     reason: '需要终止后台命令',
     riskLevel: 'medium',
     previewAction: terminalId ? `终止后台命令 ${terminalId}` : '终止后台命令',
@@ -449,6 +463,9 @@ const astGrepReplacePermissionDeriver: ToolPermissionDeriver = (ctx) => {
   if (!pattern) return null;
   return {
     scope: `ast:${lang}:${pattern}`.slice(0, 200),
+    ...(ctx.rawInput.dryRun === undefined || ctx.rawInput.dryRun === true
+      ? { approvalDefault: 'allow' as const }
+      : {}),
     reason: '需要执行 AST 级代码重写',
     riskLevel: 'high',
     previewAction: `AST 替换 ${lang} "${pattern}"`,
@@ -542,6 +559,35 @@ const lspRenamePermissionDeriver: ToolPermissionDeriver = (ctx) => {
   };
 };
 
+const lspTouchPermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const pathValue = readToolPathInput(ctx.rawInput);
+  if (!pathValue) return null;
+  return {
+    scope: toRelativeScope(rewriteUnboundPlaceholderPath(ctx.sessionId, pathValue)),
+    ruleScopeAliases: [defaultPermissionDeriver(ctx).scope],
+    approvalDefault: 'allow',
+    reason: '需要通知 LSP 重新读取文件',
+    riskLevel: 'low',
+    previewAction: `通知 LSP ${pathValue}`,
+    always: ['*'],
+  };
+};
+
+const sessionRenamePermissionDeriver: ToolPermissionDeriver = (ctx) => {
+  const rawTarget = ctx.rawInput.sessionID ?? ctx.sessionId;
+  if (typeof rawTarget !== 'string') return defaultPermissionDeriver(ctx);
+  const target = rawTarget;
+  return {
+    scope: `session:${target}`,
+    ruleScopeAliases: [defaultPermissionDeriver(ctx).scope],
+    ...(target === ctx.sessionId ? { approvalDefault: 'allow' as const } : {}),
+    reason: '需要重命名会话',
+    riskLevel: 'low',
+    previewAction: `重命名会话 ${target}`,
+    always: ['*'],
+  };
+};
+
 const mcpCallPermissionDeriver: ToolPermissionDeriver = (ctx) => {
   const parsed = parseMcpCallRawInput(ctx.rawInput);
   if (!parsed.ok) {
@@ -558,12 +604,9 @@ const mcpCallPermissionDeriver: ToolPermissionDeriver = (ctx) => {
       previewAction: `调用 ${parsed.serverId}/${parsed.toolName} ${previewArguments}`,
       always: [`${parsed.serverId}:${parsed.toolName}:*`, `${parsed.serverId}:*`],
     };
-  } catch {
-    // 服务器已不再配置（用户在本轮中途删除 / 禁用）时返回 null，与 flat-MCP 分支
-    // 保持一致：这是有意为之，不是漏判——无法运行的工具不该弹审批框（yolo / 后台
-    // team 会话也无人可批），后续执行路径会重新解析服务器并给出确定性错误，比在
-    // 权限阶段抛异常更可靠。
-    return null;
+  } catch (error) {
+    logDeriverResolutionFailure(ctx, parsed.serverId, error);
+    return failedMcpPermissionContext(parsed.serverId, parsed.toolName);
   }
 };
 
@@ -595,6 +638,10 @@ const mcpManageServersPermissionDeriver: ToolPermissionDeriver = (ctx) => {
   const scope = `${action}:${serverId || 'new'}`;
   return {
     scope,
+    // 会话级 add/update 只创建提案，连接仍由管理员确认路由授权。
+    ...(ctx.rawInput.scope === 'session' && (action === 'add' || action === 'update')
+      ? { approvalDefault: 'allow' as const }
+      : {}),
     reason: '需要修改 MCP 服务器配置',
     riskLevel: 'high',
     previewAction: buildMcpManagePreviewAction(action, serverId, serverRecord),
@@ -645,6 +692,10 @@ const skillManagePermissionDeriver: ToolPermissionDeriver = (ctx) => {
   }`;
   return {
     scope: `${action}:${skillId || 'new'}`,
+    // search 只读；会话级 install 只创建提案，不修改安装集合。
+    ...(action === 'search' || (ctx.rawInput.scope === 'session' && action === 'install')
+      ? { approvalDefault: 'allow' as const }
+      : {}),
     reason: '需要修改已安装技能',
     riskLevel: 'high',
     previewAction: previewAction.slice(0, 200),
@@ -933,7 +984,7 @@ function buildMcpManagePreviewAction(
       const parsed = new URL(url);
       safeUrl = `${parsed.origin}${parsed.pathname}`;
     } catch {
-      // 非法 URL 原样展示（执行层会用同一套 schema 报错，不会真的连接）。
+      // 非法 URL 原样展示，由执行层 schema 拒绝；预览降级不记日志，避免用户输入泄露。
     }
     return `MCP 管理 ${action} ${target} (sse): ${safeUrl}`.slice(0, 200);
   }
@@ -1062,6 +1113,8 @@ const TOOL_PERMISSION_DERIVERS: Readonly<Record<string, ToolPermissionDeriver>> 
   workspace_create_directory: workspaceCreateDirectoryPermissionDeriver,
   workspace_review_revert: workspaceReviewRevertPermissionDeriver,
   lsp_rename: lspRenamePermissionDeriver,
+  lsp_touch: lspTouchPermissionDeriver,
+  session_rename: sessionRenamePermissionDeriver,
   mcp_call: mcpCallPermissionDeriver,
   [MCP_MANAGE_SERVERS_TOOL_NAME]: mcpManageServersPermissionDeriver,
   [MEMORY_MANAGE_TOOL_NAME]: memoryManagePermissionDeriver,
@@ -1093,4 +1146,34 @@ export function buildToolPermissionRequestContext(
 /** 供测试与诊断使用：列出已登记派生器的工具名。 */
 export function listToolPermissionDeriverNames(): string[] {
   return Object.keys(TOOL_PERMISSION_DERIVERS);
+}
+
+function failedMcpPermissionContext(serverId: string, toolName: string): PermissionRequestContext {
+  const reason = '无法验证 MCP 配置或调用参数，已阻止调用。请检查服务器是否存在且已启用后重试。';
+  return {
+    scope: `${serverId}:${toolName}:unresolved`,
+    reason,
+    denialReason: reason,
+    riskLevel: 'high',
+    previewAction: 'MCP 权限验证失败',
+    always: [],
+  };
+}
+
+/**
+ * 内部 helper：记录派生器解析失败。
+ * 用于 MCP 服务器配置查询失败等可预期的错误。
+ */
+function logDeriverResolutionFailure(
+  ctx: ToolPermissionDerivationContext,
+  serverId: string,
+  error: unknown,
+): void {
+  // 异常可能携带服务器凭据或工具参数，不输出 message/stack，也不转换未知值。
+  logGatewayWarn('[tool-permission-derivers] MCP permission derivation failed', {
+    sessionId: ctx.sessionId,
+    serverId,
+    entrypoint: ctx.toolName === 'mcp_call' ? 'legacy' : 'flat',
+    errorType: error instanceof Error ? 'error' : 'non-error',
+  });
 }

@@ -78,7 +78,7 @@ interface UseSessionSidebarFileTreeStateResult {
 }
 
 export function sortSessionSidebarFileTreeNodes(nodes: FileTreeNode[]): FileTreeNode[] {
-  return [...nodes].sort((a, b) => {
+  return nodes.toSorted((a, b) => {
     if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
     return a.name.localeCompare(b.name, 'zh-CN', { numeric: true });
   });

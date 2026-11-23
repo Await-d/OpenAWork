@@ -142,6 +142,8 @@ interface ChatComposerProps {
   onQueueMessage?: (overrideText?: string) => void | Promise<void>;
   onRemoveQueuedMessage: (id: string) => void;
   onRestoreQueuedMessage?: (id: string) => void;
+  /** 当前网关配置的单条消息字符上限。 */
+  messageMaxChars?: number;
   /** 传入 overrideText 时以该文本发送，用于合并折叠的粘贴内容。 */
   onSend: (overrideText?: string) => void | Promise<void>;
   onStop: () => void | Promise<void>;
@@ -261,6 +263,7 @@ export function ChatComposer({
   onQueueMessage,
   onRemoveQueuedMessage,
   onRestoreQueuedMessage,
+  messageMaxChars,
   onSend,
   onStop,
   onRequestFiles,
@@ -329,6 +332,10 @@ export function ChatComposer({
     ? (agentOptions.find((a) => a.id === manualAgentId.trim())?.label ?? manualAgentId.trim())
     : defaultAgentLabel;
   const hasAgentOverride = manualAgentId.trim().length > 0;
+  const messageCharacterCount = (
+    pasteCollapsed ? combinePastedText(pasteCollapsed.text, input) : input
+  ).length;
+  const messageOverLimit = messageMaxChars !== undefined && messageCharacterCount > messageMaxChars;
 
   const slashIncludesWorkspaceCatalog = slashCommandItems.some((item) => item.source !== 'command');
   const canSubmit = imageGenerationMode
@@ -398,6 +405,7 @@ export function ChatComposer({
   );
 
   const wrappedOnSend = useCallback(() => {
+    if (messageOverLimit) return;
     if (pasteCollapsed) {
       const combined = combinePastedText(pasteCollapsed.text, input);
       clearPaste();
@@ -408,9 +416,10 @@ export function ChatComposer({
       return;
     }
     void onSend();
-  }, [clearPaste, input, onSend, onReplaceInput, pasteCollapsed]);
+  }, [clearPaste, input, onSend, onReplaceInput, pasteCollapsed, messageOverLimit]);
 
   const wrappedOnQueueMessage = useCallback(() => {
+    if (messageOverLimit) return;
     if (pasteCollapsed) {
       const combined = combinePastedText(pasteCollapsed.text, input);
       clearPaste();
@@ -419,7 +428,7 @@ export function ChatComposer({
       return;
     }
     void onQueueMessage?.();
-  }, [clearPaste, input, onQueueMessage, onReplaceInput, pasteCollapsed]);
+  }, [clearPaste, input, onQueueMessage, onReplaceInput, pasteCollapsed, messageOverLimit]);
 
   const wrappedOnKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -879,7 +888,7 @@ export function ChatComposer({
                 permissionModeControl={permissionModeControl}
                 streaming={streaming}
                 imageGenerationBusy={imageGenerationBusy}
-                canSubmit={canSubmit}
+                canSubmit={canSubmit && !messageOverLimit}
                 webSearchEnabled={webSearchEnabled}
                 showVoice={showVoice}
                 imageGenerationMode={imageGenerationMode}
@@ -895,6 +904,29 @@ export function ChatComposer({
                 showStopAction={showStopAction}
                 showQueueAction={showQueueAction}
                 queuedMessageCount={queuedMessages.length}
+                characterCountControl={
+                  messageMaxChars !== undefined ? (
+                    <>
+                      <span
+                        className={`composer-character-count${messageOverLimit ? ' composer-character-count--over-limit' : ''}`}
+                        title={
+                          messageOverLimit
+                            ? '消息超过字符上限，请缩短文本后再发送或排队。内容已保留。'
+                            : '消息字符数 / 字符上限'
+                        }
+                      >
+                        {messageCharacterCount.toLocaleString()} /{' '}
+                        {messageMaxChars.toLocaleString()} 字符
+                        {messageOverLimit ? '（超限）' : ''}
+                      </span>
+                      {messageOverLimit ? (
+                        <span role="alert" className="sr-only">
+                          消息超过字符上限，请缩短文本后再发送或排队。内容已保留。
+                        </span>
+                      ) : null}
+                    </>
+                  ) : undefined
+                }
                 optimizeError={optimizeError}
                 optimizeLoading={optimizeLoading}
                 optimizeResult={optimizeResult}

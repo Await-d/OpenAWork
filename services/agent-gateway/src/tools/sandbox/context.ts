@@ -9,6 +9,7 @@
  * 依赖方向:`tool-sandbox.ts` → 本模块(单向)。
  */
 
+import { realpath } from 'node:fs/promises';
 import type { ToolCallRequest, ToolCallResult, ToolDefinition } from '@openAwork/agent-core';
 import { lspDiagnosticsTool, lspTouchTool } from '@openAwork/agent-core';
 import { lspManager } from '../../lsp/router.js';
@@ -19,7 +20,10 @@ import {
 } from '../../permission/tool-permission-derivers.js';
 import { dispatchToolExecuteAfter, dispatchToolExecuteBefore } from '../../runtime/plugin-host.js';
 import { readToolInvokeAllowlist } from '../../session/tool-invoke-allowlist.js';
-import { getSessionWorkingDirectory } from '../../workspace/workspace-safety.js';
+import {
+  getSessionWorkingDirectory,
+  resolveWorkspaceEntryPathForRequest,
+} from '../../workspace/workspace-safety.js';
 import { rewriteLegacyToolRequest } from '../legacy-tool-name-rewrite.js';
 import { type SshRemoteResolution } from '../ssh-remote-execution.js';
 import { resolveToolInvokeRequest } from '../tool-folding.js';
@@ -64,14 +68,19 @@ export function formatSessionWorkspaceViolation(
   sessionId: string,
   path: string,
   reason: 'forbidden-path' | 'outside-session-workspace',
+  suggestFileExport = false,
 ): string {
-  if (reason === 'forbidden-path') {
-    return `Forbidden workspace path: ${path}`;
-  }
-  const workingDirectory = getSessionWorkingDirectory(sessionId);
-  return workingDirectory
-    ? `目标路径超出当前工作区范围：${path}（当前工作区：${workingDirectory}）`
-    : `目标路径超出当前工作区范围：${path}`;
+  const workingDirectory =
+    reason === 'outside-session-workspace' ? getSessionWorkingDirectory(sessionId) : null;
+  const message =
+    reason === 'forbidden-path'
+      ? `Forbidden workspace path: ${path}`
+      : `目标路径超出当前工作区范围：${path}${workingDirectory ? `（当前工作区：${workingDirectory}）` : ''}`;
+  if (!suggestFileExport) return message;
+  return (
+    `${message}\n建议：交付新文件时，先写入当前工作区并告诉用户文件位置，由用户在文件编辑器中另存为或下载。` +
+    '需要修改目标目录中的原文件时，请用户切换到有权访问的目标工作区。不要用其他工具绕过限制。'
+  );
 }
 
 export function formatMissingSessionWorkspace(toolName: string): string {
@@ -255,6 +264,18 @@ export async function applyToolExecuteBeforeHook(
           ...request,
           rawInput: beforeOutput.args,
         };
+  // FILE_TOOLS 的前置校验接收绝对路径；先按会话根解析相对路径，
+  // 解析真实路径后再交给共享范围与 agentignore 校验，防止符号链接逃逸。
+  if (effectiveRequest.toolName === lspTouchTool.name) {
+    const parsed = lspTouchTool.inputSchema.safeParse(effectiveRequest.rawInput);
+    if (parsed.success) {
+      const path = resolveWorkspaceEntryPathForRequest({ path: parsed.data.path, sessionId });
+      if (path) {
+        const resolvedPath = await realpath(path);
+        return { ...effectiveRequest, rawInput: { ...parsed.data, path: resolvedPath } };
+      }
+    }
+  }
   return effectiveRequest;
 }
 

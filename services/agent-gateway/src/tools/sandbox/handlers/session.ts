@@ -9,6 +9,10 @@
 
 import type { ToolCallResult } from '@openAwork/agent-core';
 import {
+  permissionGetInputSchema,
+  runPermissionGetTool,
+} from '../../../permission/permission-get-tool.js';
+import {
   getLatestReferencedToolResult,
   getSessionToolResultByCallId,
   getSessionToolResultByReference,
@@ -71,6 +75,23 @@ export async function handleSessionListTool(
     toolName: request.toolName,
     output: await runSessionListTool(userId, parsed.data),
     isError: false,
+    durationMs: 0,
+  };
+}
+
+export async function handlePermissionGetTool(ctx: SandboxHandlerContext): Promise<ToolCallResult> {
+  const { request, sessionId, rawInput } = ctx;
+  const parsed = permissionGetInputSchema.safeParse(rawInput ?? {});
+  const userId = getSessionOwnerUserId(sessionId);
+  return {
+    toolCallId: request.toolCallId,
+    toolName: request.toolName,
+    output: !parsed.success
+      ? formatToolInputValidationOutput(request.toolName, parsed.error.issues)
+      : userId
+        ? runPermissionGetTool(userId, parsed.data)
+        : { request: null },
+    isError: !parsed.success || !userId,
     durationMs: 0,
   };
 }

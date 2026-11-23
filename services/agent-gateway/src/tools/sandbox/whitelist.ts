@@ -9,13 +9,14 @@
  */
 
 import type { ToolCallRequest } from '@openAwork/agent-core';
-import { PERMISSION_CATEGORIES } from '@openAwork/agent-core';
+import { lspTouchTool, PERMISSION_CATEGORIES } from '@openAwork/agent-core';
 import { agentManageToolDefinition } from '../../agent/agent-admin-tools.js';
 import { scheduleManageToolDefinition } from '../../cron/schedule-admin-tools.js';
 import { mcpManageServersToolDefinition } from '../../mcp/mcp-admin-tools.js';
 import type {} from '../../mcp/mcp-server-authorization.js';
 import { memoryManageToolDefinition } from '../../memory/memory-admin-tools.js';
 import { type PermissionRule } from '../../permission/permission-rules.js';
+import { isGatewayToolEnabledForSessionMetadata } from '../../session/session-tool-visibility.js';
 import { pluginManageToolDefinition } from '../../plugin/plugin-admin-tools.js';
 import {
   sessionInfoToolDefinition,
@@ -58,7 +59,11 @@ import {
 } from '../session-management-tools.js';
 import { subTodoReadTool, subTodoWriteTool, todoReadTool, todoWriteTool } from '../todo-tools.js';
 import { websearchTool } from '../tool-aliases.js';
-import { TOOL_INVOKE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME } from '../tool-folding.js';
+import {
+  resolveToolInvokeRequest,
+  TOOL_INVOKE_TOOL_NAME,
+  TOOL_SEARCH_TOOL_NAME,
+} from '../tool-folding.js';
 import { readToolPathInput } from '../tool-path-aliases.js';
 import { webfetchTool } from '../web-tools.js';
 import {
@@ -86,6 +91,20 @@ export function normalizeWorkspaceManagedRawInput(
   sessionId: string,
   request: ToolCallRequest,
 ): ToolCallRequest | null {
+  if (request.toolName === lspTouchTool.name) {
+    const parsed = lspTouchTool.inputSchema.safeParse(request.rawInput);
+    if (!parsed.success) {
+      return null;
+    }
+    return {
+      ...request,
+      rawInput: {
+        ...parsed.data,
+        path: assertSessionWorkspacePath({ path: parsed.data.path, sessionId, access: 'write' }),
+      },
+    };
+  }
+
   if (request.toolName === listTool.name) {
     const parsed = listTool.inputSchema.safeParse(request.rawInput);
     if (!parsed.success) {
@@ -189,6 +208,7 @@ export const FILE_TOOLS = new Set([
   'grep',
   'list',
   'lsp_rename',
+  'lsp_touch',
   'multi_edit',
   'read',
   'write',
@@ -216,6 +236,7 @@ export const READ_ONLY_WORKSPACE_TOOLS = new Set(['read', 'list', 'glob', 'grep'
  * semantics for anything that mutates state.
  */
 const PERMISSION_SAFE_SIBLING_TOOLS = new Set([
+  'permission_get',
   'read',
   'list',
   'glob',
@@ -226,7 +247,24 @@ const PERMISSION_SAFE_SIBLING_TOOLS = new Set([
   'lsp',
 ]);
 
-export function isPermissionSafeSiblingTool(normalizedToolName: string): boolean {
+export function isPermissionSafeSiblingTool(
+  normalizedToolName: string,
+  rawInput?: unknown,
+  sessionMetadata: Record<string, unknown> = {},
+): boolean {
+  if (normalizedToolName === TOOL_INVOKE_TOOL_NAME) {
+    const allowlist = sessionMetadata['toolInvokeAllowlist'];
+    const decision = resolveToolInvokeRequest({
+      toolName: normalizedToolName,
+      rawInput,
+      allowlist: Array.isArray(allowlist)
+        ? allowlist.filter((entry): entry is string => typeof entry === 'string')
+        : [],
+      isToolEnabled: (toolName) =>
+        isGatewayToolEnabledForSessionMetadata(toolName, sessionMetadata),
+    });
+    return decision.kind === 'rewrite' && PERMISSION_SAFE_SIBLING_TOOLS.has(decision.toolName);
+  }
   return PERMISSION_SAFE_SIBLING_TOOLS.has(normalizedToolName);
 }
 
@@ -240,6 +278,7 @@ export const SESSION_WORKSPACE_REQUIRED_TOOLS = new Set([
   'interactive_bash',
   'list',
   'lsp_rename',
+  'lsp_touch',
   'multi_edit',
   'read',
   'run_bash_in_background',
@@ -276,6 +315,7 @@ export const TOOL_WHITELIST = new Set<string>([
   'question',
   'background_output',
   'background_cancel',
+  'permission_get',
   sessionListToolDefinition.name,
   sessionReadToolDefinition.name,
   sessionSearchToolDefinition.name,

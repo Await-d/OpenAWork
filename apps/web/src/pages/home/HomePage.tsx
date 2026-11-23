@@ -72,8 +72,10 @@ export default function HomePage() {
     void navigate(path);
   };
 
+  // 页面根用 <section aria-label> 而非 <main>：主内容 landmark 由布局壳
+  //（LayoutClassic / LayoutFusion 的 .outlet-content-wrap）提供，页面内再放 main 会嵌套。
   return (
-    <main className="home-page" aria-label="首页">
+    <section className="home-page" aria-label="首页">
       <div className="home-shell">
         <HomeProjectColumn
           projects={projects}
@@ -122,7 +124,7 @@ export default function HomePage() {
           />
         </HomeSessionList>
       </div>
-    </main>
+    </section>
   );
 }
 

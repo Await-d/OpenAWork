@@ -1,0 +1,1525 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="aurora" data-mode="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenAWork 媒体渲染方案对比</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__brand">媒体渲染方案对比<small>OpenAWork · 基于源码实测还原</small></div>
+      <nav class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true" data-tab="current">
+          ① 现状 baseline
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="a">
+          ② 方案 A · 自适应拼贴
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="b">
+          ③ 方案 B · 统一媒体卡片
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="c">
+          ④ 方案 C · 沉浸式聚焦
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="d">
+          ⑤ 融合方案（推荐）
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="matrix">⑥ 对比与建议</button>
+      </nav>
+      <button class="ghost-btn" id="theme-toggle">切换亮色</button>
+    </header>
+
+    <!-- ══════════ ① 现状 ══════════ -->
+    <section class="view" data-active="true" data-view="current">
+      <div class="canvas">
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">①</span>
+            <span class="scenario__title">用户消息附件：固定 180px 缩略图网格</span>
+            <span class="scenario__hint">hover 显示 ⤢ 徽标 · 点击开灯箱</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="msg msg--user">
+              <span class="msg__who">用户</span>
+              <div class="msg__bubble">
+                <div class="msg__prose">对比一下这三版渲染的观感，顺便看下附件排版。</div>
+                <div style="margin-top: 10px">
+                  <div class="baseline-gallery">
+                    <figure class="baseline-tile">
+                      <button
+                        class="baseline-tile__btn"
+                        data-lb-group="base"
+                        data-lb-label="dashboard-dark.png"
+                      >
+                        <img
+                          data-ph="1"
+                          data-ph-c1="#8b9dff"
+                          data-ph-c2="#a06bff"
+                          data-ph-label="1920×1080"
+                          data-ph-w="640"
+                          data-ph-h="400"
+                          alt="dashboard-dark.png"
+                        />
+                        <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                      </button>
+                      <figcaption>
+                        <span class="static-label">dashboard-dark.png</span>
+                      </figcaption>
+                    </figure>
+                    <figure class="baseline-tile">
+                      <button
+                        class="baseline-tile__btn"
+                        data-lb-group="base"
+                        data-lb-label="dashboard-light.png"
+                      >
+                        <img
+                          data-ph="1"
+                          data-ph-c1="#3aa0ff"
+                          data-ph-c2="#38e2c1"
+                          data-ph-label="1920×1080"
+                          data-ph-w="640"
+                          data-ph-h="400"
+                          alt="dashboard-light.png"
+                        />
+                        <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                      </button>
+                      <figcaption>
+                        <span class="static-label">dashboard-light.png</span>
+                      </figcaption>
+                    </figure>
+                    <figure class="baseline-tile">
+                      <button
+                        class="baseline-tile__btn"
+                        data-lb-group="base"
+                        data-lb-label="mobile.png"
+                      >
+                        <img
+                          data-ph="1"
+                          data-ph-c1="#ff6f9c"
+                          data-ph-c2="#a06bff"
+                          data-ph-label="828×1792"
+                          data-ph-w="420"
+                          data-ph-h="800"
+                          alt="mobile.png"
+                        />
+                        <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                      </button>
+                      <figcaption><span class="static-label">mobile.png</span></figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="msg msg--user">
+              <span class="msg__who">用户</span>
+              <div class="msg__bubble">
+                <div class="msg__prose">这份报告也一起给你。</div>
+                <div style="margin-top: 10px">
+                  <div class="baseline-missing">
+                    <span>ⓘ</span>
+                    <span>report-2026q1.pdf · 4.2 MB —— 当前无任何渲染（仅文件名文本）</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">②</span>
+            <span class="scenario__title">助手消息：视频（悬浮工具栏）</span>
+            <span class="scenario__hint">未播放时工具栏常显 · 播放中移开鼠标即隐藏</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="vp is-paused" style="max-width: 420px">
+              <img
+                class="vp__video"
+                data-ph="1"
+                data-ph-c1="#1d2144"
+                data-ph-c2="#3aa0ff"
+                data-ph-label="demo.mp4"
+                data-ph-w="840"
+                data-ph-h="472"
+                alt="screen-record-2026-11-02.mp4"
+              />
+              <span class="vp__fmt">mp4</span>
+              <div class="vp__bar">
+                <button class="vp__play" aria-label="播放">▶</button>
+                <span class="vp__name">screen-record-2026-11-02.mp4</span>
+                <span class="vp__time">02:14</span>
+                <button class="vp__icon" aria-label="全屏">⛶</button>
+                <button class="vp__icon" aria-label="下载">↓</button>
+              </div>
+              <div class="vp__progress"><i style="width: 42%"></i></div>
+            </div>
+            <p class="legend" style="margin: var(--spacing-3) 0 0">
+              进度条为 2px 细线，无拖拽把手、无缓冲态、无音量控件；<code>controls={false}</code>
+              全自绘。
+            </p>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">③</span>
+            <span class="scenario__title">助手消息：音频（假波形 + 工具栏 + 转写）</span>
+            <span class="scenario__hint">点击波形可模拟播放进度</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="ap" id="ap-current">
+              <div class="ap__row">
+                <button class="ap__play" data-audio-play="ap-current" aria-label="播放">▶</button>
+                <div class="ap__wave" data-audio-wave="ap-current"></div>
+                <div class="ap__time">0:00 / 1:48</div>
+              </div>
+              <div class="ap__tools">
+                <button class="ap__chip" data-rate-btn>1x</button>
+                <button class="ap__chip ap__chip--muted">↓ 下载</button>
+                <span class="ap__name">meeting-summary.mp3</span>
+                <span class="ap__mime">MPEG</span>
+              </div>
+              <div class="ap__transcript">
+                今天主要讨论三件事：媒体渲染一致性、附件缺卡片、以及波形数据来源。结论是先补齐文件卡片……
+              </div>
+            </div>
+            <div
+              class="callout callout--warn"
+              style="margin-top: var(--spacing-4); max-width: 420px"
+            >
+              ⚠ 32 根波形柱由 <code>Math.sin(i * 1.5)</code> 生成，与真实音频无关；仓库无 wavesurfer
+              / peaks 依赖。它会被用户误读为「音频音量分布」。
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">④</span>
+            <span class="scenario__title">灯箱：缩放 / 旋转 / 图集 / 键盘</span>
+            <span class="scenario__hint">点击打开 · Esc 关闭 · ←→ 切换 · +/- 缩放 · R 旋转</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="baseline-gallery">
+              <figure class="baseline-tile">
+                <button
+                  class="baseline-tile__btn"
+                  data-lb-group="lb-demo"
+                  data-lb-label="shot-01.png"
+                >
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#8b9dff"
+                    data-ph-c2="#ff6f9c"
+                    data-ph-label="shot-01"
+                    data-ph-w="720"
+                    data-ph-h="450"
+                    alt="shot-01.png"
+                  />
+                  <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                </button>
+                <figcaption><span class="static-label">shot-01.png</span></figcaption>
+              </figure>
+              <figure class="baseline-tile">
+                <button
+                  class="baseline-tile__btn"
+                  data-lb-group="lb-demo"
+                  data-lb-label="shot-02.png"
+                >
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#3aa0ff"
+                    data-ph-c2="#8b9dff"
+                    data-ph-label="shot-02"
+                    data-ph-w="720"
+                    data-ph-h="450"
+                    alt="shot-02.png"
+                  />
+                  <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                </button>
+                <figcaption><span class="static-label">shot-02.png</span></figcaption>
+              </figure>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <aside class="notes">
+        <h2>现状：能用的都做了，但不成体系</h2>
+        <p>四类媒体各自独立实现，视觉语言互不相通，且都缺少「非图片文件」的落点。</p>
+
+        <h3>已具备</h3>
+        <ul>
+          <li>图片：180px 固定 tile + hover 徽标 + 文件名按钮</li>
+          <li>灯箱：缩放 ±0.25、旋转、图集、下载、完整键盘</li>
+          <li>视频：原生 video + 自绘悬浮栏 + HLS + 全屏</li>
+          <li>音频：播放钮、语速、转写、下载</li>
+        </ul>
+
+        <h3>问题（按严重度）</h3>
+        <ul>
+          <li><b>非图片附件无渲染</b>：PDF / docx / zip 只落成一行文本</li>
+          <li><b>多图排版失控</b>：固定 180px，1 张显得孤零、6 张挤成零散小图</li>
+          <li><b>音频波形成幻觉数据</b>：<code>Math.sin</code> 假柱</li>
+          <li><b>三种媒体三种语言</b>：图片裸缩略图、音频卡片、视频黑块</li>
+          <li><b>视频控件缺项</b>：无进度拖拽、无缓冲态、无音量</li>
+          <li><b>无加载 / 失败态</b>：artifactId 取流期间只有空白</li>
+        </ul>
+
+        <h3>落点文件</h3>
+        <ul>
+          <li><code>apps/web/.../session/ChatPageSections.tsx</code></li>
+          <li><code>packages/shared-ui/src/chat/VideoPlayer.tsx</code></li>
+          <li><code>packages/shared-ui/src/chat/AudioPlayer.tsx</code></li>
+          <li><code>apps/web/.../chat/image/image-lightbox.tsx</code></li>
+        </ul>
+      </aside>
+    </section>
+
+    <!-- ══════════ ② 方案 A ══════════ -->
+    <section class="view" data-view="a">
+      <div class="canvas">
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">A1</span>
+            <span class="scenario__title">尺寸随数量自适应（1 / 2 / 3 / 4 / 6 张）</span>
+            <span class="scenario__hint">同一组件，五种排版</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="stage-row">
+              <div>
+                <div class="legend" style="margin-bottom: 6px">1 张 — 16:10 大图不裁切</div>
+                <div class="ag" data-count="1">
+                  <button class="ag__cell" data-lb-group="a1" data-lb-label="only.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#8b9dff"
+                      data-ph-c2="#a06bff"
+                      data-ph-label="仅 1 张"
+                      data-ph-w="880"
+                      data-ph-h="550"
+                      alt="only.png"
+                    />
+                    <span class="ag__counter">1/1</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div class="legend" style="margin-bottom: 6px">2 张 — 等宽并排 1:1</div>
+                <div class="ag" data-count="2" style="max-width: 300px">
+                  <button class="ag__cell" data-lb-group="a2" data-lb-label="a.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#3aa0ff"
+                      data-ph-c2="#38e2c1"
+                      data-ph-label="A"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="a.png"
+                    />
+                    <span class="ag__counter">1/2</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="a2" data-lb-label="b.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#ff6f9c"
+                      data-ph-c2="#a06bff"
+                      data-ph-label="B"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="b.png"
+                    />
+                    <span class="ag__counter">2/2</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div class="legend" style="margin-bottom: 6px">3 张 — 1 大 2 小</div>
+                <div class="ag" data-count="3" style="max-width: 300px">
+                  <button class="ag__cell" data-lb-group="a3" data-lb-label="c1.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#8b9dff"
+                      data-ph-c2="#3aa0ff"
+                      data-ph-label="主图"
+                      data-ph-w="400"
+                      data-ph-h="600"
+                      alt="c1.png"
+                    />
+                  </button>
+                  <button class="ag__cell" data-lb-group="a3" data-lb-label="c2.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#38e2c1"
+                      data-ph-c2="#3aa0ff"
+                      data-ph-label="副 1"
+                      data-ph-w="400"
+                      data-ph-h="240"
+                      alt="c2.png"
+                    />
+                  </button>
+                  <button class="ag__cell" data-lb-group="a3" data-lb-label="c3.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#ff6f9c"
+                      data-ph-c2="#8b9dff"
+                      data-ph-label="副 2"
+                      data-ph-w="400"
+                      data-ph-h="240"
+                      alt="c3.png"
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div class="legend" style="margin-bottom: 6px">4 张 — 2×2</div>
+                <div class="ag" data-count="4" style="max-width: 300px">
+                  <button class="ag__cell" data-lb-group="a4" data-lb-label="d1.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#a06bff"
+                      data-ph-c2="#8b9dff"
+                      data-ph-label="1"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="d1.png"
+                    />
+                  </button>
+                  <button class="ag__cell" data-lb-group="a4" data-lb-label="d2.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#3aa0ff"
+                      data-ph-c2="#8b9dff"
+                      data-ph-label="2"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="d2.png"
+                    />
+                  </button>
+                  <button class="ag__cell" data-lb-group="a4" data-lb-label="d3.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#38e2c1"
+                      data-ph-c2="#3aa0ff"
+                      data-ph-label="3"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="d3.png"
+                    />
+                  </button>
+                  <button class="ag__cell" data-lb-group="a4" data-lb-label="d4.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#ff6f9c"
+                      data-ph-c2="#a06bff"
+                      data-ph-label="4"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="d4.png"
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div class="legend" style="margin-bottom: 6px">6 张 — 3 列 + 计数</div>
+                <div class="ag" data-count="6" style="max-width: 360px">
+                  <button class="ag__cell" data-lb-group="a6" data-lb-label="e1.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#8b9dff"
+                      data-ph-c2="#a06bff"
+                      data-ph-label="1"
+                      data-ph-w="300"
+                      data-ph-h="300"
+                      alt="e1.png"
+                    />
+                    <span class="ag__counter">1/6</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="a6" data-lb-label="e2.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#3aa0ff"
+                      data-ph-c2="#38e2c1"
+                      data-ph-label="2"
+                      data-ph-w="300"
+                      data-ph-h="300"
+                      alt="e2.png"
+                    />
+                    <span class="ag__counter">2/6</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="a6" data-lb-label="e3.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#ff6f9c"
+                      data-ph-c2="#a06bff"
+                      data-ph-label="3"
+                      data-ph-w="300"
+                      data-ph-h="300"
+                      alt="e3.png"
+                    />
+                    <span class="ag__counter">3/6</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="a6" data-lb-label="e4.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#38e2c1"
+                      data-ph-c2="#3aa0ff"
+                      data-ph-label="4"
+                      data-ph-w="300"
+                      data-ph-h="300"
+                      alt="e4.png"
+                    />
+                    <span class="ag__counter">4/6</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="a6" data-lb-label="e5.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#a06bff"
+                      data-ph-c2="#ff6f9c"
+                      data-ph-label="5"
+                      data-ph-w="300"
+                      data-ph-h="300"
+                      alt="e5.png"
+                    />
+                    <span class="ag__counter">5/6</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="a6" data-lb-label="e6.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#8b9dff"
+                      data-ph-c2="#3aa0ff"
+                      data-ph-label="6"
+                      data-ph-w="300"
+                      data-ph-h="300"
+                      alt="e6.png"
+                    />
+                    <span class="ag__counter">6/6</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">A2</span>
+            <span class="scenario__title">hover 操作条：下载 / 放大 / 更多</span>
+            <span class="scenario__hint">鼠标移到主图上看效果</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="ag" data-count="3" style="max-width: 380px">
+              <button class="ag__cell" data-lb-group="a7" data-lb-label="f1.png">
+                <img
+                  data-ph="1"
+                  data-ph-c1="#8b9dff"
+                  data-ph-c2="#ff6f9c"
+                  data-ph-label="hover 我"
+                  data-ph-w="500"
+                  data-ph-h="700"
+                  alt="f1.png"
+                />
+                <span class="ag__actions">
+                  <span class="ag__act">↓</span>
+                  <span class="ag__act">⤢</span>
+                  <span class="ag__act">⋯</span>
+                </span>
+              </button>
+              <button class="ag__cell" data-lb-group="a7" data-lb-label="f2.png">
+                <img
+                  data-ph="1"
+                  data-ph-c1="#3aa0ff"
+                  data-ph-c2="#38e2c1"
+                  data-ph-label="F2"
+                  data-ph-w="500"
+                  data-ph-h="300"
+                  alt="f2.png"
+                />
+              </button>
+              <button class="ag__cell" data-lb-group="a7" data-lb-label="f3.png">
+                <img
+                  data-ph="1"
+                  data-ph-c1="#a06bff"
+                  data-ph-c2="#3aa0ff"
+                  data-ph-label="F3"
+                  data-ph-w="500"
+                  data-ph-h="300"
+                  alt="f3.png"
+                />
+              </button>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <aside class="notes">
+        <h2>方案 A · 自适应拼贴画廊</h2>
+        <p>只改「网格容器」，缩略图尺寸与排列随图片数量决定，灯箱与文件名交互原样保留。</p>
+
+        <h3>优化点</h3>
+        <ul>
+          <li>1 张：16:10 大图 <code>contain</code>，不再被压成小方块</li>
+          <li>2 张等宽 1:1；3 张 1 大 2 小；4 张 2×2；5–9 张 3 列</li>
+          <li>&gt;9 张：前 8 张 + <code>+N</code> 遮罩入口</li>
+          <li>统一右下角 <code>i/n</code> 计数胶囊</li>
+          <li>hover 操作条：下载 / 放大 / 更多</li>
+        </ul>
+
+        <h3>成本 / 风险</h3>
+        <ul>
+          <li>成本：<b>低</b>，仅重写 <code>UserAttachedImagesGallery</code> 的容器与 tile 样式</li>
+          <li>风险：须保持 <code>ImageLightbox</code> 的 index 映射逻辑不变</li>
+          <li>不解决：文件卡片缺口、音频假波形</li>
+        </ul>
+
+        <div class="callout">适用场景：图片是主要交付物（截图、设计稿、生图结果）。</div>
+      </aside>
+    </section>
+
+    <!-- ══════════ ③ 方案 B ══════════ -->
+    <section class="view" data-view="b">
+      <div class="canvas">
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">B1</span>
+            <span class="scenario__title">统一媒体卡片：图片 / 视频 / 音频共用一套骨架</span>
+            <span class="scenario__hint">媒体区 + 信息条（图标 · 名称 · 元数据 · 操作）</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="stage-row">
+              <div class="umc">
+                <div class="umc__media">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#8b9dff"
+                    data-ph-c2="#a06bff"
+                    data-ph-label=""
+                    data-ph-w="520"
+                    data-ph-h="264"
+                    alt="dashboard-dark.png"
+                  />
+                  <span class="umc__type">图片</span>
+                </div>
+                <div class="umc__bar">
+                  <span class="umc__glyph glyph--code">IMG</span>
+                  <span class="umc__meta">
+                    <span class="umc__name">dashboard-dark.png</span>
+                    <span class="umc__sub">1920×1080 · PNG · 386 KB</span>
+                  </span>
+                  <span class="umc__acts">
+                    <button class="umc__act" aria-label="下载">↓</button>
+                  </span>
+                </div>
+              </div>
+
+              <div class="umc">
+                <div class="umc__media">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#11142a"
+                    data-ph-c2="#3aa0ff"
+                    data-ph-label=""
+                    data-ph-w="520"
+                    data-ph-h="264"
+                    alt="screen-record.mp4"
+                  />
+                  <span class="umc__play">▶</span>
+                  <span class="umc__dur">02:14</span>
+                </div>
+                <div class="umc__bar">
+                  <span class="umc__glyph glyph--doc">MP4</span>
+                  <span class="umc__meta">
+                    <span class="umc__name">screen-record.mp4</span>
+                    <span class="umc__sub">1280×720 · H.264 · 24.6 MB</span>
+                  </span>
+                  <span class="umc__acts">
+                    <button class="umc__act" aria-label="下载">↓</button>
+                  </span>
+                </div>
+              </div>
+
+              <div class="umc">
+                <div class="umc__media umc__media--tight">
+                  <button class="ap__play" aria-label="播放">▶</button>
+                  <span class="mini-progress"><i></i></span>
+                  <span class="umc__sub">0:41 / 1:48</span>
+                </div>
+                <div class="umc__bar">
+                  <span class="umc__glyph glyph--xls">WAV</span>
+                  <span class="umc__meta">
+                    <span class="umc__name">meeting-summary.mp3</span>
+                    <span class="umc__sub">1:48 · MP3 · 96 kbps · 有转写</span>
+                  </span>
+                  <span class="umc__acts">
+                    <button class="umc__act" aria-label="下载">↓</button>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="callout callout--warn" style="margin-top: var(--spacing-4)">
+              B1
+              的关键取舍：<b>音频放弃假波形</b>，改用与视频一致的可拖拽进度条。真实波形需要服务端解析
+              peaks（当前仓库无该能力），在拿到之前不应用装饰数据冒充数据。
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">B2</span>
+            <span class="scenario__title">新增文件卡片：填补「非图片附件零渲染」缺口</span>
+            <span class="scenario__hint">当前这些类型在消息里完全不可交互</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="stage-row">
+              <div class="umc">
+                <div class="umc__bar" style="padding: var(--spacing-3)">
+                  <span class="umc__glyph glyph--pdf">PDF</span>
+                  <span class="umc__meta">
+                    <span class="umc__name">report-2026q1.pdf</span>
+                    <span class="umc__sub">4.2 MB · 18 页</span>
+                  </span>
+                  <span class="umc__acts">
+                    <button class="umc__act umc__act--wide">预览</button>
+                    <button class="umc__act" aria-label="下载">↓</button>
+                  </span>
+                </div>
+              </div>
+
+              <div class="umc">
+                <div class="umc__bar" style="padding: var(--spacing-3)">
+                  <span class="umc__glyph glyph--xls">XLS</span>
+                  <span class="umc__meta">
+                    <span class="umc__name">metrics-2026.xlsx</span>
+                    <span class="umc__sub">312 KB · 6 个工作表</span>
+                  </span>
+                  <span class="umc__acts">
+                    <button class="umc__act umc__act--wide">预览</button>
+                    <button class="umc__act" aria-label="下载">↓</button>
+                  </span>
+                </div>
+              </div>
+
+              <div class="umc">
+                <div class="umc__bar" style="padding: var(--spacing-3)">
+                  <span class="umc__glyph glyph--zip">ZIP</span>
+                  <span class="umc__meta">
+                    <span class="umc__name">assets-bundle.zip</span>
+                    <span class="umc__sub">12.8 MB · 归档，不可预览</span>
+                  </span>
+                  <span class="umc__acts">
+                    <button class="umc__act" aria-label="下载">↓</button>
+                  </span>
+                </div>
+              </div>
+
+              <div class="umc">
+                <div class="umc__bar" style="padding: var(--spacing-3)">
+                  <span class="umc__glyph glyph--code">TS</span>
+                  <span class="umc__meta">
+                    <span class="umc__name">media-renderer.ts</span>
+                    <span class="umc__sub">6.1 KB · TypeScript</span>
+                  </span>
+                  <span class="umc__acts">
+                    <button class="umc__act umc__act--wide">查看</button>
+                    <button class="umc__act" aria-label="下载">↓</button>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <p class="legend" style="margin: var(--spacing-4) 0 0">
+              图标语义参考已有的 <code>resolveFileIcon</code>（按扩展名，非 MIME）；PDF
+              「预览」应指向已有 <code>FilePreviewPane</code> 分支，而不是新写解析器。
+            </p>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">B3</span>
+            <span class="scenario__title">同一条消息内的混合排版</span>
+            <span class="scenario__hint">图片 + 视频 + 文件卡片共存时的一致性</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="msg msg--assistant">
+              <span class="msg__who">助手</span>
+              <div class="msg__bubble">
+                <div class="msg__prose" style="margin-bottom: var(--spacing-3)">
+                  已生成三份产物：一张架构图、一段演示录屏，以及分析报告。
+                </div>
+                <div class="stage-row" style="gap: var(--spacing-3)">
+                  <div class="umc" style="width: 220px">
+                    <div class="umc__media">
+                      <img
+                        data-ph="1"
+                        data-ph-c1="#3aa0ff"
+                        data-ph-c2="#8b9dff"
+                        data-ph-label=""
+                        data-ph-w="440"
+                        data-ph-h="224"
+                        alt="architecture.svg"
+                      />
+                      <span class="umc__type">图片</span>
+                    </div>
+                    <div class="umc__bar">
+                      <span class="umc__glyph glyph--code">SVG</span>
+                      <span class="umc__meta">
+                        <span class="umc__name">architecture.svg</span>
+                        <span class="umc__sub">1280×720 · 42 KB</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="umc" style="width: 220px">
+                    <div class="umc__media">
+                      <img
+                        data-ph="1"
+                        data-ph-c1="#11142a"
+                        data-ph-c2="#ff6f9c"
+                        data-ph-label=""
+                        data-ph-w="440"
+                        data-ph-h="224"
+                        alt="walkthrough.mp4"
+                      />
+                      <span class="umc__play">▶</span>
+                      <span class="umc__dur">00:38</span>
+                    </div>
+                    <div class="umc__bar">
+                      <span class="umc__glyph glyph--doc">MP4</span>
+                      <span class="umc__meta">
+                        <span class="umc__name">walkthrough.mp4</span>
+                        <span class="umc__sub">1920×1080 · 8.1 MB</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="umc" style="width: 300px">
+                    <div class="umc__bar" style="padding: var(--spacing-3)">
+                      <span class="umc__glyph glyph--pdf">PDF</span>
+                      <span class="umc__meta">
+                        <span class="umc__name">analysis.pdf</span>
+                        <span class="umc__sub">2.4 MB · 12 页</span>
+                      </span>
+                      <span class="umc__acts">
+                        <button class="umc__act umc__act--wide">预览</button>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <aside class="notes">
+        <h2>方案 B · 统一媒体卡片</h2>
+        <p>
+          把「每种媒体各写一套」收敛为一个卡片骨架：媒体区（可选）+ 信息条。核心增量是补齐文件类型。
+        </p>
+
+        <h3>优化点</h3>
+        <ul>
+          <li>图片 / 视频 / 音频共用同一容器、圆角、hover 行为</li>
+          <li>信息条统一承载：类型图标、文件名、元数据（尺寸 / 大小 / 时长）</li>
+          <li><b>新增文件卡片</b>：PDF / xlsx / zip / 代码 都有图标 + 预览 / 下载</li>
+          <li>音频去假波形，改为与视频一致的进度条</li>
+          <li>操作按钮固定右下，符合扫视习惯</li>
+        </ul>
+
+        <h3>成本 / 风险</h3>
+        <ul>
+          <li>成本：<b>中</b>，新增 <code>MediaCard</code> 组件 + 改造 3 处调用点</li>
+          <li>风险：卡片固定 260px，窄屏需断点降级为单列</li>
+          <li>依赖：PDF 内联预览仍需引入 pdf.js，短期只做「下载 + 跳转文件编辑器」</li>
+        </ul>
+
+        <div class="callout">
+          适用场景：产物形态多样（文件 / 图片 / 录屏混合），用户需要「一眼看清是什么文件」。
+        </div>
+      </aside>
+    </section>
+
+    <!-- ══════════ ④ 方案 C ══════════ -->
+    <section class="view" data-view="c">
+      <div class="canvas">
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">C1</span>
+            <span class="scenario__title">单图升格：媒体成为消息焦点</span>
+            <span class="scenario__hint">限高 380 / contain / 左下角信息胶囊</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="msg msg--assistant">
+              <span class="msg__who">助手</span>
+              <div class="msg__bubble">
+                <button class="focus-single" data-lb-group="c1" data-lb-label="final-cover.png">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#8b9dff"
+                    data-ph-c2="#ff6f9c"
+                    data-ph-label="final-cover"
+                    data-ph-w="1040"
+                    data-ph-h="650"
+                    alt="final-cover.png"
+                  />
+                  <span class="focus-single__tag">final-cover.png · 2600×1625 · 1/1</span>
+                </button>
+                <div class="msg__prose" style="margin-top: var(--spacing-3)">
+                  封面已按你的要求改为极光渐变，需要我同时导出深浅两版吗？
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">C2</span>
+            <span class="scenario__title">多图收成紧凑条</span>
+            <span class="scenario__hint">72px 高横向条 + +N，点击进灯箱</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="focus-strip">
+              <button class="focus-strip__item" data-lb-group="c2" data-lb-label="g1.png">
+                <img
+                  data-ph="1"
+                  data-ph-c1="#8b9dff"
+                  data-ph-c2="#a06bff"
+                  data-ph-label="1"
+                  data-ph-w="200"
+                  data-ph-h="200"
+                  alt="g1.png"
+                />
+              </button>
+              <button class="focus-strip__item" data-lb-group="c2" data-lb-label="g2.png">
+                <img
+                  data-ph="1"
+                  data-ph-c1="#3aa0ff"
+                  data-ph-c2="#38e2c1"
+                  data-ph-label="2"
+                  data-ph-w="200"
+                  data-ph-h="200"
+                  alt="g2.png"
+                />
+              </button>
+              <button class="focus-strip__item" data-lb-group="c2" data-lb-label="g3.png">
+                <img
+                  data-ph="1"
+                  data-ph-c1="#ff6f9c"
+                  data-ph-c2="#a06bff"
+                  data-ph-label="3"
+                  data-ph-w="200"
+                  data-ph-h="200"
+                  alt="g3.png"
+                />
+              </button>
+              <button class="focus-strip__item" data-lb-group="c2" data-lb-label="g4.png">
+                <img
+                  data-ph="1"
+                  data-ph-c1="#38e2c1"
+                  data-ph-c2="#3aa0ff"
+                  data-ph-label="4"
+                  data-ph-w="200"
+                  data-ph-h="200"
+                  alt="g4.png"
+                />
+              </button>
+              <span class="focus-strip__more">+3</span>
+            </div>
+            <p class="legend" style="margin: var(--spacing-3) 0 0">
+              收起后消息流高度稳定，适合「贴了一堆图但正文才是重点」的场景。
+            </p>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">C3</span>
+            <span class="scenario__title">音频：进度条取代假波形 + 时间轴分段转写</span>
+            <span class="scenario__hint">点击分段可跳转（演示态）</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="ap2" id="ap-next">
+              <div class="ap__row">
+                <button class="ap__play" data-audio-play="ap-next" aria-label="播放">▶</button>
+                <div class="ap__wave" data-audio-wave="ap-next"></div>
+                <div class="ap__time">0:00 / 1:48</div>
+              </div>
+              <div class="ap2__segments">
+                <button class="ap2__seg">
+                  <span class="ap2__stamp">00:00</span>
+                  <span>今天主要讨论三件事：渲染一致性、附件卡片、波形数据来源。</span>
+                </button>
+                <button class="ap2__seg">
+                  <span class="ap2__stamp">00:24</span>
+                  <span>结论是先补齐文件卡片，波形等 peaks 服务上线后再做。</span>
+                </button>
+                <button class="ap2__seg">
+                  <span class="ap2__stamp">01:05</span>
+                  <span>另外灯箱建议加缩略图条，方便在十几张图之间跳转。</span>
+                </button>
+              </div>
+            </div>
+            <div class="callout" style="margin-top: var(--spacing-4); max-width: 420px">
+              C3 的进度条是单色实心条 —— 若要波形，必须由服务端返回真实 peaks
+              数组；否则本方案比现状「假波形」更诚实。
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">C4</span>
+            <span class="scenario__title">灯箱增强：缩略图条 + 键盘提示</span>
+            <span class="scenario__hint">打开后底部出现缩略图条</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="baseline-gallery">
+              <figure class="baseline-tile">
+                <button class="baseline-tile__btn" data-lb-group="c4" data-lb-label="h1.png">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#8b9dff"
+                    data-ph-c2="#3aa0ff"
+                    data-ph-label="h1"
+                    data-ph-w="600"
+                    data-ph-h="380"
+                    alt="h1.png"
+                  />
+                  <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                </button>
+                <figcaption><span class="static-label">h1.png</span></figcaption>
+              </figure>
+              <figure class="baseline-tile">
+                <button class="baseline-tile__btn" data-lb-group="c4" data-lb-label="h2.png">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#a06bff"
+                    data-ph-c2="#ff6f9c"
+                    data-ph-label="h2"
+                    data-ph-w="600"
+                    data-ph-h="380"
+                    alt="h2.png"
+                  />
+                  <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                </button>
+                <figcaption><span class="static-label">h2.png</span></figcaption>
+              </figure>
+              <figure class="baseline-tile">
+                <button class="baseline-tile__btn" data-lb-group="c4" data-lb-label="h3.png">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#38e2c1"
+                    data-ph-c2="#3aa0ff"
+                    data-ph-label="h3"
+                    data-ph-w="600"
+                    data-ph-h="380"
+                    alt="h3.png"
+                  />
+                  <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                </button>
+                <figcaption><span class="static-label">h3.png</span></figcaption>
+              </figure>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <aside class="notes">
+        <h2>方案 C · 沉浸式聚焦</h2>
+        <p>
+          思路相反：不给每种媒体造卡片，而是让媒体「按重要性分配空间」——重点给大图，次要收成条。
+        </p>
+
+        <h3>优化点</h3>
+        <ul>
+          <li>单图 contain 大图（限高 380），带左下角信息胶囊</li>
+          <li>多图默认收成 72px 紧凑条 + <code>+N</code></li>
+          <li>音频去假波形；转写改时间轴分段，可点击跳转</li>
+          <li>灯箱加缩略图条与键盘提示浮层</li>
+          <li>建议补骨架屏与失败重试（取流期间当前为空白）</li>
+        </ul>
+
+        <h3>成本 / 风险</h3>
+        <ul>
+          <li>成本：<b>中高</b>，涉及灯箱、音频播放器、消息渲染三处</li>
+          <li>风险：紧凑条降低图片可见性，需要明确的产品判断</li>
+          <li>收益：灯箱增强是纯增量，可单独先落地</li>
+        </ul>
+
+        <div class="callout">适用场景：以长文本 / 代码为主，媒体是辅助证据。</div>
+      </aside>
+    </section>
+
+    <!-- ══════════ ⑤ 融合方案（推荐） ══════════ -->
+    <section class="view" data-view="d">
+      <div class="canvas">
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">D1</span>
+            <span class="scenario__title">一条消息里三种媒体共存（最终形态）</span>
+            <span class="scenario__hint">图片走拼贴 · 视频/文件走卡片 · 共享灯箱</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="msg msg--assistant">
+              <span class="msg__who">助手</span>
+              <div class="msg__bubble">
+                <div class="msg__prose" style="margin-bottom: var(--spacing-3)">
+                  已产出 4 版视觉稿、一段演示录屏和一份评审报告。
+                </div>
+                <div class="ag" data-count="4" style="max-width: 420px">
+                  <button class="ag__cell" data-lb-group="d1" data-lb-label="cover-a.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#8b9dff"
+                      data-ph-c2="#a06bff"
+                      data-ph-label="A"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="cover-a.png"
+                    />
+                    <span class="ag__counter">1/4</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="d1" data-lb-label="cover-b.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#3aa0ff"
+                      data-ph-c2="#38e2c1"
+                      data-ph-label="B"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="cover-b.png"
+                    />
+                    <span class="ag__counter">2/4</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="d1" data-lb-label="cover-c.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#ff6f9c"
+                      data-ph-c2="#a06bff"
+                      data-ph-label="C"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="cover-c.png"
+                    />
+                    <span class="ag__counter">3/4</span>
+                  </button>
+                  <button class="ag__cell" data-lb-group="d1" data-lb-label="cover-d.png">
+                    <img
+                      data-ph="1"
+                      data-ph-c1="#38e2c1"
+                      data-ph-c2="#3aa0ff"
+                      data-ph-label="D"
+                      data-ph-w="400"
+                      data-ph-h="400"
+                      alt="cover-d.png"
+                    />
+                    <span class="ag__counter">4/4</span>
+                  </button>
+                </div>
+
+                <div class="stage-row" style="gap: var(--spacing-3); margin-top: var(--spacing-3)">
+                  <div class="umc" style="width: 240px">
+                    <div class="umc__media">
+                      <img
+                        data-ph="1"
+                        data-ph-c1="#11142a"
+                        data-ph-c2="#8b9dff"
+                        data-ph-label=""
+                        data-ph-w="480"
+                        data-ph-h="244"
+                        alt="walkthrough.mp4"
+                      />
+                      <span class="umc__play">▶</span>
+                      <span class="umc__dur">00:38</span>
+                    </div>
+                    <div class="umc__bar">
+                      <span class="umc__glyph glyph--doc">MP4</span>
+                      <span class="umc__meta">
+                        <span class="umc__name">walkthrough.mp4</span>
+                        <span class="umc__sub">1080p · 8.1 MB</span>
+                      </span>
+                      <span class="umc__acts">
+                        <button class="umc__act" aria-label="下载">↓</button>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="umc" style="width: 300px">
+                    <div class="umc__bar" style="padding: var(--spacing-3)">
+                      <span class="umc__glyph glyph--pdf">PDF</span>
+                      <span class="umc__meta">
+                        <span class="umc__name">review-2026q4.pdf</span>
+                        <span class="umc__sub">2.4 MB · 12 页</span>
+                      </span>
+                      <span class="umc__acts">
+                        <button class="umc__act umc__act--wide">预览</button>
+                        <button class="umc__act" aria-label="下载">↓</button>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">D2</span>
+            <span class="scenario__title">图片数量 → 布局的完整规则</span>
+            <span class="scenario__hint">实现时按这张表写 switch，不再有例外</span>
+          </div>
+          <div class="scenario__body">
+            <div class="matrix" style="border: 0">
+              <table>
+                <thead>
+                  <tr>
+                    <th>数量</th>
+                    <th>布局</th>
+                    <th>单格尺寸</th>
+                    <th>裁切</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td>单栏大图</td>
+                    <td>宽度 100%，最大 460</td>
+                    <td><code>contain</code></td>
+                  </tr>
+                  <tr>
+                    <td>2</td>
+                    <td>等宽并排</td>
+                    <td>各 50%</td>
+                    <td><code>cover</code> 1:1</td>
+                  </tr>
+                  <tr>
+                    <td>3</td>
+                    <td>1 大 2 小</td>
+                    <td>主图跨 2 行</td>
+                    <td><code>cover</code></td>
+                  </tr>
+                  <tr>
+                    <td>4</td>
+                    <td>2 × 2</td>
+                    <td>各 50%</td>
+                    <td><code>cover</code> 1:1</td>
+                  </tr>
+                  <tr>
+                    <td>5–9</td>
+                    <td>3 列网格</td>
+                    <td>各 33%</td>
+                    <td><code>cover</code> 1:1</td>
+                  </tr>
+                  <tr>
+                    <td>&gt;9</td>
+                    <td>3 列 + 末格 <code>+N</code></td>
+                    <td>前 8 张可见</td>
+                    <td><code>cover</code> 1:1</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">D3</span>
+            <span class="scenario__title">音频统一形态（去假波形）</span>
+            <span class="scenario__hint">进度条 + 时间轴转写，与视频操作习惯一致</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="ap2" id="ap-merged">
+              <div class="ap__row">
+                <button class="ap__play" data-audio-play="ap-merged" aria-label="播放">▶</button>
+                <div class="ap__wave" data-audio-wave="ap-merged"></div>
+                <div class="ap__time">0:00 / 1:48</div>
+              </div>
+              <div class="ap2__segments">
+                <button class="ap2__seg">
+                  <span class="ap2__stamp">00:00</span>
+                  <span>渲染一致性、附件卡片、波形数据来源三件事。</span>
+                </button>
+                <button class="ap2__seg">
+                  <span class="ap2__stamp">00:24</span>
+                  <span>结论：先补文件卡片，波形待 peaks 服务上线。</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">D4</span>
+            <span class="scenario__title">共享增强灯箱</span>
+            <span class="scenario__hint">点开可见缩略图条 + 键盘提示</span>
+          </div>
+          <div class="scenario__body scenario__body--chat">
+            <div class="baseline-gallery">
+              <figure class="baseline-tile">
+                <button class="baseline-tile__btn" data-lb-group="d4" data-lb-label="k1.png">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#8b9dff"
+                    data-ph-c2="#3aa0ff"
+                    data-ph-label="k1"
+                    data-ph-w="600"
+                    data-ph-h="380"
+                    alt="k1.png"
+                  />
+                  <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                </button>
+                <figcaption><span class="static-label">k1.png</span></figcaption>
+              </figure>
+              <figure class="baseline-tile">
+                <button class="baseline-tile__btn" data-lb-group="d4" data-lb-label="k2.png">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#a06bff"
+                    data-ph-c2="#ff6f9c"
+                    data-ph-label="k2"
+                    data-ph-w="600"
+                    data-ph-h="380"
+                    alt="k2.png"
+                  />
+                  <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                </button>
+                <figcaption><span class="static-label">k2.png</span></figcaption>
+              </figure>
+              <figure class="baseline-tile">
+                <button class="baseline-tile__btn" data-lb-group="d4" data-lb-label="k3.png">
+                  <img
+                    data-ph="1"
+                    data-ph-c1="#38e2c1"
+                    data-ph-c2="#8b9dff"
+                    data-ph-label="k3"
+                    data-ph-w="600"
+                    data-ph-h="380"
+                    alt="k3.png"
+                  />
+                  <span class="baseline-tile__veil"><span class="zoom-badge">⤢</span></span>
+                </button>
+                <figcaption><span class="static-label">k3.png</span></figcaption>
+              </figure>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <aside class="notes">
+        <h2>融合方案：不需要选</h2>
+        <p>
+          A / B / C
+          解决的是三个不同层的问题，唯一冲突点是「图片要不要套卡片壳」，用一条规则就化解了。
+        </p>
+
+        <h3>一条规则</h3>
+        <ul>
+          <li><b>图片 → 拼贴</b>（图片本身就是内容，不加卡片壳）</li>
+          <li><b>视频 / 音频 / 文件 → 卡片</b>（需要元信息与控制）</li>
+          <li><b>全部共享同一个增强灯箱</b></li>
+          <li><b>音频禁止装饰波形</b>，统一进度条</li>
+          <li>操作按钮统一落在右下角</li>
+        </ul>
+
+        <h3>三期落地</h3>
+        <ul>
+          <li><b>P1</b>：图片拼贴 + 文件卡片（互不阻塞，可并行）</li>
+          <li><b>P2</b>：视频 / 音频收敛为媒体卡片</li>
+          <li><b>P3</b>：灯箱缩略图条 + 键盘提示 + 加载/失败态</li>
+        </ul>
+
+        <div class="callout">
+          每期都能独立上线与回滚；P1-A 只涉及图集组件与其样式，是本方案里性价比最高的一步。
+        </div>
+
+        <p class="legend">
+          实施状态（2026-11-03）：P1-A 图片拼贴与 P3 灯箱增强已落地并通过 chat 目录 201 文件 / 2465
+          例测试。本页 D1 中的<span style="color: var(--fg-strong)">逐格计数胶囊</span>与<span
+            style="color: var(--fg-strong)"
+            >「⋯ 更多」按钮</span
+          >在实现时被裁决移除（前者属重复信息，后者无可打开的菜单），理由与偏离记录见
+          <code>.agentdocs/workflow/261103-消息媒体渲染融合方案.md</code
+          >。文件卡片（P1-B）与音频去假波形（P2）尚未开工。
+        </p>
+
+        <p class="legend">
+          注：D1 里的图片与卡片分别来自方案 A 与方案 B 的真实实现，灯箱来自方案 C，三者共用同一套
+          token。
+        </p>
+      </aside>
+    </section>
+
+    <!-- ══════════ ⑥ 对比 ══════════ -->
+    <section class="view" data-view="matrix">
+      <div class="canvas">
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>方案</th>
+                <th>多图表现</th>
+                <th>单图观感</th>
+                <th>文件类型覆盖</th>
+                <th>信息密度</th>
+                <th>实现成本</th>
+                <th>token 一致性</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>① 现状</td>
+                <td><span class="dot dot--none">○</span>固定 180px 零散</td>
+                <td><span class="dot dot--none">○</span>小方块</td>
+                <td><span class="dot dot--none">○</span>仅图片 / 音视频</td>
+                <td><span class="dot dot--half">◐</span></td>
+                <td>—</td>
+                <td><span class="dot dot--full">●</span></td>
+              </tr>
+              <tr>
+                <td>② 方案 A 自适应拼贴</td>
+                <td><span class="dot dot--full">●</span>按数量自适应</td>
+                <td><span class="dot dot--full">●</span>大图 contain</td>
+                <td><span class="dot dot--none">○</span>不变</td>
+                <td><span class="dot dot--half">◐</span></td>
+                <td><span class="dot dot--full">●</span>低</td>
+                <td><span class="dot dot--full">●</span></td>
+              </tr>
+              <tr>
+                <td>③ 方案 B 统一媒体卡片</td>
+                <td><span class="dot dot--half">◐</span>卡片网格</td>
+                <td><span class="dot dot--half">◐</span>卡内 132px</td>
+                <td><span class="dot dot--full">●</span>含 PDF / 表格 / 压缩包 / 代码</td>
+                <td><span class="dot dot--full">●</span>最高</td>
+                <td><span class="dot dot--half">◐</span>中</td>
+                <td><span class="dot dot--full">●</span></td>
+              </tr>
+              <tr>
+                <td>④ 方案 C 沉浸式聚焦</td>
+                <td><span class="dot dot--full">●</span>紧凑条可控</td>
+                <td><span class="dot dot--full">●</span>焦点大图</td>
+                <td><span class="dot dot--none">○</span>不变</td>
+                <td><span class="dot dot--half">◐</span>正文优先</td>
+                <td><span class="dot dot--half">◐</span>中高</td>
+                <td><span class="dot dot--full">●</span></td>
+              </tr>
+              <tr>
+                <td>⑤ 融合方案（推荐）</td>
+                <td><span class="dot dot--full">●</span>拼贴</td>
+                <td><span class="dot dot--full">●</span>大图</td>
+                <td><span class="dot dot--full">●</span>含 PDF / 表格 / 压缩包 / 代码</td>
+                <td><span class="dot dot--full">●</span>最高</td>
+                <td><span class="dot dot--half">◐</span>分期可控</td>
+                <td><span class="dot dot--full">●</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <article class="scenario">
+          <div class="scenario__head">
+            <span class="scenario__index">★</span>
+            <span class="scenario__title">落地顺序（= 融合方案三期）</span>
+            <span class="scenario__hint">每期可独立上线与回滚</span>
+          </div>
+          <div class="scenario__body">
+            <ol
+              style="
+                color: var(--fg-default);
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                margin: 0;
+                padding-left: 20px;
+              "
+            >
+              <li>
+                <b>第一期（低风险）</b>：方案 A 的自适应网格 —— 只动
+                <code>UserAttachedImagesGallery</code>，用户感知最强。
+              </li>
+              <li>
+                <b>第二期（补能力缺口）</b>：方案 B 的文件卡片 —— 解决 PDF / 表格 /
+                压缩包「零渲染」，预览先接已有 <code>FilePreviewPane</code>。
+              </li>
+              <li>
+                <b>第三期（体验精修）</b>：方案 C 的灯箱缩略图条 + 音频去假波形 ——
+                纯增量、可独立发布。
+              </li>
+            </ol>
+          </div>
+        </article>
+      </div>
+
+      <aside class="notes">
+        <h2>结论：推荐 ⑤ 融合方案</h2>
+        <ul>
+          <li>
+            三个方案的优点全部收进来，唯一冲突（图片要不要卡片壳）用「图片拼贴、非图片卡片」化解
+          </li>
+          <li>若只能先做一件事 → <b>P1 图片拼贴</b>：只动 1 个组件，感知最强</li>
+          <li>若用户常收到文件 → <b>P1 文件卡片</b>：补的是能力缺口，不是美化</li>
+          <li>想低风险尝鲜 → <b>C 的灯箱缩略图条</b>：纯增量，可独立发布</li>
+        </ul>
+
+        <h3>共同建议（无论选哪个）</h3>
+        <ul>
+          <li>音频假波形应下线，它把装饰数据伪装成真实数据</li>
+          <li>补媒体加载骨架与失败重试态</li>
+          <li>
+            浮层配色沿用 <code>--bg-elevated</code> + <code>--fg-strong</code>，禁用
+            <code>--fg-on-accent</code>（历史 bug 已验证）
+          </li>
+        </ul>
+
+        <div class="callout">
+          顶部「切换亮色」可验证双主题表现 —— 媒体区在 Aurora Light
+          下的对比度是本次设计的重点验收项。
+        </div>
+      </aside>
+    </section>
+
+    <!-- 灯箱 -->
+    <div
+      class="lb"
+      id="lb"
+      data-open="false"
+      role="dialog"
+      aria-modal="true"
+      aria-label="图片查看器"
+    >
+      <div class="lb__toolbar">
+        <button class="lb__btn lb__btn--label" id="lb-zoom-out" aria-label="缩小">−</button>
+        <span class="lb__btn lb__btn--label" id="lb-zoom-label">100%</span>
+        <button class="lb__btn lb__btn--label" id="lb-zoom-in" aria-label="放大">+</button>
+        <span class="lb__divider"></span>
+        <button class="lb__btn" id="lb-rotate" aria-label="旋转">⟳</button>
+        <button class="lb__btn" id="lb-reset" aria-label="重置">⤾</button>
+        <span class="lb__divider"></span>
+        <button class="lb__btn" aria-label="下载">↓</button>
+        <button class="lb__btn" id="lb-close" aria-label="关闭">✕</button>
+      </div>
+      <span class="lb__kbd" id="lb-kbd">← → 切换 · + / − 缩放 · R 旋转 · Esc 关闭</span>
+      <button class="lb__nav lb__nav--prev" id="lb-prev" aria-label="上一张">‹</button>
+      <div class="lb__stage">
+        <img class="lb__img" id="lb-img" alt="" />
+      </div>
+      <button class="lb__nav lb__nav--next" id="lb-next" aria-label="下一张">›</button>
+      <div class="lb__strip" id="lb-strip"></div>
+      <div class="lb__caption">
+        <span id="lb-caption">—</span>
+        <span class="lb__counter" id="lb-counter">1 / 1</span>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

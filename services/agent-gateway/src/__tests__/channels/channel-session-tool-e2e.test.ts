@@ -4,6 +4,7 @@ import type * as AuthModule from '../../infra/auth.js';
 import type * as ChannelsRouterModule from '../../channels/router.js';
 import type * as DbModule from '../../infra/db.js';
 import type * as RequestWorkflowModule from '../../runtime/request-workflow.js';
+import type * as StreamCancellationModule from '../../routes/stream-cancellation.js';
 import type * as StreamRuntimeModule from '../../routes/stream-runtime.js';
 import { channelManager } from '../../channels/manager.js';
 import type { ChannelInstance } from '../../channels/types.js';
@@ -32,6 +33,16 @@ vi.mock('../../routes/stream-runtime.js', async (importOriginal) => {
   return {
     ...actual,
     runSessionInBackground: vi.fn(),
+  };
+});
+
+// 只把「取消在途轮次」这一个入口换成可断言的 mock：真实的注册表在渠道链路里由内核
+// 自己登记，这里要验证的是**渠道插话真的接到了这个入口**上，而不是重新测一遍取消。
+vi.mock('../../routes/stream-cancellation.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof StreamCancellationModule>();
+  return {
+    ...actual,
+    stopAnyInFlightStreamRequestForSession: vi.fn(async () => false),
   };
 });
 
@@ -205,6 +216,183 @@ describe('channel session tool e2e', () => {
           }),
         );
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('Given a channel session polluted with dialogueMode=clarify When the agent replies Then the channel reply still goes out', async () => {
+    // 回归背景：网页端复用同一个 ChatPage 打开渠道会话时，顶栏曾渲染**可写**的三模式
+    // 切换器，而渠道会话从不写 dialogueMode —— 任何一次 metadata 写入都会把界面上的默认
+    // 模式落库。该值一旦是 clarify，澄清只读白名单（不含任何渠道回复工具）就会把渠道
+    // 会话的回复能力整套收敛掉。这里让渠道会话带着这个脏值跑一轮真实回复。
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
+      if (url.includes('/getUpdates')) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, result: [] })));
+      }
+      if (url.includes('/sendMessage')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true, result: { message_id: 79 } })),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { createDefaultSandbox } = await import('../../tools/tool-sandbox.js');
+    const streamRuntime = await import('../../routes/stream-runtime.js');
+    vi.mocked(streamRuntime.runSessionInBackground).mockImplementation(async ({ sessionId }) => {
+      // 模拟旧版本留下的脏值（写入侧现已封堵；存量由启动期清洗迁移负责剥掉）。
+      dbModule.sqliteRun(
+        `UPDATE sessions SET metadata_json = json_set(metadata_json, '$.dialogueMode', 'clarify')
+          WHERE id = ?`,
+        [sessionId],
+      );
+      const polluted = dbModule.sqliteGet<{ source: string | null; dialogueMode: string | null }>(
+        `SELECT json_extract(metadata_json, '$.source') AS source,
+                json_extract(metadata_json, '$.dialogueMode') AS dialogueMode
+           FROM sessions WHERE id = ?`,
+        [sessionId],
+      );
+      // 前置断言：脏值确实进了库，避免这条用例退化成「什么都没验证」。
+      expect(polluted).toEqual({ source: 'channel', dialogueMode: 'clarify' });
+
+      const result = await createDefaultSandbox().execute(
+        {
+          toolCallId: 'call-channel-e2e-polluted-clarify',
+          toolName: 'PluginReplyMessage',
+          rawInput: { message_id: 'message-42', content: '脏值下依然能回' },
+        },
+        new AbortController().signal,
+        sessionId,
+        {
+          clientRequestId: 'req-channel-e2e-polluted-clarify',
+          nextRound: 1,
+          requestData: { clientRequestId: 'req-channel-e2e-polluted-clarify' },
+        },
+      );
+      expect(result.isError).toBe(false);
+      return { statusCode: 200, stopReason: 'end_turn' };
+    });
+    const app = await buildApp();
+    try {
+      const startResponse = await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/start`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(startResponse.statusCode).toBe(200);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/inbound`,
+        headers: { 'x-openawork-channel-secret': 'relay-secret' },
+        payload: {
+          chatId: 'chat-1',
+          senderId: 'sender-1',
+          senderName: 'Sender',
+          content: '请回复我',
+          messageId: 'message-42',
+        },
+      });
+
+      expect(response.statusCode).toBe(202);
+      await vi.waitFor(() => {
+        expect(streamRuntime.runSessionInBackground).toHaveBeenCalledOnce();
+        expect(fetchMock).toHaveBeenCalledWith(
+          'https://api.telegram.org/botredacted/sendMessage',
+          expect.objectContaining({
+            body: JSON.stringify({
+              chat_id: 'chat-1',
+              text: '脏值下依然能回',
+              reply_to_message_id: 'message-42',
+            }),
+          }),
+        );
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('Given a newer inbound message in the same chat When the previous turn is still running Then the in-flight run is cancelled through the gateway entry', async () => {
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
+      if (url.includes('/getUpdates')) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, result: [] })));
+      }
+      if (url.includes('/sendMessage')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true, result: { message_id: 55 } })),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const streamRuntime = await import('../../routes/stream-runtime.js');
+    const cancellation = await import('../../routes/stream-cancellation.js');
+    const stopMock = vi.mocked(cancellation.stopAnyInFlightStreamRequestForSession);
+    const runMock = vi.mocked(streamRuntime.runSessionInBackground);
+
+    // 第一条卡在这一轮里不返回；第二条入站时 auto-reply 会抢占它并 abort。
+    const firstRun =
+      createDeferred<Awaited<ReturnType<typeof StreamRuntimeModule.runSessionInBackground>>>();
+    runMock.mockReturnValueOnce(firstRun.promise);
+    runMock.mockImplementation(async () => ({ statusCode: 200, stopReason: 'end_turn' }));
+
+    const app = await buildApp();
+    try {
+      await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/start`,
+        headers: { authorization: bearer(app) },
+      });
+
+      const firstResponse = await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/inbound`,
+        headers: { 'x-openawork-channel-secret': 'relay-secret' },
+        payload: {
+          chatId: 'chat-1',
+          senderId: 'sender-1',
+          senderName: 'Sender',
+          content: '第一条',
+          messageId: 'message-51',
+        },
+      });
+      expect(firstResponse.statusCode).toBe(202);
+      await vi.waitFor(() => {
+        expect(runMock).toHaveBeenCalledTimes(1);
+      });
+
+      const secondResponse = await app.inject({
+        method: 'POST',
+        url: `/channels/${TELEGRAM_CHANNEL_ID}/inbound`,
+        headers: { 'x-openawork-channel-secret': 'relay-secret' },
+        payload: {
+          chatId: 'chat-1',
+          senderId: 'sender-1',
+          senderName: 'Sender',
+          content: '第二条',
+          messageId: 'message-52',
+        },
+      });
+      expect(secondResponse.statusCode).toBe(202);
+
+      // 抢占必须真的走到网关的取消入口：否则上一轮不停、会话锁不释放，用户看到的
+      // 仍然是「仍在处理中」然后再无下文 —— 这正是插话要解决的问题本身。
+      await vi.waitFor(() => {
+        expect(stopMock).toHaveBeenCalledWith({
+          sessionId: expect.any(String),
+          userId: USER_ID,
+          reason: 'user_aborted',
+        });
+      });
+      expect(stopMock).toHaveBeenCalledTimes(1);
+
+      firstRun.resolve({ statusCode: 200, stopReason: 'cancelled' });
+      await vi.waitFor(() => {
+        expect(runMock).toHaveBeenCalledTimes(2);
+      });
+      expect(runMock.mock.calls[1]?.[0]?.requestData).toMatchObject({ message: '第二条' });
     } finally {
       await app.close();
     }

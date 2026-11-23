@@ -1,12 +1,25 @@
 import type { SessionPermissionMode } from '@openAwork/shared';
+import {
+  isSourceManagedSession,
+  parseSessionOrigin,
+  UNKNOWN_SESSION_ORIGIN,
+  type SessionOrigin,
+} from './session-origin.js';
 
 export type SessionDialogueMode = 'clarify' | 'coding' | 'programmer';
+
+export type { SessionOrigin, SessionOriginSource } from './session-origin.js';
 
 interface ParsedSessionMetadata {
   dialogueMode: SessionDialogueMode;
   icon?: string;
   modelId?: string;
   modelLabel?: string;
+  /**
+   * 会话来源（`metadata.source`）。渠道 / 定时任务会话**没有**对话模式，
+   * 由 `isSourceManagedSession(origin)` 判定是否必须按只读对待。
+   */
+  origin: SessionOrigin;
   parentSessionId?: string;
   /** 审批方式档位：规范字段，旧数据由 yoloMode 布尔回退推导。 */
   permissionMode: SessionPermissionMode;
@@ -19,6 +32,7 @@ interface ParsedSessionMetadata {
 
 const FALLBACK_PARSED_SESSION_METADATA: ParsedSessionMetadata = {
   dialogueMode: 'clarify',
+  origin: UNKNOWN_SESSION_ORIGIN,
   permissionMode: 'ask',
   workingDirectory: null,
   yoloMode: false,
@@ -112,6 +126,18 @@ export function extractDialogueMode(metadataJson?: string): SessionDialogueMode 
   return parseSessionMetadata(metadataJson).dialogueMode;
 }
 
+export function extractSessionOrigin(metadataJson?: string): SessionOrigin {
+  return parseSessionMetadata(metadataJson).origin;
+}
+
+/**
+ * 该会话是否由来源托管（渠道 / 定时任务）：其对话模式由来源侧决定，网页端必须只读
+ *（顶栏不渲染模式切换器，且不把 `dialogueMode` 写进 metadata）。
+ */
+export function isSourceManagedSessionMetadata(metadataJson?: string): boolean {
+  return isSourceManagedSession(extractSessionOrigin(metadataJson));
+}
+
 function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
   if (!metadataJson) {
     return FALLBACK_PARSED_SESSION_METADATA;
@@ -124,12 +150,14 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
 
   try {
     const parsed = JSON.parse(metadataJson) as {
+      channel?: unknown;
       dialogueMode?: unknown;
       icon?: unknown;
       modelId?: unknown;
       modelLabel?: unknown;
       parentSessionId?: unknown;
       permissionMode?: unknown;
+      source?: unknown;
       sshConnectionId?: unknown;
       teamWorkspaceId?: unknown;
       workingDirectory?: unknown;
@@ -155,6 +183,7 @@ function parseSessionMetadata(metadataJson?: string): ParsedSessionMetadata {
       icon: normalizeOptionalString(parsed.icon),
       modelId: normalizeOptionalString(parsed.modelId),
       modelLabel: normalizeOptionalString(parsed.modelLabel),
+      origin: parseSessionOrigin(parsed),
       parentSessionId: normalizeOptionalString(parsed.parentSessionId),
       permissionMode,
       sshConnectionId: normalizeOptionalString(parsed.sshConnectionId),

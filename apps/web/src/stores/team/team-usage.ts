@@ -481,7 +481,7 @@ function toolStatsFromRecord(record: TeamToolCallRecordSeed): ToolCallStats {
     successes: record.successes,
     failures: record.failures,
     totalDurationMs: record.totalDurationMs,
-    durations: [...record.durations].sort((a, b) => a - b).slice(-TOOL_DURATION_LIMIT),
+    durations: record.durations.toSorted((a, b) => a - b).slice(-TOOL_DURATION_LIMIT),
     errorSamples: [...record.errorSamples],
   };
 }

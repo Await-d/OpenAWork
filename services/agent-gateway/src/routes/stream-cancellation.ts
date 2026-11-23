@@ -1,3 +1,5 @@
+import { logGatewayWarn } from '../infra/gateway-logger.js';
+
 /**
  * Optional metadata attached to a stop call so the stream's abort
  * handler can render a precise "由父会话中断" toast instead of the
@@ -14,6 +16,12 @@ export interface InFlightStreamRequestEntry {
   abortController: AbortController;
   clientRequestId: string;
   execution: Promise<{ statusCode: number }>;
+  /**
+   * 所属会话 id。虽然它同时是注册表的 key 前缀,但 TTL 到期回收发生在**遍历**
+   * 路径里,那里只有 key 与 entry 两份信息,显式保留一份可避免再做字符串拆分,
+   * 也便于告警只带标识字段。
+   */
+  sessionId: string;
   userId: string;
   /**
    * 登记时刻(ms 时间戳),供 TTL 回收使用。见 `STREAM_REQUEST_LOCK_TTL_MS`。
@@ -52,6 +60,23 @@ const NOOP_REJECT = (_reason: unknown): void => undefined;
  */
 export const STREAM_REQUEST_LOCK_TTL_MS = 2 * 60 * 60 * 1000;
 
+/**
+ * TTL 到期回收占位时记录的固定告警文本。
+ *
+ * 该模块此前对这类回收是**静默**的:占位被删、旧执行却未 abort,于是同一会话出现
+ * 「新旧两轮重叠」。按仓库「不允许静默降级」口径,这里补一条固定文本告警——只带
+ * `sessionId` / `clientRequestId` 两个标识字段,不带任何命令或请求入参。
+ */
+const STREAM_REQUEST_LOCK_TTL_EXPIRED_WARN =
+  'stream 运行锁 TTL 到期，回收占位（旧执行未被中断，可能与该会话新请求重叠）';
+
+function warnExpiredStreamRequest(entry: InFlightStreamRequestEntry): void {
+  logGatewayWarn(STREAM_REQUEST_LOCK_TTL_EXPIRED_WARN, {
+    sessionId: entry.sessionId,
+    clientRequestId: entry.clientRequestId,
+  });
+}
+
 const inFlightStreamRequests = new Map<string, InFlightStreamRequestEntry>();
 
 function getStreamRequestKey(sessionId: string, clientRequestId: string): string {
@@ -76,6 +101,7 @@ export function getInFlightStreamRequest(
   const entry = inFlightStreamRequests.get(key);
   if (!entry) return undefined;
   if (isExpiredStreamRequest(entry, Date.now())) {
+    warnExpiredStreamRequest(entry);
     inFlightStreamRequests.delete(key);
     return undefined;
   }
@@ -117,6 +143,7 @@ export function reserveInFlightStreamRequest(input: {
     abortController,
     clientRequestId: input.clientRequestId,
     execution,
+    sessionId: input.sessionId,
     startedAt: Date.now(),
     userId: input.userId,
   });
@@ -141,6 +168,7 @@ export function registerInFlightStreamRequest(input: {
     abortController: input.abortController,
     clientRequestId: input.clientRequestId,
     execution: input.execution,
+    sessionId: input.sessionId,
     startedAt: Date.now(),
     userId: input.userId,
   });
@@ -159,6 +187,7 @@ export function getAnyInFlightStreamRequestForSession(input: {
 
     // 顺手回收本会话下的死亡锁:避免它们冒充「正在运行」而让后续请求恒定 409。
     if (isExpiredStreamRequest(entry, now)) {
+      warnExpiredStreamRequest(entry);
       inFlightStreamRequests.delete(key);
       continue;
     }
@@ -232,6 +261,43 @@ export async function stopAllInFlightStreamRequestsForSession(input: {
   }
 
   return stoppedCount;
+}
+
+/** 发出整棵树的取消信号，共用一个等待预算。超时不释放仍在使用的运行锁。 */
+export async function stopSessionStreamsForDeletion(input: {
+  sessionIds: ReadonlySet<string>;
+  userId: string;
+  timeoutMs: number;
+}): Promise<string | null> {
+  const now = Date.now();
+  const entries = [...inFlightStreamRequests.values()].filter(
+    (entry) =>
+      entry.userId === input.userId &&
+      input.sessionIds.has(entry.sessionId) &&
+      !isExpiredStreamRequest(entry, now),
+  );
+  if (entries.length === 0) return null;
+
+  const pending = new Set(entries);
+  const settled = Promise.all(
+    entries.map(async (entry) => {
+      entry.abortController.abort();
+      await entry.execution.catch(() => undefined);
+      pending.delete(entry);
+    }),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      settled,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, input.timeoutMs);
+      }),
+    ]);
+    return pending.values().next().value?.sessionId ?? null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

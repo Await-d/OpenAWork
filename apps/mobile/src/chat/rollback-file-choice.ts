@@ -13,6 +13,7 @@
  * 与按 request 的变更投影后传入。
  */
 
+import { parseServerTimestamp } from '@openAwork/shared';
 import type { SnapshotTreeEntry } from '@openAwork/web-client';
 import type { MobileChatMessage } from './chat-message-content';
 
@@ -35,24 +36,9 @@ export interface MobileRollbackChoiceModel {
   readonly summaryText: string;
 }
 
-/**
- * SQLite `datetime('now')` 的输出形态：UTC、秒级、空格分隔、无时区后缀。
- * `snapshot_trees.created_at` 就是这种格式——`Date.parse` 会按**本地时区**解释它。
- */
-const SQLITE_UTC_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
-
 export function toTimestamp(value: string | number | undefined): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const normalized = SQLITE_UTC_DATETIME_PATTERN.test(value)
-      ? `${value.replace(' ', 'T')}Z`
-      : value;
-    const parsed = Date.parse(normalized);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
+  // 解析语义统一收口在 `@openAwork/shared`：无时区 SQLite 文本按 UTC 解析。
+  return parseServerTimestamp(value);
 }
 
 /**

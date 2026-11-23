@@ -35,6 +35,11 @@ function renderStopHook(overrides: Partial<Parameters<typeof useChatStopActiveMe
 
     return {
       state: { stoppingStream, streamError, stoppingStreamRef, streamRevealTargetRef },
+      switchSessionView: (epoch: number) => {
+        currentSessionViewRef.current = { epoch };
+        stoppingStreamRef.current = false;
+        setStoppingStream(false);
+      },
       api: useChatStopActiveMessage({
         client,
         currentSessionId: 's1',
@@ -99,4 +104,59 @@ describe('useChatStopActiveMessage', () => {
     expect(hook.result.current.state.streamError).toBe('boom');
     expect(hook.result.current.state.stoppingStreamRef.current).toBe(false);
   });
+
+  it.each(['rejected', 'not-stopped', 'stopped'] as const)(
+    '切换会话后忽略旧停止结果：%s',
+    async (outcome) => {
+      const { client, hook, loadCurrentSessionSnapshot, requestSessionListRefresh } =
+        renderStopHook({
+          stopCapability: 'precise',
+        });
+      let finishOldStop: (() => void) | undefined;
+      let finishNewStop: (() => void) | undefined;
+      client.stopStream
+        .mockImplementationOnce(
+          () =>
+            new Promise<boolean>((resolve, reject) => {
+              finishOldStop = () => {
+                if (outcome === 'rejected') reject(new Error('旧请求失败'));
+                else resolve(outcome === 'stopped');
+              };
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<boolean>((resolve) => {
+              finishNewStop = () => resolve(true);
+            }),
+        );
+
+      let oldResult: Promise<void> | undefined;
+      let newResult: Promise<void> | undefined;
+      act(() => {
+        oldResult = hook.result.current.api.stopActiveMessage();
+        hook.result.current.switchSessionView(8);
+      });
+      act(() => {
+        newResult = hook.result.current.api.stopActiveMessage();
+      });
+      expect(client.stopStream).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        finishOldStop?.();
+        await oldResult;
+      });
+
+      expect(hook.result.current.state.stoppingStream).toBe(true);
+      expect(hook.result.current.state.stoppingStreamRef.current).toBe(true);
+      expect(hook.result.current.state.streamError).toBeNull();
+      expect(loadCurrentSessionSnapshot).not.toHaveBeenCalled();
+      expect(requestSessionListRefresh).not.toHaveBeenCalled();
+
+      await act(async () => {
+        finishNewStop?.();
+        await newResult;
+      });
+      expect(hook.result.current.state.stoppingStream).toBe(false);
+    },
+  );
 });

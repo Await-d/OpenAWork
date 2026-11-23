@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe('renderChatMessageContentWithOptions', () => {
-  it('chat 模式隐藏推理时仍保留简化后的占位提示', () => {
+  it('chat 模式隐藏推理时仍可通过简化按钮展开和收起思考内容', async () => {
     useDisplayPreferencesStore.setState({ showReasoningBlock: false });
 
     const message: ChatMessage = {
@@ -53,8 +53,24 @@ describe('renderChatMessageContentWithOptions', () => {
 
     render(<>{renderChatMessageContentWithOptions(message, { presentationMode: 'chat' })}</>);
 
-    expect(screen.getByText('思考过程')).not.toBeNull();
-    expect(screen.getByText('已完成')).not.toBeNull();
+    const button = screen.getByRole('button', { name: '思考过程' });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('已完成')).toBeNull();
+    expect(screen.queryByText(/[▶▼]/)).toBeNull();
+    expect(screen.queryByText('生成中')).toBeNull();
+    expect(screen.queryByText('先判断入口，再确认渲染分支。')).toBeNull();
+
+    fireEvent.click(button);
+
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(await screen.findByText('先判断入口，再确认渲染分支。')).not.toBeNull();
+    expect(screen.queryByText('已完成')).toBeNull();
+    expect(screen.queryByText(/[▶▼]/)).toBeNull();
+
+    fireEvent.click(button);
+
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('先判断入口，再确认渲染分支。')).toBeNull();
   });
 
   it('team 模式隐藏推理时不展示 chat 专属占位提示', () => {
@@ -172,6 +188,39 @@ describe('renderChatMessageContentWithOptions', () => {
     // 尾部是推理块（不绘制光标），光标仍落在最后一个非空文本段（text-1）上，不退化为零。
     expect(cursorOwners).toHaveLength(1);
     expect(cursorOwners[0]).toBe(bodies[0]);
+  });
+
+  /**
+   * 用户消息是 `white-space: pre-wrap` 的纯文本，长度不受任何约束：粘一段日志进来就能
+   * 把整页撑开。这条用例锁住渲染入口的分流——非 assistant 角色必须走折叠，而不是原样
+   * 返回正文字符串。
+   */
+  it('用户角色超长正文默认折叠，短正文不折叠', () => {
+    const longUserMessage: ChatMessage = {
+      id: 'user-long',
+      role: 'user',
+      content: Array.from(
+        { length: 60 },
+        (_, index) => `第 ${index + 1} 行：粘贴进来的日志正文，用于把内容推过折叠阈值。`,
+      ).join('\n'),
+    };
+
+    const { unmount } = render(<>{renderChatMessageContentWithOptions(longUserMessage)}</>);
+    const foldContainer = document.querySelector('.chat-markdown-fold-container');
+    expect(foldContainer?.getAttribute('data-fold-scope')).toBe('user');
+    expect(foldContainer?.getAttribute('data-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: '展开全部消息内容' })).toBeTruthy();
+    unmount();
+
+    const shortUserMessage: ChatMessage = {
+      id: 'user-short',
+      role: 'user',
+      content: '短问题，不该出现任何折叠控件。',
+    };
+    render(<>{renderChatMessageContentWithOptions(shortUserMessage)}</>);
+    expect(document.querySelector('.chat-markdown-fold-container')).toBeNull();
+    expect(screen.queryByRole('button', { name: '展开全部消息内容' })).toBeNull();
+    expect(screen.getByText('短问题，不该出现任何折叠控件。')).toBeTruthy();
   });
 });
 

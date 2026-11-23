@@ -212,6 +212,51 @@ describe('bash-tools', () => {
   });
 
   describe('shell-aware safety pre-checks', () => {
+    it('未知 shell 保留原始检查，不套用 POSIX 引号语义', () => {
+      expect(() =>
+        assertSafeShellCommand("echo 'literal `whoami`'", {
+          isPowerShell: false,
+          shellName: 'fish',
+        }),
+      ).toThrow(/Backtick/);
+    });
+
+    it.each([
+      'bun -e \'const harness="patch-tool",mode="dark"; console.log(`http://127.0.0.1:5173/harness/${harness}.html?mode=${mode}`)\'',
+      'node -e \'console.log("$(whoami)")\'',
+      "printf '%s' 'literal `whoami` and $(whoami)'",
+      "printf '%s' 'literal \\' '$(whoami)'",
+    ])('允许单引号参数内的字面量：%s', (command) => {
+      expect(() => assertSafeShellCommand(command, { isPowerShell: false })).not.toThrow();
+    });
+
+    it.each([
+      'echo "`whoami`"',
+      'echo "$(whoami)"',
+      'echo "\'`whoami`\'"',
+      'echo "\'$(whoami)\'"',
+      "echo 'safe'`whoami`",
+      "echo 'safe'$(whoami)",
+      "echo \\'`whoami`",
+      "echo \\'$(whoami)",
+      "echo \\\\'safe'`whoami`",
+      "echo \\\\'safe'$(whoami)",
+      "echo $'escaped \\' quote'`whoami`",
+      "echo $'escaped \\' quote'$(whoami)",
+      'echo "$\'$(whoami)\'"',
+      'echo "escaped \\"`whoami`',
+      'echo "escaped \\"$(whoami)',
+      'printf \'%s\' "${v:-"\'$(printf PROBE)\'"}"',
+      'printf \'%s\' "${v:-"\'`printf PROBE`\'"}"',
+      "printf '%s' $'a\\'$(printf PROBE) # '",
+      "a['$(printf PROBE >&2; printf 0)']=x",
+      "a['`printf PROBE >&2; printf 0`']=x",
+    ])('仍拒绝引号或转义边界外的命令替换：%s', (command) => {
+      expect(() => assertSafeShellCommand(command, { isPowerShell: false })).toThrow(
+        /[Cc]ommand substitution/,
+      );
+    });
+
     it('允许 PowerShell 的变量子表达式', () => {
       expect(() =>
         assertSafeShellCommand('Write-Output "$($_.LineNumber)"', { isPowerShell: true }),
@@ -275,7 +320,7 @@ describe('bash-tools', () => {
 
     it('不示范会被守卫拒绝的写法（HEREDOC / 命令替换 / 换行）', () => {
       const description = bashToolDefinition.description;
-      // 守卫无条件拒绝 `$(...)` 与任何换行（见 DISALLOWED_PATTERNS），描述里就
+      // 守卫拒绝实际命令替换与任何换行（见 DISALLOWED_PATTERNS），描述里就
       // 不能再教 HEREDOC 或 `$(cat <<'EOF' ...)`，否则模型照做必被拒。
       expect(description).not.toContain("<<'EOF'");
       expect(description).toContain('--body-file');
@@ -685,6 +730,18 @@ describe('bash-tools', () => {
   });
 
   describe('safety pre-checks', () => {
+    it.skipIf(process.platform === 'win32')('执行单引号内的 JavaScript 模板字符串', async () => {
+      const result = await runBashCommand({
+        command:
+          'node -e \'const harness="patch-tool",mode="dark"; console.log(`http://127.0.0.1:5173/harness/${harness}.html?mode=${mode}`)\'',
+        description: '验证模板字符串参数',
+        workdir,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('http://127.0.0.1:5173/harness/patch-tool.html?mode=dark');
+    });
+
     it('rejects sudo invocations', async () => {
       await expect(
         runBashCommand({

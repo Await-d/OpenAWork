@@ -665,9 +665,9 @@ export function IdleHint() {
 }
 
 function summarizeLatestAssistantOutput(messages: Message[] | undefined): string | null {
-  const latestAssistantMessage = [...(messages ?? [])]
-    .reverse()
-    .find((message) => message.role === 'assistant');
+  const latestAssistantMessage = (messages ?? []).findLast(
+    (message) => message.role === 'assistant',
+  );
   if (!latestAssistantMessage) {
     return null;
   }

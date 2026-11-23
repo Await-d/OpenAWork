@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>网页抓取卡片 · 真实渲染预览（方案 A 已落地）</title>
+
+    <!-- 真实样式表：与 apps/web 里 chat-message.css 引入的是同一批文件 -->
+    <link rel="stylesheet" href="../../apps/web/src/components/chat/tool-call/css/base.css" />
+    <link rel="stylesheet" href="../../apps/web/src/components/chat/tool-call/css/shared.css" />
+    <link rel="stylesheet" href="../../apps/web/src/components/chat/tool-call/css/previews.css" />
+    <link rel="stylesheet" href="../../apps/web/src/components/chat/tool-call/css/tokens.css" />
+
+    <style>
+      /* 设计 token（取自 apps/web/src/index.css 的 linear 主题 + 全局动效 / 圆角）。
+         tool-call 的样式表只消费 var()，所以这里内联一份即可还原真实观感。 */
+      :root {
+        --tc-path: var(--fg-default);
+        --tc-cmd: var(--fg-default);
+        --tc-string: var(--fg-muted);
+        --tc-num: var(--fg-muted);
+        --tc-url: var(--fg-default);
+        --tc-keyword: var(--fg-subtle);
+
+        --bg-base: #0a0c10;
+        --bg-raised: #0c0f15;
+        --bg-overlay: #11151c;
+        --bg-surface: #161b25;
+        --bg-elevated: #1d2230;
+        --bg-hover: #232a3a;
+        --bg-active: #2a3145;
+
+        --fg-strong: #e8eaf2;
+        --fg-default: #b8bdcb;
+        --fg-muted: #7a8194;
+        --fg-subtle: #4a5168;
+        --fg-on-accent: #0a0c1f;
+
+        --accent: #5b6cff;
+        --accent-hover: #6f7eff;
+        --accent-muted: rgba(91, 108, 255, 0.14);
+        --accent-subtle: rgba(91, 108, 255, 0.07);
+        --accent-border: rgba(91, 108, 255, 0.35);
+
+        --contrast: #f0b429;
+        --contrast-muted: rgba(240, 180, 41, 0.14);
+        --contrast-border: rgba(240, 180, 41, 0.35);
+
+        --complement: #f06464;
+        --complement-muted: rgba(240, 100, 100, 0.14);
+        --complement-border: rgba(240, 100, 100, 0.3);
+
+        --aux: #38bdf8;
+        --aux-muted: rgba(56, 189, 248, 0.14);
+
+        --success: #2cc28a;
+        --success-muted: rgba(44, 194, 138, 0.14);
+        --success-border: rgba(44, 194, 138, 0.3);
+        --warning: #f0b429;
+        --danger: #f06464;
+
+        --border-subtle: hsl(215 20% 50% / 0.03);
+        --border-default: hsl(215 18% 50% / 0.06);
+        --border-emphasis: hsl(215 16% 55% / 0.13);
+        --border-strong: hsl(215 14% 60% / 0.2);
+
+        --radius-md: 8px;
+        --ease-micro: cubic-bezier(0.4, 0, 0.2, 1);
+        --dur-micro: 100ms;
+      }
+
+      html[data-mode='light'] {
+        --bg-base: #fbfbfd;
+        --bg-raised: #ffffff;
+        --bg-overlay: #f4f5f9;
+        --bg-surface: #ffffff;
+        --bg-elevated: #f4f5f9;
+        --bg-hover: #eef0f5;
+        --bg-active: #e6e8ee;
+        --fg-strong: #0c0e14;
+        --fg-default: #3d4458;
+        --fg-muted: #6a7184;
+        --fg-subtle: #9aa1b4;
+        --fg-on-accent: #ffffff;
+        --accent: #4f63e8;
+        --accent-muted: rgba(79, 99, 232, 0.1);
+        --accent-subtle: rgba(79, 99, 232, 0.05);
+        --aux: #0284c7;
+        --success: #12885f;
+        --success-muted: rgba(18, 136, 95, 0.1);
+        --contrast: #b57d0a;
+        --complement: #d94a4a;
+        --border-subtle: rgb(15 23 60 / 0.07);
+        --border-default: rgb(15 23 60 / 0.12);
+        --border-emphasis: rgb(15 23 60 / 0.2);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+          'Microsoft YaHei', sans-serif;
+        font-size: 13px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .page {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 40px 24px 120px;
+      }
+
+      .page-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 28px;
+      }
+
+      .page-head h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        color: var(--fg-strong);
+      }
+
+      .page-head p {
+        margin: 0;
+        max-width: 620px;
+        font-size: 12.5px;
+        color: var(--fg-muted);
+      }
+
+      .theme-btn {
+        flex: none;
+        margin-left: auto;
+        padding: 6px 12px;
+        border: 1px solid var(--border-default);
+        border-radius: 6px;
+        background: var(--bg-overlay);
+        color: var(--fg-muted);
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .theme-btn:hover {
+        background: var(--bg-hover);
+        color: var(--fg-strong);
+      }
+
+      /* ── 模拟会话容器：让卡片出现在它真实的语境里 ── */
+      .chat {
+        padding: 20px 0;
+        border-top: 1px solid var(--border-default);
+        border-bottom: 1px solid var(--border-default);
+      }
+
+      .turn {
+        padding: 10px 0;
+      }
+
+      .turn-user {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .bubble {
+        max-width: 78%;
+        padding: 8px 12px;
+        border-radius: 10px;
+        background: var(--bg-elevated);
+        color: var(--fg-default);
+        font-size: 13px;
+      }
+
+      .assistant-text {
+        margin: 0 0 6px;
+        color: var(--fg-default);
+      }
+
+      .stage-note {
+        margin: 26px 0 10px;
+        font-size: 12px;
+        color: var(--fg-subtle);
+      }
+
+      .stage-note b {
+        color: var(--fg-muted);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>网页抓取卡片 · 真实渲染预览</h1>
+          <p>
+            下面两段 DOM 是 <code>BlockToolCall</code> 在 jsdom 里真实渲染出来的结果，样式表也是 app
+            里同一批文件（<code>tool-call/css/*.css</code>）——不是手写的示意结构。
+          </p>
+          <p>头像方块的颜色由名称哈希决定，同一账号在每次会话里颜色一致。</p>
+        </div>
+        <button class="theme-btn" type="button" id="themeBtn">切换主题</button>
+      </div>
+
+      <div class="chat">
+        <div class="turn turn-user">
+          <div class="bubble">帮我在 GitHub 上搜一下 workbuddy 相关的仓库，看看有哪些实现。</div>
+        </div>
+
+        <div class="turn">
+          <p class="assistant-text">我查一下 GitHub 的仓库搜索接口。</p>
+
+          <div class="tool-call-block" data-tool-status="completed">
+            <button type="button" class="tool-call-block-header" aria-expanded="true">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px">
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M17.9166 10.4167V3.75H2.08325V17.0833H10.4166M17.9166 13.5897L11.6666 11.6667L13.5897 17.9167L15.032 15.0321L17.9166 13.5897Z"
+                    stroke="currentColor"
+                    stroke-width="1.07143"
+                    stroke-linecap="square"
+                  ></path>
+                  <path
+                    d="M5.00024 6.125C5.29925 6.12518 5.54126 6.36795 5.54126 6.66699C5.54108 6.96589 5.29914 7.20783 5.00024 7.20801C4.7012 7.20801 4.45843 6.966 4.45825 6.66699C4.45825 6.36784 4.70109 6.125 5.00024 6.125ZM7.91626 6.125C8.21541 6.125 8.45825 6.36784 8.45825 6.66699C8.45808 6.966 8.21531 7.20801 7.91626 7.20801C7.61736 7.20783 7.37542 6.96589 7.37524 6.66699C7.37524 6.36795 7.61726 6.12518 7.91626 6.125ZM10.8333 6.125C11.1324 6.125 11.3752 6.36784 11.3752 6.66699C11.3751 6.966 11.1323 7.20801 10.8333 7.20801C10.5342 7.20801 10.2914 6.966 10.2913 6.66699C10.2913 6.36784 10.5341 6.125 10.8333 6.125Z"
+                    fill="currentColor"
+                    stroke="currentColor"
+                    stroke-width="0.25"
+                    stroke-linecap="square"
+                  ></path>
+                </svg>
+              </span>
+              <span class="tool-call-block-title" data-tool-category="net">已抓取了网页</span>
+              <span class="tool-call-block-web-status" data-status-ok="true">200</span>
+              <span
+                class="tool-call-block-web-host"
+                title="https://api.github.com/search/repositories?q=workbuddy&amp;register&amp;per_page=5"
+                >api.github.com</span
+              >
+              <span class="tool-call-block-web-count">共 1284 个仓库</span>
+              <span class="tool-call-block-elapsed" data-duration-tier="fast">820ms</span>
+              <span class="tool-call-block-chevron">▾</span>
+            </button>
+
+            <div class="tool-call-block-body">
+              <div class="tool-call-block-output">
+                <div class="tool-call-block-web-results">
+                  <a
+                    class="tool-call-block-web-result"
+                    href="https://github.com/darker2016/workbuddy"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title="https://github.com/darker2016/workbuddy"
+                  >
+                    <span class="tool-call-block-web-result-avatar" data-tone="1" aria-hidden="true"
+                      >D</span
+                    >
+                    <span class="tool-call-block-web-result-main">
+                      <span class="tool-call-block-web-result-line">
+                        <span class="tool-call-block-web-result-owner">darker2016</span
+                        ><span class="tool-call-block-web-result-slash">/</span
+                        ><span class="tool-call-block-web-result-name">workbuddy</span>
+                        <span class="tool-call-block-web-result-chip"
+                          ><i style="background: rgb(49, 120, 198)" aria-hidden="true"></i
+                          >TypeScript</span
+                        >
+                      </span>
+                      <span class="tool-call-block-web-result-desc"
+                        >本地优先的 AI 工作台：把会话、技能与自动化收进一个跨平台桌面应用。</span
+                      >
+                      <span class="tool-call-block-web-result-stats">
+                        <span class="tool-call-block-web-result-stat"
+                          ><svg
+                            viewBox="0 0 24 24"
+                            width="10"
+                            height="10"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z"
+                            ></path></svg
+                          >1.2k</span
+                        >
+                        <span class="tool-call-block-web-result-stat"
+                          ><svg
+                            viewBox="0 0 24 24"
+                            width="10"
+                            height="10"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                          >
+                            <circle cx="6" cy="5" r="2.5"></circle>
+                            <circle cx="18" cy="5" r="2.5"></circle>
+                            <circle cx="12" cy="19" r="2.5"></circle>
+                            <path d="M6 7.5v2a4 4 0 004 4h4a4 4 0 004-4v-2"></path></svg
+                          >87</span
+                        >
+                        <span class="tool-call-block-web-result-stat"
+                          ><svg
+                            viewBox="0 0 24 24"
+                            width="10"
+                            height="10"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                          >
+                            <circle cx="12" cy="12" r="9"></circle>
+                            <path d="M12 8v5M12 16.5v.01"></path></svg
+                          >12</span
+                        >
+                      </span>
+                    </span>
+                  </a>
+
+                  <a
+                    class="tool-call-block-web-result"
+                    href="https://github.com/Alpha-Park/workbuddy-cli"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title="https://github.com/Alpha-Park/workbuddy-cli"
+                  >
+                    <span class="tool-call-block-web-result-avatar" data-tone="2" aria-hidden="true"
+                      >A</span
+                    >
+                    <span class="tool-call-block-web-result-main">
+                      <span class="tool-call-block-web-result-line">
+                        <span class="tool-call-block-web-result-owner">Alpha-Park</span
+                        ><span class="tool-call-block-web-result-slash">/</span
+                        ><span class="tool-call-block-web-result-name">workbuddy-cli</span>
+                        <span class="tool-call-block-web-result-chip"
+                          ><i style="background: rgb(241, 224, 90)" aria-hidden="true"></i
+                          >JavaScript</span
+                        >
+                      </span>
+                      <span class="tool-call-block-web-result-desc"
+                        >workbuddy 的命令行外壳：批处理任务、CI 钩子与脚本化编排。</span
+                      >
+                      <span class="tool-call-block-web-result-stats">
+                        <span class="tool-call-block-web-result-stat"
+                          ><svg
+                            viewBox="0 0 24 24"
+                            width="10"
+                            height="10"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z"
+                            ></path></svg
+                          >312</span
+                        >
+                        <span class="tool-call-block-web-result-stat"
+                          ><svg
+                            viewBox="0 0 24 24"
+                            width="10"
+                            height="10"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                          >
+                            <circle cx="6" cy="5" r="2.5"></circle>
+                            <circle cx="18" cy="5" r="2.5"></circle>
+                            <circle cx="12" cy="19" r="2.5"></circle>
+                            <path d="M6 7.5v2a4 4 0 004 4h4a4 4 0 004-4v-2"></path></svg
+                          >24</span
+                        >
+                        <span class="tool-call-block-web-result-stat"
+                          ><svg
+                            viewBox="0 0 24 24"
+                            width="10"
+                            height="10"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                          >
+                            <circle cx="12" cy="12" r="9"></circle>
+                            <path d="M12 8v5M12 16.5v.01"></path></svg
+                          >3</span
+                        >
+                      </span>
+                    </span>
+                  </a>
+
+                  <a
+                    class="tool-call-block-web-result"
+                    href="https://github.com/workbuddy-labs/workbuddy-web"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title="https://github.com/workbuddy-labs/workbuddy-web"
+                  >
+                    <span class="tool-call-block-web-result-avatar" data-tone="1" aria-hidden="true"
+                      >W</span
+                    >
+                    <span class="tool-call-block-web-result-main">
+                      <span class="tool-call-block-web-result-line">
+                        <span class="tool-call-block-web-result-owner">workbuddy-labs</span
+                        ><span class="tool-call-block-web-result-slash">/</span
+                        ><span class="tool-call-block-web-result-name">workbuddy-web</span>
+                        <span class="tool-call-block-web-result-chip"
+                          ><i style="background: rgb(227, 76, 38)" aria-hidden="true"></i>HTML</span
+                        >
+                      </span>
+                      <span class="tool-call-block-web-result-desc"
+                        >实验性的 Web 端原型，用于验证渠道路由与技能沙箱。</span
+                      >
+                      <span class="tool-call-block-web-result-stats">
+                        <span class="tool-call-block-web-result-stat"
+                          ><svg
+                            viewBox="0 0 24 24"
+                            width="10"
+                            height="10"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z"
+                            ></path></svg
+                          >96</span
+                        >
+                        <span class="tool-call-block-web-result-stat"
+                          ><svg
+                            viewBox="0 0 24 24"
+                            width="10"
+                            height="10"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                          >
+                            <circle cx="6" cy="5" r="2.5"></circle>
+                            <circle cx="18" cy="5" r="2.5"></circle>
+                            <circle cx="12" cy="19" r="2.5"></circle>
+                            <path d="M6 7.5v2a4 4 0 004 4h4a4 4 0 004-4v-2"></path></svg
+                          >11</span
+                        >
+                      </span>
+                    </span>
+                  </a>
+
+                  <div class="tool-call-block-web-results-more">
+                    接口共命中 1284 条，此处展示前 3 条
+                  </div>
+                </div>
+
+                <details class="tool-call-block-web-raw">
+                  <summary>原始响应（已截断）</summary>
+                  <pre class="tool-call-block-web-raw-body">
+{&quot;total_count&quot;:1284,&quot;incomplete_results&quot;:false,&quot;items&quot;:[{&quot;name&quot;:&quot;workbuddy&quot;,&quot;full_name&quot;:&quot;darker2016/workbuddy&quot;,&quot;owner&quot;:{&quot;login&quot;:&quot;darker2016&quot;},&quot;html_url&quot;:&quot;https://github.com/darker2016/workbuddy&quot;,&quot;description&quot;:&quot;本地优先的 AI 工作台：把会话、技能与自动化收进一个跨平台桌面应用。&quot;,&quot;language&quot;:&quot;TypeScript&quot;,&quot;stargazers_count&quot;:1243,&quot;forks_count&quot;:87,&quot;open_issues_count&quot;:12}, …]}</pre>
+                </details>
+              </div>
+
+              <details class="tool-call-block-params">
+                <summary>参数 (2)</summary>
+                <div class="tool-call-block-params-body">
+                  <div class="param-list">
+                    <span class="param-list-row"
+                      ><span class="param-list-key">url</span
+                      ><span class="param-list-value"
+                        ><span class="param-list-str"
+                          >https://api.github.com/search/repositories?q=workbuddy&amp;register&amp;per_page=5</span
+                        ></span
+                      ></span
+                    >
+                    <span class="param-list-row"
+                      ><span class="param-list-sep" aria-hidden="true">·</span
+                      ><span class="param-list-key">format</span
+                      ><span class="param-list-value"
+                        ><span class="param-list-str">text</span></span
+                      ></span
+                    >
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="stage-note">
+        <b>未命中结构化识别时</b>——仍然是原来的 Markdown / 文本路径，只是折叠行多了状态码与域名：
+      </p>
+
+      <div class="chat" style="padding-bottom: 0">
+        <div class="turn">
+          <div class="tool-call-block" data-tool-status="completed">
+            <button type="button" class="tool-call-block-header" aria-expanded="true">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px">
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M17.9166 10.4167V3.75H2.08325V17.0833H10.4166M17.9166 13.5897L11.6666 11.6667L13.5897 17.9167L15.032 15.0321L17.9166 13.5897Z"
+                    stroke="currentColor"
+                    stroke-width="1.07143"
+                    stroke-linecap="square"
+                  ></path>
+                  <path
+                    d="M5.00024 6.125C5.29925 6.12518 5.54126 6.36795 5.54126 6.66699C5.54108 6.96589 5.29914 7.20783 5.00024 7.20801C4.7012 7.20801 4.45843 6.966 4.45825 6.66699C4.45825 6.36784 4.70109 6.125 5.00024 6.125ZM7.91626 6.125C8.21541 6.125 8.45825 6.36784 8.45825 6.66699C8.45808 6.966 8.21531 7.20801 7.91626 7.20801C7.61736 7.20783 7.37542 6.96589 7.37524 6.66699C7.37524 6.36795 7.61726 6.12518 7.91626 6.125ZM10.8333 6.125C11.1324 6.125 11.3752 6.36784 11.3752 6.66699C11.3751 6.966 11.1323 7.20801 10.8333 7.20801C10.5342 7.20801 10.2914 6.966 10.2913 6.66699C10.2913 6.36784 10.5341 6.125 10.8333 6.125Z"
+                    fill="currentColor"
+                    stroke="currentColor"
+                    stroke-width="0.25"
+                    stroke-linecap="square"
+                  ></path>
+                </svg>
+              </span>
+              <span class="tool-call-block-title" data-tool-category="net">已抓取了网页</span>
+              <span class="tool-call-block-web-status" data-status-ok="true">200</span>
+              <span
+                class="tool-call-block-web-host"
+                title="https://blog.example.dev/posts/local-first-ai"
+                >blog.example.dev</span
+              >
+              <span class="tool-call-block-elapsed" data-duration-tier="normal">1.2s</span>
+              <span class="tool-call-block-chevron">▾</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="tool-call-block-output">
+                <div class="tool-call-block-web-meta">
+                  <span
+                    class="tool-call-block-web-url"
+                    title="https://blog.example.dev/posts/local-first-ai"
+                    >https://blog.example.dev/posts/local-first-ai</span
+                  >
+                  <button type="button" class="tool-call-copy-btn" title="Copy content">⧉</button>
+                </div>
+                <div class="tool-call-block-web-markdown">
+                  <h2>为什么把状态留在磁盘上</h2>
+                  <p>本地优先带来的第二个好处是可审计。</p>
+                </div>
+              </div>
+              <details class="tool-call-block-params">
+                <summary>参数 (2)</summary>
+                <div class="tool-call-block-params-body">
+                  <div class="param-list">
+                    <span class="param-list-row"
+                      ><span class="param-list-key">url</span
+                      ><span class="param-list-value"
+                        ><span class="param-list-str"
+                          >https://blog.example.dev/posts/local-first-ai</span
+                        ></span
+                      ></span
+                    >
+                    <span class="param-list-row"
+                      ><span class="param-list-sep" aria-hidden="true">·</span
+                      ><span class="param-list-key">format</span
+                      ><span class="param-list-value"
+                        ><span class="param-list-str">markdown</span></span
+                      ></span
+                    >
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      document.getElementById('themeBtn').addEventListener('click', function () {
+        var root = document.documentElement;
+        root.dataset.mode = root.dataset.mode === 'dark' ? 'light' : 'dark';
+      });
+    </script>
+  </body>
+</html>

@@ -16,8 +16,10 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, RouterProvider, createMemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CachedRouteOutlet } from '../../components/common/routing/CachedRouteOutlet.js';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { useUIStateStore } from '../../stores/ui/uiState.js';
+import { COMPOSER_REFERENCE_EVENT_NAME } from '../../utils/chat/composer-reference-events.js';
 import ChatPage from './ChatPage.js';
 
 const { getRecoveryMock } = vi.hoisted(() => ({ getRecoveryMock: vi.fn() }));
@@ -283,5 +285,67 @@ describe('ChatPage — classic ↔ fusion 容器切换', () => {
     expect(screen.queryByTestId('fusion-chat-main-shell')).toBeNull();
     expect(screen.queryByTestId('classic-chat-workbench')).not.toBeNull();
     expect(screen.getByTestId('chat-scroll-region')).not.toBeNull();
+  });
+});
+
+/**
+ * R-04b：`openawork:composer-reference` 是 window 级广播，keep-alive 缓存路由下
+ * 非活动 ChatPage 保持挂载。若订阅缺页面激活门控，多实例共存时引用会被追加进
+ * **每个**实例的输入框（即非当前会话）。
+ *
+ * 这里走真实的 `CachedRouteOutlet`（两路由交替访问，旧条目被缓存保留挂载），
+ * 从而拿到真实的「一个激活 + 一个非激活」实例态。
+ */
+describe('ChatPage — 页面激活门控（composer-reference）', () => {
+  it('两实例共存时 composer-reference 只追加到激活实例的输入框，且恰好一次', async () => {
+    useUIStateStore.setState({ workbenchLayoutMode: 'classic' });
+
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/',
+          element: <CachedRouteOutlet />,
+          children: [
+            { path: 'chat-a/:sessionId', element: <ChatPage /> },
+            { path: 'chat-b/:sessionId', element: <ChatPage /> },
+          ],
+        },
+      ],
+      { initialEntries: ['/chat-a/session-a'] },
+    );
+
+    render(<RouterProvider router={router} />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // 访问第二个会话：session-a 条目被缓存保留挂载，但仍存在。
+    await act(async () => {
+      await router.navigate('/chat-b/session-b');
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    const textareas = Array.from(document.querySelectorAll('textarea'));
+    // 两个实例都仍挂载（缓存路由），且各自有输入框。
+    expect(textareas.length).toBeGreaterThanOrEqual(1);
+
+    const before = textareas.map((el) => el.value);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent(COMPOSER_REFERENCE_EVENT_NAME, {
+          detail: { path: 'src/app.ts', text: 'src/app.ts' },
+        }),
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    });
+
+    const after = Array.from(document.querySelectorAll('textarea')).map((el) => el.value);
+    const changed = after.filter((value, index) => value !== before[index]);
+    // 恰好一个实例的输入框被追加（激活的那个）。
+    expect(changed).toHaveLength(1);
+    expect(changed[0]).toContain('src/app.ts');
   });
 });

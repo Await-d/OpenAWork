@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { createRandomUuid } from '@openAwork/web-client';
 
 export type ToastType = 'info' | 'success' | 'warning' | 'error';
 
@@ -327,7 +328,7 @@ export function ToastContainer() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = useCallback((t: Omit<Toast, 'id'>) => {
-    const id = crypto.randomUUID();
+    const id = createRandomUuid();
     setToasts((prev) => [...prev.slice(-4), { ...t, id }]);
   }, []);
 

@@ -1,5 +1,6 @@
 import { color } from '../tokens.js';
 import React, { useState } from 'react';
+import { isImeComposingKeyboardEvent } from '../utils/ime-composition.js';
 
 export interface WorkspaceSelectorProps {
   currentPath?: string;
@@ -124,6 +125,7 @@ export function WorkspaceSelector({
             setError(null);
           }}
           onKeyDown={(e) => {
+            if (isImeComposingKeyboardEvent(e)) return;
             if (e.key === 'Enter') void handleSubmit();
           }}
         />

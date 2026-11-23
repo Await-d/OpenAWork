@@ -36,6 +36,15 @@ const REQUIRED_TABLE_HITS: ReadonlyArray<{
   // 待发队列 / 输入历史（FK → sessions ON DELETE CASCADE，FK 关闭时必须显式删）。
   { table: 'session_composer_queue' },
   { table: 'session_composer_input_history' },
+  // 会话扩展五表（FK → sessions ON DELETE CASCADE，FK 关闭时必须显式删）。
+  // deliveries FK → session_extension_operations(id)，secrets FK → sessions(id)：
+  // FK 关闭时都不级联，故子表 deliveries/secrets 必须先于 operations/sessions 清。
+  { table: 'session_extension_deliveries', before: 'sessions' },
+  { table: 'session_extension_secrets', before: 'sessions' },
+  { table: 'session_extension_operations', before: 'sessions' },
+  { table: 'session_skill_installations', before: 'sessions' },
+  { table: 'session_mcp_servers', before: 'sessions' },
+  { table: 'session_extension_settings', before: 'sessions' },
   { table: 'sessions' },
   // V2 event-sourced storage — these were missing prior to the
   // single-write-path audit and are the core of this regression.
@@ -54,6 +63,8 @@ const REQUIRED_TABLE_HITS: ReadonlyArray<{
   { table: 'shared_session_comments' },
   { table: 'shared_session_presence' },
   { table: 'memory_extraction_logs' },
+  // 入站来源行（FK → sessions ON DELETE CASCADE，FK 关闭时必须显式删）。
+  { table: 'memory_message_provenance' },
   // Artifact versions must precede artifacts because their FK is to
   // artifacts(id), not directly to sessions(id) — under FK-off the
   // cascade chain breaks at this hop unless we explicitly clear the

@@ -10,6 +10,7 @@ import {
 } from '@openAwork/web-client';
 import { FileChangeReviewPanel } from '@openAwork/shared-ui';
 import type { FileChange } from '@openAwork/shared-ui';
+import { formatServerDateTime } from '@openAwork/shared';
 import { extractWorkingDirectory } from '../../../utils/session/session-metadata.js';
 import type { SessionRow } from '../state/session-page-types.js';
 import { WorkspaceWarpDialog } from './workspace-warp-dialog.js';
@@ -156,8 +157,12 @@ function compactSnapshotRef(snapshotRef: string): string {
     : snapshotRef;
 }
 
-function formatSnapshotTime(iso: string): string {
-  return new Date(iso).toLocaleString();
+/**
+ * 快照时间同样来自 SQLite `datetime('now')`（UTC、无时区后缀），
+ * 直接 `new Date(iso)` 会按本地时区解释、整体少 8 小时。
+ */
+function formatSnapshotTime(value: string): string {
+  return formatServerDateTime(value, { fallback: value });
 }
 
 function renderTurnFiles(files: SessionTurnDiffFileSummary[]): string {
@@ -714,10 +719,7 @@ export function DetailPanel({
                 >
                   {statusLabel(selected.state_status)}
                 </span>
-                <SummaryPill
-                  label="更新时间"
-                  value={new Date(selected.updated_at).toLocaleString()}
-                />
+                <SummaryPill label="更新时间" value={formatServerDateTime(selected.updated_at)} />
               </div>
             </div>
             <button
@@ -761,7 +763,7 @@ export function DetailPanel({
             }}
           >
             <DetailField label="状态" value={statusLabel(selected.state_status)} />
-            <DetailField label="更新时间" value={new Date(selected.updated_at).toLocaleString()} />
+            <DetailField label="更新时间" value={formatServerDateTime(selected.updated_at)} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span
                 style={{

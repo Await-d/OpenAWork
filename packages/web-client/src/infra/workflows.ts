@@ -417,10 +417,24 @@ export function createWorkflowsClient(baseUrl: string): WorkflowsClient {
           templates: [],
         };
       }
+      const payload: unknown = await response.json();
+      // 这里原先是 `as WorkflowTemplateRecord[]` 无校验强转：一旦响应体不是数组
+      // （空对象、错误包装、被中间层截断的响应），坏数据会直接进页面状态，
+      // 调用方在 `templates.find(...)` 处抛 TypeError，整页落进错误边界。
+      // 现在按「契约不符」处理：返回结构化失败，页面显示错误条而不是白屏崩溃。
+      if (!Array.isArray(payload)) {
+        return {
+          ok: false,
+          retryable: true,
+          errorMessage: '工作流模板响应格式异常（预期数组）。',
+          status: response.status,
+          templates: [],
+        };
+      }
       return {
         ok: true,
         retryable: false,
-        templates: (await response.json()) as WorkflowTemplateRecord[],
+        templates: payload as WorkflowTemplateRecord[],
       };
     } catch (error) {
       return {

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { CopyBtn } from '../shared/copy-btn.js';
+import { boundedJson, LazyPreviewCopy, PreviewMore, PREVIEW_CHAR_STEP } from './bounded-preview.js';
+import './bounded-preview.css';
 import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /** 折叠态最多渲染的字符数：MB 级输出不能全量生成 HTML 字符串 + DOM。 */
@@ -24,14 +25,12 @@ export function JsonPreview({
   defaultExpanded?: boolean;
   maxLines?: number;
 }) {
-  const jsonString = useMemo(() => {
-    return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  }, [data]);
-
   const isInsideExpandedToolCard = useIsInsideExpandedToolCard();
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const [charLimit, setCharLimit] = useState(MAX_RENDERED_CHARS);
   const effectiveExpanded = expanded || isInsideExpandedToolCard;
-
+  const prefix = useMemo(() => boundedJson(data, charLimit), [data, charLimit]);
+  const jsonString = prefix.text;
   const view = useMemo(() => {
     const lineCount = countLines(jsonString);
 
@@ -45,7 +44,7 @@ export function JsonPreview({
           clipped: true,
         };
       }
-      return { lineCount, rendered: jsonString, clipped: false };
+      return { lineCount, rendered: jsonString, clipped: prefix.clipped };
     }
 
     // 折叠态：行级截断到 maxLines，再兜一层字符上限。
@@ -55,12 +54,12 @@ export function JsonPreview({
     return {
       lineCount,
       rendered: head.length > MAX_RENDERED_CHARS ? head.slice(0, MAX_RENDERED_CHARS) : head,
-      clipped: head.length > MAX_RENDERED_CHARS,
+      clipped: prefix.clipped || head.length > charLimit,
     };
-  }, [jsonString, effectiveExpanded, maxLines]);
+  }, [jsonString, effectiveExpanded, maxLines, prefix.clipped, charLimit]);
 
   const html = useMemo(() => highlightJson(view.rendered), [view.rendered]);
-  const canToggle = view.lineCount > maxLines && !isInsideExpandedToolCard && !view.clipped;
+  const canToggle = view.lineCount > maxLines && !isInsideExpandedToolCard;
 
   return (
     <div className="json-preview">
@@ -68,7 +67,7 @@ export function JsonPreview({
         <span className="json-preview-meta">
           {view.lineCount} 行{view.clipped ? ` · 已截断显示前 ${view.rendered.length} 字符` : ''}
         </span>
-        <CopyBtn text={jsonString} />
+        <LazyPreviewCopy data={data} />
       </div>
       <div
         className="json-preview-content"
@@ -80,8 +79,18 @@ export function JsonPreview({
       </div>
       {view.clipped && (
         <span className="json-preview-meta json-preview-clipped-hint">
-          内容过大，仅展示前 {view.rendered.length} 字符（共 {jsonString.length} 字符）
+          内容过大，仅展示前 {view.rendered.length} 字符，可继续加载或复制完整内容
         </span>
+      )}
+      {prefix.clipped && charLimit < MAX_EXPANDED_CHARS && (
+        <PreviewMore
+          onClick={() => {
+            setExpanded(true);
+            setCharLimit((limit) => Math.min(MAX_EXPANDED_CHARS, limit + PREVIEW_CHAR_STEP));
+          }}
+        >
+          加载更多内容
+        </PreviewMore>
       )}
       {canToggle && (
         <button type="button" className="tool-output-toggle" onClick={() => setExpanded((v) => !v)}>

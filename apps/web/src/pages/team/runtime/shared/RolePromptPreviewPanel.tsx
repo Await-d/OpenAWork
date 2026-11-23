@@ -20,9 +20,11 @@
  */
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { createPortal } from 'react-dom';
 import MarkdownMessageContent from '../../../../components/chat/markdown/markdown-message-content.js';
 import { tryFormatJson } from '../../../../utils/format-json.js';
+import { copyTextToClipboard } from '../../../../components/layout/file-tree/file-tree-actions.js';
 import {
   createTeamPhaseAClient,
   type InstructionStackPreview,
@@ -501,10 +503,7 @@ function CopyButton({ text }: { text: string }) {
       type="button"
       style={ACCENT_BTN_STYLE}
       onClick={() => {
-        const write = navigator.clipboard?.writeText;
-        if (!write) return;
-        void write
-          .call(navigator.clipboard, text)
+        void copyTextToClipboard(text)
           .then(() => {
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1500);
@@ -563,6 +562,9 @@ function EditView({
         value={draft}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
+          if (isImeComposingKeyboardEvent(e)) {
+            return;
+          }
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             e.preventDefault();
             if (canSave) onSave();

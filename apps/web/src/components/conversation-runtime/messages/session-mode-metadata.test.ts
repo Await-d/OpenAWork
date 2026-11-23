@@ -7,6 +7,7 @@
  * - 解析抛错（含 JSON `null`）：返回带 `dialogueMode: 'clarify'` 的兜底对象。
  */
 import { describe, expect, it } from 'vitest';
+import { UNKNOWN_SESSION_ORIGIN } from '../../../utils/session/session-origin.js';
 import type { ReasoningEffort } from './message-model.js';
 import { parseSessionModeMetadata } from './session-mode-metadata.js';
 
@@ -15,6 +16,7 @@ describe('parseSessionModeMetadata', () => {
     const result = parseSessionModeMetadata(undefined);
 
     expect(result).toEqual({
+      origin: UNKNOWN_SESSION_ORIGIN,
       permissionMode: 'ask',
       yoloMode: false,
       webSearchEnabled: true,
@@ -43,6 +45,7 @@ describe('parseSessionModeMetadata', () => {
     expect(result).toEqual({
       agentId: 'sisyphus-junior',
       dialogueMode: 'coding',
+      origin: UNKNOWN_SESSION_ORIGIN,
       permissionMode: 'yolo',
       yoloMode: true,
       webSearchEnabled: false,
@@ -52,6 +55,28 @@ describe('parseSessionModeMetadata', () => {
       providerId: 'openai',
       modelId: 'gpt-5',
     });
+  });
+
+  it('水合会话来源：渠道 / 定时任务在恢复路径即可判定（顶栏据此只读）', () => {
+    const channel = parseSessionModeMetadata(
+      JSON.stringify({
+        source: 'channel',
+        channel: { id: 'p1', type: 'feishu', name: '飞书研发群' },
+        // 渠道会话 metadata 不带 dialogueMode。
+      }),
+    );
+    expect(channel.origin).toEqual({ source: 'channel', channelLabel: '飞书研发群' });
+    // 关键：来源会话不因缺失 dialogueMode 而在恢复路径被塞进一个假模式。
+    expect(channel.dialogueMode).toBeUndefined();
+
+    expect(parseSessionModeMetadata(JSON.stringify({ source: 'cron' })).origin).toEqual({
+      source: 'cron',
+      channelLabel: null,
+    });
+    // 普通会话不得被误判为来源托管。
+    expect(parseSessionModeMetadata(JSON.stringify({ dialogueMode: 'coding' })).origin).toEqual(
+      UNKNOWN_SESSION_ORIGIN,
+    );
   });
 
   it('合法 JSON 缺字段时回落默认值，dialogueMode 保持 undefined', () => {
@@ -123,6 +148,7 @@ describe('parseSessionModeMetadata', () => {
     expect(result).toEqual({
       agentId: undefined,
       dialogueMode: 'clarify',
+      origin: UNKNOWN_SESSION_ORIGIN,
       permissionMode: 'ask',
       yoloMode: false,
       webSearchEnabled: true,

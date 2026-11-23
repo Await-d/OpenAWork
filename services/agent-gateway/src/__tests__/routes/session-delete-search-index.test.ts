@@ -10,7 +10,7 @@
  */
 
 import Fastify, { type FastifyInstance } from 'fastify';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -173,6 +173,7 @@ beforeEach(() => {
   // event_log / event_sequences 没有指向 sessions 的外键，也不会被上面的清理带走。
   dbModule.sqliteRun('DELETE FROM event_log', []);
   dbModule.sqliteRun('DELETE FROM event_sequences', []);
+  dbModule.sqliteRun('DELETE FROM session_deletion_cleanup', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
   seedUser();
@@ -184,6 +185,142 @@ afterAll(async () => {
 });
 
 describe('session deletion keeps the search index consistent', () => {
+  it('keeps the session and its stream reservation when stopping exceeds the deadline', async () => {
+    const { clearInFlightStreamRequest, getInFlightStreamRequest, reserveInFlightStreamRequest } =
+      await import('../../routes/stream-cancellation.js');
+    const sessionId = 'delete-slow-stream';
+    seedSession(sessionId);
+    const app = await buildApp();
+    const key = { sessionId, clientRequestId: 'active', userId: USER_ID };
+    const stream = reserveInFlightStreamRequest(key);
+    try {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/sessions/${sessionId}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ blockReason: 'stream', sessionId });
+      expect(stream.abortController.signal.aborted).toBe(true);
+      expect(getInFlightStreamRequest(sessionId, key.clientRequestId)?.execution).toBe(
+        stream.execution,
+      );
+      expect(dbModule.sqliteGet('SELECT id FROM sessions WHERE id = ?', [sessionId])).toBeDefined();
+      expect(dbModule.sqliteGet('SELECT id FROM session_deletion_cleanup')).toBeUndefined();
+    } finally {
+      stream.resolve({ statusCode: 200 });
+      clearInFlightStreamRequest({ ...key, execution: stream.execution });
+      await app.close();
+    }
+  });
+
+  it('responds while disk cleanup is pending and resumes a failed job on startup', async () => {
+    const { getGatewayArtifactManager } = await import('../../infra/artifact-manager.js');
+    const sessionId = 'delete-with-assets';
+    seedSession(sessionId);
+    seedSession('delete-with-assets-survivor');
+    const manager = getGatewayArtifactManager();
+    const path = join(workspaceRoot, 'delayed-cleanup.txt');
+    writeFileSync(path, 'temporary attachment');
+    const artifact = manager.add({ sessionId, path, name: 'attachment.txt', type: 'document' });
+    let failCleanup: (error: Error) => void = () => undefined;
+    const cleanup = vi.spyOn(manager, 'removeForDeletedSessions').mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          failCleanup = reject;
+        }),
+    );
+    const app = await buildApp();
+    try {
+      const deleted = await app.inject({
+        method: 'DELETE',
+        url: `/sessions/${sessionId}`,
+        headers: { authorization: bearer(app) },
+      });
+      expect(deleted.statusCode).toBe(200);
+      expect(deleted.json()).toEqual({ ok: true, deletedSessionIds: [sessionId] });
+      await vi.waitFor(() => expect(cleanup).toHaveBeenCalledWith(new Set([sessionId])));
+      const list = await app.inject({
+        method: 'GET',
+        url: '/sessions',
+        headers: { authorization: bearer(app) },
+      });
+      expect(list.statusCode).toBe(200);
+      expect(list.body).toContain('delete-with-assets-survivor');
+      expect(
+        dbModule.sqliteGet('SELECT id FROM sessions WHERE id = ?', [sessionId]),
+      ).toBeUndefined();
+      expect(existsSync(path)).toBe(true);
+      failCleanup(new Error('模拟一次磁盘清理失败'));
+      await vi.waitFor(() =>
+        expect(dbModule.sqliteGet('SELECT attempts FROM session_deletion_cleanup')).toEqual({
+          attempts: 1,
+        }),
+      );
+    } finally {
+      failCleanup(new Error('结束清理测试'));
+      await app.close();
+      cleanup.mockRestore();
+    }
+
+    dbModule.sqliteRun('UPDATE session_deletion_cleanup SET next_attempt_at = 0');
+    const restartedApp = await buildApp();
+    try {
+      await vi.waitFor(() =>
+        expect(dbModule.sqliteGet('SELECT id FROM session_deletion_cleanup')).toBeUndefined(),
+      );
+      expect(existsSync(path)).toBe(false);
+      expect(manager.get(artifact.id)).toBeUndefined();
+    } finally {
+      await restartedApp.close();
+    }
+  });
+
+  it('deletes mixed descendants without crossing owners or parsing unrelated malformed metadata', async () => {
+    seedSession('mixed-root');
+    seedSession('mixed-team', { teamParentSessionId: 'mixed-root' });
+    seedSession('mixed-grandchild', { metadata: { parentSessionId: 'mixed-team' } });
+    seedSession('mixed-malformed', { teamParentSessionId: 'mixed-root' });
+    dbModule.sqliteRun("UPDATE sessions SET metadata_json = '{' WHERE id = 'mixed-malformed'", []);
+    dbModule.sqliteRun(
+      "INSERT INTO users (id, email, password_hash) VALUES ('other', 'other@example.com', 'x')",
+      [],
+    );
+    dbModule.sqliteRun(
+      `INSERT INTO sessions (id, user_id, title, metadata_json, team_parent_session_id)
+       VALUES ('other-child', 'other', 'session', '{"parentSessionId":"mixed-root"}', 'mixed-root')`,
+      [],
+    );
+    // The migration must make JSON parent lookup indexable without rejecting corrupt legacy rows.
+    const plan = dbModule.sqliteAll<{ detail: string }>(
+      `EXPLAIN QUERY PLAN SELECT id FROM sessions
+       WHERE user_id = ? AND (CASE WHEN json_valid(metadata_json)
+         THEN json_extract(metadata_json, '$.parentSessionId') END) = ?`,
+      [USER_ID, 'mixed-root'],
+    );
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/sessions/mixed-root',
+        headers: { authorization: bearer(app) },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().deletedSessionIds.sort()).toEqual([
+        'mixed-grandchild',
+        'mixed-malformed',
+        'mixed-root',
+        'mixed-team',
+      ]);
+      expect(
+        dbModule.sqliteGet('SELECT id FROM sessions WHERE id = ?', ['other-child']),
+      ).toBeDefined();
+      expect(plan.some(({ detail }) => detail.includes('idx_sessions_metadata_parent'))).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('DELETE /sessions/:sessionId removes the index rows of the deleted session only', async () => {
     seedSession('sess-delete-root');
     seedSession('sess-delete-survivor');

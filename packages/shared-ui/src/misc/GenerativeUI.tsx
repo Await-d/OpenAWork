@@ -346,6 +346,20 @@ function UICompaction({ payload }: { payload: Record<string, unknown> }) {
         gap: 8,
         minWidth: 0,
         maxWidth: '100%',
+        /*
+         * 压缩提示是一条**胶囊**，不是横贯整行的横条。
+         *
+         * 此前只有 `maxWidth: '100%'`：块级 div 的宽度默认撑满父容器，于是
+         * `justifyContent: 'center'` 只把文字居中在这条长条里——整行被一条
+         * 通栏色块占满，与相邻消息的视觉节奏完全不一致（实测 1440px 下卡片
+         * 宽度 868px = 内容区全宽）。
+         *
+         * `width: 'fit-content'` 让卡片收缩到文字宽度，`margin: '0 auto'`
+         * 再把它放回行的对称轴上，这才是「胶囊」应有的形态。
+         * 长文本仍受 `maxWidth: 100%` 约束，不会溢出。
+         */
+        width: 'fit-content',
+        margin: '0 auto',
         color: toneColor,
         fontSize: 11,
         lineHeight: 1.4,

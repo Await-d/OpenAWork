@@ -3,7 +3,6 @@ import { compareOrderedIds } from '../../../../components/conversation-runtime/m
 import {
   parseAssistantEventContent,
   readAssistantTracePayload,
-  type ChatMessagePart,
 } from '../../../../components/conversation-runtime/messages/support.js';
 
 /** Matches the `msg_` ordered-id prefix (mirrors `ordered-id.ts`). */
@@ -52,26 +51,6 @@ function toComparableTimestamp(value: number | string | undefined): number | nul
   return null;
 }
 
-function hasSharedTracePart(
-  left: ChatMessagePart[] | undefined,
-  right: ChatMessagePart[] | undefined,
-) {
-  if (!left || !right || left.length === 0 || right.length === 0) return false;
-  const rightIds = new Set(right.map((part) => part.id));
-  return left.some((part) => rightIds.has(part.id));
-}
-
-function hasSharedToolCall(
-  left: ChatMessagePart[] | undefined,
-  right: ChatMessagePart[] | undefined,
-) {
-  if (!left || !right) return false;
-  const rightToolIds = new Set(
-    right.filter((part) => part.type === 'tool').map((part) => part.toolCallId),
-  );
-  return left.some((part) => part.type === 'tool' && rightToolIds.has(part.toolCallId));
-}
-
 function hasSameVisibleText(left: string, right: string): boolean {
   const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
   const a = normalize(left);
@@ -113,7 +92,16 @@ export function mergeStreamingEntryIntoHistoricalEntries(
 
   const lastUserEntryIndex = findLastUserEntryIndex(historicalRenderedMessageEntries);
   const streamingMessage = streamingRenderedMessageEntry.message;
-  const exactMatchIndices = historicalRenderedMessageEntries.flatMap((entry, index) => {
+  const livePartIds = new Set<string>();
+  const liveToolCallIds = new Set<string>();
+  for (const part of streamingMessage.parts ?? []) {
+    livePartIds.add(part.id);
+    if (part.type === 'tool') liveToolCallIds.add(part.toolCallId);
+  }
+
+  // A persisted copy may only share part/tool IDs while another shares the
+  // request/message ID. Collect all direct identities before replacing them.
+  const strongMatchIndices = historicalRenderedMessageEntries.flatMap((entry, index) => {
     const existingMessage = entry.message;
     const matchesMessageId =
       activeStreamMessageId !== null && existingMessage.id === activeStreamMessageId;
@@ -122,37 +110,30 @@ export function mergeStreamingEntryIntoHistoricalEntries(
       activeStreamClientRequestId !== null &&
       existingMessage.role === 'assistant' &&
       existingMessage.clientRequestId === activeStreamClientRequestId;
-    return matchesMessageId || matchesRequestId ? [index] : [];
+    const matchesTraceIdentity =
+      streamingMessage.role === 'assistant' &&
+      !(
+        existingMessage.clientRequestId &&
+        (activeStreamClientRequestId ?? streamingMessage.clientRequestId) &&
+        existingMessage.clientRequestId !==
+          (activeStreamClientRequestId ?? streamingMessage.clientRequestId)
+      ) &&
+      existingMessage.role === 'assistant' &&
+      existingMessage.parts?.some(
+        (part) =>
+          livePartIds.has(part.id) ||
+          (part.type === 'tool' && liveToolCallIds.has(part.toolCallId)),
+      );
+    return matchesMessageId || matchesRequestId || matchesTraceIdentity ? [index] : [];
   });
 
-  if (exactMatchIndices.length > 0) {
-    const firstMatchIndex = exactMatchIndices[0]!;
-    const matchingIndices = new Set(exactMatchIndices);
+  if (strongMatchIndices.length > 0) {
+    const firstMatchIndex = strongMatchIndices[0]!;
+    const matchingIndices = new Set(strongMatchIndices);
     return historicalRenderedMessageEntries.flatMap((entry, index) => {
       if (index === firstMatchIndex) {
         return [streamingRenderedMessageEntry];
       }
-      return matchingIndices.has(index) ? [] : [entry];
-    });
-  }
-
-  // The gateway may persist the round under a new message ID before the
-  // local streaming entry is committed. Shared part/tool IDs are a stronger
-  // identity signal than timestamp ordering; otherwise the same assistant
-  // response is rendered once from history and once from the live overlay.
-  const traceMatchIndices = historicalRenderedMessageEntries.flatMap((entry, index) => {
-    const message = entry.message;
-    if (message.role !== 'assistant') return [];
-    return hasSharedTracePart(message.parts, streamingMessage.parts) ||
-      hasSharedToolCall(message.parts, streamingMessage.parts)
-      ? [index]
-      : [];
-  });
-  if (traceMatchIndices.length > 0) {
-    const firstMatchIndex = traceMatchIndices[0]!;
-    const matchingIndices = new Set(traceMatchIndices);
-    return historicalRenderedMessageEntries.flatMap((entry, index) => {
-      if (index === firstMatchIndex) return [streamingRenderedMessageEntry];
       return matchingIndices.has(index) ? [] : [entry];
     });
   }
@@ -175,6 +156,7 @@ export function mergeStreamingEntryIntoHistoricalEntries(
       const isEventCard = parseAssistantEventContent(existing.content) !== null;
       if (!isEventCard) assistantCandidates += 1;
       if (
+        !isEventCard &&
         index > lastUserEntryIndex &&
         hasSameVisibleText(
           visibleAssistantText(existing),

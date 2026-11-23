@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from 'react';
+import { useSubagentProgress } from '../../subagent-progress.js';
 import {
   ToolKindIcon,
   resolveSubagentSessionIdFromToolOutput,
@@ -196,6 +197,8 @@ function resolveTaskChildSessionId(input: {
     input.runtimeSnapshot?.sessionId,
     input.taskMetaOutputSessionId,
     input.taskMetaRequestedSessionId,
+    readNonEmptyString(input.input['session_id']),
+    readNonEmptyString(input.input['sessionId']),
     readNonEmptyString(asRecord(input.output)?.['sessionId']),
     resolveSubagentSessionIdFromToolOutput(input.output),
   ];
@@ -353,6 +356,23 @@ function TaskInlineShell({
 }
 
 export function TaskToolInline(props: TaskToolInlineProps) {
+  const progress = useSubagentProgress();
+  const childSessionId = resolveTaskChildSessionId({
+    input: props.input,
+    output: props.output,
+    runtimeSnapshot: props.runtimeSnapshot,
+  });
+  if (
+    progress &&
+    childSessionId &&
+    progress.knownIds.has(childSessionId) &&
+    !progress.visibleIds.has(childSessionId)
+  )
+    return null;
+  return <TaskToolInlineContent {...props} />;
+}
+
+function TaskToolInlineContent(props: TaskToolInlineProps) {
   const displayData = resolveToolCallCardDisplayData({
     toolCallId: props.toolCallId,
     toolName: props.toolName,

@@ -64,6 +64,8 @@ export function TitlebarTab({
       role="tab"
       aria-selected={active}
       draggable
+      // 供激活项自动入视（useScrollActiveTitlebarTab）与测试按 id 定位。
+      data-tab-id={tab.id}
       data-active={active ? 'true' : 'false'}
       data-menu-open={menuOpen ? 'true' : 'false'}
       className="titlebar-tab-strip__tab"

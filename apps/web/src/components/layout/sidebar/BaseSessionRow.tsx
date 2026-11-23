@@ -28,6 +28,7 @@ import React, {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import './BaseSessionRow.css';
 
 /** 触屏长按判定：按住 500ms 且位移不超过 8px 视为长按。 */
@@ -420,6 +421,7 @@ export function BaseSessionRow({
               value={renameValue ?? ''}
               onChange={(event) => onRenameChange?.(event.target.value)}
               onKeyDown={(event) => {
+                if (isImeComposingKeyboardEvent(event)) return;
                 event.stopPropagation();
                 if (event.key === 'Enter' || event.key === 'Escape') {
                   onRenameCommit?.(sessionId);

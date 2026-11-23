@@ -26,10 +26,12 @@ import {
   type PromptSnippetGroup,
   type PromptSnippetVersion,
 } from '@openAwork/web-client';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import {
   getUserVisibleErrorMessage,
   isAbortLikeError,
 } from '../../../utils/errors/user-visible-error.js';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 import { PromptSnippetsVersionHistory } from './PromptSnippetsVersionHistory.js';
 
 function iconStroke(color = 'currentColor') {
@@ -546,7 +548,7 @@ export function PromptSnippetsPanel({
       setActionError,
       setPendingAction,
       run: async () => {
-        await navigator.clipboard.writeText(text);
+        await copyTextToClipboard(text);
         setCopiedId(id);
         if (copiedResetTimerRef.current !== null) {
           window.clearTimeout(copiedResetTimerRef.current);
@@ -1007,6 +1009,7 @@ export function PromptSnippetsPanel({
                     placeholder="分组名称"
                     autoFocus
                     onKeyDown={(e) => {
+                      if (isImeComposingKeyboardEvent(e)) return;
                       if (e.key === 'Enter') void handleCreateGroup();
                     }}
                     style={inputStyle}
@@ -1039,6 +1042,7 @@ export function PromptSnippetsPanel({
                     placeholder="分组名称"
                     autoFocus
                     onKeyDown={(e) => {
+                      if (isImeComposingKeyboardEvent(e)) return;
                       if (e.key === 'Enter') void handleUpdateGroup();
                     }}
                     style={inputStyle}

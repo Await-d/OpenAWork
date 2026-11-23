@@ -247,7 +247,7 @@ describe('createSettingsClient mutation error handling', () => {
         ok: true,
         json: async () => ({
           servers: [],
-          builtinServers: [{ id: 'omo', builtinKind: 'adapter', source: 'system' }],
+          builtinServers: [{ id: 'lsp', builtinKind: 'virtual', source: 'system' }],
         }),
       } as unknown as Response;
     }) as typeof fetch;
@@ -257,7 +257,7 @@ describe('createSettingsClient mutation error handling', () => {
     const result = await client.listMcpServers('token-1');
 
     expect(result).toMatchObject({
-      builtinServers: [{ id: 'omo', builtinKind: 'adapter', source: 'system' }],
+      builtinServers: [{ id: 'lsp', builtinKind: 'virtual', source: 'system' }],
     });
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:3000/settings/mcp-servers',
@@ -277,14 +277,14 @@ describe('createSettingsClient mutation error handling', () => {
     await client.putMcpServers('token-1', {
       servers: [
         {
-          id: 'omo',
-          name: 'omo',
+          id: 'lsp',
+          name: 'lsp',
           transport: 'stdio',
           builtin: true,
-          builtinKind: 'adapter',
+          builtinKind: 'virtual',
           source: 'system',
           enabled: false,
-          disabledTools: ['omo_list_agents'],
+          disabledTools: ['lsp_rename'],
         },
       ],
     });
@@ -295,14 +295,14 @@ describe('createSettingsClient mutation error handling', () => {
         body: JSON.stringify({
           servers: [
             {
-              id: 'omo',
-              name: 'omo',
+              id: 'lsp',
+              name: 'lsp',
               transport: 'stdio',
               builtin: true,
-              builtinKind: 'adapter',
+              builtinKind: 'virtual',
               source: 'system',
               enabled: false,
-              disabledTools: ['omo_list_agents'],
+              disabledTools: ['lsp_rename'],
             },
           ],
         }),

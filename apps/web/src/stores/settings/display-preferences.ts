@@ -56,6 +56,16 @@ export type ToolExpandOverrides = Record<ToolExpandCategory, boolean>;
 export type MessageLayoutMode = 'unified' | 'split';
 
 /**
+ * 消息统计信息（meta 行）的展示范围。
+ * - `latest`：仅最新一条助手消息展示统计信息，历史消息默认不显示（默认）。
+ * - `all`：每条助手消息都展示统计信息。
+ *
+ * 注意：无论取哪个值，异常终态（错误 / 已停止 / 等待权限等）与「修改 N 文件」
+ * 始终保留展示——它们是诊断信息，隐藏会让用户看不出对话为何中断。
+ */
+export type MetaLineScope = 'latest' | 'all';
+
+/**
  * 将工具名映射到折叠类别，用于按类别控制工具调用的默认展开/折叠行为。
  */
 export function classifyToolName(toolName: string): ToolExpandCategory {
@@ -150,6 +160,10 @@ export interface DisplayPreferencesStore {
   showMetaLine: boolean;
   setShowMetaLine: (v: boolean) => void;
 
+  /** 统计信息的展示范围：仅最新一条 / 全部消息。 */
+  metaLineScope: MetaLineScope;
+  setMetaLineScope: (v: MetaLineScope) => void;
+
   // ── 消息布局 ──────────────────────────────────────────────
 
   messageLayout: MessageLayoutMode;
@@ -237,6 +251,7 @@ type DisplayPreferenceValues = Omit<
   | 'setShowRequestIndex'
   | 'setShowToolCount'
   | 'setShowMetaLine'
+  | 'setMetaLineScope'
   | 'setMessageLayout'
   | 'setShowReasoningBlock'
   | 'setReasoningExpandedByDefault'
@@ -260,7 +275,7 @@ const DISPLAY_PREFERENCES_STORAGE_KEY = 'openAwork-display-preferences';
  * 持久化结构版本号（persist 声明与手工备份写入必须共用同一常量，
  * 两处漂移会让 migrate 在每次刷新时误判旧数据）。
  */
-const DISPLAY_PREFERENCES_STORAGE_VERSION = 8;
+const DISPLAY_PREFERENCES_STORAGE_VERSION = 9;
 
 /**
  * 工具类别折叠默认值。
@@ -291,6 +306,9 @@ const DEFAULTS: DisplayPreferenceValues = {
   showRequestIndex: true,
   showToolCount: true,
   showMetaLine: true,
+  // 默认只给最新一条消息展示统计信息：历史消息的「请求 N · $ · tokens · TPS」
+  // 长会话里会形成刷屏式噪声，需要时可在 设置 → 显示 切回「全部消息」。
+  metaLineScope: 'latest',
   messageLayout: 'unified',
   showReasoningBlock: true,
   reasoningExpandedByDefault: false,
@@ -326,6 +344,7 @@ export function pickDisplayPreferenceValues(
     showRequestIndex: state.showRequestIndex,
     showToolCount: state.showToolCount,
     showMetaLine: state.showMetaLine,
+    metaLineScope: state.metaLineScope,
     messageLayout: state.messageLayout,
     showReasoningBlock: state.showReasoningBlock,
     reasoningExpandedByDefault: state.reasoningExpandedByDefault,
@@ -416,6 +435,10 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
         set({ showMetaLine: v });
         void persistToLocalStorage();
       },
+      setMetaLineScope: (v) => {
+        set({ metaLineScope: v });
+        void persistToLocalStorage();
+      },
       setMessageLayout: (v) => {
         set({ messageLayout: v });
         void persistToLocalStorage();
@@ -489,9 +512,13 @@ export const useDisplayPreferencesStore = create<DisplayPreferencesStore>()(
       migrate: (persistedState, version) => {
         const state = persistedState as Partial<DisplayPreferenceValues> | undefined;
         if (!state) return state;
-        if (version < DISPLAY_PREFERENCES_STORAGE_VERSION) {
+        if (version < 8) {
           // v8：文件编辑 / 写入默认直接展示内容变更（对齐参考实现 opencode 的文件卡）。
           // 旧版本默认值是 false，这里一次性升级为 true；用户仍可在设置中单独关闭。
+          //
+          // 条件必须钉死在 `< 8` 而不是 `< DISPLAY_PREFERENCES_STORAGE_VERSION`：
+          // 后者会在每次提升版本号（如 v9 新增 metaLineScope）时重跑本分支，
+          // 把用户已经显式关闭的 fileEdit 又打开一次。
           return {
             ...state,
             toolExpandedOverrides: { ...state.toolExpandedOverrides, fileEdit: true },

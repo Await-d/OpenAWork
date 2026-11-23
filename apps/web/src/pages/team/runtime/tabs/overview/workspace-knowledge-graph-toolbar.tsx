@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type { GraphRoleLayer } from '../../data/build-knowledge-graph.js';
 import { workspaceKnowledgeRoleLayerFromSearchTerm } from '../../data/workspace-knowledge-key-classification.js';
 import {
@@ -106,6 +107,9 @@ export function GraphToolbar({
             value={queryDraft}
             onChange={(event) => onQueryDraftChange(event.currentTarget.value)}
             onKeyDown={(event) => {
+              if (isImeComposingKeyboardEvent(event)) {
+                return;
+              }
               if (event.key === 'Enter' && !event.nativeEvent.isComposing && !queryApplyDisabled) {
                 onApplyQuery();
               }

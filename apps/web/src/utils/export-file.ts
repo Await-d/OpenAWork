@@ -34,6 +34,10 @@ export interface ExportBlobFileOptions {
 export type ExportFileOptions =
   ExportTextFileOptions | ExportDataUrlFileOptions | ExportBlobFileOptions;
 
+export function getFileExportLabel(): '另存为' | '下载' {
+  return window.__TAURI__?.core?.invoke ? '另存为' : '下载';
+}
+
 export async function exportFile(options: ExportFileOptions): Promise<ExportFileResult> {
   const tauriInvoke = window.__TAURI__?.core?.invoke;
   if (tauriInvoke) {

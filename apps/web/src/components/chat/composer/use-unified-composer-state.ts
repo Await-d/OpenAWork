@@ -40,6 +40,7 @@ import type { DialogueMode } from '../../../pages/chat-page/mode/dialogue-mode.j
 import type { UnifiedComposerFeatures, UnifiedComposerSubmitPayload } from './UnifiedComposer.js';
 import type { ImageEditReferenceArtifact } from '../../../pages/chat-page/conversation/render/image-edit-reference-artifacts.js';
 import type { ComposerWorkspaceCatalog } from '../../../hooks/chat/useComposerWorkspaceCatalog.js';
+import { useMessageLimits } from '../../../hooks/use-message-limits.js';
 
 /**
  * 共享的空队列常量：内存队列在"不属于当前 scope"时必须复用同一引用，
@@ -258,6 +259,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     items: EMPTY_QUEUED_COMPOSER_MESSAGES,
   });
   const [streamError, setStreamError] = useState<string | null>(null);
+  const { maxChars: messageMaxChars } = useMessageLimits(gatewayUrl, token, currentUserEmail);
 
   // ─── Refs ─────────────────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -510,6 +512,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   const enqueueComposerMessage = useCallback(
     async (overrideText?: string): Promise<boolean> => {
       const queuedText = sanitizeComposerPlainText(overrideText ?? input).trim();
+      if ((overrideText ?? input).length > messageMaxChars) return false;
       const queuedItem = await enqueueComposerMessageDirect(overrideText);
       if (!queuedItem) {
         return false;
@@ -559,6 +562,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
       enqueueOnBackend,
       input,
       queuedComposerScope,
+      messageMaxChars,
       recordSubmittedInputHistory,
       setAttachedFiles,
       setAttachmentItems,
@@ -625,6 +629,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   const sendMessage = useCallback(
     async (overrideText?: string): Promise<boolean> => {
       const submittedText = overrideText ?? input;
+      if (submittedText.length > messageMaxChars) return false;
       const submittedDraftRevision = composerDraftRevisionRef.current;
       const payload: UnifiedComposerSubmitPayload = {
         text: submittedText,
@@ -669,6 +674,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     [
       input,
       attachedFiles,
+      messageMaxChars,
       attachmentItems,
       imageGenerationMode,
       imageGenerationDefaults,
@@ -826,7 +832,9 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
       );
 
     void (async () => {
-      const serverQueue = await hydrateQueueFromBackend();
+      // 把取消判定传进水合：卸载后迟到的失败不应记日志（否则会落到已拆解的组件与
+      // 即将关闭的测试 worker 上）。返回契约不变，`null` 仍走本地快照兜底。
+      const serverQueue = await hydrateQueueFromBackend(() => cancelled);
       if (cancelled) return;
 
       // null = 没问成（网关不可用 / 未登录），此时保留本地快照而不是清空队列。
@@ -889,6 +897,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
         queuedMessageId?: string;
       },
     ) => {
+      if ((overrideText ?? input).length > messageMaxChars) return false;
       const payload: UnifiedComposerSubmitPayload = {
         text: overrideText ?? input,
         files: options?.queuedFiles ?? attachedFiles,
@@ -952,6 +961,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
 
     const [nextQueuedMessage] = queuedComposerMessages;
     if (!nextQueuedMessage || nextQueuedMessage.requiresAttachmentRebind) return;
+    if (nextQueuedMessage.text.length > messageMaxChars) return;
 
     const flushScope = queuedComposerScope;
     queueFlushInFlightScopesRef.current.add(flushScope);
@@ -1057,6 +1067,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
   }, [
     canStopSession,
     claimQueueItemsOnBackend,
+    messageMaxChars,
     queuedComposerMessages,
     queuedComposerScope,
     queueFlushRetryNonce,
@@ -1117,8 +1128,12 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
 
   // ─── Queued composer previews ─────────────────────────────────────────────
   const queuedComposerPreviews = useMemo(
-    () => queuedComposerMessages.map((item) => createQueuedComposerPreview(item)),
-    [queuedComposerMessages],
+    () =>
+      queuedComposerMessages.map((item) => ({
+        ...createQueuedComposerPreview(item),
+        exceedsMessageLimit: item.text.length > messageMaxChars,
+      })),
+    [queuedComposerMessages, messageMaxChars],
   );
 
   return {
@@ -1142,6 +1157,7 @@ export function useUnifiedComposerState(opts: UseUnifiedComposerStateOptions) {
     setStreamError,
     isBrowsingInputHistory,
     submitPending,
+    messageMaxChars,
 
     // Refs
     textareaRef,

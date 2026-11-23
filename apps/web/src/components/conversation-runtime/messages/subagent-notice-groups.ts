@@ -166,7 +166,7 @@ export function mergeNoticeGroupsIntoRenderGroups(input: {
     return input.messageGroups;
   }
 
-  const sortedNotices = [...input.noticeGroups].sort((left, right) => {
+  const sortedNotices = input.noticeGroups.toSorted((left, right) => {
     if (left.createdAt !== right.createdAt) {
       return left.createdAt - right.createdAt;
     }

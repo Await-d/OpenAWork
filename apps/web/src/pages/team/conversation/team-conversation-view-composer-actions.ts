@@ -9,7 +9,7 @@
 
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import type { InputImageContent } from '@openAwork/shared';
-import { createSessionsClient, createSettingsClient } from '@openAwork/web-client';
+import { createSessionsClient } from '@openAwork/web-client';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
 import { applyRollbackReceipt } from '../../../stores/team/rollback-tombstones.js';
 import type { ChatRenderAction } from '../../../components/chat/message/chat-message-group-list.js';
@@ -271,31 +271,23 @@ export function useTeamConversationViewRetryActions(input: {
     setProvidersRefreshing(false);
   };
 
+  /**
+   * 上下文挡位（「自动压缩上下文」）写入。
+   *
+   * 挡位是**会话级**设置：写会话 metadata 的 `contextWindowOverride`，
+   * 不再改 `user_settings.providers`（那是该用户下所有会话共享的默认值——
+   * 在某个会话里改会连带所有用同一模型的会话）。
+   * 显式 `undefined` 落库为 `null`，网关按「显式 null = 清除本会话覆盖」处理，
+   * 随后回退模型级 / 模型 preset。
+   */
   const handleContextWindowOverrideChange = async (value: number | undefined) => {
-    if (!token || !state.activeProviderId || !state.activeModelId) {
-      throw new Error('当前模型尚未准备好，无法保存上下文挡位。');
+    if (!token || !state.sessionId) {
+      throw new Error('当前会话尚未准备好，无法保存上下文挡位。');
     }
-    const result = await createSettingsClient(gatewayUrl).putModelContext(token, {
-      providerId: state.activeProviderId,
-      modelId: state.activeModelId,
+    await createSessionsClient(gatewayUrl).updateMetadata(token, state.sessionId, {
       contextWindowOverride: value ?? null,
     });
-    state.setProviders((previous) =>
-      previous.map((provider) => {
-        if (provider.id !== result.providerId) return provider;
-        return {
-          ...provider,
-          defaultModels: provider.defaultModels.map((model) => {
-            if (model.id !== result.modelId) return model;
-            if (result.contextWindowOverride === null) {
-              const { contextWindowOverride: _removed, ...rest } = model;
-              return rest;
-            }
-            return { ...model, contextWindowOverride: result.contextWindowOverride };
-          }),
-        };
-      }),
-    );
+    state.setSessionContextWindowOverride(value);
   };
 
   // 找某条消息对应的「重试源」：assistant 消息 → 向上回溯到最近 user 消息。

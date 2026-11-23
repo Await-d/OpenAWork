@@ -555,8 +555,7 @@ function UsageMetricsPanel({ selectedSessionId, selectedSessionTitle }: UsageVie
         <span style={SECTION_TITLE_STYLE}>最近 {scopedRecent.length} 条调用</span>
         <div style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--fg-default)' }}>
           {scopedRecent
-            .slice()
-            .reverse()
+            .toReversed()
             .slice(0, 20)
             .map((event, idx) => (
               <div
@@ -700,8 +699,7 @@ function LayerDrilldown({ calls }: { calls: TeamUsageEvent[] }) {
       }}
     >
       {calls
-        .slice()
-        .reverse()
+        .toReversed()
         .slice(0, 12)
         .map((event, idx) => (
           <div key={`${event.timestamp}-${idx}`} style={{ display: 'flex', gap: 8 }}>

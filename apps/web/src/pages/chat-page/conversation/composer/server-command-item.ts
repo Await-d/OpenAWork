@@ -1,5 +1,5 @@
 import type { CommandDescriptor, CommandResultCard, RunEvent } from '@openAwork/shared';
-import { createCommandsClient } from '@openAwork/web-client';
+import { createCommandsClient, createRandomUuid } from '@openAwork/web-client';
 import type { SlashCommandItem } from '../../../../components/conversation-runtime/messages/support.js';
 
 interface ExecuteServerCommandParams {
@@ -127,7 +127,7 @@ export async function executeServerCommand(params: ExecuteServerCommandParams): 
   }
   params.onOpenRightPanel();
 
-  const executionId = isCompactionCommand(params.command) ? crypto.randomUUID() : undefined;
+  const executionId = isCompactionCommand(params.command) ? createRandomUuid() : undefined;
   const optimisticEvents = executionId
     ? buildOptimisticCommandEvents(params.command, sid, executionId)
     : [];

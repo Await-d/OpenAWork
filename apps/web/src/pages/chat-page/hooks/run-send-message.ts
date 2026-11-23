@@ -93,6 +93,7 @@ import type { ImageEditReferenceArtifact } from '.././conversation/render/image-
 import { shouldSendExplicitStreamModelSelection } from '.././conversation/settings/model-selection-source.js';
 import type { ModelSelectionSource } from '.././conversation/settings/model-selection-source.js';
 import { resolveChatThinkingRequest } from '.././conversation/settings/resolve-chat-thinking-request.js';
+import type { EnsuredSession } from './run-ensure-session.js';
 import type { SessionImageGenerationResponse } from '.././hooks/use-chat-image-generation.js';
 import type { DialogueMode } from '.././mode/dialogue-mode.js';
 import {
@@ -115,6 +116,7 @@ import type {
 import type { AttachmentItem } from '@openAwork/shared-ui';
 import {
   createComposerQueueClient,
+  createMessageLimitsClient,
   createPendingPermissionRequestSnapshot,
   createClientErrorReporter,
   dedupePendingPermissionRequests,
@@ -160,7 +162,7 @@ export interface SendMessageDeps {
   readonly effectiveAgentId: string | undefined;
   readonly effectiveModelId: string;
   readonly effectiveProviderId: string;
-  readonly ensureSession: () => Promise<string>;
+  readonly ensureSession: () => Promise<EnsuredSession>;
   readonly gatewayUrl: string;
   readonly generateImageForSession: (params: {
     inputArtifacts?:
@@ -209,9 +211,8 @@ export interface SendMessageDeps {
   readonly setActiveStreamFirstTokenLatencyMs: Dispatch<SetStateAction<number | null>>;
   readonly setActiveStreamRoundStartedAt: Dispatch<SetStateAction<number | null>>;
   readonly setActiveStreamStartedAt: Dispatch<SetStateAction<number | null>>;
-  readonly setBrowserPreviewUrl: (url: string | null) => void;
+  readonly openBrowserPreview: (url: string, mode?: 'newTab' | 'currentTab') => void;
   readonly setChildSessions: Dispatch<SetStateAction<Session[]>>;
-  readonly setEditorMode: (v: boolean) => void;
   readonly setHasPendingFollowContent: Dispatch<SetStateAction<boolean>>;
   readonly setInput: Dispatch<SetStateAction<string>>;
   readonly setLatestGeneratedImageResult: Dispatch<
@@ -311,9 +312,8 @@ export async function runSendMessage(
     setActiveStreamFirstTokenLatencyMs,
     setActiveStreamRoundStartedAt,
     setActiveStreamStartedAt,
-    setBrowserPreviewUrl,
+    openBrowserPreview,
     setChildSessions,
-    setEditorMode,
     setHasPendingFollowContent,
     setInput,
     setLatestGeneratedImageResult,
@@ -406,15 +406,7 @@ export async function runSendMessage(
         }
         return arg;
       })();
-      // 派发 BuiltInBrowser 监听的事件,新建 tab 并跳转。
-      window.dispatchEvent(
-        new CustomEvent('openawork:browser:open-url', {
-          detail: { url: normalizedUrl, mode: 'newTab' },
-        }),
-      );
-      // 同时激活浏览器面板:存到 store + 切到 browser tab
-      setBrowserPreviewUrl(normalizedUrl);
-      setEditorMode(true);
+      openBrowserPreview(normalizedUrl, 'newTab');
       toast(`已在浏览器中打开 ${normalizedUrl}`, 'success');
       cleanupConsumedQueuedMessage({
         gatewayUrl,
@@ -437,7 +429,7 @@ export async function runSendMessage(
 
     let sid: string;
     try {
-      sid = options?.forcedSessionId ?? (await ensureSession());
+      sid = options?.forcedSessionId ?? (await ensureSession()).sessionId;
     } catch (err) {
       logger.error('session create failed', err);
       if (activeSessionRef.current === requestOriginSessionId) {
@@ -560,9 +552,11 @@ export async function runSendMessage(
     return true;
   }
 
-  let sid: string;
+  let ensuredSession: EnsuredSession;
   try {
-    sid = options?.forcedSessionId ?? (await ensureSession());
+    ensuredSession = options?.forcedSessionId
+      ? { sessionId: options.forcedSessionId }
+      : await ensureSession();
   } catch (err) {
     logger.error('session create failed', err);
     if (activeSessionRef.current === requestOriginSessionId) {
@@ -572,18 +566,36 @@ export async function runSendMessage(
     return false;
   }
 
+  const { sessionId: sid, newSessionModel } = ensuredSession;
   if (activeSessionRef.current !== sid) {
     return false;
   }
 
-  const preparedStandardInput = await prepareStandardChatSendInput({
-    ...(options?.existingInputParts ? { existingInputParts: options.existingInputParts } : {}),
-    files: effectiveFiles,
-    gatewayUrl,
-    sessionId: sid,
-    text,
-    token,
-  });
+  let preparedStandardInput: Awaited<ReturnType<typeof prepareStandardChatSendInput>>;
+  try {
+    preparedStandardInput = await prepareStandardChatSendInput({
+      ...(options?.existingInputParts ? { existingInputParts: options.existingInputParts } : {}),
+      files: effectiveFiles,
+      gatewayUrl,
+      sessionId: sid,
+      text,
+      token,
+    });
+    const limits = await createMessageLimitsClient(gatewayUrl).read(token ?? '');
+    if (preparedStandardInput.text.length > limits.maxChars) {
+      const message = `消息（含附件摘要）超过当前 ${limits.maxChars.toLocaleString()} 字符上限，请缩短文本或移除附件后重试。内容已保留。`;
+      setStreamError(message);
+      toast(message, 'warning');
+      return false;
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : '请求失败';
+    const message = `发送前准备或读取消息字符上限失败：${detail}。内容已保留，请重试。`;
+    setStreamError(message);
+    toast(message, 'error');
+    return false;
+  }
+  if (activeSessionRef.current !== sid || streamingRef.current) return false;
   text = preparedStandardInput.text;
   const { requestInputParts, localRequestInputParts } = preparedStandardInput;
 
@@ -632,11 +644,15 @@ export async function runSendMessage(
   const toolCallIds = new Set<string>();
   const liveToolCalls = new Map<string, LiveToolCallState>();
   let streamTerminalized = false;
-  const requestProviderId = effectiveProviderId || undefined;
-  const requestModelLabel = (activeModelOption?.label ?? effectiveModelId) || undefined;
+  // 首轮沿用建会话时的选型，不再读取点击发送时可能尚未加载默认值的快照。
+  const requestModelId = newSessionModel?.modelId ?? effectiveModelId;
+  const requestProviderId = (newSessionModel?.providerId ?? effectiveProviderId) || undefined;
+  const requestModelLabel = newSessionModel
+    ? newSessionModel.modelLabel || requestModelId || undefined
+    : (activeModelOption?.label ?? requestModelId) || undefined;
   const shouldSendExplicitSelection = shouldSendExplicitStreamModelSelection(
     sessionModelSelectionSourceRef.current,
-    { sessionModesHydrated, effectiveModelId },
+    { sessionModesHydrated, effectiveModelId: requestModelId },
   );
   const requestAgentId = effectiveAgentId || undefined;
 
@@ -830,22 +846,23 @@ export async function runSendMessage(
 
   setRightPanelState((prev) => startChatRightPanelRun(prev, text));
 
-  const resolvedThinkingRequest = resolveChatThinkingRequest({
-    providerType: activeProvider?.type,
-    modelId: activeModelOption?.id ?? effectiveModelId,
-    declaredSupportsThinking: activeModelOption?.supportsThinking === true,
-    thinkingEnabled,
-    reasoningEffort,
-  });
+  const resolvedThinkingRequest =
+    newSessionModel?.thinkingRequest ??
+    resolveChatThinkingRequest({
+      providerType: activeProvider?.type,
+      modelId: activeModelOption?.id ?? effectiveModelId,
+      declaredSupportsThinking: activeModelOption?.supportsThinking === true,
+      thinkingEnabled,
+      reasoningEffort,
+      reasoningOptions: activeModelOption?.reasoningOptions,
+    });
 
   client.stream(sid, requestText, {
     agentId: effectiveAgentId,
     dialogueMode,
     displayMessage: displayMessageForStream,
-    model: shouldSendExplicitSelection ? effectiveModelId || 'default' : 'default',
-    ...(shouldSendExplicitSelection && effectiveProviderId
-      ? { providerId: effectiveProviderId }
-      : {}),
+    model: shouldSendExplicitSelection ? requestModelId || 'default' : 'default',
+    ...(shouldSendExplicitSelection && requestProviderId ? { providerId: requestProviderId } : {}),
     thinkingEnabled: resolvedThinkingRequest.thinkingEnabled,
     reasoningEffort: resolvedThinkingRequest.reasoningEffort,
     webSearchEnabled,
@@ -969,9 +986,7 @@ export async function runSendMessage(
             devServerDetectedTerminalIdsRef.current.add(terminalEvent.terminalId);
           }
           if (detected.detectedUrl) {
-            setBrowserPreviewUrl(detected.detectedUrl);
-            // Open the editor pane with browser preview instead of right panel
-            setEditorMode(true);
+            openBrowserPreview(detected.detectedUrl, 'currentTab');
           }
         }
       }
@@ -1241,6 +1256,8 @@ export async function runSendMessage(
       // question_asked already called resetStreamState(), so an unexpected onDone
       // would create a duplicate assistant message with a fresh ID. Bail out.
       if (pausedForQuestion) {
+        streamingRef.current = false;
+        setStreaming(false);
         requestSessionListRefresh();
         return;
       }
@@ -1464,5 +1481,15 @@ export async function runSendMessage(
     },
   });
   streamClientRequestId = client.getActiveStreamClientRequestId();
+  const clientRequestId = streamClientRequestId;
+  if (clientRequestId) {
+    setMessages((previous) =>
+      previous.map((msg) =>
+        msg.id === userMessageId && msg.role === 'user' && msg.clientRequestId !== clientRequestId
+          ? { ...msg, clientRequestId }
+          : msg,
+      ),
+    );
+  }
   return true;
 }

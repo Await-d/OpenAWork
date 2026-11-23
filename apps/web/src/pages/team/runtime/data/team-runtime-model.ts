@@ -273,9 +273,7 @@ export function buildWorkspaceOverviewLines(input: {
 export function findLatestAssistantMessage(
   detail: SharedSessionDetailRecord | null,
 ): string | null {
-  const message = [...(detail?.session.messages ?? [])]
-    .reverse()
-    .find((entry) => entry.role === 'assistant');
+  const message = (detail?.session.messages ?? []).findLast((entry) => entry.role === 'assistant');
   if (!message) {
     return null;
   }
@@ -374,7 +372,7 @@ export function buildWorkspaceOutputCards(input: {
     : [];
 
   const sortedSharedSessions = selectedSessionId
-    ? [...input.sharedSessions].sort((left, right) => {
+    ? input.sharedSessions.toSorted((left, right) => {
         if (left.sessionId === selectedSessionId) return -1;
         if (right.sessionId === selectedSessionId) return 1;
         return 0;

@@ -20,6 +20,7 @@
  * Hover：微妙浮起 + 轻阴影。
  */
 
+import { formatServerDateTime } from '@openAwork/shared';
 import React, { type CSSProperties, type MouseEvent, useMemo } from 'react';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import {
@@ -580,9 +581,7 @@ export function SessionCard({
       sessionId={session.id}
       title={session.title}
       timeLabel={formatRelativeShort(session.updatedAt)}
-      timeTitle={
-        session.updatedAt ? new Date(session.updatedAt).toLocaleString('zh-CN') : undefined
-      }
+      timeTitle={session.updatedAt ? formatServerDateTime(session.updatedAt) : undefined}
       active={active}
       hovered={hovered}
       icon={iconNode}

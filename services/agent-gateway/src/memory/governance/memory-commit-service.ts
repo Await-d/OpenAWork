@@ -9,7 +9,12 @@ import type {
   MemoryScope,
   UpdateMemoryInput,
 } from '@openAwork/agent-core';
-import { isProposalExpired, memoryProposalPayloadFingerprint } from '@openAwork/agent-core';
+import {
+  isProposalExpired,
+  memoryProposalPayloadFingerprint,
+  memoryScopeKey,
+  detectExactDuplicateGroups,
+} from '@openAwork/agent-core';
 import { sqliteGet, sqliteRun, sqliteRunWithChanges, sqliteTransaction } from '../../infra/db.js';
 import { scanMemoryWriteContent } from '../memory-security-scanner.js';
 import { getMemoryRuleByName } from './memory-rule-store.js';
@@ -205,7 +210,13 @@ export function commitMemoryProposal(input: {
       return commitFailure('提议已过期，需重新确认');
     }
 
-    const activePayload = input.overridePayload ?? proposal.payload;
+    const activePayload = input.overridePayload
+      ? {
+          ...input.overridePayload,
+          ...(proposal.payload.dependencies ? { dependencies: proposal.payload.dependencies } : {}),
+          ...(proposal.payload.mergeIntoId ? { mergeIntoId: proposal.payload.mergeIntoId } : {}),
+        }
+      : proposal.payload;
     if (proposal.action === 'rule') {
       return commitRuleProposal(input, proposal, activePayload, nowIso);
     }
@@ -218,16 +229,7 @@ export function commitMemoryProposal(input: {
       return commitFailure(payloadProblem);
     }
 
-    // 「修改后保存」：用户改的是新内容，必须重算 digest 并落回，确认的才是新内容。
-    if (input.overridePayload) {
-      const digest = computeMemoryProposalDigest(input.overridePayload);
-      sqliteRunWithChanges(
-        `UPDATE memory_proposals
-         SET payload_json = ?, payload_digest = ?, revision = revision + 1
-         WHERE id = ? AND status = 'pending'`,
-        [JSON.stringify(input.overridePayload), digest, input.proposalId],
-      );
-    } else if (computeMemoryProposalDigest(proposal.payload) !== proposal.payloadDigest) {
+    if (computeMemoryProposalDigest(proposal.payload) !== proposal.payloadDigest) {
       // 载荷摘要与落库值不一致 = 内容被篡改，拒绝消费。
       return commitFailure('提议内容摘要校验失败');
     }
@@ -243,13 +245,37 @@ export function commitMemoryProposal(input: {
     const target = targetId ? getMemoryById(input.userId, targetId) : undefined;
 
     // 并发 / 冲突检测：目标条目的当前版本必须与提议期望版本一致。
-    const expected = input.expectedRevision ?? proposal.expectedRevision ?? null;
+    const expected = proposal.expectedRevision ?? null;
+    if (
+      input.expectedRevision != null &&
+      expected !== null &&
+      input.expectedRevision !== expected
+    ) {
+      return commitFailure('确认版本与提议基线冲突，请重新生成提议');
+    }
     if (targetId) {
       if (!target) {
         return commitFailure('目标记忆不存在');
       }
-      if (expected !== null && target.revision !== expected) {
-        return commitFailure('目标记忆已被修改，内容冲突');
+      if (
+        expected === null ||
+        target.revision !== expected ||
+        memoryScopeKey(target.scope) !== memoryScopeKey(proposal.scope)
+      ) {
+        return commitFailure('目标记忆版本或作用域冲突，请重新生成提议');
+      }
+    }
+    for (const dependency of proposal.payload.dependencies ?? []) {
+      const entry = getMemoryById(input.userId, dependency.memoryId);
+      if (
+        !entry ||
+        entry.revision !== dependency.revision ||
+        !entry.enabled ||
+        entry.lifecycle !== 'active' ||
+        memoryScopeKey(entry.scope) !== memoryScopeKey(proposal.scope) ||
+        (entry.validUntil !== null && !(Date.parse(entry.validUntil) > now.getTime()))
+      ) {
+        return commitFailure('整理依据已变化，内容冲突，请重新分析');
       }
     }
 
@@ -310,14 +336,33 @@ export function commitMemoryProposal(input: {
         if (!target) {
           return commitFailure('目标记忆不存在');
         }
-        operation = 'update';
+        const keeperId = proposal.payload.mergeIntoId;
+        const keeper = keeperId ? getMemoryById(input.userId, keeperId) : undefined;
+        if (
+          !keeper ||
+          keeper.id === target.id ||
+          !keeper.enabled ||
+          keeper.lifecycle !== 'active' ||
+          memoryScopeKey(keeper.scope) !== memoryScopeKey(proposal.scope) ||
+          !proposal.payload.dependencies?.some((item) => item.memoryId === keeper.id) ||
+          detectExactDuplicateGroups([keeper, target]).length !== 1 ||
+          JSON.stringify(keeper.roleLayers) !== JSON.stringify(target.roleLayers) ||
+          keeper.workspaceRoot !== target.workspaceRoot ||
+          keeper.validUntil !== target.validUntil ||
+          activePayload.key !== proposal.payload.key ||
+          activePayload.value !== proposal.payload.value
+        ) {
+          return commitFailure('合并依据或内容冲突，请重新生成提议');
+        }
+        operation = 'merge';
         memory = updateMemory(input.userId, target.id, {
-          value: activePayload.value ?? activePayload.body ?? target.value,
+          enabled: false,
+          lifecycle: 'superseded',
+          supersededBy: keeper.id,
           confirmationKind: 'proposal',
           confirmedAt: nowIso,
         });
-        // 被合并进来的源条目 id 无法从 payload 可靠推断，只更新目标并在决策备注里记录。
-        extraNote = '合并：仅覆盖目标正文，源条目未自动归档';
+        extraNote = `重复条目已被 ${keeper.id} 替代，原文及来源保留`;
         break;
       }
       default: {
@@ -360,13 +405,23 @@ export function commitMemoryProposal(input: {
     const note = extraNote ?? input.note ?? null;
     const consumed = sqliteRunWithChanges(
       `UPDATE memory_proposals
-       SET status = 'applied', decided_at = ?, decided_by = ?, decision_note = ?, result_memory_id = ?
-       WHERE id = ? AND status = 'pending'`,
-      [nowIso, input.decidedBy, note, memory.id, input.proposalId],
+       SET status = 'applied', decided_at = ?, decided_by = ?, decision_note = ?, result_memory_id = ?,
+           payload_json = ?, payload_digest = ?, revision = revision + ?
+       WHERE id = ? AND user_id = ? AND status = 'pending'`,
+      [
+        nowIso,
+        input.decidedBy,
+        note,
+        memory.id,
+        JSON.stringify(activePayload),
+        computeMemoryProposalDigest(activePayload),
+        input.overridePayload ? 1 : 0,
+        input.proposalId,
+        input.userId,
+      ],
     );
     if (consumed === 0) {
-      // 条件更新失败 = 提议已被另一路径消费（双击 / 双标签页），回滚本次写入。
-      return commitFailure('提议已被处理');
+      throw new Error('提议已被处理，本次写入回滚');
     }
 
     return { ok: true, memory };
@@ -729,6 +784,136 @@ function parseSnapshot(json: string | null): MemoryEntry | null {
   }
 }
 
+interface RuleRow {
+  id: string;
+  user_id: string;
+  scope_type: string;
+  scope_id: string;
+  name: string;
+  body: string;
+  revision: number;
+  enabled: number;
+  confirmed_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 把一条规则行合成为 `MemoryEntry` 快照（与 `commitMemoryRule` 的合成口径一致）。 */
+function ruleRowToSyntheticEntry(row: RuleRow): MemoryEntry {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: 'instruction',
+    key: row.name,
+    value: row.body,
+    source: 'manual',
+    confidence: 1.0,
+    priority: 50,
+    workspaceRoot: null,
+    teamWorkspaceId: row.scope_type === 'team' ? row.scope_id : null,
+    roleLayers: null,
+    enabled: row.enabled === 1,
+    scope: { type: row.scope_type as MemoryScope['type'], id: row.scope_id },
+    lifecycle: 'active',
+    revision: row.revision,
+    confirmationKind: 'proposal',
+    confirmedAt: row.confirmed_at,
+    changeSeq: 0,
+    validUntil: null,
+    supersededBy: null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * 回滚一条**规则** revision（`memory_revisions.memory_id = ruleId`，权威在
+ * `memory_rule_entries`）。
+ *
+ * 与记忆回滚同口径：「必须是最新 revision 才可回滚」，不删历史、不回退 revision 号，而是
+ * 按目标 revision 的 `before` 快照**作为一次新变更**重放。
+ *
+ * 唯一键风险与处理：`memory_rule_entries` 有部分唯一索引
+ * `(user_id, scope_type, scope_id, name) WHERE enabled = 1`。这里**只改同一行的 body /
+ * enabled，绝不改 name / scope**（提议路径本身也强制 name 不变），所以要么原地更新同一行
+ * （无冲突），要么在「原操作是创建」时把该行 `enabled=0`（离开部分索引的覆盖范围）。
+ * 因此不会撞唯一键。规则被直接停用 / 删除（`setMemoryRuleEnabled` / `deleteMemoryRule`）
+ * 会推进 DB revision 却不写 `memory_revisions`，此时 `current.revision !== row.revision`
+ * → 判为「已被后续修改」直接拒绝，不会覆盖。
+ */
+function rollbackMemoryRuleRevision(input: {
+  userId: string;
+  actorId: string;
+  row: RevisionRow;
+  before: MemoryEntry | null;
+  nowIso: string;
+}): MemoryCommitResult {
+  const current = sqliteGet<RuleRow>(
+    'SELECT * FROM memory_rule_entries WHERE id = ? AND user_id = ? LIMIT 1',
+    [input.row.memory_id, input.userId],
+  );
+  if (!current) {
+    // 规则已被删除：不谎报「记忆不存在」，给出规则专属诊断。
+    return commitFailure('目标规则不存在或已删除');
+  }
+
+  const latest = sqliteGet<{ revision: number }>(
+    'SELECT revision FROM memory_revisions WHERE memory_id = ? ORDER BY revision DESC LIMIT 1',
+    [input.row.memory_id],
+  );
+  if (
+    current.revision !== input.row.revision ||
+    (latest && latest.revision !== input.row.revision)
+  ) {
+    return commitFailure('目标规则已被后续修改，无法直接回滚');
+  }
+
+  let operation: MemoryRevisionRecord['operation'];
+  if (!input.before) {
+    // 原操作是创建 → 回滚等价于停用（离开部分唯一索引，不撞 (user,scope,name)）。
+    operation = 'archive';
+    sqliteRun(
+      `UPDATE memory_rule_entries
+          SET enabled = 0, revision = revision + 1, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+      [input.nowIso, current.id, input.userId],
+    );
+  } else {
+    operation = 'restore';
+    // 只恢复正文与启用态；name / scope 保持不变，避免撞唯一键或跨作用域移动。
+    sqliteRun(
+      `UPDATE memory_rule_entries
+          SET body = ?, enabled = ?, revision = revision + 1, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+      [input.before.value, input.before.enabled ? 1 : 0, input.nowIso, current.id, input.userId],
+    );
+  }
+
+  const updated = sqliteGet<RuleRow>(
+    'SELECT * FROM memory_rule_entries WHERE id = ? AND user_id = ? LIMIT 1',
+    [current.id, input.userId],
+  );
+  if (!updated) {
+    return commitFailure('回滚写入失败');
+  }
+
+  const beforeEntry = ruleRowToSyntheticEntry(current);
+  const afterEntry = ruleRowToSyntheticEntry(updated);
+  writeMemoryRevision({
+    memoryId: updated.id,
+    userId: input.userId,
+    revision: updated.revision,
+    operation,
+    before: beforeEntry,
+    after: afterEntry,
+    proposalId: null,
+    actorKind: 'user',
+    actorId: input.actorId,
+    createdAt: input.nowIso,
+  });
+  return { ok: true, memory: afterEntry };
+}
+
 /**
  * 把某条历史 revision 的 `before` 状态恢复为当前状态——**作为一次新变更**。
  *
@@ -754,6 +939,23 @@ export function rollbackMemoryRevision(input: {
     const before = parseSnapshot(row.before_json);
     const current = getMemoryById(input.userId, row.memory_id);
     if (!current) {
+      // 规则提议的版本历史同样落在 `memory_revisions`（`memory_id = ruleId`），而规则的权威在
+      // `memory_rule_entries`。规则历史走独立的回滚重放（见 `rollbackMemoryRuleRevision`）；
+      // 这里的 `getMemoryById` 落空**不能**与「记忆已删除」混为一谈，否则直调该端点会拿到
+      // 一句与事实不符的 404「目标记忆不存在或已删除」。先按规则表判定：
+      const rule = sqliteGet<RuleRow>(
+        'SELECT * FROM memory_rule_entries WHERE id = ? AND user_id = ? LIMIT 1',
+        [row.memory_id, input.userId],
+      );
+      if (rule !== undefined) {
+        return rollbackMemoryRuleRevision({
+          userId: input.userId,
+          actorId: input.actorId,
+          row,
+          before,
+          nowIso,
+        });
+      }
       return commitFailure('目标记忆不存在或已删除');
     }
 
@@ -763,7 +965,7 @@ export function rollbackMemoryRevision(input: {
       'SELECT revision FROM memory_revisions WHERE memory_id = ? ORDER BY revision DESC LIMIT 1',
       [row.memory_id],
     );
-    if (latest && latest.revision !== row.revision) {
+    if (current.revision !== row.revision || (latest && latest.revision !== row.revision)) {
       return commitFailure('目标记忆已被后续修改，无法直接回滚');
     }
 
@@ -787,6 +989,10 @@ export function rollbackMemoryRevision(input: {
         confidence: before.confidence,
         priority: before.priority,
         roleLayers: before.roleLayers,
+        workspaceRoot: before.workspaceRoot,
+        teamWorkspaceId: before.teamWorkspaceId,
+        validUntil: before.validUntil,
+        source: before.source,
         enabled: before.enabled,
         lifecycle: before.lifecycle,
         scope: before.scope,

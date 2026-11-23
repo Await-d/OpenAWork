@@ -4,11 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDisplayPreferencesStore } from '../../../../stores/settings/display-preferences.js';
 
-vi.mock('@openAwork/shared-ui', async () => {
+vi.mock('@openAwork/shared-ui', async (importOriginal) => {
   // 高亮工具是纯函数：转发真实实现（FileContentPreview 会直接调用它们）。
   const { detectLanguage, highlightCodeLines } =
     await import('../../../../../../../packages/shared-ui/src/tools/UnifiedCodeDiff.js');
   return {
+    ...(await importOriginal<Record<string, unknown>>()),
     BashTerminalCard: ({ view, running }: { view?: { output?: string }; running?: boolean }) => (
       <div data-testid="bash-terminal" data-running={running ? 'true' : 'false'}>
         {view?.output ?? ''}
@@ -256,5 +257,45 @@ describe('BlockToolCall 展开行为', () => {
       'true',
     );
     expect(container.querySelectorAll('.file-content-line')).toHaveLength(FILE_LINES.length);
+  });
+
+  /**
+   * 回归：「参数 (1)」而展开有 3 个字段。抽屉标题必须与预览读同一处规则
+   *（见 shared/tool-input-fields），而不是裸数 `Object.keys(input)`。
+   */
+  it('入参抽屉的计数按实际渲染的字段数（MCP 展平后），不是裸 key 数', () => {
+    const { container } = render(
+      <BlockToolCall
+        kind="mcp"
+        toolName="mcp_call"
+        input={{
+          arguments: { query: 'OpenAWork', limit: 10 },
+          serverId: 'open-websearch',
+        }}
+        status="completed"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    // 裸 key 是 2（arguments / serverId）；渲染的是展平后的 2 个业务字段。
+    expect(container.querySelector('.tool-call-block-params > summary')?.textContent).toBe(
+      '参数 (2)',
+    );
+    expect(container.textContent).not.toContain('serverId');
+  });
+
+  it('渠道发送类的入参抽屉标题为「内容」（展示的是消息正文，不是参数）', () => {
+    const { container } = render(
+      <BlockToolCall
+        toolName="PluginSendMessage"
+        input={{ chat_id: 'c2c1', plugin_id: 'ep0', content: '**收到**，这就看' }}
+        status="completed"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    expect(container.querySelector('.tool-call-block-params > summary')?.textContent).toBe('内容');
+    expect(container.querySelector('.channel-message-preview')).not.toBeNull();
+    expect(container.textContent).not.toContain('plugin_id');
   });
 });

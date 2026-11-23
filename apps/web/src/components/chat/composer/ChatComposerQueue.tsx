@@ -5,6 +5,7 @@ export interface QueuedComposerMessage {
   readonly label: string;
   readonly requiresAttachmentRebind?: boolean;
   readonly title?: string;
+  readonly exceedsMessageLimit?: boolean;
 }
 
 export interface ChatComposerQueueProps {
@@ -23,6 +24,11 @@ export function ChatComposerQueue({
   return (
     <div className="composer-queue">
       <span className="composer-queue-label">待发队列</span>
+      {queuedMessages[0]?.exceedsMessageLimit && (
+        <p role="alert" className="composer-queue-limit-warning">
+          队首消息超过当前上限，队列已暂停。请恢复编辑或移除该消息。
+        </p>
+      )}
       <div className="composer-queue-items">
         {queuedMessages.slice(0, 3).map((item, index) => (
           <span

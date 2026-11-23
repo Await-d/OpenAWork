@@ -119,7 +119,7 @@ export function useWorkflowStudio() {
 
   const addNode = useCallback(() => {
     const endNode = draftNodes.find((node) => node.type === 'end');
-    const lastExecutableNode = [...draftNodes].reverse().find((node) => node.type !== 'end');
+    const lastExecutableNode = draftNodes.findLast((node) => node.type !== 'end');
     const nextNodeIndex = draftNodes.filter((node) => node.id.startsWith('node-')).length + 1;
     const nextNodeId = `node-${nextNodeIndex}`;
     const nextNode: WorkflowNodeRecord = {

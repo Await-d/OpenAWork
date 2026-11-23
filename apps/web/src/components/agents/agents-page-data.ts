@@ -36,7 +36,7 @@ export interface AgentsSummary {
 
 /** 排序：启用优先 → 内置先于自定义 → 名称（zh-CN）。 */
 export function sortAgents(agents: ManagedAgentRecord[]): ManagedAgentRecord[] {
-  return [...agents].sort((left, right) => {
+  return agents.toSorted((left, right) => {
     const statusDelta = Number(right.enabled) - Number(left.enabled);
     if (statusDelta !== 0) {
       return statusDelta;

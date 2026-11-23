@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type {
   ChannelDescriptorTool,
   ChannelMemberAclPermissionPatchDraft,
@@ -537,6 +538,9 @@ export function ChannelMemberAclEditor({
     index: number,
     event: ReactKeyboardEvent<HTMLInputElement>,
   ): void {
+    if (isImeComposingKeyboardEvent(event)) {
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       addCustomTool(index);
@@ -547,6 +551,9 @@ export function ChannelMemberAclEditor({
     index: number,
     event: ReactKeyboardEvent<HTMLInputElement>,
   ): void {
+    if (isImeComposingKeyboardEvent(event)) {
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       addReadablePath(index);

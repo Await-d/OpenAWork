@@ -68,7 +68,7 @@ function buildCommentTimeline(comments: SharedSessionCommentRecord[]): TimelineI
 
 function computeMedian(values: number[]): number {
   if (values.length === 0) return 0;
-  const sorted = [...values].sort((left, right) => left - right);
+  const sorted = values.toSorted((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
   if (sorted.length % 2 === 1) {
     return sorted[middle] ?? 0;

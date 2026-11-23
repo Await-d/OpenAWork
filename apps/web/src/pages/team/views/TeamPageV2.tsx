@@ -1214,7 +1214,8 @@ export default function TeamPageV2() {
             onRequestResumeAll={handleRequestResumeAll}
           />
 
-          <main className="team-v2-main-shell" style={mainGridStyle}>
+          {/* 主内容 landmark 由布局壳提供（页面内再放 main 会嵌套）。 */}
+          <div className="team-v2-main-shell" style={mainGridStyle}>
             {/* 中：对话区（紧凑流程栏已并入「概览 / 拓扑」子 tab） */}
             <TeamPageMiddleArea
               accessToken={accessToken}
@@ -1389,7 +1390,7 @@ export default function TeamPageV2() {
                 ) : null
               }
             />
-          </main>
+          </div>
 
           {/* classic 弃用底部「层级对话」面板；fusion 保留 */}
           {!isClassicWorkbench ? (

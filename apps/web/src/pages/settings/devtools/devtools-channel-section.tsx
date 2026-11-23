@@ -104,7 +104,7 @@ function matchesAuditQuery(log: DevtoolsChannelAuditRecord, query: string): bool
 
 /** 有故障标记的频道排前面，其余按最近故障时间倒序。 */
 function sortChannels(channels: readonly DevtoolsChannelRecord[]): DevtoolsChannelRecord[] {
-  return [...channels].sort((left, right) => {
+  return channels.toSorted((left, right) => {
     const leftFailed = left.lastError === null ? 1 : 0;
     const rightFailed = right.lastError === null ? 1 : 0;
     if (leftFailed !== rightFailed) return leftFailed - rightFailed;

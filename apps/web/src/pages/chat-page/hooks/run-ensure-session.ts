@@ -18,6 +18,7 @@ import { createSessionMetadataSnapshot } from '.././conversation/render/chat-pag
 import { resolveModelSelectionSourceFromMetadata } from '.././conversation/settings/model-selection-source.js';
 import type { ModelSelectionSource } from '.././conversation/settings/model-selection-source.js';
 import { normalizeChatThinkingState } from '.././conversation/settings/resolve-chat-thinking-request.js';
+import type { ResolvedChatThinkingRequest } from '.././conversation/settings/resolve-chat-thinking-request.js';
 import { createSessionsClient } from '@openAwork/web-client';
 
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
@@ -56,7 +57,7 @@ export interface EnsureSessionDeps {
     reasoningEffort: ReasoningEffort;
     thinkingEnabled: boolean;
   } | null>;
-  readonly sessionMetadataDirty: boolean;
+  readonly draftThinkingOverrideRef: RefObject<boolean>;
   readonly sessionModelSelectionSourceRef: RefObject<ModelSelectionSource | null>;
   readonly setActiveModelId: Dispatch<SetStateAction<string>>;
   readonly setActiveProviderId: Dispatch<SetStateAction<string>>;
@@ -69,7 +70,17 @@ export interface EnsureSessionDeps {
   readonly token: string | null;
 }
 
-export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string> {
+export interface EnsuredSession {
+  readonly sessionId: string;
+  readonly newSessionModel?: {
+    readonly providerId: string;
+    readonly modelId: string;
+    readonly modelLabel: string | undefined;
+    readonly thinkingRequest: ResolvedChatThinkingRequest;
+  };
+}
+
+export async function runEnsureSession(deps: EnsureSessionDeps): Promise<EnsuredSession> {
   const {
     activateSessionView,
     activeModelId,
@@ -89,7 +100,7 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
     providers,
     reasoningEffort,
     savedChatDefaultsRef,
-    sessionMetadataDirty,
+    draftThinkingOverrideRef,
     sessionModelSelectionSourceRef,
     setActiveModelId,
     setActiveProviderId,
@@ -111,7 +122,7 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
     const liveSessionId = activeSessionRef.current;
     if (liveSessionId !== currentSessionId) {
       if (liveSessionId) {
-        return liveSessionId;
+        return { sessionId: liveSessionId };
       }
       throw new Error('当前会话已切换，请重试');
     }
@@ -120,11 +131,13 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
       ...currentSessionViewRef.current,
       sessionId: currentSessionId,
     };
-    return currentSessionId;
+    return { sessionId: currentSessionId };
   }
 
   const originSessionId = activeSessionRef.current;
   const originSessionViewEpoch = currentSessionViewRef.current.epoch;
+  const useDefaultModel = sessionModelSelectionSourceRef.current !== 'manual';
+  const useDefaultThinking = !draftThinkingOverrideRef.current;
   let savedDefaults = savedChatDefaultsRef.current;
   let availableProviders = providers;
   if (!savedDefaults) {
@@ -144,31 +157,17 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
     }
   }
 
-  const resolvedProviderId = sessionMetadataDirty
-    ? activeProviderId || savedDefaults?.providerId || ''
-    : savedDefaults?.providerId || activeProviderId || '';
-  const resolvedModelId = sessionMetadataDirty
-    ? activeModelId || savedDefaults?.modelId || ''
-    : savedDefaults?.modelId || activeModelId || '';
-  const resolvedThinkingEnabled = sessionMetadataDirty
-    ? thinkingEnabled
-    : (savedDefaults?.thinkingEnabled ?? thinkingEnabled);
-  const resolvedReasoningEffort = sessionMetadataDirty
-    ? reasoningEffort
-    : (savedDefaults?.reasoningEffort ?? reasoningEffort);
-  const resolvedModelSelectionSource =
-    sessionMetadataDirty && sessionModelSelectionSourceRef.current
-      ? sessionModelSelectionSourceRef.current
-      : resolvedProviderId && resolvedModelId
-        ? 'defaults'
-        : sessionModelSelectionSourceRef.current;
-
-  if (!activeProviderId && resolvedProviderId) {
-    setActiveProviderId(resolvedProviderId);
-  }
-  if (!activeModelId && resolvedModelId) {
-    setActiveModelId(resolvedModelId);
-  }
+  const resolvedProviderId = useDefaultModel
+    ? savedDefaults?.providerId || activeProviderId
+    : activeProviderId;
+  const resolvedModelId = useDefaultModel ? savedDefaults?.modelId || activeModelId : activeModelId;
+  const resolvedThinkingEnabled = useDefaultThinking
+    ? (savedDefaults?.thinkingEnabled ?? thinkingEnabled)
+    : thinkingEnabled;
+  const resolvedReasoningEffort = useDefaultThinking
+    ? (savedDefaults?.reasoningEffort ?? reasoningEffort)
+    : reasoningEffort;
+  const resolvedModelSelectionSource = useDefaultModel ? 'defaults' : 'manual';
 
   const resolvedProvider = availableProviders.find(
     (provider) => provider.id === resolvedProviderId,
@@ -182,18 +181,16 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
     declaredSupportsThinking: resolvedModel?.supportsThinking === true,
     thinkingEnabled: resolvedThinkingEnabled,
     reasoningEffort: resolvedReasoningEffort,
+    reasoningOptions: resolvedModel?.reasoningOptions,
   });
-
-  if (!sessionMetadataDirty) {
-    setThinkingEnabled(normalizedThinkingState.thinkingEnabled);
-    setReasoningEffort(normalizedThinkingState.reasoningEffort);
-  }
 
   const resolvedMetadata = buildSessionMetadata({
     ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
     ...(resolvedModelId ? { modelId: resolvedModelId } : {}),
     ...(resolvedModel?.label ? { modelLabel: resolvedModel.label } : {}),
-    ...(resolvedModelSelectionSource ? { modelSelectionSource: resolvedModelSelectionSource } : {}),
+    ...(resolvedProviderId && resolvedModelId
+      ? { modelSelectionSource: resolvedModelSelectionSource }
+      : {}),
     reasoningEffort: normalizedThinkingState.reasoningEffort,
     thinkingEnabled: normalizedThinkingState.thinkingEnabled,
   });
@@ -206,6 +203,7 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
   }
   const session = await createSessionsClient(gatewayUrl).create(token ?? '', {
     metadata: resolvedMetadata,
+    resolveModelConfig: { useDefaultModel, useDefaultThinking },
   });
   if (
     activeSessionRef.current !== originSessionId ||
@@ -214,16 +212,46 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
     throw new Error('当前会话已切换，请重试');
   }
 
-  lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot(resolvedMetadata);
+  const confirmed = session.modelConfig;
+  const providerId = confirmed?.providerId ?? resolvedProviderId;
+  const modelId = confirmed?.modelId ?? resolvedModelId;
+  const modelLabel = confirmed ? confirmed.modelLabel : resolvedModel?.label;
+  const selectionSource =
+    !useDefaultModel && providerId === resolvedProviderId && modelId === resolvedModelId
+      ? 'manual'
+      : 'defaults';
+  const thinkingRequest = confirmed
+    ? { thinkingEnabled: confirmed.thinkingEnabled, reasoningEffort: confirmed.reasoningEffort }
+    : {
+        thinkingEnabled:
+          normalizedThinkingState.canConfigureThinking && normalizedThinkingState.thinkingEnabled,
+        reasoningEffort: normalizedThinkingState.canConfigureThinking
+          ? normalizedThinkingState.reasoningEffort
+          : undefined,
+      };
+  const displayThinkingEnabled =
+    confirmed?.thinkingEnabled ?? normalizedThinkingState.thinkingEnabled;
+  const displayEffort = confirmed
+    ? (confirmed.reasoningEffort ?? 'medium')
+    : normalizedThinkingState.reasoningEffort;
+  lastPersistedSessionMetadataSnapshotRef.current = createSessionMetadataSnapshot({
+    ...resolvedMetadata,
+    providerId,
+    modelId,
+    modelSelectionSource: selectionSource,
+    thinkingEnabled: displayThinkingEnabled,
+    reasoningEffort: displayEffort,
+  });
   sessionModelSelectionSourceRef.current = resolveModelSelectionSourceFromMetadata({
-    modelSelectionSource:
-      typeof resolvedMetadata['modelSelectionSource'] === 'string'
-        ? resolvedMetadata['modelSelectionSource']
-        : undefined,
-    providerId: resolvedProviderId,
-    modelId: resolvedModelId,
+    modelSelectionSource: selectionSource,
+    providerId,
+    modelId,
   });
   activateSessionView(session.id);
+  setActiveProviderId(providerId);
+  setActiveModelId(modelId);
+  setThinkingEnabled(displayThinkingEnabled);
+  setReasoningEffort(displayEffort);
   pendingBootstrapSessionRef.current = session.id;
   setCurrentSessionId(session.id);
   clearSessionMetadataDirty();
@@ -235,5 +263,8 @@ export async function runEnsureSession(deps: EnsureSessionDeps): Promise<string>
   // 受「无会话」限制，不复位会在会话落库后把上一会话残留的展开态直接放出来。
   useUIStateStore.getState().setReviewPanelOpened(false);
   void navigate(`/chat/${session.id}`, { replace: true });
-  return session.id;
+  return {
+    sessionId: session.id,
+    newSessionModel: { providerId, modelId, modelLabel, thinkingRequest },
+  };
 }

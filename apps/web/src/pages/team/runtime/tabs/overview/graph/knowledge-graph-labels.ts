@@ -203,7 +203,7 @@ export function selectVisibleLabels(
 ): Set<string> {
   const budget = options.budget ?? LABEL_BUDGET;
   const obstacles = options.obstacles ?? [];
-  const ordered = [...candidates].sort(compareCandidates);
+  const ordered = candidates.toSorted(compareCandidates);
   const accepted: LabelBox[] = [];
   const visible = new Set<string>();
   for (const candidate of ordered) {

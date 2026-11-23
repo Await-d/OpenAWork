@@ -137,6 +137,56 @@ function formatDate(value: string | number | undefined): string {
   return date.toISOString();
 }
 
+/**
+ * 行头括号内的附加限定词（合成通知专用）。
+ *
+ * 刻意放进**括号内、时间之后**，而不是角色之后：客户端的行头正则要求
+ * 「角色 + 可选括号」收尾（见 `apps/web/src/components/chat/tool-call/shared/session-read-view.ts`
+ * 的 `ENTRY_HEAD`）。加在角色之后会让旧客户端整行失配、这条通知从 UI 直接消失；
+ * 放进括号最坏只是旧客户端解析不出时间（留空），消息本身不丢。
+ *
+ * 输出形态：` · subagent · scout · failed`（来源 · 来源名 · 非正常状态）。
+ */
+function buildNoticeSuffix(message: Message): string {
+  if (message.role !== 'synthetic') return '';
+  const metadata = message.metadata;
+  if (!metadata || typeof metadata !== 'object') return '';
+
+  const source = Reflect.get(metadata, 'source');
+  if (typeof source !== 'string' || source.trim().length === 0) return '';
+
+  const parts = [source.trim()];
+  const agent = Reflect.get(metadata, 'agent');
+  if (typeof agent === 'string' && agent.trim().length > 0) parts.push(agent.trim());
+  // `done` 是常态，不占位；只有失败 / 取消才值得标出来。
+  const state = Reflect.get(metadata, 'state');
+  if (typeof state === 'string' && state.length > 0 && state !== 'done') parts.push(state);
+
+  return ` · ${parts.join(' · ')}`;
+}
+
+/**
+ * 通道会话的来源行。
+ *
+ * 通道来源是**会话级**属性——消息上没有通道字段，`channelMessageId` 只保存最新一条
+ * （见 `channels/channel-session-store.ts`），无法回溯历史。所以这里只能说
+ * 「这个会话来自哪个通道」，说不出「哪几条消息来自通道」。
+ */
+function buildChannelSourceLine(metadata: Record<string, unknown>): string | null {
+  if (metadata['source'] !== 'channel') return null;
+
+  const parts = ['channel'];
+  const channel = metadata['channel'];
+  if (channel !== null && typeof channel === 'object') {
+    const type = Reflect.get(channel, 'type');
+    if (typeof type === 'string' && type.trim().length > 0) parts.push(type.trim());
+  }
+  const chatId = metadata['channelChatId'];
+  if (typeof chatId === 'string' && chatId.trim().length > 0) parts.push(chatId.trim());
+
+  return `Source: ${parts.join(' · ')}`;
+}
+
 function formatMessageParts(message: Message): string {
   return message.content
     .map((content: MessageContent) => {
@@ -316,8 +366,10 @@ export function runSessionReadTool(
   // 默认摘要视图：只取最近 limit 条，避免整段历史一次性灌入上下文。
   const sliced = allMessages.length > input.limit ? allMessages.slice(-input.limit) : allMessages;
   const firstShownIndex = allMessages.length - sliced.length;
+  const channelSource = buildChannelSourceLine(parseSessionMetadataJson(session.metadata_json));
   const lines = [
     `Session: ${session.id}`,
+    ...(channelSource ? [channelSource] : []),
     `Messages: ${allMessages.length}${sliced.length < allMessages.length ? `（仅显示最近 ${sliced.length} 条；调大 limit 可取更早消息，上限 500）` : ''}`,
     `Date Range: ${formatDate(session.created_at)} to ${formatDate(session.updated_at)}`,
     ...(input.full
@@ -330,7 +382,7 @@ export function runSessionReadTool(
 
   sliced.forEach((message, index) => {
     lines.push(
-      `[Message ${firstShownIndex + index + 1}/${allMessages.length}] ${message.role} (${formatDate(message.createdAt)})`,
+      `[Message ${firstShownIndex + index + 1}/${allMessages.length}] ${message.role} (${formatDate(message.createdAt)}${buildNoticeSuffix(message)})`,
     );
     const body = formatMessageParts(message);
     lines.push(

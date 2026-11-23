@@ -38,7 +38,7 @@ const BASE_TOOL_TO_CATEGORY = {
   run_bash_in_background: 'bash',
   bash_output: 'bash',
   bash_kill: 'bash',
-  // lsp_touch 会改写文件时间戳以触发 LSP 重新加载，属于文件副作用，按编辑类审批。
+  // 保留历史 edit 类规则兼容；LSP 文件同步的默认免审批由网关按具体动作判定。
   lsp_touch: 'edit',
   // 媒体生成/转换类工具会写盘（图片、音频、视频帧、转码结果），必须审批。
   generate_image: 'custom',
@@ -56,6 +56,14 @@ const BASE_TOOL_TO_CATEGORY = {
   // 不登记会落到 `resolvePermissionCategory` 的 fail-closed 兜底 `custom`,
   // 使每次委派都被迫走审批。
   subagent: 'task_run',
+  // 历史委派入口名 `call_omo_agent`：261102 批次 B 已从**模型可见面**移除
+  // （呈报名收敛为 `Agent` → 规范名 `subagent`），但该 wire 名仍可能出现在
+  // 旧会话 / 兼容路径的权限判定中，语义与 `task` / `subagent` 完全一致，
+  // 归入 `task_run`（默认 ask；yolo 档位与 team 后台成员免审批）。
+  // 不能依赖 fail-closed 兜底 `custom`：cron 会话内按类别判断「委派类免审批」
+  // （见 session-context.ts）会因命中 custom 而失去豁免，且权限档位与
+  // `task`/`subagent` 不一致。
+  call_omo_agent: 'task_run',
   task_create: 'task',
   task_update: 'task',
   skill: 'skill',
@@ -111,7 +119,7 @@ export const TOOL_TO_PERMISSION_CATEGORY: Readonly<Record<string, string>> = {
  * 准入标准（必须同时满足）：
  * 1. 只读检查/检索/会话状态查询，或纯委派（子调用各自仍需过权限检查）；
  * 2. 不产生文件系统 / 网络 / 进程副作用（会话内待办与计划模式状态除外）；
- * 3. 作用范围限于当前会话或当前工作区。
+ * 3. 作用范围限于当前会话/工作区；会话只读查询可读取同一所有者的会话。
  *
  * 新工具若不能确定安全，一律不要加入——让它落到 `custom`（ask），fail-closed。
  */
@@ -126,6 +134,8 @@ export const ALLOW_BY_DEFAULT_TOOL_NAMES: ReadonlySet<string> = new Set<string>(
   'session_read',
   'session_search',
   'session_info',
+  // 审批详情只读查询；目标会话与请求必须同时通过所有者校验。
+  'permission_get',
   // AST 只读搜索（替换走 ast_grep_replace → edit，仍需审批）。
   'ast_grep_search',
   // plan 模式状态切换：ExitPlanMode 自带用户计划审批（question）流程。

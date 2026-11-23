@@ -11,12 +11,14 @@
  * - 关闭标签页即失效，下次新开是新端，正好符合「旧端不会再回来发」的预期。
  */
 
+import { createRandomUuid } from '@openAwork/web-client';
+
 /** sessionStorage key。带前缀以免与其它业务的存储项撞名。 */
 const CLIENT_ID_STORAGE_KEY = 'openawork-composer-queue-client-id';
 
 /** 正常情况下不会出现，但 storage 被策略禁用时需要兜底，故不能假定写入成功。 */
 function createFallbackClientId(): string {
-  return `cq-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `cq-${createRandomUuid()}`;
 }
 
 export function resolveComposerQueueClientId(): string {
@@ -29,7 +31,7 @@ export function resolveComposerQueueClientId(): string {
     if (existing && existing.length > 0) {
       return existing;
     }
-    const created = `cq-${crypto.randomUUID()}`;
+    const created = `cq-${createRandomUuid()}`;
     window.sessionStorage.setItem(CLIENT_ID_STORAGE_KEY, created);
     return created;
   } catch {

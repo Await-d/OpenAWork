@@ -281,7 +281,7 @@ export function TaskQuickOverview({ selectedSessionId }: TaskQuickOverviewProps)
   const stats = useMemo(() => computeTeamStatusBarStats(scopedHandoffs), [scopedHandoffs]);
 
   const allTasks = useMemo(() => {
-    return [...scopedHandoffs].sort((a, b) => {
+    return scopedHandoffs.toSorted((a, b) => {
       const rankDelta = STATE_RANK[a.state] - STATE_RANK[b.state];
       if (rankDelta !== 0) return rankDelta;
       return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);

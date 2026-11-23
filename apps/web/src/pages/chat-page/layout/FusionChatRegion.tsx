@@ -97,6 +97,8 @@ export function FusionChatRegion({ model }: FusionChatRegionProps): ReactElement
                   }
                 : undefined
             }
+            sourceBadgeLabel={chrome.sourceBadgeLabel}
+            dialogueModeReady={chrome.dialogueModeReady}
             workspaceBinding={chrome.workspaceBinding}
             reviewPanelOpened={chrome.reviewPanelOpened}
             onToggleReviewPanel={chrome.onToggleReviewPanel}

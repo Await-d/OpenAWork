@@ -25,6 +25,7 @@ import {
   formatGatewayStreamErrorMessage,
   useGatewayClient,
 } from '../../../hooks/gateway/useGatewayClient.js';
+import { isNonTerminalStreamErrorCode } from '../../../hooks/gateway/stream-error-classification.js';
 import { resolveChatThinkingRequest } from '../../chat-page/conversation/settings/resolve-chat-thinking-request.js';
 import { useConversationStream } from '../../../components/conversation-runtime/stream/use-conversation-stream.js';
 import { makeOrderedMessageId } from '../../../components/conversation-runtime/messages/ordered-id.js';
@@ -101,6 +102,38 @@ async function runStreamActionOnce<T>(ctx: {
   } finally {
     ctx.onFinally();
   }
+}
+
+/**
+ * 多路 SSE 上「会开启 / 推进流式渲染」的事件类型。
+ *
+ * `usage` / `done` / `error` / 权限与提问类事件都不算：它们不产生新的可见内容，
+ * 却会把 UI 拖进「生成中」。只有真正携带 token 或工具分片的事件才把 streaming
+ * 置为 true。
+ */
+const MULTI_ATTACH_CONTENT_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'text_delta',
+  'thinking_start',
+  'thinking_delta',
+  'thinking_end',
+  'tool_call_delta',
+  'tool_progress',
+  'tool_result',
+]);
+
+export function isMultiAttachContentEvent(event: RunEvent): boolean {
+  return MULTI_ATTACH_CONTENT_EVENT_TYPES.has(event.type);
+}
+
+/**
+ * 多路 SSE 上的「本轮已结束」事件。
+ *
+ * `error` 只有终态错误才算结束——流内非终态错误（名单见
+ * `isNonTerminalStreamErrorCode`）表示这条流仍在继续，不能据此退出流式。
+ */
+export function isMultiAttachTerminalEvent(event: RunEvent): boolean {
+  if (event.type === 'done') return true;
+  return event.type === 'error' && !isNonTerminalStreamErrorCode(event.code);
 }
 
 export function useTeamConversationStreaming(
@@ -204,6 +237,16 @@ export function useTeamConversationStreaming(
   const gatewayClient = useGatewayClient(token);
   // multiAttachActiveRef 是 ref 版本，供 callback 中同步读取。
   const multiAttachActiveRef = useRef(false);
+  /**
+   * `reload` 的 ref 镜像：multi-attach 的事件回调需要「终态后补一次快照合流」，
+   * 而把 `reload` 放进那段 effect 的依赖数组会让 reload 每次换身份都重建 effect
+   * （反注册 + 重注册 handler，中途的事件会被丢进 pending 队列）。ref 只被异步
+   * 回调读取，effect 时序足够。
+   */
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
   // 本轮请求开始时间：用 state 而非 ref —— 渲染期读 `ref.current` 会被编译器判为
   // "Cannot access refs during render" 并放弃优化整个 hook（实测）。startStream 里
   // 本来就会 setActiveStreamStartedAt 触发重渲染，因此 state 不会多一次提交。
@@ -260,6 +303,22 @@ export function useTeamConversationStreaming(
   );
 
   // multiAttachActiveRef 和 multiAttachActive 已在会话状态区域声明（使用前定义）。
+
+  /**
+   * `stream` 的 ref 镜像。
+   *
+   * `useConversationStream` 返回的是一组新的函数/对象字面量（该 hook 刻意不做手写
+   * memo），因此把它放进「多路 SSE 注册」effect 的依赖数组会让 effect **每次渲染**
+   * 都反注册再注册一次，而 cleanup 会把 `multiAttachActiveRef` 置回 false —— 一旦
+   * 同一时刻 `streamingRef` 已为 true，重跑时的 `checkAndRegister` 就不会再把它置
+   * 回 true，于是后续所有 multi-attach 事件都被「本地流式」守卫吞掉：终态事件永远
+   * 到不了处理分支，streaming 卡死、composer 拒绝发送、消息只能刷新页面才出现。
+   * 改用 ref 持有后，该 effect 只随会话 / 启用状态重建，事件处理点始终取最新实例。
+   */
+  const streamRef = useRef(stream);
+  useEffect(() => {
+    streamRef.current = stream;
+  }, [stream]);
 
   // 去 useCallback 包装：编译器会对函数表达式自动 memoize（引用稳定性与手写等价），
   // 而这处手写 memo 的依赖与推断依赖不一致（多个 setter 被漏列），编译器会判
@@ -356,10 +415,11 @@ export function useTeamConversationStreaming(
             setMultiAttachActive(true);
             writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
             stream.resetRoundAccumulators();
-            setStreaming(true);
-            writeRefCurrent(streamingRef, true);
-            setActiveStreamStartedAt(Date.now());
-            setActiveStreamFirstTokenLatencyMs(null);
+            // **不置 streaming**：多路 SSE 连接是常驻的，连接本身不代表正在输出。
+            // 置 true 会让快照 reload 被流式守卫丢弃、composer 一直拒绝发送；真正的
+            // 流式由后续内容事件重新驱动（见 handleMultiAttachEvent 的注释）。
+            writeRefCurrent(streamingRef, false);
+            setStreaming(false);
           }
         }
         // Trigger reload (also called inside the consumer's onStreamDone).
@@ -377,10 +437,11 @@ export function useTeamConversationStreaming(
             setMultiAttachActive(true);
             writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
             stream.resetRoundAccumulators();
-            setStreaming(true);
-            writeRefCurrent(streamingRef, true);
-            setActiveStreamStartedAt(Date.now());
-            setActiveStreamFirstTokenLatencyMs(null);
+            // **不置 streaming**：多路 SSE 连接是常驻的，连接本身不代表正在输出。
+            // 置 true 会让快照 reload 被流式守卫丢弃、composer 一直拒绝发送；真正的
+            // 流式由后续内容事件重新驱动（见 handleMultiAttachEvent 的注释）。
+            writeRefCurrent(streamingRef, false);
+            setStreaming(false);
           }
         }
       },
@@ -488,10 +549,11 @@ export function useTeamConversationStreaming(
             setMultiAttachActive(true);
             writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
             stream.resetRoundAccumulators();
-            setStreaming(true);
-            writeRefCurrent(streamingRef, true);
-            setActiveStreamStartedAt(Date.now());
-            setActiveStreamFirstTokenLatencyMs(null);
+            // **不置 streaming**：多路 SSE 连接是常驻的，连接本身不代表正在输出。
+            // 置 true 会让快照 reload 被流式守卫丢弃、composer 一直拒绝发送；真正的
+            // 流式由后续内容事件重新驱动（见 handleMultiAttachEvent 的注释）。
+            writeRefCurrent(streamingRef, false);
+            setStreaming(false);
           }
         }
         // reload 已由 useConversationStream 的 onStreamDone 回调触发，
@@ -515,10 +577,11 @@ export function useTeamConversationStreaming(
             setMultiAttachActive(true);
             writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
             stream.resetRoundAccumulators();
-            setStreaming(true);
-            writeRefCurrent(streamingRef, true);
-            setActiveStreamStartedAt(Date.now());
-            setActiveStreamFirstTokenLatencyMs(null);
+            // **不置 streaming**：多路 SSE 连接是常驻的，连接本身不代表正在输出。
+            // 置 true 会让快照 reload 被流式守卫丢弃、composer 一直拒绝发送；真正的
+            // 流式由后续内容事件重新驱动（见 handleMultiAttachEvent 的注释）。
+            writeRefCurrent(streamingRef, false);
+            setStreaming(false);
           }
         }
       },
@@ -602,13 +665,13 @@ export function useTeamConversationStreaming(
         if (!currentAssistantStreamMessageIdRef.current) {
           writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
         }
-        stream.resetRoundAccumulators();
-        if (!streamingRef.current) {
-          setStreaming(true);
-          writeRefCurrent(streamingRef, true);
-          setActiveStreamStartedAt(Date.now());
-          setActiveStreamFirstTokenLatencyMs(null);
-        }
+        streamRef.current.resetRoundAccumulators();
+        // **刻意不在这里 setStreaming(true)**：多路 SSE 连接是常驻的（服务端只在
+        // 连接建立的那一刻判定一次「有无活跃流」，之后不会因为流结束而关闭连接），
+        // 所以「连接存在」不等于「正在输出」。早前把 connected 直接当作流式，导致
+        // streaming 永久为 true：composer 一直提示「正在生成回复」并拒绝发送，同时
+        // 快照 reload 被流式守卫丢弃，最终回复只能靠刷新页面才出现。
+        // 现在 streaming 由真实事件驱动，见 handleMultiAttachEvent。
       } else if (!isAttached && multiAttachActiveRef.current) {
         // Multi-attach disconnected — unregister
         writeRefCurrent(multiAttachActiveRef, false);
@@ -638,7 +701,31 @@ export function useTeamConversationStreaming(
       if (multiAttachRid) {
         writeRefCurrent(streamClientRequestIdRef, multiAttachRid);
       }
-      stream.handleEvent(event);
+
+      // 只有真实内容事件才把 UI 切进「流式生成中」（多路 SSE 的连接是常驻的，
+      // 连接本身不代表正在输出，见 checkAndRegister 的注释）。
+      if (!streamingRef.current && isMultiAttachContentEvent(event)) {
+        writeRefCurrent(currentAssistantStreamMessageIdRef, makeOrderedMessageId());
+        streamRef.current.resetRoundAccumulators();
+        setStreaming(true);
+        writeRefCurrent(streamingRef, true);
+        setActiveStreamStartedAt(Date.now());
+        setActiveStreamFirstTokenLatencyMs(null);
+      }
+
+      streamRef.current.handleEvent(event);
+
+      // 终态事件一到就退出流式：本轮已经结束（多路 SSE 连接不关闭，继续承接同一
+      // 会话的下一轮）。退出后立刻补一次快照合流，把服务端持久化的最终消息拉回列表
+      // ——否则「流结束但 streaming 仍为 true」会让这条回复永远不渲染、composer 也
+      // 一直拒绝发送，用户只能刷新页面。
+      if (isMultiAttachTerminalEvent(event)) {
+        writeRefCurrent(streamingRef, false);
+        setStreaming(false);
+        setStoppingStream(false);
+        setActiveStreamStartedAt(null);
+        void reloadRef.current();
+      }
     };
 
     const unregisterHandler = useMultiAttachStore
@@ -654,10 +741,10 @@ export function useTeamConversationStreaming(
   }, [
     sessionId,
     enabled,
-    stream,
     streamingRef,
     currentAssistantStreamMessageIdRef,
     setStreaming,
+    setStoppingStream,
     setActiveStreamStartedAt,
     setActiveStreamFirstTokenLatencyMs,
   ]);

@@ -4,6 +4,7 @@ import {
   describeReasoningEffort,
   getSupportedReasoningEffortsForModel,
   inferSupportsThinking,
+  isImeComposingKeyboardEvent,
   resolveProviderVisual,
   sortSupportedReasoningEfforts,
 } from '@openAwork/shared-ui';
@@ -792,6 +793,7 @@ export function ModelSettingsPopover({
                     setContextWindowError(null);
                   }}
                   onKeyDown={(event) => {
+                    if (isImeComposingKeyboardEvent(event)) return;
                     if (event.key === 'Enter') {
                       event.preventDefault();
                       void handleCustomContextWindowSave();

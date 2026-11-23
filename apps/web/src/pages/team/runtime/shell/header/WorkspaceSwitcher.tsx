@@ -24,6 +24,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import type { TeamWorkspaceSummary } from '@openAwork/web-client';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 
 export interface WorkspaceSwitcherProps {
   /** 全部可用工作区列表（来自 useTeamWorkspaceState.workspaces）。 */
@@ -302,6 +303,9 @@ export function WorkspaceSwitcher({
 
   const handleRenameKey = useCallback(
     (event: KeyboardEvent<HTMLInputElement>, workspace: TeamWorkspaceSummary) => {
+      if (isImeComposingKeyboardEvent(event)) {
+        return;
+      }
       if (event.key === 'Enter') {
         event.preventDefault();
         void submitRename(workspace);

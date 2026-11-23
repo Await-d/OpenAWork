@@ -91,6 +91,7 @@ const ALWAYS_ALLOWED_INTERNAL_TOOLS = new Set([
   'session_read',
   'session_search',
   'session_info',
+  'permission_get',
 ]);
 
 /**

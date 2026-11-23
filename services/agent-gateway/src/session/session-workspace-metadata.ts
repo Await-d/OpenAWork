@@ -150,6 +150,17 @@ const sessionMetadataPatchSchema = z
         message: 'clarificationState 必须是合法的 GrillState 序列化 JSON',
       })
       .optional(),
+    /**
+     * 会话级上下文窗口挡位（token 数）。
+     *
+     * 与「模型级」挡位（`user_settings.providers` 里模型的 `contextWindowOverride`）
+     * 是两个不同作用域：模型级是**该用户下所有会话共享的默认值**，一旦在某个会话里
+     * 改动，所有用同一模型的会话都会跟着变；本字段只影响**当前会话**。
+     *
+     * 解析优先级见 `resolveStreamModelRoute`：会话级 > 模型级 > 模型 preset。
+     * 显式传 `null` 表示清除会话级覆盖（回退到模型级），其余情况传正整数。
+     */
+    contextWindowOverride: z.number().int().positive().max(10_000_000).nullable().optional(),
     dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
     editSourceMessageId: z.string().min(1).max(200).optional(),
     imageWorkbench: z.boolean().optional(),

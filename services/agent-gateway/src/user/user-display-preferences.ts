@@ -24,6 +24,11 @@ export const userDisplayPreferencesPayloadSchema = z.object({
   showRequestIndex: z.boolean(),
   showToolCount: z.boolean(),
   showMetaLine: z.boolean(),
+  /**
+   * 统计信息展示范围：`latest` 只在最新一条助手消息上展示，`all` 每条都展示。
+   * 缺省（老客户端未上报）时由客户端本地默认值兜底，服务端不强制补默认。
+   */
+  metaLineScope: z.enum(['latest', 'all']),
   // 消息布局
   messageLayout: z.enum(['unified', 'split']),
   // 推理与工具调用

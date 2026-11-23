@@ -32,7 +32,17 @@ export interface TolerantJsonObject {
  * （bash / grep 的裸文本绝不进入 JSON 解析）。
  */
 export function parseJsonObjectTolerant(raw: string): TolerantJsonObject | null {
-  const text = raw.trim();
+  let text = raw.trim();
+  // 最多剥一层 JSON 字符串信封（总共两次解码），不递归解码任意正文。
+  if (text.startsWith('"')) {
+    try {
+      const decoded: unknown = JSON.parse(text);
+      if (typeof decoded !== 'string') return null;
+      text = decoded.trim();
+    } catch {
+      return null;
+    }
+  }
   if (!text.startsWith('{')) {
     return null;
   }
@@ -133,7 +143,7 @@ function stripIncompleteTrailingEscape(text: string, escaped: boolean): number {
 }
 
 function closersFor(closers: readonly string[]): string {
-  return [...closers].reverse().join('');
+  return closers.toReversed().join('');
 }
 
 function scanJson(text: string): JsonScan {

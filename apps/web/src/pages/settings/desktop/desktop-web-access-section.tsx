@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { logger } from '../../../utils/log/logger.js';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import {
   authenticateDesktopGateway,
   DEFAULT_GATEWAY_PORT,
   DESKTOP_DEFAULT_EMAIL,
   type DesktopGatewayBindMode,
+  isTauriRuntime,
   listLanAddresses,
   localGatewayUrl,
   parseGatewayPort,
@@ -516,7 +518,7 @@ export function DesktopWebAccessSection({
 
   const copyUrl = useCallback(async (url: string) => {
     try {
-      await navigator.clipboard.writeText(url);
+      await copyTextToClipboard(url);
       setCopiedUrl(url);
       window.setTimeout(() => {
         setCopiedUrl((current) => (current === url ? null : current));
@@ -539,6 +541,25 @@ export function DesktopWebAccessSection({
       }
     }
   }, []);
+
+  /**
+   * 浏览器里整块不渲染。
+   *
+   * 本 section 的全部能力都落在「桌面端在本机 spawn 的网关 sidecar」上：开关调
+   * `tauriInvoke('start_gateway')`、密码状态调 `admin_password_status`、`/auth/admin-*`
+   * 两个接口还要带只有 Tauri 父进程才持有的 `X-OpenAWork-Desktop-Auth` 令牌。Docker
+   * 部署的网关虽然自带前端，但这三个前提一个都不成立——开关点了必报「启动本地网关
+   * 失败」，改密卡片也永远拿不到 admin 状态。与其留一块点不动的僵尸 UI，不如隐藏；
+   * 容器部署下局域网的可用性由 compose 的端口映射决定，与本开关无关。
+   *
+   * 账号改密改由「安全与权限 → 账号安全」提供（`AccountPasswordSection`），那条路径
+   * 只依赖普通登录态，Web 端也能用。
+   *
+   * 必须放在所有 hooks 之后：条件 return 不能夹在 hooks 中间。
+   */
+  if (!isTauriRuntime()) {
+    return null;
+  }
 
   const exposeOptions: SettingsOptionCard<'localhost' | 'lan'>[] = [
     {

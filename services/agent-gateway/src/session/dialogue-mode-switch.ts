@@ -1,13 +1,12 @@
 import type { DialogueMode } from '@openAwork/shared';
 import { sqliteGet, sqliteRun } from '../infra/db.js';
+import { isSourceManagedSessionMetadata } from './session-runtime-policy.js';
 import { parseSessionMetadataJson } from './session-workspace-metadata.js';
 
 /**
  * 「澄清 → 编程」对话模式切换的**唯一落库入口**。
  *
  * 触发来源通过 `reason` 区分，全部写进审计字段 `dialogueModeSwitch`：
- *   - `clarification_confirmed`：grill 确认节点（`__grill_confirm__`）被用户肯定回答，
- *     `clarificationState.confirmedAt` 首次落库（自动，对应 clarify 提示词的确认门控）；
  *   - `plan_approved`：`ExitPlanMode` 审批通过（自动，用户批准开始实现）；
  *   - `user_confirmed`：用户在界面上显式点击「确认转换」按钮（手动，
  *     见 `routes/session-dialogue-mode.ts`）。
@@ -20,12 +19,13 @@ import { parseSessionMetadataJson } from './session-workspace-metadata.js';
  *   - 已在编程 / 程序员模式时是幂等空操作（返回 `switched: false`）。
  *
  * 刻意不改的会话：
+ *   - 来源托管会话（渠道 / 定时任务）：它们没有对话模式，`dialogueMode` 只可能是上游误写
+ *     的脏值。本入口是内部直写、不走 `PATCH /sessions/:id` 的字段级拒写，故必须自己拦住。
  *   - 带 `clarificationIntent` 的会话——那是 team reception 的 handoff 澄清链条，
  *     由编排器（`reception-orchestrator`）自行推进；界面上的「确认转换」按钮也不会
  *     出现在 team 会话里，因此这里不需要为手动来源开口子。
  */
-export type DialogueModeSwitchReason =
-  'clarification_confirmed' | 'plan_approved' | 'user_confirmed';
+export type DialogueModeSwitchReason = 'plan_approved' | 'user_confirmed';
 
 export const CLARIFY_COMPLETION_TARGET_MODE: DialogueMode = 'coding';
 
@@ -55,6 +55,12 @@ export function switchSessionDialogueModeToCoding(input: {
   }
 
   const metadata = parseSessionMetadataJson(row.metadata_json);
+  // 来源托管会话（渠道 / 定时任务）没有对话模式：本入口是**内部直写**，会绕过
+  // `PATCH /sessions/:id` 对来源会话的字段级拒写，故这里必须自己拦住——否则一次
+  // 误触发（例如脏 clarify 走通了确认门控）就会把该键写回去，甚至留下审计字段。
+  if (isSourceManagedSessionMetadata(metadata)) {
+    return { switched: false };
+  }
   if (metadata['dialogueMode'] !== 'clarify') {
     return { switched: false };
   }
@@ -69,6 +75,7 @@ export function switchSessionDialogueModeToCoding(input: {
     JSON.stringify({
       ...metadata,
       ...(input.metadataPatch ?? {}),
+      ...(metadata['planMode'] === true ? { planMode: false } : {}),
       dialogueMode: CLARIFY_COMPLETION_TARGET_MODE,
       [DIALOGUE_MODE_SWITCH_METADATA_KEY]: {
         at: Date.now(),

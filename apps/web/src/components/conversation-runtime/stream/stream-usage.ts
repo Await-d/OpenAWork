@@ -8,6 +8,7 @@ export interface ChatBackendUsageSnapshot {
   reasoningTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  contextBudget?: StreamUsageChunk['contextBudget'];
   round: number;
 }
 
@@ -41,6 +42,7 @@ export function toChatBackendUsageSnapshot(event: StreamUsageChunk): ChatBackend
     ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
     ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    ...(event.contextBudget ? { contextBudget: event.contextBudget } : {}),
     round: Math.max(1, Math.trunc(event.round)),
   };
 }
@@ -69,6 +71,7 @@ export function mergeChatBackendUsageSnapshot(
   const reasoningTokens = primary.reasoningTokens ?? fallback.reasoningTokens;
   const cacheReadTokens = primary.cacheReadTokens ?? fallback.cacheReadTokens;
   const cacheWriteTokens = primary.cacheWriteTokens ?? fallback.cacheWriteTokens;
+  const contextBudget = next.contextBudget ?? previous.contextBudget;
   return {
     ...primary,
     peakTotalTokens: Math.max(
@@ -78,5 +81,6 @@ export function mergeChatBackendUsageSnapshot(
     ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
     ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    ...(contextBudget ? { contextBudget } : {}),
   };
 }

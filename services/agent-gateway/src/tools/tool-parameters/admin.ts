@@ -2,6 +2,16 @@ import type { ToolParameters } from './tool-parameter-schema.js';
 
 export function buildAdminParameters(name: string): ToolParameters | undefined {
   switch (name) {
+    case 'permission_get':
+      return {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', minLength: 1, description: '权限请求所属的子会话 ID' },
+          request_id: { type: 'string', minLength: 1, description: '权限请求 ID' },
+        },
+        required: ['session_id', 'request_id'],
+        additionalProperties: false,
+      };
     case 'mcp_list_tools':
       return {
         type: 'object',

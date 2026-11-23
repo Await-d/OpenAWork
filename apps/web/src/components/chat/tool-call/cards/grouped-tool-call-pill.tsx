@@ -121,6 +121,7 @@ export function GroupedToolCallPill({
               const props: ToolCallDisplayProps = {
                 toolName: c.toolName,
                 input: c.input,
+                fileDiffs: c.fileDiffs,
               };
               if (c.kind !== undefined) props.kind = c.kind;
               if (c.output !== undefined) props.output = c.output;

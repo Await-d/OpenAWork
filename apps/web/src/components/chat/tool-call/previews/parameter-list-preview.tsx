@@ -1,5 +1,11 @@
-import type { ReactElement } from 'react';
-import { InitialOpenDetails } from '../shared/initial-open-details.js';
+import { useState, type ReactElement } from 'react';
+import {
+  LazyPreviewDetails,
+  PreviewMore,
+  previewKeys,
+  PREVIEW_PAGE_SIZE,
+} from './bounded-preview.js';
+import { JsonPreview } from './json-preview.js';
 import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
 
 /* ── ParameterListPreview (universal input panel) ── */
@@ -54,19 +60,20 @@ export function ParamValue({ value }: { value: unknown }): ReactElement {
     return <span className="param-list-num">{value}</span>;
   }
   if (typeof value === 'string') {
-    const isMultiLine = value.includes('\n');
+    const isMultiLine = value.slice(0, INLINE_STRING_LIMIT).includes('\n');
     const isLong = value.length > INLINE_STRING_LIMIT;
     if (isLong || isMultiLine) {
-      const flat = flattenWhitespace(value);
+      const flat = flattenWhitespace(value.slice(0, INLINE_STRING_LIMIT));
       const preview =
         flat.length > INLINE_PREVIEW_LIMIT ? `${flat.slice(0, INLINE_PREVIEW_LIMIT - 1)}…` : flat;
       return (
-        <InitialOpenDetails className="param-list-nested" initialOpen={isInsideExpandedCard}>
-          <summary title={value}>
-            <span className="param-list-str">{preview}</span>
-          </summary>
-          <pre className="param-list-json">{value}</pre>
-        </InitialOpenDetails>
+        <LazyPreviewDetails
+          className="param-list-nested"
+          initialOpen={isInsideExpandedCard}
+          summary={<span className="param-list-str">{preview}</span>}
+        >
+          <JsonPreview data={value} defaultExpanded />
+        </LazyPreviewDetails>
       );
     }
     return <span className="param-list-str">{value}</span>;
@@ -75,9 +82,12 @@ export function ParamValue({ value }: { value: unknown }): ReactElement {
     if (value.length === 0) {
       return <span className="param-list-empty-arr">[]</span>;
     }
-    const allPrimitive = value.every(
-      (v) => v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean',
-    );
+    const allPrimitive =
+      value.length <= 4 &&
+      value.every(
+        (v) =>
+          v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean',
+      );
     if (allPrimitive && value.length <= 4) {
       // Tighter inline-array threshold (was 8) so we don't push a long
       // array onto the same row as other params; anything bigger now
@@ -99,19 +109,25 @@ export function ParamValue({ value }: { value: unknown }): ReactElement {
       );
     }
     return (
-      <details className="param-list-nested" open={isInsideExpandedCard || undefined}>
-        <summary>{value.length} 项</summary>
-        <pre className="param-list-json">{JSON.stringify(value, null, 2)}</pre>
-      </details>
+      <LazyPreviewDetails
+        className="param-list-nested"
+        initialOpen={isInsideExpandedCard}
+        summary={`${value.length} 项`}
+      >
+        <JsonPreview data={value} defaultExpanded />
+      </LazyPreviewDetails>
     );
   }
   if (typeof value === 'object') {
-    const keys = Object.keys(value as Record<string, unknown>);
+    const { keys, more } = previewKeys(value, PREVIEW_PAGE_SIZE);
     return (
-      <details className="param-list-nested" open={isInsideExpandedCard || undefined}>
-        <summary>对象 · {keys.length} 键</summary>
-        <pre className="param-list-json">{JSON.stringify(value, null, 2)}</pre>
-      </details>
+      <LazyPreviewDetails
+        className="param-list-nested"
+        initialOpen={isInsideExpandedCard}
+        summary={`对象 · ${keys.length}${more ? '+' : ''} 键`}
+      >
+        <JsonPreview data={value} defaultExpanded />
+      </LazyPreviewDetails>
     );
   }
   return <span className="param-list-str">{String(value)}</span>;
@@ -127,13 +143,14 @@ export function ParamValue({ value }: { value: unknown }): ReactElement {
  * sentence wherever possible.
  */
 export function ParameterListPreview({ input }: { input: Record<string, unknown> }) {
-  const entries = Object.entries(input);
-  if (entries.length === 0) {
+  const [limit, setLimit] = useState(PREVIEW_PAGE_SIZE);
+  const { keys, more } = previewKeys(input, limit);
+  if (keys.length === 0) {
     return <div className="param-list-empty">（无参数）</div>;
   }
   return (
     <div className="param-list">
-      {entries.map(([key, value], i) => (
+      {keys.map((key, i) => (
         <span key={key} className="param-list-row">
           {i > 0 && (
             <span className="param-list-sep" aria-hidden="true">
@@ -142,10 +159,15 @@ export function ParameterListPreview({ input }: { input: Record<string, unknown>
           )}
           <span className="param-list-key">{key}</span>
           <span className="param-list-value">
-            <ParamValue value={value} />
+            <ParamValue value={input[key]} />
           </span>
         </span>
       ))}
+      {more && (
+        <PreviewMore onClick={() => setLimit((count) => count + PREVIEW_PAGE_SIZE)}>
+          加载更多字段
+        </PreviewMore>
+      )}
     </div>
   );
 }

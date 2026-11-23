@@ -262,6 +262,28 @@ describe('createMemoriesClient 提议与历史', () => {
     );
   });
 
+  it('listRevisions 保留前后快照与 null 回滚目标，不伪造 changeSeq', async () => {
+    const revisions = [
+      {
+        id: 'revision-1',
+        memoryId: 'memory-1',
+        revision: 1,
+        operation: 'create',
+        origin: 'manual',
+        actorId: 'user-1',
+        createdAt: '2026-11-01T00:00:00Z',
+        before: null,
+        after: { id: 'memory-1', value: '新内容' },
+        payload: null,
+      },
+    ];
+    globalThis.fetch = vi.fn(async () => Response.json({ revisions }));
+    const client = createMemoriesClient('http://localhost:3000');
+    const result = await client.listRevisions('token-1', { memoryId: 'memory-1' });
+    expect(result).toEqual(revisions);
+    expect(result[0]).not.toHaveProperty('changeSeq');
+  });
+
   it('rollbackRevision 用 POST 命中 rollback 子路径', async () => {
     const { calls } = captureFetch();
 

@@ -31,6 +31,13 @@ const loginSchema = z.object({
   password: z.string().min(8),
 });
 
+// 自助改密的长度约束与桌面端 `/auth/admin-set-password` 逐字一致，避免两个入口
+// 对「什么密码算合法」给出不同答案。
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(128),
+});
+
 const desktopDefaultLoginSchema = z.object({
   deviceName: z.string().min(1).max(80).optional(),
   platform: z.enum(['desktop']).optional(),
@@ -362,6 +369,78 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
       redis.del(`session:${payload.sub}:active`);
       step.succeed(undefined, { userId: payload.sub });
       return reply.send({ ok: true });
+    },
+  );
+
+  /**
+   * 已登录用户自助改密（Web / 桌面端通用）。
+   *
+   * 与桌面端 `/auth/admin-set-password` 写的是 users 表的同一行 —— 因此「Web 端改的
+   * 密码」与「桌面端改的密码」天然是同一份凭据，这也是本接口存在的理由：Docker 部署
+   * 的网关托管着前端，但拿不到桌面端的 `X-OpenAWork-Desktop-Auth` 令牌，那条改密链路
+   * 在浏览器里恒 403，必须有一条只依赖普通登录态（JWT）的路径。
+   *
+   * 需要旧密码：本接口仅凭 access token 就可能被别人冒用（共享设备 / 令牌泄漏），
+   * 而改密是能永久接管账号的操作，故不采用桌面端那条「本地已自动认证」的免密语义。
+   *
+   * 失败计入与登录同一个 (email+ip) 限流桶：猜「当前密码」与猜登录密码是同一威胁
+   * 模型，共享计数器可避免攻击者挑一个计数更松的入口绕过锁定。
+   *
+   * 成功后作废该用户全部 refresh_tokens（其它端立即失效），并为当前端补发一对新
+   * 令牌 —— 否则改密者自己会在 access token 过期后无法刷新，等同被登出。
+   */
+  app.post(
+    '/auth/change-password',
+    { onRequest: [requireAuth] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { step } = startRequestWorkflow(request, 'auth.change-password');
+      const payload = request.user as JwtPayload;
+
+      const body = changePasswordSchema.safeParse(request.body);
+      if (!body.success) {
+        step.fail('invalid input');
+        return reply.status(400).send({ error: '请求参数无效。', issues: body.error.issues });
+      }
+
+      const rateLimitKey = buildLoginRateLimitKey(payload.email, request.ip);
+      const limit = loginRateLimiter.check(rateLimitKey);
+      if (!limit.allowed) {
+        step.fail('rate limited');
+        return reply
+          .status(429)
+          .header('retry-after', String(limit.retryAfterSeconds))
+          .send({
+            error: `尝试过于频繁，请在 ${limit.retryAfterSeconds} 秒后重试。`,
+            retryAfterSeconds: limit.retryAfterSeconds,
+          });
+      }
+
+      const user = sqliteGet<{ id: string; password_hash: string }>(
+        'SELECT id, password_hash FROM users WHERE id = ? LIMIT 1',
+        [payload.sub],
+      );
+      if (!user) {
+        step.fail('user not found');
+        return reply.status(404).send({ error: '账号不存在。' });
+      }
+
+      if (!verifyPassword(body.data.currentPassword, user.password_hash).valid) {
+        loginRateLimiter.recordFailure(rateLimitKey);
+        step.fail('current password mismatch');
+        return reply.status(400).send({ error: '当前密码不正确。' });
+      }
+
+      sqliteRun('UPDATE users SET password_hash = ? WHERE id = ?', [
+        hashPassword(body.data.newPassword),
+        user.id,
+      ]);
+      sqliteRun('DELETE FROM refresh_tokens WHERE user_id = ?', [user.id]);
+      redis.del(`session:${user.id}:active`);
+      loginRateLimiter.recordSuccess(rateLimitKey);
+
+      const tokenPair = issueTokenPair(app, { id: user.id, email: payload.email });
+      step.succeed(undefined, { userId: user.id });
+      return reply.send(tokenPair);
     },
   );
 

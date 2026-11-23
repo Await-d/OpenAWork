@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>工具结果可视化 · 真实渲染预览</title>
+    <link rel="stylesheet" href="/apps/web/src/components/chat/tool-call/css/base.css" />
+    <link rel="stylesheet" href="/apps/web/src/components/chat/tool-call/css/shared.css" />
+    <link rel="stylesheet" href="/apps/web/src/components/chat/tool-call/css/previews.css" />
+    <style>
+      :root {
+        --bg-base: #0a0c10;
+        --bg-raised: #0c0f15;
+        --bg-overlay: #11151c;
+        --bg-surface: #161b25;
+        --bg-elevated: #1d2230;
+        --bg-hover: #232a3a;
+        --fg-strong: #e8eaf2;
+        --fg-default: #b8bdcb;
+        --fg-muted: #7a8194;
+        --fg-subtle: #4a5168;
+        --fg-on-accent: #0a0c1f;
+        --accent: #5b6cff;
+        --accent-muted: rgba(91, 108, 255, 0.14);
+        --aux: #38bdf8;
+        --aux-muted: rgba(56, 189, 248, 0.14);
+        --success: #2cc28a;
+        --success-muted: rgba(44, 194, 138, 0.14);
+        --warning: #f0b429;
+        --warning-muted: rgba(240, 180, 41, 0.14);
+        --danger: #f06464;
+        --danger-muted: rgba(240, 100, 100, 0.14);
+        --complement: #f06464;
+        --complement-muted: rgba(240, 100, 100, 0.14);
+        --contrast: #a78bfa;
+        --contrast-muted: rgba(167, 139, 250, 0.14);
+        --border-subtle: hsl(215 20% 60% / 0.09);
+        --border-default: hsl(215 18% 60% / 0.15);
+        --border-emphasis: hsl(215 16% 65% / 0.24);
+        --dur-micro: 120ms;
+        --ease-micro: cubic-bezier(0.4, 0, 0.2, 1);
+        --radius-md: 8px;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+          sans-serif;
+        font-size: 13px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+      .page {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 40px 24px 120px;
+      }
+      .page-head h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+        font-weight: 600;
+        color: var(--fg-strong);
+      }
+      .page-head p {
+        margin: 0 0 8px;
+        max-width: 680px;
+        font-size: 12.5px;
+        color: var(--fg-muted);
+      }
+      .page-head code {
+        padding: 1px 4px;
+        border-radius: 3px;
+        background: var(--bg-elevated);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+      }
+      .scene {
+        margin-top: 30px;
+      }
+      .scene-caption {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 8px;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--fg-strong);
+      }
+      .scene-caption span {
+        font-weight: 400;
+        font-size: 11px;
+        color: var(--fg-subtle);
+      }
+      .stage {
+        padding: 14px;
+        border: 1px dashed var(--border-subtle);
+        border-radius: 12px;
+      }
+      /* dump 出来的卡片默认是收起的，这里强制把 body 显示出来看展开态 */
+      .stage .tool-call-block-body {
+        display: block !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <h1>工具结果可视化 · 真实渲染预览</h1>
+        <p>
+          DOM 由 jsdom 里<b>真实渲染</b> dump 出来（折叠行取 <code>BlockToolCall</code>，展开体取
+          <code>ToolOutputPreview</code>），样式表引用的是 app
+          里同一批文件（<code>tool-call/css/*.css</code>），不是手抄的近似样式。
+        </p>
+        <p>
+          卡片默认折叠，这里强制展开了
+          body，便于对照折叠行标题与展开体。样本字段名取自代码里的真实契约。
+        </p>
+      </header>
+      <section class="scene">
+        <div class="scene-caption">
+          管理类 · MCP 服务器列表（含 1 个已停用，头部先给结论）<span>admin-list</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <g>
+                    <path
+                      d="M0.972656 9.37176L9.5214 1.60019C10.7018 0.527151 12.6155 0.527151 13.7957 1.60019C14.9761 2.67321 14.9761 4.41295 13.7957 5.48599L7.3397 11.3552"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                    <path
+                      d="M7.42871 11.2747L13.7957 5.48643C14.9761 4.41338 16.8898 4.41338 18.0702 5.48643L18.1147 5.52688C19.2951 6.59993 19.2951 8.33966 18.1147 9.4127L10.3831 16.4414C9.98966 16.7991 9.98966 17.379 10.3831 17.7366L11.9707 19.1799"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                    <path
+                      d="M11.6587 3.54346L5.33619 9.29119C4.15584 10.3642 4.15584 12.1039 5.33619 13.177C6.51649 14.25 8.43019 14.25 9.61054 13.177L15.9331 7.42923"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                  </g></svg></span
+              ><span class="tool-call-block-title" data-tool-category="state"
+                >已列举了 MCP 服务器</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="result-view">
+                <div class="result-view-bar">
+                  <span class="result-view-note">1 个已停用</span
+                  ><span class="result-view-spacer"></span>
+                </div>
+                <div class="result-group">
+                  <div class="result-rows">
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="0" aria-hidden="true">CO</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">Codegraph</span
+                          ><span class="result-badge" data-tone="ok">已启用</span></span
+                        ><span class="result-row-desc">代码图谱索引与符号查询</span
+                        ><span class="result-row-meta"
+                          ><span>codegraph</span><span>stdio</span></span
+                        ></span
+                      >
+                    </div>
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="2" aria-hidden="true">LA</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">Language Server</span
+                          ><span class="result-badge" data-tone="ok">已启用</span></span
+                        ><span class="result-row-desc">语言服务（诊断 / 跳转 / 重命名）</span
+                        ><span class="result-row-meta"
+                          ><span>lsp</span><span>stdio</span></span
+                        ></span
+                      >
+                    </div>
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="0" aria-hidden="true">GR</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">grep.app</span
+                          ><span class="result-badge" data-tone="off">已停用</span></span
+                        ><span class="result-row-desc">远端 SSE，尚未启用</span
+                        ><span class="result-row-meta"
+                          ><span>grep_app</span><span>sse</span></span
+                        ></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          管理类 · 定时任务（调度数据列对齐，走表格）<span>admin-table</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M7.62516 4.46094L5.05225 3.86719L3.86475 5.05469L4.4585 7.6276L2.0835 9.21094V10.7943L4.4585 12.3776L3.86475 14.9505L5.05225 16.138L7.62516 15.5443L9.2085 17.9193H10.7918L12.3752 15.5443L14.9481 16.138L16.1356 14.9505L15.5418 12.3776L17.9168 10.7943V9.21094L15.5418 7.6276L16.1356 5.05469L14.9481 3.86719L12.3752 4.46094L10.7918 2.08594H9.2085L7.62516 4.46094Z"
+                    stroke="currentColor"
+                  ></path>
+                  <path
+                    d="M12.5002 10.0026C12.5002 11.3833 11.3809 12.5026 10.0002 12.5026C8.61945 12.5026 7.50016 11.3833 7.50016 10.0026C7.50016 8.62189 8.61945 7.5026 10.0002 7.5026C11.3809 7.5026 12.5002 8.62189 12.5002 10.0026Z"
+                    stroke="currentColor"
+                  ></path></svg></span
+              ><span class="tool-call-block-title">已列举了定时任务</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="result-view">
+                <table class="result-table">
+                  <thead>
+                    <tr>
+                      <th>任务</th>
+                      <th>状态</th>
+                      <th>调度</th>
+                      <th>下次触发</th>
+                      <th>已触发</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td data-strong="true">每日构建检查</td>
+                      <td><span class="result-badge" data-tone="ok">启用</span></td>
+                      <td data-mono="true">0 9 * * 1-5</td>
+                      <td data-mono="true">01-05 17:00</td>
+                      <td data-mono="true">42</td>
+                    </tr>
+                    <tr>
+                      <td data-strong="true">周报汇总</td>
+                      <td><span class="result-badge" data-tone="off">停用</span></td>
+                      <td data-mono="true">every 604800000ms</td>
+                      <td data-mono="true">—</td>
+                      <td data-mono="true">7</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          管理类 · 待确认提议（动作徽章是中文，不回显 archive）<span>admin-proposal</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M7.62516 4.46094L5.05225 3.86719L3.86475 5.05469L4.4585 7.6276L2.0835 9.21094V10.7943L4.4585 12.3776L3.86475 14.9505L5.05225 16.138L7.62516 15.5443L9.2085 17.9193H10.7918L12.3752 15.5443L14.9481 16.138L16.1356 14.9505L15.5418 12.3776L17.9168 10.7943V9.21094L15.5418 7.6276L16.1356 5.05469L14.9481 3.86719L12.3752 4.46094L10.7918 2.08594H9.2085L7.62516 4.46094Z"
+                    stroke="currentColor"
+                  ></path>
+                  <path
+                    d="M12.5002 10.0026C12.5002 11.3833 11.3809 12.5026 10.0002 12.5026C8.61945 12.5026 7.50016 11.3833 7.50016 10.0026C7.50016 8.62189 8.61945 7.5026 10.0002 7.5026C11.3809 7.5026 12.5002 8.62189 12.5002 10.0026Z"
+                    stroke="currentColor"
+                  ></path></svg></span
+              ><span class="tool-call-block-title">已删除了记忆</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="result-view">
+                <div class="result-group">
+                  <div class="result-rows">
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="2" aria-hidden="true">⏳</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">未创建</span
+                          ><span class="result-badge" data-tone="error">归档</span></span
+                        ><span class="result-row-desc">等待用户确认后归档该条记忆</span
+                        ><span class="result-row-meta"><span>prop_9f2c</span></span></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          模型检索 · 分组行卡（released: 0 的已停用模型不显示 1970）<span>models</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M7.62516 4.46094L5.05225 3.86719L3.86475 5.05469L4.4585 7.6276L2.0835 9.21094V10.7943L4.4585 12.3776L3.86475 14.9505L5.05225 16.138L7.62516 15.5443L9.2085 17.9193H10.7918L12.3752 15.5443L14.9481 16.138L16.1356 14.9505L15.5418 12.3776L17.9168 10.7943V9.21094L15.5418 7.6276L16.1356 5.05469L14.9481 3.86719L12.3752 4.46094L10.7918 2.08594H9.2085L7.62516 4.46094Z"
+                    stroke="currentColor"
+                  ></path>
+                  <path
+                    d="M12.5002 10.0026C12.5002 11.3833 11.3809 12.5026 10.0002 12.5026C8.61945 12.5026 7.50016 11.3833 7.50016 10.0026C7.50016 8.62189 8.61945 7.5026 10.0002 7.5026C11.3809 7.5026 12.5002 8.62189 12.5002 10.0026Z"
+                    stroke="currentColor"
+                  ></path></svg></span
+              ><span class="tool-call-block-title">已搜索了可用模型</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="result-view">
+                <div class="result-view-bar">
+                  <span class="result-view-note">共 42 个模型，显示前 3 个</span
+                  ><span class="result-view-spacer"></span
+                  ><button type="button" class="result-view-toggle">表格视图</button>
+                </div>
+                <div class="result-group">
+                  <div class="result-group-title">
+                    Anthropic<span class="result-badge" data-tone="count">2</span>
+                  </div>
+                  <div class="result-rows">
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="5" aria-hidden="true">CL</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">Claude Sonnet 4.5</span
+                          ><span class="result-badge" data-tone="ok">可用</span></span
+                        ><span class="result-row-meta"
+                          ><span>anthropic/claude-sonnet-4-5</span
+                          ><span>2025-09-30 发布</span></span
+                        ></span
+                      ><span class="result-row-trailing" title="输入 / 输出，每百万 token"
+                        >$3 / $15</span
+                      >
+                    </div>
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="5" aria-hidden="true">CL</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">Claude 3.5 Haiku</span
+                          ><span class="result-badge" data-tone="off">已停用</span></span
+                        ><span class="result-row-meta"
+                          ><span>anthropic/claude-3-5-haiku</span></span
+                        ></span
+                      ><span class="result-row-trailing" title="输入 / 输出，每百万 token"
+                        >$0.8 / $4</span
+                      >
+                    </div>
+                  </div>
+                </div>
+                <div class="result-group">
+                  <div class="result-group-title">
+                    OpenAI<span class="result-badge" data-tone="count">1</span>
+                  </div>
+                  <div class="result-rows">
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="5" aria-hidden="true">GP</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">GPT-5 mini</span
+                          ><span class="result-badge" data-tone="ok">可用</span></span
+                        ><span class="result-row-meta"
+                          ><span>openai/gpt-5-mini</span><span>2025-08-23 发布</span></span
+                        ></span
+                      ><span class="result-row-trailing" title="输入 / 输出，每百万 token"
+                        >$0.25 / $2</span
+                      >
+                    </div>
+                  </div>
+                </div>
+                <div class="result-view-footnote">还有更多结果，可用 offset 翻页</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          会话转录 · 紧凑日志（顶部通道来源 + 合成通知的中文标签）<span>session-read</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M7.62516 4.46094L5.05225 3.86719L3.86475 5.05469L4.4585 7.6276L2.0835 9.21094V10.7943L4.4585 12.3776L3.86475 14.9505L5.05225 16.138L7.62516 15.5443L9.2085 17.9193H10.7918L12.3752 15.5443L14.9481 16.138L16.1356 14.9505L15.5418 12.3776L17.9168 10.7943V9.21094L15.5418 7.6276L16.1356 5.05469L14.9481 3.86719L12.3752 4.46094L10.7918 2.08594H9.2085L7.62516 4.46094Z"
+                    stroke="currentColor"
+                  ></path>
+                  <path
+                    d="M12.5002 10.0026C12.5002 11.3833 11.3809 12.5026 10.0002 12.5026C8.61945 12.5026 7.50016 11.3833 7.50016 10.0026C7.50016 8.62189 8.61945 7.5026 10.0002 7.5026C11.3809 7.5026 12.5002 8.62189 12.5002 10.0026Z"
+                    stroke="currentColor"
+                  ></path></svg></span
+              ><span class="tool-call-block-title" data-tool-category="state">已读取了会话</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="session-read">
+                <div class="session-read-source">
+                  <span class="session-read-source-tag">来源</span>通道 · 微信 · wxid_abc123
+                </div>
+                <div class="session-read-hint">
+                  默认折叠长消息（每条约 600 字符）；需要完整文本时传 full: true。
+                </div>
+                <div class="session-read-log">
+                  <div class="session-read-row">
+                    <span class="session-read-time">19:04:05</span
+                    ><span class="session-read-role" data-role="user">用户</span
+                    ><span class="session-read-text">帮我看下这个报错，本地跑不起来</span>
+                  </div>
+                  <div class="session-read-row">
+                    <span class="session-read-time">19:04:08</span
+                    ><span class="session-read-role" data-role="assistant">助手</span
+                    ><span class="session-read-text"
+                      ><code class="session-read-tool" data-kind="call"
+                        >read
+                        {"filePath":"apps/web/src/components/chat/tool-call/shared/result-view.ts"}</code
+                      ></span
+                    >
+                  </div>
+                  <div class="session-read-row">
+                    <span class="session-read-time"></span
+                    ><span class="session-read-role" data-role="assistant"></span
+                    ><span class="session-read-text"
+                      ><code class="session-read-tool" data-kind="result"
+                        >export function buildResultView(...) { ... }</code
+                      ></span
+                    >
+                  </div>
+                  <div class="session-read-row">
+                    <span class="session-read-time">19:04:10</span
+                    ><span class="session-read-role" data-role="synthetic">通知</span
+                    ><span class="session-read-text"
+                      ><span class="session-read-origin">子代理 · scout · 失败</span>子代理 scout
+                      在分析依赖时失败：找不到模块 @openAwork/shared-ui</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          语言服务状态 · 运行中 + 可安装（未安装项带出安装命令）<span>lsp-status</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M7.91602 2.91406H2.91602V17.0807H17.0827V12.0807M12.0827 2.91406H17.0827V7.91406M9.58268 10.4141L16.666 3.33073"
+                    stroke="currentColor"
+                    stroke-linecap="square"
+                  ></path></svg></span
+              ><span class="tool-call-block-title" data-tool-category="think"
+                >已执行了语言服务操作</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="result-view">
+                <div class="result-view-bar">
+                  <span class="result-view-note">1 个尚未安装</span
+                  ><span class="result-view-spacer"></span>
+                </div>
+                <div class="result-group">
+                  <div class="result-group-title">
+                    运行中<span class="result-badge" data-tone="count">2</span>
+                  </div>
+                  <div class="result-rows">
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="2" aria-hidden="true">TY</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">typescript</span
+                          ><span class="result-badge" data-tone="ok">运行中</span></span
+                        ><span class="result-row-meta"
+                          ><span>/workspace/apps/web</span><span>128 个文件</span
+                          ><span>3 条诊断</span></span
+                        ></span
+                      >
+                    </div>
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="4" aria-hidden="true">ES</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">eslint</span
+                          ><span class="result-badge" data-tone="ok">运行中</span></span
+                        ><span class="result-row-meta"
+                          ><span>/workspace/apps/web</span><span>96 个文件</span></span
+                        ></span
+                      >
+                    </div>
+                  </div>
+                </div>
+                <div class="result-group">
+                  <div class="result-group-title">
+                    可用的语言服务<span class="result-badge" data-tone="count">2</span>
+                  </div>
+                  <div class="result-rows">
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="0" aria-hidden="true">GO</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">gopls</span
+                          ><span class="result-badge" data-tone="warn">未安装</span></span
+                        ><span class="result-row-desc"
+                          >go install golang.org/x/tools/gopls@latest</span
+                        ><span class="result-row-meta"
+                          ><span>.go</span><span>gopls</span></span
+                        ></span
+                      >
+                    </div>
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="2" aria-hidden="true">RU</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">rust-analyzer</span
+                          ><span class="result-badge" data-tone="ok">已安装</span></span
+                        ><span class="result-row-meta"
+                          ><span>.rs</span><span>rust-analyzer</span></span
+                        ></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          渠道读取 · 群消息行卡（顶部给条数）<span>channel-messages</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M7.62516 4.46094L5.05225 3.86719L3.86475 5.05469L4.4585 7.6276L2.0835 9.21094V10.7943L4.4585 12.3776L3.86475 14.9505L5.05225 16.138L7.62516 15.5443L9.2085 17.9193H10.7918L12.3752 15.5443L14.9481 16.138L16.1356 14.9505L15.5418 12.3776L17.9168 10.7943V9.21094L15.5418 7.6276L16.1356 5.05469L14.9481 3.86719L12.3752 4.46094L10.7918 2.08594H9.2085L7.62516 4.46094Z"
+                    stroke="currentColor"
+                  ></path>
+                  <path
+                    d="M12.5002 10.0026C12.5002 11.3833 11.3809 12.5026 10.0002 12.5026C8.61945 12.5026 7.50016 11.3833 7.50016 10.0026C7.50016 8.62189 8.61945 7.5026 10.0002 7.5026C11.3809 7.5026 12.5002 8.62189 12.5002 10.0026Z"
+                    stroke="currentColor"
+                  ></path></svg></span
+              ><span class="tool-call-block-title">已读取了群消息</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="result-view">
+                <div class="result-view-bar">
+                  <span class="result-view-note">2 条消息</span
+                  ><span class="result-view-spacer"></span>
+                </div>
+                <div class="result-group">
+                  <div class="result-rows">
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="0" aria-hidden="true">张</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">张三</span></span
+                        ><span class="result-row-desc">接口联调好了吗？</span
+                        ><span class="result-row-meta"><span>01-02 18:00</span></span></span
+                      >
+                    </div>
+                    <div class="result-row">
+                      <span class="result-row-avatar" data-tone="2" aria-hidden="true">李</span
+                      ><span class="result-row-main"
+                        ><span class="result-row-line"
+                          ><span class="result-row-title">李四</span></span
+                        ><span class="result-row-desc">刚推了一版，麻烦看下</span
+                        ><span class="result-row-meta"
+                          ><span>01-02 18:02</span><span>回复</span></span
+                        ></span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          渠道读取 · 数据表记录（列名取 fields 键并集，数组值折叠）<span>channel-records</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M7.62516 4.46094L5.05225 3.86719L3.86475 5.05469L4.4585 7.6276L2.0835 9.21094V10.7943L4.4585 12.3776L3.86475 14.9505L5.05225 16.138L7.62516 15.5443L9.2085 17.9193H10.7918L12.3752 15.5443L14.9481 16.138L16.1356 14.9505L15.5418 12.3776L17.9168 10.7943V9.21094L15.5418 7.6276L16.1356 5.05469L14.9481 3.86719L12.3752 4.46094L10.7918 2.08594H9.2085L7.62516 4.46094Z"
+                    stroke="currentColor"
+                  ></path>
+                  <path
+                    d="M12.5002 10.0026C12.5002 11.3833 11.3809 12.5026 10.0002 12.5026C8.61945 12.5026 7.50016 11.3833 7.50016 10.0026C7.50016 8.62189 8.61945 7.5026 10.0002 7.5026C11.3809 7.5026 12.5002 8.62189 12.5002 10.0026Z"
+                    stroke="currentColor"
+                  ></path></svg></span
+              ><span class="tool-call-block-title">已读取了数据表记录</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="result-view">
+                <div class="result-view-bar">
+                  <span class="result-view-note">2 条记录</span
+                  ><span class="result-view-spacer"></span>
+                </div>
+                <table class="result-table">
+                  <thead>
+                    <tr>
+                      <th>任务</th>
+                      <th>负责人</th>
+                      <th>状态</th>
+                      <th>截止</th>
+                      <th>标签</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>接入结果可视化</td>
+                      <td>张三</td>
+                      <td>进行中</td>
+                      <td>2026-01-10</td>
+                      <td>前端、UI</td>
+                    </tr>
+                    <tr>
+                      <td>回归测试</td>
+                      <td>李四</td>
+                      <td>待开始</td>
+                      <td>2026-01-15</td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          渠道发送 · 回执确认行（不是 messageId 字段表）<span>channel-ack</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M7.62516 4.46094L5.05225 3.86719L3.86475 5.05469L4.4585 7.6276L2.0835 9.21094V10.7943L4.4585 12.3776L3.86475 14.9505L5.05225 16.138L7.62516 15.5443L9.2085 17.9193H10.7918L12.3752 15.5443L14.9481 16.138L16.1356 14.9505L15.5418 12.3776L17.9168 10.7943V9.21094L15.5418 7.6276L16.1356 5.05469L14.9481 3.86719L12.3752 4.46094L10.7918 2.08594H9.2085L7.62516 4.46094Z"
+                    stroke="currentColor"
+                  ></path>
+                  <path
+                    d="M12.5002 10.0026C12.5002 11.3833 11.3809 12.5026 10.0002 12.5026C8.61945 12.5026 7.50016 11.3833 7.50016 10.0026C7.50016 8.62189 8.61945 7.5026 10.0002 7.5026C11.3809 7.5026 12.5002 8.62189 12.5002 10.0026Z"
+                    stroke="currentColor"
+                  ></path></svg></span
+              ><span class="tool-call-block-title">已发送了消息</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="tool-call-confirm">
+                <span class="tool-call-confirm-glyph">✓</span
+                ><span class="tool-call-confirm-text"
+                  >已发送了消息<span class="tool-call-confirm-path"> · om_abc123def</span></span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          MCP 归一化 · 搜索结果列表（mcp__open_websearch__search → websearch）<span
+            >mcp-websearch</span
+          >
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <g>
+                    <path
+                      d="M0.972656 9.37176L9.5214 1.60019C10.7018 0.527151 12.6155 0.527151 13.7957 1.60019C14.9761 2.67321 14.9761 4.41295 13.7957 5.48599L7.3397 11.3552"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                    <path
+                      d="M7.42871 11.2747L13.7957 5.48643C14.9761 4.41338 16.8898 4.41338 18.0702 5.48643L18.1147 5.52688C19.2951 6.59993 19.2951 8.33966 18.1147 9.4127L10.3831 16.4414C9.98966 16.7991 9.98966 17.379 10.3831 17.7366L11.9707 19.1799"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                    <path
+                      d="M11.6587 3.54346L5.33619 9.29119C4.15584 10.3642 4.15584 12.1039 5.33619 13.177C6.51649 14.25 8.43019 14.25 9.61054 13.177L15.9331 7.42923"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                  </g></svg></span
+              ><span class="tool-call-block-title" data-tool-category="state">调用了 MCP 工具</span
+              ><span class="tool-call-block-web-count">共 42 条记录</span
+              ><span class="tool-search-badge tool-search-badge-empty">∅ 无结果</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="structured-output">
+                <div class="structured-output-header">4 个字段</div>
+                <div class="structured-output-rows">
+                  <div class="structured-output-row">
+                    <span class="structured-output-key">query</span
+                    ><span class="structured-output-value"
+                      ><span class="param-list-str">openawork</span></span
+                    >
+                  </div>
+                  <div class="structured-output-row">
+                    <span class="structured-output-key">totalResults</span
+                    ><span class="structured-output-value"
+                      ><span class="param-list-num">42</span></span
+                    >
+                  </div>
+                  <div class="structured-output-row">
+                    <span class="structured-output-key">engines</span
+                    ><span class="structured-output-value"
+                      ><span class="param-list-arr-inline"
+                        >[<span class="param-list-arr-item"
+                          ><span class="param-list-str">bing</span></span
+                        ><span class="param-list-arr-item"
+                          >, <span class="param-list-str">duckduckgo</span></span
+                        >]</span
+                      ></span
+                    >
+                  </div>
+                  <div class="structured-output-row">
+                    <span class="structured-output-key">results</span
+                    ><span class="structured-output-value"
+                      ><details class="param-list-nested">
+                        <summary>2 项</summary>
+                        <pre class="param-list-json">
+[
+  {
+    "title": "OpenAWork 发布说明",
+    "url": "https://example.com/a",
+    "snippet": "本地优先的工作台，工具结果可视化全面重做。"
+  },
+  {
+    "title": "Bun 1.2 发布",
+    "url": "https://example.com/b",
+    "snippet": "更快的包管理与测试运行器。"
+  }
+]</pre>
+                      </details></span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          MCP 归一化 · 代码图谱检索（mcp__codegraph__codegraph_search）<span>mcp-codegraph</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <g>
+                    <path
+                      d="M0.972656 9.37176L9.5214 1.60019C10.7018 0.527151 12.6155 0.527151 13.7957 1.60019C14.9761 2.67321 14.9761 4.41295 13.7957 5.48599L7.3397 11.3552"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                    <path
+                      d="M7.42871 11.2747L13.7957 5.48643C14.9761 4.41338 16.8898 4.41338 18.0702 5.48643L18.1147 5.52688C19.2951 6.59993 19.2951 8.33966 18.1147 9.4127L10.3831 16.4414C9.98966 16.7991 9.98966 17.379 10.3831 17.7366L11.9707 19.1799"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                    <path
+                      d="M11.6587 3.54346L5.33619 9.29119C4.15584 10.3642 4.15584 12.1039 5.33619 13.177C6.51649 14.25 8.43019 14.25 9.61054 13.177L15.9331 7.42923"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                  </g></svg></span
+              ><span class="tool-call-block-title" data-tool-category="state">已搜索了代码图谱</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="cg-result">
+                <div class="cg-root">/workspace</div>
+                <div class="cg-list">
+                  <div class="cg-row">
+                    <span class="cg-symbol">buildResultView</span
+                    ><span class="cg-kind">function</span
+                    ><span class="cg-path"
+                      >apps/web/src/components/chat/tool-call/shared/admin-result-view.ts:168</span
+                    >
+                  </div>
+                  <div class="cg-row">
+                    <span class="cg-symbol">buildChannelResultView</span
+                    ><span class="cg-kind">function</span
+                    ><span class="cg-path"
+                      >apps/web/src/components/chat/tool-call/shared/channel-result-view.ts:30</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="scene">
+        <div class="scene-caption">
+          MCP 归一化 · Git Bash 环境探测（mcp__git_bash__diagnose）<span>mcp-git-bash</span>
+        </div>
+        <div class="stage">
+          <div class="tool-call-block" data-tool-status="completed" data-open="true">
+            <button type="button" class="tool-call-block-header" aria-expanded="false">
+              <span class="tool-icon" data-state="completed" style="width: 14px; height: 14px"
+                ><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <g>
+                    <path
+                      d="M0.972656 9.37176L9.5214 1.60019C10.7018 0.527151 12.6155 0.527151 13.7957 1.60019C14.9761 2.67321 14.9761 4.41295 13.7957 5.48599L7.3397 11.3552"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                    <path
+                      d="M7.42871 11.2747L13.7957 5.48643C14.9761 4.41338 16.8898 4.41338 18.0702 5.48643L18.1147 5.52688C19.2951 6.59993 19.2951 8.33966 18.1147 9.4127L10.3831 16.4414C9.98966 16.7991 9.98966 17.379 10.3831 17.7366L11.9707 19.1799"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                    <path
+                      d="M11.6587 3.54346L5.33619 9.29119C4.15584 10.3642 4.15584 12.1039 5.33619 13.177C6.51649 14.25 8.43019 14.25 9.61054 13.177L15.9331 7.42923"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                    ></path>
+                  </g></svg></span
+              ><span class="tool-call-block-title" data-tool-category="state"
+                >已检测了 Git Bash 环境</span
+              ><span class="tool-call-block-elapsed" data-duration-tier="fast">720ms</span
+              ><span class="tool-call-block-chevron">▸</span>
+            </button>
+            <div class="tool-call-block-body">
+              <div class="git-bash-status">
+                <div class="git-bash-status-head">
+                  <span class="git-bash-status-badge" data-ok="false">✕ 未找到 Git Bash</span
+                  ><span class="git-bash-status-chip">win32</span
+                  ><span class="git-bash-status-warn">当前环境无法执行 git_bash</span>
+                </div>
+                <dl class="git-bash-status-rows">
+                  <div class="git-bash-status-row">
+                    <dt>状态</dt>
+                    <dd>missing-git-bash</dd>
+                  </div>
+                  <div class="git-bash-status-row">
+                    <dt>探测来源</dt>
+                    <dd>not-found</dd>
+                  </div>
+                </dl>
+                <details class="git-bash-status-paths">
+                  <summary>探测路径（2）</summary>
+                  <ul>
+                    <li title="C:\Program Files\Git\bin\bash.exe">
+                      C:\Program Files\Git\bin\bash.exe
+                    </li>
+                    <li title="C:\Program Files (x86)\Git\bin\bash.exe">
+                      C:\Program Files (x86)\Git\bin\bash.exe
+                    </li>
+                  </ul>
+                </details>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

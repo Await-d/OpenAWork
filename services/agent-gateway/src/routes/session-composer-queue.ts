@@ -29,6 +29,7 @@ import { ApiError } from '../infra/error-response.js';
 import { parseBody, parseParams } from '../infra/parse-request.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
 import { purgeComposerQueueAttachments } from '../session/composer-queue-artifact-purge.js';
+import { syncComposerQueueBlockedNotification } from '../session/composer-queue-auto-run.js';
 import { getAnyInFlightStreamRequestForSession } from './stream-cancellation.js';
 import {
   claimComposerQueueItem,
@@ -230,6 +231,9 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
         step.succeed(undefined, { updated: false });
         return reply.status(404).send({ ok: false, error: '目标待发条目不存在。' });
       }
+      // 附件回填可能刚好解除了「附件没恢复」这类阻塞：立即重算一次提醒，不让红点
+      // 拖到下一个回合收尾才灭。
+      syncComposerQueueBlockedNotification({ sessionId, userId: user.sub });
       step.succeed(undefined, { updated: true });
       return reply.send({ ok: true, updated: true, item: toItemPayload(item) });
     },
@@ -255,6 +259,11 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
       if (removed && existing) {
         purgeComposerQueueAttachments(existing.attachmentItems);
       }
+      // 用户手动移出条目是「消解阻塞」最常见的路径：此刻必须重算提醒，否则红点要等到
+      // 下一个回合收尾才灭，而用户可能已经走了。
+      if (removed) {
+        syncComposerQueueBlockedNotification({ sessionId, userId: user.sub });
+      }
       // 条目已不在（可能刚被本会话的另一个标签页消费掉）不算失败：
       // 删除是幂等语义，调用方拿到 ok:true 即可继续。
       step.succeed(undefined, { removed });
@@ -277,6 +286,7 @@ export async function registerSessionComposerQueueRoutes(app: FastifyInstance): 
       const removedCount = clearComposerQueue({ sessionId, userId: user.sub });
       if (removedCount > 0) {
         purgeComposerQueueAttachments(existingItems.flatMap((item) => item.attachmentItems));
+        syncComposerQueueBlockedNotification({ sessionId, userId: user.sub });
       }
       step.succeed(undefined, { removedCount });
       return reply.send({ ok: true, removedCount });

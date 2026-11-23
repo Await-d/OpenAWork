@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { login, logout, refreshAccessToken } from './auth.js';
+import { changePassword, login, logout, refreshAccessToken } from './auth.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -94,5 +94,60 @@ describe('gateway auth helpers', () => {
     }) as unknown as typeof fetch;
 
     await expect(logout('http://localhost:3000', 'access-1', 20)).resolves.toBeUndefined();
+  });
+
+  it('changePassword 成功时返回新令牌对，并带上 Bearer 令牌与两个密码字段', async () => {
+    const fetchMock = vi.fn(async (_input: string | URL, _init?: RequestInit) => {
+      return {
+        ok: true,
+        json: async () => ({
+          accessToken: 'new-access',
+          refreshToken: 'new-refresh',
+          expiresIn: '15m',
+        }),
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await changePassword(
+      'http://localhost:3000',
+      'old-access',
+      'old-password',
+      'new-password-123',
+    );
+    expect(result).toMatchObject({ accessToken: 'new-access', refreshToken: 'new-refresh' });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe('http://localhost:3000/auth/change-password');
+    const init = call?.[1];
+    expect(init?.method).toBe('POST');
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer old-access');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      currentPassword: 'old-password',
+      newPassword: 'new-password-123',
+    });
+  });
+
+  it('changePassword 失败时透出服务端中文文案', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: false,
+        json: async () => ({ error: '当前密码不正确。' }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await expect(
+      changePassword('http://localhost:3000', 'access', 'wrong-password', 'new-password-123'),
+    ).rejects.toThrow('当前密码不正确。');
+  });
+
+  it('changePassword 网络异常时转换成中文网络错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Failed to fetch');
+    }) as unknown as typeof fetch;
+
+    await expect(
+      changePassword('http://localhost:3000', 'access', 'old-password', 'new-password-123'),
+    ).rejects.toThrow('网络异常，修改密码失败。');
   });
 });

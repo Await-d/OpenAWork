@@ -1,0 +1,843 @@
+{
+  "chromium": "145.0.7632.6",
+  "passed": 187,
+  "failed": 0,
+  "results": [
+    {
+      "name": "dark/375 collapsed overflow",
+      "passed": true
+    },
+    {
+      "name": "dark/375 listing expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 empty expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 malformed expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 error expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 directory region",
+      "passed": true
+    },
+    {
+      "name": "dark/375 root path",
+      "passed": true
+    },
+    {
+      "name": "dark/375 returned counts",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/375 visited count",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/375 depth limit",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/375 seven initial rows",
+      "passed": true
+    },
+    {
+      "name": "dark/375 empty directory is noninteractive",
+      "passed": true
+    },
+    {
+      "name": "dark/375 all icons loaded",
+      "passed": true,
+      "detail": "[{\"source\":\"/file-icons/folder-src-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/readme.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/nodejs.svg\",\"loaded\":true,\"width\":16}]"
+    },
+    {
+      "name": "dark/375 folder and file icon types",
+      "passed": true
+    },
+    {
+      "name": "dark/375 Enter collapses directory",
+      "passed": true
+    },
+    {
+      "name": "dark/375 collapsed children hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/375 collapsed folder icon changes",
+      "passed": true
+    },
+    {
+      "name": "dark/375 Space expands directory",
+      "passed": true
+    },
+    {
+      "name": "dark/375 nested directory collapses",
+      "passed": true
+    },
+    {
+      "name": "dark/375 nested directory restores",
+      "passed": true
+    },
+    {
+      "name": "dark/375 empty counts",
+      "passed": true
+    },
+    {
+      "name": "dark/375 empty message",
+      "passed": true
+    },
+    {
+      "name": "dark/375 malformed fallback notice",
+      "passed": true
+    },
+    {
+      "name": "dark/375 malformed raw data retained",
+      "passed": true
+    },
+    {
+      "name": "dark/375 malformed no tree",
+      "passed": true
+    },
+    {
+      "name": "dark/375 error text retained",
+      "passed": true
+    },
+    {
+      "name": "dark/375 error no success tree",
+      "passed": true
+    },
+    {
+      "name": "dark/375 expanded overflow",
+      "passed": true,
+      "detail": "scrollWidth=375, viewport=375"
+    },
+    {
+      "name": "dark/375 keyboard focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/375 theme applied",
+      "passed": true,
+      "detail": "{\"mode\":\"dark\",\"background\":\"rgb(8, 9, 10)\",\"color\":\"rgb(240, 241, 243)\"}"
+    },
+    {
+      "name": "dark/375 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/768 collapsed overflow",
+      "passed": true
+    },
+    {
+      "name": "dark/768 listing expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 empty expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 malformed expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 error expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 directory region",
+      "passed": true
+    },
+    {
+      "name": "dark/768 root path",
+      "passed": true
+    },
+    {
+      "name": "dark/768 returned counts",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/768 visited count",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/768 depth limit",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/768 seven initial rows",
+      "passed": true
+    },
+    {
+      "name": "dark/768 empty directory is noninteractive",
+      "passed": true
+    },
+    {
+      "name": "dark/768 all icons loaded",
+      "passed": true,
+      "detail": "[{\"source\":\"/file-icons/folder-src-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/readme.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/nodejs.svg\",\"loaded\":true,\"width\":16}]"
+    },
+    {
+      "name": "dark/768 folder and file icon types",
+      "passed": true
+    },
+    {
+      "name": "dark/768 Enter collapses directory",
+      "passed": true
+    },
+    {
+      "name": "dark/768 collapsed children hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/768 collapsed folder icon changes",
+      "passed": true
+    },
+    {
+      "name": "dark/768 Space expands directory",
+      "passed": true
+    },
+    {
+      "name": "dark/768 nested directory collapses",
+      "passed": true
+    },
+    {
+      "name": "dark/768 nested directory restores",
+      "passed": true
+    },
+    {
+      "name": "dark/768 empty counts",
+      "passed": true
+    },
+    {
+      "name": "dark/768 empty message",
+      "passed": true
+    },
+    {
+      "name": "dark/768 malformed fallback notice",
+      "passed": true
+    },
+    {
+      "name": "dark/768 malformed raw data retained",
+      "passed": true
+    },
+    {
+      "name": "dark/768 malformed no tree",
+      "passed": true
+    },
+    {
+      "name": "dark/768 error text retained",
+      "passed": true
+    },
+    {
+      "name": "dark/768 error no success tree",
+      "passed": true
+    },
+    {
+      "name": "dark/768 expanded overflow",
+      "passed": true,
+      "detail": "scrollWidth=768, viewport=768"
+    },
+    {
+      "name": "dark/768 keyboard focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/768 theme applied",
+      "passed": true,
+      "detail": "{\"mode\":\"dark\",\"background\":\"rgb(8, 9, 10)\",\"color\":\"rgb(240, 241, 243)\"}"
+    },
+    {
+      "name": "dark/768 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/1440 collapsed overflow",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 listing expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 empty expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 malformed expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 error expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 directory region",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 root path",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 returned counts",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/1440 visited count",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/1440 depth limit",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "dark/1440 seven initial rows",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 empty directory is noninteractive",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 all icons loaded",
+      "passed": true,
+      "detail": "[{\"source\":\"/file-icons/folder-src-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/readme.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/nodejs.svg\",\"loaded\":true,\"width\":16}]"
+    },
+    {
+      "name": "dark/1440 folder and file icon types",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 Enter collapses directory",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 collapsed children hidden",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 collapsed folder icon changes",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 Space expands directory",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 nested directory collapses",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 nested directory restores",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 empty counts",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 empty message",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 malformed fallback notice",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 malformed raw data retained",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 malformed no tree",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 error text retained",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 error no success tree",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 expanded overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440, viewport=1440"
+    },
+    {
+      "name": "dark/1440 keyboard focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "dark/1440 theme applied",
+      "passed": true,
+      "detail": "{\"mode\":\"dark\",\"background\":\"rgb(8, 9, 10)\",\"color\":\"rgb(240, 241, 243)\"}"
+    },
+    {
+      "name": "dark/1440 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/375 collapsed overflow",
+      "passed": true
+    },
+    {
+      "name": "light/375 listing expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 empty expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 malformed expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 error expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 directory region",
+      "passed": true
+    },
+    {
+      "name": "light/375 root path",
+      "passed": true
+    },
+    {
+      "name": "light/375 returned counts",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/375 visited count",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/375 depth limit",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/375 seven initial rows",
+      "passed": true
+    },
+    {
+      "name": "light/375 empty directory is noninteractive",
+      "passed": true
+    },
+    {
+      "name": "light/375 all icons loaded",
+      "passed": true,
+      "detail": "[{\"source\":\"/file-icons/folder-src-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/readme.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/nodejs.svg\",\"loaded\":true,\"width\":16}]"
+    },
+    {
+      "name": "light/375 folder and file icon types",
+      "passed": true
+    },
+    {
+      "name": "light/375 Enter collapses directory",
+      "passed": true
+    },
+    {
+      "name": "light/375 collapsed children hidden",
+      "passed": true
+    },
+    {
+      "name": "light/375 collapsed folder icon changes",
+      "passed": true
+    },
+    {
+      "name": "light/375 Space expands directory",
+      "passed": true
+    },
+    {
+      "name": "light/375 nested directory collapses",
+      "passed": true
+    },
+    {
+      "name": "light/375 nested directory restores",
+      "passed": true
+    },
+    {
+      "name": "light/375 empty counts",
+      "passed": true
+    },
+    {
+      "name": "light/375 empty message",
+      "passed": true
+    },
+    {
+      "name": "light/375 malformed fallback notice",
+      "passed": true
+    },
+    {
+      "name": "light/375 malformed raw data retained",
+      "passed": true
+    },
+    {
+      "name": "light/375 malformed no tree",
+      "passed": true
+    },
+    {
+      "name": "light/375 error text retained",
+      "passed": true
+    },
+    {
+      "name": "light/375 error no success tree",
+      "passed": true
+    },
+    {
+      "name": "light/375 expanded overflow",
+      "passed": true,
+      "detail": "scrollWidth=375, viewport=375"
+    },
+    {
+      "name": "light/375 keyboard focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/375 theme applied",
+      "passed": true,
+      "detail": "{\"mode\":\"light\",\"background\":\"rgb(244, 245, 246)\",\"color\":\"rgb(10, 11, 12)\"}"
+    },
+    {
+      "name": "light/375 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/768 collapsed overflow",
+      "passed": true
+    },
+    {
+      "name": "light/768 listing expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 empty expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 malformed expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 error expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 directory region",
+      "passed": true
+    },
+    {
+      "name": "light/768 root path",
+      "passed": true
+    },
+    {
+      "name": "light/768 returned counts",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/768 visited count",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/768 depth limit",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/768 seven initial rows",
+      "passed": true
+    },
+    {
+      "name": "light/768 empty directory is noninteractive",
+      "passed": true
+    },
+    {
+      "name": "light/768 all icons loaded",
+      "passed": true,
+      "detail": "[{\"source\":\"/file-icons/folder-src-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/readme.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/nodejs.svg\",\"loaded\":true,\"width\":16}]"
+    },
+    {
+      "name": "light/768 folder and file icon types",
+      "passed": true
+    },
+    {
+      "name": "light/768 Enter collapses directory",
+      "passed": true
+    },
+    {
+      "name": "light/768 collapsed children hidden",
+      "passed": true
+    },
+    {
+      "name": "light/768 collapsed folder icon changes",
+      "passed": true
+    },
+    {
+      "name": "light/768 Space expands directory",
+      "passed": true
+    },
+    {
+      "name": "light/768 nested directory collapses",
+      "passed": true
+    },
+    {
+      "name": "light/768 nested directory restores",
+      "passed": true
+    },
+    {
+      "name": "light/768 empty counts",
+      "passed": true
+    },
+    {
+      "name": "light/768 empty message",
+      "passed": true
+    },
+    {
+      "name": "light/768 malformed fallback notice",
+      "passed": true
+    },
+    {
+      "name": "light/768 malformed raw data retained",
+      "passed": true
+    },
+    {
+      "name": "light/768 malformed no tree",
+      "passed": true
+    },
+    {
+      "name": "light/768 error text retained",
+      "passed": true
+    },
+    {
+      "name": "light/768 error no success tree",
+      "passed": true
+    },
+    {
+      "name": "light/768 expanded overflow",
+      "passed": true,
+      "detail": "scrollWidth=768, viewport=768"
+    },
+    {
+      "name": "light/768 keyboard focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/768 theme applied",
+      "passed": true,
+      "detail": "{\"mode\":\"light\",\"background\":\"rgb(244, 245, 246)\",\"color\":\"rgb(10, 11, 12)\"}"
+    },
+    {
+      "name": "light/768 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/1440 collapsed overflow",
+      "passed": true
+    },
+    {
+      "name": "light/1440 listing expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 empty expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 malformed expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 error expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 directory region",
+      "passed": true
+    },
+    {
+      "name": "light/1440 root path",
+      "passed": true
+    },
+    {
+      "name": "light/1440 returned counts",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/1440 visited count",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/1440 depth limit",
+      "passed": true,
+      "detail": "已返回 3 个目录 · 4 个文件\n已访问 190 个条目\n遍历深度 3 · 更深层内容未读取"
+    },
+    {
+      "name": "light/1440 seven initial rows",
+      "passed": true
+    },
+    {
+      "name": "light/1440 empty directory is noninteractive",
+      "passed": true
+    },
+    {
+      "name": "light/1440 all icons loaded",
+      "passed": true,
+      "detail": "[{\"source\":\"/file-icons/folder-src-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/readme.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/folder-open.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/react_ts.svg\",\"loaded\":true,\"width\":16},{\"source\":\"/file-icons/nodejs.svg\",\"loaded\":true,\"width\":16}]"
+    },
+    {
+      "name": "light/1440 folder and file icon types",
+      "passed": true
+    },
+    {
+      "name": "light/1440 Enter collapses directory",
+      "passed": true
+    },
+    {
+      "name": "light/1440 collapsed children hidden",
+      "passed": true
+    },
+    {
+      "name": "light/1440 collapsed folder icon changes",
+      "passed": true
+    },
+    {
+      "name": "light/1440 Space expands directory",
+      "passed": true
+    },
+    {
+      "name": "light/1440 nested directory collapses",
+      "passed": true
+    },
+    {
+      "name": "light/1440 nested directory restores",
+      "passed": true
+    },
+    {
+      "name": "light/1440 empty counts",
+      "passed": true
+    },
+    {
+      "name": "light/1440 empty message",
+      "passed": true
+    },
+    {
+      "name": "light/1440 malformed fallback notice",
+      "passed": true
+    },
+    {
+      "name": "light/1440 malformed raw data retained",
+      "passed": true
+    },
+    {
+      "name": "light/1440 malformed no tree",
+      "passed": true
+    },
+    {
+      "name": "light/1440 error text retained",
+      "passed": true
+    },
+    {
+      "name": "light/1440 error no success tree",
+      "passed": true
+    },
+    {
+      "name": "light/1440 expanded overflow",
+      "passed": true,
+      "detail": "scrollWidth=1440, viewport=1440"
+    },
+    {
+      "name": "light/1440 keyboard focus ring",
+      "passed": true,
+      "detail": "{\"visible\":true,\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\"}"
+    },
+    {
+      "name": "light/1440 theme applied",
+      "passed": true,
+      "detail": "{\"mode\":\"light\",\"background\":\"rgb(244, 245, 246)\",\"color\":\"rgb(10, 11, 12)\"}"
+    },
+    {
+      "name": "light/1440 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/light distinct theme backgrounds",
+      "passed": true
+    }
+  ],
+  "screenshots": [
+    "/home/await/project/OpenAWork/apps/web/harness/list-directory-artifacts/list-directory-dark-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/list-directory-artifacts/list-directory-dark-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/list-directory-artifacts/list-directory-dark-1440.png",
+    "/home/await/project/OpenAWork/apps/web/harness/list-directory-artifacts/list-directory-light-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/list-directory-artifacts/list-directory-light-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/list-directory-artifacts/list-directory-light-1440.png"
+  ],
+  "themes": [
+    {
+      "mode": "dark",
+      "background": "rgb(8, 9, 10)",
+      "color": "rgb(240, 241, 243)"
+    },
+    {
+      "mode": "dark",
+      "background": "rgb(8, 9, 10)",
+      "color": "rgb(240, 241, 243)"
+    },
+    {
+      "mode": "dark",
+      "background": "rgb(8, 9, 10)",
+      "color": "rgb(240, 241, 243)"
+    },
+    {
+      "mode": "light",
+      "background": "rgb(244, 245, 246)",
+      "color": "rgb(10, 11, 12)"
+    },
+    {
+      "mode": "light",
+      "background": "rgb(244, 245, 246)",
+      "color": "rgb(10, 11, 12)"
+    },
+    {
+      "mode": "light",
+      "background": "rgb(244, 245, 246)",
+      "color": "rgb(10, 11, 12)"
+    }
+  ]
+}

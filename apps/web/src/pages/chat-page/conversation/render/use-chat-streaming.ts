@@ -10,6 +10,7 @@ import {
 } from '../../../../components/conversation-runtime/reveal/streaming-reveal.js';
 import type { StreamingThinkingBlock } from '../../../../components/conversation-runtime/stream/streaming-thinking.js';
 import type { ChatMessagePart } from '../../../../components/conversation-runtime/messages/support.js';
+import { useRunAcceptedStore } from '../../../../stores/chat/run-accepted.js';
 
 export interface UseChatStreamingReturn {
   streaming: boolean;
@@ -156,6 +157,10 @@ export function useChatStreaming(): UseChatStreamingReturn {
     setStreamError(null);
     setLatestUpstreamSummary(null);
     currentAssistantStreamMessageIdRef.current = null;
+    // 受理确认属于「本轮」：这里是丢弃当前流状态的唯一原语，会话切换、流收尾、
+    // 出错清理都经过它，在此复位才能保证下一个会话的占位气泡不会沿用上一个会话的凭据
+    // （若不复位，切到一个由远端正在运行的会话时，气泡会直接显示「服务端已接收」）。
+    useRunAcceptedStore.getState().reset();
   }, []);
 
   const scheduleStreamReveal = useCallback((opts: { prefersReducedMotion: boolean }) => {

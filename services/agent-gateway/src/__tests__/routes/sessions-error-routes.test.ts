@@ -166,6 +166,81 @@ describe('sessions route error contracts', () => {
     }
   });
 
+  it.each([true, false])(
+    'POST /sessions 保存并返回同一份模型与思考配置（沿用默认：%s）',
+    async (useDefaultThinking) => {
+      const providerId = 'session-config-provider';
+      const selection = { providerId, modelId: 'gpt-5' };
+      const now = new Date().toISOString();
+      const settings = {
+        providers: [
+          {
+            id: providerId,
+            type: 'custom',
+            name: 'Session config provider',
+            enabled: true,
+            baseUrl: 'https://provider.example.com/v1',
+            apiKey: 'test-secret',
+            defaultModels: [{ id: 'gpt-5', label: 'GPT-5', enabled: true, supportsThinking: true }],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        active_selection: { chat: selection, fast: selection },
+        default_thinking: {
+          chat: { enabled: true, effort: 'xhigh' },
+          fast: { enabled: false, effort: 'medium' },
+        },
+      };
+      for (const [key, value] of Object.entries(settings)) {
+        dbModule.sqliteRun('INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)', [
+          USER_ID,
+          key,
+          JSON.stringify(value),
+        ]);
+      }
+      const { invalidateCatalog } = await import('../../provider/provider-catalog.js');
+      invalidateCatalog(USER_ID);
+      const app = await buildApp();
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/sessions',
+          headers: { authorization: bearer(app) },
+          payload: {
+            metadata: {
+              providerId: 'stale-provider',
+              modelId: 'stale-model',
+              thinkingEnabled: false,
+              reasoningEffort: 'low',
+            },
+            resolveModelConfig: { useDefaultModel: true, useDefaultThinking },
+          },
+        });
+        expect(response.statusCode, response.body).toBe(201);
+        const { sessionId, modelConfig } = response.json();
+        expect(modelConfig).toEqual({
+          ...selection,
+          modelLabel: 'GPT-5',
+          thinkingEnabled: useDefaultThinking,
+          reasoningEffort: useDefaultThinking ? 'high' : 'low',
+        });
+        const row = dbModule.sqliteGet<{ metadata_json: string }>(
+          'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+          [sessionId, USER_ID],
+        );
+        expect(JSON.parse(row?.metadata_json ?? '{}')).toMatchObject({
+          ...modelConfig,
+          modelSelectionSource: 'defaults',
+        });
+      } finally {
+        await app.close();
+        invalidateCatalog(USER_ID);
+        dbModule.sqliteRun('DELETE FROM user_settings WHERE user_id = ?', [USER_ID]);
+      }
+    },
+  );
+
   it('POST /sessions 对越界 workingDirectory 返回中文 403', async () => {
     const app = await buildApp();
     try {

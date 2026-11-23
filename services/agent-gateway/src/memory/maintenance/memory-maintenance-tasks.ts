@@ -11,13 +11,9 @@ import {
   detectValueConflicts,
   memoryScopeKey,
 } from '@openAwork/agent-core';
-import { sqliteAll } from '../../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun, sqliteTransaction } from '../../infra/db.js';
 import { logGatewayWarn } from '../../infra/gateway-logger.js';
-import {
-  getMemoryById,
-  listActiveMemoriesChangedSince,
-  listActiveMemoriesForScope,
-} from '../memory-store.js';
+import { getMemoryById, listActiveMemoriesForScope } from '../memory-store.js';
 import {
   claimDueMemoryJob,
   completeMemoryJob,
@@ -201,16 +197,21 @@ function enqueueIfAbsent(input: {
   now: Date;
 }): number {
   const scopeKey = memoryScopeKey(input.scope);
-  const before = countJobsForPeriod(input.kind, scopeKey, input.periodKey);
+  const before = countJobsForPeriod(input.userId, input.kind, scopeKey, input.periodKey);
   enqueueMemoryJob(input);
-  const after = countJobsForPeriod(input.kind, scopeKey, input.periodKey);
+  const after = countJobsForPeriod(input.userId, input.kind, scopeKey, input.periodKey);
   return after > before ? 1 : 0;
 }
 
-function countJobsForPeriod(kind: MemoryJobKind, scopeKey: string, periodKey: string): number {
+function countJobsForPeriod(
+  userId: string,
+  kind: MemoryJobKind,
+  scopeKey: string,
+  periodKey: string,
+): number {
   const row = sqliteAll<{ n: number }>(
-    'SELECT COUNT(*) AS n FROM memory_jobs WHERE kind = ? AND scope_key = ? AND period_key = ?',
-    [kind, scopeKey, periodKey],
+    'SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND kind = ? AND scope_key = ? AND period_key = ?',
+    [userId, kind, scopeKey, periodKey],
   );
   return row[0]?.n ?? 0;
 }
@@ -310,6 +311,8 @@ export function buildDailyPatrolSummary(
 
   for (const group of detectExactDuplicateGroups(entries)) {
     summary.duplicates += group.entries.length - 1;
+    const keeper = group.entries[0];
+    if (!keeper) continue;
     // 保留第一条（列表序稳定），对其余生成合并提议。
     for (let i = 1; i < group.entries.length; i += 1) {
       const entry = group.entries[i];
@@ -320,11 +323,18 @@ export function buildDailyPatrolSummary(
         userId,
         action: 'merge',
         scope,
-        payload: payloadFromEntry(entry),
+        payload: {
+          ...payloadFromEntry(entry),
+          mergeIntoId: keeper.id,
+          dependencies: [keeper, entry].map((item) => ({
+            memoryId: item.id,
+            revision: item.revision,
+          })),
+        },
         origin: 'maintenance',
         targetMemoryId: entry.id,
         expectedRevision: entry.revision,
-        reason: '与既有记忆完全重复，建议合并',
+        reason: `保留 ${keeper.key}（${keeper.id}），将本重复条目标记为已替代；双方来源与历史保留`,
         now,
       });
       if (created) {
@@ -395,9 +405,13 @@ export function buildIncrementalSummary(
   now: Date,
 ): { summary: MemoryMaintenanceSummary; watermark: number } {
   const summary = emptySummary('weekly_semantic', scope);
-  const changed = listActiveMemoriesChangedSince(userId, sinceChangeSeq);
+  const changed = sqliteAll<{ change_seq: number }>(
+    `SELECT change_seq FROM memories WHERE user_id = ? AND scope_type = ? AND scope_id = ?
+      AND change_seq > ? ORDER BY change_seq ASC LIMIT 1000`,
+    [userId, scope.type, scope.id, sinceChangeSeq],
+  );
   const maxChangeSeq = changed.reduce(
-    (max, entry) => Math.max(max, entry.changeSeq),
+    (max, entry) => Math.max(max, entry.change_seq),
     sinceChangeSeq,
   );
 
@@ -429,6 +443,7 @@ export function buildIncrementalSummary(
       payload: {
         ...payloadFromEntry(target),
         value: distinctValues[0] ?? target.value,
+        dependencies: group.entries.map((item) => ({ memoryId: item.id, revision: item.revision })),
       },
       origin: 'maintenance',
       targetMemoryId: target.id,
@@ -489,6 +504,8 @@ export function buildMonthlyReviewSummary(
 
   // 月复核只产出「重复合并」与「临时归档」两类低风险提醒，冲突交由周增量处理。
   for (const group of detectExactDuplicateGroups(collected)) {
+    const keeper = group.entries[0];
+    if (!keeper) continue;
     for (let i = 1; i < group.entries.length; i += 1) {
       const entry = group.entries[i];
       if (entry === undefined) {
@@ -498,11 +515,18 @@ export function buildMonthlyReviewSummary(
         userId,
         action: 'merge',
         scope,
-        payload: payloadFromEntry(entry),
+        payload: {
+          ...payloadFromEntry(entry),
+          mergeIntoId: keeper.id,
+          dependencies: [keeper, entry].map((item) => ({
+            memoryId: item.id,
+            revision: item.revision,
+          })),
+        },
         origin: 'maintenance',
         targetMemoryId: entry.id,
         expectedRevision: entry.revision,
-        reason: '月度复核：与既有记忆完全重复，建议合并',
+        reason: `月度复核：保留 ${keeper.key}（${keeper.id}），将本重复条目标记为已替代`,
         now,
       });
       if (created) {
@@ -630,7 +654,9 @@ async function processLeasedJob(
       const { runMemorySemanticAnalysis } = await import('./memory-semantic-maintenance.js');
       try {
         const semantic = await runMemorySemanticAnalysis({
-          userId: lease.userId, scope: lease.scope, now,
+          userId: lease.userId,
+          scope: lease.scope,
+          now,
         });
         if (!semantic.skipped) {
           outcome.skip = false;
@@ -649,18 +675,33 @@ async function processLeasedJob(
       return;
     }
 
-    if (outcome.summary) {
-      result.summaries.push(outcome.summary);
-      createMemoryMaintenanceReport({
-        userId: lease.userId,
-        jobId: lease.jobId,
-        scope: lease.scope,
-        summary: outcome.summary,
-        watermark: outcome.watermark ?? 0,
-        now,
-      });
-    }
-    completeMemoryJob(lease, now);
+    sqliteTransaction(() => {
+      if (!completeMemoryJob(lease, now)) throw new Error('整理任务租约已失效');
+      if (outcome.summary) {
+        createMemoryMaintenanceReport({
+          userId: lease.userId,
+          jobId: lease.jobId,
+          scope: lease.scope,
+          summary: outcome.summary,
+          watermark: outcome.watermark ?? 0,
+          now,
+        });
+      }
+      if (lease.kind === 'weekly_semantic' && outcome.watermark !== undefined) {
+        sqliteRun(
+          `INSERT INTO memory_scope_watermarks(user_id, scope_key, change_watermark)
+          VALUES (?, ?, ?) ON CONFLICT(user_id, scope_key)
+          DO UPDATE SET change_watermark = MAX(change_watermark, excluded.change_watermark)`,
+          [lease.userId, memoryScopeKey(lease.scope), outcome.watermark],
+        );
+        writeMemoryMaintenanceState(
+          lease.userId,
+          { lastSemanticAt: now.toISOString(), changeWatermark: outcome.watermark },
+          now,
+        );
+      }
+    });
+    if (outcome.summary) result.summaries.push(outcome.summary);
     result.completed += 1;
   } catch (error) {
     result.failed += 1;
@@ -692,22 +733,20 @@ function dispatchJob(lease: MemoryJobLease, now: Date): JobOutcome {
       };
     }
     case 'weekly_semantic': {
-      const state = readMemoryMaintenanceState(lease.userId);
+      const state = sqliteGet<{ change_watermark: number }>(
+        'SELECT change_watermark FROM memory_scope_watermarks WHERE user_id = ? AND scope_key = ?',
+        [lease.userId, memoryScopeKey(lease.scope)],
+      );
       const { summary, watermark } = buildIncrementalSummary(
         lease.userId,
         lease.scope,
-        state.changeWatermark,
+        state?.change_watermark ?? 0,
         now,
       );
       if (summary.checked === 0) {
         // 无变化：不产生提议、不写报告、不动水位。
         return { skip: true };
       }
-      writeMemoryMaintenanceState(
-        lease.userId,
-        { lastSemanticAt: now.toISOString(), changeWatermark: watermark },
-        now,
-      );
       return { skip: false, summary, watermark };
     }
     case 'monthly_review': {

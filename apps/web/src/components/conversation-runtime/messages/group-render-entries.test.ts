@@ -56,6 +56,27 @@ function userEntry(id: string): ChatRenderEntry {
   };
 }
 
+/**
+ * 压缩提示消息（「已自动压缩上下文」）。
+ *
+ * 它是 assistant 角色的**会话级系统事件**：与相邻助手消息同 role，因此分组
+ * 若只按 role 判定就会把它并入上一条回复的组（`is-grouped` 负 margin 贴住上一条），
+ * 同时让紧随其后的回复也被判成续行（头像与消息头整块消失）。
+ */
+function compactionEntry(id: string): ChatRenderEntry {
+  return {
+    message: {
+      id,
+      role: 'assistant',
+      content: JSON.stringify({
+        type: 'compaction',
+        payload: { summary: '压缩了 12 条消息', phase: 'completed' },
+      }),
+    },
+    renderContent: () => null,
+  };
+}
+
 /** 按调用方约定拼接「复用前缀 + 重算尾部」，返回最终展示组序列。 */
 function applyReconcileResult(
   previousGroups: ChatRenderGroup[],
@@ -108,6 +129,28 @@ describe('groupChatRenderEntries', () => {
     ]);
 
     expect(requireMessageGroup(groups[0]).entries).toHaveLength(2);
+  });
+
+  it('压缩提示独占一组，不与前后助手消息合并', () => {
+    const groups = groupChatRenderEntries([
+      assistantEntry('a1', 'pm1'),
+      compactionEntry('c2'),
+      assistantEntry('a3', 'pm1'),
+    ]);
+
+    // 三组：压缩提示既不是上一条回复的续行，也不让下一条回复变成它的续行。
+    expect(groups).toHaveLength(3);
+    expect(entryIds(groups[0])).toEqual(['a1']);
+    expect(entryIds(groups[1])).toEqual(['c2']);
+    expect(entryIds(groups[2])).toEqual(['a3']);
+  });
+
+  it('连续两条压缩提示也各自成组', () => {
+    const groups = groupChatRenderEntries([compactionEntry('c1'), compactionEntry('c2')]);
+
+    expect(groups).toHaveLength(2);
+    expect(entryIds(groups[0])).toEqual(['c1']);
+    expect(entryIds(groups[1])).toEqual(['c2']);
   });
 });
 

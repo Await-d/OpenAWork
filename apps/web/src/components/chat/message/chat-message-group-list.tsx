@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSubagentProgress } from '../subagent-progress.js';
 import type { SubagentNotice } from '@openAwork/shared';
 import { SubagentNoticeRow } from '@openAwork/shared-ui';
 import type { ChatMessage, ChatUsageDetails } from '../../conversation-runtime/messages/support.js';
@@ -137,7 +138,7 @@ export function ChatMessageGroupList({
   bottomRef,
   currentUserDisplayName,
   currentUserEmail,
-  groups,
+  groups: allGroups,
   pendingMessageScroll,
   pendingPermissions,
   providerCatalog,
@@ -146,6 +147,17 @@ export function ChatMessageGroupList({
   scrollRegionRef,
   trailingContent,
 }: ChatMessageGroupListProps) {
+  const progress = useSubagentProgress();
+  const groups = progress
+    ? allGroups.filter(
+        (group) =>
+          group.kind !== 'subagent-notice' ||
+          group.notice.source !== 'subagent' ||
+          !group.notice.targetSessionId ||
+          !progress.knownIds.has(group.notice.targetSessionId) ||
+          progress.visibleIds.has(group.notice.targetSessionId),
+      )
+    : allGroups;
   const shouldVirtualize =
     groups.length >= VIRTUALIZATION_GROUP_THRESHOLD ||
     groups.some(
@@ -156,6 +168,24 @@ export function ChatMessageGroupList({
     activePendingPermissions.length > 0 && resolveInlinePermissionActions !== undefined;
 
   const dividerLabels = useMemo(() => computeDividerLabels(groups), [groups]);
+
+  /**
+   * 「仅最新一条消息展示统计信息」的判定基准：倒序找最后一个 assistant 组的
+   * 最后一条 entry（同一组内可能有多条 assistant 消息，只有末尾那条是最新）。
+   *
+   * 在列表顶层算一次而不是在每行内算：虚拟化与非虚拟化两条分支共用同一结果，
+   * MessageRow 也不必再订阅列表结构。groups 引用变化才重算，倒序扫描通常
+   * 第一步即命中，成本可忽略。
+   */
+  const latestAssistantMessageId = useMemo(() => {
+    for (let groupIndex = groups.length - 1; groupIndex >= 0; groupIndex -= 1) {
+      const group = groups[groupIndex];
+      if (!group || group.kind !== 'messages' || group.role !== 'assistant') continue;
+      const lastEntry = group.entries[group.entries.length - 1];
+      if (lastEntry) return lastEntry.message.id;
+    }
+    return null;
+  }, [groups]);
 
   if (!shouldVirtualize) {
     return (
@@ -169,6 +199,7 @@ export function ChatMessageGroupList({
             currentUserDisplayName={currentUserDisplayName}
             currentUserEmail={currentUserEmail}
             group={group}
+            latestAssistantMessageId={latestAssistantMessageId}
             providerCatalog={providerCatalog}
             timeDividerLabel={dividerLabels[groupIndex] ?? null}
             {...(onOpenSubagentChild ? { onOpenSubagentChild } : {})}
@@ -196,6 +227,7 @@ export function ChatMessageGroupList({
       currentUserEmail={currentUserEmail}
       dividerLabels={dividerLabels}
       groups={groups}
+      latestAssistantMessageId={latestAssistantMessageId}
       pendingMessageScroll={pendingMessageScroll}
       pendingPermissions={activePendingPermissions}
       providerCatalog={providerCatalog}
@@ -247,6 +279,7 @@ function VirtualizedChatGroupViewport({
   currentUserEmail,
   dividerLabels,
   groups,
+  latestAssistantMessageId,
   pendingMessageScroll,
   pendingPermissions,
   providerCatalog,
@@ -254,7 +287,10 @@ function VirtualizedChatGroupViewport({
   scrollRegionRef,
   trailingContent,
   onOpenSubagentChild,
-}: ChatMessageGroupListProps & { dividerLabels: Array<string | null> }) {
+}: ChatMessageGroupListProps & {
+  dividerLabels: Array<string | null>;
+  latestAssistantMessageId: string | null;
+}) {
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_VIEWPORT_HEIGHT);
   const [scrollTop, setScrollTop] = useState(0);
   const [measuredVersion, setMeasuredVersion] = useState(0);
@@ -540,6 +576,7 @@ function VirtualizedChatGroupViewport({
                 currentUserDisplayName={currentUserDisplayName}
                 currentUserEmail={currentUserEmail}
                 group={group}
+                latestAssistantMessageId={latestAssistantMessageId}
                 providerCatalog={providerCatalog}
                 entryOffset={entryOffset}
                 timeDividerLabel={entryOffset === 0 ? (dividerLabels[groupIndex] ?? null) : null}
@@ -577,6 +614,7 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   currentUserDisplayName,
   currentUserEmail,
   group,
+  latestAssistantMessageId,
   onOpenSubagentChild,
   providerCatalog,
   timeDividerLabel,
@@ -589,6 +627,8 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
   currentUserDisplayName?: string;
   currentUserEmail: string;
   group: ChatRenderGroup;
+  /** 当前会话最新一条 assistant 消息的 id；未传时所有消息都视为最新。 */
+  latestAssistantMessageId?: string | null;
   /** 点击子代理通知时打开对应子会话；未传入时通知行不可点击。 */
   onOpenSubagentChild?: (childSessionId: string) => void;
   providerCatalog?: ReadonlyMap<string, ChatProviderDescriptor>;
@@ -655,6 +695,11 @@ const ChatGroupBlock = React.memo(function ChatGroupBlock({
             renderContent={entry.renderContent}
             sharedUiThemeVars={sharedUiThemeVars}
             usageDetails={entry.usageDetails}
+            isLatestMessage={
+              latestAssistantMessageId === undefined
+                ? undefined
+                : entry.message.id === latestAssistantMessageId
+            }
           />
         );
       })}

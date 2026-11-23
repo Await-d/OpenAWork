@@ -80,6 +80,6 @@ export async function openPathInSystem(path: string): Promise<void> {
     await invoke<void>('open_artifact_path', { path: target });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`用系统默认程序打开失败：${reason}`);
+    throw new Error(`用系统默认程序打开失败：${reason}`, { cause: error });
   }
 }

@@ -22,7 +22,7 @@ import {
 } from '@openAwork/agent-core';
 import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithChanges } from '../../infra/db.js';
 import { scanMemoryWriteContent } from '../memory-security-scanner.js';
-import { listActiveMemoriesForScope } from '../memory-store.js';
+import { getMemoryById, listActiveMemoriesForScope } from '../memory-store.js';
 import { logGatewayWarn } from '../../infra/gateway-logger.js';
 
 /**
@@ -204,6 +204,10 @@ function payloadIsUnsafe(payload: MemoryProposalPayload): string | null {
 export function createMemoryProposal(input: CreateMemoryProposalInput): CreateMemoryProposalResult {
   const now = input.now ?? new Date();
   const payload = input.payload;
+  const target = input.targetMemoryId
+    ? getMemoryById(input.userId, input.targetMemoryId)
+    : undefined;
+  const frozenRevision = input.expectedRevision ?? target?.revision ?? null;
 
   if (!isPayloadStructurallyValid(input.action, payload)) {
     return { outcome: 'invalid', detail: '载荷缺少该动作必需的字段' };
@@ -256,6 +260,18 @@ export function createMemoryProposal(input: CreateMemoryProposalInput): CreateMe
 
   const payloadJson = JSON.stringify(payload);
   const payloadDigest = computeMemoryProposalDigest(payload);
+  const dedupeKey = createHash('sha256')
+    .update(
+      JSON.stringify([
+        input.scope.type,
+        input.scope.id,
+        input.action,
+        input.targetMemoryId ?? null,
+        frozenRevision,
+        payloadDigest,
+      ]),
+    )
+    .digest('hex');
   const expiresAt = memoryProposalExpiry(now);
   const id = randomUUID();
   const createdAt = now.toISOString();
@@ -275,21 +291,21 @@ export function createMemoryProposal(input: CreateMemoryProposalInput): CreateMe
       input.scope.type,
       input.scope.id,
       input.targetMemoryId ?? null,
-      input.expectedRevision ?? null,
+      frozenRevision,
       payloadJson,
       payloadDigest,
       input.reason ?? null,
       input.origin,
       input.confidence ?? null,
       input.provenance ? JSON.stringify(input.provenance) : null,
-      fingerprint,
+      dedupeKey,
       createdAt,
       expiresAt,
     ],
   );
 
   if (changes === 0) {
-    const existing = findPendingProposalByDedupeKey(input.userId, fingerprint);
+    const existing = findPendingProposalByDedupeKey(input.userId, dedupeKey);
     return {
       outcome: 'duplicate',
       proposal: existing ?? undefined,

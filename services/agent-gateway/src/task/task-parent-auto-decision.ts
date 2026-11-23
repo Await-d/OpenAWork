@@ -9,10 +9,16 @@ import {
 import { createPermissionRepliedEvent } from '../session/session-permission-events.js';
 import { createQuestionRepliedEvent } from '../session/session-question-events.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import { hasPendingSessionInteraction } from '../session/session-runtime-state.js';
 import { shouldExitPlanModeFromAnswers } from '../tools/plan-mode-tools.js';
 import { formatAnsweredQuestionOutput, type QuestionToolInput } from '../tools/question-tools.js';
 import type { ApprovedPermissionResumePayload } from '../routes/stream.js';
 import { logGatewayError } from '../infra/gateway-logger.js';
+import { buildPermissionDecisionMessage } from './task-parent-permission-message.js';
+import {
+  markPermissionNotificationsActedByRequestIds,
+  markQuestionNotificationsActedByRequestIds,
+} from '../session/notification-store.js';
 
 const TASK_PARENT_DECISION_REQUEST_PREFIX = 'task-parent-decision:';
 const MAX_PARENT_DECISION_MESSAGE_LENGTH = 16000;
@@ -198,29 +204,6 @@ function buildQuestionDecisionMessage(input: {
     .slice(0, MAX_PARENT_DECISION_MESSAGE_LENGTH);
 }
 
-function buildPermissionDecisionMessage(input: {
-  childSessionId: string;
-  parentTaskId: string;
-  permission: PendingPermissionRow;
-}): string {
-  return [
-    '你是上级任务分配 AI。下级开发 agent 因工具权限请求暂停。',
-    '这是开发执行层决策，不要转问用户；请判断是否批准。危险、破坏性、外部副作用不明确时拒绝并要求替代方案。',
-    '只输出 JSON，不要输出解释文本。格式：{"kind":"permission","decision":"approve|reject","feedback":"拒绝时给替代建议","rationale":"一句话依据"}',
-    '',
-    `父任务：${input.parentTaskId}`,
-    `子会话：${input.childSessionId}`,
-    `权限请求：${input.permission.id}`,
-    `工具：${input.permission.tool_name}`,
-    `范围：${input.permission.scope}`,
-    `风险：${input.permission.risk_level}`,
-    `原因：${input.permission.reason}`,
-    `预览：${input.permission.preview_action ?? '无'}`,
-  ]
-    .join('\n')
-    .slice(0, MAX_PARENT_DECISION_MESSAGE_LENGTH);
-}
-
 function buildDecisionRequestData(input: {
   baseRequestData: Record<string, unknown>;
   childSessionId: string;
@@ -241,6 +224,11 @@ async function requestParentDecision(input: {
   message: string;
   userId: string;
 }): Promise<ParentDecision | null> {
+  // 父会话正在等待用户时，子代理不得自动另起一轮替用户做决定。
+  // 返回空决策由调用方归还子交互，保留其待处理状态与恢复载荷。
+  if (hasPendingSessionInteraction(input.context.parent_session_id)) {
+    return null;
+  }
   let requestData: Record<string, unknown>;
   try {
     requestData = buildDecisionRequestData({
@@ -418,7 +406,16 @@ async function applyQuestionDecision(input: {
   sessionId: string;
   userId: string;
 }): Promise<boolean> {
-  const payload = parseQuestionResumePayload(input.question.request_payload_json);
+  // 父级模型决策期间，另一个回答可能把阻塞尾部追加到 deciding 行。
+  // 提交前重读唯一真相源，避免恢复旧快照而丢失已交接的调用。
+  const latestQuestion = sqliteGet<{ request_payload_json: string | null }>(
+    `SELECT request_payload_json FROM question_requests
+     WHERE id = ? AND session_id = ? AND status = 'deciding'`,
+    [input.question.id, input.sessionId],
+  );
+  const payload = parseApprovedPermissionResumePayload(
+    latestQuestion?.request_payload_json ?? null,
+  );
   if (!payload) {
     return false;
   }
@@ -468,6 +465,13 @@ async function applyQuestionDecision(input: {
     ...(persistedEvent.seq === null ? {} : { seq: persistedEvent.seq }),
   });
 
+  // 父代理代决的提问同样要收口通知：用户没动手，但待办已经消解，铃铛不能继续亮。
+  markQuestionNotificationsActedByRequestIds({
+    requestIds: [input.question.id],
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+
   const answerOutput = formatAnsweredQuestionOutput({ questions, answers: input.decision.answers });
   void import('../routes/stream-runtime.js')
     .then((runtime) =>
@@ -495,7 +499,14 @@ async function applyPermissionDecision(input: {
   sessionId: string;
   userId: string;
 }): Promise<boolean> {
-  const payload = parseApprovedPermissionResumePayload(input.permission.request_payload_json);
+  const latestPermission = sqliteGet<{ request_payload_json: string | null }>(
+    `SELECT request_payload_json FROM permission_requests
+     WHERE id = ? AND session_id = ? AND status = 'deciding'`,
+    [input.permission.id, input.sessionId],
+  );
+  const payload = parseApprovedPermissionResumePayload(
+    latestPermission?.request_payload_json ?? null,
+  );
   if (!payload) {
     return false;
   }
@@ -533,6 +544,13 @@ async function applyPermissionDecision(input: {
     ...(persistedEvent.seq === null ? {} : { seq: persistedEvent.seq }),
   });
 
+  // 父代理代决的审批同样要收口通知，理由同上（用户没动手 ≠ 待办还在）。
+  markPermissionNotificationsActedByRequestIds({
+    requestIds: [input.permission.id],
+    sessionId: input.sessionId,
+    userId: input.userId,
+  });
+
   const resumePayload: ApprovedPermissionResumePayload = {
     ...payload,
     toolName: input.permission.tool_name,
@@ -563,33 +581,6 @@ async function applyPermissionDecision(input: {
       });
     });
   return true;
-}
-
-function parseQuestionResumePayload(
-  payloadJson: string | null,
-): Omit<ApprovedPermissionResumePayload, 'toolName'> | null {
-  if (!payloadJson) return null;
-  try {
-    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
-    const clientRequestId =
-      typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
-    const toolCallId = typeof parsed['toolCallId'] === 'string' ? parsed['toolCallId'] : null;
-    const nextRound = typeof parsed['nextRound'] === 'number' ? parsed['nextRound'] : null;
-    const rawInput =
-      parsed['rawInput'] && typeof parsed['rawInput'] === 'object'
-        ? (parsed['rawInput'] as Record<string, unknown>)
-        : null;
-    const requestData =
-      parsed['requestData'] && typeof parsed['requestData'] === 'object'
-        ? (parsed['requestData'] as Record<string, unknown>)
-        : null;
-    if (!clientRequestId || !toolCallId || nextRound === null || !rawInput || !requestData) {
-      return null;
-    }
-    return { clientRequestId, nextRound, rawInput, requestData, toolCallId };
-  } catch {
-    return null;
-  }
 }
 
 export async function tryResolveTaskPendingInteractionWithParent(input: {
@@ -687,6 +678,7 @@ export async function tryResolveTaskPendingInteractionWithParent(input: {
         context,
         message: buildPermissionDecisionMessage({
           childSessionId: input.childSessionId,
+          parentSessionId: context.parent_session_id,
           parentTaskId: context.task_id,
           permission,
         }),

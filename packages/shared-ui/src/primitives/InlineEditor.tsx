@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 
+import { isImeComposingKeyboardEvent } from '../utils/ime-composition.js';
+
 export interface InlineEditorProps {
   readonly value: string;
   readonly label: string;
@@ -9,6 +11,14 @@ export interface InlineEditorProps {
   readonly className?: string;
   readonly style?: CSSProperties;
   readonly buttonStyle?: CSSProperties;
+  /**
+   * 非编辑态（纯展示按钮）专用样式。
+   *
+   * `buttonStyle` 会同时作用于展示态与编辑态容器，因此凡是「只想改展示态」的
+   * 布局约束（例如固定高度 / 行高）必须走这里——否则会把 `height` 一并压到
+   * 编辑态的 `<label>` 上，把输入框在垂直方向裁掉。
+   */
+  readonly displayStyle?: CSSProperties;
   readonly inputStyle?: CSSProperties;
   readonly onSaveError?: (message: string) => void;
 }
@@ -22,6 +32,7 @@ export function InlineEditor({
   className,
   style,
   buttonStyle,
+  displayStyle,
   inputStyle,
   onSaveError,
 }: InlineEditorProps) {
@@ -73,6 +84,8 @@ export function InlineEditor({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (isImeComposingKeyboardEvent(event)) return;
+
     if (event.key === 'Enter') {
       event.preventDefault();
       void commit();
@@ -108,6 +121,7 @@ export function InlineEditor({
           whiteSpace: 'nowrap',
           ...style,
           ...buttonStyle,
+          ...displayStyle,
         }}
       >
         {value}

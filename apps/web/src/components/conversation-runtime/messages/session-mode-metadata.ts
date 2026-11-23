@@ -1,5 +1,10 @@
 import type { SessionPermissionMode } from '@openAwork/shared';
 import type { DialogueMode } from '../../../pages/chat-page/mode/dialogue-mode.js';
+import {
+  parseSessionOrigin,
+  UNKNOWN_SESSION_ORIGIN,
+  type SessionOrigin,
+} from '../../../utils/session/session-origin.js';
 import type { ReasoningEffort } from './message-model.js';
 
 /**
@@ -13,7 +18,14 @@ function normalizeSessionPermissionMode(value: unknown, yoloMode: boolean): Sess
 
 export function parseSessionModeMetadata(metadataJson: string | undefined): {
   agentId?: string;
+  /** 会话级上下文窗口挡位（`metadata.contextWindowOverride`）；未覆盖时为 undefined。 */
+  contextWindowOverride?: number;
   dialogueMode?: DialogueMode;
+  /**
+   * 会话来源（渠道 / 定时任务）：这些会话**没有**对话模式，网页端必须按只读对待
+   *（不渲染模式切换器、不写 `dialogueMode`）。判定见 utils/session/session-origin。
+   */
+  origin: SessionOrigin;
   permissionMode: SessionPermissionMode;
   yoloMode: boolean;
   webSearchEnabled: boolean;
@@ -25,6 +37,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
 } {
   if (!metadataJson) {
     return {
+      origin: UNKNOWN_SESSION_ORIGIN,
       permissionMode: 'ask',
       yoloMode: false,
       webSearchEnabled: true,
@@ -35,9 +48,12 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
 
   try {
     const parsed = JSON.parse(metadataJson) as {
+      channel?: unknown;
+      contextWindowOverride?: unknown;
       dialogueMode?: DialogueMode;
       agentId?: string;
       permissionMode?: unknown;
+      source?: unknown;
       yoloMode?: boolean;
       webSearchEnabled?: boolean;
       thinkingEnabled?: boolean;
@@ -52,6 +68,12 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
     );
     return {
       agentId: typeof parsed.agentId === 'string' ? parsed.agentId : undefined,
+      contextWindowOverride:
+        typeof parsed.contextWindowOverride === 'number' &&
+        Number.isInteger(parsed.contextWindowOverride) &&
+        parsed.contextWindowOverride > 0
+          ? parsed.contextWindowOverride
+          : undefined,
       dialogueMode:
         parsed.dialogueMode === 'clarify' ||
         parsed.dialogueMode === 'coding' ||
@@ -59,6 +81,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
           ? parsed.dialogueMode
           : undefined,
       permissionMode,
+      origin: parseSessionOrigin(parsed),
       // 布尔字段只作为档位的派生投影返回，保证两个字段不会互相矛盾。
       yoloMode: permissionMode === 'yolo',
       webSearchEnabled: parsed.webSearchEnabled !== false,
@@ -86,6 +109,7 @@ export function parseSessionModeMetadata(metadataJson: string | undefined): {
     return {
       agentId: undefined,
       dialogueMode: 'clarify',
+      origin: UNKNOWN_SESSION_ORIGIN,
       permissionMode: 'ask',
       yoloMode: false,
       webSearchEnabled: true,

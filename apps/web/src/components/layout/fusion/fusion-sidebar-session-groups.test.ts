@@ -10,11 +10,7 @@ import {
   UNBOUND_WORKSPACE_LABEL,
   getWorkspaceGroupKey,
 } from '../../../utils/session/session-grouping.js';
-import {
-  PINNED_SESSION_GROUP_KEY,
-  buildFusionChatGroups,
-  countRunningSessions,
-} from './fusion-sidebar-session-groups.js';
+import { buildFusionChatGroups, countRunningSessions } from './fusion-sidebar-session-groups.js';
 
 function makeSession(id: string, title = id): Session {
   return {
@@ -81,49 +77,41 @@ describe('buildFusionChatGroups', () => {
         ['/repo/empty', 0],
       ]),
       isSearching: false,
-      isPinned: () => false,
     });
 
     expect(rows.map((row) => row.key)).toEqual(['/repo/alpha', '/repo/empty']);
     expect(rows[1]?.sessionCount).toBe(0);
     expect(rows[1]?.roots).toEqual([]);
-    expect(rows.some((row) => row.isPinnedGroup)).toBe(false);
   });
 
-  it('非搜索态：置顶会话收敛到首个「置顶」分区并从原组扣减计数', () => {
+  it('非搜索态：会话不会被抽离工作区（置顶只影响组内顺序，不改分组结构）', () => {
     const rows = buildFusionChatGroups({
       groupedSessions: [makeGroup('/repo/alpha', [ROOT_A, ROOT_B])],
       groupedSessionTrees: [makeTreeGroup('/repo/alpha', [makeNode(ROOT_A), makeNode(ROOT_B)])],
       sessionCountByWorkspace: new Map([['/repo/alpha', 2]]),
       isSearching: false,
-      isPinned: (sessionId) => sessionId === 'b',
     });
 
-    expect(rows).toHaveLength(2);
-    const [pinnedRow, alphaRow] = rows;
-    expect(pinnedRow?.key).toBe(PINNED_SESSION_GROUP_KEY);
-    expect(pinnedRow?.workspaceLabel).toBe('置顶');
-    expect(pinnedRow?.isPinnedGroup).toBe(true);
-    expect(pinnedRow?.sessionCount).toBe(1);
-    expect(pinnedRow?.roots.map((node) => node.session.id)).toEqual(['b']);
-
-    expect(alphaRow?.sessionCount).toBe(1);
-    expect(alphaRow?.roots.map((node) => node.session.id)).toEqual(['a']);
+    // 只有一个分组，且两条会话都还在这个分组里：不存在跨工作区的顶层「置顶」分组。
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.key).toBe('/repo/alpha');
+    expect(rows[0]?.sessionCount).toBe(2);
+    expect(rows[0]?.roots.map((node) => node.session.id)).toEqual(['a', 'b']);
   });
 
-  it('非搜索态：父会话被置顶时子节点提升，不丢会话', () => {
+  it('非搜索态：子会话仍挂在父节点下，不因任何抽取而提升为根', () => {
     const rows = buildFusionChatGroups({
       groupedSessions: [makeGroup('/repo/alpha', [ROOT_B, CHILD_B])],
       groupedSessionTrees: [makeTreeGroup('/repo/alpha', [makeNode(ROOT_B, [makeNode(CHILD_B)])])],
       sessionCountByWorkspace: new Map([['/repo/alpha', 2]]),
       isSearching: false,
-      isPinned: (sessionId) => sessionId === 'b',
     });
 
-    const [pinnedRow, alphaRow] = rows;
-    expect(pinnedRow?.roots.map((node) => node.session.id)).toEqual(['b']);
-    expect(alphaRow?.roots.map((node) => node.session.id)).toEqual(['b-child']);
-    expect(alphaRow?.sessionCount).toBe(1);
+    expect(rows).toHaveLength(1);
+    const alphaRow = rows[0];
+    expect(alphaRow?.sessionCount).toBe(2);
+    expect(alphaRow?.roots.map((node) => node.session.id)).toEqual(['b']);
+    expect(alphaRow?.roots[0]?.children.map((node) => node.session.id)).toEqual(['b-child']);
   });
 
   it('非搜索态：多个工作区都活跃时按名称字母序，空组沉底', () => {
@@ -154,7 +142,6 @@ describe('buildFusionChatGroups', () => {
         ['/repo/empty', 0],
       ]),
       isSearching: false,
-      isPinned: () => false,
     });
 
     // 「new」的会话更新更近，但两个工作区都活跃时按字母序：
@@ -176,7 +163,6 @@ describe('buildFusionChatGroups', () => {
         ['/repo/zzz-active', 1],
       ]),
       isSearching: false,
-      isPinned: () => false,
     });
 
     expect(rows.map((row) => row.key)).toEqual(['/repo/zzz-active', '/repo/aaa-idle']);
@@ -200,7 +186,6 @@ describe('buildFusionChatGroups', () => {
         ['/repo/local', 1],
       ]),
       isSearching: false,
-      isPinned: () => false,
     });
 
     // 远端组的键带连接维度：两台主机的同名目录因此不会挤进同一个分组。
@@ -230,7 +215,6 @@ describe('buildFusionChatGroups', () => {
         [getWorkspaceGroupKey('/srv/app', 'ssh-b'), 1],
       ]),
       isSearching: false,
-      isPinned: () => false,
     });
 
     expect(rows).toHaveLength(2);
@@ -268,20 +252,18 @@ describe('buildFusionChatGroups', () => {
         ['/repo/stale', 1],
       ]),
       isSearching: false,
-      isPinned: () => false,
     });
 
     expect(rows.map((row) => row.workspacePath)).toEqual(['/repo/stale', null]);
     expect(rows[1]?.workspaceLabel).toBe(UNBOUND_WORKSPACE_LABEL);
   });
 
-  it('搜索态：忽略置顶分区并使用命中计数', () => {
+  it('搜索态：忽略置顶状态并使用命中计数', () => {
     const rows = buildFusionChatGroups({
       groupedSessions: [makeGroup('/repo/alpha', [ROOT_A, ROOT_B])],
       groupedSessionTrees: [makeTreeGroup('/repo/alpha', [makeNode(ROOT_A)])],
       sessionCountByWorkspace: new Map([['/repo/alpha', 2]]),
       isSearching: true,
-      isPinned: (sessionId) => sessionId === 'b',
     });
 
     expect(rows).toHaveLength(1);

@@ -1,4 +1,6 @@
+import { formatServerDateTime } from '@openAwork/shared';
 import { useState, useCallback } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type {
   UpdateWorkflowTemplateInput,
   WorkflowTemplateRecord,
@@ -138,6 +140,7 @@ function InlineField({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposingKeyboardEvent(e)) return;
                 if (e.key === 'Enter') void handleConfirm();
                 if (e.key === 'Escape') handleCancel();
               }}
@@ -514,12 +517,8 @@ function TemplateDetailView({
           borderTop: '1px solid var(--border-subtle)',
         }}
       >
-        {template.createdAt && (
-          <span>创建：{new Date(template.createdAt).toLocaleString('zh-CN')}</span>
-        )}
-        {template.updatedAt && (
-          <span>更新：{new Date(template.updatedAt).toLocaleString('zh-CN')}</span>
-        )}
+        {template.createdAt && <span>创建：{formatServerDateTime(template.createdAt)}</span>}
+        {template.updatedAt && <span>更新：{formatServerDateTime(template.updatedAt)}</span>}
       </div>
     </div>
   );

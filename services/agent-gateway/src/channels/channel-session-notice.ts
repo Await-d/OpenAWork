@@ -21,7 +21,6 @@ import {
   listPendingPermissionSummaries,
   resolveEarliestPendingExpiry,
 } from '../permission/permission-pending-store.js';
-import { extractMessageText } from '../session/session-message-store.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import {
   buildLocalizedErrorMessage,
@@ -32,6 +31,7 @@ import {
 } from './channel-localization.js';
 import { channelLogInfo, channelLogWarn } from './channel-log.js';
 import { CHANNELS_SETTINGS_KEY, materializeStoredChannels } from './channel-config.js';
+import { extractChannelReplyText } from './channel-reply-text.js';
 import {
   normalizeChannelReplyLanguage,
   type ChannelReplyLanguage,
@@ -466,6 +466,7 @@ function readLatestAssistantText(input: {
       (entry) => entry.role === 'assistant' && entry.clientRequestId === input.clientRequestId,
     )
     .at(-1);
-  const text = extractMessageText(latest).trim();
+  // 只取正文：回推给 IM 的内容不得包含 reasoning / 工具入参与输出。
+  const text = extractChannelReplyText(latest);
   return text.length > 0 ? text : null;
 }

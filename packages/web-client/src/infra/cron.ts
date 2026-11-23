@@ -7,6 +7,14 @@
  * 幂等入口，这里统一走 `PATCH { enabled }`。
  */
 
+import type {
+  DeliveryMode,
+  ScheduleKind,
+  ScheduledTaskCreateInput,
+  ScheduledTaskExecution,
+  ScheduledTaskUpdateInput,
+  ScheduledTaskView,
+} from '@openAwork/shared';
 import {
   authHeader,
   fetchWithTimeout,
@@ -18,97 +26,47 @@ import {
   type JsonErrorData,
 } from '../gateway/http.js';
 
-export type CronScheduleKind = 'at' | 'every' | 'cron';
-/**
- * 启停态。**不含 `running`**：`shared-ui` 的 `CronManager` 在 `status === 'running'`
- * 时会隐藏「启用 / 禁用」按钮，把运行中写进 status 会让长任务停不掉。
- */
-export type CronJobStatus = 'enabled' | 'disabled';
+export type CronScheduleKind = ScheduleKind;
+/** 启停态与运行态分离，运行中仍能停用任务。 */
+export type CronJobStatus = ScheduledTaskView['status'];
 
-export interface CronJobRecord {
-  id: string;
-  name: string;
-  /** 调度类型（原始字段，gateway 的 `schedule_kind`）。 */
-  schedule_kind: CronScheduleKind;
-  schedule_at: number | null;
-  schedule_every: number | null;
-  schedule_expr: string | null;
-  schedule_tz: string;
-  prompt: string;
-  enabled: boolean;
-  delete_after_run: boolean;
-  /** 结果投递方式；`none` 表示只执行、不主动送达（产出仍可从执行历史查看）。 */
-  delivery_mode: 'none' | 'session' | 'desktop';
-  /** `delivery_mode: 'session'` 的目标会话 id。 */
-  delivery_target: string | null;
-  last_fired_at: number | null;
-  fire_count: number;
-  /** 派生：与 `schedule_kind` 等值的驼峰别名（供 shared-ui 的 `CronJob` 消费）。 */
-  scheduleKind: CronScheduleKind;
-  /** 派生：人类可读的调度描述。 */
-  scheduleDisplay: string;
-  /**
-   * 派生：只表达启停态。**不会是 `running`**——`shared-ui` 的 `CronManager`
-   * 在 `running` 时会隐藏停用按钮，长任务将无法被停止；运行中信息见 `running`。
-   */
-  status: 'enabled' | 'disabled';
-  /** 派生：该任务当前是否有一次执行在途（独立于 `status`，不影响按钮可用性）。 */
-  running: boolean;
-  /** 派生：与 `fire_count` 等值（供 shared-ui 的 `CronJob` 直接消费）。 */
-  fireCount: number;
-  /** 派生：与 `last_fired_at` 等值。 */
-  lastFiredAt: number | null;
-  /** 派生：下次触发时间（epoch 毫秒）；无法计算时为 `null`。 */
-  nextFireAt: number | null;
-  /**
-   * 派生：最近一次执行（含失败原因）。
-   *
-   * 列表页直接用它标「上次失败」，不再逐任务拉 `/history?limit=1`（N+1）。
-   */
-  lastExecution: CronExecutionRecord | null;
+type BrowserCronDeliveryMode = Extract<DeliveryMode, 'none' | 'session' | 'desktop'>;
+
+/** 保留既有浏览器视图字段集合，字段定义由共享 wire 契约提供。 */
+export interface CronJobRecord extends Pick<
+  ScheduledTaskView,
+  | 'id'
+  | 'name'
+  | 'schedule_kind'
+  | 'schedule_at'
+  | 'schedule_every'
+  | 'schedule_expr'
+  | 'schedule_tz'
+  | 'prompt'
+  | 'enabled'
+  | 'delete_after_run'
+  | 'delivery_target'
+  | 'last_fired_at'
+  | 'fire_count'
+  | 'scheduleKind'
+  | 'scheduleDisplay'
+  | 'status'
+  | 'running'
+  | 'fireCount'
+  | 'lastFiredAt'
+  | 'nextFireAt'
+  | 'lastExecution'
+> {
+  delivery_mode: DeliveryMode;
   [key: string]: unknown;
 }
 
-/** 新增任务的入参（与网关 `POST /cron/jobs` 的 body 对齐）。 */
-export interface CreateCronJobInput {
-  name: string;
-  schedule_kind: CronScheduleKind;
-  prompt: string;
-  schedule_at?: number | null;
-  schedule_every?: number | null;
-  schedule_expr?: string | null;
-  schedule_tz?: string;
-  agent_id?: string | null;
-  model?: string | null;
-  working_folder?: string | null;
-  session_id?: string | null;
-  delivery_mode?: 'desktop' | 'session' | 'none';
-  delivery_target?: string | null;
-  enabled?: boolean;
-  delete_after_run?: boolean;
-}
+/** 保持浏览器已有的投递范围；渠道配置由渠道管理入口处理。 */
+export type CreateCronJobInput = Omit<ScheduledTaskCreateInput, 'delivery_mode'> & {
+  delivery_mode?: BrowserCronDeliveryMode;
+};
 
-export interface CronExecutionRecord {
-  id: string;
-  job_id: string;
-  started_at: number;
-  finished_at: number | null;
-  /**
-   * `skipped`：到点触发被跳过（上一次执行未结束 / 网关并发已满）。
-   * 不是失败，但必须可见——否则任务看起来「一直没跑」。
-   */
-  status: 'running' | 'completed' | 'failed' | 'skipped';
-  error?: string;
-  /** 本次执行所用的会话 id；存在即可跳过去看完整现场。 */
-  session_id?: string;
-  /**
-   * 该次执行的产出摘要（网关只对最近若干条生成）。
-   *
-   * `delivery_mode: 'none'` 的任务不会主动投递，摘要是用户在历史里
-   * 直接读到「这次跑了什么」的唯一途径。
-   */
-  outputPreview?: string;
-}
+export type CronExecutionRecord = ScheduledTaskExecution;
 
 export interface CronJobsResponse {
   jobs: CronJobRecord[];
@@ -143,7 +101,9 @@ export interface CronClient {
   update(
     token: string,
     jobId: string,
-    patch: Partial<CreateCronJobInput>,
+    patch: Omit<ScheduledTaskUpdateInput, 'delivery_mode'> & {
+      delivery_mode?: BrowserCronDeliveryMode;
+    },
   ): Promise<CronJobRecord | null>;
 }
 

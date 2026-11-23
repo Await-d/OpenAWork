@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
 import { categorizeAlwaysPatterns } from '@openAwork/shared-ui';
+import { parseServerTimestamp } from '@openAwork/shared';
 import type {
   NotificationRecord,
   NotificationView,
@@ -402,7 +403,10 @@ function NotificationItemImpl({
   const typeMeta = getNotificationTypeMeta(notification.eventType);
   const isPermission = notification.eventType === 'permission_asked';
   const parsedDetail = isPermission ? buildPermissionDetail(notification, permDetail) : null;
-  const createdDate = new Date(notification.createdAt);
+  // `notifications.created_at` 是 SQLite `datetime('now')`（UTC、无时区后缀），
+  // 直接 `new Date(...)` 会被按本地时区解释 → 相对时间整体少 8 小时。
+  const createdAtMs = parseServerTimestamp(notification.createdAt);
+  const createdDate = createdAtMs === null ? null : new Date(createdAtMs);
   // 归档视图是只读回溯视图：不再提供「标记已读 / 审批」等会改动待办态的动作。
   const isArchivedView = view === 'archived';
   // 已处理 / 已忽略的待办不再重复给出审批按钮（提交会 409）。
@@ -520,9 +524,9 @@ function NotificationItemImpl({
               color: 'var(--fg-muted)',
               flexShrink: 0,
             }}
-            title={formatAbsoluteTime(createdDate)}
+            title={createdDate ? formatAbsoluteTime(createdDate) : notification.createdAt}
           >
-            {formatRelativeTime(createdDate)}
+            {createdDate ? formatRelativeTime(createdDate) : '—'}
           </span>
         </div>
 

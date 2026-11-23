@@ -177,6 +177,76 @@ describe('buildTroubleshootBundleMarkdown', () => {
     expect(markdown).toContain('（已按 requestId 跨数据源去重）');
   });
 
+  it('失败子调用在两个来源中均有对应记录时，仅从合计中去掉 batch 包装错误', () => {
+    const output = {
+      results: [
+        { tool: 'read', isError: true, output: '读取失败' },
+        { tool: 'read', isError: false, output: '读取成功' },
+        { tool: 'bash', isError: true, output: '命令失败' },
+      ],
+      total: 3,
+    };
+    const markdown = buildTroubleshootBundleMarkdown(
+      baseInput({
+        diagnostics: [
+          {
+            filePath: 'batch',
+            toolName: 'batch',
+            message: '批次诊断',
+            severity: 'error',
+            requestId: 'call_batch',
+            output,
+          },
+          { filePath: 'read', message: '读取诊断', severity: 'error', requestId: 'call_batch:0' },
+        ],
+        errorLogs: [
+          {
+            level: 'error',
+            source: 'batch',
+            message: '批次日志',
+            timestamp: 0,
+            requestId: 'call_batch',
+            output,
+          },
+          { level: 'error', message: '读取日志', timestamp: 0, requestId: 'call_batch:0' },
+          { level: 'error', message: '命令日志', timestamp: 0, requestId: 'call_batch:2' },
+        ],
+      }),
+    );
+
+    expect(markdown).toContain('**待排查问题合计：2 项**');
+    expect(markdown).toContain('- 错误日志：3 条（其中 2 条与诊断记录指向同一事件）');
+    expect(markdown).toContain('### 1. 批次诊断');
+    expect(markdown).toContain('### 1. 批次日志');
+    expect(markdown.match(/"results":/g)).toHaveLength(2);
+  });
+
+  it.each([
+    ['有失败索引缺少对应记录', { results: [{ isError: true }, { isError: true }], total: 2 }],
+    ['审计输出省略了部分子结果', { results: [{ isError: true }], total: 2 }],
+    ['缺少输出', undefined],
+    ['批次自身失败', 'batch requires a non-empty tool_calls array'],
+    ['没有失败子项', { results: [{ isError: false }], total: 1 }],
+  ])('保留 batch 父错误：%s', (_case, output) => {
+    const markdown = buildTroubleshootBundleMarkdown(
+      baseInput({
+        errorLogs: [
+          {
+            level: 'error',
+            source: 'batch',
+            message: '批次日志',
+            timestamp: 0,
+            requestId: 'call_batch',
+            output,
+          },
+          { level: 'error', message: '子调用日志', timestamp: 0, requestId: 'call_batch:0' },
+        ],
+      }),
+    );
+
+    expect(markdown).toContain('**待排查问题合计：2 项**');
+  });
+
   it('缺少 requestId 与 id 的记录按各自独立一条计数，不被去重吞掉', () => {
     const markdown = buildTroubleshootBundleMarkdown(
       baseInput({

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import type { DialogueMode, InputImageContent, RunEvent } from '@openAwork/shared';
+import { createRandomUuid } from '@openAwork/web-client';
 import { extractRuntimeTextDelta, extractRuntimeThinkingDelta } from '../chat/chat-message-content';
 
 export type ActivityEvent =
@@ -229,7 +230,7 @@ export class MobileGatewayClient {
     const dialogueMode = options.dialogueMode;
     const payload = JSON.stringify({
       ...(agentId ? { agentId } : {}),
-      clientRequestId: crypto.randomUUID(),
+      clientRequestId: createRandomUuid(),
       ...(options.displayMessage ? { displayMessage: options.displayMessage } : {}),
       ...(dialogueMode ? { dialogueMode } : {}),
       ...(options.inputParts ? { inputParts: options.inputParts } : {}),

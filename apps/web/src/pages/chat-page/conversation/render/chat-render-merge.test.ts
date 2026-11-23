@@ -16,6 +16,27 @@ function createEntry(message: ChatMessage): ChatRenderEntry {
 }
 
 describe('mergeStreamingEntryIntoHistoricalEntries', () => {
+  it('共享分片不能覆盖明确冲突的轮次身份', () => {
+    const parts: NonNullable<ChatMessage['parts']> = [{ id: 'shared', type: 'text', text: '同文' }];
+    const old = createEntry({
+      id: 'old',
+      role: 'assistant',
+      content: '同文',
+      clientRequestId: 'req:assistant:1',
+      parts,
+    });
+    const live = createEntry({
+      id: 'live',
+      role: 'assistant',
+      content: '同文',
+      clientRequestId: 'req',
+      parts,
+    });
+    expect(mergeStreamingEntryIntoHistoricalEntries([old], live, 'live', 'req')).toEqual([
+      old,
+      live,
+    ]);
+  });
   it('服务端已持久化同一请求而本地流继续时只渲染本地流消息', () => {
     const userEntry = createEntry({
       id: 'user-1',
@@ -207,6 +228,130 @@ describe('mergeStreamingEntryIntoHistoricalEntries', () => {
       ),
     ).toEqual([userEntry, streamingEntry, laterEventEntry]);
   });
+
+  it.each(['request', 'message'] as const)(
+    '%s 身份副本与共享 part 副本同时存在时在最早匹配处只保留实时消息',
+    (identity) => {
+      const directEntry = createEntry({
+        id: identity === 'message' ? 'live' : 'persisted-request',
+        role: 'assistant',
+        content: '请求副本',
+        clientRequestId: identity === 'request' ? 'request-1' : undefined,
+      });
+      const partEntry = createEntry({
+        id: 'persisted-part',
+        role: 'assistant',
+        content: 'part 副本',
+        parts: [{ id: 'shared-part', type: 'text', text: '旧内容' }],
+      });
+      const unrelatedEntry = createEntry({ id: 'other', role: 'assistant', content: '其他轮次' });
+      const streamingEntry = createEntry({
+        id: 'live',
+        role: 'assistant',
+        content: '实时内容',
+        clientRequestId: 'request-1',
+        parts: [{ id: 'shared-part', type: 'text', text: '实时内容' }],
+        status: 'streaming',
+      });
+
+      for (const entries of [
+        [directEntry, unrelatedEntry, partEntry],
+        [partEntry, unrelatedEntry, directEntry],
+      ]) {
+        expect(
+          mergeStreamingEntryIntoHistoricalEntries(entries, streamingEntry, 'live', 'request-1'),
+        ).toEqual([streamingEntry, unrelatedEntry]);
+      }
+    },
+  );
+
+  it('请求身份副本与仅共享 toolCallId 的副本同时存在时只保留最早位置的实时消息', () => {
+    const requestEntry = createEntry({
+      id: 'persisted-request',
+      role: 'assistant',
+      content: '请求副本',
+      clientRequestId: 'request-1',
+    });
+    const toolEntry = createEntry({
+      id: 'persisted-tool',
+      role: 'assistant',
+      content: '工具副本',
+      parts: [
+        {
+          id: 'historical-tool-part',
+          type: 'tool',
+          toolCallId: 'shared-call',
+          toolName: 'read',
+          input: {},
+          status: 'completed',
+        },
+      ],
+    });
+    const unrelatedEntry = createEntry({ id: 'other', role: 'assistant', content: '其他轮次' });
+    const streamingEntry = createEntry({
+      id: 'live',
+      role: 'assistant',
+      content: '实时内容',
+      clientRequestId: 'request-1',
+      parts: [
+        {
+          id: 'live-tool-part',
+          type: 'tool',
+          toolCallId: 'shared-call',
+          toolName: 'read',
+          input: {},
+          status: 'running',
+        },
+      ],
+      status: 'streaming',
+    });
+
+    for (const entries of [
+      [requestEntry, unrelatedEntry, toolEntry],
+      [toolEntry, unrelatedEntry, requestEntry],
+    ]) {
+      expect(
+        mergeStreamingEntryIntoHistoricalEntries(entries, streamingEntry, 'live', 'request-1'),
+      ).toEqual([streamingEntry, unrelatedEntry]);
+    }
+  });
+
+  it.each([true, false])(
+    '同文历史轮次不会因实时副本合并而被折叠（显式轮次请求 ID：%s）',
+    (hasRequestIds) => {
+      const historicalRounds = [1, 2].map((round) =>
+        createEntry({
+          id: `round-${round}`,
+          role: 'assistant',
+          content: '相同的回答',
+          clientRequestId: hasRequestIds ? `request-1:assistant:${round}` : undefined,
+          status: 'completed',
+        }),
+      );
+      const requestEntry = createEntry({
+        id: 'persisted-request',
+        role: 'assistant',
+        content: '相同的回答',
+        clientRequestId: 'request-1',
+      });
+      const streamingEntry = createEntry({
+        id: 'live',
+        role: 'assistant',
+        content: '相同的回答',
+        clientRequestId: 'request-1',
+        status: 'streaming',
+      });
+
+      expect(
+        mergeStreamingEntryIntoHistoricalEntries(
+          [...historicalRounds, requestEntry],
+          streamingEntry,
+          'live',
+          'request-1',
+        ),
+      ).toEqual([...historicalRounds, streamingEntry]);
+    },
+  );
 
   it('消息 ID 变化但共享工具 part 时不重复渲染实时消息', () => {
     const persistedAssistantEntry = createEntry({

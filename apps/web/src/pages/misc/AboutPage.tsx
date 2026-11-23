@@ -4,6 +4,7 @@ import { createSettingsClient } from '@openAwork/web-client';
 import { BrandLogo } from '@openAwork/shared-ui';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
+import { copyTextToClipboard } from '../../components/layout/file-tree/file-tree-actions.js';
 import { isTauri, tauriInvoke } from '../settings/shared/settings-page-helpers.js';
 import type { SettingsVersionInfo } from '../settings/state/settings-types.js';
 import type { DesktopUpdateState } from './about/desktop-update-section.js';
@@ -231,7 +232,7 @@ export default function AboutPage() {
         toast('复制失败,请手动选中文本', 'error');
       },
       run: async () => {
-        await navigator.clipboard.writeText(summary);
+        await copyTextToClipboard(summary);
         toast('已复制构建信息到剪贴板', 'success');
       },
     });

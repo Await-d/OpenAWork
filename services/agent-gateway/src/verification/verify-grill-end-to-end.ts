@@ -10,6 +10,10 @@ import authPlugin from '../infra/auth.js';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun } from '../infra/db.js';
 import requestWorkflowPlugin from '../runtime/request-workflow.js';
 import { questionsRoutes } from '../routes/questions.js';
+import {
+  buildExitPlanModeQuestionInput,
+  EXIT_PLAN_MODE_APPROVE_LABEL,
+} from '../tools/plan-mode-tools.js';
 import { assert, withTempEnv } from './task-verification-helpers.js';
 
 const GRILL_QUESTIONS = [
@@ -57,13 +61,14 @@ const GRILL_QUESTIONS = [
 
 const CONFIRM_QUESTION = [
   {
-    header: '确认',
-    question: '以上共识是否确认？',
+    header: '制定方案',
+    question: '是否将以上共识整理成实施方案？',
     nodeId: CONFIRM_NODE_ID,
     round: 1,
     options: [
-      { label: '确认', description: '共识达成，进入执行', recommended: true },
-      { label: '需修改', description: '仍有未决项' },
+      { label: '确认并制定方案', description: '确认当前共识并起草方案', recommended: true },
+      { label: '暂不制定', description: '停在当前讨论结论' },
+      { label: '继续讨论', description: '仍有未决项' },
     ],
   },
 ];
@@ -72,12 +77,19 @@ function insertPendingRequest(input: {
   sessionId: string;
   userId: string;
   questions: unknown[];
+  toolName?: 'question' | 'ExitPlanMode';
 }): string {
   const requestId = randomUUID();
   sqliteRun(
     `INSERT INTO question_requests (id, session_id, user_id, tool_name, title, questions_json, status)
-     VALUES (?, ?, ?, 'question', 'Question', ?, 'pending')`,
-    [requestId, input.sessionId, input.userId, JSON.stringify(input.questions)],
+     VALUES (?, ?, ?, ?, 'Question', ?, 'pending')`,
+    [
+      requestId,
+      input.sessionId,
+      input.userId,
+      input.toolName ?? 'question',
+      JSON.stringify(input.questions),
+    ],
   );
   return requestId;
 }
@@ -86,6 +98,7 @@ function readSessionMetadata(sessionId: string): {
   clarificationState?: string;
   dialogueMode?: string;
   dialogueModeSwitch?: { from?: string; reason?: string; to?: string };
+  planMode?: boolean;
 } {
   const row = sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? LIMIT 1',
@@ -96,6 +109,7 @@ function readSessionMetadata(sessionId: string): {
     clarificationState?: string;
     dialogueMode?: string;
     dialogueModeSwitch?: { from?: string; reason?: string; to?: string };
+    planMode?: boolean;
   };
 }
 
@@ -126,7 +140,7 @@ async function main(): Promise<void> {
     ]);
     sqliteRun(
       `INSERT INTO sessions (id, user_id, messages_json, metadata_json) VALUES (?, ?, '[]', ?)`,
-      [sessionId, userId, JSON.stringify({ dialogueMode: 'clarify' })],
+      [sessionId, userId, JSON.stringify({ dialogueMode: 'clarify', planMode: true })],
     );
 
     const app = Fastify();
@@ -204,7 +218,7 @@ async function main(): Promise<void> {
         userId,
         questions: CONFIRM_QUESTION,
       });
-      const rejectRes = await reply(rejectRequest, [['需修改']]);
+      const rejectRes = await reply(rejectRequest, [['暂不制定']]);
       assert(rejectRes.statusCode === 200, 'rejection reply should succeed');
 
       const afterReject = readClarificationState(sessionId);
@@ -227,7 +241,7 @@ async function main(): Promise<void> {
         userId,
         questions: CONFIRM_QUESTION,
       });
-      const confirmRes = await reply(confirmRequest, [['确认']]);
+      const confirmRes = await reply(confirmRequest, [['确认并制定方案']]);
       assert(confirmRes.statusCode === 200, 'confirmation reply should succeed');
 
       const afterConfirm = readClarificationState(sessionId);
@@ -236,7 +250,7 @@ async function main(): Promise<void> {
         'confirmation via the recommended option label must set confirmedAt',
       );
       assert(
-        afterConfirm.nodes.find((node) => node.id === CONFIRM_NODE_ID)?.answer === '确认',
+        afterConfirm.nodes.find((node) => node.id === CONFIRM_NODE_ID)?.answer === '确认并制定方案',
         'confirm node should record the chosen label',
       );
       assert(
@@ -244,21 +258,38 @@ async function main(): Promise<void> {
         'confirmation must clear the needsConfirmation gate',
       );
 
-      // 设计已完成（共识确认）→ 会话自动切换到编程模式，并在响应里回传新模式，
-      // 让前端无需额外拉取就能同步模式选择器。
       const confirmBody: { dialogueMode?: string } = confirmRes.json();
       assert(
-        confirmBody.dialogueMode === 'coding',
-        'confirm reply should return the auto-switched dialogue mode',
+        confirmBody.dialogueMode === undefined,
+        'consensus confirmation should not return a dialogue mode switch',
       );
       const afterConfirmMetadata = readSessionMetadata(sessionId);
       assert(
-        afterConfirmMetadata.dialogueMode === 'coding',
-        'session metadata dialogueMode should be switched to coding after confirmation',
+        afterConfirmMetadata.dialogueMode === 'clarify',
+        'session should stay in clarify after consensus confirmation',
       );
+      assert(afterConfirmMetadata.planMode === true, 'plan mode should still be active');
+
+      const exitPlanRequest = insertPendingRequest({
+        sessionId,
+        userId,
+        toolName: 'ExitPlanMode',
+        questions: buildExitPlanModeQuestionInput({ plan: '改单文件并运行现有测试' }).questions,
+      });
+      const exitPlanRes = await reply(exitPlanRequest, [[EXIT_PLAN_MODE_APPROVE_LABEL]]);
+      assert(exitPlanRes.statusCode === 200, 'ExitPlanMode approval reply should succeed');
+      const exitPlanBody: { dialogueMode?: string } = exitPlanRes.json();
+      assert(exitPlanBody.dialogueMode === 'coding', 'approval reply should return coding mode');
+
+      const afterApprovalMetadata = readSessionMetadata(sessionId);
       assert(
-        afterConfirmMetadata.dialogueModeSwitch?.reason === 'clarification_confirmed',
-        'auto-switch should record its reason for observability',
+        afterApprovalMetadata.dialogueMode === 'coding',
+        'session should switch to coding after ExitPlanMode approval',
+      );
+      assert(afterApprovalMetadata.planMode === false, 'approval should clear plan mode');
+      assert(
+        afterApprovalMetadata.dialogueModeSwitch?.reason === 'plan_approved',
+        'mode switch should record plan approval as its reason',
       );
 
       console.log('verify-grill-end-to-end: ok');

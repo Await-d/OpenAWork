@@ -21,6 +21,7 @@ import { BP, IS, SS, UV } from '../shared/settings-section-styles.js';
 import { UpstreamRetrySection } from './upstream-retry-section.js';
 import { SubagentLimitsSection } from './SubagentLimitsSection.js';
 import { SubagentModelPolicySection } from './SubagentModelPolicySection.js';
+import { MessageLimitsSection } from './message-limits-section.js';
 
 /** 区域分组标题——比 ST 更大，用于二级信息架构 */
 const GROUP_TITLE: CSSProperties = {
@@ -372,6 +373,8 @@ export function ConnectionTabContent({
           </div>
         </section>
       </div>
+
+      <MessageLimitsSection />
 
       {/* ───── 区域二：调用策略 ───── */}
       <div style={GROUP_WRAPPER}>

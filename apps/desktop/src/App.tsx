@@ -20,6 +20,7 @@ import {
 } from '@openAwork/shared-ui';
 import OnboardingWizard from './onboarding/OnboardingWizard.js';
 import ArtifactsPage from '../../web/src/pages/artifacts/ArtifactsPage.js';
+import DispatchesPage from '../../web/src/pages/dispatches/DispatchesPage.js';
 import ChatPage from '../../web/src/pages/chat-page/ChatPage.js';
 import SessionsPage from '../../web/src/pages/sessions-page/SessionsPage.js';
 import SettingsPage from '../../web/src/pages/settings/SettingsPage.js';
@@ -486,6 +487,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ArtifactsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dispatches/:dispatchId?"
+            element={
+              <ProtectedRoute>
+                <DispatchesPage />
               </ProtectedRoute>
             }
           />

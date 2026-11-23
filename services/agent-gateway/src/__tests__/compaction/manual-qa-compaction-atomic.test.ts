@@ -6,6 +6,8 @@ import { appendSessionMessageV2, listSessionMessagesV2 } from '../../message/mes
 import { microcompactMessages } from '../../compaction/microcompact.js';
 import type { UnifiedMessage } from '../../message/message-to-model-messages.js';
 import * as db from '../../infra/db.js';
+import { executeCompactCommand } from '../../routes/compact-command.js';
+import { taskManager } from '../../routes/command-executors.js';
 
 const USER_ID = 'manual-qa-compaction-user';
 const SESSION_ID = 'manual-qa-compaction-session';
@@ -73,6 +75,57 @@ afterAll(async () => {
 });
 
 describe('manual QA compaction atomicity', () => {
+  it.each([false, true])(
+    '手动压缩无新增内容（保留尾部=%s）成功且不写压缩标记',
+    async (keepTail) => {
+      const metadataJson = JSON.stringify({
+        lastCompactionLlmSummary: 'prior anchor',
+        consecutiveCompactionFailures: 3,
+      });
+      db.sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ?', [
+        metadataJson,
+        SESSION_ID,
+      ]);
+      const graph = await taskManager.loadOrCreate(temporaryDatabaseDirectory, SESSION_ID);
+      const result = await executeCompactCommand({
+        args: [],
+        commandId: 'compact',
+        graph,
+        messages: keepTail
+          ? [
+              {
+                id: 'recent',
+                role: 'user',
+                content: [{ type: 'text', text: '保留近期消息' }],
+                createdAt: 1,
+              },
+            ]
+          : [],
+        metadataJson,
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+      });
+      expect(result.card).toMatchObject({ type: 'compaction', summary: '没有新增可压缩内容。' });
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          phase: 'completed',
+          compactedMessages: 0,
+          representedMessages: 0,
+        }),
+      );
+      expect(result.events).not.toContainEqual(expect.objectContaining({ phase: 'failed' }));
+      expect(
+        db.sqliteGet<{ metadata_json: string }>('SELECT metadata_json FROM sessions WHERE id = ?', [
+          SESSION_ID,
+        ])?.metadata_json,
+      ).toBe(metadataJson);
+      // Run events may append an assistant event message; none may be a durable compaction marker.
+      expect(
+        JSON.stringify(listSessionMessagesV2({ sessionId: SESSION_ID, userId: USER_ID })),
+      ).not.toContain('compaction_marker');
+    },
+  );
+
   it('只改渲染输入，file-backed SQLite message_v2 与 part_v2 原始字节在重载后保持不变', async () => {
     appendSessionMessageV2({
       sessionId: SESSION_ID,

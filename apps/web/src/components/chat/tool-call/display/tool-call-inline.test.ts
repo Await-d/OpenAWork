@@ -1859,12 +1859,22 @@ describe('extractErrorSummary', () => {
     expect(extractErrorSummary(undefined, true)).toBe('执行失败');
   });
 
-  it('clamps long messages to a single line under the cap', () => {
+  // 上限从 80 放宽到 120：折叠态改取「结构化结论」，80 字符会在结论后的路径中间截断，
+  // 反而看不出是哪个文件（样式仍是单行省略号，120 不会撑破折叠行）。
+  it('clamps long messages to a single line under the widened 120-char cap', () => {
     const long = `${'x'.repeat(200)} END`;
     const out = extractErrorSummary(long, true);
     expect(out).not.toBeNull();
-    expect((out as string).length).toBeLessThanOrEqual(80);
+    expect((out as string).length).toBeLessThanOrEqual(120);
     expect((out as string).endsWith('…')).toBe(true);
+  });
+
+  // 行为改进：多段失败文本不再「取首行前 80 字」，而是「分类 · 结构化结论」——
+  // agentignore 拦截的首行只是半句话，真正原因在句号之后。
+  it('uses the structured headline (category · conclusion) for multi-sentence failures', () => {
+    const denial =
+      'Access denied: file "/repo/.omo/x.ts" is protected by agentignore rules. 该类路径受 agentignore 保护。请勿重复尝试。';
+    expect(extractErrorSummary(denial, true)).toBe('写入被拒绝 · agentignore 保护路径');
   });
 
   it("returns the string error field as-is for {error: 'msg'} shape", () => {

@@ -77,7 +77,23 @@ export interface ChatConversationViewChromeInputs {
   onToggleReviewPanel: () => void;
   activeModelOptionLabel?: string;
   effectiveModelId: string;
-  dialogueModeLabel: string;
+  /**
+   * 对话模式文案；来源会话（渠道 / 定时任务）为 null——它们没有对话模式，
+   * 顶栏改由 `sourceBadgeLabel` 展示只读来源标识，避免在会话信息里显示假模式。
+   */
+  dialogueModeLabel: string | null;
+  /**
+   * 只读来源标识（「渠道：飞书」/「定时任务」）；非来源会话为 null（此时才渲染
+   * 三模式切换器）。见 utils/session/session-origin。
+   */
+  sourceBadgeLabel: string | null;
+  /**
+   * 对话模式是否已可交互（会话 metadata 已水合，或处于无会话的草稿态）。
+   *
+   * 未水合时不渲染模式控件：此刻 `dialogueMode` 只是用户默认值这个假值，对来源会话
+   * 会短暂渲染出一个可点击的错误模式（见 utils/session/session-origin）。
+   */
+  dialogueModeReady: boolean;
   workflowRuntime: WorkflowRuntimeState | null;
   sessionTasks: SessionTask[];
   // ─── classic 专属 ───────────────────────────────────────────────────

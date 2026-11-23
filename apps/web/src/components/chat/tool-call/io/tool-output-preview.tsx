@@ -18,6 +18,9 @@ import {
 } from '../previews/grep-content-hits-preview.js';
 import { extractGrepCountsFromOutput, GrepCountsPreview } from '../previews/grep-counts-preview.js';
 import { JsonPreview } from '../previews/json-preview.js';
+import { FileChangeResultPreview } from '../previews/file-change-result-preview.js';
+import { parseFileChangeResult } from '../shared/file-change-result.js';
+import { buildFileSnapshotChangeResult } from '../shared/file-snapshot-result.js';
 import { extractRepoCloneFromOutput, RepoClonePreview } from '../previews/repo-clone-preview.js';
 import {
   extractRepoOverviewFromOutput,
@@ -54,11 +57,7 @@ import { parseLspCallHierarchy } from '../shared/lsp-call-hierarchy-view.js';
 import { parseLspLocations } from '../shared/lsp-location-view.js';
 import { parseLspPrepareRename } from '../shared/lsp-prepare-rename-view.js';
 import { parseSessionSearchHits } from '../shared/session-search-view.js';
-import {
-  parseMaybeJsonPayload,
-  resolveLspMcpToolName,
-  resolveMcpLspPayload,
-} from '../shared/lsp-mcp-view.js';
+import { resolveMcpBuiltinBridge } from '../shared/mcp-builtin-alias.js';
 import { parseLspSymbols } from '../shared/lsp-symbol-view.js';
 import { extractMcpToolList, McpToolListPreview } from '../previews/mcp-tool-list-preview.js';
 import {
@@ -78,6 +77,14 @@ import {
   CodegraphResultPreview,
   extractCodegraphResult,
 } from '../previews/codegraph-result-preview.js';
+import { extractGitBashStatus, GitBashStatusPreview } from '../previews/git-bash-status-preview.js';
+import { ResultViewPreview } from '../previews/result-view-preview.js';
+import { SessionReadPreview } from '../previews/session-read-preview.js';
+import { buildAdminResultView, extractAdminEnvelope } from '../shared/admin-result-view.js';
+import { buildChannelResultView, extractChannelAck } from '../shared/channel-result-view.js';
+import { buildLspStatusView } from '../shared/lsp-status-view.js';
+import { buildModelsResultViews } from '../shared/models-result-view.js';
+import { parseSessionReadOutput } from '../shared/session-read-view.js';
 import {
   extractQuestionAnswers,
   QuestionAnswerPreview,
@@ -88,37 +95,12 @@ import { parseAstGrepMatches } from '../shared/ast-grep-view.js';
 import { extractSkillContent, SkillContentPreview } from '../previews/skill-content-preview.js';
 import { parseSessionInfoText, parseSessionListTable } from '../shared/session-text-view.js';
 import { StructuredOutputPreview } from '../previews/structured-output-preview.js';
+import { ToolFailurePreview } from '../previews/tool-failure-preview.js';
 import { ExpandableOutput } from '../shared/expandable-output.js';
 import { extractTextFromOutput } from '../shared/extract-text.js';
 import { useToolExpandDefault } from '../../../../stores/settings/use-tool-expand-default.js';
 import { stripToolOutputTruncationDeep } from '@openAwork/shared';
 
-/**
- * Render a tool's output expansion panel. Tries domain-aware paths in order:
- *   1. todo-family → TodoListPreview from metadata.todos
- *   2. read → FileContentPreview
- *   3. lsp_diagnostics → LspDiagnosticsPreview（按文件分组）
- *   4. grep → GrepContentHitsPreview / GrepCountsPreview / FilePathListPreview
- *   5. glob → FilePathListPreview
- *   6. list → TreeNodesPreview
- *   7. workspace_review_status → ReviewStatusPreview
- *   8. workspace_create_directory / workspace_review_revert /
- *      session_rename / session_move / lsp_touch → SuccessConfirmPreview
- *   9. mcp_list_tools → McpToolListPreview
- *  10. run_bash_in_background / bash_output / bash_kill → BackgroundTerminalPreview
- *  11. read_tool_output → ToolOutputReadPreview
- *  12. background_output → BackgroundOutputPreview
- *  13. codegraph_* → CodegraphResultPreview
- *  14. skill → SkillContentPreview (unwraps `<skill_content>`)
- *  15. question / askuserquestion → QuestionAnswerPreview
- *  16. MCP/shape-matched envelope → McpResultPreview
- *  17. envelope `{output|content|text|message|result: string}` → text
- *      + DiagnosticsPreview if `diagnostics` array is present
- *  18. fallback → StructuredOutputPreview (objects) / ArrayOutputPreview (arrays) / text
- *
- * Order matters: the shape-matched MCP and skill/question branches must run
- * before the generic text/JSON fallbacks or those envelopes get dumped raw.
- */
 /**
  * 解析「看起来像 JSON」的工具输出。
  *
@@ -140,11 +122,24 @@ export function ToolOutputPreview({
   toolName,
   output: rawOutput,
   input,
+  isError,
+  sessionId,
 }: {
   toolName: string;
   output: unknown;
   /** 部分预览需要入参补全上下文（如 `lsp_symbols` 的 document 模式没有逐行路径）。 */
   input?: Record<string, unknown>;
+  /**
+   * 失败标记。为真时**优先**渲染结构化失败卡（见 `renderToolOutputBody` 开头），
+   * 各业务预览不再抢屏；调用方（block / inline 工具卡）在 `visualState === 'failed'`
+   * 时传入，未传即视为成功调用，行为与改造前完全一致。
+   */
+  isError?: boolean;
+  /**
+   * 当前消息所属会话 id。只被文件变更预览用于「按需加载完整快照」——
+   * 缺省时那类预览整体隐藏加载入口，其余分支完全不受影响。
+   */
+  sessionId?: string | undefined;
 }) {
   const normalized = toolName.trim().toLowerCase();
   const shouldExpandByDefault = useToolExpandDefault()(toolName);
@@ -156,8 +151,27 @@ export function ToolOutputPreview({
   // 输出内容本身；而「内容其实不完整」这个信息又确实需要告知。
   const truncation = useMemo(() => stripToolOutputTruncationDeep(output), [output]);
   const previewOutput = truncation ? truncation.value : output;
-  const body = renderToolOutputBody({ normalized, previewOutput, shouldExpandByDefault, input });
-  if (!truncation) {
+  /*
+   * 文件变更卡**自带更精确**的截断说明（「快照被截断 · 省略 N 字符，以下仅对比已保留的
+   * 前段内容」），位置就在 diff 旁边。再叠一个通用徽标只是把同一件事说两遍，
+   * 而且它离 diff 很远，看起来像是另一个问题。
+   */
+  const rendersFileChangeCard = useMemo(
+    () =>
+      parseFileChangeResult(output) !== null ||
+      buildFileSnapshotChangeResult(output, output) !== null,
+    [output],
+  );
+  const body = renderToolOutputBody({
+    normalized,
+    previewOutput,
+    shouldExpandByDefault,
+    input,
+    originalOutput: rawOutput,
+    isError: isError === true,
+    sessionId,
+  });
+  if (!truncation || rendersFileChangeCard) {
     return body;
   }
   return (
@@ -170,18 +184,60 @@ export function ToolOutputPreview({
   );
 }
 
-/** 把内部先前的 if 链抽成独立函数，便于外层统一追加截断徽标。 */
+/**
+ * 输出体的分发链。**顺序即优先级**，几条硬约束：
+ *
+ * 1. 开头先跑 MCP 归一化桥（`resolveMcpBuiltinBridge`）：`mcp__<server>__<tool>` 与
+ *    legacy `mcp_call` 先换成内置工具名、并把 MCP 信封剥成内层载荷。下游所有内置
+ *    分支因此对 MCP 通道天然生效，不必为每个 server 再写一段「剥壳 + 派发」。
+ * 2. 中段是**按工具名**分派的专用视图（todo / lsp_* / read / bash / grep / glob /
+ *    list / workspace_* / session_* / repo_* / task_* / mcp_list_tools / codegraph_* /
+ *    git_bash_status / lsp_status / read_tool_output / background_* …）。
+ * 3. 再往下一组是**按输出形状**匹配的通用分支：管理类信封 `{ ok, action, … }`、
+ *    `models` 的 provider 分组、渠道发送回执 `{ messageId }`、渠道读取的
+ *    消息 / 记录 / 群组 / 成员，以及 `skill` / `question`。
+ * 4. 最后才是通用兜底：MCP 信封 → 文本信封（带 `diagnostics` 时叠加诊断预览）→
+ *    对象 `StructuredOutputPreview` / 数组 `ArrayOutputPreview` / JSON / 纯文本。
+ *
+ * 两条不能破的规矩：
+ * - **形状匹配必须排在通用兜底之前**，否则 `{ ok, action, … }` 这类信封会被当 JSON
+ *   整个铺开，`{ messageId }` 这种小对象也会被铺成字段表。
+ * - **判定要用归一化后的 `normalized`**，不要用原始 `rawToolName`，否则 MCP 通道会
+ *   绕过内置视图、重新退化成一坨 JSON。
+ *
+ * 这里刻意不再逐条罗列编号清单——上一版的固定号码表在新增五个分支之后就过期了，
+ * 而没人会去同步一份号码表。要确切顺序，直接读下面的 `if` 链。
+ *
+ * （抽成独立函数是为了让外层统一追加截断徽标。）
+ */
 function renderToolOutputBody({
-  normalized,
-  previewOutput,
+  normalized: rawToolName,
+  previewOutput: rawOutput,
   shouldExpandByDefault,
   input,
+  originalOutput,
+  isError,
+  sessionId,
 }: {
   normalized: string;
   previewOutput: unknown;
   shouldExpandByDefault: boolean;
   input?: Record<string, unknown>;
+  originalOutput: unknown;
+  isError: boolean;
+  sessionId?: string | undefined;
 }): ReactNode {
+  // 失败态优先：结构化失败卡**早于**所有业务预览——失败时业务预览要么渲染不出
+  // （形状对不上），要么把「为什么失败」埋进一坨 JSON。放行规则见 `shouldRenderFailureCard`。
+  if (shouldRenderFailureCard(rawOutput, isError, rawToolName)) {
+    return <ToolFailurePreview output={rawOutput} isError />;
+  }
+  // MCP 通道（扁平 `mcp__<server>__<tool>` / legacy `mcp_call`）先归一化成内置工具名，
+  // 并把信封剥成内层载荷：下游所有内置分支就此天然生效，不必为每个 server 再写一段
+  // 「剥壳 + 派发」。认不出对应关系时保持原样，继续走 McpResultPreview。
+  const bridge = resolveMcpBuiltinBridge(rawToolName, rawOutput, input);
+  const normalized = bridge?.toolName ?? rawToolName;
+  const previewOutput = bridge?.output ?? rawOutput;
   const toolName = normalized;
   const isTodoFamily =
     normalized === 'todoread' ||
@@ -196,67 +252,6 @@ function renderToolOutputBody({
         return <div className="tool-call-inline-empty">（暂无待办项）</div>;
       }
       return <TodoListPreview todos={todos} />;
-    }
-  }
-
-  // 虚拟 LSP MCP（`mcp__lsp__*` / legacy `mcp_call` + serverId=lsp）：输出被 MCP
-  // 包成 text 块，剥壳后复用内置 `lsp_*` 的专用视图 —— 否则同一能力会出现
-  // 「内置是位置列表、MCP 是一坨 JSON」的两套观感。
-  const lspMcpTool = resolveLspMcpToolName(toolName, input);
-  if (lspMcpTool) {
-    const payload = parseMaybeJsonPayload(resolveMcpLspPayload(previewOutput));
-    if (payload !== null) {
-      if (lspMcpTool === 'diagnostics') {
-        const entries = extractLspDiagnostics(payload);
-        if (entries) return <LspDiagnosticsPreview entries={entries} />;
-      }
-      if (
-        lspMcpTool === 'goto_definition' ||
-        lspMcpTool === 'goto_implementation' ||
-        lspMcpTool === 'find_references'
-      ) {
-        const locations = parseLspLocations(payload);
-        if (locations) return <LspLocationPreview entries={locations} />;
-      }
-      if (lspMcpTool === 'symbols') {
-        const symbols = parseLspSymbols(payload);
-        if (symbols) {
-          // legacy `mcp_call` 把真实参数放在 `input.arguments` 里；扁平 MCP 工具
-          // 才是平平的 `input.filePath`。两者都认，document 模式才能拿到路径。
-          const flatPath = input?.['filePath'];
-          const args = input?.['arguments'];
-          const nestedPath =
-            args !== null && typeof args === 'object'
-              ? (args as Record<string, unknown>)['filePath']
-              : undefined;
-          const candidate = typeof flatPath === 'string' ? flatPath : nestedPath;
-          const filePath =
-            typeof candidate === 'string' && candidate.trim().length > 0
-              ? candidate.trim()
-              : undefined;
-          return <LspSymbolPreview entries={symbols} {...(filePath ? { filePath } : {})} />;
-        }
-      }
-      if (lspMcpTool === 'hover' && typeof payload === 'string') {
-        return <LspHoverPreview text={payload} />;
-      }
-      if (lspMcpTool === 'call_hierarchy') {
-        const view = parseLspCallHierarchy(payload);
-        if (view) return <LspCallHierarchyPreview view={view} />;
-      }
-      if (lspMcpTool === 'touch') {
-        // 内置 `lsp_touch` 已有确认行，MCP 通道也要一致（不然同一个动作两套观感）。
-        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-          const record = payload as Record<string, unknown>;
-          if (record['ok'] === true) {
-            return <SuccessConfirmPreview toolName="lsp_touch" output={record} />;
-          }
-        }
-      }
-      if (lspMcpTool === 'prepare_rename') {
-        const view = parseLspPrepareRename(payload);
-        if (view) return <LspPrepareRenamePreview view={view} />;
-      }
     }
   }
 
@@ -279,9 +274,7 @@ function renderToolOutputBody({
   if (normalized === 'lsp_symbols') {
     const symbols = parseLspSymbols(previewOutput);
     if (symbols) {
-      const inputPath = input?.['filePath'];
-      const filePath =
-        typeof inputPath === 'string' && inputPath.trim().length > 0 ? inputPath.trim() : undefined;
+      const filePath = resolveSymbolsFilePath(input);
       return <LspSymbolPreview entries={symbols} {...(filePath ? { filePath } : {})} />;
     }
   }
@@ -351,6 +344,16 @@ function renderToolOutputBody({
   if (normalized === 'list') {
     const data = extractTreeNodesFromOutput(previewOutput);
     if (data) return <TreeNodesPreview data={data} defaultExpanded={shouldExpandByDefault} />;
+    if (typeof previewOutput === 'string' && previewOutput.trim().startsWith('{')) {
+      return (
+        <div>
+          <div className="tool-call-search-meta">
+            目录输出格式不完整或无法识别，以下保留原始内容。
+          </div>
+          <ExpandableOutput text={previewOutput} defaultExpanded={shouldExpandByDefault} />
+        </div>
+      );
+    }
   }
 
   if (normalized === 'workspace_review_status') {
@@ -469,6 +472,49 @@ function renderToolOutputBody({
     if (graph) return <CodegraphResultPreview view={graph} />;
   }
 
+  // git_bash 的状态类工具（`which_bash` / `diagnose`）归一化到这里。
+  if (normalized === 'git_bash_status') {
+    const view = extractGitBashStatus(previewOutput);
+    if (view) return <GitBashStatusPreview view={view} />;
+  }
+
+  // LSP 服务状态：`servers`（在跑的）+ `missing`（可安装的，带 installCommand）。
+  if (normalized === 'lsp_status') {
+    const view = buildLspStatusView(previewOutput);
+    if (view) return <ResultViewPreview view={view} />;
+  }
+
+  // 管理类信封（`{ ok, action, … }`）：七个管理工具的列表 / 单实体 / 待确认提议。
+  // 按形状识别而非按工具名枚举，新增同族管理工具自动受益。
+  const adminEnvelope = extractAdminEnvelope(previewOutput);
+  if (adminEnvelope) {
+    const adminView = buildAdminResultView(adminEnvelope);
+    if (adminView) return <ResultViewPreview view={adminView} />;
+  }
+
+  // 模型检索：行卡与表格两种排版互斥，交给渲染器提供切换。
+  if (normalized === 'models') {
+    const models = buildModelsResultViews(previewOutput);
+    if (models) return <ResultViewPreview view={models.primary} alternate={models.alternate} />;
+  }
+
+  // 会话转录：把纯文本还原成紧凑日志。
+  if (normalized === 'session_read') {
+    const sessionView = parseSessionReadOutput(previewOutput);
+    if (sessionView) return <SessionReadPreview view={sessionView} />;
+  }
+
+  // 渠道发送类：接口约定就是 `Promise<{ messageId }>`，剥掉信封后只剩一个技术 id。
+  // 渲染成一枚确认行（「✓ 已发送了消息 · om_xxx」），比铺 `messageId | om_xxx` 的
+  // 字段表更贴合「这条消息发出去了」这个事实。
+  const channelAck = extractChannelAck(previewOutput);
+  if (channelAck) return <SuccessConfirmPreview toolName={normalized} output={channelAck} />;
+
+  // 渠道读取类：按**输出形状**识别（消息 / 记录 / 群组 / 成员），不枚举工具名——
+  // Plugin* / Feishu* / Weixin* 各家族的读取工具因此都能命中。
+  const channelView = buildChannelResultView(previewOutput);
+  if (channelView) return <ResultViewPreview view={channelView} />;
+
   if (normalized === 'skill') {
     const skillContent = extractSkillContent(previewOutput);
     if (skillContent) return <SkillContentPreview data={skillContent} />;
@@ -478,6 +524,32 @@ function renderToolOutputBody({
     const answers = extractQuestionAnswers(previewOutput);
     if (answers) return <QuestionAnswerPreview items={answers} />;
   }
+
+  // 从未经截断标记剥离的载荷判定完整性，保留完整信封供原始结果复制。
+  const originalBridge = resolveMcpBuiltinBridge(
+    rawToolName,
+    parseStoredJsonOutput(originalOutput),
+    input,
+  );
+  const fileChanges = parseFileChangeResult(originalBridge?.output ?? originalOutput);
+  if (fileChanges)
+    return (
+      <FileChangeResultPreview
+        result={{ ...fileChanges, raw: originalOutput }}
+        sessionId={sessionId}
+      />
+    );
+
+  // 写入类工具（`write` / `edit` / `multi_edit` / ssh 同族）的输出是一个
+  // 「整文件信封」：`{ before, after, filediff, success, path, … }`。它不符合
+  // `parseFileChangeResult` 的 `{ success, files[] }` 约定，因此此前落到
+  // `StructuredOutputPreview`，把 before/after 摊成两行字段预览——用户看不到任何
+  // 代码差异。这里改用专用的差异预览：文件头 + 增删行高亮，并按需展开。
+  const fileSnapshot = buildFileSnapshotChangeResult(
+    originalBridge?.output ?? originalOutput,
+    originalOutput,
+  );
+  if (fileSnapshot) return <FileChangeResultPreview result={fileSnapshot} sessionId={sessionId} />;
 
   // MCP envelope — `skill_mcp` returns this same shape JSON-stringified.
   const mcpResult = extractMcpResult(previewOutput);
@@ -551,6 +623,42 @@ function renderToolOutputBody({
 }
 
 /**
+ * 失败态是否交给结构化失败卡（`ToolFailurePreview`）。
+ *
+ * 失败时业务预览基本都渲染不出有用信息：形状对不上，或者把「为什么失败」埋进一坨
+ * JSON。但两类输出必须**放行给原预览**，否则就是功能倒退：
+ *
+ * 1. **bash 信封**（`{command, cwd, exitCode, output, …}`）——它已有 `BashTerminalCard`
+ *    （实时 stdout + 退出码），失败卡只会把终端画面换成一段 JSON；
+ * 2. **能解析出文件变更 / 整文件快照的**——diff 卡自带成功 / 失败结论与 before/after，
+ *    信息量高于失败卡（失败卡会把 diff 折叠进「原始输出」）。
+ */
+function shouldRenderFailureCard(output: unknown, isError: boolean, toolName: string): boolean {
+  if (!isError) return false;
+  // `question` 族的 `is_error` 语义不是失败：`Question request … has been created. Ask the
+  // user to answer it…` 是正常流程提示，渲染成红色失败卡会让用户以为提问失败了。
+  if (toolName === 'question' || toolName === 'askuserquestion') return false;
+  if (isBashFailureEnvelope(output)) return false;
+  if (parseFileChangeResult(output)) return false;
+  if (buildFileSnapshotChangeResult(output, output)) return false;
+  return true;
+}
+
+/**
+ * bash 工具的失败信封：`{ command, cwd, exitCode, output, truncated, terminalId }`。
+ */
+function isBashFailureEnvelope(output: unknown): boolean {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return false;
+  const record = output as Record<string, unknown>;
+  if (typeof record['command'] !== 'string') return false;
+  return (
+    typeof record['exitCode'] === 'number' ||
+    typeof record['terminalId'] === 'string' ||
+    typeof record['output'] === 'string'
+  );
+}
+
+/**
  * 存储层（`normalizeToolResultOutputForStorage`）会把超过体积上限的工具输出
  * 序列化成 JSON 字符串——刷新历史消息时前端拿到的就是这种形态。
  * 这里把「看起来像 JSON 对象/数组」的字符串还原成对象，避免结构化预览
@@ -565,4 +673,22 @@ function parseStoredJsonOutput(output: unknown): unknown {
   } catch {
     return output;
   }
+}
+
+/**
+ * `lsp_symbols` 的文件路径。扁平 MCP 工具的参数是平平的 `input.filePath`，legacy
+ * `mcp_call` 则把真实参数放在 `input.arguments` 里——两者都认，document 模式才不会
+ * 因为走了 MCP 通道就丢掉路径（归一化后这条路只剩一个分支，必须自己覆盖两种形状）。
+ */
+function resolveSymbolsFilePath(input?: Record<string, unknown>): string | undefined {
+  const flat = input?.['filePath'];
+  const args = input?.['arguments'];
+  const nested =
+    args !== null && typeof args === 'object' && !Array.isArray(args)
+      ? (args as Record<string, unknown>)['filePath']
+      : undefined;
+  const candidate = typeof flat === 'string' ? flat : nested;
+  return typeof candidate === 'string' && candidate.trim().length > 0
+    ? candidate.trim()
+    : undefined;
 }

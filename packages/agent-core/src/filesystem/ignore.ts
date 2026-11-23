@@ -66,7 +66,16 @@ export interface IgnoreRuleSet {
 
 export interface AgentIgnoreManager {
   loadRules(projectRoot: string): Promise<IgnoreRuleSet>;
+  /** 搜索 / 上下文可见性：`.gitignore` 参与判定。 */
   shouldIgnore(filePath: string): boolean;
+  /**
+   * 精确读写（`read` / `write` / `edit` / `multi_edit`）的安全边界：
+   * **跳过 `.gitignore`**，只由内置敏感模式 + `.agentignore` + 全局 + runtime 规则拒绝。
+   *
+   * 理由：`.gitignore` 表达的是「不进版本库」，不是「禁止 Agent 写」。把它当成写保护
+   * 会让「用 write 写临时脚本再单行执行」这条官方补救路径被 `temp/` 规则反向焊死。
+   */
+  shouldProtect(filePath: string): boolean;
   listIgnored(dir: string): Promise<string[]>;
   addRuntimeRule(pattern: string): void;
 }
@@ -217,7 +226,17 @@ export function createAgentIgnoreManager(): AgentIgnoreManager {
   let runtimePatterns: string[] = [];
   let projectRoot = '';
 
-  const evaluateIgnore = (filePath: string): boolean => {
+  /**
+   * `includeGitignore` 区分两种语义：
+   *
+   * - `true`（搜索 / 上下文可见性）：`.gitignore` 参与判定，`dist/` / `temp/` 这类
+   *   「不入版本库」的目录不会污染 grep / glob / 文件树。
+   * - `false`（精确读写）：`.gitignore` 不参与，只有安全类规则（内置敏感模式 +
+   *   `.agentignore` + 全局 + runtime）才拒绝。否则「bash 拒绝多行 → 提示用 write
+   *   写脚本 → write 拒绝工作区外 → 退到 temp/ 又被 .gitignore 判成 agentignore」
+   *   会形成闭环，模型无路可走（2026-11-18 排障）。
+   */
+  const evaluate = (filePath: string, includeGitignore: boolean): boolean => {
     const normalized = filePath.replace(/\\/g, '/');
     const rel = projectRoot ? relative(projectRoot, filePath).replace(/\\/g, '/') : normalized;
     const base = normalized.split('/').pop() ?? '';
@@ -259,7 +278,7 @@ export function createAgentIgnoreManager(): AgentIgnoreManager {
 
     // While the `.env.*` baseline holds, `.gitignore` matches — positive or
     // negated — must not change the decision, so this layer is skipped whole.
-    if (!envStarBaseline) {
+    if (includeGitignore && !envStarBaseline) {
       for (const pattern of rules.gitignorePatterns) {
         const { regex, negate } = parseIgnorePattern(pattern);
         if (regex && matchesIgnorePattern(regex, rel, base)) decision = !negate;
@@ -277,6 +296,9 @@ export function createAgentIgnoreManager(): AgentIgnoreManager {
     }
     return decision;
   };
+
+  const evaluateIgnore = (filePath: string): boolean => evaluate(filePath, true);
+  const evaluateProtection = (filePath: string): boolean => evaluate(filePath, false);
 
   return {
     async loadRules(root: string): Promise<IgnoreRuleSet> {
@@ -300,6 +322,10 @@ export function createAgentIgnoreManager(): AgentIgnoreManager {
 
     shouldIgnore(filePath: string): boolean {
       return evaluateIgnore(filePath);
+    },
+
+    shouldProtect(filePath: string): boolean {
+      return evaluateProtection(filePath);
     },
 
     async listIgnored(dir: string): Promise<string[]> {

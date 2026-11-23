@@ -218,6 +218,24 @@ export interface HttpJsonTransport<Body, Frame> extends Transport<
 const timeoutDuration = (value: HttpTimeout | undefined, fallback: number) =>
   value === false ? Duration.infinity : Duration.millis(value ?? fallback);
 
+/**
+ * 整次请求预算（`total`）。与上游 `packages/ai@v2.0.28` 对齐：**未显式配置 `timeout`
+ * 时不做整次超时**（`Duration.infinity`）。
+ *
+ * 这里曾回落到 `DEFAULT_HTTP_TIMEOUT_MS`（300s）。该常量按自身文档只属于
+ * `headerTimeout`（见 `schema/options.ts`：`headerTimeout 未显式设置时的默认值`），
+ * 拿它当整次预算等于给每个请求都加了一堵**5 分钟硬墙**：上游只要还活着、只是单轮
+ * 耗时长（长推理模型实测一轮 827 个 reasoning 分片、0 个 text 分片），就会被
+ * `Timed out waiting for the response to complete` 掐断，用户侧看到「执行失败」，
+ * 且分片超时的 15 分钟宽容度永远不可能生效（300s 恒先到）。
+ *
+ * 无界并不等于没有护栏：响应头超时（默认 300s，连不上或不回头）与分片超时
+ * （默认 900s，上游静默）仍在，二者共同覆盖「上游挂了」这一真正要防的场景；
+ * 需要硬墙的调用方显式传 `request.http.timeout`（`false` 同义于不设上限）。
+ */
+export const resolveTotalTimeout = (value: HttpTimeout | undefined): Duration.Duration =>
+  value === undefined || value === false ? Duration.infinity : Duration.millis(value);
+
 const timeout = (message: string, url: string, operation: TransportOperation = 'request') =>
   new LLMError({
     module: 'HttpTransport',
@@ -252,13 +270,14 @@ export const httpJson = <Body, Frame>(
         middleware: prepareInput.middleware,
       })),
     ),
-  // 三档超时：响应头、相邻分片、整次请求。缺失任一层保护都会让「上游静默」
-  // 表现为无限挂起而不是可诊断的失败——分片超时默认 15 分钟是因为部分上游
-  // （如 DeepSeek）在长推理期间确实会长时间不产出数据。
+  // 三档超时：响应头、相邻分片、整次请求。前两档默认开启（上游静默 = 可诊断的
+  // 失败而不是无限挂起）；整次预算是**可选的硬墙**，未配置时不设上限，见
+  // `resolveTotalTimeout`。分片超时默认 15 分钟是因为部分上游（如 DeepSeek）
+  // 在长推理期间确实会长时间不产出数据。
   frames: (prepared, request, runtime) =>
     Stream.unwrap(
       Effect.gen(function* () {
-        const total = timeoutDuration(request.http?.timeout, DEFAULT_HTTP_TIMEOUT_MS);
+        const total = resolveTotalTimeout(request.http?.timeout);
         const started = yield* Clock.currentTimeMillis;
         const response = yield* runtime.http.execute(prepared.request, prepared.middleware).pipe(
           Effect.timeoutOrElse({

@@ -1,4 +1,6 @@
+import { parseServerTimestamp } from '@openAwork/shared';
 import { useCallback, useState, type CSSProperties } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type { SharedSessionDetailRecord } from '@openAwork/web-client';
 import type { AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
@@ -54,11 +56,11 @@ function formatSharedStatus(status: AgentTeamsSidebarTeam['status']): string {
 }
 
 function formatCommentTime(createdAt: string): string {
-  const parsed = new Date(createdAt);
-  if (Number.isNaN(parsed.getTime())) {
+  const parsed = parseServerTimestamp(createdAt);
+  if (parsed === null) {
     return createdAt;
   }
-  return parsed.toLocaleString('zh-CN', {
+  return new Date(parsed).toLocaleString('zh-CN', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -153,6 +155,7 @@ export function SharedSessionMessagesView({
           value={commentInput}
           onChange={(event) => setCommentInput(event.target.value)}
           onKeyDown={(event) => {
+            if (isImeComposingKeyboardEvent(event)) return;
             if (event.key === 'Enter') {
               handleSubmitComment();
             }
@@ -218,8 +221,7 @@ export function SharedSessionMessagesView({
       ) : sharedSession?.comments.length ? (
         <div style={{ display: 'grid', gap: 6 }}>
           {sharedSession.comments
-            .slice()
-            .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+            .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))
             .map((comment) => (
               <div key={comment.id} style={COMMENT_CARD_STYLE}>
                 <div

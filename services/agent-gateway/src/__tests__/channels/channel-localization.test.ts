@@ -6,6 +6,7 @@ import {
   buildChannelHelpMessage,
   buildContextCompressedMessage,
   buildInitCommandAck,
+  buildInterruptedMessage,
   buildLocalizedErrorMessage,
   buildNoChannelConfigurationMessage,
   buildNoChannelOwnerMessage,
@@ -134,6 +135,20 @@ describe('channel help message formatting', () => {
     expect(buildLocalizedErrorMessage('zh-CN', 'boom')).toContain('**执行失败**');
     expect(buildNoTextReplyMessage('en-US')).toContain('**Reply result**');
     expect(buildBusyMessage('zh-CN')).toContain('**会话繁忙**');
+  });
+
+  it('插话打断回执说明上一轮已停止、最新这条正在处理', () => {
+    const zh = buildInterruptedMessage('zh-CN');
+
+    expect(zh).toContain('**已打断上一轮**');
+    expect(zh).toContain('- 状态：`已切换到你最新发来的消息`');
+    // 「上一轮可能拿不到完整答复」是用户判断自己是否要重发的前提，不能省。
+    expect(zh).toContain('上一轮执行已停止');
+
+    const en = buildInterruptedMessage('en-US');
+
+    expect(en).toContain('**Previous turn interrupted**');
+    expect(en).toContain('was stopped');
   });
 
   it('等待授权提示包含待授权操作与「群里的同意不算授权」', () => {

@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
 import type * as StoreModule from '../../memory/memory-store.js';
+import * as semanticModule from '../../memory/maintenance/memory-semantic-maintenance.js';
 import type * as SemanticModule from '../../memory/maintenance/memory-semantic-maintenance.js';
+import { enqueueMemoryJob } from '../../memory/governance/memory-job-store.js';
+import { runMemoryMaintenanceTick } from '../../memory/maintenance/memory-maintenance-tasks.js';
 
 process.env['DATABASE_URL'] = ':memory:';
 let db: typeof DbModule;
@@ -55,6 +58,35 @@ function generator(suggestions: unknown[] = []) {
 }
 
 describe('模型语义整理', () => {
+  it('后台周任务确实调用语义分析并写入报告', async () => {
+    seed();
+    const analyze = vi.spyOn(semanticModule, 'runMemorySemanticAnalysis').mockResolvedValueOnce({
+      proposed: 1,
+      skipped: false,
+      note: '模型已生成待确认建议',
+    });
+    try {
+      enqueueMemoryJob({
+        userId,
+        kind: 'weekly_semantic',
+        scope,
+        periodKey: 'integration',
+        dueAt: now.toISOString(),
+        now,
+      });
+      await runMemoryMaintenanceTick({ owner: 'semantic-test', now, maxJobs: 1 });
+      expect(analyze).toHaveBeenCalledWith({ userId, scope, now });
+      expect(
+        db.sqliteGet<{ summary_json: string }>(
+          'SELECT summary_json FROM memory_maintenance_reports WHERE user_id=?',
+          [userId],
+        )?.summary_json,
+      ).toContain('模型已生成待确认建议');
+    } finally {
+      analyze.mockRestore();
+    }
+  });
+
   it('缺省关闭，不调用模型', async () => {
     seed();
     store.writeMemorySettings(userId, {
@@ -84,6 +116,13 @@ describe('模型语义整理', () => {
       [userId],
     );
     expect(proposal).toMatchObject({ status: 'pending', origin: 'maintenance' });
+    const frozen = db.sqliteGet<{ payload_json: string }>(
+      'SELECT payload_json FROM memory_proposals WHERE user_id=?',
+      [userId],
+    );
+    expect(
+      (JSON.parse(frozen?.payload_json ?? '{}') as { dependencies: unknown[] }).dependencies,
+    ).toHaveLength(2);
     await run({ userId, scope, now, generate });
     expect(generate).toHaveBeenCalledTimes(1);
   });

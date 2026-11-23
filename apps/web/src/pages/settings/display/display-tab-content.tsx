@@ -18,6 +18,7 @@ import {
   type ThemeStyle,
   type ToolExpandCategory,
   type MessageLayoutMode,
+  type MetaLineScope,
   TOOL_EXPAND_CATEGORY_LABELS,
 } from '../../../stores/settings/display-preferences.js';
 import { DIALOGUE_MODE_OPTIONS } from '../../../pages/chat-page/mode/dialogue-mode.js';
@@ -25,6 +26,7 @@ import { useUIStateStore } from '../../../stores/ui/uiState.js';
 import type { WorkbenchLayoutMode } from '../../../stores/ui/uiState.js';
 import { CurrentUserProfileSection } from './current-user-profile-section.js';
 import { DisplayPreferencesSyncStatusRow } from './display-preferences-sync-status.js';
+import { DialogueModePromptOverridesSection } from './dialogue-mode-prompt-overrides-section.js';
 
 // ── 设置行组件 ──────────────────────────────────────────────
 
@@ -73,6 +75,20 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
+];
+
+/** 统计信息展示范围：默认只给最新一条，避免长会话被重复的统计行刷屏。 */
+const META_LINE_SCOPE_OPTIONS: SettingsOptionCard<MetaLineScope>[] = [
+  {
+    value: 'latest',
+    label: '仅最新消息',
+    description: '只在最新一条回复下显示请求序号、耗时、Token 等统计',
+  },
+  {
+    value: 'all',
+    label: '全部消息',
+    description: '每条回复都显示统计信息',
+  },
 ];
 
 const THEME_STYLE_OPTIONS: {
@@ -291,6 +307,14 @@ export function DisplayTabContent() {
                 paddingTop: 4,
               }}
             >
+              <SettingsOptionCardRow
+                title="显示范围"
+                description="「仅最新消息」下历史消息不再重复展示统计信息（错误 / 已停止等状态仍会保留）"
+                options={META_LINE_SCOPE_OPTIONS}
+                value={store.metaLineScope}
+                onChange={store.setMetaLineScope}
+                ariaLabel="消息统计信息显示范围"
+              />
               <div style={{ ...SECTION_LIST, opacity: store.showMetaLine ? 1 : 0.5 }}>
                 {renderRows(metaLineSubRows)}
               </div>
@@ -302,6 +326,8 @@ export function DisplayTabContent() {
       <ReasoningToolSection />
 
       <DialogueModeSection />
+
+      <DialogueModePromptOverridesSection />
 
       <section style={SS}>
         <h3 style={ST}>输入区</h3>

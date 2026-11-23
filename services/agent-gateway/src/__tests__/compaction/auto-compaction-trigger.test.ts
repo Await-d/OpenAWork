@@ -309,7 +309,7 @@ describe('自动压缩续跑', () => {
     });
 
     expect(result.triggered).toBe(true);
-    expect(result.recovered).toBe(false);
+    expect(result.recovered).toBe(true);
     expect(result.syntheticContinuationPrompt).toContain('conversation was compacted');
     expect(mocks.executeSessionCompaction).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="carbon" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>工具调用状态真实浏览器验收</title>
+    <style>
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family: system-ui, sans-serif;
+      }
+      .tool-status-harness {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        padding: 16px;
+      }
+      .tool-status-harness section {
+        min-width: 0;
+        padding: 12px;
+        background: var(--bg-raised);
+        border-radius: 8px;
+      }
+      .tool-status-harness h1 {
+        font-size: 20px;
+        margin: 0;
+      }
+      .tool-status-harness h2 {
+        font-size: 12px;
+        margin: 0 0 12px;
+        color: var(--fg-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/tool-status-entry.tsx"></script>
+  </body>
+</html>

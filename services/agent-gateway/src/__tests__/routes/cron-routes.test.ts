@@ -64,6 +64,114 @@ afterEach(() => {
 });
 
 describe('cron routes', () => {
+  it('共享创建契约在真实路由拒绝非有限时间且保留历史响应字段', async () => {
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app), 'content-type': 'application/json' },
+      payload:
+        '{"name":"无效时间","prompt":"p","schedule_kind":"every","schedule_every":1000,"schedule_at":1e309}',
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: 'invalid_cron_job' });
+    await app.close();
+  });
+
+  it('共享 PATCH 契约不补默认值并忽略不可写所有权字段', async () => {
+    const { scheduledTaskCreateInputSchema, scheduledTaskUpdateInputSchema } =
+      await import('@openAwork/shared');
+    expect(scheduledTaskUpdateInputSchema.parse({ enabled: false, user_id: 'attacker' })).toEqual({
+      enabled: false,
+    });
+    expect(
+      scheduledTaskCreateInputSchema.parse({
+        name: 'x',
+        prompt: 'p',
+        schedule_kind: 'every',
+        schedule_every: 1000,
+      }),
+    ).toMatchObject({
+      schedule_at: null,
+      schedule_expr: null,
+      schedule_tz: 'UTC',
+      delivery_mode: 'none',
+    });
+  });
+
+  it('真实路由保留所有权、响应外壳和渠道创建语义', async () => {
+    const app = await buildApp();
+    const unauthorized = await app.inject({ method: 'GET', url: '/cron/jobs' });
+    expect(unauthorized.statusCode).toBe(401);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app) },
+      payload: {
+        name: '渠道任务',
+        prompt: 'p',
+        schedule_kind: 'every',
+        schedule_every: 60000,
+        delivery_mode: 'channel',
+        plugin_id: 'plugin-1',
+        plugin_chat_id: 'chat-1',
+        enabled: false,
+        user_id: 'attacker',
+        id: 'injected',
+        max_iterations: 999,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const { job } = created.json();
+    expect(job).toMatchObject({
+      user_id: CRON_USER_ID,
+      delivery_mode: 'channel',
+      max_iterations: 10,
+    });
+    expect(job.id).not.toBe('injected');
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: `/cron/jobs/${job.id}`,
+      headers: { authorization: bearer(app) },
+      payload: { name: '改名', user_id: 'attacker' },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().job).toMatchObject({
+      user_id: CRON_USER_ID,
+      schedule_every: 60000,
+      delivery_mode: 'channel',
+      enabled: false,
+    });
+    const outsiderToken = app.jwt.sign({ sub: 'u-cron-outsider', email: 'outsider@example.com' });
+    const db = await import('../../infra/db.js');
+    db.sqliteRun("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+      'u-cron-outsider',
+      'outsider@example.com',
+    ]);
+    for (const suffix of ['', '/history']) {
+      const denied = await app.inject({
+        method: suffix ? 'GET' : 'PATCH',
+        url: `/cron/jobs/${job.id}${suffix}`,
+        headers: { authorization: `Bearer ${outsiderToken}` },
+        ...(suffix ? {} : { payload: { enabled: true } }),
+      });
+      expect(denied.statusCode).toBe(404);
+    }
+    const list = await app.inject({
+      method: 'GET',
+      url: '/cron/jobs',
+      headers: { authorization: bearer(app) },
+    });
+    expect(list.json()).toMatchObject({ jobs: [{ id: job.id }] });
+    const history = await app.inject({
+      method: 'GET',
+      url: `/cron/jobs/${job.id}/history?preview=false&limit=1`,
+      headers: { authorization: bearer(app) },
+    });
+    expect(history.json()).toEqual({ history: [] });
+    await app.close();
+  });
+
   it('POST /cron/jobs 在非法 payload 时返回结构化 400', async () => {
     const app = await buildApp();
     const response = await app.inject({

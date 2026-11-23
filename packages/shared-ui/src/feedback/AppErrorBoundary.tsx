@@ -1,5 +1,6 @@
 import { Component, useState, type ErrorInfo, type ReactNode } from 'react';
 import { color, font, radius, spacing } from '../tokens.js';
+import { copyTextToClipboard } from '../utils/copy-text-to-clipboard.js';
 import { isDynamicImportFailure } from './dynamic-import-failure.js';
 
 export interface AppErrorBoundaryProps {
@@ -146,35 +147,15 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
    * 复制到剪贴板。
    *
    * `navigator.clipboard` 在非安全上下文（http 局域网访问）与 Tauri WebView 的
-   * 部分版本上不可用，因此必须保留 `execCommand` 兜底——否则「复制诊断信息」
+   * 部分版本上不可用，封装内部已回落 `execCommand`——否则「复制诊断信息」
    * 这个排障入口在最需要它的环境里恰好失效。
    */
   private async copyText(text: string): Promise<void> {
     try {
-      const clipboard = globalThis.navigator?.clipboard;
-      if (clipboard?.writeText) {
-        await clipboard.writeText(text);
-        this.setState({ copied: true });
-        return;
-      }
-      throw new Error('clipboard unavailable');
+      await copyTextToClipboard(text);
+      this.setState({ copied: true });
     } catch {
-      try {
-        const doc = globalThis.document;
-        if (!doc) return;
-        const area = doc.createElement('textarea');
-        area.value = text;
-        area.setAttribute('readonly', '');
-        area.style.position = 'fixed';
-        area.style.opacity = '0';
-        doc.body.appendChild(area);
-        area.select();
-        const succeeded = doc.execCommand('copy');
-        doc.body.removeChild(area);
-        if (succeeded) this.setState({ copied: true });
-      } catch {
-        // 复制不可用时保持原状：诊断正文仍完整展示在页面上，可手动选中。
-      }
+      // 复制不可用时保持原状：诊断正文仍完整展示在页面上，可手动选中。
     }
   }
 

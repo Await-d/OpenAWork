@@ -1,3 +1,4 @@
+import { formatServerDate } from '@openAwork/shared';
 import { useEffect, useState, useCallback } from 'react';
 import { createSessionsClient } from '@openAwork/web-client';
 import {
@@ -127,7 +128,7 @@ export function SessionsScreen({
             <Text style={styles.itemTitle} numberOfLines={1}>
               {item.title ?? '未命名'}
             </Text>
-            <Text style={styles.itemDate}>{new Date(item.updated_at).toLocaleDateString()}</Text>
+            <Text style={styles.itemDate}>{formatServerDate(item.updated_at)}</Text>
           </TouchableOpacity>
         )}
       />

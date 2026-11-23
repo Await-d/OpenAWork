@@ -1,5 +1,9 @@
 import type { CSSProperties } from 'react';
-import type { QueuedComposerPreview } from './queued-composer-state.js';
+import {
+  QUEUED_ATTACHMENT_REBIND_LABEL,
+  formatQueuedAttachmentCountLabel,
+  type QueuedComposerPreview,
+} from './queued-composer-state.js';
 
 /**
  * 对话流末尾的「待发」气泡。
@@ -43,9 +47,13 @@ function QueuedSendBubble({ item }: { item: QueuedComposerPreview }) {
       <div style={META_ROW_STYLE}>
         <span style={BADGE_STYLE}>待发</span>
         {item.attachmentCount > 0 ? (
-          <span style={META_TEXT_STYLE}>{item.attachmentCount} 个附件</span>
+          <span style={META_TEXT_STYLE}>
+            {formatQueuedAttachmentCountLabel(item.attachmentCount)}
+          </span>
         ) : null}
-        {item.requiresAttachmentRebind ? <span style={WARN_TEXT_STYLE}>需重新选择附件</span> : null}
+        {item.requiresAttachmentRebind ? (
+          <span style={WARN_TEXT_STYLE}>{QUEUED_ATTACHMENT_REBIND_LABEL}</span>
+        ) : null}
       </div>
       {text.length > 0 ? (
         <div style={TEXT_STYLE}>{text}</div>
@@ -88,7 +96,7 @@ const META_ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   flexWrap: 'wrap',
-  gap: 6,
+  gap: 8,
   marginBottom: 4,
 };
 
@@ -96,7 +104,7 @@ const BADGE_STYLE: CSSProperties = {
   fontSize: 10.5,
   fontWeight: 600,
   letterSpacing: '0.04em',
-  padding: '1px 6px',
+  padding: '2px 8px',
   borderRadius: 999,
   color: 'var(--accent)',
   border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',

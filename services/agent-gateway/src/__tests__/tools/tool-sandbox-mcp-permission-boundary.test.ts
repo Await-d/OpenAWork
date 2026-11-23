@@ -20,6 +20,9 @@ type PermissionApprovalCandidateRow = {
 const mcpScope = 'github:create_issue:fp-github';
 
 const mocks = vi.hoisted(() => ({
+  loadWorkspacePermissionRules: vi.fn(
+    () => [] as Array<{ permission: string; pattern: string; action: 'allow' }>,
+  ),
   callMcpToolForSessionMock: vi.fn(),
   getConfiguredMcpServerForSessionMock: vi.fn((_sessionId: string, serverId: string) => ({
     id: serverId,
@@ -68,6 +71,11 @@ vi.mock('../../mcp/mcp-runtime.js', () => ({
   listMcpToolsForSession: mocks.listMcpToolsForSessionMock,
 }));
 
+vi.mock('../../permission/permission-rules.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  loadWorkspacePermissionRules: mocks.loadWorkspacePermissionRules,
+}));
+
 import { createDefaultSandbox } from '../../tools/tool-sandbox.js';
 
 function executionContext(clientRequestId: string) {
@@ -86,6 +94,7 @@ function permissionInsertParams(): readonly unknown[] | undefined {
 
 describe('tool-sandbox flat MCP permission boundary', () => {
   beforeEach(() => {
+    mocks.loadWorkspacePermissionRules.mockReturnValue([]);
     mocks.callMcpToolForSessionMock.mockReset();
     mocks.callMcpToolForSessionMock.mockResolvedValue({
       serverId: 'github',
@@ -102,6 +111,108 @@ describe('tool-sandbox flat MCP permission boundary', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
+
+  it.each([
+    ['mcp__github__create_issue', 'resolver'],
+    ['mcp_call', 'resolver'],
+    ['mcp__github__create_issue', 'fingerprint'],
+    ['mcp_call', 'fingerprint'],
+  ])('%s rejects global allow when %s fails', async (toolName, failure) => {
+    mocks.loadWorkspacePermissionRules.mockReturnValue([
+      { permission: 'mcp_call', pattern: '*', action: 'allow' },
+    ]);
+    const originalSqliteGet = mocks.sqliteGetMock.getMockImplementation();
+    mocks.sqliteGetMock.mockImplementation((query) =>
+      query.includes('SELECT metadata_json')
+        ? { metadata_json: JSON.stringify({ workingDirectory: '/home/await/project/OpenAWork' }) }
+        : originalSqliteGet?.(query),
+    );
+    const failedLookup =
+      failure === 'resolver'
+        ? mocks.getConfiguredMcpServerForSessionMock
+        : mocks.getMcpServerFingerprintMock;
+    failedLookup.mockImplementationOnce(() => {
+      throw new Error('private-config');
+    });
+    try {
+      const result = await createDefaultSandbox().execute(
+        {
+          toolCallId: `allow-${failure}-${toolName}`,
+          toolName,
+          rawInput: { serverId: 'github', toolName: 'create_issue', arguments: {} },
+        },
+        new AbortController().signal,
+        'session-1',
+        executionContext(`allow-${failure}-${toolName}`),
+      );
+      expect(mocks.loadWorkspacePermissionRules).toHaveBeenCalledWith(
+        '/home/await/project/OpenAWork',
+      );
+      expect(result.isError).toBe(true);
+      expect(result.pendingPermissionRequestId).toBeUndefined();
+      expect(mocks.callMcpToolForSessionMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalSqliteGet) mocks.sqliteGetMock.mockImplementation(originalSqliteGet);
+      failedLookup.mockReset();
+      mocks.getConfiguredMcpServerForSessionMock.mockImplementation((_sessionId, serverId) => ({
+        id: serverId,
+        name: serverId.toUpperCase(),
+        transport: 'stdio',
+        enabled: true,
+      }));
+      mocks.getMcpServerFingerprintMock.mockImplementation((server) => `fp-${server.id}`);
+    }
+  });
+
+  it.each(['mcp__github__create_issue', 'mcp_call'])(
+    '%s fails closed when configuration lookup fails transiently before execution',
+    async (toolName) => {
+      mocks.getConfiguredMcpServerForSessionMock.mockImplementationOnce(() => {
+        throw new SyntaxError('private-config');
+      });
+      const result = await createDefaultSandbox().execute(
+        {
+          toolCallId: `transient-${toolName}`,
+          toolName,
+          rawInput:
+            toolName === 'mcp_call'
+              ? { serverId: 'github', toolName: 'create_issue', arguments: { title: 'Bug' } }
+              : { title: 'Bug' },
+        },
+        new AbortController().signal,
+        'session-1',
+        executionContext(`transient-${toolName}`),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(String(result.output)).toContain('MCP');
+      expect(String(result.output)).not.toContain('private-config');
+      expect(result.pendingPermissionRequestId).toBeUndefined();
+      expect(mocks.callMcpToolForSessionMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['mcp__github__create_issue', 'mcp_call'])(
+    '%s fails closed when fingerprint derivation fails',
+    async (toolName) => {
+      mocks.getMcpServerFingerprintMock.mockImplementationOnce(() => {
+        throw new TypeError('private-fingerprint');
+      });
+      const result = await createDefaultSandbox().execute(
+        {
+          toolCallId: `fingerprint-${toolName}`,
+          toolName,
+          rawInput: { serverId: 'github', toolName: 'create_issue', arguments: {} },
+        },
+        new AbortController().signal,
+        'session-1',
+        executionContext(`fingerprint-${toolName}`),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(mocks.callMcpToolForSessionMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('stores flat MCP pending permission requests under the legacy mcp_call category', async () => {
     const result = await createDefaultSandbox().execute(
@@ -362,11 +473,21 @@ describe('tool-sandbox mcp_call permission boundary for removed servers', () => 
     }
   });
 
-  it('surfaces the tool error instead of rejecting when the server is no longer configured', async () => {
+  it.each([
+    ['mcp_call', 'Configured MCP server not found: removed-server'],
+    ['mcp__github__create_issue', 'Configured MCP server not found: github'],
+    ['mcp_call', 'Configured MCP server is disabled: removed-server'],
+    ['mcp__github__create_issue', 'Configured MCP server is disabled: github'],
+  ])('%s returns a tool error without approval even in yolo: %s', async (toolName, message) => {
+    mocks.callMcpToolForSessionMock.mockClear();
+    mocks.sqliteRunMock.mockClear();
+    mocks.getConfiguredMcpServerForSessionMock.mockImplementation(() => {
+      throw new Error(message);
+    });
     const execution = createDefaultSandbox().execute(
       {
         toolCallId: 'call-mcp-removed-yolo',
-        toolName: 'mcp_call',
+        toolName,
         rawInput: {
           serverId: 'removed-server',
           toolName: 'create_issue',
@@ -378,11 +499,10 @@ describe('tool-sandbox mcp_call permission boundary for removed servers', () => 
       executionContext('req-mcp-removed-yolo'),
     );
 
-    // 权限阶段必须放行（context 为 null → not_needed），而不是把异常抛出沙箱。
     await expect(execution).resolves.toMatchObject({ isError: true });
     const result = await execution;
-    expect(String(result.output)).toContain('Configured MCP server not found: removed-server');
+    expect(String(result.output)).toContain('无法验证 MCP 配置或调用参数');
     expect(permissionInsertParams()).toBeUndefined();
-    expect(mocks.callMcpToolForSessionMock).toHaveBeenCalledTimes(1);
+    expect(mocks.callMcpToolForSessionMock).not.toHaveBeenCalled();
   });
 });

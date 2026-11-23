@@ -5,8 +5,16 @@
  * driver or the gateway db singleton.
  */
 
+import {
+  buildDeleteOrphanedChannelChatMemoriesSql,
+  buildDeleteOrphanedChannelChatRulesSql,
+} from '../memory/channel-chat-scope-cleanup.js';
+
 export interface SessionDeleteRecoveryStatement {
-  params: (input: { sessionId: string; userId: string }) => [string] | [string, string];
+  params: (input: {
+    sessionId: string;
+    userId: string;
+  }) => [string] | [string, string] | [string, string, string];
   sql: string;
 }
 
@@ -214,6 +222,58 @@ export const SESSION_DELETE_RECOVERY_STATEMENTS: ReadonlyArray<SessionDeleteReco
   {
     sql: 'DELETE FROM session_composer_input_history WHERE session_id = ? AND user_id = ?',
     params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  // ── 会话扩展（会话级安装 / MCP / 审批人 / 操作提案）：全部
+  //    `REFERENCES sessions(id) ON DELETE CASCADE`（见 infra/db.ts 的建表），
+  //    FK 关闭时不会级联，不显式删就永久残留。子表先于父表：
+  //    `session_extension_deliveries` / `session_extension_secrets` 经
+  //    `session_extension_operations` / `sessions` 间接级联，FK 关闭时同样
+  //    不会被带走，必须逐表清理（deliveries 引 operations.id，secrets 引 sessions.id）。──
+  {
+    sql: 'DELETE FROM session_extension_deliveries WHERE session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'DELETE FROM session_extension_secrets WHERE session_id = ?',
+    params: ({ sessionId }) => [sessionId],
+  },
+  {
+    sql: 'DELETE FROM session_extension_operations WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  {
+    sql: 'DELETE FROM session_skill_installations WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  {
+    sql: 'DELETE FROM session_mcp_servers WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  {
+    sql: 'DELETE FROM session_extension_settings WHERE session_id = ? AND user_id = ?',
+    params: ({ sessionId, userId }) => [sessionId, userId],
+  },
+  // `session_extension_admins` 是**用户级**审批人清单（PK: user_id + admin_user_id），
+  // 不指向任何会话——与会话删除无关，故不在此清理（由用户删除路径负责）。
+  // ── channel_chat 作用域记忆 / 规则（261104-渠道作用域记忆泄漏）──
+  //    作用域 id 由入站来源派生（`memory_message_provenance`），记忆/规则表本身**无**
+  //    sessions 外键，FK 关闭时不会被级联带走；而注入按 scope id 字符串匹配、不校验
+  //    会话是否仍存在，故不显式清理会留下「删了会话仍被命中」的孤儿。只清「本会话来源
+  //    派生、且已无其它会话引用」的 scope id（作用域失效），别的作用域一律不动；
+  //    必须在删除 provenance 行**之前**执行（子查询要读本会话来源派生 scope）。
+  {
+    sql: buildDeleteOrphanedChannelChatMemoriesSql(),
+    params: ({ sessionId, userId }) => [userId, sessionId, sessionId],
+  },
+  {
+    sql: buildDeleteOrphanedChannelChatRulesSql(),
+    params: ({ sessionId, userId }) => [userId, sessionId, sessionId],
+  },
+  // 入站来源行：FK 为 sessions(id) ON DELETE CASCADE，FK 关闭时不会级联，必须显式删，
+  // 否则恢复路径下留下悬挂来源行（也供上面的作用域派生子查询在此前使用）。
+  {
+    sql: 'DELETE FROM memory_message_provenance WHERE session_id = ?',
+    params: ({ sessionId }) => [sessionId],
   },
   {
     sql: 'DELETE FROM sessions WHERE id = ? AND user_id = ?',

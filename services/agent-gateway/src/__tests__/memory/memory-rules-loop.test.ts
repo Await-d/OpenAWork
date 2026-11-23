@@ -104,6 +104,18 @@ async function decide(
 }
 
 describe('结构化规则闭环', () => {
+  it('同内容重试返回同一待确认提案，不重复创建或谎报失败', async () => {
+    const app = await buildApp();
+    try {
+      const first = await proposeRule(app, '重试规则', '保持同一正文', 0);
+      const second = await proposeRule(app, '重试规则', '保持同一正文', 0);
+      expect(second.statusCode).toBe(202);
+      expect(second.proposalId).toBe(first.proposalId);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('创建时冻结空基线，另一同名提议不能覆盖首次确认结果', async () => {
     const app = await buildApp();
     try {
@@ -379,6 +391,121 @@ describe('结构化规则闭环', () => {
       });
       expect(response.statusCode).toBe(403);
       expect(response.json()).toMatchObject({ code: 'memory_rule_scope_forbidden' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('规则提议带合法渠道对话作用域可提交，普通 id 仍被 403 拦截', async () => {
+    const app = await buildApp();
+    try {
+      const ok = await app.inject({
+        method: 'POST',
+        url: '/memories/rules',
+        headers: { authorization: bearer(app) },
+        payload: {
+          scope: { type: 'channel_chat', id: 'channel:telegram:chat:42' },
+          name: '渠道规则',
+          body: '仅在该会话生效。',
+        },
+      });
+      expect(ok.statusCode).toBe(202);
+
+      const bad = await app.inject({
+        method: 'POST',
+        url: '/memories/rules',
+        headers: { authorization: bearer(app) },
+        payload: {
+          scope: { type: 'channel_chat', id: '随便填的id' },
+          name: '渠道规则2',
+          body: '前缀不合法。',
+        },
+      });
+      expect(bad.statusCode).toBe(403);
+      expect(bad.json()).toMatchObject({ code: 'memory_rule_scope_forbidden' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('规则 revision 按 ruleId 落审计，并可经回滚端点重放 before 快照', async () => {
+    const app = await buildApp();
+    try {
+      const proposed = await proposeRule(app, '回滚边界', '初始正文');
+      expect(await decide(app, proposed.proposalId, 'approve')).toBe(200);
+      const ruleId = dbModule.sqliteGet<{ id: string }>(
+        'SELECT id FROM memory_rule_entries LIMIT 1',
+      )?.id;
+      expect(ruleId).toBeTruthy();
+
+      // 审计行确实落库（规则写入有历史记录）。
+      const revision = dbModule.sqliteGet<{ id: string }>(
+        'SELECT id FROM memory_revisions WHERE memory_id = ? ORDER BY revision DESC LIMIT 1',
+        [ruleId],
+      );
+      expect(revision?.id).toBeTruthy();
+
+      // 创建 revision 的 before 为 null → 回滚等价于停用该规则（不删历史、不删行）。
+      if (revision?.id) {
+        const rollback = await app.inject({
+          method: 'POST',
+          url: `/memories/revisions/${revision.id}/rollback`,
+          headers: { authorization: bearer(app) },
+        });
+        expect(rollback.statusCode).toBe(200);
+        expect(rollback.json()).toMatchObject({ ok: true });
+      }
+      // 规则行仍在，但已被回滚为停用；注入块不再包含它。
+      expect(
+        dbModule.sqliteGet<{ enabled: number; body: string }>(
+          'SELECT enabled, body FROM memory_rule_entries LIMIT 1',
+        ),
+      ).toEqual({ enabled: 0, body: '初始正文' });
+      expect(buildMemoryBlockForSession(USER_ID, PERSONAL_METADATA) ?? '').not.toContain(
+        '回滚边界',
+      );
+      expect(
+        dbModule.sqliteGet<{ count: number }>('SELECT COUNT(*) AS count FROM memories')?.count,
+      ).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('规则更新后被回滚会重放 before 正文', async () => {
+    const app = await buildApp();
+    try {
+      const created = await proposeRule(app, '可回滚规则', '初版正文');
+      expect(await decide(app, created.proposalId, 'approve')).toBe(200);
+      const updated = await proposeRule(app, '可回滚规则', '新版正文', 1);
+      expect(await decide(app, updated.proposalId, 'approve')).toBe(200);
+      expect(
+        dbModule.sqliteGet<{ body: string; revision: number }>(
+          'SELECT body, revision FROM memory_rule_entries LIMIT 1',
+        ),
+      ).toEqual({ body: '新版正文', revision: 2 });
+
+      // 最新 revision（rev=2，update）的 before 是 rev=1 的旧正文 → 回滚恢复「初版正文」。
+      const ruleId = dbModule.sqliteGet<{ id: string }>(
+        'SELECT id FROM memory_rule_entries LIMIT 1',
+      )?.id;
+      const latestRev = dbModule.sqliteGet<{ id: string }>(
+        'SELECT id FROM memory_revisions WHERE memory_id = ? ORDER BY revision DESC LIMIT 1',
+        [ruleId],
+      );
+      if (latestRev?.id) {
+        const rollback = await app.inject({
+          method: 'POST',
+          url: `/memories/revisions/${latestRev.id}/rollback`,
+          headers: { authorization: bearer(app) },
+        });
+        expect(rollback.statusCode).toBe(200);
+      }
+      expect(
+        dbModule.sqliteGet<{ body: string; revision: number }>(
+          'SELECT body, revision FROM memory_rule_entries LIMIT 1',
+        ),
+      ).toEqual({ body: '初版正文', revision: 3 });
     } finally {
       await app.close();
     }

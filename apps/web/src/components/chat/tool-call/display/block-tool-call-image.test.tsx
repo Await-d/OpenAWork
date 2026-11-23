@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@openAwork/shared-ui', () => ({
+vi.mock('@openAwork/shared-ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   BashTerminalCard: () => null,
   FileTypeIcon: () => null,
   resolveToolCallCardDisplayData: () => ({
@@ -107,5 +108,42 @@ describe('BlockToolCall web image preview', () => {
 
     expect(screen.getByText('标题')).toBeTruthy();
     expect(document.querySelector('img')).toBeNull();
+  });
+});
+
+describe('BlockToolCall 渠道发图缩略图', () => {
+  const SENT_IMAGE_URL = 'https://example.com/assets/photo.png';
+
+  it.each(['WeixinSendImage', 'PluginSendImage', 'FeishuSendImage'])(
+    '%s 的图片源取自入参 file_path，展开态渲染缩略图 + 回执确认行',
+    (toolName) => {
+      // 渠道发图走 block 卡（不在 INLINE_TOOLS 名单里），缩略图由 BlockToolCall 的
+      // imageSource 统一渲染——不要再在 ToolOutputPreview 里渲染一次，否则同一张图
+      // 会在同一张卡片里出现两遍。
+      const { container } = render(
+        <BlockToolCall
+          toolName={toolName}
+          input={{ file_path: SENT_IMAGE_URL }}
+          output={JSON.stringify({ messageId: 'ROBOT1.0_abc' })}
+        />,
+      );
+
+      const image = container.querySelector<HTMLImageElement>('.tool-call-image-preview img');
+      expect(image?.getAttribute('src')).toBe(SENT_IMAGE_URL);
+      expect(container.querySelector('.tool-call-confirm')?.textContent).toContain('已发送了图片');
+    },
+  );
+
+  it('file_path 不是图片时只留回执确认行，不渲染缩略图', () => {
+    const { container } = render(
+      <BlockToolCall
+        toolName="WeixinSendImage"
+        input={{ file_path: '/workspace/report.pdf' }}
+        output={JSON.stringify({ messageId: 'ROBOT1.0_abc' })}
+      />,
+    );
+
+    expect(container.querySelector('.tool-call-image-preview')).toBeNull();
+    expect(container.querySelector('.tool-call-confirm')).not.toBeNull();
   });
 });

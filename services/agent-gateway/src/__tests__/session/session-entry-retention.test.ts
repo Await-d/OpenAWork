@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as DbModule from '../../infra/db.js';
+import type * as ScopeRecencyModule from '../../session/scope-recency-index.js';
 import type * as SessionEntryStoreModule from '../../session/session-entry-store.js';
 import type { SessionEvent, SessionEventID } from '../../session/session-event.js';
 
@@ -7,6 +8,7 @@ process.env['DATABASE_URL'] = ':memory:';
 process.env['OPENAWORK_APP_VERSION'] = '0.0.0-test';
 
 let dbModule: typeof DbModule;
+let scopeRecency: typeof ScopeRecencyModule;
 let store: typeof SessionEntryStoreModule;
 
 const SESSION_ID = 'sess-entry-retention';
@@ -16,6 +18,7 @@ beforeAll(async () => {
   dbModule = await import('../../infra/db.js');
   await dbModule.connectDb();
   await dbModule.migrate();
+  scopeRecency = await import('../../session/scope-recency-index.js');
   store = await import('../../session/session-entry-store.js');
 });
 
@@ -25,6 +28,8 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
+  // The recency index is process-global: start every case from a clean slate.
+  scopeRecency.__resetScopeRecencyIndexForTesting();
   dbModule.sqliteRun('DELETE FROM session_entry', []);
   dbModule.sqliteRun('DELETE FROM sessions', []);
   dbModule.sqliteRun('DELETE FROM users', []);
@@ -102,5 +107,30 @@ describe('session_entry scope retention', () => {
         store.listSessionEvents({ sessionId: SESSION_ID, clientRequestId: `keep-${s}` }),
       ).toHaveLength(2);
     }
+  });
+
+  it('进程重启（内存次序索引为空）后按 DB 播种，仍收敛到上限', () => {
+    store.__setSessionEntryRetentionForTesting(0, 1);
+    for (let s = 0; s < 5; s++) {
+      writeScope(`boot-${s}`, 2, 9_000 + s * 100);
+    }
+
+    // 模拟进程重启：内存次序索引清空，DB 仍是唯一真相。
+    scopeRecency.__resetScopeRecencyIndexForTesting();
+
+    store.__setSessionEntryRetentionForTesting(2, 1);
+    writeScope('boot-5', 1, 9_900);
+
+    for (const stale of ['boot-0', 'boot-1', 'boot-2', 'boot-3']) {
+      expect(store.listSessionEvents({ sessionId: SESSION_ID, clientRequestId: stale })).toEqual(
+        [],
+      );
+    }
+    expect(
+      store.listSessionEvents({ sessionId: SESSION_ID, clientRequestId: 'boot-4' }),
+    ).toHaveLength(2);
+    expect(
+      store.listSessionEvents({ sessionId: SESSION_ID, clientRequestId: 'boot-5' }),
+    ).toHaveLength(1);
   });
 });

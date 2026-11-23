@@ -1,0 +1,199 @@
+/* 定时任务页 · 卡片视图 */
+
+.sch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.sch-card {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--bg-overlay), var(--bg-raised));
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.sch-card:hover {
+  border-color: var(--border-emphasis);
+  transform: translateY(-1px);
+}
+
+.sch-card[data-disabled='true'] {
+  /* 不再用整体 opacity 弱化：它会把卡片内文字一起压淡，axe 实测「已停用」卡片的
+     倒计时说明只有 3.18:1。改用虚线边框 + 平面背景表达「未启用」。 */
+  border-style: dashed;
+  background: var(--bg-raised);
+}
+
+/* 运行中：顶部一条扫光，提示「这一轮在途」，但不影响任何按钮的可用性 */
+.sch-card[data-running='true']::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--contrast), transparent);
+  animation: sch-sweep 1.6s linear infinite;
+}
+
+@keyframes sch-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+.sch-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sch-card-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.sch-card-title h2 {
+  /* 与组件的 <h2> 保持一致（h1 页头之后只能是 h2，否则 heading-order 违规）。 */
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  word-break: break-word;
+  color: var(--fg-strong);
+}
+
+.sch-card-title p {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sch-countdown {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-base);
+}
+
+.sch-countdown-value {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fg-strong);
+}
+
+.sch-countdown-note {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.sch-card-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.sch-card-meta dt {
+  margin: 0 0 2px;
+  font-size: 10.5px;
+  /* 小字号标签统一用 --fg-muted：--fg-subtle 在浅色主题不到 4.5:1。 */
+  color: var(--fg-muted);
+}
+
+.sch-card-meta dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  flex-wrap: wrap;
+  color: var(--fg-strong);
+}
+
+.sch-card-error {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--complement);
+  word-break: break-word;
+}
+
+.sch-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border-default);
+  padding-top: 10px;
+}
+
+.sch-card-history {
+  border-top: 1px dashed var(--border-emphasis);
+  padding-top: 10px;
+}
+
+.sch-empty {
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-muted);
+  border: 1px dashed var(--border-emphasis);
+  border-radius: 10px;
+}
+
+/* ── 密度（D-02）────────────────────────────────────────────────────────
+   默认（data-density="comfortable"）就是上面的样式；紧凑档只做三件事：
+   收窄最小列宽让一屏多放几列、收紧卡片留白、提示词压到一行。 */
+
+.sch-grid[data-density='compact'] {
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 9px;
+}
+
+.sch-grid[data-density='compact'] .sch-card {
+  gap: 8px;
+  padding: 11px 12px;
+}
+
+.sch-grid[data-density='compact'] .sch-card-title p {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.sch-grid[data-density='compact'] .sch-countdown {
+  padding: 6px 9px;
+}
+
+.sch-grid[data-density='compact'] .sch-countdown-value {
+  font-size: 16px;
+}
+
+.sch-grid[data-density='compact'] .sch-card-foot {
+  padding-top: 8px;
+}

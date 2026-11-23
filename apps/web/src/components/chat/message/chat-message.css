@@ -22,6 +22,24 @@
   transition: transform 140ms ease;
 }
 
+/*
+ * 压缩上下文胶囊（「已自动压缩上下文」）是**会话级系统事件**，不是模型发言。
+ *
+ * 它此前按普通消息渲染：左侧 28px 头像 + 12px 间距，胶囊在自己的内容区里居中，
+ * 结果是视觉上比整行中线右偏约 20px，并且顶着模型名 / 时间 / 复制按钮——
+ * 一条系统提示被画成了「某个模型说的一句话」。
+ *
+ * 这里让它通栏：去掉头像列与列间距，内容区独占整行，胶囊居中即对齐整行对称轴，
+ * 与时间分隔条（`TimeDividerRow`）、子代理通知行保持一致。
+ */
+.chat-message-row[data-layout='compact-bar'] {
+  gap: 0;
+}
+
+.chat-message-row[data-layout='compact-bar'] > .chat-message-avatar-frame {
+  display: none;
+}
+
 .chat-message-group {
   display: flex;
   width: 100%;

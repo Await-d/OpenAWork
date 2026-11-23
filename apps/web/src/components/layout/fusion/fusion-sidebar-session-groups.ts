@@ -1,14 +1,20 @@
 /**
  * 融合侧栏 Chat 会话分组的构建逻辑。
  *
- * 把「搜索态 / 非搜索态」「置顶分区」两类数据来源合并成统一的渲染模型，
+ * 把「搜索态 / 非搜索态」两类数据来源合并成统一的渲染模型，
  * 使列表组件只消费一种结构。
  *
  * 规则：
  * - 搜索态：以过滤后的会话树为唯一渲染源，计数取命中数，
- *   避免出现「组标题仍在、下面却没有会话」的空组；此态不单独抽出置顶分区。
- * - 非搜索态：保留全部已保存工作区分组（含暂未创建会话的空组），
- *   置顶会话统一收敛到顶部「置顶」分区，并计入该分区而非原工作区。
+ *   避免出现「组标题仍在、下面却没有会话」的空组。
+ * - 非搜索态：保留全部已保存工作区分组（含暂未创建会话的空组）。
+ *
+ * 置顶**不在这里抽分区**：置顶是「工作区内置顶」语义，组内置顶优先由
+ * `groupSessionsByWorkspace`（`pinnedSessionIds` 参数）在排序阶段完成，
+ * 渲染层只按工作区落位。此前把置顶会话汇总成跨工作区的顶部「置顶」分组，
+ * 会让会话脱离它所属的工作区——用户在原工作区里反而找不到它，也丢失了
+ * 父子层级（子会话被提升成根节点）。新增任何「把会话搬出工作区」的渲染逻辑
+ * 都与此语义冲突，不要恢复。
  */
 
 import type { Session } from '../../../hooks/workspace/useSessions.js';
@@ -18,19 +24,14 @@ import type {
   WorkspaceSessionTreeNode,
 } from '../../../utils/session/session-grouping.js';
 
-/** 置顶分区使用的分组键（与未绑定工作区分组键区分开）。 */
-export const PINNED_SESSION_GROUP_KEY = '__pinned__';
-
 export interface FusionChatGroupRow {
   key: string;
   workspacePath: string | null;
   workspaceLabel: string;
-  /** 组内会话绑定的 SSH 连接 id；非空表示该工作区是远端目录。置顶分区为 null。 */
+  /** 组内会话绑定的 SSH 连接 id；非空表示该工作区是远端目录。 */
   sshConnectionId: string | null;
   sessionCount: number;
   roots: WorkspaceSessionTreeNode<Session>[];
-  /** 置顶分区：不提供「在此工作区新建会话」入口 */
-  isPinnedGroup: boolean;
 }
 
 export interface BuildFusionChatGroupsParams {
@@ -38,7 +39,6 @@ export interface BuildFusionChatGroupsParams {
   groupedSessionTrees: readonly WorkspaceSessionTreeGroup<Session>[];
   sessionCountByWorkspace: ReadonlyMap<string, number>;
   isSearching: boolean;
-  isPinned: (sessionId: string) => boolean;
 }
 
 export function buildFusionChatGroups({
@@ -46,7 +46,6 @@ export function buildFusionChatGroups({
   groupedSessionTrees,
   sessionCountByWorkspace,
   isSearching,
-  isPinned,
 }: BuildFusionChatGroupsParams): FusionChatGroupRow[] {
   const findTreeGroup = (groupKey: string) =>
     groupedSessionTrees.find((candidate) => candidate.groupKey === groupKey);
@@ -60,54 +59,30 @@ export function buildFusionChatGroups({
       sshConnectionId: treeGroup.sshConnectionId ?? null,
       sessionCount: treeGroup.sessions.length,
       roots: treeGroup.roots,
-      isPinnedGroup: false,
     }));
   }
 
-  const pinnedNodes: WorkspaceSessionTreeNode<Session>[] = [];
-  for (const treeGroup of groupedSessionTrees) {
-    collectPinnedNodes(treeGroup.roots, isPinned, pinnedNodes);
-  }
-  const pinnedCountByGroupKey = new Map<string, number>();
-  for (const treeGroup of groupedSessionTrees) {
-    pinnedCountByGroupKey.set(treeGroup.groupKey, countPinnedNodes(treeGroup.roots, isPinned));
-  }
-
+  // 非搜索态：计数与树都由会话集合原样带来——置顶会话仍计入它所属的工作区，
+  // 位置由组内排序（置顶优先）决定，不参与这里的任何抽取。
   const rows: FusionChatGroupRow[] = groupedSessions.map((group) => {
     const groupKey = group.groupKey;
     const treeGroup = findTreeGroup(groupKey);
-    const roots = stripPinnedNodes(treeGroup?.roots ?? [], isPinned);
-    const pinnedCount = pinnedCountByGroupKey.get(groupKey) ?? 0;
 
     return {
       key: groupKey,
       workspacePath: group.workspacePath,
       workspaceLabel: group.workspaceLabel,
       sshConnectionId: group.sshConnectionId ?? null,
-      sessionCount: Math.max(0, (sessionCountByWorkspace.get(groupKey) ?? 0) - pinnedCount),
-      roots,
-      isPinnedGroup: false,
+      sessionCount: sessionCountByWorkspace.get(groupKey) ?? 0,
+      roots: treeGroup?.roots ?? [],
     };
   });
 
   // 活跃工作区排前面；同为活跃（或同为闲置）时按名称字母序，
   // 让列表位置稳定可预期，不随会话更新而跳动。
   rows.sort(compareWorkspaceGroups);
-  const orderedRows: FusionChatGroupRow[] = rows;
 
-  if (pinnedNodes.length > 0) {
-    orderedRows.unshift({
-      key: PINNED_SESSION_GROUP_KEY,
-      workspacePath: null,
-      workspaceLabel: '置顶',
-      sshConnectionId: null,
-      sessionCount: pinnedNodes.length,
-      roots: pinnedNodes,
-      isPinnedGroup: true,
-    });
-  }
-
-  return orderedRows;
+  return rows;
 }
 
 /** 统计一组会话树中处于运行中的会话数量（含子会话）。 */
@@ -145,52 +120,4 @@ function compareWorkspaceGroups(a: FusionChatGroupRow, b: FusionChatGroupRow): n
   }
 
   return a.workspaceLabel.localeCompare(b.workspaceLabel, undefined, { sensitivity: 'base' });
-}
-
-function collectPinnedNodes(
-  nodes: readonly WorkspaceSessionTreeNode<Session>[],
-  isPinned: (sessionId: string) => boolean,
-  collected: WorkspaceSessionTreeNode<Session>[],
-): void {
-  for (const node of nodes) {
-    if (isPinned(node.session.id)) {
-      collected.push({ session: node.session, children: [] });
-    }
-    collectPinnedNodes(node.children, isPinned, collected);
-  }
-}
-
-function countPinnedNodes(
-  nodes: readonly WorkspaceSessionTreeNode<Session>[],
-  isPinned: (sessionId: string) => boolean,
-): number {
-  let count = 0;
-  for (const node of nodes) {
-    if (isPinned(node.session.id)) {
-      count += 1;
-    }
-    count += countPinnedNodes(node.children, isPinned);
-  }
-  return count;
-}
-
-/**
- * 从树中移除已置顶的会话节点；被移除节点的子节点提升到父级，避免会话丢失。
- */
-function stripPinnedNodes(
-  nodes: readonly WorkspaceSessionTreeNode<Session>[],
-  isPinned: (sessionId: string) => boolean,
-): WorkspaceSessionTreeNode<Session>[] {
-  const result: WorkspaceSessionTreeNode<Session>[] = [];
-
-  for (const node of nodes) {
-    const children = stripPinnedNodes(node.children, isPinned);
-    if (isPinned(node.session.id)) {
-      result.push(...children);
-      continue;
-    }
-    result.push({ session: node.session, children });
-  }
-
-  return result;
 }

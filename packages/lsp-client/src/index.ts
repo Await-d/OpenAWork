@@ -323,11 +323,9 @@ export class LSPManager {
     const pending = this.installs.get(serverId);
     if (pending) return pending;
 
-    const running = this.runInstall(serverId, server.installCommand, server.binary).finally(
-      () => {
-        this.installs.delete(serverId);
-      },
-    );
+    const running = this.runInstall(serverId, server.installCommand, server.binary).finally(() => {
+      this.installs.delete(serverId);
+    });
     this.installs.set(serverId, running);
     return running;
   }

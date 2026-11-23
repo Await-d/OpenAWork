@@ -1,5 +1,15 @@
+import { parseServerTimestamp } from '@openAwork/shared';
+
+/**
+ * 会话时间的相对文案。
+ *
+ * `dateStr` 来自网关 `sessions.updated_at`（SQLite `datetime('now')`：UTC、无时区后缀），
+ * 不能直接 `new Date(dateStr)`——那会按本地时区解释，东八区下算出「8 小时前」。
+ */
 export function relativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
+  const timestamp = parseServerTimestamp(dateStr);
+  if (timestamp === null) return '—';
+  const diff = Date.now() - timestamp;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return '刚刚';
   if (mins < 60) return `${mins}分钟前`;

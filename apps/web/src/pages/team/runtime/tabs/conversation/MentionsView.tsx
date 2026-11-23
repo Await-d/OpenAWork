@@ -107,7 +107,7 @@ export function MentionsView({
     } else if (filter === 'blocking') {
       list = list.filter((item) => item.blocking);
     }
-    return list.slice().sort((a, b) => {
+    return list.toSorted((a, b) => {
       if (a.blocking !== b.blocking) return a.blocking ? -1 : 1;
       return b.event.timestamp - a.event.timestamp;
     });

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { assert, waitFor, withMockFetch, withTempEnv } from './task-verification-helpers.js';
+import { getAnyInFlightStreamRequestForSession } from '../routes/stream-cancellation.js';
 
 async function main(): Promise<void> {
   const workspaceRoot = `/tmp/openawork-session-single-flight-${randomUUID()}`;
@@ -77,6 +78,18 @@ async function main(): Promise<void> {
           await waitFor(
             () => firstFetchStarted,
             'first session request should start upstream fetch',
+          );
+
+          // 会话级单飞:第一轮仍在飞时,同一会话(不同 requestId)必须被判定为「正在运行」,
+          // 这是 stream.ts 输出 409 SESSION_ALREADY_RUNNING 的同一真相源。此断言不改变
+          // 下面「第二个请求被拒」的既有契约,只是把「为什么拒」在更靠前处钉死。
+          assert(
+            getAnyInFlightStreamRequestForSession({
+              excludeClientRequestId: 'req-2',
+              sessionId,
+              userId,
+            })?.clientRequestId === 'req-1',
+            'first in-flight request should occupy the session single-flight slot',
           );
 
           const secondEvents: Array<{ code?: string; type: string }> = [];

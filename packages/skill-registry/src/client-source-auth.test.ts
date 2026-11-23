@@ -30,7 +30,7 @@ function source(
     name: 'Test',
     url: 'https://registry.test',
     type: 'community',
-    trust: 'trusted',
+    trust: 'verified',
     enabled: true,
     priority: 1,
     ...(auth === undefined ? {} : { auth }),

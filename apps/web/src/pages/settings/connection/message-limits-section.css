@@ -1,0 +1,70 @@
+.message-limits {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  color: var(--fg-default);
+  font-size: 12px;
+}
+.message-limits h3 {
+  margin: 0;
+  color: var(--fg-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+.message-limits p {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+.message-limits form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.message-limits__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.message-limits input,
+.message-limits button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-emphasis);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-overlay);
+  color: var(--fg-strong);
+  font: inherit;
+}
+.message-limits input {
+  min-width: 0;
+  width: 100%;
+  max-width: 200px;
+}
+.message-limits button {
+  cursor: pointer;
+}
+.message-limits button:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}
+.message-limits button:active:not(:disabled) {
+  opacity: 0.8;
+}
+.message-limits button.message-limits__save {
+  background: var(--accent);
+  color: var(--fg-on-accent);
+}
+.message-limits :is(button, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+.message-limits :disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.message-limits [role='alert'],
+.message-limits input[aria-invalid='true'] {
+  color: var(--complement);
+}

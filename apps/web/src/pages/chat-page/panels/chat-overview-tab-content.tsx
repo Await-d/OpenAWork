@@ -26,6 +26,13 @@ import type {
   WorkspaceFileMentionItem,
 } from '../../../components/conversation-runtime/messages/support.js';
 import type { DialogueMode } from '../mode/dialogue-mode.js';
+
+/** 概览行的简写文案；与顶栏的 `DIALOGUE_MODE_OPTIONS` 标签刻意不同（这里更短）。 */
+const DIALOGUE_MODE_LABELS: Record<DialogueMode, string> = {
+  clarify: '澄清',
+  coding: '编程',
+  programmer: '程序员',
+};
 import { SessionInjectedToolsSection } from './session-injected-tools-section.js';
 import {
   buildUpstreamSummaryGroupContextText,
@@ -81,7 +88,11 @@ export interface ChatOverviewTabContentProps {
   contentArtifactCount: number;
   contentArtifactCountStatus: 'idle' | 'loading' | 'ready' | 'error';
   currentSessionId: string | null;
-  dialogueMode: DialogueMode;
+  /**
+   * 对话模式；来源会话（渠道 / 定时任务）与 metadata 未水合的窗口内**不传**
+   *（该会话没有模式 / 本地值还只是用户默认值这个假值），此时概览只显示占位符。
+   */
+  dialogueMode?: DialogueMode;
   effectiveWorkingDirectory: string | null;
   effectiveContextMessageCount?: number;
   messages: ChatMessage[];
@@ -113,9 +124,6 @@ interface StatusChip {
   readonly label: string;
   readonly tone: 'accent' | 'aux' | 'success' | 'warning' | 'danger';
 }
-
-/** 默认压缩阈值（后续可从 active model 注入）。 */
-const COMPACTION_THRESHOLD_PERCENT = 95;
 
 function formatTokenCount(value: number | null): string {
   if (value === null) return '-';
@@ -410,9 +418,12 @@ export function ChatOverviewTabContent(props: ChatOverviewTabContentProps) {
       label: '工作区',
       value: effectiveWorkingDirectory ?? '未绑定',
     },
+
     {
       label: '对话模式',
-      value: dialogueMode === 'clarify' ? '澄清' : dialogueMode === 'coding' ? '编程' : '程序员',
+      // 来源会话（渠道 / 定时任务）没有对话模式，metadata 未水合的窗口内也还没有真值：
+      // 两种情况调用方都不传该值，此处显示占位而不是一个该会话并不具备的模式。
+      value: dialogueMode ? DIALOGUE_MODE_LABELS[dialogueMode] : '—',
     },
     {
       label: '审批方式',
@@ -562,6 +573,17 @@ function UsageHero({
 }) {
   const usedTokens = contextUsageSnapshot?.usedTokens ?? null;
   const maxTokens = contextUsageSnapshot?.maxTokens ?? null;
+  const thresholdTokens = contextUsageSnapshot?.autoCompactThresholdTokens;
+  const thresholdPercent =
+    typeof thresholdTokens === 'number' && maxTokens !== null
+      ? (thresholdTokens / maxTokens) * 100
+      : null;
+  const thresholdLabel =
+    typeof thresholdTokens === 'number' && thresholdPercent !== null
+      ? `自动压缩触发阈值 ${thresholdTokens.toLocaleString()} token（${Math.round(thresholdPercent)}%）`
+      : thresholdTokens === null
+        ? '自动压缩已关闭'
+        : undefined;
   const rawPercent =
     usedTokens !== null && maxTokens !== null
       ? Math.round((usedTokens / Math.max(1, maxTokens)) * 100)
@@ -600,14 +622,17 @@ function UsageHero({
           aria-valuemin={0}
           aria-valuemax={maxTokens}
           aria-valuenow={Math.min(usedTokens, maxTokens)}
-          title={usageTitle}
+          title={thresholdLabel ? `${usageTitle}；${thresholdLabel}` : usageTitle}
+          aria-valuetext={thresholdLabel ? `${usageTitle}；${thresholdLabel}` : usageTitle}
         >
           <span className="chat-overview__meter-fill" style={{ width: `${displayPercent}%` }} />
-          <span
-            className="chat-overview__meter-tick"
-            aria-hidden="true"
-            style={{ left: `${COMPACTION_THRESHOLD_PERCENT}%` }}
-          />
+          {thresholdPercent !== null && (
+            <span
+              className="chat-overview__meter-tick"
+              aria-hidden="true"
+              style={{ left: `${thresholdPercent}%` }}
+            />
+          )}
         </div>
       ) : null}
       <div className="chat-overview__hero-foot">

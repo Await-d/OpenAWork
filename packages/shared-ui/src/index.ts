@@ -1,3 +1,5 @@
+export { copyTextToClipboard } from './utils/copy-text-to-clipboard.js';
+export { isImeComposingKeyboardEvent, isImeComposingNativeEvent } from './utils/ime-composition.js';
 export { ChatMessage } from './chat/ChatMessage.js';
 export type { ChatMessageProps } from './chat/ChatMessage.js';
 export { SubagentNoticeRow } from './chat/SubagentNoticeRow.js';
@@ -65,7 +67,15 @@ export type { FileStatusPanelProps, FileChange, FileChangeStatus } from './file/
 export { FileChangeReviewPanel } from './file/FileChangeReviewPanel.js';
 export { ToolDiffCollection } from './tools/ToolDiffCollection.js';
 export type { ToolDiffCollectionProps, ToolDiffFileView } from './tools/ToolDiffCollection.js';
-export { UnifiedCodeDiff, detectLanguage, highlightCodeLines } from './tools/UnifiedCodeDiff.js';
+export {
+  UnifiedCodeDiff,
+  detectLanguage,
+  highlightCodeLines,
+  summarizeSnapshotDiff,
+  summarizeUnifiedDiff,
+  collapseSnapshotRows,
+  parseSnapshotDiffRows,
+} from './tools/UnifiedCodeDiff.js';
 export type {
   DiffToken,
   UnifiedCodeDiffProps,
@@ -145,14 +155,6 @@ export type {
   ChannelType,
   ChannelStatus,
 } from './misc/ChannelManager.js';
-export { CronManager } from './misc/CronManager.js';
-export type {
-  CronManagerProps,
-  CronJob,
-  CronJobDeliveryMode,
-  ScheduleKind,
-  CronJobStatus,
-} from './misc/CronManager.js';
 export { ContextPanel } from './misc/ContextPanel.js';
 export type { ContextPanelProps, ContextItem, ContextItemKind } from './misc/ContextPanel.js';
 export { FileTreePanel } from './file/FileTreePanel.js';
@@ -282,8 +284,6 @@ export {
   MobileLayoutContext,
 } from './misc/MobileResponsiveWrapper.js';
 export type { MobileResponsiveWrapperProps } from './misc/MobileResponsiveWrapper.js';
-export { ScheduleManagerUI } from './misc/ScheduleManagerUI.js';
-export type { ScheduleManagerUIProps, ScheduleTaskItem } from './misc/ScheduleManagerUI.js';
 export { CommandPalette } from './misc/CommandPalette.js';
 export type { CommandPaletteProps, CommandItem } from './misc/CommandPalette.js';
 export { tokens } from './tokens.js';
@@ -353,3 +353,12 @@ export type {
   FileTypeIconProps,
   FolderTypeIconProps,
 } from './file/file-icon-theme/index.js';
+export {
+  parseFileChangeResult,
+  isIncompleteFileSnapshot,
+  readFileSnapshot,
+  type FileChangeResult,
+  type FileChangeResultEntry,
+} from './tools/file-change-result.js';
+export { parseJsonObjectTolerant } from './tools/truncated-json.js';
+export type { TolerantJsonObject } from './tools/truncated-json.js';

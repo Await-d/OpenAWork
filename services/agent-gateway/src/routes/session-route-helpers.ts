@@ -9,7 +9,18 @@ import { formatToolOutputTruncationMarker } from '@openAwork/shared';
 import type { SessionTodo } from '../tools/todo-tools.js';
 import { buildWorkflowRuntimeState } from '../session/workflow-runtime-state.js';
 
-const SLIM_STRING_MAX = 800;
+/**
+ * 单个 leaf 字符串的字符预算。
+ *
+ * 原值 800 会让常见的文件写入结果彻底失真：`write` / `edit` 的输出是
+ * `{ before, after, filediff, … }` 的**整文件快照**，一个 2.5KB 的脚本
+ * 就会被截到 800 字符，再由下面的整体上限折叠成「一坨截断 JSON 字符串」，
+ * 前端于是既拿不到完整快照、也画不出 diff（用户只能看到原始 JSON 文本）。
+ *
+ * 放宽到 8000 后，绝大多数单文件改动都能拿到完整前后文；真正超大的文件
+ * 仍由 `OUTPUT_HARD_CAP_BYTES`（64KB）兜住，不会无界增长。
+ */
+const SLIM_STRING_MAX = 8000;
 const SLIM_INPUT_MAX = 2000;
 const SLIM_DIFF_MAX = 3000;
 
@@ -241,6 +252,17 @@ function slimOutputValue(output: unknown): unknown {
     typeof obj['exitCode'] === 'number' ||
     typeof obj['stdout'] === 'string' ||
     typeof obj['stderr'] === 'string';
+  /**
+   * 整文件快照（`write` / `edit` / `multi_edit` / ssh 同族）：
+   * `{ before, after, filediff, success, path, … }`。
+   *
+   * 前端靠这两份快照画 diff。旧逻辑把它交给下面的整体上限，一旦序列化超过
+   * `SLIM_OUTPUT_TOTAL_MAX`（4000 字符）就**折叠成一段截断 JSON 字符串**——
+   * `before` / `after` 双双变成半截文本，前端既识别不出形状、也画不出 diff，
+   * 用户最终只看到「内容已截断 · 省略 N 字符」加一坨原始 JSON。
+   * 判据取得很窄（顶层同时有字符串 before/after），不会误伤其它输出。
+   */
+  const isFileSnapshotShape = typeof obj['before'] === 'string' && typeof obj['after'] === 'string';
   const slimmed: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (key === 'diffs' && Array.isArray(value)) {
@@ -270,7 +292,7 @@ function slimOutputValue(output: unknown): unknown {
   // 但「逐字段截断」只约束单字段长度，**不含累加上限**：叶子一多（bash 的
   // stdout/stderr/diffs、batch 的大量子结果）总字节仍可无界。下面这层字节硬上限
   // 在保住结构的前提下兜住累加量，是本函数唯一的总体上界。
-  if (isBatchShape || isBashShape) {
+  if (isBatchShape || isBashShape || isFileSnapshotShape) {
     return applyOutputByteLimit(slimmed, OUTPUT_HARD_CAP_BYTES);
   }
   const serialized = JSON.stringify(slimmed);

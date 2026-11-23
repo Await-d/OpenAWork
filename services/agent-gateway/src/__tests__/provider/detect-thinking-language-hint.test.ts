@@ -14,17 +14,17 @@ describe('detectThinkingLanguageHintFromText', () => {
 
   it('returns the Chinese hint for CJK-Han-dominant text', () => {
     const hint = detectThinkingLanguageHintFromText('帮我搜索一下 React 19 的新特性');
-    expect(hint).toContain('请用中文进行思考');
+    expect(hint).toBe('如无其他语言要求，请用中文回复。');
   });
 
   it('returns the Japanese hint when hiragana / katakana dominate', () => {
     const hint = detectThinkingLanguageHintFromText('Reactのコンポーネントについて教えてください');
-    expect(hint).toContain('日本語で思考してください');
+    expect(hint).toBe('別の指定がなければ、日本語で回答してください。');
   });
 
   it('returns the Korean hint when hangul dominates', () => {
     const hint = detectThinkingLanguageHintFromText('리액트 컴포넌트에 대해 알려주세요');
-    expect(hint).toContain('한국어로 생각하세요');
+    expect(hint).toBe('별도 요청이 없으면 사용자에게 한국어로 답변하세요.');
   });
 
   // Regression: every emitted hint variant must be detectable by the
@@ -34,9 +34,9 @@ describe('detectThinkingLanguageHintFromText', () => {
   // would re-introduce the byte-instability the persist-time fix is
   // supposed to eliminate.
   it.each([
-    ['帮我搜索一下', '请用中文进行思考'],
-    ['コンポーネントについて教えて', '日本語で思考してください'],
-    ['리액트 컴포넌트', '한국어로 생각하세요'],
+    ['帮我搜索一下', '如无其他语言要求，请用中文回复'],
+    ['コンポーネントについて教えて', '別の指定がなければ、日本語で回答してください'],
+    ['리액트 컴포넌트', '별도 요청이 없으면 사용자에게 한국어로 답변하세요'],
   ])('hint emitted for %j is recognised by THINKING_LANGUAGE_HINT_MARKERS', (input, marker) => {
     const hint = detectThinkingLanguageHintFromText(input);
     expect(hint).not.toBeNull();
@@ -46,4 +46,9 @@ describe('detectThinkingLanguageHintFromText', () => {
     const persistedEnvelope = `用户文本\n[${hint}]`;
     expect(THINKING_LANGUAGE_HINT_MARKERS.some((m) => persistedEnvelope.includes(m))).toBe(true);
   });
+
+  it.each(['请用中文进行思考', '日本語で思考してください', '한국어로 생각하세요'])(
+    'still recognizes the stored legacy marker %s',
+    (marker) => expect(THINKING_LANGUAGE_HINT_MARKERS).toContain(marker),
+  );
 });

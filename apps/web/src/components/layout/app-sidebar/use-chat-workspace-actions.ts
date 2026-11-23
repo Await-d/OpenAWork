@@ -4,6 +4,7 @@
 
 import { useCallback, useState } from 'react';
 import { useUIStateStore } from '../../../stores/ui/uiState.js';
+import { copyTextToClipboard } from '../file-tree/file-tree-actions.js';
 
 export interface ChatWorkspaceMenuState {
   workspacePath: string;
@@ -38,7 +39,9 @@ export function useChatWorkspaceActions() {
   );
 
   const copyChatWorkspacePath = useCallback((workspacePath: string) => {
-    void navigator.clipboard?.writeText(workspacePath);
+    void copyTextToClipboard(workspacePath).catch((copyError: unknown) => {
+      console.warn('复制工作区路径失败', copyError);
+    });
   }, []);
 
   const removeChatWorkspace = useCallback(

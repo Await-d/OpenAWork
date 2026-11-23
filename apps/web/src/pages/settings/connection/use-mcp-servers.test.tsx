@@ -53,14 +53,14 @@ beforeEach(() => {
     ],
     builtinServers: [
       {
-        id: 'omo',
-        name: 'omo',
+        id: 'lsp',
+        name: 'lsp',
         transport: 'stdio',
         builtin: true,
-        builtinKind: 'adapter',
+        builtinKind: 'virtual',
         source: 'builtin',
         enabled: true,
-        disabledTools: ['omo_read_session'],
+        disabledTools: ['lsp_rename'],
       },
     ],
   });
@@ -69,14 +69,14 @@ beforeEach(() => {
   mocks.getMcpStatus.mockResolvedValue({
     servers: [
       {
-        id: 'omo',
-        name: 'omo',
+        id: 'lsp',
+        name: 'lsp',
         builtin: true,
-        disabledTools: ['omo_read_session'],
-        error: 'manifest stale',
+        disabledTools: ['lsp_rename'],
+        error: 'bridge unavailable',
         status: 'error',
         toolCount: 1,
-        tools: [{ name: 'adapter_catalog', description: 'Catalog' }],
+        tools: [{ name: 'hover', description: 'Hover' }],
         type: 'stdio',
       },
     ],
@@ -101,35 +101,35 @@ afterEach(() => {
 
 describe('useMcpServers settings wiring', () => {
   it('Given an active settings tab When loading, saving, and retrying MCP servers Then uses web-client endpoints and preserves status data', async () => {
-    const initialOmoStatus = {
-      id: 'omo',
-      name: 'omo',
+    const initialLspStatus = {
+      id: 'lsp',
+      name: 'lsp',
       builtin: true,
-      disabledTools: ['omo_read_session'],
-      error: 'manifest stale',
+      disabledTools: ['lsp_rename'],
+      error: 'bridge unavailable',
       status: 'error',
       toolCount: 1,
-      tools: [{ name: 'adapter_catalog', description: 'Catalog' }],
+      tools: [{ name: 'hover', description: 'Hover' }],
       type: 'stdio',
     };
-    const refreshedOmoStatus = {
-      id: 'omo',
-      name: 'omo',
+    const refreshedLspStatus = {
+      id: 'lsp',
+      name: 'lsp',
       builtin: true,
       disabledTools: [],
       status: 'connected',
       toolCount: 3,
       tools: [
-        { name: 'fetch_web', description: '提取网页正文' },
-        { name: 'fetch_github_readme', description: '读取 README' },
-        { name: 'search', description: '多引擎搜索' },
+        { name: 'find_references', description: '查找引用' },
+        { name: 'goto_definition', description: '跳转定义' },
+        { name: 'diagnostics', description: '诊断' },
       ],
       type: 'stdio',
     };
     mocks.getMcpStatus
-      .mockResolvedValueOnce({ servers: [initialOmoStatus] })
-      .mockResolvedValueOnce({ servers: [initialOmoStatus] })
-      .mockResolvedValue({ servers: [refreshedOmoStatus] });
+      .mockResolvedValueOnce({ servers: [initialLspStatus] })
+      .mockResolvedValueOnce({ servers: [initialLspStatus] })
+      .mockResolvedValue({ servers: [refreshedLspStatus] });
 
     const { result } = renderHook(() =>
       useMcpServers({
@@ -140,18 +140,18 @@ describe('useMcpServers settings wiring', () => {
     );
 
     await waitFor(() => {
-      expect(result.current.mcpServers.map((server) => server.id)).toEqual(['fs', 'omo']);
+      expect(result.current.mcpServers.map((server) => server.id)).toEqual(['fs', 'lsp']);
       expect(result.current.mcpStatuses).toEqual([
         {
-          id: 'omo',
-          name: 'omo',
+          id: 'lsp',
+          name: 'lsp',
           status: 'error',
           toolCount: 1,
           authType: 'stdio',
           builtin: true,
-          disabledTools: ['omo_read_session'],
-          error: 'manifest stale',
-          tools: [{ name: 'adapter_catalog', description: 'Catalog' }],
+          disabledTools: ['lsp_rename'],
+          error: 'bridge unavailable',
+          tools: [{ name: 'hover', description: 'Hover' }],
         },
       ]);
     });
@@ -163,13 +163,13 @@ describe('useMcpServers settings wiring', () => {
     act(() => {
       result.current.setMcpServers((servers) =>
         servers.map((server) =>
-          server.id === 'omo'
+          server.id === 'lsp'
             ? {
                 ...server,
                 enabled: false,
                 source: 'system',
-                command: 'forged-omo-command',
-                url: 'https://forged.invalid/omo',
+                command: 'forged-lsp-command',
+                url: 'https://forged.invalid/lsp',
               }
             : server,
         ),
@@ -187,32 +187,32 @@ describe('useMcpServers settings wiring', () => {
     }
     const [putMcpServersToken, putMcpServersPayload] = putMcpServersCall;
     expect(putMcpServersToken).toBe('token-1');
-    expect(putMcpServersPayload.servers.map((server) => server.id)).toEqual(['fs', 'omo']);
+    expect(putMcpServersPayload.servers.map((server) => server.id)).toEqual(['fs', 'lsp']);
     expect(putMcpServersPayload.servers[0]).toMatchObject({
       id: 'fs',
       name: 'filesystem',
       source: 'user',
     });
 
-    const persistedOmoServer = putMcpServersPayload.servers.find((server) => server.id === 'omo');
-    expect(persistedOmoServer).toBeDefined();
-    if (persistedOmoServer === undefined) {
-      expect.fail('Expected persisted OMO server row');
+    const persistedLspServer = putMcpServersPayload.servers.find((server) => server.id === 'lsp');
+    expect(persistedLspServer).toBeDefined();
+    if (persistedLspServer === undefined) {
+      expect.fail('Expected persisted protected virtual server row');
     }
-    expect(persistedOmoServer).toMatchObject({
-      id: 'omo',
+    expect(persistedLspServer).toMatchObject({
+      id: 'lsp',
       builtin: true,
-      builtinKind: 'adapter',
-      disabledTools: ['omo_read_session'],
+      builtinKind: 'virtual',
+      disabledTools: ['lsp_rename'],
       enabled: false,
       source: 'system',
       transport: 'stdio',
     });
-    expect(persistedOmoServer).not.toHaveProperty('url');
-    expect(persistedOmoServer).not.toHaveProperty('command');
+    expect(persistedLspServer).not.toHaveProperty('url');
+    expect(persistedLspServer).not.toHaveProperty('command');
 
     expect(result.current.mcpStatuses[0]).toMatchObject({
-      id: 'omo',
+      id: 'lsp',
       status: 'error',
     });
     expect(result.current.mcpStatuses[0]).not.toHaveProperty('retryFeedback');
@@ -223,15 +223,15 @@ describe('useMcpServers settings wiring', () => {
     });
 
     act(() => {
-      result.current.onRetryMcp('omo');
+      result.current.onRetryMcp('lsp');
     });
 
     await waitFor(() => {
-      expect(mocks.retryMcpServer).toHaveBeenCalledWith('token-1', 'omo');
+      expect(mocks.retryMcpServer).toHaveBeenCalledWith('token-1', 'lsp');
       // 重试成功后同样重拉目录：计数与工具明细必须来自同一次后端快照。
       expect(mocks.getMcpStatus.mock.calls.length).toBeGreaterThanOrEqual(3);
       expect(result.current.mcpStatuses[0]).toMatchObject({
-        id: 'omo',
+        id: 'lsp',
         status: 'connected',
         toolCount: 3,
         disabledTools: [],
@@ -242,9 +242,9 @@ describe('useMcpServers settings wiring', () => {
         },
       });
       expect(result.current.mcpStatuses[0]?.tools?.map((tool) => tool.name)).toEqual([
-        'fetch_web',
-        'fetch_github_readme',
-        'search',
+        'find_references',
+        'goto_definition',
+        'diagnostics',
       ]);
     });
   });
@@ -410,13 +410,13 @@ describe('useMcpServers settings wiring', () => {
       .mockResolvedValueOnce({
         servers: [
           {
-            id: 'omo',
-            name: 'omo',
+            id: 'lsp',
+            name: 'lsp',
             builtin: true,
-            disabledTools: ['omo_read_session'],
+            disabledTools: ['lsp_rename'],
             status: 'error',
             toolCount: 1,
-            tools: [{ name: 'adapter_catalog' }],
+            tools: [{ name: 'hover' }],
             type: 'stdio',
           },
         ],
@@ -436,12 +436,12 @@ describe('useMcpServers settings wiring', () => {
     });
 
     act(() => {
-      result.current.onRetryMcp('omo');
+      result.current.onRetryMcp('lsp');
     });
 
     await waitFor(() => {
       expect(result.current.mcpStatuses[0]).toMatchObject({
-        id: 'omo',
+        id: 'lsp',
         status: 'connected',
         toolCount: 3,
         retryFeedback: { kind: 'ok', toolCount: 3, durationMs: 42 },

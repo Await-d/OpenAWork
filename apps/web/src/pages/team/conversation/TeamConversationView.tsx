@@ -25,6 +25,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useChatSearch } from '../../../components/chat/search/chat-search-overlay.js';
+import { applyContextWindowOverride } from '../../../components/conversation-runtime/messages/context-usage.js';
 import { SnapshotRestoreConfirmDialog } from '../../../components/chat/snapshot/SnapshotRestoreConfirmDialog.js';
 import { useSnapshotAwareAction } from '../../../components/chat/snapshot/useSnapshotAwareAction.js';
 import { LatestAssistantMessageContext } from '../../../components/chat/message/collapsible-assistant-content.js';
@@ -492,7 +493,13 @@ export function TeamConversationView({
   // （provider 数量为个位数），内联后由编译器按 state.providers / state.active*Id 自动 memo。
   const providerCatalog = buildTeamProviderCatalog(state.providers);
   const activeProvider = findTeamActiveProvider(state.providers, state.activeProviderId);
-  const activeModelOption = findTeamActiveModelOption(activeProvider, state.activeModelId);
+  // 会话级挡位优先（会话 > 模型级 > 模型 preset）：模型弹层与上下文占用条
+  // 都应显示本会话真正生效的值，而不是设置页里的全局默认。
+  const activeModelOption =
+    applyContextWindowOverride(
+      findTeamActiveModelOption(activeProvider, state.activeModelId),
+      state.sessionContextWindowOverride,
+    ) ?? undefined;
   const activeModelCanConfigureThinking = resolveTeamActiveModelCanConfigureThinking({
     activeModelId: state.activeModelId,
     activeModelOption,

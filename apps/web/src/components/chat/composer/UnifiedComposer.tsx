@@ -444,6 +444,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
     modelSettingsBtnRef,
     isBrowsingInputHistory,
     submitPending,
+    messageMaxChars,
     agentOptions,
     defaultAgentLabel,
     queuedComposerPreviews,
@@ -576,6 +577,7 @@ export function UnifiedComposer(props: UnifiedComposerProps) {
       )}
 
       <ChatComposer
+        messageMaxChars={messageMaxChars}
         variant={composerVariant}
         editorMode={editorMode}
         activeProviderId={activeProviderId}

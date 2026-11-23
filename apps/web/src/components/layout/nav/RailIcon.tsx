@@ -22,6 +22,7 @@ export const railLabelCn: Record<string, string> = {
   Agents: '智能体',
   Channels: '渠道',
   Chat: '对话',
+  Dispatches: '个人派工',
   Images: '图像',
   Schedules: '定时任务',
   Sessions: '会话',
@@ -50,6 +51,7 @@ export const railGroups: readonly RailGroup[] = [
     items: [
       { to: '/workflows', label: 'Workflows' },
       { to: '/schedules', label: 'Schedules' },
+      { to: '/dispatches', label: 'Dispatches' },
       { to: '/skills', label: 'Skills' },
       { to: '/agents', label: 'Agents' },
     ],
@@ -67,6 +69,7 @@ export const railGroups: readonly RailGroup[] = [
 
 /** 顶部区块导航项：定时任务 / 技能 / 智能体 */
 export const TOP_NAV_ITEMS: NavItem[] = [
+  { to: '/dispatches', label: '个人派工', iconKey: 'Dispatches' },
   { to: '/schedules', label: '定时任务', iconKey: 'Schedules' },
   { to: '/skills', label: '技能', iconKey: 'Skills' },
   { to: '/agents', label: '智能体', iconKey: 'Agents' },
@@ -96,6 +99,8 @@ const I = ({ d, children }: { d?: string; children?: React.ReactNode }) => (
 
 export function railIcon(label: string) {
   switch (label) {
+    case 'Dispatches':
+      return <I d="M4 5h16v14H4zM8 9h8m-8 3h8m-8 3h4" />;
     case 'Chat':
       return <I d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />;
     case 'Images':

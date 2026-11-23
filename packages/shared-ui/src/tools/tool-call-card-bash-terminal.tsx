@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { tokens, color } from '../tokens.js';
+import { copyTextToClipboard } from '../utils/copy-text-to-clipboard.js';
 
 /** 终端类内容的等宽字体栈（命令 / 输出共用）。 */
 const TERMINAL_MONO_FONT =
@@ -750,13 +751,7 @@ export function BashTerminalCard({
   }, [copyState]);
 
   const handleCopy = () => {
-    if (!navigator.clipboard) {
-      setCopyState('failed');
-      return;
-    }
-
-    void navigator.clipboard
-      .writeText(combinedText)
+    void copyTextToClipboard(combinedText)
       .then(() => setCopyState('copied'))
       .catch(() => setCopyState('failed'));
   };

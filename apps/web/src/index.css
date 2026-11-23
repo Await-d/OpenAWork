@@ -247,7 +247,7 @@
 
   --fg-strong: #e8eaf2;
   --fg-default: #b8bdcb;
-  --fg-muted: #7a8194;
+  --fg-muted: #7f8698;
   --fg-subtle: #4a5168;
   --fg-on-accent: #0a0c1f;
   --fg-on-contrast: #fff;
@@ -335,7 +335,7 @@
 
   --fg-strong: #0c0e14;
   --fg-default: #3d4458;
-  --fg-muted: #6a7184;
+  --fg-muted: #676e80;
   --fg-subtle: #9ca3b4;
   --fg-on-accent: #fff;
   --fg-on-contrast: #fff;
@@ -572,7 +572,7 @@
   --bg-active: #362436;
   --fg-strong: #f5ecf0;
   --fg-default: #ccbcc4;
-  --fg-muted: #8e7a88;
+  --fg-muted: #927e8c;
   --fg-subtle: #5a4a58;
   --fg-on-accent: #1a0a14;
   --fg-on-contrast: #1a0a14;
@@ -722,7 +722,7 @@
   --bg-active: #262a2e;
   --fg-strong: #f0f1f3;
   --fg-default: #b8bcc4;
-  --fg-muted: #6e747e;
+  --fg-muted: #7c828d;
   --fg-subtle: #444a54;
   --fg-on-accent: #08090a;
   --fg-on-contrast: #08090a;
@@ -872,7 +872,7 @@
   --bg-active: #3a2721;
   --fg-strong: #f5ede8;
   --fg-default: #c8b8ae;
-  --fg-muted: #8a7568;
+  --fg-muted: #958073;
   --fg-subtle: #564538;
   --fg-on-accent: #1a0a05;
   --fg-on-contrast: #1a0a05;
@@ -1022,7 +1022,7 @@
   --bg-active: #223844;
   --fg-strong: #e8f4f8;
   --fg-default: #b0c8d4;
-  --fg-muted: #6a8898;
+  --fg-muted: #708d9c;
   --fg-subtle: #3e5868;
   --fg-on-accent: #052028;
   --fg-on-contrast: #052028;
@@ -2745,6 +2745,9 @@ textarea {
   background: var(--bg-active) !important;
 }
 .page-title {
+  /* 页面主标题现在是 <h1>（无障碍：每个页面要有 heading-one），
+     必须清掉 UA 默认 margin，否则 44px 高的页头会被撑高。 */
+  margin: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--fg-strong);

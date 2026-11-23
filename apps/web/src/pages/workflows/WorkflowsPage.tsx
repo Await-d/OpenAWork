@@ -24,10 +24,11 @@ export default function WorkflowsPage() {
 
   return (
     <div className="page-root">
-      <div className="page-header">
-        <span className="page-title">工作流工作台</span>
+      {/* 页头 <header> + 主标题 <h1>：landmark 与 heading-one 无障碍要求。 */}
+      <header className="page-header">
+        <h1 className="page-title">工作流工作台</h1>
         <span className="page-subtitle">把流程模板、节点编排和协作剧本真正接成可见入口</span>
-      </div>
+      </header>
       <div className="page-content">
         <div
           style={{

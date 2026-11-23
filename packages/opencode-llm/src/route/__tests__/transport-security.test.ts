@@ -190,7 +190,10 @@ describe('transport security boundaries', () => {
         ),
       );
       expect(result._tag).toBe('Failure');
-      expect(redirectRequestCount).toBe(1);
+      // 302 被 `redirect: 'error'` 拒绝属于**连接阶段**失败（operation='request'），
+      // 现在会按 executor 的 MAX_RETRIES 重试，所以本机收到的是 3 次尝试而不是 1 次。
+      // 安全性不变量与重试无关，仍由下一条断言保证：`/private` 一次都不能被访问。
+      expect(redirectRequestCount).toBe(3);
       expect(privateRequestCount).toBe(0);
     } finally {
       const closed = once(server, 'close');

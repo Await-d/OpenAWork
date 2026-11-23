@@ -1,0 +1,84 @@
+/* 定时任务页 · 「投递到会话」选择弹层 */
+
+.sch-picker-search {
+  width: 100%;
+  border: 1px solid var(--border-emphasis);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--fg-strong);
+  padding: 7px 9px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.sch-picker-search:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.sch-picker-state {
+  padding: 14px 2px;
+  font-size: 12px;
+  /* 小字用 --fg-muted：--fg-subtle 达不到 4.5:1（同页其它小字一致）。 */
+  color: var(--fg-muted);
+}
+
+.sch-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.sch-picker-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--fg-strong);
+  padding: 8px 10px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.sch-picker-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent-border);
+}
+
+.sch-picker-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sch-picker-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.sch-picker-meta {
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}

@@ -148,6 +148,10 @@ export function ImageZoomTrigger({
       style={style}
       title={label}
     >
+      {/* 与 `ImageLightbox` 的大图 / 缩略条口径一致：远端图（聊天 Markdown、工具
+          图片预览、渠道发图 `file_path` 为 http(s) 时）若带上站点 Referer，遇到防盗链
+          的图床会「缩略图裂、点开大图反而正常」；不带 Referer 是这类图床普遍放行的
+          形态。data: / blob: / 同源图不受该属性影响。 */}
       <img
         alt={alt}
         className={
@@ -162,6 +166,7 @@ export function ImageZoomTrigger({
         style={imageStyle}
         title={imageTitle}
         loading={loading}
+        referrerPolicy="no-referrer"
       />
     </button>
   );

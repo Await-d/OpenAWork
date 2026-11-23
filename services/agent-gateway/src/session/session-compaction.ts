@@ -1,4 +1,9 @@
-import type { Message } from '@openAwork/shared';
+import { randomUUID } from 'node:crypto';
+import type { CompactionTokenEstimate, Message } from '@openAwork/shared';
+import {
+  buildCompactionTokenEstimate,
+  estimateCompactionHistoryTokens,
+} from '../compaction/compaction-token-estimate.js';
 import { callCompactionLlm } from '../compaction/compaction-llm.js';
 import {
   mergeCompactionMetadata,
@@ -66,10 +71,12 @@ export interface ExecuteSessionCompactionInput {
 }
 
 export interface ExecuteSessionCompactionResult {
+  committed?: boolean;
   durableSummary: DurableCompactionSummary | null;
   llmErrorMessage?: string;
   llmSummary?: string;
   messagesToKeep?: Message[];
+  historyTokenEstimate?: CompactionTokenEstimate;
   metadata: Record<string, unknown>;
   metadataJson: string;
   retryable?: boolean;
@@ -94,7 +101,7 @@ interface CompactionRequestRow {
 }
 
 type CompactionRequestReservation =
-  { kind: 'acquired' } | { kind: 'existing'; row: CompactionRequestRow };
+  { kind: 'acquired'; ownerToken: string } | { kind: 'existing'; row: CompactionRequestRow };
 
 function getCompactionRequestIdentity(
   input: ExecuteSessionCompactionInput,
@@ -154,19 +161,24 @@ function reserveCompactionRequest(
       );
     }
 
+    // The composite-key table has no AUTOINCREMENT: rowid can be reused.
+    // Reserved rows use this otherwise-unused error field as a private fencing token.
+    // Legacy NULL-token reservations remain busy until their normal lease expires.
+    const ownerToken = `reservation:${randomUUID()}`;
     sqliteRun(
       `INSERT INTO compaction_requests
-       (session_id, user_id, client_request_id, round, signature, status)
-       VALUES (?, ?, ?, ?, ?, 'reserved')`,
+       (session_id, user_id, client_request_id, round, signature, status, llm_error_message)
+       VALUES (?, ?, ?, ?, ?, 'reserved', ?)`,
       [
         identity.sessionId,
         identity.userId,
         identity.clientRequestId,
         identity.round,
         identity.signature,
+        ownerToken,
       ],
     );
-    return { kind: 'acquired' };
+    return { kind: 'acquired', ownerToken };
   });
 }
 
@@ -346,7 +358,9 @@ export function readConsecutiveCompactionFailures(metadataJson: string): number 
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const record = parsed as Record<string, unknown>;
       const count = record['consecutiveCompactionFailures'];
-      return typeof count === 'number' ? count : 0;
+      return typeof count === 'number' && Number.isFinite(count) && count >= 0
+        ? Math.floor(count)
+        : 0;
     }
   } catch {
     // ignore parse errors
@@ -356,12 +370,39 @@ export function readConsecutiveCompactionFailures(metadataJson: string): number 
 
 /** Check if the circuit-breaker has tripped for auto-compaction. */
 export function isAutoCompactCircuitBreakerTripped(metadataJson: string): boolean {
-  return readConsecutiveCompactionFailures(metadataJson) >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES;
+  const metadata = parseCompactionRequestMetadata(metadataJson);
+  const next = metadata['nextAutoCompactionAt'];
+  const last = metadata['lastCompactionFailureAt'];
+  if (
+    typeof next !== 'number' ||
+    !Number.isFinite(next) ||
+    typeof last !== 'number' ||
+    !Number.isFinite(last)
+  )
+    return false;
+  // Anchor the bound to the failure, never to each probe's current time.
+  const now = Date.now();
+  return last <= now && now < Math.min(next, last + 300_000);
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('compaction aborted', 'AbortError');
+}
+
+function compactionBoundary(metadataJson: string): string {
+  const metadata = parseCompactionRequestMetadata(metadataJson);
+  return JSON.stringify([
+    metadata['lastCompactionSignature'],
+    metadata['lastCompactionAt'],
+    metadata['lastCompactionLlmSummary'],
+    metadata['compactionMemory'],
+  ]);
 }
 
 export async function executeSessionCompaction(
   input: ExecuteSessionCompactionInput,
 ): Promise<ExecuteSessionCompactionResult> {
+  throwIfCancelled(input.signal);
   const recentMessagesKept = input.recentMessagesKept ?? 0;
   // Prefer the opencode-style token-budget tail selection when the
   // caller passes `preserveRecentTokens`. Falls back to the legacy
@@ -390,22 +431,12 @@ export async function executeSessionCompaction(
 
   // If there are no messages to summarize, nothing to compact
   if (messagesToSummarize.length === 0) {
-    const metadata = {
-      ...mergeCompactionMetadata(input.metadataJson, {
-        summary: '',
-        trigger: input.trigger,
-        recentMessagesKept,
-      }),
-      lastCompactionLlmSummary: '',
-      consecutiveCompactionFailures: 0,
-    };
-    const metadataJson = JSON.stringify(metadata);
     return {
+      committed: false,
       durableSummary: null,
-      messagesToKeep,
-      metadata,
-      metadataJson,
-      summary: '',
+      messagesToKeep: input.messages,
+      metadata: parseCompactionRequestMetadata(input.metadataJson),
+      metadataJson: input.metadataJson,
     };
   }
 
@@ -424,103 +455,187 @@ export async function executeSessionCompaction(
   const signature = durableSummary?.signature;
   const compactionRequest = getCompactionRequestIdentity(input, signature);
   const reservation = compactionRequest ? reserveCompactionRequest(compactionRequest) : undefined;
-  const fallbackSummary =
-    durableSummary?.structuredSummary ??
-    buildStructuredCompactionSummary({
-      messages: messagesToSummarize,
-      recentMessagesKept,
-      trigger: input.trigger,
-    });
+  try {
+    const fallbackSummary =
+      durableSummary?.structuredSummary ??
+      buildStructuredCompactionSummary({
+        messages: messagesToSummarize,
+        recentMessagesKept,
+        trigger: input.trigger,
+      });
 
-  if (reservation?.kind === 'existing') {
-    const isCompleted = reservation.row.status === 'completed';
-    if (!isCompleted) {
+    if (reservation?.kind === 'existing') {
+      const isCompleted = reservation.row.status === 'completed';
+      if (!isCompleted) {
+        return {
+          committed: false,
+          durableSummary,
+          llmErrorMessage: 'compaction request is in progress; retry this request',
+          ...(messagesToKeep.length > 0 ? { messagesToKeep } : {}),
+          metadata: parseCompactionRequestMetadata(input.metadataJson),
+          metadataJson: input.metadataJson,
+          retryable: true,
+        };
+      }
+      const completedMetadataJson = reservation.row.metadata_json ?? input.metadataJson;
+      const fresh = sqliteGet<{ metadata_json: string }>(
+        'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+        [input.sessionId, input.userId],
+      );
+      const metadataJson = fresh?.metadata_json ?? input.metadataJson;
+      const metadata = parseCompactionRequestMetadata(metadataJson);
+      if (compactionBoundary(metadataJson) !== compactionBoundary(completedMetadataJson)) {
+        return { committed: false, durableSummary: null, metadata, metadataJson };
+      }
+      const summary = reservation.row.summary ?? fallbackSummary;
+
       return {
+        committed: true,
         durableSummary,
-        llmErrorMessage: 'compaction request is in progress; retry this request',
+        ...(reservation.row.llm_error_message
+          ? { llmErrorMessage: reservation.row.llm_error_message }
+          : {}),
+        ...(reservation.row.llm_summary ? { llmSummary: reservation.row.llm_summary } : {}),
         ...(messagesToKeep.length > 0 ? { messagesToKeep } : {}),
-        metadata: parseCompactionRequestMetadata(input.metadataJson),
-        metadataJson: input.metadataJson,
-        retryable: true,
+        metadata,
+        metadataJson,
+        summary,
       };
     }
-    const metadataJson = reservation.row.metadata_json ?? input.metadataJson;
-    const metadata = parseCompactionRequestMetadata(metadataJson);
-    const summary = reservation.row.summary ?? fallbackSummary;
 
-    return {
-      durableSummary,
-      ...(reservation.row.llm_error_message
-        ? { llmErrorMessage: reservation.row.llm_error_message }
-        : {}),
-      ...(reservation.row.llm_summary ? { llmSummary: reservation.row.llm_summary } : {}),
-      ...(messagesToKeep.length > 0 ? { messagesToKeep } : {}),
-      metadata,
-      metadataJson,
-      summary,
-    };
-  }
-
-  const previousFailures = readConsecutiveCompactionFailures(input.metadataJson);
-  const tripsAutomaticCircuitBreaker =
-    input.trigger === 'automatic' && previousFailures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES;
-  let llmSummary: string | undefined;
-  let llmErrorMessage = tripsAutomaticCircuitBreaker
-    ? `automatic compaction circuit breaker tripped after ${MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES} consecutive failures`
-    : undefined;
-  if (input.route && !tripsAutomaticCircuitBreaker) {
-    const prunedMessages =
-      input.prune === false ? messagesToSummarize : pruneMessagesForCompaction(messagesToSummarize);
-    const conversationMessages: UnifiedMessage[] = buildPreparedUpstreamConversation(
-      prunedMessages,
-      {
-        contextWindow: 1,
+    if (!durableSummary || durableSummary.newlySummarizedMessages === 0) {
+      return {
+        committed: false,
+        durableSummary: null,
+        metadata: parseCompactionRequestMetadata(input.metadataJson),
         metadataJson: input.metadataJson,
-        persistedMemory: existingMemory,
-      },
-    ).normalizedMessages;
-    try {
-      const result = await callCompactionLlm({
-        conversationMessages,
-        route: input.route,
-        sessionId: input.sessionId,
-        signal: input.signal,
-        ...(previousLlmSummary ? { previousSummary: previousLlmSummary } : {}),
-      });
-      llmSummary = result.summary;
-    } catch (error: unknown) {
-      llmErrorMessage = error instanceof Error ? error.message : 'unknown compaction llm error';
+      };
     }
-  }
 
-  const summary = llmSummary ?? fallbackSummary;
+    const tripsAutomaticCircuitBreaker =
+      input.trigger === 'automatic' && isAutoCompactCircuitBreakerTripped(input.metadataJson);
+    let llmSummary: string | undefined;
+    let llmErrorMessage = tripsAutomaticCircuitBreaker
+      ? 'automatic compaction circuit breaker cooldown is active'
+      : input.route
+        ? undefined
+        : 'compaction LLM route unavailable';
+    if (input.route && !tripsAutomaticCircuitBreaker) {
+      const prunedMessages =
+        input.prune === false
+          ? messagesToSummarize
+          : pruneMessagesForCompaction(messagesToSummarize);
+      const conversationMessages: UnifiedMessage[] = buildPreparedUpstreamConversation(
+        prunedMessages,
+        {
+          contextWindow: 1,
+          metadataJson: input.metadataJson,
+          persistedMemory: existingMemory,
+        },
+      ).normalizedMessages;
+      try {
+        const result = await callCompactionLlm({
+          conversationMessages,
+          route: input.route,
+          sessionId: input.sessionId,
+          signal: input.signal,
+          ...(previousLlmSummary ? { previousSummary: previousLlmSummary } : {}),
+        });
+        llmSummary = result.summary;
+        if (!llmSummary?.trim()) {
+          llmSummary = undefined;
+          llmErrorMessage = 'compaction LLM returned an empty summary';
+        }
+      } catch (error: unknown) {
+        if (isMetadataRecord(error) && error['name'] === 'AbortError') throw error;
+        llmErrorMessage = error instanceof Error ? error.message : 'unknown compaction llm error';
+      }
+    }
 
-  const isFailure = !!llmErrorMessage;
-  const nextFailures = isFailure
-    ? Math.min(previousFailures + 1, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES)
-    : 0;
+    throwIfCancelled(input.signal);
 
-  const metadata = {
-    ...mergeCompactionMetadata(input.metadataJson, {
-      persistedMemory: durableSummary?.persistedMemory,
-      summary,
-      trigger: input.trigger,
-      omittedMessages: durableSummary?.totalRepresentedMessages ?? messagesToSummarize.length,
-      recentMessagesKept,
-      signature: durableSummary?.signature,
-    }),
-    lastCompactionLlmSummary: summary,
-    consecutiveCompactionFailures: nextFailures,
-  };
-  const metadataJson = JSON.stringify(metadata);
+    const summary = llmSummary ?? fallbackSummary;
 
-  try {
-    sqliteTransaction(() => {
+    return sqliteTransaction(() => {
+      throwIfCancelled(input.signal);
+      const fresh = sqliteGet<{ metadata_json: string }>(
+        'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+        [input.sessionId, input.userId],
+      );
+      const freshJson = fresh?.metadata_json ?? input.metadataJson;
+      const unchanged = (): ExecuteSessionCompactionResult => ({
+        committed: false,
+        durableSummary: null,
+        metadata: parseCompactionRequestMetadata(freshJson),
+        metadataJson: freshJson,
+      });
+      if (compactionRequest && reservation?.kind === 'acquired') {
+        const owned = sqliteGet<{ status: string }>(
+          `SELECT status FROM compaction_requests WHERE session_id = ? AND user_id = ?
+         AND client_request_id = ? AND round = ? AND signature = ?
+         AND status = 'reserved' AND llm_error_message = ?`,
+          [
+            compactionRequest.sessionId,
+            compactionRequest.userId,
+            compactionRequest.clientRequestId,
+            compactionRequest.round,
+            compactionRequest.signature,
+            reservation.ownerToken,
+          ],
+        );
+        if (!owned)
+          return {
+            ...unchanged(),
+            retryable: true,
+            llmErrorMessage: 'compaction reservation ownership lost; retry this request',
+          };
+      }
+      if (compactionBoundary(freshJson) !== compactionBoundary(input.metadataJson)) {
+        return { ...unchanged(), llmErrorMessage: 'compaction boundary changed during request' };
+      }
+      if (tripsAutomaticCircuitBreaker) return { ...unchanged(), llmErrorMessage };
+      if (llmErrorMessage && input.trigger === 'automatic') {
+        const previousFailures = readConsecutiveCompactionFailures(freshJson);
+        const nextFailures = Math.min(Math.max(0, previousFailures) + 1, 100);
+        const now = Date.now();
+        const metadata = {
+          ...parseCompactionRequestMetadata(freshJson),
+          consecutiveCompactionFailures: nextFailures,
+          lastCompactionFailureAt: now,
+          nextAutoCompactionAt:
+            now + Math.min(300_000, 30_000 * 2 ** Math.min(nextFailures - 1, 4)),
+          lastCompactionLlmError: llmErrorMessage,
+        };
+        const metadataJson = JSON.stringify(metadata);
+        sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ? AND user_id = ?', [
+          metadataJson,
+          input.sessionId,
+          input.userId,
+        ]);
+        return { committed: false, durableSummary: null, llmErrorMessage, metadata, metadataJson };
+      }
+      const metadata: Record<string, unknown> = {
+        ...mergeCompactionMetadata(freshJson, {
+          persistedMemory: durableSummary?.persistedMemory,
+          summary,
+          trigger: input.trigger,
+          omittedMessages: durableSummary?.totalRepresentedMessages ?? messagesToSummarize.length,
+          recentMessagesKept,
+          signature: durableSummary?.signature,
+        }),
+        lastCompactionLlmSummary: summary,
+        consecutiveCompactionFailures: 0,
+      };
+      delete metadata['nextAutoCompactionAt'];
+      delete metadata['lastCompactionFailureAt'];
+      delete metadata['lastCompactionLlmError'];
+      const metadataJson = JSON.stringify(metadata);
       sqliteRun(
         "UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?",
         [metadataJson, input.sessionId, input.userId],
       );
 
+      const historyTokensBefore = estimateCompactionHistoryTokens(input);
       appendCompactionMarkerMessage({
         sessionId: input.sessionId,
         userId: input.userId,
@@ -537,13 +652,16 @@ export async function executeSessionCompaction(
           : {}),
       });
 
+      const historyTokenEstimate = buildCompactionTokenEstimate(historyTokensBefore, () =>
+        estimateCompactionHistoryTokens(input),
+      );
       if (compactionRequest) {
         sqliteRun(
           `UPDATE compaction_requests
            SET status = 'completed', metadata_json = ?, summary = ?, llm_summary = ?,
                llm_error_message = ?, completed_at = datetime('now')
            WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND round = ?
-             AND signature = ? AND status = 'reserved'`,
+             AND signature = ? AND status = 'reserved' AND llm_error_message = ?`,
           [
             metadataJson,
             summary,
@@ -554,35 +672,37 @@ export async function executeSessionCompaction(
             compactionRequest.clientRequestId,
             compactionRequest.round,
             compactionRequest.signature,
+            reservation?.kind === 'acquired' ? reservation.ownerToken : undefined,
           ],
         );
       }
+      return {
+        committed: true,
+        durableSummary,
+        ...(llmErrorMessage ? { llmErrorMessage } : {}),
+        ...(llmSummary ? { llmSummary } : {}),
+        ...(historyTokenEstimate ? { historyTokenEstimate } : {}),
+        ...(messagesToKeep.length > 0 ? { messagesToKeep } : {}),
+        metadata,
+        metadataJson,
+        summary,
+      };
     });
-  } catch (error: unknown) {
-    if (compactionRequest) {
+  } finally {
+    if (compactionRequest && reservation?.kind === 'acquired') {
       sqliteRun(
-        `DELETE FROM compaction_requests
-         WHERE session_id = ? AND user_id = ? AND client_request_id = ? AND round = ?
-           AND signature = ? AND status = 'reserved'`,
+        `DELETE FROM compaction_requests WHERE session_id = ? AND user_id = ?
+         AND client_request_id = ? AND round = ? AND signature = ?
+         AND status = 'reserved' AND llm_error_message = ?`,
         [
           compactionRequest.sessionId,
           compactionRequest.userId,
           compactionRequest.clientRequestId,
           compactionRequest.round,
           compactionRequest.signature,
+          reservation.ownerToken,
         ],
       );
     }
-    throw error;
   }
-
-  return {
-    durableSummary,
-    ...(llmErrorMessage ? { llmErrorMessage } : {}),
-    ...(llmSummary ? { llmSummary } : {}),
-    ...(messagesToKeep.length > 0 ? { messagesToKeep } : {}),
-    metadata,
-    metadataJson,
-    summary,
-  };
 }

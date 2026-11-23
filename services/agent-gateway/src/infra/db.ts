@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { migrateMessageLimits } from './message-limits-migration.js';
+import { migrateDispatches } from './dispatch-migration.js';
 import { createRequire } from 'node:module';
 import { dirname, parse, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -285,6 +287,18 @@ export async function closeDb(): Promise<void> {
 }
 
 export async function migrate(): Promise<void> {
+  migrateMessageLimits(db);
+  // 清理记录必须独立于 sessions 的级联，在会话删除提交后继续存在。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_deletion_cleanup (
+      id INTEGER PRIMARY KEY,
+      payload_json TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_deletion_cleanup_due
+      ON session_deletion_cleanup(next_attempt_at, id);
+  `);
   // Created up-front: later migration steps (the legacy part-order repair)
   // read and write one-shot markers through get/setAppMetaValue.
   ensureAppMetaTable();
@@ -303,6 +317,8 @@ export async function migrate(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+
+  migrateDispatches(db);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -344,6 +360,11 @@ export async function migrate(): Promise<void> {
       PRIMARY KEY (session_id, user_id, client_request_id, round, signature)
     )
   `);
+
+  // CASE tolerates malformed legacy metadata, including during later writes.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_metadata_parent ON sessions (
+    user_id, (CASE WHEN json_valid(metadata_json) THEN json_extract(metadata_json, '$.parentSessionId') END)
+  )`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_messages (
@@ -561,6 +582,11 @@ export async function migrate(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  // 可枚举的决策理由词表（human_approved / rule_denied / mode_yolo ...）。
+  // 用 ensureColumn 增列而不是重建表：重建路径在 `IF NOT EXISTS` 幂等重入时会
+  // 因为旧表已存在而先 CREATE 再 INSERT 备份，撞上 UNIQUE 约束——这是本仓库
+  // 历史踩过的坑。ADD COLUMN 天然可重入且不触碰既有行（旧行为 null）。
+  ensureColumn('permission_decision_logs', 'reason', 'TEXT');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS request_workflow_logs (
@@ -785,6 +811,22 @@ export async function migrate(): Promise<void> {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_composer_input_history_scope ON session_composer_input_history(session_id, user_id, id)',
   );
+
+  // ─── 编辑前置校验的「read 证据」 (2026-11-18) ───
+  // `edit` / `multi_edit` 要求模型先读过目标文件。历史实现只扫 `audit_logs`
+  // 最近 50 条 `tool_name='read'` 的行，而该表**每次工具调用都写一行**——一次
+  // `batch` 就是 4~5 行，高强度会话里 50 行几分钟就被 bash/grep 挤出窗口，
+  // 于是「读过 → 跑了几十次工具 → 回来编辑」必然误报 `You must read file`。
+  // 改为专用表精确记账：read 成功即 upsert，编辑前按 (session, path) 精确查；
+  // `audit_logs` 仍作为升级前旧会话的兜底证据（见 session-file-reads.ts）。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_file_reads (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      read_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, path)
+    )
+  `);
 
   // ─── 消息频道健康与错误留痕 ───
   // 频道侧的错误此前只存在于 `ChannelManager` 的内存 Map，进程重启即全部丢失，
@@ -1601,6 +1643,9 @@ export async function migrate(): Promise<void> {
   // client_request_id 键）而没写反规范化列，必须在本启动周期内补齐，否则按请求族读写的
   // 入口会漏掉这批历史行。`backfillMessageRole` 在上面先跑，道理相同。
   backfillMessageClientRequestId();
+  // 存量脏键清扫（渠道 / 定时任务会话不该有 dialogueMode）：必须在 `sessions` 表建好之后，
+  // 且越早越好 —— 该值残留到读路径就会被当成真实对话模式参与工具面收敛。
+  purgeDialogueModeFromSourceSessions();
 
   // ─── V2 Session Columns (event-sourcing projectors) ───
   ensureColumn('sessions', 'parent_id', 'TEXT DEFAULT NULL');
@@ -2623,7 +2668,10 @@ interface MemoryGovernanceBackfillRow {
  * 阶段拉入整个 agent-core 运行时更划算。
  */
 function normalizeMemoryScopeWorkspaceId(workspaceRoot: string): string {
-  const unified = workspaceRoot.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  const unified = workspaceRoot
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/{2,}/g, '/');
   if (unified === '/' || /^[A-Za-z]:\/$/.test(unified)) {
     return unified;
   }
@@ -2669,9 +2717,8 @@ function migrateMemoryGovernance(): void {
          FROM memories`,
       )
       .all() as MemoryGovernanceBackfillRow[];
-    const counterRow = db
-      .prepare('SELECT value FROM memory_change_counter WHERE id = 1')
-      .get() as { value: number } | undefined;
+    const counterRow = db.prepare('SELECT value FROM memory_change_counter WHERE id = 1').get() as
+      { value: number } | undefined;
     let seq = counterRow?.value ?? 0;
     const update = db.prepare(
       `UPDATE memories
@@ -2685,7 +2732,8 @@ function migrateMemoryGovernance(): void {
       if (!scopeId) {
         const teamWorkspaceId =
           typeof row.team_workspace_id === 'string' ? row.team_workspace_id.trim() : '';
-        const workspaceRoot = typeof row.workspace_root === 'string' ? row.workspace_root.trim() : '';
+        const workspaceRoot =
+          typeof row.workspace_root === 'string' ? row.workspace_root.trim() : '';
         if (teamWorkspaceId) {
           scopeType = 'team';
           scopeId = teamWorkspaceId;
@@ -2704,8 +2752,7 @@ function migrateMemoryGovernance(): void {
         changeSeq = seq;
       }
 
-      const sourceDetail =
-        row.source_detail ?? (row.confirmation_kind ? null : 'legacy');
+      const sourceDetail = row.source_detail ?? (row.confirmation_kind ? null : 'legacy');
       update.run(scopeType, scopeId, changeSeq, sourceDetail, row.id);
     }
 
@@ -2825,9 +2872,10 @@ function migrateMemoryGovernance(): void {
       updated_at TEXT NOT NULL
     )
   `);
+  db.exec('DROP INDEX IF EXISTS idx_memory_jobs_period');
   db.exec(
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_jobs_period
-     ON memory_jobs(kind, scope_key, period_key)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_jobs_period_user
+     ON memory_jobs(user_id, kind, scope_key, period_key)`,
   );
   db.exec('CREATE INDEX IF NOT EXISTS idx_memory_jobs_due ON memory_jobs(status, due_at)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_memory_jobs_user ON memory_jobs(user_id, kind)');
@@ -2843,6 +2891,13 @@ function migrateMemoryGovernance(): void {
       updated_at TEXT NOT NULL
     )
   `);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS memory_scope_watermarks (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope_key TEXT NOT NULL,
+    change_watermark INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(user_id, scope_key)
+  )`);
 
   // ── 整理报告（汇总通知，不逐条追问）──
   db.exec(`
@@ -3025,6 +3080,47 @@ export function purgeUnidentifiableMessageRows(): void {
   console.info(
     `[V2_MIGRATION] 幽灵消息行清理完成：删除 ${removed} 行，耗时 ${Date.now() - startedAt}ms`,
   );
+  setAppMetaValue(markerKey, 'done');
+}
+
+/**
+ * 一次性清理：剥掉来源托管会话（渠道 / 定时任务）metadata 里的 `dialogueMode` 脏键。
+ *
+ * 成因：网页端此前用同一个 ChatPage 打开渠道会话，顶栏渲染出**可写**的「澄清 / 编程 /
+ * 程序员」切换器 —— 而这两类会话从不写该字段（工具面由渠道 allowlist / permissions 或
+ * 定时任务自身配置决定）。读取时的回退值因此被当成真值展示，任何一次 metadata 写入
+ *（换模型、切权限档）都会把界面上的假模式顺手落库。该值一旦是 `clarify`，网关的澄清
+ * 只读白名单（`clarify-mode-tool-policy`，不含任何渠道回复工具）就会把该会话在渠道侧
+ * 的回复能力整套收敛掉 —— 表现为「渠道里再也回不了消息」。
+ *
+ * 写入侧已封堵：前端不再渲染该切换器且 `buildSessionMetadata` 省略该键，`PATCH
+ * /sessions/:id` 对来源会话字段级拒写。这里负责清除存量。
+ *
+ * 用单条 UPDATE 完成（不做 JS 逐行回写，避免把 metadata_json 全量拉进内存）：
+ * `json_valid` 让手改 / 损坏行安全跳过；`json_type` 只在键**存在**时非 NULL（缺失返回
+ * NULL、JSON null 返回 'null'），因此 `"dialogueMode": null` 这类残留也会被清掉。
+ * 与其它启动期修补一致地落 `app_meta` 标记：清扫后每次启动都不必再全表扫 `sessions`。
+ */
+export function purgeDialogueModeFromSourceSessions(): void {
+  const markerKey = 'source_session_dialogue_mode_purge_v1';
+  if (getAppMetaValue(markerKey) === 'done') {
+    return;
+  }
+
+  const changes = sqliteRunWithChanges(
+    `UPDATE sessions
+        SET metadata_json = json_remove(metadata_json, '$.dialogueMode')
+      WHERE metadata_json IS NOT NULL
+        AND json_valid(metadata_json) = 1
+        AND json_extract(metadata_json, '$.source') IN ('channel', 'cron')
+        AND json_type(metadata_json, '$.dialogueMode') IS NOT NULL`,
+  );
+
+  if (changes > 0) {
+    console.info(
+      `[V2_MIGRATION] 已清除 ${changes} 条来源会话（渠道 / 定时任务）的 dialogueMode 脏键`,
+    );
+  }
   setAppMetaValue(markerKey, 'done');
 }
 

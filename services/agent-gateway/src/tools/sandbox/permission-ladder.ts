@@ -33,6 +33,7 @@ import { findMatchingPermissionGrant } from '../../permission/permission-grants-
 import {
   evaluatePermissionRules,
   loadWorkspacePermissionRules,
+  wildcardMatch,
   type PermissionAction,
   type PermissionRule,
 } from '../../permission/permission-rules.js';
@@ -44,6 +45,11 @@ import {
 import { createPermissionAskedEvent } from '../../session/session-permission-events.js';
 import { createQuestionAskedEvent } from '../../session/session-question-events.js';
 import { publishSessionRunEvent } from '../../session/session-run-events.js';
+import {
+  PERMISSION_DECISION_REASONS,
+  recordLadderPermissionDecision,
+  type PermissionDecisionReason,
+} from '../../session/permission-decision-log-store.js';
 import {
   isChannelManagedSession,
   shouldAutoApproveToolForSessionMetadata,
@@ -175,22 +181,29 @@ function updatePendingPermissionPayload(
 }
 
 /**
- * Merge the batch of calls blocked by a permission pause into the owning
- * pending request payload, so the approval resume can run all of them (in
+ * Merge the batch of calls blocked by an interaction pause into the owning
+ * pending request payload, so the resume can run all of them (in
  * `tool_use` order) instead of only the single call that created the request.
  *
  * Idempotent: entries are deduped by `toolCallId`, and the first entry is
- * mirrored onto the legacy `toolCallId` / `rawInput` / `toolName` fields.
+ * mirrored onto legacy permission fields. Question fields keep the answered
+ * tool's anchor instead of being replaced by a blocked sibling call.
  */
 export function recordBlockedToolCallsForPendingRequest(
   requestId: string,
   calls: BlockedToolCallPayload[],
 ): void {
   if (calls.length === 0) return;
-  const row = sqliteGet<{ request_payload_json: string | null }>(
+  const permissionRow = sqliteGet<{ request_payload_json: string | null }>(
     `SELECT request_payload_json FROM permission_requests WHERE id = ? AND status = 'pending' LIMIT 1`,
     [requestId],
   );
+  const row =
+    permissionRow ??
+    sqliteGet<{ request_payload_json: string | null }>(
+      `SELECT request_payload_json FROM question_requests WHERE id = ? AND status = 'pending' LIMIT 1`,
+      [requestId],
+    );
   if (!row?.request_payload_json) return;
 
   let payload: PermissionRequestPayload;
@@ -206,6 +219,11 @@ export function recordBlockedToolCallsForPendingRequest(
   const blockedToolCalls = [...merged.values()];
   const first = blockedToolCalls[0];
   if (!first) return;
+
+  if (!permissionRow) {
+    updatePendingQuestionPayload(requestId, { ...payload, blockedToolCalls });
+    return;
+  }
 
   updatePendingPermissionPayload(requestId, {
     ...payload,
@@ -443,39 +461,116 @@ export async function ensurePermissionForTool(
     category,
   };
 
+  /**
+   * 权限阶梯的**唯一记账出口**：每个 return 前都经此落一条审计行。
+   *
+   * 只记录、不裁决——`recordLadderPermissionDecision` 是 best-effort（写失败
+   * 内部吞掉），绝不改变返回的权限结论，也不覆盖 session-extension / 渠道 /
+   * team 后台 / 派生会话各自的独立授权门。审计的 reason 用可枚举词表，且自动
+   * allow 一律不写成 `user_approved`（人工批准只由 `/permissions` 路由记录）。
+   */
+  const finish = (
+    state: PermissionState,
+    reason: PermissionDecisionReason,
+    scope: string,
+  ): PermissionState => {
+    recordLadderPermissionDecision({
+      sessionId,
+      toolName: request.toolName,
+      scope,
+      outcome:
+        state.kind === 'denied'
+          ? 'denied'
+          : state.kind === 'pending'
+            ? 'pending'
+            : state.kind === 'approved'
+              ? 'approved'
+              : 'not_needed',
+      reason,
+      requestId: state.kind === 'approved' || state.kind === 'pending' ? state.requestId : null,
+      workspaceRoot: workspaceRoot ?? null,
+    });
+    return state;
+  };
+
   // Pre-check with wildcard scope: skip context building for globally allowed tools.
   const toolLevelAction = resolveEffectivePermissionAction(request.toolName, '*', workspaceRules);
+  if (toolLevelAction === 'deny') {
+    // 已拒绝的早退路径不再调用 hook（插件只能降级，无法改变 deny）。
+    return finish(
+      {
+        kind: 'denied',
+        reason: `工具 "${request.toolName}" 被权限规则禁止。`,
+      },
+      PERMISSION_DECISION_REASONS.RULE_DENIED,
+      '*',
+    );
+  }
+
+  const isMcpCall = request.toolName === 'mcp_call' || !!parseFlatMcpToolName(request.toolName);
+  const mcpContext = isMcpCall
+    ? buildPermissionRequestContext(sessionId, request, sshManaged)
+    : null;
+  if (mcpContext?.denialReason) {
+    // MCP flat/legacy 派生异常的前置拒绝：在任何 allow / saved approval 之前
+    // 拦下，审计 reason 单列，避免被误读成规则拒绝。
+    return finish(
+      { kind: 'denied', reason: mcpContext.denialReason },
+      PERMISSION_DECISION_REASONS.MCP_DENIED,
+      '*',
+    );
+  }
   if (toolLevelAction === 'allow') {
-    return gatePermissionDecision(
+    const state = await gatePermissionDecision(
       { ...evaluationBase, scope: '*', decision: 'allow' },
       { kind: 'not_needed' },
     );
-  }
-  if (toolLevelAction === 'deny') {
-    // 已拒绝的早退路径不再调用 hook（插件只能降级，无法改变 deny）。
-    return {
-      kind: 'denied',
-      reason: `工具 "${request.toolName}" 被权限规则禁止。`,
-    };
+    return finish(state, reasonByState(state, PERMISSION_DECISION_REASONS.RULE_ALLOWED), '*');
   }
 
   // 'ask' → build permission context for scope-specific evaluation.
-  const context = buildPermissionRequestContext(sessionId, request, sshManaged);
+  const context = isMcpCall
+    ? mcpContext
+    : buildPermissionRequestContext(sessionId, request, sshManaged);
+  if (context?.denialReason) {
+    return finish(
+      { kind: 'denied', reason: context.denialReason },
+      PERMISSION_DECISION_REASONS.MCP_DENIED,
+      '*',
+    );
+  }
   if (!context) {
-    return gatePermissionDecision(
+    // Reached only when the tool-level rule did NOT allow (that branch returned
+    // above), i.e. the wildcard action is `ask`, yet the deriver returned no
+    // context. The auto-allow therefore comes from the deriver, NOT from a rule:
+    // the rule engine said `ask`. Recording `rule_allowed` here would misstate
+    // the audit (e.g. `memory_manage`, whose deriver returns null because it is
+    // proposal-only and gated by the proposal-decision route). Use the dedicated
+    // reason so the audit reflects the real source of the allow.
+    const state = await gatePermissionDecision(
       { ...evaluationBase, scope: '*', decision: 'allow' },
       { kind: 'not_needed' },
+    );
+    return finish(
+      state,
+      reasonByState(state, PERMISSION_DECISION_REASONS.DERIVER_NOT_REQUIRED),
+      '*',
     );
   }
 
   // Re-evaluate with the actual scope for fine-grained rules.
+  // 新派生器的旧 JSON scope 仅作为规则匹配别名，沿用同一 last-match-wins 顺序。
+  const ruleScopes = [context.scope, ...(context.ruleScopeAliases ?? [])];
+  const scopedWorkspaceRules = workspaceRules
+    .filter((rule) => ruleScopes.some((scope) => wildcardMatch(scope, rule.pattern)))
+    .map((rule) => ({ ...rule, pattern: '*' }));
   const scopedAction = resolveEffectivePermissionAction(
     request.toolName,
     context.scope,
-    workspaceRules,
+    scopedWorkspaceRules,
   );
   if (scopedAction === 'allow') {
-    return gatePermissionDecision(
+    const state = await gatePermissionDecision(
       { ...evaluationBase, scope: context.scope, decision: 'allow' },
       {
         kind: 'approved',
@@ -483,12 +578,39 @@ export async function ensurePermissionForTool(
         decision: 'permanent',
       },
     );
+    return finish(
+      state,
+      reasonByState(state, PERMISSION_DECISION_REASONS.RULE_ALLOWED),
+      context.scope,
+    );
   }
   if (scopedAction === 'deny') {
-    return {
-      kind: 'denied',
-      reason: `工具 "${request.toolName}" 在作用域 "${context.scope}" 被权限规则禁止。`,
-    };
+    return finish(
+      {
+        kind: 'denied',
+        reason: `工具 "${request.toolName}" 在作用域 "${context.scope}" 被权限规则禁止。`,
+      },
+      PERMISSION_DECISION_REASONS.RULE_DENIED,
+      context.scope,
+    );
+  }
+
+  // 精确动作的低风险默认值，不改变类别（bash/edit/skill/session 等），
+  // 因此已有类别级 deny 仍在上面生效。显式工作区 ask 也覆盖此默认值；
+  // 不使用 null 免审批，以免跳过真实作用域规则。所有放行仍经过插件否决与审计。
+  const hasExplicitScopedRule = scopedWorkspaceRules.some((rule) =>
+    wildcardMatch(category, rule.permission),
+  );
+  if (context.approvalDefault === 'allow' && !hasExplicitScopedRule) {
+    const state = await gatePermissionDecision(
+      { ...evaluationBase, scope: context.scope, decision: 'allow' },
+      { kind: 'not_needed' },
+    );
+    return finish(
+      state,
+      reasonByState(state, PERMISSION_DECISION_REASONS.DERIVER_NOT_REQUIRED),
+      context.scope,
+    );
   }
 
   // Team session 自动批准修改类工具：
@@ -507,9 +629,23 @@ export async function ensurePermissionForTool(
     isUnattendedSessionDelegationAutoApproved(sessionMetadata, category) ||
     isReceptionReadOnlyToolAutoApproved(sessionRoleContext, request.toolName)
   ) {
-    return gatePermissionDecision(
+    const state = await gatePermissionDecision(
       { ...evaluationBase, scope: context.scope, decision: 'allow' },
       { kind: 'not_needed' },
+    );
+    return finish(
+      state,
+      reasonByState(
+        state,
+        resolveModeShortcutReason(
+          permissionMode,
+          sessionRoleContext,
+          sessionMetadata,
+          category,
+          request.toolName,
+        ),
+      ),
+      context.scope,
     );
   }
 
@@ -521,14 +657,19 @@ export async function ensurePermissionForTool(
     AUTO_EDIT_PERMISSION_CATEGORIES.has(category) &&
     !AUTO_EDIT_EXCLUDED_TOOLS.has(request.toolName)
   ) {
-    return gatePermissionDecision(
+    const state = await gatePermissionDecision(
       { ...evaluationBase, scope: context.scope, decision: 'allow' },
       { kind: 'not_needed' },
+    );
+    return finish(
+      state,
+      reasonByState(state, PERMISSION_DECISION_REASONS.MODE_AUTO_EDIT),
+      context.scope,
     );
   }
 
   if (shouldAutoApproveToolForSessionMetadata(request.toolName, sessionMetadata)) {
-    return gatePermissionDecision(
+    const state = await gatePermissionDecision(
       { ...evaluationBase, scope: context.scope, decision: 'allow' },
       {
         kind: 'approved',
@@ -536,16 +677,26 @@ export async function ensurePermissionForTool(
         decision: 'session',
       },
     );
+    return finish(
+      state,
+      reasonByState(state, PERMISSION_DECISION_REASONS.CHANNEL_POLICY),
+      context.scope,
+    );
   }
 
   if (workspaceRoot && hasWorkspacePermanentPermission(sessionId, category, context.scope)) {
-    return gatePermissionDecision(
+    const state = await gatePermissionDecision(
       { ...evaluationBase, scope: context.scope, decision: 'allow' },
       {
         kind: 'approved',
         requestId: 'workspace-policy',
         decision: 'permanent',
       },
+    );
+    return finish(
+      state,
+      reasonByState(state, PERMISSION_DECISION_REASONS.WORKSPACE_RULE),
+      context.scope,
     );
   }
 
@@ -558,6 +709,7 @@ export async function ensurePermissionForTool(
           nextRound: executionContext.nextRound,
           requestData: executionContext.requestData,
           toolCallId: request.toolCallId,
+          toolName: request.toolName,
           rawInput: request.rawInput as Record<string, unknown>,
           ...(observability ? { observability } : {}),
         }
@@ -565,13 +717,18 @@ export async function ensurePermissionForTool(
 
   const approved = findApprovedPermission(sessionId, category, context.scope);
   if (approved) {
-    return gatePermissionDecision(
+    const state = await gatePermissionDecision(
       { ...evaluationBase, scope: context.scope, decision: 'allow' },
       {
         kind: 'approved',
         requestId: approved.id,
         decision: approved.decision,
       },
+    );
+    return finish(
+      state,
+      reasonByState(state, PERMISSION_DECISION_REASONS.SAVED_APPROVAL),
+      context.scope,
     );
   }
 
@@ -582,7 +739,9 @@ export async function ensurePermissionForTool(
     scope: context.scope,
     decision: 'ask',
   });
-  if (veto) return veto;
+  if (veto) {
+    return finish(veto, PERMISSION_DECISION_REASONS.PLUGIN_DENIED, context.scope);
+  }
 
   // 渠道会话没有人工审批通道：审批入口只在 Web 端、且限会话所有者，群成员无从回复；
   // 而落一条 pending 会把会话钉在 `paused` 上等一个永远不来的回复（`expires_at`
@@ -591,10 +750,14 @@ export async function ensurePermissionForTool(
   // 本身就是「对本渠道不可见却仍被调用」的异常路径——直接拒绝，让模型拿到明确结果
   // 继续，而不是整轮停摆。
   if (isChannelManagedSession(sessionMetadata)) {
-    return {
-      kind: 'denied',
-      reason: `工具 "${request.toolName}" 在当前渠道会话中不可用：渠道没有人工审批通道，无法为它授权。如需使用，请在渠道配置中放开该工具。`,
-    };
+    return finish(
+      {
+        kind: 'denied',
+        reason: `工具 "${request.toolName}" 在当前渠道会话中不可用：渠道没有人工审批通道，无法为它授权。如需使用，请在渠道配置中放开该工具。`,
+      },
+      PERMISSION_DECISION_REASONS.CHANNEL_NO_APPROVAL,
+      context.scope,
+    );
   }
 
   const pendingRequestId = findPendingPermission(sessionId, category, context.scope);
@@ -602,12 +765,58 @@ export async function ensurePermissionForTool(
     if (requestPayload) {
       updatePendingPermissionPayload(pendingRequestId, requestPayload);
     }
-    return { kind: 'pending', requestId: pendingRequestId, created: false };
+    return finish(
+      { kind: 'pending', requestId: pendingRequestId, created: false },
+      PERMISSION_DECISION_REASONS.AWAITING_USER,
+      context.scope,
+    );
   }
 
-  return {
-    kind: 'pending',
-    requestId: createPendingPermissionRequest(sessionId, category, context, requestPayload),
-    created: true,
-  };
+  return finish(
+    {
+      kind: 'pending',
+      requestId: createPendingPermissionRequest(sessionId, category, context, requestPayload),
+      created: true,
+    },
+    PERMISSION_DECISION_REASONS.AWAITING_USER,
+    context.scope,
+  );
+}
+
+/**
+ * 插件 hook 可以把内置 allow 降级为 deny：此时出口 reason 必须是插件拒绝而非
+ * 原分支的 allow 理由，否则审计会把「被插件拒绝」误记成「已放行」。
+ * 保留原分支理由作为「若非插件否决会是哪个理由」，这里只做最终态纠正。
+ */
+function reasonByState(
+  state: PermissionState,
+  fallback: PermissionDecisionReason,
+): PermissionDecisionReason {
+  return state.kind === 'denied' ? PERMISSION_DECISION_REASONS.PLUGIN_DENIED : fallback;
+}
+
+/**
+ * 免审批快捷分支的具体理由：四档（yolo / team 后台 / 派生无人值守 / reception 只读）
+ * 合并成一个 if，这里按同一优先级回推到底是哪一档命中，保证审计可区分。
+ */
+function resolveModeShortcutReason(
+  permissionMode: string,
+  sessionRoleContext: ReturnType<typeof getSessionRoleContext>,
+  sessionMetadata: ReturnType<typeof getSessionMetadata>,
+  category: string,
+  toolName: string,
+): PermissionDecisionReason {
+  if (permissionMode === 'yolo') {
+    return PERMISSION_DECISION_REASONS.MODE_YOLO;
+  }
+  if (isBackgroundAutoApprovedTeamSession(sessionRoleContext)) {
+    return PERMISSION_DECISION_REASONS.TEAM_BACKGROUND;
+  }
+  if (isUnattendedSessionDelegationAutoApproved(sessionMetadata, category)) {
+    return PERMISSION_DECISION_REASONS.DELEGATION_UNATTENDED;
+  }
+  if (isReceptionReadOnlyToolAutoApproved(sessionRoleContext, toolName)) {
+    return PERMISSION_DECISION_REASONS.RECEPTION_READONLY;
+  }
+  return PERMISSION_DECISION_REASONS.MODE_YOLO;
 }

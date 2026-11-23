@@ -74,7 +74,22 @@ export interface ChatTopBarProps {
   density?: 'normal' | 'compact';
   todoController?: ChatTodoController;
   todoDetailsId?: string;
-  hideDialogueModeToggle?: boolean;
+  /**
+   * 只读来源标识（渠道：「渠道：飞书」/ 定时任务：「定时任务」）。
+   *
+   * 传非空值时顶栏用只读 chip 取代三模式切换器与「确认转换」按钮——来源会话
+   * （`metadata.source` 为 channel / cron）没有对话模式，其模式由来源侧配置决定。
+   */
+  sourceBadgeLabel?: string | null;
+  /**
+   * 对话模式是否已可交互。
+   *
+   * 已有会话路由但会话 metadata 尚未水合时为 false：这一窗口内 `dialogueMode` 只是
+   * 「用户默认值」这个假值，渲染出的切换器既可能显示错误模式（来源会话没有对话模式），
+   * 又是**可写的**。故未水合时一律不渲染模式控件与「确认转换」。
+   * 无会话的草稿态下本地模式就是真值，调用方应传 true。
+   */
+  dialogueModeReady?: boolean;
   hideRightPanelToggle?: boolean;
   /** 会话信息 slot：标题 + 模型 + 模式，合并展示在左侧 */
   sessionInfo?: {
@@ -114,6 +129,73 @@ function AutoEditPencilGlyph() {
     >
       <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
     </svg>
+  );
+}
+
+/** 「渠道 / 定时任务」来源图标：外链式会话来源，与模式图标区分开。 */
+function SourceOriginGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+/**
+ * 只读的会话来源标识（渠道 / 定时任务）。
+ *
+ * 这些会话**没有**「澄清 / 编程 / 程序员」对话模式——它们的工具面由渠道配置决定，
+ * 故这里必须替换掉可写的三模式切换器：模式切换器不仅能改本地状态，其变更会随
+ * `buildSessionMetadata` 落库，被误写成 `clarify` 会让该会话在渠道侧被澄清只读
+ * 白名单收敛掉全部回复工具（见 utils/session/session-origin 的说明）。
+ */
+function ReadonlySourceChip({ label }: { label: string }) {
+  return (
+    <span
+      data-testid="chat-top-bar-source-chip"
+      data-readonly="true"
+      data-tone="info"
+      title="该会话的模式与工具由来源侧配置决定，此处只读"
+      style={{
+        height: 26,
+        padding: '0 7px',
+        borderRadius: 5,
+        border: 'none',
+        background: 'color-mix(in srgb, var(--aux) 18%, var(--bg-overlay))',
+        color: 'var(--aux)',
+        boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--aux) 42%, var(--border-default))',
+        fontSize: 10,
+        fontWeight: 600,
+        flexShrink: 0,
+        letterSpacing: '0.04em',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        userSelect: 'none',
+        maxWidth: 160,
+      }}
+    >
+      <SourceOriginGlyph />
+      <span
+        style={{
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </span>
+    </span>
   );
 }
 
@@ -180,7 +262,8 @@ export function ChatTopBar({
   density = 'normal',
   todoController,
   todoDetailsId,
-  hideDialogueModeToggle = false,
+  sourceBadgeLabel = null,
+  dialogueModeReady = true,
   hideRightPanelToggle = false,
   sessionInfo,
   workspaceBinding,
@@ -358,15 +441,19 @@ export function ChatTopBar({
           </>
         )}
 
-        {hideDialogueModeToggle ? null : (
+        {/* 来源会话（渠道 / 定时任务）用只读 chip；metadata 未水合时两者都不渲染。 */}
+        {sourceBadgeLabel !== null ? (
+          <ReadonlySourceChip label={sourceBadgeLabel} />
+        ) : dialogueModeReady ? (
           <DialogueModeToggle
             mode={dialogueMode}
             onChange={onChangeDialogueMode}
             style={{ flexShrink: 1, minWidth: 0 }}
           />
-        )}
+        ) : null}
 
-        {onConfirmClarifySwitch ? (
+        {/* 「确认转换」只在澄清模式有意义：未水合 / 来源会话一律不渲染。 */}
+        {onConfirmClarifySwitch && dialogueModeReady && sourceBadgeLabel === null ? (
           <DialogueModeSwitchButton
             mode={dialogueMode}
             onConfirm={onConfirmClarifySwitch}

@@ -19,7 +19,7 @@ interface SessionMetadataRow {
 /**
  * 用户在界面上显式确认「方案设计完成」并切换到编程模式（chat 页面的「确认转换」按钮）。
  *
- * 与自动门控（`routes/questions.ts` 的确认节点 / ExitPlanMode）的关系：
+ * 与自动门控（`routes/questions.ts` 的 ExitPlanMode 审批）的关系：
  *   - 都走 `switchSessionDialogueModeToCoding`，因此状态、审计字段与幂等语义一致；
  *   - 本路由额外把澄清确认门控（`clarificationState` 的确认节点）**在同一次写入里**结算掉
  *     ——用户点按钮本身就是"共识已确认"的表达，避免留下"已进入编程模式但确认节点仍未决"

@@ -334,6 +334,16 @@ describe('right-panel-sections UI', () => {
     expect(screen.getByText('检查点与恢复')).toBeTruthy();
   });
 
+  it('overview 无对话模式时显示占位而不是一个该会话并不具备的模式', () => {
+    // 来源会话（渠道 / 定时任务）没有对话模式，metadata 未水合的窗口内也还没有真值：
+    // 调用方不传 dialogueMode，此处不得回退成「程序员」（那是错误显示）。
+    renderOverview({ dialogueMode: undefined });
+
+    expect(screen.getByText('对话模式')).toBeTruthy();
+    expect(screen.queryByText('程序员')).toBeNull();
+    expect(screen.getByText('—')).toBeTruthy();
+  });
+
   it('切到 background tab 渲染 BackgroundTaskPanel（占位替身）', () => {
     render(<ChatRightPanel {...createRightPanelProps()} />);
 

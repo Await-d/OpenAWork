@@ -218,7 +218,7 @@ function artifactPhaseLabel(phase: string | null): string {
 }
 
 function sortArtifacts(artifacts: KnowledgeGraphArtifactInput[]): KnowledgeGraphArtifactInput[] {
-  return [...artifacts].sort((left, right) => {
+  return artifacts.toSorted((left, right) => {
     const leftRank = PHASE_RANK[left.phase ?? ''] ?? 99;
     const rightRank = PHASE_RANK[right.phase ?? ''] ?? 99;
     if (leftRank !== rightRank) {
@@ -235,7 +235,7 @@ function sortArtifacts(artifacts: KnowledgeGraphArtifactInput[]): KnowledgeGraph
 function sortStoredKnowledge(
   storedKnowledge: KnowledgeGraphStoredInput[],
 ): KnowledgeGraphStoredInput[] {
-  return [...storedKnowledge].sort((left, right) => {
+  return storedKnowledge.toSorted((left, right) => {
     const leftClassified = classifyStoredKnowledge(left);
     const rightClassified = classifyStoredKnowledge(right);
     const leftCategoryRank = CATEGORY_RANK.get(leftClassified.category) ?? 99;

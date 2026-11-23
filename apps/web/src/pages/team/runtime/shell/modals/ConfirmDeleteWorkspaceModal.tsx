@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { TeamWorkspaceSummary } from '@openAwork/web-client';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type { AgentTeamsWorkspaceGroup } from '../../data/team-runtime-types.js';
 import { XIcon } from '../../shared/TeamIcons.js';
 
@@ -377,6 +378,7 @@ export function ConfirmDeleteWorkspaceModal({
               if (error) setError(null);
             }}
             onKeyDown={(e) => {
+              if (isImeComposingKeyboardEvent(e)) return;
               if (e.key === 'Enter' && canConfirm) {
                 e.preventDefault();
                 void handleConfirm();

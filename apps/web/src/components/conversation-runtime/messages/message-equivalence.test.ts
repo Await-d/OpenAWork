@@ -12,7 +12,7 @@
  * `areInputImagesEquivalent` 都是模块私有符号，这里用字面量 15_000 固定
  * 公开行为，并通过 `areLikelySameNearbyUserMessage` 间接覆盖图片比较。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   areLikelySameNearbyUserMessage,
   areLogicalMessageDuplicates,
@@ -20,6 +20,7 @@ import {
   areSameAssistantMessageContent,
   areSnapshotMessagesEquivalent,
   areStronglyIdenticalMessages,
+  createSnapshotMessageComparator,
   hasOverlappingPartIds,
   hasUserMessageBetween,
 } from './message-equivalence.js';
@@ -27,8 +28,82 @@ import { createAssistantEventCardContent } from './card-codec.js';
 import type { ChatMessage, ChatMessagePart } from './message-model.js';
 import type { Message } from '@openAwork/shared';
 import { createAssistantTraceContent } from './trace-codec.js';
+import { normalizeChatMessages } from './normalize-chat-messages.js';
 
 const SNAPSHOT_TIME_TOLERANCE_MS = 15_000;
+
+describe('快照比较缓存与轮次身份', () => {
+  it.each([15_001, 16_000, 3_600_000])('真实数组用户消息无强身份时受时间窗约束：%s', (delay) => {
+    const messages = normalizeChatMessages([
+      { id: 'local', role: 'user', createdAt: 1_000, content: [{ type: 'text', text: '问题' }] },
+      {
+        id: 'server',
+        role: 'user',
+        createdAt: 1_000 + delay,
+        content: [{ type: 'text', text: '问题' }],
+      },
+    ]);
+    expect(areLikelySameNearbyUserMessage(messages[0]!, messages[1]!)).toBe(false);
+  });
+
+  it.each(['same-id', 'same-request', 'missing-time', 'within-window'])(
+    '真实数组保留合理身份配对：%s',
+    (kind) => {
+      const messages = normalizeChatMessages([
+        {
+          id: 'local',
+          role: 'user',
+          createdAt: kind === 'missing-time' ? undefined : 1_000,
+          clientRequestId: kind === 'same-request' ? 'req:assistant:1' : undefined,
+          content: [{ type: 'text', text: '问题' }],
+        },
+        {
+          id: kind === 'same-id' ? 'local' : 'server',
+          role: 'user',
+          createdAt:
+            kind === 'missing-time' ? undefined : kind === 'within-window' ? 16_000 : 3_601_000,
+          clientRequestId: kind === 'same-request' ? 'req:assistant:1' : undefined,
+          content: [{ type: 'text', text: '问题' }],
+        },
+      ]);
+      expect(areLikelySameNearbyUserMessage(messages[0]!, messages[1]!)).toBe(true);
+      expect(areSnapshotMessagesEquivalent(messages[0]!, messages[1]!)).toBe(true);
+    },
+  );
+  it('一次比较器内每条 trace 仅解析一次，新比较器读取最新正文', () => {
+    const left = assistantMessage({
+      content: createAssistantTraceContent({ text: '第一条回答', toolCalls: [] }),
+    });
+    const right = assistantMessage({
+      id: 'other',
+      content: createAssistantTraceContent({ text: '第二条回答', toolCalls: [] }),
+    });
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const compare = createSnapshotMessageComparator();
+      expect(compare(left, right)).toBe(false);
+      const calls = parse.mock.calls.length;
+      expect(calls).toBeGreaterThan(0);
+      expect(compare(left, right)).toBe(false);
+      expect(parse.mock.calls).toHaveLength(calls);
+      right.content = createAssistantTraceContent({ text: '第一条回答扩展', toolCalls: [] });
+      expect(createSnapshotMessageComparator()(left, right)).toBe(true);
+      expect(parse.mock.calls.length).toBeGreaterThan(calls);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it('不同请求轮次即便共享 part 或 toolCallId 也不折叠', () => {
+    const parts: ChatMessagePart[] = [
+      { id: 'shared', type: 'tool', toolCallId: 'call', toolName: 'read', input: {} },
+    ];
+    const left = assistantMessage({ id: 'a', clientRequestId: 'req:assistant:1', parts });
+    const right = assistantMessage({ id: 'b', clientRequestId: 'req', parts });
+    expect(areStronglyIdenticalMessages(left, right)).toBe(false);
+    expect(areLogicalMessageDuplicates(left, right)).toBe(false);
+  });
+});
 
 function assistantMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return { id: 'msg-1', role: 'assistant', content: '相同正文', ...overrides };
@@ -408,6 +483,83 @@ describe('areSameAssistantMessageContent', () => {
 });
 
 describe('areLikelySameNearbyUserMessage', () => {
+  const image = {
+    type: 'input_image' as const,
+    artifactId: 'artifact-1',
+    fileId: 'file-1',
+    detail: 'auto' as const,
+    mimeType: 'image/png',
+  };
+
+  it.each([undefined, 'blob:other-preview'])('同 artifact 忽略预览 URL 差异：%s', (imageUrl) => {
+    const left = userMessage({
+      rawContent: [{ ...image, imageUrl: 'blob:local-preview' }],
+    });
+    const right = userMessage({ id: 'server', rawContent: [{ ...image, imageUrl }] });
+    expect(areLikelySameNearbyUserMessage(left, right)).toBe(true);
+    expect(areLikelySameNearbyUserMessage(right, left)).toBe(true);
+  });
+
+  it('仅 fileId 标识图片时也忽略预览 URL 差异', () => {
+    expect(
+      areLikelySameNearbyUserMessage(
+        userMessage({
+          rawContent: [{ type: 'input_image', fileId: 'file-1', imageUrl: 'blob:a' }],
+        }),
+        userMessage({ id: 'server', rawContent: [{ type: 'input_image', fileId: 'file-1' }] }),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    { ...image, artifactId: 'artifact-2' },
+    { ...image, fileId: 'file-2' },
+    { ...image, detail: 'high' as const },
+    { ...image, mimeType: 'image/jpeg' },
+    { ...image, fileName: 'other.png' },
+  ])('图片身份或内容元数据不同不得被同文时间兜底覆盖：%j', (differentImage) => {
+    const left = userMessage({ createdAt: 1_000, rawContent: [image] });
+    const right = userMessage({ id: 'server', createdAt: 2_000, rawContent: [differentImage] });
+    expect(areLikelySameNearbyUserMessage(left, right)).toBe(false);
+    expect(areSnapshotMessagesEquivalent(left, right)).toBe(false);
+    expect(areLogicalMessageDuplicates(left, right)).toBe(false);
+  });
+
+  it('图片数量不同不得被同文时间兜底覆盖', () => {
+    const left = userMessage({ rawContent: [image] });
+    const right = userMessage({ id: 'server', rawContent: [image, image] });
+    expect(areLikelySameNearbyUserMessage(left, right)).toBe(false);
+    expect(areSnapshotMessagesEquivalent(left, right)).toBe(false);
+  });
+
+  it('缺少稳定 ID 时仍比较图片 URL', () => {
+    const left = userMessage({ rawContent: [{ type: 'input_image', imageUrl: 'blob:a' }] });
+    const right = userMessage({
+      id: 'server',
+      rawContent: [{ type: 'input_image', imageUrl: 'blob:b' }],
+    });
+    expect(areLikelySameNearbyUserMessage(left, right)).toBe(false);
+    expect(areSnapshotMessagesEquivalent(left, right)).toBe(false);
+  });
+
+  it('相同图片但用户请求 ID 冲突时不等价', () => {
+    const left = userMessage({ clientRequestId: 'request-a', rawContent: [image] });
+    const right = userMessage({ id: 'server', clientRequestId: 'request-b', rawContent: [image] });
+    expect(areLikelySameNearbyUserMessage(left, right)).toBe(false);
+    expect(areSnapshotMessagesEquivalent(left, right)).toBe(false);
+    expect(areLogicalMessageDuplicates(left, right)).toBe(false);
+  });
+
+  it('rawContent 显示文本不同不得被同文时间兜底覆盖', () => {
+    const left = userMessage({ rawContent: [{ type: 'text', text: '第一问' }, image] });
+    const right = userMessage({
+      id: 'server',
+      rawContent: [{ type: 'text', text: '第二问' }, image],
+    });
+    expect(areLikelySameNearbyUserMessage(left, right)).toBe(false);
+    expect(areSnapshotMessagesEquivalent(left, right)).toBe(false);
+  });
+
   it('非用户消息返回 false', () => {
     expect(
       areLikelySameNearbyUserMessage(

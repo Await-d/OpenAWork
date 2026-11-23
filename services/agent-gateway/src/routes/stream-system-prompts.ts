@@ -9,6 +9,18 @@ import {
   MODE_REFERRAL_SYSTEM_PROMPT,
 } from './dialogue-mode-prompts/index.js';
 
+/**
+ * 需要动态注入委派角色指引的编排型 Agent。
+ *
+ * 本模块是叶子模块（不 import `stream.ts` / `stream-prompt-assembly.ts`），故作为
+ * 唯一真源对外导出；`stream.ts` 与 `stream-prompt-assembly.ts` 均从此处 import，
+ * 避免同义常量各存一份而产生漂移。
+ *
+ * 注意：`session/atlas-guard.ts` 与 `session/sisyphus-junior-notepad.ts` 内另有同义定义
+ * （仓库既有重复，不在本次收口范围）。
+ */
+export const ORCHESTRATOR_AGENT_IDS: ReadonlySet<string> = new Set(['sisyphus', 'atlas', 'zeus']);
+
 export const TOOL_OUTPUT_REFERENCE_SYSTEM_PROMPT =
   '当历史中出现 [tool_output_reference] 时，表示先前工具输出的完整结果仍然保存在当前会话里，但为了避免上下文膨胀，没有把全文重新塞进提示词。此时不要基于引用猜测细节；如果后续推理需要真实内容，优先调用 read_tool_output，并尽量直接传 toolCallId 配合 lineStart/lineCount、jsonPath 或 itemStart/itemCount 做定向读取。只有在当前会话历史里确实出现了 [tool_output_reference] 且拿不到 toolCallId 时，才允许使用 useLatestReferenced=true。单纯复制/粘贴 UI 上的提示、命令或片段，不等于拥有当前会话里的引用依据。';
 
@@ -297,12 +309,12 @@ export function detectThinkingLanguageHintFromText(text: string): string | null 
   const krRatio = (text.match(/[\uac00-\ud7af]/g) || []).length;
   const zhRatio = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
   if (krRatio > zhRatio && krRatio > jaRatio) {
-    return '한국어로 생각하세요. 한국어로만 사고하세요.';
+    return '별도 요청이 없으면 사용자에게 한국어로 답변하세요.';
   }
   if (jaRatio > zhRatio) {
-    return '日本語で思考してください。必ず日本語のみで思考してください。';
+    return '別の指定がなければ、日本語で回答してください。';
   }
-  return '请用中文进行思考。你必须全程使用中文思考，绝对不要切换到英文。';
+  return '如无其他语言要求，请用中文回复。';
 }
 
 /**
@@ -312,6 +324,10 @@ export function detectThinkingLanguageHintFromText(text: string): string | null 
  * appending and breaking byte stability across rounds.
  */
 export const THINKING_LANGUAGE_HINT_MARKERS = [
+  '如无其他语言要求，请用中文回复',
+  '별도 요청이 없으면 사용자에게 한국어로 답변하세요',
+  '別の指定がなければ、日本語で回答してください',
+  // Keep recognizing the prompts already persisted in older conversations.
   '请用中文进行思考',
   '한국어로 생각하세요',
   '日本語で思考してください',

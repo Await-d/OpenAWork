@@ -98,7 +98,7 @@
     width var(--dur-normal) var(--ease-normal);
 }
 
-/* 95% 压缩阈值刻度：线不参与填充，只提示触发压缩的位置。 */
+/* 压缩阈值刻度独立于用量填充。 */
 .chat-overview__meter-tick {
   background: var(--warning);
   bottom: 0;
@@ -814,6 +814,30 @@
   scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+/* 上面两条是标准属性，Safari 直到 26.2 才认 `scrollbar-color`（`scrollbar-width` 是 18.2），
+   基线是 Safari 16.2、桌面端又是 macOS WKWebView——只写标准属性时那边滚动条退回系统默认外观。
+   这里补 WebKit 伪元素回退，包在 `@supports not (...)` 里，避免在支持标准属性的引擎上
+   两套规则同时命中。颜色取全局 token（--scrollbar-thumb / --scrollbar-thumb-hover），不写死色值。 */
+@supports not (scrollbar-color: auto) {
+  .chat-overview__injected-panel::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .chat-overview__injected-panel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .chat-overview__injected-panel::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: var(--scrollbar-thumb);
+  }
+
+  .chat-overview__injected-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
 }
 
 .chat-overview__injected-panel[hidden] {

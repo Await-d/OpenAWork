@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { extractSshConnectionId, getSessionModeLabels } from './session-metadata.js';
+import {
+  extractSshConnectionId,
+  getSessionModeLabels,
+  isSourceManagedSessionMetadata,
+} from './session-metadata.js';
 
 describe('extractSshConnectionId — SSH 工作区绑定', () => {
   it('解析出会话绑定的 SSH 连接 id', () => {
@@ -12,6 +16,20 @@ describe('extractSshConnectionId — SSH 工作区绑定', () => {
     expect(extractSshConnectionId(JSON.stringify({ workingDirectory: '/repo' }))).toBeNull();
     expect(extractSshConnectionId(JSON.stringify({ sshConnectionId: '   ' }))).toBeNull();
     expect(extractSshConnectionId(undefined)).toBeNull();
+  });
+});
+
+describe('会话来源（渠道 / 定时任务）', () => {
+  it('渠道 / 定时任务判为来源托管，普通会话不是', () => {
+    expect(
+      isSourceManagedSessionMetadata(
+        JSON.stringify({ source: 'channel', channel: { type: 'qq' } }),
+      ),
+    ).toBe(true);
+    expect(isSourceManagedSessionMetadata(JSON.stringify({ source: 'cron' }))).toBe(true);
+    expect(isSourceManagedSessionMetadata(JSON.stringify({ source: 'desktop' }))).toBe(false);
+    expect(isSourceManagedSessionMetadata(JSON.stringify({ dialogueMode: 'coding' }))).toBe(false);
+    expect(isSourceManagedSessionMetadata(undefined)).toBe(false);
   });
 });
 

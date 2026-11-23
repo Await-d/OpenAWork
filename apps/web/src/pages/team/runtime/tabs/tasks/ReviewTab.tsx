@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, type CSSProperties } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type { AgentTeamsReviewCard, AgentTeamsSidebarTeam } from '../../data/team-runtime-types.js';
 import { formatSidebarTeamStatus } from '../../data/team-runtime-status.js';
 import { resolveSidebarTeamSubtitle } from '../../data/team-runtime-status.js';
@@ -411,6 +412,7 @@ export function ReviewTab({
                         value={commentInput}
                         onChange={(e) => setCommentInput(e.target.value)}
                         onKeyDown={(e) => {
+                          if (isImeComposingKeyboardEvent(e)) return;
                           if (e.key === 'Enter') handleAddComment(card.id);
                           if (e.key === 'Escape') {
                             setCommentingId(null);

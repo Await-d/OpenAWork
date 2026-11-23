@@ -114,7 +114,7 @@ export function TemplateModelPoolPicker({
         <div style={{ display: 'grid', gap: 8 }}>
           {providers.map((provider) => {
             // 模型按名称排序（数字感知），便于用户在池里快速定位。
-            const sortedModels = [...provider.defaultModels].sort(compareModelsByName);
+            const sortedModels = provider.defaultModels.toSorted(compareModelsByName);
             const modelIds = sortedModels.map((m) => m.id);
             const selectedCount = modelIds.filter((id) =>
               selected.has(`${provider.id}::${id}`),

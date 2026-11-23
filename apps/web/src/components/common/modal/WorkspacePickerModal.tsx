@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { FolderIcon } from '../../file-editor/preview/FileIcon.js';
 import { isTauriRuntime, pickDesktopFolder } from '../../../utils/gateway/desktop-gateway.js';
 import {
@@ -536,6 +537,7 @@ export default function WorkspacePickerModal({
                 setPathInput(event.currentTarget.value);
               }}
               onKeyDown={(event) => {
+                if (isImeComposingKeyboardEvent(event)) return;
                 if (event.key === 'Enter') {
                   event.preventDefault();
                   void handleOpenPathInput();
@@ -714,6 +716,7 @@ export default function WorkspacePickerModal({
                   setNewDirectoryName(event.currentTarget.value);
                 }}
                 onKeyDown={(event) => {
+                  if (isImeComposingKeyboardEvent(event)) return;
                   if (event.key === 'Enter') {
                     event.preventDefault();
                     void handleCreateDirectory();

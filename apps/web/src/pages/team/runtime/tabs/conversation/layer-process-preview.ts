@@ -68,9 +68,9 @@ export function resolveLayerProcessRecords(input: {
     : null;
   const anchorTimeMs = focusedRecord?.timeMs ?? relatedRecords[relatedRecords.length - 1]!.timeMs;
   const currentRoundStartRecord =
-    [...relatedRecords]
-      .reverse()
-      .find((record) => record.kind === 'incoming' && record.timeMs <= anchorTimeMs) ?? null;
+    relatedRecords.findLast(
+      (record) => record.kind === 'incoming' && record.timeMs <= anchorTimeMs,
+    ) ?? null;
 
   const windowedRecords =
     currentRoundStartRecord !== null

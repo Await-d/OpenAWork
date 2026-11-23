@@ -234,7 +234,7 @@ export function computeHiddenCounts(
 ): Map<string, number> {
   const visibleChildren = buildContainsChildrenMap(visibleGraph);
   const depths = computeContainsDepths(visibleGraph);
-  const ordered = [...visibleGraph.nodes].sort(
+  const ordered = visibleGraph.nodes.toSorted(
     (left, right) => (depths.get(right.id) ?? 0) - (depths.get(left.id) ?? 0),
   );
   const visibleSubtree = new Map<string, number>();

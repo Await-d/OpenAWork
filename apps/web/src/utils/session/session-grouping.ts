@@ -184,7 +184,7 @@ export function groupSessionsByWorkspace<TSession extends SessionWithWorkspaceLi
   savedWorkspaces: readonly WorkspaceIdentity[] = [],
   pinnedSessionIds: readonly string[] = [],
 ): WorkspaceSessionGroup<TSession>[] {
-  const orderedSessions = [...sessions].sort((a, b) =>
+  const orderedSessions = sessions.toSorted((a, b) =>
     compareSessionsByUpdatedAt(a, b, pinnedSessionIds),
   );
   const groups = new Map<string, WorkspaceSessionGroup<TSession>>();
@@ -283,7 +283,7 @@ export function buildWorkspaceSessionCollections<TSession extends SessionWithWor
 export function listWorkspaceIdentitiesFromSessions<TSession extends SessionWithWorkspaceLike>(
   sessions: TSession[],
 ): WorkspaceIdentity[] {
-  const orderedSessions = [...sessions].sort(compareSessionsByUpdatedAt);
+  const orderedSessions = sessions.toSorted(compareSessionsByUpdatedAt);
   const sessionsById = new Map(orderedSessions.map((session) => [session.id, session]));
   const resolvedBindingCache = new Map<string, SessionWorkspaceBinding>();
   const workspaces: WorkspaceIdentity[] = [];

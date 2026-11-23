@@ -23,6 +23,7 @@ import type {
   WorkflowTeamTemplateModelRef,
   WorkflowTeamTemplateModelStrategy,
 } from '@openAwork/web-client';
+import { createRandomUuid } from '@openAwork/web-client';
 import { LAYER_ALLOWED_TOOLSETS } from './template-architecture.js';
 
 export interface TemplateEditorState {
@@ -113,7 +114,7 @@ const CATALOG_ORDER = new Map<string, number>(
 );
 
 export function sortRosterByCatalog(roster: FixedTeamMemberSlot[]): FixedTeamMemberSlot[] {
-  return [...roster].sort((a, b) => {
+  return roster.toSorted((a, b) => {
     const ai = CATALOG_ORDER.get(slotKey(a.layer, a.specialty)) ?? Number.MAX_SAFE_INTEGER;
     const bi = CATALOG_ORDER.get(slotKey(b.layer, b.specialty)) ?? Number.MAX_SAFE_INTEGER;
     if (ai !== bi) return ai - bi;
@@ -194,10 +195,7 @@ export function addCustomSlot(
   layer: TeamRuntimeLayer,
   input: CustomSlotInput,
 ): FixedTeamMemberSlot[] {
-  const uid =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID().slice(0, 8)
-      : Math.random().toString(36).slice(2, 10);
+  const uid = createRandomUuid().slice(0, 8);
   const id = `${layer}-custom-${uid}`;
   const slot: FixedTeamMemberSlot = {
     id,

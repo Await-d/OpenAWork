@@ -31,7 +31,7 @@ export function PromptTemplatePanel({ isOpen, onClose, onInsert }: PromptTemplat
       result = result.filter((t) => t.category === filterCategory);
     }
     // Sort by usage count descending, then by updatedAt descending
-    return [...result].sort((a, b) => b.usageCount - a.usageCount || b.updatedAt - a.updatedAt);
+    return result.toSorted((a, b) => b.usageCount - a.usageCount || b.updatedAt - a.updatedAt);
   }, [templates, filterCategory]);
 
   const handleUseTemplate = useCallback(

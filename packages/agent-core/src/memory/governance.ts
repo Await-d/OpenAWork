@@ -197,7 +197,15 @@ export function detectExactDuplicateGroups(
 ): MemoryDuplicateGroup[] {
   const byKey = new Map<string, MemoryEntry[]>();
   for (const entry of entries) {
-    const normalizedKey = `${entry.type}:${normalizeMemoryKey(entry.key)}`;
+    const normalizedKey = JSON.stringify([
+      memoryScopeKey(entry.scope),
+      entry.type,
+      normalizeMemoryKey(entry.key),
+      entry.workspaceRoot,
+      entry.teamWorkspaceId,
+      entry.roleLayers === null ? null : [...entry.roleLayers].sort(),
+      entry.validUntil,
+    ]);
     const bucket = byKey.get(normalizedKey);
     if (bucket) {
       bucket.push(entry);

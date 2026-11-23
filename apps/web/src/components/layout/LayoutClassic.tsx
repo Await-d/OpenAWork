@@ -59,7 +59,10 @@ export function LayoutClassic({ shared, theme, onToggleTheme }: LayoutClassicPro
         }}
       >
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', minWidth: 0 }}>
-          <div
+          {/* 用 <main> 作为主内容 landmark：axe 的 region 规则要求页面内容都在
+              landmark 内，外壳此前全是 div，导致每个页面都被判「内容不在 landmark 内」。
+              样式仍走 .outlet-content-wrap 类（无标签选择器依赖）。 */}
+          <main
             className="outlet-content-wrap"
             style={{
               flex: 1,
@@ -70,7 +73,7 @@ export function LayoutClassic({ shared, theme, onToggleTheme }: LayoutClassicPro
             }}
           >
             <CachedRouteOutlet />
-          </div>
+          </main>
         </div>
       </div>
     </div>

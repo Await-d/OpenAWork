@@ -114,7 +114,7 @@ describe('tool-sandbox · memory_manage 接线与门控（提议化后）', () =
       permissionMode: 'yolo',
     });
 
-    const result = await executeMemoryTool(
+    await executeMemoryTool(
       { action: 'add', memory: { type: 'fact', key: 'k', value: 'v' } },
       'yolo-session',
     );

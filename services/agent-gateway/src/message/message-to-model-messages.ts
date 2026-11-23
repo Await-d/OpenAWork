@@ -434,6 +434,13 @@ export function filterCompacted(
   return result;
 }
 
+// Exact envelopes written by older gateways as synthetic text parts.
+const LEGACY_THINKING_LANGUAGE_PARTS = new Set([
+  '[请用中文进行思考。你必须全程使用中文思考，绝对不要切换到英文。]',
+  '[日本語で思考してください。必ず日本語のみで思考してください。]',
+  '[한국어로 생각하세요. 한국어로만 사고하세요.]',
+]);
+
 /**
  * Convert MessageWithParts[] to UnifiedMessage[].
  * This is the single standardization entry point — all upstream rendering
@@ -491,10 +498,13 @@ export function toModelMessages(
     if (msg.parts.length === 0) continue;
 
     if (msg.info.role === 'user') {
-      const parts =
-        messageIndex === latestUserMessageIndex
-          ? msg.parts
-          : msg.parts.filter((part) => part.type !== 'text' || part.synthetic !== true);
+      const parts = msg.parts.filter(
+        (part) =>
+          part.type !== 'text' ||
+          part.synthetic !== true ||
+          (messageIndex === latestUserMessageIndex &&
+            !LEGACY_THINKING_LANGUAGE_PARTS.has(part.text.trim())),
+      );
       const { text, images } = buildUserInput(parts);
       if (text.length > 0 || images.length > 0) {
         result.push({ role: 'user', content: text, ...(images.length > 0 ? { images } : {}) });

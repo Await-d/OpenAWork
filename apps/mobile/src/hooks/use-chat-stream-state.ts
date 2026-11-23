@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createRandomUuid } from '@openAwork/web-client';
 import { appendMessage as dbAppendMessage } from '../db/session-store';
 import { useGatewayClient } from './useGatewayClient';
 import type { MobileChatMessage } from '../chat/chat-message-content';
@@ -51,7 +52,7 @@ export function useChatStreamState({
       }
 
       const text = input.trim();
-      const userMsg: MobileChatMessage = { id: crypto.randomUUID(), role: 'user', content: text };
+      const userMsg: MobileChatMessage = { id: createRandomUuid(), role: 'user', content: text };
 
       setMessages((prev) => [...prev, userMsg]);
       setStreaming(true);
@@ -102,7 +103,7 @@ export function useChatStreamState({
               return;
             }
             const assistantMsg: MobileChatMessage = {
-              id: crypto.randomUUID(),
+              id: createRandomUuid(),
               role: 'assistant',
               content: accumulated,
               ...(accumulatedThinking.trim().length > 0
@@ -128,7 +129,7 @@ export function useChatStreamState({
               return;
             }
             const assistantMsg: MobileChatMessage = {
-              id: crypto.randomUUID(),
+              id: createRandomUuid(),
               role: 'assistant',
               content: `[Error: ${code}]`,
               ...(accumulatedThinking.trim().length > 0

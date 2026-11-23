@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="carbon" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>目录列表视觉验收</title>
+    <style>
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family: system-ui, sans-serif;
+      }
+      .list-harness {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        padding: 16px;
+      }
+      .list-harness > section {
+        min-width: 0;
+        padding: 12px;
+        border-radius: 8px;
+        background: var(--bg-raised);
+      }
+      .list-harness h1 {
+        font-size: 20px;
+        margin: 0;
+      }
+      .list-harness h2 {
+        font-size: 12px;
+        color: var(--fg-muted);
+        margin: 0 0 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/list-directory-entry.tsx"></script>
+  </body>
+</html>

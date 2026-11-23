@@ -73,7 +73,16 @@ function boundedInput(entries: MemoryEntry[]): { entries: MemoryEntry[]; content
   for (const entry of entries.slice(0, 100)) {
     const next = [...selected, entry];
     const json = JSON.stringify(
-      next.map(({ id, revision, type, key, value }) => ({ id, revision, type, key, value })),
+      next.map(({ id, revision, type, key, value, roleLayers, workspaceRoot, validUntil }) => ({
+        id,
+        revision,
+        type,
+        key,
+        value,
+        roleLayers,
+        workspaceRoot,
+        validUntil,
+      })),
     );
     if (estimateTokenCount(json) > 12_000) break;
     selected.push(entry);
@@ -200,6 +209,10 @@ export async function runMemorySemanticAnalysis(input: {
             workspaceRoot: target.workspaceRoot,
             teamWorkspaceId: target.teamWorkspaceId,
             roleLayers: target.roleLayers,
+            dependencies: entries.map((entry) => ({
+              memoryId: entry.id,
+              revision: entry.revision,
+            })),
           },
           reason: `模型语义整理建议（尚未修改记忆）：${suggestion.reason}`,
         });

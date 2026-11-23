@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { MESSAGE_HARD_MAX_CHARS, readMessageMaxChars } from '../infra/message-limits-store.js';
 import { promises as fsp } from 'node:fs';
 import { join, relative } from 'node:path';
 import type {
@@ -6,7 +7,6 @@ import type {
   FileDiffContent,
   InputImageContent,
   StreamCancellationSummary,
-  ManagedAgentRecord,
   MessageContent,
   RunEvent,
   ToolCallObservabilityAnnotation,
@@ -29,54 +29,35 @@ import {
 } from '../provider/model-router.js';
 import { getProviderForSelection } from '../provider/provider-catalog.js';
 import { WorkflowLogger, createRequestContext } from '@openAwork/logger';
-import {
-  appendSessionMessageV2,
-  deleteSessionMessagesByRequestScope,
-  getSessionMessageByRequestId,
-  listSessionMessagesByRequestScope,
-  listSessionMessagesV2,
-} from '../message/message-v2-adapter.js';
+import { appendSessionMessageV2, listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import {
   triggerProactiveCompaction,
   triggerOverflowCompaction,
 } from '../compaction/auto-compaction-trigger.js';
 import { persistStreamUserMessage } from '../session/stream-session-title.js';
-import { deleteSessionEventsByRequestScope } from '../session/session-entry-store.js';
-import { buildCapabilityContext } from './capabilities.js';
 import {
-  CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
-  DIALOGUE_MODE_SYSTEM_PROMPTS,
-  LSP_TOOL_GUIDANCE_SYSTEM_PROMPT,
-  YOLO_MODE_SYSTEM_PROMPT,
   detectThinkingLanguageHintFromText,
+  ORCHESTRATOR_AGENT_IDS,
 } from './stream-system-prompts.js';
+import { calculateTokenUsageCost, resolveSessionPermissionMode } from '@openAwork/agent-core';
 import {
-  calculateTokenUsageCost,
-  KeywordDetectorImpl,
-  redactText,
-  resolveSessionPermissionMode,
-} from '@openAwork/agent-core';
-import {
-  deleteSessionRunEventsByRequest,
   flushSessionRunEventQueue,
   hasPersistedRunEvent,
-  listSessionRunEventsByRequestAfterSeq,
-  listSessionRunEventsByRequest,
   queueSessionRunEvent,
   subscribeSessionRunEvents,
 } from '../session/session-run-events.js';
-import { deriveRunEventBookend } from '../session/run-event-envelope.js';
 import { buildSingleToolPartialOutputWriter } from './single-tool-live-output.js';
 import {
   collectFileDiffsFromToolOutput,
   mergeFileDiffs,
   traceFileDiffs,
 } from '../tools/modified-files-summary.js';
+import { persistSessionFileDiffs } from '../session/session-file-diff-store.js';
 import {
-  deleteRequestFileDiffs,
-  persistSessionFileDiffs,
-} from '../session/session-file-diff-store.js';
-import { deleteRequestSnapshots } from '../session/session-snapshot-store.js';
+  createRunAcceptedEvent,
+  createRunEventMeta,
+  createStreamErrorChunk,
+} from './stream-sse-encoder.js';
 import { buildToolResultContent, buildToolResultRunEvent } from '../tools/tool-result-contract.js';
 import {
   createDefaultSandbox,
@@ -101,13 +82,33 @@ import {
   type PinnedSkillsSnapshot,
 } from '../skill/pinned-skills-prompt.js';
 import {
-  loadDynamicToolsForWorkspace,
   buildDynamicGatewayToolDefinitions,
-  type DynamicToolEntry,
+  loadDynamicToolsForWorkspace,
 } from '../tools/dynamic-tool-loader.js';
 import { buildStreamUsageChunk } from './stream-usage-event.js';
 import { isEnabledToolName, normalizeToolNameForEnablement } from './tool-name-compat.js';
-import { sanitizeSessionMetadataJson } from '../session/session-workspace-metadata.js';
+import {
+  buildErrorContent,
+  clearStaleReplayRequestArtifacts,
+  parseToolInput,
+  replayPersistedAssistantResponse,
+} from './stream-replay.js';
+export { replayPersistedAssistantResponse } from './stream-replay.js';
+import {
+  type StreamAgentSelection,
+  normalizeRequestedProviderId,
+  resolveStreamAgentSelection,
+} from './stream-agent-resolution.js';
+import {
+  assembleStreamPromptContext,
+  type AssembledStreamPromptContext,
+} from './stream-prompt-assembly.js';
+import { parseSessionProviderSelection, parseStoredJson } from './stream-auth.js';
+import type { SessionStreamContext } from './stream-auth.js';
+export { loadSessionContext, loadSessionUser } from './stream-auth.js';
+export type { SessionStreamContext } from './stream-auth.js';
+import { TeamModelBindingUnavailableError } from './stream-error-handler.js';
+export { TeamModelBindingUnavailableError } from './stream-error-handler.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
 import { validateWorkspacePath } from '../workspace/workspace-paths.js';
 import { resolveUnboundSessionWorkspaceFallback } from '../workspace/workspace-safety.js';
@@ -120,6 +121,7 @@ import {
 import {
   resolveSessionRuntimePolicy,
   isChannelManagedSessionMetadata,
+  isSourceManagedSessionMetadata,
 } from '../session/session-runtime-policy.js';
 import { resolveCanonicalName } from '../claude-code/claude-code-tool-surface.js';
 import { resolveChannelPersonaSystemPrompt } from '../channels/channel-persona-prompt.js';
@@ -132,6 +134,10 @@ import {
 import { listSessionTodos } from '../tools/todo-tools.js';
 import { isGatewayInternalRequestKey } from '../handoff/store/handoff-store.js';
 import { noteManualSessionInteraction } from '../task/task-wake-budget.js';
+import {
+  noteManualSessionInteractionForComposerQueue,
+  scheduleComposerQueueAutoRun,
+} from '../session/composer-queue-auto-run.js';
 import { completeConsumedBackgroundJobs } from '../task/task-job.js';
 import {
   detectRecoveryErrorType,
@@ -155,9 +161,8 @@ import {
   withUserDefaultThinkingFallback,
 } from '../session/session-route-selection.js';
 import { resolveUserDefaultThinkingForChat } from '../user/user-thinking-defaults.js';
-import { normalizeToolArgumentsForStorage } from '../tools/tool-result-contract.js';
 import { detectEmptyTaskResponse } from '../task/empty-task-response-detector.js';
-import { buildDynamicOrchestratorPrompt } from '../agent/dynamic-agent-prompt-builder.js';
+
 import { appendTaskResumeInfo } from '../task/task-resume-info.js';
 import { checkAiComments } from '../tools/comment-checker.js';
 import {
@@ -171,11 +176,6 @@ import {
 } from '../session/atlas-guard.js';
 import { checkRalphLoopContinuation } from '../session/ralph-loop.js';
 import {
-  detectStartWorkKeyword as detectUltraworkKeyword,
-  processStartWork,
-} from '../workspace/start-work.js';
-import { detectActiveCommandContext } from '../tools/command-templates.js';
-import {
   checkPrometheusToolGuard,
   PLANNING_CONSULT_WARNING,
   PROMETHEUS_WORKFLOW_REMINDER,
@@ -187,12 +187,10 @@ import {
 import { runModelRound, MAX_CONTINUATION_ROUNDS } from './stream-model-round.js';
 import { resolveStreamFailureMessages } from './stream-failure-messages.js';
 
-export const STREAM_ERROR_MESSAGES = {
-  inputImageMissingSource: 'input_image 必须提供 artifactId、fileId 或 imageUrl 其中之一。',
-  requestReplayFailed: '请求重放失败。',
-  sessionAlreadyRunning: '当前会话已有请求正在运行。',
-  teamModelBindingUnavailable: '团队会话绑定的模型当前不可用，请在团队模板或会话中重新绑定模型。',
-} as const;
+// 错误消息映射表以 `stream-error-handler.ts` 为唯一真相源：此前此处另存一份逐字相同的副本，
+// 改一处漏一处。改为从叶子模块导入并原样 re-export，保持对外导出形状与取值完全不变。
+export { STREAM_ERROR_MESSAGES } from './stream-error-handler.js';
+import { STREAM_ERROR_MESSAGES } from './stream-error-handler.js';
 import { dispatchChatMessage } from '../runtime/plugin-host.js';
 import {
   clearSessionRuntimeThread,
@@ -202,8 +200,6 @@ import {
 } from '../session/session-runtime-thread-store.js';
 import { resolveSessionInteractionStateUpdate } from '../session/session-runtime-state.js';
 import { persistMonthlyUsageRecord } from '../session/usage-records-store.js';
-import { listManagedAgentsForUser } from '../agent/agent-catalog.js';
-import { selectDelegatedModelForUser } from '../task/task-model-selection.js';
 import {
   DEFAULT_UPSTREAM_RETRY_MAX_RETRIES,
   readUpstreamRetrySettings,
@@ -215,10 +211,6 @@ import {
   autoExtractMemoriesForRequest,
   buildMemoryBlockForSession,
 } from '../memory/memory-runtime.js';
-import {
-  buildCompanionPrompt,
-  loadCompanionSettingsForUser,
-} from '../workspace/companion-settings.js';
 import {
   peekDoomLoop,
   recordDoomLoopEntry,
@@ -576,7 +568,7 @@ export const streamRequestSchema = modelRequestSchema.omit({ model: true }).exte
   // `maxTokens` 继承自 `modelRequestSchema`：可选、无默认值。
   // 未显式指定时不下发 `max_tokens`（见 `provider/model-router.ts` 的注释）。
   agentId: z.string().trim().min(1).max(120).optional(),
-  displayMessage: z.string().min(1).max(32768).optional(),
+  displayMessage: z.string().min(1).max(MESSAGE_HARD_MAX_CHARS).optional(),
   dialogueMode: z.enum(['clarify', 'coding', 'programmer']).optional(),
   inputParts: z
     .preprocess((value) => {
@@ -590,7 +582,7 @@ export const streamRequestSchema = modelRequestSchema.omit({ model: true }).exte
       return value;
     }, z.array(inputImagePartSchema))
     .optional(),
-  message: z.string().max(32768),
+  message: z.string().max(MESSAGE_HARD_MAX_CHARS),
   model: z.string().min(1).max(200).optional(),
   providerId: z.string().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(128),
@@ -650,6 +642,15 @@ export const streamRequestSchema = modelRequestSchema.omit({ model: true }).exte
     }, z.boolean())
     .optional(),
 });
+
+/** 外部入口按当前全局配置校验，内部续跑继续使用结构 schema。 */
+export function createExternalStreamRequestSchema() {
+  const maxChars = readMessageMaxChars();
+  return streamRequestSchema.extend({
+    message: z.string().max(maxChars),
+    displayMessage: z.string().min(1).max(maxChars).optional(),
+  });
+}
 
 export const stopStreamSchema = z.object({
   clientRequestId: z.string().min(1).max(128),
@@ -747,60 +748,12 @@ export function buildStreamToolObservability(input: {
   };
 }
 
-export interface SessionStreamContext {
-  metadataJson: string;
-  roleLayer?: string | null;
-}
-
-interface SessionUserRow {
-  email: string;
-}
-
-interface SessionProviderSelection {
-  /**
-   * 会话绑定的 Agent（`metadata.agentId`，客户端会话设置写入、PATCH 白名单内的正式键）。
-   *
-   * 请求未显式携带 `agentId` 时用它兜底：后台续跑（`continueSessionFromHistory`）、
-   * 子代理唤醒、GitHub 事件等轮次都不带请求级 agentId，若不兜底就会丢掉角色提示词。
-   */
-  agentId?: string;
-  delegatedSystemPrompt?: string;
-  modelId?: string;
-  providerId?: string;
-  reasoningEffort?: string;
-  systemPrompt?: string;
-  thinkingEnabled?: boolean;
-  variant?: string;
-}
-
 interface StreamInteractionModes {
   dialogueMode?: DialogueMode;
   yoloMode: boolean;
 }
 
-type StreamAgentDowngradeReason = 'agent_disabled' | 'agent_model_unavailable' | 'agent_not_found';
-
-interface StreamAgentSelection {
-  deferToolLoading?: boolean;
-  downgradeReason?: StreamAgentDowngradeReason;
-  effectiveAgentId?: string;
-  modelId?: string;
-  providerId?: string;
-  requestedAgentId?: string;
-  systemPrompt?: string;
-  variant?: string;
-}
-
 type ResolvedStreamModelRoute = ModelRouteConfig & StreamAgentSelection;
-
-export class TeamModelBindingUnavailableError extends Error {
-  readonly code = 'TEAM_MODEL_BINDING_UNAVAILABLE';
-
-  constructor() {
-    super(STREAM_ERROR_MESSAGES.teamModelBindingUnavailable);
-    this.name = 'TeamModelBindingUnavailableError';
-  }
-}
 
 function isTeamRoleLayer(value: string | null | undefined): boolean {
   return (
@@ -935,15 +888,7 @@ function createAbortError(): Error {
   return error;
 }
 
-export function createRunEventMeta(runId: string, sequence: { value: number }) {
-  const eventId = `${runId}:evt:${sequence.value}`;
-  sequence.value += 1;
-  return {
-    eventId,
-    runId,
-    occurredAt: Date.now(),
-  };
-}
+export { createRunEventMeta } from './stream-sse-encoder.js';
 
 function resolveStreamRouteProviderId(route: ModelRouteConfig): string | undefined {
   return route.providerId ?? route.providerType;
@@ -1024,7 +969,10 @@ export const TOOLS_REQUIRING_NON_EMPTY_ARGS = new Set([
   'multi_edit',
   'patch',
   'submit_patch',
+  // 委派工具：历史别名 `task` 与规范名 `subagent`（`TASK_TOOL_NAME`）同属一个工具，
+  // 空参调用都应被前置拦截（261102 规范名收敛遗留项 #5）。
   'task',
+  'subagent',
   'task_create',
   'todowrite',
   'subtodowrite',
@@ -1054,385 +1002,6 @@ function isMissingRequiredToolArguments(
   return Object.keys(rawInput).length === 0;
 }
 
-export function replayPersistedAssistantResponse(input: {
-  clientRequestId: string;
-  runId: string;
-  sessionId: string;
-  userId: string;
-  writeChunk: (chunk: RunEvent) => void;
-  afterSeq?: number;
-}): NonNullable<HandleStreamResult['stopReason']> | false {
-  const durableEvents =
-    typeof input.afterSeq === 'number' && input.afterSeq > 0
-      ? listSessionRunEventsByRequestAfterSeq({
-          sessionId: input.sessionId,
-          clientRequestId: input.clientRequestId,
-          afterSeq: input.afterSeq,
-        }).map(({ event }) => event)
-      : listSessionRunEventsByRequest({
-          sessionId: input.sessionId,
-          clientRequestId: input.clientRequestId,
-        });
-  if (durableEvents.length > 0) {
-    const latestBookend = deriveRunEventBookend(durableEvents.at(-1)!);
-    if (latestBookend?.kind === 'run_failed') {
-      return false;
-    }
-
-    if (latestBookend?.replayable === true) {
-      durableEvents.forEach((event) => {
-        input.writeChunk(event);
-      });
-      return latestBookend.kind === 'interaction_wait'
-        ? 'tool_permission'
-        : (toStreamStopReason(latestBookend.stopReason) ?? 'error');
-    }
-
-    if (latestBookend?.replayable === false) {
-      return false;
-    }
-  }
-
-  const stored = getSessionMessageByRequestId({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    clientRequestId: input.clientRequestId,
-    role: 'assistant',
-  });
-  if (!stored) return false;
-
-  const scopedMessages = listSessionMessagesByRequestScope({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    clientRequestId: input.clientRequestId,
-  });
-  const toolNames = new Map<string, string>();
-  const replayedToolResultIds = new Set<string>();
-  scopedMessages.forEach((message) => {
-    message.content.forEach((content) => {
-      if (content.type === 'tool_call') {
-        toolNames.set(content.toolCallId, content.toolName);
-      }
-    });
-  });
-  let sequence = 1;
-  scopedMessages.forEach((message) => {
-    message.content.forEach((content) => {
-      const meta = {
-        eventId: `${input.runId}:replay:${sequence++}`,
-        runId: input.runId,
-        occurredAt: Date.now(),
-      };
-
-      if (message.role === 'assistant' && content.type === 'text' && content.text.length > 0) {
-        input.writeChunk({ type: 'text_delta', delta: redactText(content.text), ...meta });
-        return;
-      }
-
-      if (message.role === 'assistant' && content.type === 'tool_call') {
-        input.writeChunk({
-          type: 'tool_call_delta',
-          toolCallId: content.toolCallId,
-          toolName: content.toolName,
-          inputDelta: normalizeToolArgumentsForStorage(content.rawArguments ?? content.input),
-          ...meta,
-        });
-        return;
-      }
-
-      if (content.type === 'tool_result' && !replayedToolResultIds.has(content.toolCallId)) {
-        replayedToolResultIds.add(content.toolCallId);
-        input.writeChunk(
-          buildToolResultRunEvent({
-            toolCallId: content.toolCallId,
-            toolName: content.toolName ?? toolNames.get(content.toolCallId) ?? 'tool',
-            clientRequestId: content.clientRequestId ?? input.clientRequestId,
-            output: content.output,
-            isError: content.isError,
-            fileDiffs: content.fileDiffs,
-            pendingPermissionRequestId: content.pendingPermissionRequestId,
-            observability: content.observability,
-            ...(content.resumedAfterApproval ? { resumedAfterApproval: true } : {}),
-            eventMeta: meta,
-          }),
-        );
-      }
-    });
-  });
-
-  if (stored.status === 'error') {
-    return false;
-  }
-
-  input.writeChunk({
-    type: 'done',
-    stopReason: 'end_turn',
-    eventId: `${input.runId}:replay:${sequence}`,
-    runId: input.runId,
-    occurredAt: Date.now(),
-  });
-  return 'end_turn';
-}
-
-function clearStaleReplayRequestArtifacts(input: {
-  clientRequestId: string;
-  sessionId: string;
-  userId: string;
-}): boolean {
-  const durableEvents = listSessionRunEventsByRequest({
-    sessionId: input.sessionId,
-    clientRequestId: input.clientRequestId,
-  });
-  const latestEvent = durableEvents.at(-1);
-  const latestBookend = latestEvent ? deriveRunEventBookend(latestEvent) : undefined;
-  const stored = getSessionMessageByRequestId({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    clientRequestId: input.clientRequestId,
-    role: 'assistant',
-  });
-
-  const shouldClearRequestScope =
-    latestBookend?.kind === 'run_failed' ||
-    latestBookend?.replayable === false ||
-    stored?.status === 'error' ||
-    (durableEvents.length > 0 && latestBookend === undefined && !stored);
-
-  if (!shouldClearRequestScope) {
-    return false;
-  }
-
-  deleteSessionRunEventsByRequest({
-    sessionId: input.sessionId,
-    clientRequestId: input.clientRequestId,
-  });
-
-  deleteSessionMessagesByRequestScope({
-    sessionId: input.sessionId,
-    userId: input.userId,
-    clientRequestId: input.clientRequestId,
-    roles: ['assistant', 'tool', 'synthetic'],
-  });
-  deleteRequestFileDiffs({
-    clientRequestId: input.clientRequestId,
-    sessionId: input.sessionId,
-    userId: input.userId,
-  });
-  deleteRequestSnapshots({
-    clientRequestId: input.clientRequestId,
-    sessionId: input.sessionId,
-    userId: input.userId,
-  });
-  deleteSessionEventsByRequestScope({
-    clientRequestId: input.clientRequestId,
-    sessionId: input.sessionId,
-    userId: input.userId,
-  });
-  return true;
-}
-
-function parseToolInput(raw: string): Record<string, unknown> {
-  const normalized = raw.trim();
-  if (normalized.length === 0) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(normalized) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    return { raw: normalized };
-  }
-
-  return { raw: normalized };
-}
-
-function buildErrorContent(code: string, message: string): MessageContent[] {
-  return [{ type: 'text', text: `[错误: ${code}] ${message}`.trim() }];
-}
-
-export function loadSessionContext(sessionId: string, userId: string): SessionStreamContext | null {
-  const session = sqliteGet<{ metadata_json: string; role_layer: string | null }>(
-    'SELECT metadata_json, role_layer FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
-    [sessionId, userId],
-  );
-  if (!session) return null;
-  return {
-    metadataJson: sanitizeSessionMetadataJson(session.metadata_json),
-    roleLayer: session.role_layer,
-  };
-}
-
-export function loadSessionUser(sessionId: string, userId: string): JwtPayload | null {
-  const user = sqliteGet<SessionUserRow>(
-    `SELECT u.email
-     FROM users u
-     JOIN sessions s ON s.user_id = u.id
-     WHERE s.id = ? AND u.id = ?
-     LIMIT 1`,
-    [sessionId, userId],
-  );
-
-  if (!user) {
-    return null;
-  }
-
-  return {
-    sub: userId,
-    email: user.email,
-  };
-}
-
-function parseSessionProviderSelection(metadataJson: string): SessionProviderSelection {
-  try {
-    const parsed = JSON.parse(metadataJson) as Record<string, unknown>;
-    const channel = parsed['channel'];
-    const channelRecord =
-      typeof channel === 'object' && channel !== null ? (channel as Record<string, unknown>) : null;
-    return {
-      agentId: typeof parsed['agentId'] === 'string' ? parsed['agentId'] : undefined,
-      providerId:
-        typeof parsed['providerId'] === 'string'
-          ? parsed['providerId']
-          : typeof channelRecord?.['providerId'] === 'string'
-            ? channelRecord['providerId']
-            : undefined,
-      modelId:
-        typeof parsed['modelId'] === 'string'
-          ? parsed['modelId']
-          : typeof channelRecord?.['model'] === 'string'
-            ? channelRecord['model']
-            : undefined,
-      variant:
-        typeof parsed['variant'] === 'string'
-          ? parsed['variant']
-          : typeof channelRecord?.['variant'] === 'string'
-            ? channelRecord['variant']
-            : undefined,
-      delegatedSystemPrompt:
-        typeof parsed['delegatedSystemPrompt'] === 'string'
-          ? parsed['delegatedSystemPrompt']
-          : undefined,
-      systemPrompt: typeof parsed['systemPrompt'] === 'string' ? parsed['systemPrompt'] : undefined,
-      thinkingEnabled:
-        typeof parsed['thinkingEnabled'] === 'boolean' ? parsed['thinkingEnabled'] : undefined,
-      reasoningEffort:
-        typeof parsed['reasoningEffort'] === 'string' ? parsed['reasoningEffort'] : undefined,
-    };
-  } catch {
-    return {};
-  }
-}
-
-function parseStoredJson<T>(value: string | undefined): T | undefined {
-  if (!value) return undefined;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return undefined;
-  }
-}
-
-function normalizeRequestedAgentId(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : undefined;
-}
-
-function normalizeRequestedProviderId(providerId: string | undefined): string | undefined {
-  const normalized = providerId?.trim();
-  return normalized && normalized.length > 0 ? normalized : undefined;
-}
-
-function normalizeManagedAgentIdentifier(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function findManagedStreamAgent(
-  agents: ManagedAgentRecord[],
-  requestedAgentId: string,
-): ManagedAgentRecord | undefined {
-  const normalizedRequestedAgentId = normalizeManagedAgentIdentifier(requestedAgentId);
-  return agents.find((agent) => {
-    if (normalizeManagedAgentIdentifier(agent.id) === normalizedRequestedAgentId) {
-      return true;
-    }
-
-    if (normalizeManagedAgentIdentifier(agent.label) === normalizedRequestedAgentId) {
-      return true;
-    }
-
-    return agent.aliases.some(
-      (alias) => normalizeManagedAgentIdentifier(alias) === normalizedRequestedAgentId,
-    );
-  });
-}
-
-function normalizeAgentModelCandidate(modelId: string): string {
-  const normalized = modelId.trim();
-  return normalized.includes('/') ? (normalized.split('/').at(-1) ?? normalized) : normalized;
-}
-
-function getManagedAgentModelCandidates(agent: ManagedAgentRecord): string[] {
-  return Array.from(
-    new Set(
-      [agent.model, ...(agent.fallbackModels ?? [])]
-        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-        .map((value) => normalizeAgentModelCandidate(value)),
-    ),
-  );
-}
-
-function resolveStreamAgentSelection(input: {
-  requestedAgentId: string | undefined;
-  sessionAgentId?: string | undefined;
-  userId: string;
-}): StreamAgentSelection {
-  // 请求显式值优先；缺席时落到会话绑定（见 SessionProviderSelection.agentId）。
-  const requestedAgentId =
-    normalizeRequestedAgentId(input.requestedAgentId) ??
-    normalizeRequestedAgentId(input.sessionAgentId);
-  if (!requestedAgentId) {
-    return {};
-  }
-
-  const agents = listManagedAgentsForUser(input.userId);
-  const matchedAgent = findManagedStreamAgent(agents, requestedAgentId);
-  if (!matchedAgent) {
-    return {
-      downgradeReason: 'agent_not_found',
-      requestedAgentId,
-    };
-  }
-
-  if (!matchedAgent.enabled) {
-    return {
-      downgradeReason: 'agent_disabled',
-      requestedAgentId,
-    };
-  }
-
-  const modelCandidates = getManagedAgentModelCandidates(matchedAgent);
-  const delegatedModel =
-    modelCandidates.length > 0
-      ? selectDelegatedModelForUser(input.userId, modelCandidates)
-      : undefined;
-
-  return {
-    ...(modelCandidates.length > 0 && !delegatedModel?.providerId
-      ? { downgradeReason: 'agent_model_unavailable' as const }
-      : {}),
-    deferToolLoading: matchedAgent.deferToolLoading === true ? true : undefined,
-    effectiveAgentId: matchedAgent.id,
-    modelId: delegatedModel?.modelId,
-    providerId: delegatedModel?.providerId,
-    requestedAgentId,
-    systemPrompt: matchedAgent.systemPrompt,
-    variant: delegatedModel?.variant ?? matchedAgent.variant,
-  };
-}
-
 function normalizeRequestedModelId(modelId: string | undefined): string | undefined {
   if (!modelId || modelId === 'default') {
     return undefined;
@@ -1450,6 +1019,22 @@ export function resolveStreamInteractionModes(input: {
   requestData: StreamRequest;
 }): StreamInteractionModes {
   const metadata = parseSessionMetadataJson(input.metadataJson);
+  // 来源托管会话（渠道 / 定时任务）没有对话模式：**请求级与 metadata 一律忽略**。
+  //
+  // 通道侧入站回合由服务端自建 StreamRequest（不带 dialogueMode），此前只能靠
+  // metadata 兜底；一旦 metadata 被网页端误写入 `dialogueMode: 'clarify'`，澄清的
+  // 只读白名单会连渠道回复工具一起过滤掉（渠道会话无法回消息）。网页端误发请求级
+  // `dialogueMode` 同理——该值对这些会话本就没有语义，忽略才是正确收敛。
+  if (isSourceManagedSessionMetadata(metadata)) {
+    const requestPermissionMode = input.requestData.permissionMode;
+    return {
+      dialogueMode: undefined,
+      yoloMode:
+        requestPermissionMode !== undefined
+          ? requestPermissionMode === 'yolo'
+          : (input.requestData.yoloMode ?? resolveSessionPermissionMode(metadata) === 'yolo'),
+    };
+  }
   const metadataDialogueMode = isDialogueMode(metadata['dialogueMode'])
     ? metadata['dialogueMode']
     : undefined;
@@ -1474,7 +1059,7 @@ export async function resolveStreamModelRoute(input: {
   userId: string;
 }): Promise<ResolvedStreamModelRoute> {
   const sessionSelection = parseSessionProviderSelection(input.metadataJson);
-  const agentSelection = resolveStreamAgentSelection({
+  const agentSelection = await resolveStreamAgentSelection({
     requestedAgentId: input.requestData.agentId,
     sessionAgentId: sessionSelection.agentId,
     userId: input.userId,
@@ -1524,6 +1109,22 @@ export async function resolveStreamModelRoute(input: {
   };
   const hasExplicitRequestSelection =
     requestedProviderId !== undefined && requestedModelId !== undefined;
+
+  /**
+   * 会话级上下文挡位优先于模型级配置。
+   *
+   * 「上下文长度」的作用域是**会话**：模型级 `contextWindowOverride`
+   * （`user_settings.providers`）只是该用户下所有会话共享的默认值，会话
+   * metadata 里一旦写了 `contextWindowOverride`，本轮就必须用它。
+   * 未写时保持模型级 / preset 的既有行为。
+   */
+  const sessionContextWindowOverride = sessionSelection.contextWindowOverride;
+  const withSessionContextWindowOverride = <T extends { contextWindowOverride?: number }>(
+    route: T,
+  ): T =>
+    sessionContextWindowOverride === undefined
+      ? route
+      : { ...route, contextWindowOverride: sessionContextWindowOverride };
   const providerConfig = await getProviderForSelection(
     input.userId,
     {
@@ -1548,7 +1149,7 @@ export async function resolveStreamModelRoute(input: {
     );
     return {
       ...agentSelection,
-      ...route,
+      ...withSessionContextWindowOverride(route),
     };
   }
 
@@ -1562,44 +1163,13 @@ export async function resolveStreamModelRoute(input: {
   });
   return {
     ...agentSelection,
-    ...route,
+    ...withSessionContextWindowOverride(route),
   };
 }
 
 export function createToolResultRequestId(clientRequestId: string, toolCallId: string): string {
   return `${clientRequestId}:tool:${toolCallId}`;
 }
-
-// ---------------------------------------------------------------------------
-// Agent usage reminder (oh-my-opencode agentUsageReminder pattern)
-// ---------------------------------------------------------------------------
-
-const SEARCH_READ_TOOLS = new Set([
-  'grep',
-  'glob',
-  'read',
-  'list',
-  'websearch',
-  'web_fetch',
-  'webfetch',
-  'codesearch',
-  'codebase_search',
-  'ast_grep_search',
-  'ast-grep-search',
-]);
-
-const AGENT_DELEGATION_TOOLS = new Set(['task_create', 'task', 'call_omo_agent', 'delegate_task']);
-
-const ORCHESTRATOR_AGENT_IDS = new Set(['sisyphus', 'atlas', 'zeus']);
-
-const AGENT_USAGE_REMINDER_SUFFIX = `
-
-[Agent Usage Reminder]
-You called a search/read tool directly. For complex multi-file exploration, consider using the task tool to delegate work:
-- task_create: Create a sub-agent task for parallel exploration
-- Multiple parallel tasks can run simultaneously while you continue working
-- Sub-agents can perform deeper, more thorough searches
-ALWAYS prefer: Multiple parallel task_create calls > Direct search tool calls`;
 
 export async function executeToolCalls(input: {
   agentId?: string;
@@ -1667,13 +1237,6 @@ export async function executeToolCalls(input: {
   }> = [];
   let blockingPermissionRequestId: string | undefined;
 
-  // Agent usage reminder state (oh-my-opencode agentUsageReminder pattern)
-  // Track whether task/delegation tools have been used in this turn's tool call batch.
-  // NOTE: this is turn-scoped (resets per executeToolCalls call), not session-scoped.
-  let taskToolUsedInTurn = false;
-  let agentUsageReminderCount = 0;
-  const MAX_AGENT_USAGE_REMINDERS = 3;
-
   for (const [toolCallId, toolCall] of input.state.toolCalls.entries()) {
     if (input.signal.aborted) {
       throw createAbortError();
@@ -1693,7 +1256,19 @@ export async function executeToolCalls(input: {
     // Deliberately placed BEFORE `recordTaskToolCallOrThrow`: a held-back call is
     // never executed, so it must not feed the doom-loop counter (recording it
     // could trip the guard and fail the whole turn for a call that never ran).
-    if (hasPendingPermission && !isPermissionSafeSiblingTool(canonicalToolName)) {
+    if (
+      hasPendingPermission &&
+      !isPermissionSafeSiblingTool(
+        canonicalToolName,
+        parseToolInput(toolCall.inputText),
+        parseSessionMetadataJson(
+          sqliteGet<{ metadata_json: string }>(
+            'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ?',
+            [input.sessionId, input.userId],
+          )?.metadata_json ?? '{}',
+        ),
+      )
+    ) {
       blockedToolCalls.push({
         toolCallId,
         toolName: toolCall.toolName,
@@ -1738,7 +1313,7 @@ export async function executeToolCalls(input: {
       }
 
       // Atlas guard (oh-my-opencode atlas pattern):
-      // Orchestrator agents must delegate, not implement directly.
+      // Keep delegated work focused without requiring Sisyphus to delegate small edits.
       const atlasGuard = checkAtlasGuard({
         agentId: currentAgentId,
         toolName: canonicalToolName,
@@ -1752,11 +1327,6 @@ export async function executeToolCalls(input: {
       // Inject single-task directive for delegate_task from orchestrators
       if (atlasGuard.injectSingleTaskDirective && typeof parsedInput['prompt'] === 'string') {
         parsedInput['prompt'] = SINGLE_TASK_DIRECTIVE + parsedInput['prompt'];
-      }
-
-      // Inject delegation-required warning for write/edit outside .sisyphus/ by orchestrators
-      if (atlasGuard.injectDelegationWarning && atlasGuard.delegationWarningFilePath) {
-        // This is a soft warning (not a block) — the tool still executes but a reminder is appended post-execution
       }
 
       // Sisyphus Junior notepad directive (oh-my-opencode sisyphus-junior-notepad pattern):
@@ -1847,33 +1417,6 @@ export async function executeToolCalls(input: {
                 durationMs: 0,
               };
 
-    // Agent usage reminder (oh-my-opencode agentUsageReminder pattern):
-    // When search/read tools are called directly without using task delegation,
-    // append a reminder to encourage using task tools for better results.
-    if (AGENT_DELEGATION_TOOLS.has(canonicalToolName)) {
-      taskToolUsedInTurn = true;
-    } else if (
-      !result.isError &&
-      !taskToolUsedInTurn &&
-      agentUsageReminderCount < MAX_AGENT_USAGE_REMINDERS &&
-      SEARCH_READ_TOOLS.has(canonicalToolName) &&
-      !(typeof result.output === 'string' && /no files? found/i.test(result.output.trim()))
-    ) {
-      if (typeof result.output === 'string') {
-        result.output += AGENT_USAGE_REMINDER_SUFFIX;
-      } else if (result.output && typeof result.output === 'object') {
-        try {
-          const obj = result.output as Record<string, unknown>;
-          if (typeof obj['output'] === 'string') {
-            obj['output'] += AGENT_USAGE_REMINDER_SUFFIX;
-          }
-        } catch {
-          /* non-string output, skip */
-        }
-      }
-      agentUsageReminderCount++;
-    }
-
     // Delegate task retry (oh-my-opencode delegate-task-retry pattern):
     // When task/delegate_task returns an error, detect the pattern and append
     // retry guidance so the LLM can self-correct on the next turn.
@@ -1889,7 +1432,7 @@ export async function executeToolCalls(input: {
 
     // Atlas guard post-processing (oh-my-opencode atlas pattern):
     // Append verification reminder + boulder progress after delegate_task for orchestrators.
-    // Append delegation-required warning after write/edit outside .sisyphus/ for orchestrators.
+    // Keep direct-write reminders for Atlas and Zeus, not for Sisyphus.
     if (typeof result.output === 'string' && ORCHESTRATOR_AGENT_IDS.has(currentAgentId)) {
       const atlasReminder = await buildAtlasPostProcessReminder({
         agentId: currentAgentId,
@@ -2199,6 +1742,17 @@ export async function handleStreamRequest(input: {
         error instanceof Error ? error.message : String(error),
       );
     }
+    try {
+      noteManualSessionInteractionForComposerQueue({
+        sessionId: input.sessionId,
+        userId: input.user.sub,
+      });
+    } catch (error) {
+      logGatewayWarn(
+        '[stream] noteManualSessionInteractionForComposerQueue failed',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
   const userVisibleMessage = input.teamResumeRootSessionId
     ? (requestData.displayMessage ?? '恢复团队会话')
@@ -2364,76 +1918,44 @@ export async function handleStreamRequest(input: {
   // 在并发写抢锁时还会被 busy_timeout 放大。单独计时以便在网关日志里直接归因，
   // 避免只能靠客户端的「首token」总指标去猜。
   const stepPrepare = wl.start('stream.prepare-sync');
-  // 用**生效**的 Agent（含会话绑定回退）解析 companion 绑定：否则同一会话的前台轮
-  // （请求带 agentId）与后台续跑 / 唤醒 / 事件轮（请求不带）会命中不同的 companion
-  // 配置，同一份历史在两种轮次下拿到不一致的语音与提示词绑定。
-  const companionPrompt = buildCompanionPrompt(
-    loadCompanionSettingsForUser(
-      input.user.sub,
-      input.user.email,
-      route.effectiveAgentId ?? requestData.agentId,
-    ),
-    userVisibleMessage,
-  );
-  const capabilityContext = runtimePolicy.includeCapabilityContext
-    ? buildCapabilityContext(input.user.sub, input.sessionId)
-    : null;
-  // Dynamic agent prompt (oh-my-opencode dynamic-agent-prompt-builder pattern):
-  // For orchestrator agents (sisyphus, atlas, zeus), inject delegation table,
-  // tool selection table, key triggers, and agent-specific sections.
-  const effectiveAgentId = route.effectiveAgentId ?? requestData.agentId ?? '';
-  const dynamicAgentPrompt = ORCHESTRATOR_AGENT_IDS.has(effectiveAgentId)
-    ? buildDynamicOrchestratorPrompt()
-    : null;
-  const detector = new KeywordDetectorImpl();
-  const detection = detector.detect(requestData.message);
-  const injectedPrompt = detection.injectedPrompt ?? null;
-
-  // Start-work (oh-my-opencode start-work pattern):
-  // Detect "ultrawork/ulw" keyword and inject plan context + create boulder state.
-  let startWorkContext: string | null = null;
-  // 已绑定：用会话路径；未绑定：回退到桌面端默认目录（禁止 process.cwd() 落到盘符根）。
-  const workspaceRootForStartWork = workspacePath ?? resolveUnboundSessionWorkspaceFallback();
-  if (detectUltraworkKeyword(requestData.message)) {
-    try {
-      startWorkContext = await processStartWork(
-        workspaceRootForStartWork,
-        input.sessionId,
-        requestData.message,
-      );
-    } catch (error) {
-      wl.fail(stepPrepare, 'start-work 失败');
-      return failReservation(error);
-    }
-  }
-
-  // Command templates (oh-my-opencode builtin-commands pattern):
-  // Detect active command context from session metadata and inject workflow instructions.
-  const commandContext = detectActiveCommandContext(input.sessionContext.metadataJson);
-  const lspGuidance = runtimePolicy.includeLspGuidance
-    ? interactionModes.dialogueMode === 'clarify'
-      ? CLARIFY_LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
-      : LSP_TOOL_GUIDANCE_SYSTEM_PROMPT
-    : null;
-  const hasExplicitAgent = !!route.effectiveAgentId;
-  const dialogueModePrompt =
-    !hasExplicitAgent && interactionModes.dialogueMode !== undefined
-      ? DIALOGUE_MODE_SYSTEM_PROMPTS[interactionModes.dialogueMode]
-      : null;
-  const yoloModePrompt = interactionModes.yoloMode === true ? YOLO_MODE_SYSTEM_PROMPT : null;
-  const webSearchEnabled =
-    requestData.webSearchEnabled ?? isWebSearchEnabled(input.sessionContext.metadataJson);
-
-  const dynamicToolDefsPromise = runtimePolicy.includeDynamicWorkspaceTools
-    ? loadDynamicToolsForWorkspace(workspaceRootForStartWork, input.sessionId).catch(
-        (error: unknown) => {
-          logGatewayWarn(
-            `[stream] Failed to load dynamic tools for ${workspaceRootForStartWork}: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          return [] as DynamicToolEntry[];
+  // 提示词 / 上下文组装（companion、能力目录、关键词检测、start-work、命令模板、
+  // LSP / 对话模式 / YOLO 模式提示词、websearch 开关、动态工作区工具加载）。
+  // 组装细节见 `stream-prompt-assembly.ts`；`dynamicToolDefsPromise` 在返回前已启动。
+  let assembledPromptContext: AssembledStreamPromptContext;
+  try {
+    assembledPromptContext = await assembleStreamPromptContext({
+      interactionModes,
+      requestData,
+      route,
+      runtimePolicy,
+      sessionContext: input.sessionContext,
+      sessionId: input.sessionId,
+      user: input.user,
+      userVisibleMessage,
+      workspacePath,
+      workflow: {
+        failPrepare: (reason) => {
+          wl.fail(stepPrepare, reason);
         },
-      )
-    : Promise.resolve([] as DynamicToolEntry[]);
+      },
+    });
+  } catch (error) {
+    return failReservation(error);
+  }
+  const {
+    capabilityContext,
+    commandContext,
+    companionPrompt,
+    dialogueModePrompt,
+    dynamicToolDefsPromise,
+    dynamicAgentPrompt,
+    injectedPrompt,
+    lspGuidance,
+    startWorkContext,
+    webSearchEnabled,
+    workspaceRootForStartWork,
+    yoloModePrompt,
+  } = assembledPromptContext;
 
   clearStaleReplayRequestArtifacts({
     clientRequestId: requestData.clientRequestId,
@@ -2612,21 +2134,22 @@ export async function handleStreamRequest(input: {
       //
       // 直接走 `input.writeChunk`（传输层）而**不是** `emitChunk`：后者会 INSERT 进
       // `session_run_events` 并广播给 attach 订阅者，于是「已受理」会被重连回放——一个
-      // 若干秒前的受理确认重放出来，客户端只会误判成新的一轮刚刚开始。见
-      // `StreamRunAcceptedChunk` 的说明。
+      // 若干秒前的受理确认重放出来，客户端只会误判成新的一轮刚刚开始。
+      // `createRunAcceptedEvent` 是该事件的唯一构造入口。
       //
       // 位置选在此处而不是更早：单飞锁已持有、模型路由已确定，此刻的确认不会在半路被
       // 拒绝（`SESSION_ALREADY_RUNNING` 那条路径已在更早处 return）。
-      input.writeChunk({
-        type: 'run_accepted',
-        occurredAt: Date.now(),
-        requestId: requestData.clientRequestId,
-        runId,
-        // 手拼 eventId 而不是走 `createRunEventMeta(runId, eventSequence)`：后者会占用一个
-        // 序列号，而本事件不入库，会让 `session_run_events.seq` 出现无法解释的跳号。
-        // 同一 runId 只会受理一次，故这个 id 天然唯一（与 `createStreamErrorChunk` 同法）。
-        eventId: `${runId}:accepted`,
-      });
+      //
+      // 形状由 `stream-sse-encoder` 的工厂统一，**不要在这里手写对象**——同一个事件
+      // 曾经被写成两份，改一处漏一处。该工厂已被 `stream-layered-refactor-simple.test.ts`
+      // 覆盖；它也刻意不占用 `eventSequence`，避免让不入库的事件在
+      // `session_run_events.seq` 上留下无法解释的跳号。
+      input.writeChunk(
+        createRunAcceptedEvent({
+          runId,
+          requestId: requestData.clientRequestId,
+        }),
+      );
 
       // Reset doom loop history at the start of each new user message stream
       resetDoomLoopHistory(input.sessionId);
@@ -3054,9 +2577,7 @@ export async function handleStreamRequest(input: {
                     lastRoundUsage: { inputTokens: renderedMessageTokens },
                     requestKind: 'conversation',
                   });
-                  if (proactiveResult.triggered) {
-                    input.sessionContext.metadataJson = proactiveResult.metadataJson;
-                  }
+                  input.sessionContext.metadataJson = proactiveResult.metadataJson;
                   return proactiveResult.triggered;
                 },
               }
@@ -3074,6 +2595,7 @@ export async function handleStreamRequest(input: {
               round,
               runId,
               usage: result.usage,
+              context: { userId: input.user.sub, route, autoCompact: compactionSettings.auto },
             }),
           );
           persistMonthlyUsageRecord({
@@ -3159,8 +2681,8 @@ export async function handleStreamRequest(input: {
               upstreamError: result.upstreamError,
             },
           });
-          if (overflowResult.triggered) {
-            input.sessionContext.metadataJson = overflowResult.metadataJson;
+          input.sessionContext.metadataJson = overflowResult.metadataJson;
+          if (overflowResult.recovered || overflowResult.syntheticContinuationPrompt) {
             overflowTriggered = true;
             if (overflowResult.syntheticContinuationPrompt) {
               syntheticContinuationPrompt = overflowResult.syntheticContinuationPrompt;
@@ -3536,7 +3058,10 @@ export async function handleStreamRequest(input: {
       role: 'assistant',
       // 用 describeError 的结果而非 `String(err)`：后者对非 Error 的抛出值会退化成
       // "[object Object]"，用户在会话里看到的就是一句毫无信息量的话。
-      content: buildErrorContent('STREAM_ERROR', streamErrorDetail.errorMessage),
+      // 第三参传原始异常：与模型轮次路径共用同一个 buildErrorContent，使同一 STREAM_ERROR
+      // 在两条路径下的落库正文一致（`[错误: STREAM_ERROR] 摘要` + `\n\n技术详情：…`），
+      // 前端按该标记还原技术详情折叠区。
+      content: buildErrorContent('STREAM_ERROR', streamErrorDetail.errorMessage, err),
       clientRequestId: requestData.clientRequestId,
       status: 'error',
       replaceExisting: true,
@@ -3564,27 +3089,14 @@ export async function handleStreamRequest(input: {
     return await execution;
   } finally {
     clearReservation();
+    // 回合收尾（含失败）：尝试消费下一条待发消息并起下一轮。
+    // 必须在 `clearReservation()` 之后——drain 里会用同一张 in-flight 注册表判断
+    // 「会话是否仍在跑」，早于释放会被自己挡下。fire-and-forget：这里属于请求返回路径，
+    // await 一整轮会把上一轮的响应拖住。
+    scheduleComposerQueueAutoRun({ sessionId: input.sessionId, userId: input.user.sub });
   }
 }
 
-export function createStreamErrorChunk(
-  code: string,
-  message: string,
-  runId: string,
-  upstreamSummary?: UpstreamStreamSummary,
-  requestId?: string,
-  technicalDetail?: string,
-) {
-  const normalizedTechnicalDetail = technicalDetail?.trim();
-  return {
-    type: 'error' as const,
-    code,
-    message,
-    ...(normalizedTechnicalDetail ? { technicalDetail: normalizedTechnicalDetail } : {}),
-    ...(requestId ? { requestId } : {}),
-    runId,
-    ...(upstreamSummary ? { upstreamSummary } : {}),
-    eventId: `${runId}:error:${randomUUID()}`,
-    occurredAt: Date.now(),
-  };
-}
+// 实现已移至叶子模块 `stream-sse-encoder.ts`（打破 stream.ts ⇄ stream-model-round.ts 运行时环）；
+// 此处仅 re-export 保持对外导出名与签名不变，`stream-routes-plugin.ts` 等下游无需改动。
+export { createStreamErrorChunk } from './stream-sse-encoder.js';

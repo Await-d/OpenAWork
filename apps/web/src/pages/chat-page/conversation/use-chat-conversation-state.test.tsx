@@ -431,6 +431,7 @@ function usePermissionModeHarness() {
   const settings = useSessionSettingsCallbacks(
     {
       dialogueMode: conversation.dialogueMode,
+      isSourceManagedSession: false,
       permissionMode,
       webSearchEnabled: conversation.webSearchEnabled,
       thinkingEnabled: conversation.thinkingEnabled,
@@ -449,6 +450,7 @@ function usePermissionModeHarness() {
       setWebSearchEnabled: conversation.setWebSearchEnabled,
       setThinkingEnabled: conversation.setThinkingEnabled,
       setReasoningEffort: conversation.setReasoningEffort,
+      setContextWindowOverride: () => undefined,
       setManualAgentId: conversation.setManualAgentId,
       setSessionMetadataDirty,
     },

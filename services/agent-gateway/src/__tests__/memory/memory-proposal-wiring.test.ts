@@ -364,6 +364,76 @@ describe('人工保存路径 · 直接生效', () => {
       expect(after?.value).toBe('TypeScript strict');
       expect((after?.revision ?? 0) > (before?.revision ?? 0)).toBe(true);
       expect(countPendingProposals()).toBe(0);
+
+      const history = await app.inject({
+        method: 'GET',
+        url: `/memories/revisions?memoryId=${memoryId}`,
+        headers: { authorization: auth },
+      });
+      expect(history.statusCode).toBe(200);
+      const { revisions } = history.json<{
+        revisions: Array<{ id: string; after: { changeSeq?: number }; changeSeq?: number }>;
+      }>();
+      expect(revisions).toHaveLength(2);
+      expect(revisions[0]).toMatchObject({
+        origin: 'manual',
+        before: { value: 'TypeScript' },
+        after: { value: 'TypeScript strict' },
+        payload: { value: 'TypeScript' },
+      });
+      expect(revisions[0]?.changeSeq).toBe(revisions[0]?.after.changeSeq);
+      expect(revisions[1]).toMatchObject({ before: null, payload: null });
+
+      const forbidden = await app.inject({
+        method: 'GET',
+        url: `/memories/revisions?memoryId=${memoryId}`,
+        headers: { authorization: bearerFor(app, OTHER_USER_ID) },
+      });
+      expect(forbidden.json()).toEqual({ revisions: [] });
+      const staleRollback = await app.inject({
+        method: 'POST',
+        url: `/memories/revisions/${revisions[1]!.id}/rollback`,
+        headers: { authorization: auth },
+      });
+      expect(staleRollback.statusCode).toBeGreaterThanOrEqual(400);
+      const rollback = await app.inject({
+        method: 'POST',
+        url: `/memories/revisions/${revisions[0]!.id}/rollback`,
+        headers: { authorization: auth },
+      });
+      expect(rollback.statusCode).toBe(200);
+      expect(rollback.json()).toMatchObject({ ok: true, memory: { value: 'TypeScript' } });
+
+      for (const snapshot of [
+        '{invalid-json',
+        JSON.stringify({
+          id: memoryId,
+          userId: OTHER_USER_ID,
+          key: 'secret',
+          value: '不应泄露',
+          enabled: true,
+        }),
+        JSON.stringify({
+          id: 'another-memory',
+          userId: USER_ID,
+          key: 'secret',
+          value: '不应泄露',
+          enabled: true,
+        }),
+        JSON.stringify({ id: memoryId, userId: USER_ID, key: 'broken', enabled: true }),
+      ]) {
+        dbModule.sqliteRun('UPDATE memory_revisions SET before_json = ? WHERE memory_id = ?', [
+          snapshot,
+          memoryId,
+        ]);
+        const invalidHistory = await app.inject({
+          method: 'GET',
+          url: `/memories/revisions?memoryId=${memoryId}`,
+          headers: { authorization: auth },
+        });
+        expect(invalidHistory.statusCode).toBe(200);
+        expect(invalidHistory.json()).toEqual({ revisions: [] });
+      }
     } finally {
       await app.close();
     }

@@ -16,7 +16,13 @@ export type {
   ClientStreamErrorReportResult,
   ReportClientStreamErrorInput,
 } from './session/client-errors.js';
-export { AuthRequestRejectedError, login, refreshAccessToken, logout } from './gateway/auth.js';
+export {
+  AuthRequestRejectedError,
+  changePassword,
+  login,
+  refreshAccessToken,
+  logout,
+} from './gateway/auth.js';
 export type { TokenPair } from './gateway/auth.js';
 export { getPairingQr, loginWithDesktopDefault, loginWithPairingToken } from './gateway/pairing.js';
 export type { PairingQrResponse } from './gateway/pairing.js';
@@ -237,6 +243,12 @@ export type {
 } from './session/questions.js';
 export { createDialogueModeClient } from './session/dialogue-mode.js';
 export type { ConfirmClarifySwitchResult, DialogueModeClient } from './session/dialogue-mode.js';
+export { createPromptOverridesClient } from './session/prompt-overrides.js';
+export type {
+  DialogueModePromptView,
+  PromptOverrideSnapshot,
+  PromptOverridesClient,
+} from './session/prompt-overrides.js';
 export {
   COMPOSER_INPUT_HISTORY_MAX_ENTRIES,
   COMPOSER_INPUT_HISTORY_TEXT_MAX_LENGTH,
@@ -385,6 +397,10 @@ export type {
 } from './infra/plugins.js';
 
 export { createHealthClient, isGatewayHealthy } from './infra/health.js';
+export { createMessageLimitsClient } from './infra/message-limits.js';
+export { createDispatchesClient } from './infra/dispatches.js';
+export type { DispatchesClient } from './infra/dispatches.js';
+export type { MessageLimitsClient, MessageLimitsSnapshot } from './infra/message-limits.js';
 export type { HealthClient } from './infra/health.js';
 
 export { createListeningPortsClient } from './infra/ports.js';
@@ -485,6 +501,8 @@ export type {
 
 export { createSseFrameParser } from './gateway/sse-frames.js';
 export type { ParsedSseFrame, SseFrameParser } from './gateway/sse-frames.js';
+
+export { createRandomUuid } from './utils/random-uuid.js';
 
 export { createSessionTerminalsClient, openTerminalSocket } from './session/session-terminals.js';
 export type {

@@ -114,14 +114,14 @@ describe('McpServerManager', () => {
 
   it('内置项移除文案与二次确认', () => {
     const { onRemove } = renderManager({
-      servers: [server({ builtin: true, source: 'builtin', id: 'omo', name: 'omo' })],
+      servers: [server({ builtin: true, source: 'builtin', id: 'lsp', name: 'lsp' })],
       statuses: [],
     });
 
     fireEvent.click(screen.getByText('禁用'));
     expect(onRemove).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('确认禁用'));
-    expect(onRemove).toHaveBeenCalledWith('omo');
+    expect(onRemove).toHaveBeenCalledWith('lsp');
   });
 
   it('添加服务器表单可展开并回传 entry', () => {

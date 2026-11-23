@@ -77,6 +77,27 @@ function issueIdentity(record: { requestId?: string | null; id?: string | null }
   return id && id.length > 0 ? `id:${id}` : null;
 }
 
+function hasRecordedBatchFailures(
+  output: unknown,
+  requestId: string,
+  errorRequestIds: ReadonlySet<string>,
+): boolean {
+  if (!output || typeof output !== 'object' || !('results' in output)) return false;
+  if (!Array.isArray(output.results) || ('error' in output && output.error != null)) return false;
+  // 审计接口可能截断结果数组；未展示的子项也可能失败。
+  if ('total' in output && output.total !== output.results.length) return false;
+
+  // 批次处理器以结果数组的原始索引生成子调用请求 ID。
+  let hasFailure = false;
+  for (const [index, result] of (output.results as readonly unknown[]).entries()) {
+    if (result && typeof result === 'object' && 'isError' in result && result.isError === true) {
+      if (!errorRequestIds.has(`${requestId}:${index}`)) return false;
+      hasFailure = true;
+    }
+  }
+  return hasFailure;
+}
+
 /**
  * 统计待排查问题。
  *
@@ -108,6 +129,29 @@ export function summarizeIssues(input: {
     }
     if (seen.has(identity)) duplicatedLogs += 1;
     else seen.add(identity);
+  }
+
+  const errors = [
+    ...input.diagnostics.filter((record) => record.severity === 'error'),
+    ...input.errorLogs.filter((record) => record.level === 'error'),
+  ];
+  const errorRequestIds = new Set(
+    errors.map((record) => record.requestId?.trim()).filter((id) => id !== undefined),
+  );
+  const batchWrappers = new Set<string>();
+  const retainedBatches = new Set<string>();
+  for (const record of errors) {
+    const tool = 'filePath' in record ? (record.toolName ?? record.filePath) : record.source;
+    const requestId = record.requestId?.trim();
+    if (tool !== 'batch' || !requestId) continue;
+    if (hasRecordedBatchFailures(record.output, requestId, errorRequestIds)) {
+      batchWrappers.add(requestId);
+    } else {
+      retainedBatches.add(requestId);
+    }
+  }
+  for (const requestId of batchWrappers) {
+    if (!retainedBatches.has(requestId)) seen.delete(`request:${requestId}`);
   }
 
   const errorWorkers = input.workers.filter((worker) => worker.status === 'error').length;

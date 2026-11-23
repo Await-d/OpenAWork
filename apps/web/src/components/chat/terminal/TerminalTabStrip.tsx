@@ -15,6 +15,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type { SessionTerminalView } from '../../conversation-runtime/terminals/terminals-api.js';
 import { CloseIcon } from './TerminalIcons.js';
 
@@ -225,6 +226,7 @@ export function TerminalTabStrip({
                   onChange={(event) => onRenameValueChange(event.target.value)}
                   onBlur={onCommitRename}
                   onKeyDown={(event) => {
+                    if (isImeComposingKeyboardEvent(event)) return;
                     if (event.key === 'Enter') onCommitRename();
                     if (event.key === 'Escape') onCancelRename();
                   }}

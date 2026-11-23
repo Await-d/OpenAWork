@@ -7,6 +7,7 @@ import {
   parseAssistantEventContent,
   readAssistantTracePayload,
 } from '../../../components/conversation-runtime/messages/support.js';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 
 export interface HistoryEditPrompt {
   hasCodeMarkers: boolean;
@@ -180,8 +181,7 @@ export function useChatMessageActions(
 
   const handleCopyMessage = useCallback(
     (message: ChatMessage) => {
-      const copyRequest = navigator.clipboard?.writeText(getCopyableMessageText(message));
-      void copyRequest?.catch(() => undefined);
+      void copyTextToClipboard(getCopyableMessageText(message)).catch(() => undefined);
     },
     [getCopyableMessageText],
   );
@@ -197,8 +197,7 @@ export function useChatMessageActions(
         return;
       }
 
-      const copyRequest = navigator.clipboard?.writeText(combinedText);
-      void copyRequest?.catch(() => undefined);
+      void copyTextToClipboard(combinedText).catch(() => undefined);
     },
     [getCopyableMessageText],
   );

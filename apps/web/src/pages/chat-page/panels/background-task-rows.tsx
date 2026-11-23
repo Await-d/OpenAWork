@@ -14,6 +14,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { BackgroundTaskRow, BackgroundTaskState } from './background-task-model.js';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 
 /** 复制成功 / 失败反馈的保留时长。 */
 const COPY_FEEDBACK_MS = 1600;
@@ -133,18 +134,15 @@ function useRowClock(active: boolean): number {
   return nowMs;
 }
 
-/** 复制到剪贴板：不可用 / 被拒绝一律返回 false，由调用方呈现「复制失败」。 */
+/** 复制到剪贴板：彻底失败一律返回 false，由调用方呈现「复制失败」。 */
 async function writeClipboardText(text: string): Promise<boolean> {
-  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-  if (clipboard === undefined || typeof clipboard.writeText !== 'function') {
-    return false;
-  }
   try {
-    // 直接用成员调用（`clipboard.writeText(text)`）：避免抽取方法引用后调用丢 `this`。
-    await clipboard.writeText(text);
+    // 走公共封装：非安全上下文（http 内网访问）下 `navigator.clipboard` 不存在，
+    // 封装会回落 `execCommand('copy')`，避免复制按钮在内网部署下全量失效。
+    await copyTextToClipboard(text);
     return true;
   } catch {
-    // 非安全上下文 / 无权限 / 用户拒绝：降级为行内「复制失败」，不抛给上层。
+    // 无权限 / 用户拒绝：降级为行内「复制失败」，不抛给上层。
     return false;
   }
 }

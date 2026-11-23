@@ -1,6 +1,19 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ScheduleKind,
+  ScheduledTaskCreateInput,
+  ScheduledTaskExecution,
+  ScheduledTaskView,
+} from '@openAwork/shared';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { createCronClient } from './cron.js';
+import type {
+  CreateCronJobInput,
+  CronExecutionRecord,
+  CronJobRecord,
+  CronJobStatus,
+  CronScheduleKind,
+} from './cron.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -18,6 +31,57 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe('createCronClient', () => {
+  it('公开类型沿用共享 wire 契约，创建入参仍允许省略服务端默认值', () => {
+    expectTypeOf<CronScheduleKind>().toEqualTypeOf<ScheduleKind>();
+    expectTypeOf<CronJobStatus>().toEqualTypeOf<ScheduledTaskView['status']>();
+    expectTypeOf<CronJobRecord['delivery_mode']>().toEqualTypeOf<
+      ScheduledTaskView['delivery_mode']
+    >();
+    expectTypeOf<CronExecutionRecord>().toEqualTypeOf<ScheduledTaskExecution>();
+    expectTypeOf<CreateCronJobInput>().toExtend<ScheduledTaskCreateInput>();
+    expectTypeOf<CronJobRecord['lastExecution']>().toEqualTypeOf<
+      ScheduledTaskView['lastExecution']
+    >();
+    const input: CreateCronJobInput = { name: '任务', schedule_kind: 'every', prompt: '执行' };
+    expect(input).not.toHaveProperty('enabled');
+  });
+
+  it('history 保留共享终态、毫秒时间与驼峰摘要字段', async () => {
+    const execution: ScheduledTaskExecution = {
+      id: 'expired-1',
+      job_id: 'job-1',
+      started_at: 1_792_000_000_000,
+      finished_at: 1_792_000_001_000,
+      status: 'expired',
+      outputPreview: '已过期的单次任务',
+    };
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse(200, { history: [execution] }),
+    ) as typeof fetch;
+
+    const history = await createCronClient('http://localhost:3000').history('token-1', 'job-1');
+
+    expect(history).toEqual([execution]);
+    expect(history[0]?.outputPreview).toBe('已过期的单次任务');
+    expect(history[0]?.started_at).toBe(1_792_000_000_000);
+  });
+
+  it('读取渠道任务时保留真实 channel 模式，启停请求不重写投递配置', async () => {
+    const job = { id: 'channel-job', delivery_mode: 'channel' } satisfies Pick<
+      CronJobRecord,
+      'id' | 'delivery_mode'
+    >;
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+      jsonResponse(200, init?.method === 'PATCH' ? { job } : { jobs: [job] }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    const client = createCronClient('http://localhost:3000');
+
+    expect((await client.list('token-1'))[0]?.delivery_mode).toBe('channel');
+    expect((await client.setEnabled('token-1', job.id, false))?.delivery_mode).toBe('channel');
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ enabled: false });
+  });
+
   it('list 成功时返回 jobs 列表', async () => {
     globalThis.fetch = vi.fn(async () =>
       jsonResponse(200, {
@@ -152,9 +216,9 @@ describe('createCronClient', () => {
     const job = await client.update('token-1', 'job-1', { delivery_mode: 'desktop' });
 
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe('PATCH');
-    expect(String((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body)).toContain(
-      'delivery_mode',
-    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      delivery_mode: 'desktop',
+    });
     expect(job?.id).toBe('job-1');
   });
 });

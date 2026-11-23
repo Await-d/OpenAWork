@@ -4,16 +4,17 @@ import { randomUUID } from 'node:crypto';
 import type { JwtPayload } from '../infra/auth.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
-import { describeError } from '../infra/gateway-logger.js';
+import { describeError, logGatewayError } from '../infra/gateway-logger.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import { startRequestWorkflow } from '../runtime/request-workflow.js';
-import { extractMessageText } from '../session/session-message-store.js';
 import { runSessionInBackground } from '../routes/stream-runtime.js';
+import { stopAnyInFlightStreamRequestForSession } from '../routes/stream-cancellation.js';
 import {
   listPendingPermissionSummaries,
   resolveEarliestPendingExpiry,
 } from '../permission/permission-pending-store.js';
 import { AutoReplyPipeline } from './auto-reply.js';
+import { extractChannelReplyText } from './channel-reply-text.js';
 import { recordChannelMessage } from './channel-message-cache.js';
 import { resolveChannelMemberAcl } from './channel-member-acl.js';
 import { runWithChannelActorPolicy } from './channel-actor-scope.js';
@@ -126,6 +127,7 @@ const autoReply = new AutoReplyPipeline({
     onPartialText,
     senderId,
     senderName,
+    signal,
   }) => {
     const channel = channels.get(pluginId);
     if (!channel?.ownerUserId) {
@@ -181,6 +183,33 @@ const autoReply = new AutoReplyPipeline({
       },
     });
 
+    // 渠道插话：更新的入站消息到达时 auto-reply 会 abort 本轮的 signal。这里把它接到
+    // 网关「停止本会话在途轮次」的入口上 —— 必须走注册表（那边持有真正的
+    // AbortController，并会 `await` 本轮 settle），否则这一轮的运行锁不释放，紧接着
+    // 启动的新一轮会撞 `SESSION_ALREADY_RUNNING`。作用域被会话 + 归属用户限定。
+    const onInterrupt = (): void => {
+      void stopAnyInFlightStreamRequestForSession({
+        sessionId,
+        userId: channelOwnerUserId,
+        reason: 'user_aborted',
+      }).catch((error: unknown) => {
+        logGatewayError('[channels] 打断在途轮次失败', {
+          pluginId,
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    };
+    signal?.addEventListener('abort', onInterrupt, { once: true });
+    if (signal?.aborted) {
+      // 监听注册与内核轮次登记之间有窗口（更新的消息恰在这几毫秒里到达）。此刻
+      // `onInterrupt` 查不到在途 entry，也就无法取消；直接不发起这一轮 ——
+      // auto-reply 会因自身 signal 已 abort 丢弃返回值，紧接着处理最新那条。
+      signal.removeEventListener('abort', onInterrupt);
+      channelLogInfo('channel run skipped: interrupted before start', { pluginId, sessionId });
+      return '';
+    }
+
     let result: Awaited<ReturnType<typeof runSessionInBackground>>;
     try {
       result = await runWithChannelActorPolicy(
@@ -231,6 +260,8 @@ const autoReply = new AutoReplyPipeline({
         });
       }
       throw error;
+    } finally {
+      signal?.removeEventListener('abort', onInterrupt);
     }
 
     await partialUpdates.flush();
@@ -300,7 +331,9 @@ const autoReply = new AutoReplyPipeline({
     })
       .filter((entry) => entry.role === 'assistant' && entry.clientRequestId === clientRequestId)
       .at(-1);
-    const assistantText = extractMessageText(latestAssistantMessage) || partialText.trim();
+    // 只取 `text` 片段：`extractMessageText` 会把 reasoning / 工具入参与输出一起拉平，
+    // 直接回给 IM 等于把思维链贴进聊天窗口。见 channel-reply-text.ts。
+    const assistantText = extractChannelReplyText(latestAssistantMessage) || partialText.trim();
 
     if (assistantText.length > 0) {
       return assistantText;

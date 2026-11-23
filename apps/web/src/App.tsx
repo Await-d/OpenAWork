@@ -1015,6 +1015,16 @@ export default function App() {
               />
             }
           />
+          <Route
+            path="/dispatches/:dispatchId?"
+            element={
+              <LazyRoutePage
+                component={PRELOADABLE_ROUTE_MODULES.dispatches.component}
+                prefersReducedMotion={prefersReducedMotion}
+                title={PRELOADABLE_ROUTE_MODULES.dispatches.title}
+              />
+            }
+          />
           <Route path="/about" element={<Navigate to="/settings/about" replace />} />
         </Route>
         {/*

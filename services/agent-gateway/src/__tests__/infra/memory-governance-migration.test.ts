@@ -204,6 +204,7 @@ describe('记忆治理迁移', () => {
       'memory_revisions',
       'memory_jobs',
       'memory_maintenance_state',
+      'memory_scope_watermarks',
       'memory_maintenance_reports',
       'memory_deliveries',
       'memory_message_provenance',
@@ -211,6 +212,25 @@ describe('记忆治理迁移', () => {
     ]) {
       expect(tableExists(name), name).toBe(true);
     }
+  });
+
+  it('已有job旧索引升级为含user_id的唯一键且保留任务', async () => {
+    dbModule.sqliteRun('DROP INDEX IF EXISTS idx_memory_jobs_period_user');
+    dbModule.sqliteRun(
+      'CREATE UNIQUE INDEX idx_memory_jobs_period ON memory_jobs(kind, scope_key, period_key)',
+    );
+    await dbModule.migrate();
+    const indexes = dbModule.sqliteAll<{ name: string }>('PRAGMA index_list(memory_jobs)');
+    expect(indexes.map((entry) => entry.name)).not.toContain('idx_memory_jobs_period');
+    const columns = dbModule.sqliteAll<{ name: string }>(
+      'PRAGMA index_info(idx_memory_jobs_period_user)',
+    );
+    expect(columns.map((entry) => entry.name)).toEqual([
+      'user_id',
+      'kind',
+      'scope_key',
+      'period_key',
+    ]);
   });
 
   it('重复迁移是 no-op（不重置作用域，也不重排水位）', async () => {

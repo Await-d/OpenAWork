@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as MessageStoreV2 from '../../message/message-store-v2.js';
@@ -201,6 +201,20 @@ describe('tool-sandbox workspace path alias and skill resource boundary', () => 
     expect(result.isError).toBe(true);
     expect(outputText(result.output)).toContain('目标路径超出当前工作区范围');
     expect(outputText(result.output)).not.toContain('overwritten');
+  });
+
+  it('工作区外的新文件不落盘、不发起审批，并指引用户从工作区导出', async () => {
+    const target = join(OUTSIDE_ROOT, 'report.md');
+    const result = await runTool('write', { path: target, content: '# 报告' });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result.output)).toContain('另存为或下载');
+    expect(existsSync(target)).toBe(false);
+    expect(
+      mocks.sqliteRunMock.mock.calls.some(
+        ([query]) => typeof query === 'string' && query.includes('INSERT INTO permission_requests'),
+      ),
+    ).toBe(false);
   });
 
   it('edit 与 multi_edit 对技能资源保持阻断', async () => {

@@ -297,6 +297,7 @@ describe('buildChatRightPanelStateFromRunEvents', () => {
           strategy: 'runtime_replace',
           compactedMessages: 12,
           representedMessages: 12,
+          historyTokenEstimate: { before: 100_000, after: 30_000 },
           runId: 'command:session-1:slash-compact:run-1',
           eventId: 'session-1:slash-compact:run-1:compaction:completed',
           occurredAt: 200,
@@ -310,7 +311,37 @@ describe('buildChatRightPanelStateFromRunEvents', () => {
       phase: 'completed',
       compactedMessages: 12,
       representedMessages: 12,
+      historyTokenEstimate: { before: 100_000, after: 30_000 },
     });
+  });
+
+  it('同一次运行的不同自动压缩轮次各自保留估算结果', () => {
+    const state = buildChatRightPanelStateFromRunEvents({
+      goal: '压缩上下文',
+      events: [1, 2].flatMap((round) => [
+        {
+          type: 'compaction' as const,
+          summary: '正在压缩',
+          trigger: 'automatic' as const,
+          phase: 'started' as const,
+          runId: 'run-1',
+          eventId: `request:1:auto-compact:${round}:started`,
+        },
+        {
+          type: 'compaction' as const,
+          summary: '压缩完成',
+          trigger: 'automatic' as const,
+          phase: 'completed' as const,
+          runId: 'run-1',
+          eventId: `request:1:auto-compact:${round}:signature:completed`,
+          historyTokenEstimate: { before: 100_000, after: round * 10_000 },
+        },
+      ]),
+    });
+
+    expect(state.compactions.map((item) => item.historyTokenEstimate?.after)).toEqual([
+      20_000, 10_000,
+    ]);
   });
 });
 

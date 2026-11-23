@@ -127,6 +127,8 @@ type RenderToolCallDisplay = (props: {
   durationMs?: number;
   /** 子行展开区里的嵌套渲染：隐藏嵌套卡自身 header，直接给内容。 */
   embedded?: boolean;
+  /** 会话 id：透给文件变更卡的「加载完整内容」入口。 */
+  sessionId?: string | undefined;
 }) => React.ReactNode;
 
 function BatchSubCallRow({
@@ -137,6 +139,7 @@ function BatchSubCallRow({
   kind,
   parentTerminalState,
   renderToolCallDisplay,
+  sessionId,
 }: {
   tool: string;
   input: Record<string, unknown>;
@@ -145,6 +148,7 @@ function BatchSubCallRow({
   kind?: ToolCallCardProps['kind'];
   parentTerminalState?: 'completed' | 'failed';
   renderToolCallDisplay: RenderToolCallDisplay;
+  sessionId?: string | undefined;
 }) {
   const shouldExpandByDefault = useToolExpandDefault()(tool);
   const visualState = batchSubVisualState(result, parentTerminalState);
@@ -220,6 +224,7 @@ function BatchSubCallRow({
               kind,
               embedded: true,
               ...(result?.durationMs != null ? { durationMs: result.durationMs } : {}),
+              ...(sessionId !== undefined ? { sessionId } : {}),
             })}
           </div>
         </ToolCardExpansionProvider>
@@ -246,6 +251,7 @@ export function BatchToolCallCard({
   status,
   isError,
   renderToolCallDisplay,
+  sessionId,
 }: {
   approvalActions?: ToolCallCardProps['approvalActions'];
   kind?: ToolCallCardProps['kind'];
@@ -254,6 +260,7 @@ export function BatchToolCallCard({
   status?: ToolCallCardProps['status'];
   isError?: boolean;
   renderToolCallDisplay: RenderToolCallDisplay;
+  sessionId?: string | undefined;
 }) {
   const visualState = resolveToolVisualStatus({
     defaultStatus: 'running',
@@ -449,6 +456,7 @@ export function BatchToolCallCard({
               kind={kind}
               parentTerminalState={parentTerminalState}
               renderToolCallDisplay={renderToolCallDisplay}
+              sessionId={sessionId}
             />
           ))}
         </div>

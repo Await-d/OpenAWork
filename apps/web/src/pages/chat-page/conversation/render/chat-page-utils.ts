@@ -90,6 +90,7 @@ export function buildQueuedComposerScopeKey(email: string, sessionId: string): s
 
 export function createSessionMetadataSnapshot(metadata: {
   agentId?: string;
+  contextWindowOverride?: number | null;
   dialogueMode?: DialogueMode;
   modelId?: string;
   modelSelectionSource?: ModelSelectionSource | null;
@@ -110,6 +111,9 @@ export function createSessionMetadataSnapshot(metadata: {
     webSearchEnabled: metadata.webSearchEnabled !== false,
     thinkingEnabled: metadata.thinkingEnabled === true,
     reasoningEffort: metadata.reasoningEffort ?? 'medium',
+    // 会话级上下文挡位必须进快照：否则「本会话未覆盖 → 设为 400K」会得到
+    // 完全相同的快照，dirty 检查短路后永远不会 PATCH 到服务端。
+    contextWindowOverride: metadata.contextWindowOverride ?? null,
   };
   const providerId = metadata.providerId?.trim();
   if (providerId) snapshot['providerId'] = providerId;

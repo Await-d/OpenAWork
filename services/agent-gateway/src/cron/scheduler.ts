@@ -1,4 +1,5 @@
 import { nextCronFireAfter } from './cron-expression.js';
+import { publishCronJobsChanged } from './cron-events-bus.js';
 import type {
   CronJobRecord,
   CronExecutionRecord,
@@ -10,12 +11,9 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 
 /**
  * Default wall-clock ceiling for a single cron handler invocation.
- * The scheduler tracks a global `runningCount` against `maxConcurrent`;
- * a handler that hangs (e.g. an upstream socket that connects but never
- * responds) would otherwise hold its concurrency slot forever, and after
- * `maxConcurrent` such hangs every future fire would silently no-op.
- * Bounding each invocation guarantees slots are always reclaimed. Pass a
- * non-positive value to disable.
+ * 超时只报告失败，不代表底层 handler 已取消；其并发与同任务隔离占位
+ * 必须保留到 handler 真正结束，避免超时任务仍运行时再次派发。
+ * Pass a non-positive value to disable.
  */
 export const DEFAULT_CRON_JOB_TIMEOUT_MS = 600_000;
 
@@ -59,6 +57,14 @@ export class CronJobTimeoutError extends Error {
     this.name = 'CronJobTimeoutError';
     this.timeoutMs = timeoutMs;
   }
+}
+
+function cronHandlerErrorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : 'Cron job handler failed with a non-Error rejection';
 }
 
 interface ActiveJob {
@@ -252,6 +258,9 @@ export class CronScheduler {
    * 比不跑更糟的副作用（例如补发一份早已过时的日报）。
    */
   private disableAtJob(job: CronJobRecord, failure: string | null): void {
+    // 刻意**不**发布 `cron.jobs.changed`：本方法只在 `restoreJobs`（网关启动装载）
+    // 路径被调用，此时客户端尚未连接，首屏 REST 已能拿到 `enabled: false` 的真实
+    // 状态；补发事件无人接收，纯属噪音。此处非「遗漏」。
     const disabled: CronJobRecord = { ...job, enabled: false, updated_at: Date.now() };
     this.jobs.set(job.id, disabled);
     this.persistSafely(() => this.persistence?.upsertJob(disabled), 'upsertJob(at-disabled)');
@@ -285,6 +294,14 @@ export class CronScheduler {
       this.scheduleErrorListener?.(jobId, message);
     } catch {
       // listener 自身故障：吞掉，建臂失败本身已由调用方 return 处理。
+    }
+    // 路由层 listener 会往执行历史写一条 `failed`（「调度建臂失败：…」），该记录
+    // 在 `/history` 用户可见——不推事件时历史面板会停留在旧内容（旧轮询靠全量重拉
+    // 自愈）。userId 取自调度器内存态；任务未知（如 removeJob 后残留的续臂）时无法
+    // 定向投递，跳过即可。
+    const job = this.jobs.get(jobId);
+    if (job) {
+      publishCronJobsChanged({ userId: job.user_id, reason: 'schedule_error', jobId });
     }
   }
 
@@ -403,15 +420,10 @@ export class CronScheduler {
   /**
    * Race the handler against a wall-clock deadline. On timeout the returned
    * promise rejects with `CronJobTimeoutError` so `fireJob` records the
-   * failure and its `finally` reclaims the concurrency slot. A rejection
-   * handler is attached to the underlying handler promise so its eventual
-   * (post-timeout) settlement never surfaces as an unhandled rejection.
+   * failure. Concurrency slots are released by the underlying handler's
+   * settlement, not by this deadline. Its eventual rejection stays handled.
    */
-  private runHandlerWithTimeout(
-    job: CronJobRecord,
-    context: CronJobExecutionContext,
-  ): Promise<void> {
-    const handlerPromise = this.handler(job, context);
+  private runHandlerWithTimeout(job: CronJobRecord, handlerPromise: Promise<void>): Promise<void> {
     if (!Number.isFinite(this.jobTimeoutMs) || this.jobTimeoutMs <= 0) {
       return handlerPromise;
     }
@@ -427,7 +439,7 @@ export class CronScheduler {
         },
         (err: unknown) => {
           clearTimeout(timer);
-          reject(err instanceof Error ? err : new Error(String(err)));
+          reject(err instanceof Error ? err : new Error(cronHandlerErrorMessage(err)));
         },
       );
     });
@@ -511,6 +523,11 @@ export class CronScheduler {
     this.jobs.set(jobId, updated);
     this.persistSafely(() => this.persistence?.upsertJob(updated), 'upsertJob(fire)');
 
+    // 发布 `run_started`：执行记录与任务态（last_fired_at / fire_count）均已登记
+    // （持久化是 best-effort，见 `persistSafely`；内存态即运行期权威）。放在
+    // `executeJob` 之前，保证订阅者先看到「已开始」再看到「已结束」。
+    publishCronJobsChanged({ userId: job.user_id, reason: 'run_started', jobId });
+
     return { started: true, executionId: execId, completion: this.executeJob(exec, updated) };
   }
 
@@ -545,6 +562,11 @@ export class CronScheduler {
       () => this.persistence?.recordExecution(job, exec),
       'recordExecution(skipped)',
     );
+
+    // 发布 `run_skipped`：这条 `skipped` 执行记录会出现在 `/history` 里（用户可见），
+    // 不推事件的话历史面板会一直停在旧内容——旧轮询实现靠每 15s 全量重拉自愈，
+    // 改成 SSE 后必须显式通知。放在持久化之后，与其余发布点同一约束。
+    publishCronJobsChanged({ userId: job.user_id, reason: 'run_skipped', jobId: job.id });
   }
 
   /**
@@ -561,18 +583,28 @@ export class CronScheduler {
       },
     };
 
+    const releaseSlot = () => {
+      this.runningCount--;
+      this.inFlightJobs.delete(jobId);
+    };
     try {
-      await this.runHandlerWithTimeout(job, handlerContext);
+      const handlerPromise = new Promise<void>((resolve) => {
+        resolve(this.handler(job, handlerContext));
+      });
+      const trackedHandler = handlerPromise.then(
+        () => releaseSlot(),
+        (error: unknown) => {
+          releaseSlot();
+          throw error;
+        },
+      );
+      await this.runHandlerWithTimeout(job, trackedHandler);
       exec.status = 'completed';
     } catch (err) {
       exec.status = 'failed';
-      exec.error = err instanceof Error ? err.message : String(err);
+      exec.error = cronHandlerErrorMessage(err);
     } finally {
       exec.finished_at = Date.now();
-      this.runningCount--;
-      // Release the per-job slot last so it is freed even if the handler
-      // threw — otherwise the job would be permanently wedged in-flight.
-      this.inFlightJobs.delete(jobId);
       // 执行记录以「最新任务态」的 user_id 落库（任务可能已被改归属）。
       const latest = this.jobs.get(jobId) ?? job;
       this.persistSafely(
@@ -580,10 +612,24 @@ export class CronScheduler {
         'recordExecution(end)',
       );
 
+      // 发布 `run_finished`：终态（completed / failed）已写入执行记录。放在 `finally`
+      // 的收尾持久化之后，是本次执行的**真实 settle 点**（`runHandlerWithTimeout`
+      // 只是墙钟超时包装，其 reject 也最终汇聚到这里统一收尾）。
+      publishCronJobsChanged({ userId: latest.user_id, reason: 'run_finished', jobId });
+
       if (job.delete_after_run && job.schedule_kind === 'at') {
         // 同理：删除失败只记日志，不能把 finally 抛出去（否则 fireJob 变成
         // rejected promise，而调用方是 `void this.fireJob(...)` → unhandled rejection）。
-        this.persistSafely(() => this.removeJob(jobId), 'removeJob(delete_after_run)');
+        //
+        // 发布 `deleted` 必须**与删除同处一个 safe 块**：`scheduler.removeJob()` 内部
+        // 不 publish（它只是持久化 + 清内存），而上一条 `run_finished` 在删除**之前**
+        // 已发出——客户端被它触发重拉时任务还在，之后若不再发事件，一次性任务会永久
+        // 滞留在列表里。放进同一个回调即「仅当删除未抛错才发」。`delete_after_run`
+        // 不会与 router 的显式 DELETE 并发（router 只处理显式删除），故不会重复发。
+        this.persistSafely(() => {
+          this.removeJob(jobId);
+          publishCronJobsChanged({ userId: latest.user_id, reason: 'deleted', jobId });
+        }, 'removeJob(delete_after_run)');
       }
     }
   }
@@ -678,10 +724,7 @@ export class CronScheduler {
   stopAll(): void {
     for (const id of [...this.activeJobs.keys()]) this.cancelJob(id);
     this.armTokens.clear();
-    // Drop reentrancy bookkeeping so a handler still mid-flight at stop()
-    // doesn't leave a stale id that falsely skips the first fire after a
-    // later restart.
-    this.inFlightJobs.clear();
+    // 停止定时器不取消在途 handler；占位由其实际结束释放，重装任务也不能绕过。
     this.skipRecordedAt.clear();
   }
 

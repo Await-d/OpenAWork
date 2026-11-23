@@ -23,6 +23,7 @@ export const INTEGRATED_RESOURCE_SKILL_NAMES = [
   'excel-processor',
   'frontend-design',
   'image-ocr',
+  'modern-web-guidance',
   'pdf',
   'pptx',
   'product-design',
@@ -239,6 +240,10 @@ export const RESOURCE_SKILL_PROFILES = {
   'image-ocr': {
     capabilities: ['image.ocr', 'document.extract', 'vision.text'],
     permissions: filesystemOptional,
+  },
+  'modern-web-guidance': {
+    capabilities: ['frontend.web-platform', 'frontend.compatibility', 'frontend.accessibility'],
+    permissions: filesystemAndNetworkOptional,
   },
   pdf: {
     capabilities: ['document.pdf', 'document.extract', 'document.forms', 'document.generate'],

@@ -15,6 +15,7 @@ import type {
 import type { DevtoolsSourceState, SettingsDiagnosticRecord } from '../state/settings-types.js';
 import { groupDiagnosticsByFile } from '../state/settings-derived.js';
 import { BP, SS, ST, UV } from '../shared/settings-section-styles.js';
+import { AccountPasswordSection } from './account-password-section.js';
 import { NotificationPreferencePanel } from './notification-preference-panel.js';
 import { useTelemetry } from '../../../hooks/use-telemetry.js';
 
@@ -47,6 +48,7 @@ export function SecurityTabContent({
 
   return (
     <>
+      <AccountPasswordSection />
       <NotificationPreferencePanel />
       <section style={SS}>
         <h3 style={ST}>权限规则</h3>

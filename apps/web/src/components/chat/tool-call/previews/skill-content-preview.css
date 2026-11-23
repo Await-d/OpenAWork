@@ -1,0 +1,48 @@
+.skill-content-preview {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.skill-content-preview .chat-markdown {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.skill-resource-list {
+  margin-top: var(--spacing-3, 12px);
+}
+
+.skill-resource-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.skill-resource-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2, 8px);
+  padding-block: var(--spacing-1, 4px);
+  color: var(--fg-muted);
+}
+
+.skill-resource-list code {
+  min-width: 0;
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+.skill-content-preview :is(button, a):focus-visible,
+.tool-call-inline[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.skill-content-preview button:hover {
+  background: var(--bg-hover);
+}
+
+.skill-content-preview button:active {
+  background: var(--accent-subtle);
+}

@@ -77,6 +77,14 @@ export interface MemoryProposalPayload {
   enabled?: boolean;
   name?: string;
   body?: string;
+  /** `rule` 动作：目标规则的 id（规则权威在 `memory_rule_entries`，历史按它查询）。 */
+  ruleId?: string;
+  /** `rule` 动作：提议基线的规则版本号。 */
+  ruleRevision?: number;
+  /** `merge` 动作：保留条目 id。 */
+  mergeIntoId?: string;
+  /** 整理依据。 */
+  dependencies?: Array<{ memoryId: string; revision: number }>;
 }
 
 /** 提议与既有记忆的关系。 */
@@ -125,8 +133,11 @@ export interface MemoryRevisionRecord {
   origin: MemoryRevisionOrigin;
   actorId: string | null;
   createdAt: string;
-  changeSeq: number;
-  payload: MemoryProposalPayload;
+  changeSeq?: number;
+  before: MemoryEntry | null;
+  after: MemoryEntry | null;
+  /** 实际回滚目标：恢复变更前状态；null 表示撤销创建并停用记忆。 */
+  payload: MemoryEntry | null;
 }
 
 export interface ListProposalsQuery {

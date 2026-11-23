@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type { ChatMessage } from '../../conversation-runtime/messages/support.js';
 import {
   type ChatSearchMatch,
@@ -277,6 +278,7 @@ export function ChatSearchOverlay({ controller }: ChatSearchOverlayProps) {
         data-testid="chat-search-overlay-input"
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
+          if (isImeComposingKeyboardEvent(event)) return;
           if (event.key === 'Escape') {
             event.preventDefault();
             close();

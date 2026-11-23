@@ -5,6 +5,18 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useComposerInputHistory } from './use-composer-input-history.js';
 import { useComposerInputHistoryStore } from '../../../stores/chat/composer-input-history.js';
+import { logger } from '../../../utils/log/logger.js';
+
+/**
+ * 可控 reject 的水合闸门：`deferred` 未设置时 list 正常返回；设置后等用例显式
+ * decide，用来制造「卸载之后才 reject」的时序（生产里 fetch 在组件卸载 / 测试结束后
+ * 才失败，正是它把日志写进已关闭的 worker → EnvironmentTeardownError）。
+ */
+const { deferred } = vi.hoisted(() => ({
+  deferred: {
+    current: null as null | { promise: Promise<void>; reject: (error: unknown) => void },
+  },
+}));
 
 /**
  * 假网关输入历史。语义与服务端一致：旧 → 新、相邻去重、最多 50 条。
@@ -35,6 +47,9 @@ vi.mock('@openAwork/web-client', () => ({
       return [...current];
     },
     list: async (_token: string, sessionId: string) => {
+      if (deferred.current) {
+        await deferred.current.promise;
+      }
       return [...(fakeHistory.entriesBySession.get(sessionId) ?? [])];
     },
   }),
@@ -75,12 +90,24 @@ beforeEach(() => {
   });
 });
 
+/**
+ * 等 reject 之后的微任务 / 宏任务链跑完。
+ *
+ * 断言「不再记录日志」时不能直接用 `waitFor`——条件一开始就成立会立刻通过，
+ * 反而盖住「取消门缺失时迟到 catch 仍会写日志」的回归。必须给 reject 后的链路
+ * 留出真实的执行窗口。
+ */
+async function flushRejection(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 afterEach(() => {
   cleanup();
   useComposerInputHistoryStore.setState((state) => ({ ...state, historyByScope: {} }));
   fakeHistory.appendCalls.length = 0;
   fakeHistory.appendShouldFail = false;
   fakeHistory.entriesBySession.clear();
+  deferred.current = null;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -289,5 +316,98 @@ describe('useComposerInputHistory', () => {
     expect(useComposerInputHistoryStore.getState().historyByScope['scope-session-1']).toEqual([
       '离线记录',
     ]);
+  });
+
+  it('卸载后迟到的水合失败不再记录日志（避免 teardown 期间写 console）', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    let rejectList!: (error: unknown) => void;
+    deferred.current = {
+      promise: new Promise<void>((_resolve, reject) => {
+        rejectList = reject;
+      }),
+      reject: (error: unknown) => rejectList(error),
+    };
+
+    const { unmount } = renderHook(() =>
+      useHistoryHarness({
+        historyScope: 'scope-session-1',
+        sessionId: 'session-1',
+        withPersistence: true,
+      }),
+    );
+
+    // 先卸载（生产里是组件消失 / 测试结束），请求此刻仍在飞行。
+    unmount();
+    // 请求在卸载之后才 reject。
+    deferred.current.reject(new Error('网关不可达'));
+    // 必须把 reject 之后的微任务链跑完再断言：否则断言会在 catch 执行前通过，
+    // 用例就失去了回归价值（无论有没有取消门都是绿的）。
+    await flushRejection();
+
+    const hydrationWarns = warnSpy.mock.calls.filter(
+      (call) => call[0] === '输入历史水合失败，保留本地记录',
+    );
+    expect(hydrationWarns).toHaveLength(0);
+  });
+
+  it('未卸载时的水合失败仍会记录日志（证明取消门没有吞掉有效日志）', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    let rejectList!: (error: unknown) => void;
+    deferred.current = {
+      promise: new Promise<void>((_resolve, reject) => {
+        rejectList = reject;
+      }),
+      reject: (error: unknown) => rejectList(error),
+    };
+
+    renderHook(() =>
+      useHistoryHarness({
+        historyScope: 'scope-session-1',
+        sessionId: 'session-1',
+        withPersistence: true,
+      }),
+    );
+
+    // 组件仍在挂载状态，请求失败必须留下可诊断的日志。
+    deferred.current.reject(new Error('网关不可达'));
+    await flushRejection();
+
+    const hydrationWarns = warnSpy.mock.calls.filter(
+      (call) => call[0] === '输入历史水合失败，保留本地记录',
+    );
+    expect(hydrationWarns).toHaveLength(1);
+  });
+
+  it('未卸载但水合期间发生写入时，水合失败仍记录日志（revision 推进不得吞掉诊断）', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    let rejectList!: (error: unknown) => void;
+    deferred.current = {
+      promise: new Promise<void>((_resolve, reject) => {
+        rejectList = reject;
+      }),
+      reject: (error: unknown) => rejectList(error),
+    };
+
+    const { result } = renderHook(() =>
+      useHistoryHarness({
+        historyScope: 'scope-session-1',
+        sessionId: 'session-1',
+        withPersistence: true,
+      }),
+    );
+
+    // 仍然挂载：期间用户发送一条消息 → `recordSubmittedInputHistory` 推进 revision。
+    // 失败分支并不消费水合结果，故「写入推进 revision」不该被当作「请求已被取代」。
+    act(() => {
+      result.current.recordSubmittedInputHistory('并发写入的输入');
+    });
+
+    deferred.current.reject(new Error('网关不可达'));
+    await flushRejection();
+
+    const hydrationWarns = warnSpy.mock.calls.filter(
+      (call) => call[0] === '输入历史水合失败，保留本地记录',
+    );
+    expect(hydrationWarns).toHaveLength(1);
   });
 });

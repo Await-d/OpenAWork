@@ -44,15 +44,29 @@ export interface QueuedComposerPreview {
   title: string;
 }
 
+/**
+ * 待发条目的附件相关文案。
+ *
+ * composer 的排队 chip（拼成摘要串）与对话流的待发气泡（渲染成独立小标签）是同一批
+ * 文案的两个出口，必须共用这一份，否则会出现「改了摘要忘了气泡」，两处说法不一致。
+ */
+export const QUEUED_ATTACHMENT_REBIND_LABEL = '需重新选择附件';
+
+export function formatQueuedAttachmentCountLabel(count: number): string {
+  return `${count} 个附件`;
+}
+
 export function summarizeQueuedComposerMessage(input: {
   attachmentItems: AttachmentItem[];
   requiresAttachmentRebind: boolean;
   text: string;
 }): { label: string; title: string } {
   const normalizedText = input.text.trim().replace(/\s+/g, ' ');
-  const attachmentCount = input.attachmentItems.length;
-  const attachmentLabel = attachmentCount > 0 ? `${attachmentCount} 个附件` : '';
-  const reattachLabel = input.requiresAttachmentRebind ? '需重新选择附件' : '';
+  const attachmentLabel =
+    input.attachmentItems.length > 0
+      ? formatQueuedAttachmentCountLabel(input.attachmentItems.length)
+      : '';
+  const reattachLabel = input.requiresAttachmentRebind ? QUEUED_ATTACHMENT_REBIND_LABEL : '';
   const suffix = [attachmentLabel, reattachLabel].filter((item) => item.length > 0).join(' · ');
 
   if (normalizedText.length === 0) {

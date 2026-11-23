@@ -1,157 +1,115 @@
-import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useState } from 'react';
+import { FileTypeIcon, FolderTypeIcon } from '@openAwork/shared-ui';
+import {
+  parseDirectoryTree,
+  type DirectoryTreeBundle,
+  type DirectoryTreeNode,
+} from '../shared/directory-listing.js';
 import { useIsInsideExpandedToolCard } from '../shared/tool-card-expansion.js';
+import './list-directory.css';
 
-/* ── list nodes preview (indented file tree) ── */
+export type TreeNode = DirectoryTreeNode;
+export type TreeNodesBundle = DirectoryTreeBundle;
+export const extractTreeNodesFromOutput = parseDirectoryTree;
 
-/**
- * 单个工具卡片内最多渲染的树节点行数。
- *
- * 旧实现里展开卡片会强制全展开且无法折叠，上万节点的工作区会一次性铺满 DOM。
- */
 const MAX_TREE_ROWS = 400;
 
-/**
- * 渲染预算：在**本次渲染内**共享的可变计数器。
- *
- * 刻意用局部对象而不是 `useRef`：React 渲染是纯函数，重渲染与 StrictMode 的
- * 双调用都会从同一个初始值重新计数，因此不存在「扣减结果累积到下一次渲染」的
- * 副作用问题。
- */
-interface RenderBudget {
-  remaining: number;
-  omitted: number;
+function isDirectory(node: TreeNode): boolean {
+  return node.type === 'dir' || node.type === 'directory' || Boolean(node.children?.length);
 }
 
-export interface TreeNode {
-  name: string;
-  type?: 'file' | 'dir' | 'directory';
-  children?: TreeNode[];
-}
-
-export interface TreeNodesBundle {
-  path?: string;
-  visited?: number;
-  nodes: TreeNode[];
-}
-
-export function extractTreeNodesFromOutput(output: unknown): TreeNodesBundle | null {
-  if (!output || typeof output !== 'object' || Array.isArray(output)) return null;
-  const record = output as Record<string, unknown>;
-  const nodes = record.nodes;
-  if (!Array.isArray(nodes)) return null;
-  return {
-    path: typeof record.path === 'string' ? record.path : undefined,
-    visited: typeof record.visitedEntries === 'number' ? record.visitedEntries : undefined,
-    nodes: nodes as TreeNode[],
-  };
-}
-
-function isDirectoryNode(node: TreeNode): boolean {
-  if (node.type === 'dir' || node.type === 'directory') return true;
-  return Array.isArray(node.children) && node.children.length > 0;
-}
-
-function TreeNodeRow({
-  node,
-  depth,
-  defaultExpanded,
-  budget,
-}: {
+interface VisibleRow {
   node: TreeNode;
-  depth: number;
-  defaultExpanded: boolean;
-  budget: RenderBudget;
-}) {
-  const isDir = isDirectoryNode(node);
-  const hasChildren = Array.isArray(node.children) && node.children.length > 0;
-  const isInsideExpandedCard = useIsInsideExpandedToolCard();
-  // 卡片展开态下默认全展开，但**仍可折叠**。旧实现把 `interactive` 绑定成
-  // `!isInsideExpandedCard`，于是展开卡片里的目录既点不动，又把用户偏好
-  // `defaultExpanded` 彻底忽略。
-  const [expanded, setExpanded] = useState(defaultExpanded || isInsideExpandedCard);
-  const effectiveExpanded = expanded;
-  const toggle = () => setExpanded((prev) => !prev);
-  const interactive = isDir && hasChildren;
+  level: number;
+  key: string;
+  expanded: boolean;
+}
 
-  return (
+function collectRows(
+  nodes: TreeNode[],
+  overrides: Readonly<Record<string, boolean>>,
+  initiallyExpanded: boolean,
+  rowLimit: number,
+) {
+  const rows: VisibleRow[] = [];
+  let limited = false;
+  function walk(items: TreeNode[], level: number, parent: string) {
+    for (const [index, node] of items.entries()) {
+      if (rows.length === rowLimit) {
+        limited = true;
+        return;
+      }
+      const key = `${parent}/${index}:${node.name}`;
+      const expanded = overrides[key] ?? initiallyExpanded;
+      rows.push({ node, level, key, expanded });
+      if (expanded && node.children?.length) walk(node.children, level + 1, key);
+    }
+  }
+  walk(nodes, 0, '');
+  return { rows, limited };
+}
+
+function countNodes(nodes: TreeNode[]): { files: number; directories: number } {
+  let files = 0;
+  let directories = 0;
+  for (const node of nodes) {
+    if (isDirectory(node)) directories += 1;
+    else files += 1;
+    const children = countNodes(node.children ?? []);
+    files += children.files;
+    directories += children.directories;
+  }
+  return { files, directories };
+}
+
+function DirectoryRow({ row, toggle }: { row: VisibleRow; toggle: () => void }) {
+  const { node, level, expanded } = row;
+  const directory = isDirectory(node);
+  const interactive = directory && Boolean(node.children?.length);
+  const content = (
     <>
-      <div
-        className="tool-call-tree-row"
-        data-kind={isDir ? 'dir' : 'file'}
-        data-expanded={isDir && hasChildren ? (effectiveExpanded ? 'true' : 'false') : undefined}
-        style={{
-          paddingLeft: depth * 12 + 6,
-          cursor: interactive ? 'pointer' : 'default',
-        }}
-        {...(interactive
-          ? {
-              role: 'button',
-              tabIndex: 0,
-              'aria-expanded': effectiveExpanded,
-              onClick: toggle,
-              onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggle();
-                }
-              },
-            }
-          : {})}
-      >
-        <span className="tool-call-tree-glyph" aria-hidden="true">
-          {isDir ? (effectiveExpanded ? '▾' : '▸') : '·'}
-        </span>
-        <span className="tool-call-tree-name">{node.name}</span>
-        {isDir && node.children && (
-          <span className="tool-call-tree-count">({node.children.length})</span>
+      <span className="tool-call-tree-glyph" aria-hidden="true">
+        {interactive ? (expanded ? '▾' : '▸') : '·'}
+      </span>
+      <span className="list-directory-icon" aria-hidden="true">
+        {directory ? (
+          <FolderTypeIcon name={node.name} open={interactive && expanded} />
+        ) : (
+          <FileTypeIcon path={node.path ?? node.name} name={node.name} />
         )}
-      </div>
-      {effectiveExpanded &&
-        Array.isArray(node.children) &&
-        renderRows(node.children, depth + 1, defaultExpanded, budget)}
+      </span>
+      <span className="tool-call-tree-name">{node.name}</span>
+      {directory && (
+        <span className="tool-call-tree-count">
+          {node.children === undefined
+            ? '未展开'
+            : node.children.length === 0
+              ? '空目录'
+              : `(${node.children.length})`}
+        </span>
+      )}
     </>
   );
-}
-
-/**
- * 按行预算渲染一层节点。超出上限的部分不渲染，并只由最外层输出一行省略提示。
- */
-function renderRows(
-  list: TreeNode[],
-  depth: number,
-  defaultExpanded: boolean,
-  budget: RenderBudget,
-): ReactNode[] {
-  const rows: ReactNode[] = [];
-
-  for (let i = 0; i < list.length; i += 1) {
-    const node = list[i];
-    if (!node) continue;
-    if (budget.remaining <= 0) {
-      budget.omitted += 1;
-      continue;
-    }
-    budget.remaining -= 1;
-    rows.push(
-      <TreeNodeRow
-        key={`${node.name}-${depth}-${i}`}
-        node={node}
-        depth={depth}
-        defaultExpanded={defaultExpanded}
-        budget={budget}
-      />,
-    );
-  }
-
-  if (depth === 0 && budget.omitted > 0) {
-    rows.push(
-      <div key="__omitted" className="tool-call-search-meta">
-        已省略 {budget.omitted} 个条目（单卡上限 {MAX_TREE_ROWS} 行）
-      </div>,
-    );
-  }
-
-  return rows;
+  const props = {
+    className: 'tool-call-tree-row list-directory-row',
+    'data-kind': directory ? 'dir' : 'file',
+    'data-expanded': interactive ? String(expanded) : undefined,
+    style: {
+      paddingInlineStart: `calc(var(--spacing-2) + ${Math.min(level, 8)} * var(--spacing-3))`,
+    },
+    title: node.path ?? node.name,
+  };
+  return (
+    <li>
+      {interactive ? (
+        <button {...props} type="button" aria-expanded={expanded} onClick={toggle}>
+          {content}
+        </button>
+      ) : (
+        <div {...props}>{content}</div>
+      )}
+    </li>
+  );
 }
 
 export function TreeNodesPreview({
@@ -161,18 +119,58 @@ export function TreeNodesPreview({
   data: TreeNodesBundle;
   defaultExpanded?: boolean;
 }) {
-  if (data.nodes.length === 0) {
-    return <div className="tool-call-inline-empty">（目录为空）</div>;
-  }
-
-  const budget: RenderBudget = { remaining: MAX_TREE_ROWS, omitted: 0 };
-
+  const insideExpandedCard = useIsInsideExpandedToolCard();
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const [rowLimit, setRowLimit] = useState(MAX_TREE_ROWS);
+  const { rows, limited } = collectRows(
+    data.nodes,
+    overrides,
+    defaultExpanded || insideExpandedCard,
+    rowLimit,
+  );
+  const counts = countNodes(data.nodes);
   return (
-    <div className="tool-call-tree">
-      {renderRows(data.nodes, 0, defaultExpanded, budget)}
-      {data.visited !== undefined && (
-        <div className="tool-call-search-meta">共 {data.visited} 个条目 · 点击目录展开</div>
+    <section className="tool-call-tree list-directory" aria-label="目录清单">
+      <header className="list-directory-header">
+        {data.path && <code className="list-directory-root">{data.path}</code>}
+        <div className="list-directory-meta">
+          <span>
+            已返回 {counts.directories} 个目录 · {counts.files} 个文件
+          </span>
+          {data.visited !== undefined && <span>已访问 {data.visited} 个条目</span>}
+          {data.depth !== undefined && <span>遍历深度 {data.depth} · 更深层内容未读取</span>}
+        </div>
+      </header>
+      {rows.length === 0 ? (
+        <div className="tool-call-inline-empty">（未返回目录条目）</div>
+      ) : (
+        <ul className="list-directory-rows">
+          {rows.map((row) => (
+            <DirectoryRow
+              key={row.key}
+              row={row}
+              toggle={() => setOverrides((prev) => ({ ...prev, [row.key]: !row.expanded }))}
+            />
+          ))}
+        </ul>
       )}
-    </div>
+      {limited && (
+        <div className="list-directory-pagination">
+          <span role="status">当前显示 {rows.length} 行，还有更多已返回条目。</span>
+          <button
+            type="button"
+            className="list-directory-load-more"
+            onClick={() => setRowLimit((limit) => limit + MAX_TREE_ROWS)}
+          >
+            加载更多（最多 {MAX_TREE_ROWS} 行）
+          </button>
+        </div>
+      )}
+      {data.truncated && (
+        <div className="list-directory-notice" role="status">
+          目录输出已截断，清单不完整。
+        </div>
+      )}
+    </section>
   );
 }

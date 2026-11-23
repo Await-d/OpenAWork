@@ -76,6 +76,28 @@ export function useMemoryProposals({
 
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasLoadedRef = useRef(false);
+  const generationRef = useRef(0);
+  const activeRef = useRef(false);
+
+  useEffect(() => {
+    activeRef.current = active && Boolean(token);
+    generationRef.current += 1;
+    hasLoadedRef.current = false;
+    setProposals([]);
+    setListStatus('idle');
+    setListError(null);
+    setPendingCount(0);
+    setCountError(null);
+    setFeedback({ status: 'idle', message: null });
+    return () => {
+      activeRef.current = false;
+      generationRef.current += 1;
+      if (feedbackTimerRef.current) {
+        clearTimeout(feedbackTimerRef.current);
+        feedbackTimerRef.current = null;
+      }
+    };
+  }, [active, gatewayUrl, token]);
 
   const showFeedback = useCallback((status: MemoryActionFeedback['status'], message: string) => {
     if (feedbackTimerRef.current) {
@@ -98,22 +120,17 @@ export function useMemoryProposals({
     setFeedback({ status: 'idle', message: null });
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (feedbackTimerRef.current) {
-        clearTimeout(feedbackTimerRef.current);
-      }
-    };
-  }, []);
-
   const refresh = useCallback(async () => {
-    if (!token) {
+    if (!token || !activeRef.current) {
       return;
     }
+    const generation = generationRef.current;
+    const isCurrent = () => activeRef.current && generationRef.current === generation;
     setListStatus('loading');
     setListError(null);
     const ok = await runProposalAction({
       onError: (error) => {
+        if (!isCurrent()) return;
         const message = toErrorMessage(error, '加载待确认提议失败');
         setListError(message);
         setListStatus('error');
@@ -122,20 +139,23 @@ export function useMemoryProposals({
       run: async () => {
         const client = createMemoriesClient(gatewayUrl);
         const next = await client.listProposals(token, { status: 'pending', limit: 50, offset: 0 });
+        if (!isCurrent()) return;
         setProposals(next);
         setListStatus('loaded');
       },
     });
-    if (!ok) {
+    if (!ok || !isCurrent()) {
       return;
     }
     await runProposalAction({
       onError: (error) => {
+        if (!isCurrent()) return;
         setCountError(toErrorMessage(error, '读取待确认数量失败'));
         logger.error('failed to count memory proposals', error);
       },
       run: async () => {
         const count = await createMemoriesClient(gatewayUrl).countPendingProposals(token);
+        if (!isCurrent()) return;
         setPendingCount(count);
         setCountError(null);
       },
@@ -155,9 +175,11 @@ export function useMemoryProposals({
       proposalId: string,
       decision: DecideProposalInput,
     ): Promise<{ ok: boolean; error?: string }> => {
-      if (!token) {
-        return { ok: false, error: '未登录，无法确认。' };
+      if (!token || !activeRef.current) {
+        return { ok: false, error: '未登录或页面已关闭，无法确认。' };
       }
+      const generation = generationRef.current;
+      const isCurrent = () => activeRef.current && generationRef.current === generation;
       showFeedback('pending', '正在提交决策…');
       let failure: string | null = null;
       const ok = await runProposalAction({
@@ -166,16 +188,23 @@ export function useMemoryProposals({
           logger.error('failed to decide memory proposal', error);
         },
         run: async () => {
-          await createMemoriesClient(gatewayUrl).decideProposal(token, proposalId, decision);
+          const result = await createMemoriesClient(gatewayUrl).decideProposal(
+            token,
+            proposalId,
+            decision,
+          );
+          if (result.ok === false) failure = '提交决策失败';
         },
       });
-      if (!ok) {
+      if (!isCurrent()) return { ok: false, error: '身份已切换或页面已关闭。' };
+      if (!ok || failure !== null) {
         const message = failure ?? '提交决策失败';
         showFeedback('error', message);
         return { ok: false, error: message };
       }
       showFeedback('success', decision.decision === 'approve' ? '已接受' : '已拒绝');
       await refresh();
+      if (!isCurrent()) return { ok: false, error: '身份已切换或页面已关闭。' };
       onChanged?.();
       return { ok: true };
     },
@@ -184,20 +213,24 @@ export function useMemoryProposals({
 
   const listRevisions = useCallback(
     async (memoryId: string): Promise<MemoryRevisionRecord[]> => {
-      if (!token) {
+      if (!token || !activeRef.current) {
         return [];
       }
+      const generation = generationRef.current;
       const client = createMemoriesClient(gatewayUrl);
-      return client.listRevisions(token, { memoryId, limit: 20 });
+      const revisions = await client.listRevisions(token, { memoryId, limit: 20 });
+      return activeRef.current && generationRef.current === generation ? revisions : [];
     },
     [gatewayUrl, token],
   );
 
   const rollback = useCallback(
     async (revisionId: string): Promise<{ ok: boolean; error?: string }> => {
-      if (!token) {
-        return { ok: false, error: '未登录，无法回滚。' };
+      if (!token || !activeRef.current) {
+        return { ok: false, error: '未登录或页面已关闭，无法回滚。' };
       }
+      const generation = generationRef.current;
+      const isCurrent = () => activeRef.current && generationRef.current === generation;
       showFeedback('pending', '正在回滚…');
       let failure: string | null = null;
       const ok = await runProposalAction({
@@ -206,16 +239,19 @@ export function useMemoryProposals({
           logger.error('failed to rollback memory revision', error);
         },
         run: async () => {
-          await createMemoriesClient(gatewayUrl).rollbackRevision(token, revisionId);
+          const result = await createMemoriesClient(gatewayUrl).rollbackRevision(token, revisionId);
+          if (result.ok === false) failure = '回滚失败';
         },
       });
-      if (!ok) {
+      if (!isCurrent()) return { ok: false, error: '身份已切换或页面已关闭。' };
+      if (!ok || failure !== null) {
         const message = failure ?? '回滚失败';
         showFeedback('error', message);
         return { ok: false, error: message };
       }
       showFeedback('success', '已回滚到该版本');
       await refresh();
+      if (!isCurrent()) return { ok: false, error: '身份已切换或页面已关闭。' };
       onChanged?.();
       return { ok: true };
     },

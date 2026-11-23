@@ -173,7 +173,7 @@ export function describeExpiry(risk: ExpiryRisk): string {
 export function sortRevisionsDescending<T extends { changeSeq: number; revision: number }>(
   revisions: readonly T[],
 ): T[] {
-  return [...revisions].sort((a, b) => b.changeSeq - a.changeSeq || b.revision - a.revision);
+  return revisions.toSorted((a, b) => b.changeSeq - a.changeSeq || b.revision - a.revision);
 }
 
 /** 提议载荷摘要（key + value），用于列表与折叠展示。 */

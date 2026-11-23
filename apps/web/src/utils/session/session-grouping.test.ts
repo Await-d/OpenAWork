@@ -94,6 +94,32 @@ describe('groupSessionsByWorkspace', () => {
     expect(groups.map((group) => group.workspaceLabel)).toEqual(['alpha', 'zeta', 'idle']);
   });
 
+  it('组内置顶优先：置顶会话排在所属工作区最前，不被搬到别的工作区', () => {
+    const alphaOld: Session = {
+      ...makeSession('alpha-old', 'A 旧会话'),
+      updated_at: '2026-07-01T00:00:00.000Z',
+      metadata_json: JSON.stringify({ workingDirectory: '/repo/alpha' }),
+    };
+    const alphaNew: Session = {
+      ...makeSession('alpha-new', 'A 新会话'),
+      updated_at: '2026-09-01T00:00:00.000Z',
+      metadata_json: JSON.stringify({ workingDirectory: '/repo/alpha' }),
+    };
+    const betaNew: Session = {
+      ...makeSession('beta-new', 'B 新会话'),
+      updated_at: '2026-09-02T00:00:00.000Z',
+      metadata_json: JSON.stringify({ workingDirectory: '/repo/beta' }),
+    };
+
+    const groups = groupSessionsByWorkspace([betaNew, alphaNew, alphaOld], [], ['alpha-old']);
+
+    // 置顶只改所属工作区内部的顺序：alpha 组里置顶的旧会话排最前，
+    // 其余分组不受影响，也不会多出一个跨工作区的「置顶」组。
+    expect(groups.map((group) => group.workspacePath)).toEqual(['/repo/alpha', '/repo/beta']);
+    expect(groups[0]?.sessions.map((session) => session.id)).toEqual(['alpha-old', 'alpha-new']);
+    expect(groups[1]?.sessions.map((session) => session.id)).toEqual(['beta-new']);
+  });
+
   it('会话组透传 SSH 连接 id：远端组非空，本地组为 null', () => {
     const sshSession: Session = {
       ...makeSession('ssh', '远端会话'),

@@ -94,11 +94,14 @@ import {
   THINKING_LANGUAGE_HINT_MARKERS,
   buildSyntheticRequestContextBlock,
   buildTwoPartSystemPrompts,
+  detectThinkingLanguageHintFromText,
   type SyntheticRequestContext,
 } from './stream-system-prompts.js';
 import type { resolveModelRoute } from '../provider/model-router.js';
 import type { SessionStreamContext } from './stream.js';
-import { createRunEventMeta, createStreamErrorChunk } from './stream.js';
+// 运行时不再回边 `./stream.js`：`createRunEventMeta` / `createStreamErrorChunk` 的真身都在叶子
+// `stream-sse-encoder.ts`。此前从 `stream.ts` value 导入会构成 stream.ts ⇄ stream-model-round.ts 运行时环。
+import { createRunEventMeta, createStreamErrorChunk } from './stream-sse-encoder.js';
 import type { getEnabledTools } from './stream.js';
 import { writeAuditLog } from '../infra/audit-log.js';
 import {
@@ -409,34 +412,6 @@ type OrderedContentSegment =
       endedAt?: number;
     }
   | { kind: 'tool_call'; toolCallId: string; toolName: string };
-
-const CJK_RANGE = /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/;
-
-function detectUserLanguageHint(
-  messages: Array<{ role: string; content: string | null }>,
-): string | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]!;
-    if (msg.role !== 'user' || !msg.content) continue;
-    const text = msg.content;
-    if (CJK_RANGE.test(text)) {
-      const jaRatio = (text.match(/[\u3040-\u309f\u30a0-\u30ff]/g) || []).length;
-      const krRatio = (text.match(/[\uac00-\ud7af]/g) || []).length;
-      const zhRatio = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-      if (krRatio > zhRatio && krRatio > jaRatio)
-        return '한국어로 생각하세요. 한국어로만 사고하세요.';
-      if (jaRatio > zhRatio) return '日本語で思考してください。必ず日本語のみで思考してください。';
-      return '请用中文进行思考。你必须全程使用中文思考，绝对不要切换到英文。';
-    }
-  }
-  return null;
-}
-
-function buildThinkingLanguageHint(
-  messages: Array<{ role: string; content: string | null }>,
-): string | null {
-  return detectUserLanguageHint(messages);
-}
 
 /**
  * UnifiedMessage version of applyThinkingLanguageHintToConversation.
@@ -1047,18 +1022,9 @@ function buildOrderedAssistantContent(
   return content.length > 0 ? content : [{ type: 'text', text: '' }];
 }
 
-function buildErrorContent(
-  code: string,
-  message: string,
-  technicalDetail?: string,
-): MessageContent[] {
-  const normalizedTechnicalDetail = technicalDetail?.trim();
-  const detailSuffix =
-    normalizedTechnicalDetail && normalizedTechnicalDetail !== message
-      ? `\n\n技术详情：${normalizedTechnicalDetail}`
-      : '';
-  return [{ type: 'text', text: `[错误: ${code}] ${message}${detailSuffix}`.trim() }];
-}
+// 错误正文构造的**唯一真相源**在 `stream-error-handler.ts`（含可选 `\n\n技术详情：` 后缀）。
+// 此处改为转发同一实现，消除「轮次路径带技术详情、顶层路径不带」的落库内容不一致。
+import { buildErrorContent } from './stream-error-handler.js';
 
 export function buildUserFacingStreamErrorMessage(input: {
   classificationMessage?: string;
@@ -1285,7 +1251,7 @@ export async function runModelRound(input: {
 
   const thinkingLanguagePrompt =
     shouldApplyThinkingConfig && isThinkingEnabled
-      ? '思考模式已启用。你的内部思考链必须与用户消息使用完全相同的语言。用户用中文提问 → 你必须全程用中文思考；用户用日文提问 → 你必须全程用日文思考；以此类推。绝对不要在思考链中切换到英文，即使你习惯用英文推理也必须遵守。'
+      ? '面向用户的回复、提问和进度说明默认沿用其当前语言；如有明确语言要求，以该要求为准。'
       : null;
 
   // ── New 2-layer pipeline (opencode pattern) ──
@@ -1367,14 +1333,11 @@ export async function runModelRound(input: {
   }
   const unifiedMessages = imageBudgetResult.messages;
 
-  // Apply thinking language hint to conversation
+  // Legacy fallback: use only the current user message, never an earlier language.
+  const latestUserMessage = unifiedMessages.findLast((message) => message.role === 'user');
   const thinkingUserHint =
-    shouldApplyThinkingConfig && isThinkingEnabled
-      ? buildThinkingLanguageHint(
-          unifiedMessages.filter(
-            (m): m is Extract<UnifiedMessage, { role: 'user' }> => m.role === 'user',
-          ),
-        )
+    isThinkingEnabled && typeof latestUserMessage?.content === 'string'
+      ? detectThinkingLanguageHintFromText(latestUserMessage.content)
       : null;
   const messagesWithHint = thinkingUserHint
     ? applyThinkingLanguageHintToUnifiedMessages(unifiedMessages, thinkingUserHint)

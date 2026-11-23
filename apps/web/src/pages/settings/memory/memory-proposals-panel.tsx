@@ -209,6 +209,15 @@ function ProposalCard({
   const payload = describeProposalPayload(proposal.payload);
   const relations = proposal.relations ?? [];
   const hasConflict = relations.some((relation) => relation.kind === 'conflict');
+  // 版本历史落在 `memory_revisions.memory_id`：普通记忆取 `targetMemoryId`；规则取
+  // `payload.ruleId`（规则提议**不写** `targetMemoryId`，ruleId 携带在载荷里；规则提示
+  // 的 targetMemoryId 即便被误填也不能信）。服务端回滚端点已支持规则 revision（按
+  // `memory_rule_entries` 重放 before 快照），故这里放开守卫。
+  // 新建规则的提议尚无 ruleId（规则还不存在）→ 无历史可看，保持不显示。
+  const revisionsMemoryId =
+    proposal.action === 'rule' ? proposal.payload.ruleId : proposal.targetMemoryId;
+  const canShowRevisions =
+    revisionsMemoryId !== null && revisionsMemoryId !== undefined && revisionsMemoryId !== '';
 
   const runDecide = (decision: DecideProposalInput) => {
     setLocalError(null);
@@ -219,13 +228,13 @@ function ProposalCard({
     });
   };
 
+  const editedPayload: MemoryProposalPayload = {
+    ...proposal.payload,
+    ...(proposal.action === 'rule'
+      ? { name: editKey.trim(), body: editValue.trim() }
+      : { key: editKey.trim(), value: editValue.trim() }),
+  };
   const submitEdited = () => {
-    const editedPayload: MemoryProposalPayload = {
-      ...proposal.payload,
-      ...(proposal.action === 'rule'
-        ? { name: editKey.trim(), body: editValue.trim() }
-        : { key: editKey.trim(), value: editValue.trim() }),
-    };
     runDecide({ decision: 'approve', payload: editedPayload });
   };
 
@@ -260,6 +269,12 @@ function ProposalCard({
         <span style={{ fontSize: 12, color: 'var(--fg-default)' }}>{proposal.reason}</span>
       </div>
 
+      {proposal.action === 'merge' && (
+        <p style={{ fontSize: 12, color: 'var(--fg-default)', margin: 0 }}>
+          保留指定条目，归档重复项。目标 ID 为重复项，mergeIntoId 为保留条目 ID；保留条目内容不变。
+        </p>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>修改结果</span>
         {editing ? (
@@ -267,6 +282,7 @@ function ProposalCard({
             <input
               type="text"
               value={editKey}
+              readOnly={proposal.action === 'rule'}
               onChange={(event) => setEditKey(event.target.value)}
               style={IS}
               aria-label="编辑提议键"
@@ -284,6 +300,29 @@ function ProposalCard({
         )}
       </div>
 
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+          目标 ID：{proposal.targetMemoryId ?? '新建记录'} · expectedRevision：
+          {proposal.expectedRevision ?? '无（新建）'}
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+          接受 / 批量接受的完整载荷（JSON）
+        </span>
+        <pre style={VALUE_BOX} aria-label="批准完整载荷">
+          {JSON.stringify(proposal.payload, null, 2)}
+        </pre>
+        {editing && (
+          <>
+            <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+              提交修改后的完整载荷（JSON）
+            </span>
+            <pre style={VALUE_BOX} aria-label="编辑后完整载荷">
+              {JSON.stringify(editedPayload, null, 2)}
+            </pre>
+          </>
+        )}
+      </div>
+
       <ExpiryLine proposal={proposal} />
 
       {relations.length > 0 && (
@@ -291,7 +330,7 @@ function ProposalCard({
           {relations.map((relation) => (
             <RelationRow key={`${relation.kind}-${relation.memoryId}`} relation={relation} />
           ))}
-          {hasConflict && (
+          {hasConflict && proposal.action !== 'merge' && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -300,19 +339,6 @@ function ProposalCard({
                 aria-label="用新内容替代"
               >
                 用新内容替代
-              </button>
-              <button
-                type="button"
-                style={BTN_GHOST}
-                onClick={() =>
-                  runDecide({
-                    decision: 'approve',
-                    note: `与既有记忆并存，适用条件：${payload.key}`,
-                  })
-                }
-                aria-label="两者并存"
-              >
-                两者并存（会新增一条，不覆盖原记录）
               </button>
               <button
                 type="button"
@@ -336,14 +362,16 @@ function ProposalCard({
         >
           接受
         </button>
-        <button
-          type="button"
-          style={BTN_GHOST}
-          onClick={() => setEditing((prev) => !prev)}
-          aria-label="修改后接受"
-        >
-          {editing ? '取消修改' : '修改后接受'}
-        </button>
+        {proposal.action !== 'merge' && (
+          <button
+            type="button"
+            style={BTN_GHOST}
+            onClick={() => setEditing((prev) => !prev)}
+            aria-label="修改后接受"
+          >
+            {editing ? '取消修改' : '修改后接受'}
+          </button>
+        )}
         {editing && (
           <button type="button" style={BP} onClick={submitEdited} aria-label="提交修改后的内容">
             提交修改后的内容
@@ -365,7 +393,7 @@ function ProposalCard({
         >
           拒绝
         </button>
-        {proposal.targetMemoryId && (
+        {canShowRevisions && (
           <button
             type="button"
             style={{ ...LINK_BTN, marginLeft: 'auto' }}
@@ -383,9 +411,9 @@ function ProposalCard({
         </div>
       )}
 
-      {showRevisions && proposal.targetMemoryId && (
+      {showRevisions && canShowRevisions && revisionsMemoryId && (
         <MemoryRevisionsPanel
-          memoryId={proposal.targetMemoryId}
+          memoryId={revisionsMemoryId}
           listRevisions={listRevisions}
           rollback={rollback}
         />

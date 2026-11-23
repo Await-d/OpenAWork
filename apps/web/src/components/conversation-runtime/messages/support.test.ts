@@ -762,35 +762,41 @@ describe('reconcileSnapshotChatMessages', () => {
     expect(reconciled[0]?.status).toBe('completed');
   });
 
-  it('把权限审批后的软刷新视为同位 user 消息，不重复保留本地 optimistic 文本', () => {
-    const previousMessages: ChatMessage[] = [
-      {
-        id: 'local-user-temp',
-        role: 'user',
-        content: '帮我执行 npm run build',
-        rawContent: [{ type: 'text', text: '帮我执行 npm run build' }],
-        createdAt: 1_000,
-        status: 'completed',
-      },
-    ];
+  it.each([undefined, 'request-build'])(
+    '权限审批后跨一分钟的用户消息仅在共享请求身份时合并：%s',
+    (clientRequestId) => {
+      const previousMessages: ChatMessage[] = [
+        {
+          id: 'local-user-temp',
+          role: 'user',
+          clientRequestId,
+          content: '帮我执行 npm run build',
+          rawContent: [{ type: 'text', text: '帮我执行 npm run build' }],
+          createdAt: 1_000,
+          status: 'completed',
+        },
+      ];
 
-    const snapshotMessages: ChatMessage[] = [
-      {
-        id: 'server-user-1',
-        role: 'user',
-        content: '帮我执行 npm run build',
-        rawContent: [{ type: 'text', text: '帮我执行 npm run build' }],
-        createdAt: 61_000,
-        status: 'completed',
-      },
-    ];
+      const snapshotMessages: ChatMessage[] = [
+        {
+          id: 'server-user-1',
+          role: 'user',
+          clientRequestId,
+          content: '帮我执行 npm run build',
+          rawContent: [{ type: 'text', text: '帮我执行 npm run build' }],
+          createdAt: 61_000,
+          status: 'completed',
+        },
+      ];
 
-    const reconciled = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
+      const reconciled = reconcileSnapshotChatMessages(previousMessages, snapshotMessages);
 
-    expect(reconciled).toHaveLength(1);
-    expect(reconciled[0]?.id).toBe('server-user-1');
-    expect(reconciled[0]?.content).toBe('帮我执行 npm run build');
-  });
+      expect(reconciled).toHaveLength(clientRequestId ? 1 : 2);
+      expect(reconciled[0]?.id).toBe('server-user-1');
+      expect(reconciled[0]?.content).toBe('帮我执行 npm run build');
+      if (!clientRequestId) expect(reconciled[1]).toBe(previousMessages[0]);
+    },
+  );
 
   it('本地中间轮与其快照孪生带相同派生请求 ID 时按强身份合并为一条', () => {
     const reconciled = reconcileSnapshotChatMessages(

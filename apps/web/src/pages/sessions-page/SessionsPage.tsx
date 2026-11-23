@@ -12,6 +12,7 @@ import { useUIStateStore } from '../../stores/ui/uiState.js';
 import { exportSession, importSession } from '../../utils/session/session-transfer.js';
 import { logger } from '../../utils/log/logger.js';
 import { toast } from '../../components/common/feedback/ToastNotification.js';
+import { copyTextToClipboard } from '../../components/layout/file-tree/file-tree-actions.js';
 import {
   buildWorkspaceSessionCollections,
   isWorkspaceGroupCollapsed,
@@ -556,10 +557,14 @@ export default function SessionsPage() {
   );
 
   function handleCopyId(id: string) {
-    void navigator.clipboard.writeText(id).then(() => {
-      setCopiedId(true);
-      setTimeout(() => setCopiedId(false), 1500);
-    });
+    void copyTextToClipboard(id)
+      .then(() => {
+        setCopiedId(true);
+        setTimeout(() => setCopiedId(false), 1500);
+      })
+      .catch((copyError: unknown) => {
+        console.warn('复制会话 ID 失败', copyError);
+      });
   }
 
   const deferredSearchQuery = useDeferredValue(searchQuery);

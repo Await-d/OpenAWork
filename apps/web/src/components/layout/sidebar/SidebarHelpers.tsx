@@ -169,7 +169,7 @@ export function FileTreeView({
   activeFilePath?: string | null;
 }) {
   // Sort: directories first, then files, both alphabetically
-  const sortedNodes = [...nodes].sort((a, b) => {
+  const sortedNodes = nodes.toSorted((a, b) => {
     if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
     return a.name.localeCompare(b.name, 'zh-CN', { numeric: true });
   });

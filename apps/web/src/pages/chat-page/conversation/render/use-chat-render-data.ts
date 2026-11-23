@@ -82,11 +82,12 @@ function messageCarriesLivePermissionRequest(message: ChatMessage): boolean {
 /**
  * 合并「同一条助手回复在本地与快照中各有一份」的重叠消息。
  *
- * 判据与原实现逐条一致：id / clientRequestId / 任一 part id / 任一 toolCallId 相交
+ * id / clientRequestId 相同，或在请求标识不冲突时任一 part id / toolCallId 相交，
  * 即视为同一条；命中时保留「已落定」或「parts 更完整」的那一份，并保持首次出现的
  * 位置（transcript 顺序不得因合并而跳动）。
  *
- * 性能：用四张倒排表把「每条消息都与已输出的每条比较」的 O(n²) 降为 O(n)。400 条
+ * 性能：用四张倒排表避免「每条消息都与已输出的每条比较」的 O(n²) 扫描；
+ * 仅遍历命中 part / tool 键的候选，无键冲突时为 O(n)。400 条
  * 消息上原实现约 5.8ms，而 `messages` 每次变化（权限申请插入事件卡片、工具结果
  * 落库、快照合并）都会整段重算，长会话下这是一次可感知的长任务。
  */
@@ -94,8 +95,17 @@ export function deduplicateOverlappingMessages(messages: ChatMessage[]): ChatMes
   const output: ChatMessage[] = [];
   const indexById = new Map<string, number>();
   const indexByClientRequestId = new Map<string, number>();
-  const indexByPartId = new Map<string, number>();
-  const indexByToolCallId = new Map<string, number>();
+  const indexByPartId = new Map<string, Set<number>>();
+  const indexByToolCallId = new Map<string, Set<number>>();
+
+  const registerCandidate = (map: Map<string, Set<number>>, key: string, index: number): void => {
+    const candidates = map.get(key);
+    if (candidates) {
+      candidates.add(index);
+    } else {
+      map.set(key, new Set([index]));
+    }
+  };
 
   const registerKeys = (index: number, message: ChatMessage): void => {
     indexById.set(message.id, index);
@@ -106,9 +116,9 @@ export function deduplicateOverlappingMessages(messages: ChatMessage[]): ChatMes
       indexByClientRequestId.set(message.clientRequestId, index);
     }
     for (const part of message.parts ?? []) {
-      indexByPartId.set(part.id, index);
+      registerCandidate(indexByPartId, part.id, index);
       if (part.type === 'tool') {
-        indexByToolCallId.set(part.toolCallId, index);
+        registerCandidate(indexByToolCallId, part.toolCallId, index);
       }
     }
   };
@@ -121,11 +131,18 @@ export function deduplicateOverlappingMessages(messages: ChatMessage[]): ChatMes
    * 合并到新消息上（表现为消息被吞掉、顺序错乱）。原 O(n²) 实现每轮都拿最新的
    * output 重新比较，天然没有这个问题。
    *
-   * 只删除「确实指向本位置」的键：同一个键可能已被后来的消息登记到别的位置。
+   * 只撤销本位置的登记：同一个 part / tool 键可能还属于其他请求的候选。
    */
   const unregisterKeys = (index: number, message: ChatMessage): void => {
     const dropKey = (map: Map<string, number>, key: string | undefined): void => {
       if (key !== undefined && map.get(key) === index) {
+        map.delete(key);
+      }
+    };
+    const dropCandidate = (map: Map<string, Set<number>>, key: string): void => {
+      const candidates = map.get(key);
+      candidates?.delete(index);
+      if (candidates?.size === 0) {
         map.delete(key);
       }
     };
@@ -136,11 +153,18 @@ export function deduplicateOverlappingMessages(messages: ChatMessage[]): ChatMes
     }
     dropKey(indexByClientRequestId, message.clientRequestId);
     for (const part of message.parts ?? []) {
-      dropKey(indexByPartId, part.id);
+      dropCandidate(indexByPartId, part.id);
       if (part.type === 'tool') {
-        dropKey(indexByToolCallId, part.toolCallId);
+        dropCandidate(indexByToolCallId, part.toolCallId);
       }
     }
+  };
+
+  const hasConflictingRequest = (index: number, message: ChatMessage): boolean => {
+    const existingRequestId = output[index]!.clientRequestId;
+    return Boolean(
+      existingRequestId && message.clientRequestId && existingRequestId !== message.clientRequestId,
+    );
   };
 
   const findExistingIndex = (message: ChatMessage): number => {
@@ -157,22 +181,24 @@ export function deduplicateOverlappingMessages(messages: ChatMessage[]): ChatMes
         return sameRequest;
       }
     }
+    let earliestIndex = -1;
+    const considerCandidates = (candidates: Set<number> | undefined): void => {
+      for (const index of candidates ?? []) {
+        if (
+          (earliestIndex < 0 || index < earliestIndex) &&
+          !hasConflictingRequest(index, message)
+        ) {
+          earliestIndex = index;
+        }
+      }
+    };
     for (const part of message.parts ?? []) {
-      const samePart = indexByPartId.get(part.id);
-      if (samePart !== undefined) {
-        return samePart;
+      considerCandidates(indexByPartId.get(part.id));
+      if (part.type === 'tool') {
+        considerCandidates(indexByToolCallId.get(part.toolCallId));
       }
     }
-    for (const part of message.parts ?? []) {
-      if (part.type !== 'tool') {
-        continue;
-      }
-      const sameToolCall = indexByToolCallId.get(part.toolCallId);
-      if (sameToolCall !== undefined) {
-        return sameToolCall;
-      }
-    }
-    return -1;
+    return earliestIndex;
   };
 
   for (const message of messages) {
@@ -734,10 +760,14 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
   const contextUsageSnapshot = useMemo(
     () =>
       buildChatContextUsageSnapshot({
-        contextWindow: resolveEffectiveContextWindow(
-          activeModelOption?.contextWindow,
-          activeModelOption?.contextWindowOverride,
-        ),
+        contextWindow:
+          visibleReportedStreamUsage?.contextBudget?.windowTokens ??
+          resolveEffectiveContextWindow(
+            activeModelOption?.contextWindow,
+            activeModelOption?.contextWindowOverride,
+          ),
+        autoCompactThresholdTokens:
+          visibleReportedStreamUsage?.contextBudget?.autoCompactThresholdTokens,
         historicalTokens: shouldPreferHistoricalContextEstimate
           ? messageInputTokens
           : Math.max(messageInputTokens, latestHistoricalReportedTotalTokens),
@@ -750,6 +780,7 @@ export function useChatRenderData(input: ChatRenderDataInput): ChatRenderDataRet
     [
       activeModelOption?.contextWindow,
       activeModelOption?.contextWindowOverride,
+      visibleReportedStreamUsage?.contextBudget,
       effectiveReportedStreamUsage?.totalTokens,
       effectiveReportedStreamUsage?.peakTotalTokens,
       latestHistoricalReportedTotalTokens,

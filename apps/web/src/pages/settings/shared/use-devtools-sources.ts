@@ -1,3 +1,4 @@
+import { parseServerTimestamp } from '@openAwork/shared';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   createDesktopAutomationClient,
@@ -167,7 +168,7 @@ export function useDevtoolsSources({ gatewayUrl, token }: UseDevtoolsSourcesOpti
               level: log.level,
               message: extractPrimaryMessage(log.output) ?? log.message,
               source: log.toolName,
-              timestamp: Date.parse(log.createdAt) || Date.now(),
+              timestamp: parseServerTimestamp(log.createdAt) ?? Date.now(),
               requestId: log.requestId,
               sessionId: log.sessionId,
               durationMs: log.durationMs,

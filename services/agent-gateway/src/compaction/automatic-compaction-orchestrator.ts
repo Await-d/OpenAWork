@@ -188,7 +188,12 @@ function publishFailed(
   cause: CompactionCause,
   error: unknown,
 ) {
-  const summary = error instanceof Error ? error.message : '自动压缩失败，保留当前上下文状态。';
+  const summary =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : '自动压缩失败，保留当前上下文状态。';
   publishSessionRunEvent(
     input.sessionId,
     {
@@ -211,7 +216,10 @@ function publishCompleted(
   round: number,
   cause: CompactionCause,
   summary: string,
-  details: { readonly compactedMessages?: number; readonly representedMessages?: number },
+  details: Pick<
+    StreamCompactionChunk,
+    'compactedMessages' | 'representedMessages' | 'historyTokenEstimate'
+  >,
   suffix: string,
 ): void {
   publishSessionRunEvent(
@@ -229,6 +237,9 @@ function publishCompleted(
       ...(details.representedMessages !== undefined
         ? { representedMessages: details.representedMessages }
         : {}),
+      ...(details.historyTokenEstimate
+        ? { historyTokenEstimate: details.historyTokenEstimate }
+        : {}),
       eventId: `${input.clientRequestId}:auto-compact:${round}:${suffix}:completed`,
       runId: input.runId,
       occurredAt: Date.now(),
@@ -238,6 +249,7 @@ function publishCompleted(
 }
 
 async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveCompactionResult> {
+  input.signal.throwIfAborted();
   const effectiveContextWindow = resolveEffectiveContextWindow(
     input.userId,
     input.route.model,
@@ -261,6 +273,7 @@ async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveC
 
   try {
     const compactionRoute = await resolveCompactionRouteForUser(input.userId, input.route);
+    input.signal.throwIfAborted();
     const allMessages = listSessionMessagesV2({
       sessionId: input.sessionId,
       userId: input.userId,
@@ -285,10 +298,14 @@ async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveC
       tailTurns: DEFAULT_AUTOMATIC_TAIL_TURNS,
       userId: input.userId,
     });
+    input.signal.throwIfAborted();
     const compactedCount =
       compactionResult.durableSummary?.newlySummarizedMessages ?? allMessages.length;
     const representedCount =
       compactionResult.durableSummary?.totalRepresentedMessages ?? allMessages.length;
+    if (compactionResult.retryable) {
+      return { triggered: false, metadataJson: compactionResult.metadataJson };
+    }
     if (compactionResult.llmErrorMessage) {
       publishFailed(
         input,
@@ -296,18 +313,30 @@ async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveC
         'proactive_near_overflow',
         compactionResult.llmErrorMessage,
       );
-      return { triggered: true, metadataJson: compactionResult.metadataJson };
+      return { triggered: false, metadataJson: compactionResult.metadataJson };
+    }
+    if (
+      compactionResult.committed === false ||
+      (compactionResult.committed === undefined && !compactionResult.summary)
+    ) {
+      return { triggered: false, metadataJson: compactionResult.metadataJson };
     }
     publishCompleted(
       input,
       input.round,
       'proactive_near_overflow',
       `已预防性压缩 ${compactedCount} 条较早消息，保留 ${input.compactionSettings.recentMessagesKept} 条近期消息。`,
-      { compactedMessages: compactedCount, representedMessages: representedCount },
+      {
+        compactedMessages: compactedCount,
+        representedMessages: representedCount,
+        historyTokenEstimate: compactionResult.historyTokenEstimate,
+      },
       compactionResult.durableSummary?.signature ?? String(Date.now()),
     );
     return { triggered: true, metadataJson: compactionResult.metadataJson };
   } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    input.signal.throwIfAborted();
     publishFailed(input, input.round, 'proactive_near_overflow', error);
     logGatewayWarn('proactive compaction failed', error);
     return { triggered: false, metadataJson: input.metadataJson };
@@ -315,6 +344,7 @@ async function runProactive(input: ProactiveCompactionInput): Promise<ProactiveC
 }
 
 async function runOverflow(input: OverflowCompactionInput): Promise<OverflowCompactionResult> {
+  input.signal.throwIfAborted();
   const { roundResult } = input;
   const effectiveContextWindow = resolveEffectiveContextWindow(
     input.userId,
@@ -341,7 +371,6 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
     !isCompactionSubrequest(input) &&
     input.compactionSettings.auto &&
     roundResult.overflow === true &&
-    !isAutoCompactCircuitBreakerTripped(input.metadataJson) &&
     ((roundResult.usage &&
       typeof effectiveContextWindow === 'number' &&
       shouldAutomaticallyCompact({
@@ -370,6 +399,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
         const remainingIds = new Set(reactiveResult.remainingMessages.map((message) => message.id));
         const droppedMessages = allMessages.filter((message) => !remainingIds.has(message.id));
         publishStarted(input, input.round, cause, RUNTIME_REPLACE_STRATEGY);
+        input.signal.throwIfAborted();
         const persisted = persistCompactionProjection({
           clientRequestId: input.clientRequestId,
           droppedMessages,
@@ -389,11 +419,14 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
           {
             compactedMessages: reactiveResult.droppedMessages,
             representedMessages: allMessages.length,
+            historyTokenEstimate: persisted.historyTokenEstimate,
           },
           `reactive-${persisted.signature ?? Date.now()}`,
         );
         return { triggered: true, recovered: true, metadataJson: persisted.metadataJson };
       } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') throw error;
+        input.signal.throwIfAborted();
         logGatewayWarn('reactive compaction projection failed, falling through', error);
       }
     }
@@ -419,6 +452,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
     if (truncationResult.success && truncationResult.sufficient) {
       try {
         publishStarted(input, input.round, cause, RUNTIME_REPLACE_STRATEGY);
+        input.signal.throwIfAborted();
         const persisted = persistCompactionProjection({
           clientRequestId: input.clientRequestId,
           kind: 'tool_output',
@@ -438,17 +472,21 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
           {
             compactedMessages: truncationResult.truncatedCount,
             representedMessages: allMessages.length,
+            historyTokenEstimate: persisted.historyTokenEstimate,
           },
           `tool-output-${persisted.signature ?? Date.now()}`,
         );
         return { triggered: true, recovered: true, metadataJson: persisted.metadataJson };
       } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') throw error;
+        input.signal.throwIfAborted();
         logGatewayWarn('tool output projection failed, falling through', error);
       }
     }
   }
 
   try {
+    input.signal.throwIfAborted();
     const smResult = await trySessionMemoryCompaction({
       clientRequestId: input.clientRequestId,
       sessionId: input.sessionId,
@@ -458,6 +496,7 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
       requestKind: 'session_memory',
       round: input.round,
     });
+    input.signal.throwIfAborted();
     if (smResult?.success) {
       if (smResult.committed) {
         publishStarted(input, input.round, cause, RUNTIME_REPLACE_STRATEGY);
@@ -466,18 +505,27 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
           input.round,
           cause,
           `已使用会话记忆进行压缩（保留 ${smResult.messagesToKeep.length} 条近期消息）。`,
-          { compactedMessages: allMessages.length - smResult.messagesToKeep.length },
+          {
+            compactedMessages: allMessages.length - smResult.messagesToKeep.length,
+            historyTokenEstimate: smResult.historyTokenEstimate,
+          },
           `session-memory-${smResult.signature}`,
         );
       }
       return { triggered: true, recovered: true, metadataJson: smResult.metadataJson };
     }
   } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    input.signal.throwIfAborted();
     logGatewayWarn('session memory compaction failed, falling through', error);
   }
 
+  if (isAutoCompactCircuitBreakerTripped(input.metadataJson)) {
+    return { triggered: false, recovered: false, metadataJson: input.metadataJson };
+  }
   try {
     const compactionRoute = await resolveCompactionRouteForUser(input.userId, input.route);
+    input.signal.throwIfAborted();
     const latestFinalMessage = allMessages.at(-1);
     const replayMessage =
       !roundResult.usage &&
@@ -513,13 +561,23 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
       tailTurns: DEFAULT_AUTOMATIC_TAIL_TURNS,
       userId: input.userId,
     });
+    input.signal.throwIfAborted();
     const compactedCount =
       compactionResult.durableSummary?.newlySummarizedMessages ?? messagesForCompaction.length;
     const representedCount =
       compactionResult.durableSummary?.totalRepresentedMessages ?? messagesForCompaction.length;
+    if (compactionResult.retryable) {
+      return { triggered: false, recovered: false, metadataJson: compactionResult.metadataJson };
+    }
     if (compactionResult.llmErrorMessage) {
       publishFailed(input, input.round, cause, compactionResult.llmErrorMessage);
-      return { triggered: true, recovered: false, metadataJson: compactionResult.metadataJson };
+      return { triggered: false, recovered: false, metadataJson: compactionResult.metadataJson };
+    }
+    if (
+      compactionResult.committed === false ||
+      (compactionResult.committed === undefined && !compactionResult.summary)
+    ) {
+      return { triggered: false, recovered: false, metadataJson: compactionResult.metadataJson };
     }
     publishCompleted(
       input,
@@ -528,12 +586,16 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
       replayMessage
         ? `已压缩 ${compactedCount} 条较早消息，并保留当前用户请求继续执行。`
         : `已压缩 ${compactedCount} 条较早消息，并注入继续执行提示。`,
-      { compactedMessages: compactedCount, representedMessages: representedCount },
+      {
+        compactedMessages: compactedCount,
+        representedMessages: representedCount,
+        historyTokenEstimate: compactionResult.historyTokenEstimate,
+      },
       compactionResult.durableSummary?.signature ?? String(Date.now()),
     );
     return {
       triggered: true,
-      recovered: replayMessage !== null,
+      recovered: true,
       metadataJson: compactionResult.metadataJson,
       ...(replayMessage
         ? {}
@@ -543,9 +605,11 @@ async function runOverflow(input: OverflowCompactionInput): Promise<OverflowComp
           }),
     };
   } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    input.signal.throwIfAborted();
     publishFailed(input, input.round, cause, error);
     logGatewayWarn('automatic compaction failed', error);
-    return { triggered: true, recovered: false, metadataJson: input.metadataJson };
+    return { triggered: false, recovered: false, metadataJson: input.metadataJson };
   }
 }
 

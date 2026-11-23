@@ -243,7 +243,7 @@ const PROCESS_EXITED_TITLE =
   '快照读到该监听进程已不存在（进程可能在枚举与展示之间退出），端口可能已释放';
 
 function sortPorts(ports: readonly ListeningPortView[]): ListeningPortView[] {
-  return [...ports].sort(
+  return ports.toSorted(
     (left, right) =>
       left.port - right.port ||
       left.protocol.localeCompare(right.protocol) ||

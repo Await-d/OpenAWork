@@ -1,5 +1,5 @@
 import type { RunEvent } from '@openAwork/shared';
-import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
+import { sqliteAll, sqliteGet, sqliteRun, sqliteRunWithChanges } from '../infra/db.js';
 import type { SqliteBindableValue } from '../infra/sqlite-bind-params.js';
 import { deleteRowsBeyondMostRecent } from '../infra/sqlite-retention.js';
 import type { NotificationChangeReason } from './notification-events-bus.js';
@@ -41,6 +41,15 @@ export const NOTIFICATION_VIEWS = ['pending', 'all', 'archived', 'expired'] as c
 export type NotificationView = (typeof NOTIFICATION_VIEWS)[number];
 
 const ACTIONABLE_EVENT_TYPES: ReadonlySet<string> = new Set(['permission_asked', 'question_asked']);
+
+/**
+ * 待发队列阻塞提醒的 event_type。
+ *
+ * 语义是 actionable（用户必须回到会话手动处理），但**没有** `permission_requests` /
+ * `question_requests` 这类对照实体，因此它不参与 `reconcileActionableNotifications` 的对账，
+ * 只由 `expireQueueBlockedNotificationsForSession` 与 TTL 收口。
+ */
+export const QUEUE_BLOCKED_NOTIFICATION_EVENT_TYPE = 'composer_queue_blocked';
 
 export function resolveNotificationKind(eventType: string): NotificationKind {
   return ACTIONABLE_EVENT_TYPES.has(eventType) ? 'actionable' : 'informational';
@@ -319,6 +328,163 @@ export function listUnreadBroadcastNotifications(input: {
   });
 }
 
+/**
+ * 与底层请求表对账时的宽限期（秒）。
+ *
+ * 事件与请求行的落库顺序是「先请求、后通知」，理论上不存在「通知已到、请求还没到」的
+ * 窗口；但跨进程 / 崩溃恢复后的脏数据没有保证，留一段宽限期可以让对账绝不误清一条
+ * 刚刚生成、底层行尚未可见的有效待办。30s 对用户观感没有影响。
+ */
+const ACTIONABLE_RECONCILE_GRACE_SECONDS = 30;
+
+/**
+ * 从 dedupe_key 解析底层待办 requestId。
+ *
+ * 只有 `permission_asked` / `question_asked` 用 `<eventType>:<requestId>` 形态；
+ * `task_update` 的键是 `<type>:<status>:<label>`，必须按事件类型校验前缀，否则会把
+ * label 当成 requestId 去匹配。
+ */
+function parseRequestIdFromDedupeKey(dedupeKey: string | null, eventType: string): string | null {
+  if (!dedupeKey) return null;
+  const prefix = `${eventType}:`;
+  if (!dedupeKey.startsWith(prefix)) return null;
+  const requestId = dedupeKey.slice(prefix.length).trim();
+  return requestId.length > 0 ? requestId : null;
+}
+
+/** 兼容存量行：permission 通知的 body 首行固定是 `requestId=<id>`。 */
+function parseRequestIdFromNotificationBody(body: string): string | null {
+  const firstLine = body.split('\n', 1)[0] ?? '';
+  if (!firstLine.startsWith('requestId=')) return null;
+  const requestId = firstLine.slice('requestId='.length).trim();
+  return requestId.length > 0 ? requestId : null;
+}
+
+interface LiveActionableRequests {
+  permission: Set<string>;
+  question: Set<string>;
+}
+
+/**
+ * 该用户「仍有底层待办」的会话 → 待办 requestId 集合。
+ *
+ * `deciding` 必须算存活：它是自动裁决 / 父级代决的中间态，此刻待办仍在等结果，
+ * 提前收口会让用户在处理过程中丢掉通知。
+ */
+function listLiveActionableRequestIds(userId: string): Map<string, LiveActionableRequests> {
+  const scopedSessions = `SELECT session_id FROM notifications
+      WHERE user_id = ? AND kind = 'actionable' AND status = 'unread' AND session_id IS NOT NULL`;
+  const rows = sqliteAll<{ id: string; session_id: string; source: 'permission' | 'question' }>(
+    `SELECT session_id, id, 'permission' AS source
+       FROM permission_requests
+      WHERE status IN ('pending', 'deciding') AND session_id IN (${scopedSessions})
+     UNION ALL
+     SELECT session_id, id, 'question' AS source
+       FROM question_requests
+      WHERE status IN ('pending', 'deciding') AND session_id IN (${scopedSessions})`,
+    [userId, userId],
+  );
+  const live = new Map<string, LiveActionableRequests>();
+  rows.forEach((row) => {
+    const bucket = live.get(row.session_id) ?? {
+      permission: new Set<string>(),
+      question: new Set<string>(),
+    };
+    if (row.source === 'permission') {
+      bucket.permission.add(row.id);
+    } else {
+      bucket.question.add(row.id);
+    }
+    live.set(row.session_id, bucket);
+  });
+  return live;
+}
+
+/**
+ * 与底层待办表对账：把「用户已经处理、但通知没收口」的 actionable 未读项置为 `expired`。
+ *
+ * 这是整套生命周期里唯一**不依赖各处理路径主动上报**的兜底。审批 / 提问的消解路径分散在
+ * permissions、questions、共享会话、任务自动裁决、停止运行等十余处，任何一处漏调收口都会
+ * 让铃铛永久挂着一条「早就处理完的待办」——用户看到的就是「通知不会自己消失」。
+ * 在读 `pending` 视图时顺手对账，比在每个写入点补调用更难遗漏。
+ *
+ * 判定分级（宁可多留，绝不误清）：
+ * - 能从 dedupe_key / body 解析出 requestId → 精确判定该请求是否仍 pending
+ * - 解析不出（存量 question 通知）→ 仅当该会话已无任何同类 pending 时才收口
+ * - 通知没有 session_id → 无从对账，保持原状
+ * - 通知仍在宽限期内 → 跳过（见 ACTIONABLE_RECONCILE_GRACE_SECONDS）
+ */
+export function reconcileActionableNotifications(userId: string): void {
+  const rows = sqliteAll<{
+    body: string;
+    dedupe_key: string | null;
+    event_type: string;
+    id: string;
+    session_id: string | null;
+  }>(
+    `SELECT id, session_id, event_type, dedupe_key, body
+       FROM notifications
+      WHERE user_id = ?
+        AND kind = 'actionable'
+        AND status = 'unread'
+        AND session_id IS NOT NULL
+        AND created_at <= datetime('now', ?)`,
+    [userId, `-${ACTIONABLE_RECONCILE_GRACE_SECONDS} seconds`],
+  );
+  if (rows.length === 0) return;
+
+  const live = listLiveActionableRequestIds(userId);
+  const expiredIds: string[] = [];
+
+  rows.forEach((row) => {
+    // 只对「有底层待办实体」的两类事件对账：permission_requests / question_requests 是它们的
+    // 对照源。其余 actionable 事件（如 composer_queue_blocked 这类由别处自己维护生命周期的提醒）
+    // 没有对照实体，此前会被无条件收成 expired —— 与本节「宁可多留，绝不误清」的前提相反。
+    // 跳过即保持原状，交给它们自己的收口路径 / TTL 处理。
+    if (row.event_type !== 'permission_asked' && row.event_type !== 'question_asked') {
+      return;
+    }
+    const bucket = live.get(row.session_id as string);
+    const requestIds =
+      row.event_type === 'permission_asked'
+        ? bucket?.permission
+        : row.event_type === 'question_asked'
+          ? bucket?.question
+          : undefined;
+    if (!requestIds) {
+      // 该会话连一条同类 pending 都没有：底层待办已彻底消解。
+      expiredIds.push(row.id);
+      return;
+    }
+    // body 兜底只对 permission 生效：question 通知的 body 是提问标题，模型完全可能
+    // 生成以 `requestId=` 开头的标题，那时按 body 解析会得到一个假 id，进而把仍在
+    // 等待的有效通知误清。
+    const requestId =
+      parseRequestIdFromDedupeKey(row.dedupe_key, row.event_type) ??
+      (row.event_type === 'permission_asked' ? parseRequestIdFromNotificationBody(row.body) : null);
+    if (requestId) {
+      if (!requestIds.has(requestId)) {
+        expiredIds.push(row.id);
+      }
+      return;
+    }
+    // 定位不到具体请求：只在该会话已无任何同类 pending 时收口。
+    if (requestIds.size === 0) {
+      expiredIds.push(row.id);
+    }
+  });
+
+  if (expiredIds.length === 0) return;
+  const placeholders = expiredIds.map(() => '?').join(', ');
+  sqliteRun(
+    `UPDATE notifications
+        SET status = 'expired'
+      WHERE user_id = ? AND status = 'unread' AND id IN (${placeholders})`,
+    [userId, ...expiredIds],
+  );
+  publishNotificationChanged({ reason: 'expired', userId });
+}
+
 export interface NotificationSnapshot {
   /**
    * 未读结果播报的完整记录（任务完成/失败）——仅 `pending` 视图有值。
@@ -342,6 +508,9 @@ export function buildPendingNotificationSnapshot(
   limit: number,
   status?: NotificationStatus,
 ): NotificationSnapshot {
+  // 读 pending 视图时顺手与底层待办对账：用户可能在会话里已经处理完（甚至由别的端 /
+  // 自动裁决消解），但通知行仍是 unread。这是「通知不会自己消失」的权威兜底。
+  reconcileActionableNotifications(userId);
   // `view=pending` 只含 actionable 待办 —— rows 与 pendingActionableCount 口径一致，
   // 结果播报不在铃铛里占位。
   const notifications = listNotifications({
@@ -460,14 +629,49 @@ function publishNotificationChanged(input: {
   });
 }
 
-export function markNotificationRead(input: { id: string; userId: string }): void {
-  sqliteRun(
-    `UPDATE notifications
-     SET status = 'read', read_at = COALESCE(read_at, datetime('now'))
-     WHERE id = ? AND user_id = ?`,
-    [input.id, input.userId],
-  );
-  publishNotificationChanged({ reason: 'read', userId: input.userId });
+type ActionableNotificationEventType = 'permission_asked' | 'question_asked';
+
+/**
+ * 用户真的响应了待办后收口对应通知（`acted`，不是仅 `read`）。
+ *
+ * 匹配同时认 `dedupe_key`（新数据，形态 `<eventType>:<requestId>`）与 body 首行的
+ * `requestId=` 前缀（改造前的存量行）：只认 body 会让提问类通知永远匹配不上（它的
+ * body 是提问标题），只认 dedupe_key 则漏掉存量行。
+ */
+function markActionableNotificationsActedByRequestIds(input: {
+  eventType: ActionableNotificationEventType;
+  requestIds: readonly string[];
+  sessionId: string;
+  userId: string;
+}): void {
+  const requestIds = [...new Set(input.requestIds.map((value) => value.trim()).filter(Boolean))];
+  if (requestIds.length === 0) return;
+  // body 兜底只对 permission 生效：question 通知的 body 是提问标题（模型可生成任意文本），
+  // 按 `requestId=` 前缀匹配会把「标题恰好长成这样」的有效通知误标为已处理。
+  const useBodyFallback = input.eventType === 'permission_asked';
+  requestIds.forEach((requestId) => {
+    const prefix = `requestId=${requestId}\n`;
+    sqliteRun(
+      `UPDATE notifications
+          SET status = 'acted', acted_at = COALESCE(acted_at, datetime('now'))
+        WHERE user_id = ?
+          AND session_id = ?
+          AND event_type = ?
+          AND status = 'unread'
+          AND (dedupe_key = ?${useBodyFallback ? ' OR substr(body, 1, ?) = ?' : ''})`,
+      useBodyFallback
+        ? [
+            input.userId,
+            input.sessionId,
+            input.eventType,
+            `${input.eventType}:${requestId}`,
+            prefix.length,
+            prefix,
+          ]
+        : [input.userId, input.sessionId, input.eventType, `${input.eventType}:${requestId}`],
+    );
+  });
+  publishNotificationChanged({ reason: 'acted', userId: input.userId });
 }
 
 /**
@@ -478,21 +682,31 @@ export function markPermissionNotificationsActedByRequestIds(input: {
   sessionId: string;
   userId: string;
 }): void {
-  const requestIds = [...new Set(input.requestIds.map((value) => value.trim()).filter(Boolean))];
-  for (const requestId of requestIds) {
-    const prefix = `requestId=${requestId}\n`;
-    sqliteRun(
-      `UPDATE notifications
-       SET status = 'acted', acted_at = COALESCE(acted_at, datetime('now'))
-       WHERE user_id = ?
-         AND session_id = ?
-         AND event_type = 'permission_asked'
-         AND status = 'unread'
-         AND substr(body, 1, ?) = ?`,
-      [input.userId, input.sessionId, prefix.length, prefix],
-    );
-  }
-  publishNotificationChanged({ reason: 'acted', userId: input.userId });
+  markActionableNotificationsActedByRequestIds({ ...input, eventType: 'permission_asked' });
+}
+
+/**
+ * 提问被回答 / 忽略后收口对应通知。
+ *
+ * 此前完全没有这条通路：`question_asked` 通知只能等会话被停止（整会话收口）或 24h TTL
+ * 到期才消失，用户明明已经在会话里答完，铃铛仍挂着——这正是「处理了也不消失」的主因。
+ */
+export function markQuestionNotificationsActedByRequestIds(input: {
+  requestIds: readonly string[];
+  sessionId: string;
+  userId: string;
+}): void {
+  markActionableNotificationsActedByRequestIds({ ...input, eventType: 'question_asked' });
+}
+
+export function markNotificationRead(input: { id: string; userId: string }): void {
+  sqliteRun(
+    `UPDATE notifications
+     SET status = 'read', read_at = COALESCE(read_at, datetime('now'))
+     WHERE id = ? AND user_id = ?`,
+    [input.id, input.userId],
+  );
+  publishNotificationChanged({ reason: 'read', userId: input.userId });
 }
 
 /**
@@ -519,6 +733,31 @@ export function expireActionableNotificationsForSession(input: {
        AND status = 'unread'`,
     [input.userId, input.sessionId],
   );
+  publishNotificationChanged({ reason: 'expired', userId: input.userId });
+}
+
+/**
+ * 收口某会话的「待发队列阻塞」提醒。
+ *
+ * ⚠️ 只有真的改到行时才 `publishNotificationChanged`：这个函数会在每回合收尾被调用一次
+ * （见 `composer-queue-auto-run` 的 drain），无条件广播会让客户端每回合重拉一次通知快照。
+ */
+export function expireQueueBlockedNotificationsForSession(input: {
+  sessionId: string;
+  userId: string;
+}): void {
+  const changed = sqliteRunWithChanges(
+    `UPDATE notifications
+        SET status = 'expired'
+      WHERE user_id = ?
+        AND session_id = ?
+        AND event_type = ?
+        AND status = 'unread'`,
+    [input.userId, input.sessionId, QUEUE_BLOCKED_NOTIFICATION_EVENT_TYPE],
+  );
+  if (changed === 0) {
+    return;
+  }
   publishNotificationChanged({ reason: 'expired', userId: input.userId });
 }
 
@@ -683,9 +922,10 @@ function mapRunEventToNotification(event: RunEvent): MappedNotification | null {
     return {
       title: `等待回答 · ${event.toolName}`,
       body: event.title,
-      // 提问事件没有稳定的 requestId，按工具名去重会误合并同一会话的不同问题，
-      // 因此不参与去重——只靠 TTL 与会话级收口兜底。
-      dedupeKey: null,
+      // 同一个 requestId 只保留一条未读：事件重放不得让红点重复计票。
+      // 同时这条键承载 requestId，供 `reconcileActionableNotifications` 精确对账
+      // （body 是提问标题，不含任何可解析的 id）。
+      dedupeKey: `${event.type}:${event.requestId}`,
       kind: 'actionable',
     };
   }

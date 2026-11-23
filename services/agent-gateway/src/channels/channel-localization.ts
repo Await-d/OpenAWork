@@ -868,3 +868,67 @@ export function buildQueuedMessage(language: ChannelReplyLanguage): string {
         },
       ]);
 }
+
+/**
+ * 「你这条把上一轮打断了」的回执。
+ *
+ * 渠道的插话语义是**最新意图优先**：同一通道会话里前一轮还没跑完时，新消息会
+ * 直接中断它并立刻开跑。没有这条回执时，用户只会看到上一轮「仍在处理中」后再无
+ * 下文，无从判断自己的新消息到底生效了没有 —— 与「消息静默消失」无法区分。
+ *
+ * 文案必须说明上一轮**可能拿不到完整答复**（它真的被停了），否则用户会以为两条
+ * 都在跑；也要说明最新这条已经开始处理，避免用户重复发送。
+ */
+export function buildInterruptedMessage(language: ChannelReplyLanguage): string {
+  return isEnglishChannelReplyLanguage(language)
+    ? buildMessagePanel('Previous turn interrupted', [
+        {
+          heading: 'Status',
+          items: [
+            '- Status: `switched to your latest message`',
+            '- Note: the previous turn was stopped and may not produce a complete answer. Your latest message is being processed now.',
+          ],
+        },
+      ])
+    : buildMessagePanel('已打断上一轮', [
+        {
+          heading: '状态',
+          items: [
+            '- 状态：`已切换到你最新发来的消息`',
+            '- 说明：上一轮执行已停止，那条可能拿不到完整答复；现在开始处理你最新发的这条。',
+          ],
+        },
+      ]);
+}
+
+/**
+ * 「本轮仍在执行」的回执（只用于**非流式**渠道）。
+ *
+ * 与 `buildQueuedMessage` 的分工：那条说的是「你这条排在上一轮后面」，这条说的是
+ * 「你这条已经在跑，只是慢」。QQ 官方 API 不支持编辑已发送消息，auto-reply 只能
+ * 整轮跑完再发一条；含工具链的运行动辄几分钟，没有这条回执时，用户侧与「机器人
+ * 掉线」完全无法区分 —— 这正是渠道端「发出去半天没反应」投诉的直接来源。
+ *
+ * 文案必须说明「结果还会再发一条」，否则用户会以为这就是最终答复。
+ */
+export function buildPendingMessage(language: ChannelReplyLanguage): string {
+  return isEnglishChannelReplyLanguage(language)
+    ? buildMessagePanel('Still working', [
+        {
+          heading: 'Status',
+          items: [
+            '- Status: `in progress`',
+            '- Note: this turn is taking a while (tools are running). The full answer will be sent once it finishes.',
+          ],
+        },
+      ])
+    : buildMessagePanel('仍在处理中', [
+        {
+          heading: '状态',
+          items: [
+            '- 状态：`执行中`',
+            '- 说明：本轮耗时较长（正在运行工具），完成后会再发一条完整结果。',
+          ],
+        },
+      ]);
+}

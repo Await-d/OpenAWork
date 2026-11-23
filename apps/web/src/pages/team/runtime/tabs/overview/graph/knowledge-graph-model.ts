@@ -173,7 +173,7 @@ export function buildGraphModel(
 
   const childrenOf = new Map<string, readonly string[]>();
   for (const [parentId, childIds] of rawChildren) {
-    const sorted = [...childIds].sort((leftId, rightId) => {
+    const sorted = childIds.toSorted((leftId, rightId) => {
       const left = byId.get(leftId);
       const right = byId.get(rightId);
       if (!left || !right) {

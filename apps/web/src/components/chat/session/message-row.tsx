@@ -56,53 +56,74 @@ export interface BuildAssistantMetaItemsInput {
   readonly showEstimatedTokens: boolean;
   readonly showRequestIndex: boolean;
   readonly showToolCount: boolean;
+  /**
+   * 是否包含「用量类」统计项（请求序号 / 费用 / 耗时 / Token 明细 / 首 token / TPS / 工具数）。
+   *
+   * 传 `false` 时只保留诊断类信息（停止原因、异常终态、修改文件数）——这是
+   * 「仅最新一条消息展示统计信息」的实现基础：历史消息的统计行整行不渲染，
+   * 但错误 / 已停止这类状态仍然可见（静默隐藏会让用户看不出对话为何中断）。
+   *
+   * 缺省视为 `true`，保持纯函数既有行为不变。
+   */
+  readonly includeStats?: boolean;
 }
 
 export function buildAssistantMetaItems(
   input: BuildAssistantMetaItemsInput,
 ): readonly MessageMetaItem[] {
   const items: MessageMetaItem[] = [];
+  const includeStats = input.includeStats !== false;
 
   if (input.presentationMode !== 'team' && input.usageDetails) {
-    if (input.showRequestIndex) {
-      items.push({ label: `请求 ${input.usageDetails.requestIndex}` });
-    }
-    if (input.usageDetails.estimatedCostUsd !== undefined) {
-      items.push({ label: formatUsdCost(input.usageDetails.estimatedCostUsd) });
-    }
-    if (input.showDuration && input.durationLabel) {
-      items.push({ label: input.durationLabel });
-    }
+    if (includeStats) {
+      if (input.showRequestIndex) {
+        items.push({ label: `请求 ${input.usageDetails.requestIndex}` });
+      }
+      if (input.usageDetails.estimatedCostUsd !== undefined) {
+        items.push({ label: formatUsdCost(input.usageDetails.estimatedCostUsd) });
+      }
+      if (input.showDuration && input.durationLabel) {
+        items.push({ label: input.durationLabel });
+      }
 
-    if (input.showTokenBreakdown) {
-      items.push({
-        label: `${formatCompactTokenCount(input.usageDetails.totalTokens)} tokens (${formatCompactTokenCount(input.usageDetails.inputTokens)}↓ ${formatCompactTokenCount(input.usageDetails.outputTokens)}↑)`,
-      });
-      items.push({
-        label:
-          input.usageDetails.firstTokenLatencyMs && input.usageDetails.firstTokenLatencyMs > 0
-            ? `首 token ${formatDurationLabel(input.usageDetails.firstTokenLatencyMs)}`
-            : '首 token --',
-      });
-      items.push({
-        label:
-          input.usageDetails.tokensPerSecond && Number.isFinite(input.usageDetails.tokensPerSecond)
-            ? `TPS ${input.usageDetails.tokensPerSecond.toFixed(1)}`
-            : 'TPS --',
-      });
+      if (input.showTokenBreakdown) {
+        items.push({
+          label: `${formatCompactTokenCount(input.usageDetails.totalTokens)} tokens (${formatCompactTokenCount(input.usageDetails.inputTokens)}↓ ${formatCompactTokenCount(input.usageDetails.outputTokens)}↑)`,
+        });
+        items.push({
+          label:
+            input.usageDetails.firstTokenLatencyMs && input.usageDetails.firstTokenLatencyMs > 0
+              ? `首 token ${formatDurationLabel(input.usageDetails.firstTokenLatencyMs)}`
+              : '首 token --',
+        });
+        items.push({
+          label:
+            input.usageDetails.tokensPerSecond &&
+            Number.isFinite(input.usageDetails.tokensPerSecond)
+              ? `TPS ${input.usageDetails.tokensPerSecond.toFixed(1)}`
+              : 'TPS --',
+        });
+      }
     }
   } else if (input.presentationMode !== 'team' && input.tokenCount > 0) {
-    if (input.showEstimatedTokens) {
-      items.push({ label: `~${input.tokenCount} tok` });
+    if (includeStats) {
+      if (input.showEstimatedTokens) {
+        items.push({ label: `~${input.tokenCount} tok` });
+      }
+      if (input.showDuration && input.durationLabel) {
+        items.push({ label: input.durationLabel });
+      }
     }
-    if (input.showDuration && input.durationLabel) {
-      items.push({ label: input.durationLabel });
-    }
-  } else if (input.presentationMode !== 'team' && input.showDuration && input.durationLabel) {
+  } else if (
+    input.presentationMode !== 'team' &&
+    includeStats &&
+    input.showDuration &&
+    input.durationLabel
+  ) {
     items.push({ label: input.durationLabel });
   }
 
-  if (input.showToolCount && input.toolLabel) {
+  if (includeStats && input.showToolCount && input.toolLabel) {
     items.push({ label: input.toolLabel });
   }
 
@@ -148,6 +169,12 @@ export function buildAssistantMetaItems(
     return [];
   }
 
+  // 统计被抑制且没有任何诊断项：整行不渲染。不能落到 fallback（否则每条历史
+  // 消息都会顶着一个「已生成回复」的无信息量标签，等于没省）。
+  if (!includeStats) {
+    return [];
+  }
+
   return [buildAssistantFallbackMetaItem(input)];
 }
 
@@ -171,7 +198,7 @@ function buildAssistantFallbackMetaItem(
   }
 
   if (input.toolLabel) {
-    return { label: '已执行工具', tone: 'accent' };
+    return { label: '包含工具调用', tone: 'accent' };
   }
   if (input.durationLabel || input.usageDetails || input.tokenCount > 0) {
     return { label: '已生成回复' };
@@ -195,6 +222,7 @@ export const MessageRow = React.memo(function MessageRow({
   renderContent,
   sharedUiThemeVars,
   usageDetails,
+  isLatestMessage,
 }: {
   message: ChatMessage;
   providerId: string;
@@ -210,8 +238,27 @@ export const MessageRow = React.memo(function MessageRow({
   renderContent: (m: ChatMessage) => React.ReactNode;
   sharedUiThemeVars: React.CSSProperties;
   usageDetails?: ChatUsageDetails;
+  /**
+   * 该消息是否为当前会话最新一条助手消息。
+   *
+   * 只在 `metaLineScope === 'latest'` 时参与判定：`false` 表示历史消息，
+   * 统计类信息不展示（诊断类仍保留）。缺省视为最新，供不经列表渲染的
+   * 单测 / 复用点保持既有行为。
+   */
+  isLatestMessage?: boolean;
 }) {
   const isUser = message.role === 'user';
+  /*
+   * 压缩标记是**会话级系统事件**，不是「某个模型说的一句话」。
+   *
+   * 它此前走完整消息行：左侧占 28px 头像 + 12px 间距，卡片在自己的内容区里居中，
+   * 于是视觉上比整行中线**右偏约 20px**（实测 390/768/1440 三档均为 19–20px），
+   * 同时还顶着模型名 / 时间 / 复制按钮——一条系统提示被渲染成了模型发言。
+   *
+   * 这里让它走「通栏」形态：不渲染头像列、消息头与元信息行，内容区独占整行，
+   * 胶囊因此对齐到行的对称轴，与 `TimeDividerRow` / `SubagentNoticeRow` 一致。
+   */
+  const isCompaction = isCompactionMessage(message);
   // 单一订阅 + shallow 比较：每行从 10 个 store 订阅降为 1 个。长列表（未虚拟化
   // 的会话可达数百行）下订阅数量随行数线性放大，这是 memo 之外的第二重列表成本。
   const messageRowPrefs = useDisplayPreferencesStore(
@@ -220,6 +267,7 @@ export const MessageRow = React.memo(function MessageRow({
       showEstimatedTokens: s.showEstimatedTokens,
       showMessageTimestamps: s.showMessageTimestamps,
       showMetaLine: s.showMetaLine,
+      metaLineScope: s.metaLineScope,
       showModelName: s.showModelName,
       showProviderLabel: s.showProviderLabel,
       showRequestIndex: s.showRequestIndex,
@@ -294,6 +342,7 @@ export const MessageRow = React.memo(function MessageRow({
         showEstimatedTokens: messageRowPrefs.showEstimatedTokens,
         showRequestIndex: messageRowPrefs.showRequestIndex,
         showToolCount: messageRowPrefs.showToolCount,
+        includeStats: messageRowPrefs.metaLineScope !== 'latest' || isLatestMessage !== false,
       })
     : [];
 
@@ -305,6 +354,9 @@ export const MessageRow = React.memo(function MessageRow({
       data-grouped={groupedWithPrevious ? 'true' : 'false'}
       data-status={message.status ?? 'completed'}
       data-agent-id={message.agentId || undefined}
+      /* 压缩胶囊走通栏：隐藏头像列、消息头与元信息行（见下方 `isCompaction`
+         的条件渲染），内容区独占整行，胶囊才能对齐行的对称轴。 */
+      data-layout={isCompaction ? 'compact-bar' : undefined}
       style={agentAccent ? ({ '--agent-accent': agentAccent } as React.CSSProperties) : undefined}
     >
       <div
@@ -370,7 +422,7 @@ export const MessageRow = React.memo(function MessageRow({
         )}
       </div>
       <div className="chat-message-main">
-        {!groupedWithPrevious && (
+        {!groupedWithPrevious && !isCompaction && (
           <div className="chat-message-header">
             <div className="chat-message-title-group">
               <div
@@ -443,7 +495,9 @@ export const MessageRow = React.memo(function MessageRow({
             {renderContent(message)}
           </div>
         </div>
-        {messageRowPrefs.showMetaLine && metaItems.length > 0 && <MetaLine items={metaItems} />}
+        {messageRowPrefs.showMetaLine && metaItems.length > 0 && !isCompaction && (
+          <MetaLine items={metaItems} />
+        )}
       </div>
     </article>
   );
@@ -497,6 +551,9 @@ function buildMetaLineEntries(items: readonly MessageMetaItem[]): MetaLineEntry[
   return entries;
 }
 
+/**
+ * 元信息行（消息底部）。
+ */
 function MetaLine({ items }: { items: readonly MessageMetaItem[] }) {
   const entries = buildMetaLineEntries(items);
 

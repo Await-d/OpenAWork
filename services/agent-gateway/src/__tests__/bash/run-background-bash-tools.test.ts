@@ -88,6 +88,40 @@ function backgroundTerminals(): RegistryModule.SessionTerminalRecord[] {
 }
 
 describe('dispatchRunBashInBackground', () => {
+  it.skipIf(process.platform === 'win32')('后台执行单引号内的模板字符串', async () => {
+    const result = await bg.dispatchRunBashInBackground({
+      context: { sessionId: SESSION_ID, userId: USER_ID },
+      rawInput: {
+        command: "node -e 'console.log(`template-${1 + 1}`)'",
+        description: '验证后台模板字符串',
+        workdir,
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected ok');
+    await waitForStatus(result.output.terminalId, 'exited');
+    const row = registry.getTerminal(result.output.terminalId, USER_ID);
+    expect(row?.exitCode).toBe(0);
+    expect(row?.outputTail).toContain('template-2');
+  });
+
+  it.each([
+    'printf \'%s\' "${v:-"\'$(printf PROBE)\'"}"',
+    'printf \'%s\' "${v:-"\'`printf PROBE`\'"}"',
+    "printf '%s' $'a\\'$(printf PROBE) # '",
+    "a['$(printf PROBE >&2; printf 0)']=x",
+    "a['`printf PROBE >&2; printf 0`']=x",
+  ])('拒绝复杂引号内的命令替换且不登记终端：%s', async (command) => {
+    const result = await bg.dispatchRunBashInBackground({
+      context: { sessionId: SESSION_ID, userId: USER_ID },
+      rawInput: { command, description: '验证命令替换拦截', workdir },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected rejection');
+    expect(result.error).toMatch(/[Cc]ommand substitution/);
+    expect(backgroundTerminals()).toEqual([]);
+  });
+
   it('returns a terminalId immediately and the command exits on its own', async () => {
     const result = await bg.dispatchRunBashInBackground({
       context: { sessionId: SESSION_ID, userId: USER_ID },
@@ -218,6 +252,39 @@ describe('dispatchBashOutput', () => {
 });
 
 describe('dispatchBashKill', () => {
+  it('跨会话或跨用户查询与停止均不能影响原终端', async () => {
+    const spawn = await bg.dispatchRunBashInBackground({
+      context: { sessionId: SESSION_ID, userId: USER_ID },
+      rawInput: { command: 'sleep 5', description: 'ownership probe', workdir },
+    });
+    if (!spawn.ok) throw new Error('spawn failed');
+    const rawInput = { terminal_id: spawn.output.terminalId };
+    try {
+      for (const context of [
+        { sessionId: OTHER_SESSION_ID, userId: USER_ID },
+        { sessionId: SESSION_ID, userId: 'another-user' },
+      ]) {
+        expect(bg.dispatchBashOutput({ context, rawInput }).ok).toBe(false);
+        const stopped = bg.dispatchBashKill({ context, rawInput });
+        if (stopped.ok) {
+          expect(stopped.output.found).toBe(false);
+          expect(stopped.output.killed).toBe(false);
+        }
+        const ownOutput = bg.dispatchBashOutput({
+          context: { sessionId: SESSION_ID, userId: USER_ID },
+          rawInput,
+        });
+        expect(ownOutput.ok).toBe(true);
+        if (ownOutput.ok) expect(ownOutput.output.status).toBe('running');
+      }
+    } finally {
+      bg.dispatchBashKill({
+        context: { sessionId: SESSION_ID, userId: USER_ID },
+        rawInput,
+      });
+    }
+  });
+
   it('kills a running background terminal and reports killed=true', async () => {
     const spawn = await bg.dispatchRunBashInBackground({
       context: { sessionId: SESSION_ID, userId: USER_ID },

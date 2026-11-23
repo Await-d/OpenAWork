@@ -19,6 +19,7 @@ import type {
 } from '@openAwork/shared-ui';
 import type { PendingPermissionRequest, Session, SessionTask } from '@openAwork/web-client';
 import type { UpstreamStreamSummary } from '@openAwork/shared';
+import type { CompactionItem } from './chat-overview-model.js';
 import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import type { ComposerPermissionMode } from '../../../components/chat/composer/ComposerPermissionModeSelect.js';
 import { TaskToolInline } from '../../../components/chat/tool-call/display/task-tool-inline.js';
@@ -128,13 +129,6 @@ function terminalPreviewTail(outputTail: string): string {
   return `…\n${outputTail.slice(-TERMINAL_PREVIEW_TAIL_CHARS)}`;
 }
 
-interface CompactionItem {
-  id: string;
-  summary: string;
-  trigger: 'manual' | 'automatic';
-  occurredAt: number;
-}
-
 interface UpstreamSummaryItem {
   id: string;
   occurredAt: number;
@@ -223,7 +217,8 @@ export interface ChatRightPanelProps {
   contentArtifactCount: number;
   contentArtifactCountStatus: 'idle' | 'loading' | 'ready' | 'error';
   currentSessionId: string | null;
-  dialogueMode: DialogueMode;
+  /** 对话模式；来源会话 / metadata 未水合时不传（概览行显示占位而不是假模式）。 */
+  dialogueMode?: DialogueMode;
   effectiveWorkingDirectory: string | null;
   effectiveContextMessageCount?: number;
   messages: ChatMessage[];

@@ -166,6 +166,40 @@
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
+/* 上面两条是**标准属性**，只有 Firefox 64+ / Chrome 121+ / Safari 26.2+ 认。
+   基线是 Safari 16.2、桌面端跑的是 macOS WKWebView，在那里这两条等于没写，
+   滚动条会退回系统默认外观——所以必须补 WebKit 伪元素。
+   用 `@supports not (...)` 包住，只在引擎确实不支持标准属性时才落回退，
+   避免两边同时生效时 WebKit 分支覆盖掉 `scrollbar-color` 的配色。
+   颜色一律取全局 token（--scrollbar-thumb / --scrollbar-thumb-hover），禁止写死色值。 */
+@supports not (scrollbar-color: auto) {
+  .team-v2-root[data-workbench-layout='classic']
+    .team-layer-todo-workbench
+    .team-wb-chip-scroll::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .team-v2-root[data-workbench-layout='classic']
+    .team-layer-todo-workbench
+    .team-wb-chip-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .team-v2-root[data-workbench-layout='classic']
+    .team-layer-todo-workbench
+    .team-wb-chip-scroll::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: var(--scrollbar-thumb);
+  }
+
+  .team-v2-root[data-workbench-layout='classic']
+    .team-layer-todo-workbench
+    .team-wb-chip-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+}
+
 /* 层 chips：带层色标识的实心胶囊，选中态取层色 */
 .team-v2-root[data-workbench-layout='classic'] .team-layer-todo-workbench .team-wb-layer-chip {
   display: inline-flex;
@@ -293,6 +327,36 @@
   overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 同 `.team-wb-chip-scroll`：标准属性在 Safari < 26.2 / macOS WKWebView 上不生效，
+   必须补 WebKit 伪元素回退；颜色仍取全局 token，不写死色值。 */
+@supports not (scrollbar-color: auto) {
+  .team-v2-root[data-workbench-layout='classic']
+    .team-layer-todo-workbench
+    .team-wb-filter-row::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .team-v2-root[data-workbench-layout='classic']
+    .team-layer-todo-workbench
+    .team-wb-filter-row::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .team-v2-root[data-workbench-layout='classic']
+    .team-layer-todo-workbench
+    .team-wb-filter-row::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: var(--scrollbar-thumb);
+  }
+
+  .team-v2-root[data-workbench-layout='classic']
+    .team-layer-todo-workbench
+    .team-wb-filter-row::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
 }
 
 /* ─────────── 相邻 tab 面板（概览 / 度量 / 治理）在窄栏中的紧凑化 ───────────

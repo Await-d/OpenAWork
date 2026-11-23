@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>用户消息超长正文折叠验收</title>
+    <style>
+      /*
+       * 断言对象是**布局几何**（60vh 裁剪、按钮可点、窄视口不溢出），不是 token 兜底链：
+       * 这里提供一套接近应用真实取值的主题变量，让文字有正常颜色与行高。
+       */
+      :root {
+        --bg-base: #0b0f16;
+        --bg-overlay: #151b26;
+        --bg-elevated: #1b2230;
+        --fg-strong: #e7edf7;
+        --fg-default: #c8d1e0;
+        --fg-muted: #8e9bb0;
+        --fg-subtle: #5c6879;
+        --border-default: #2a3342;
+        --border-subtle: #1d2531;
+        --border-emphasis: #39445a;
+        --accent: #6d8cff;
+        --accent-hover: #86a0ff;
+        --accent-subtle: rgba(109, 140, 255, 0.18);
+        --danger: #ef6b6b;
+        --success: #4ec9a5;
+        --warning: #e0a955;
+        --info: #6f9dff;
+        --spacing-2: 8px;
+      }
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      .viewport {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 10px 0 18px;
+      }
+      .viewport-label {
+        font-size: 11px;
+        color: #4d5b6e;
+        padding: 0 8px 6px;
+      }
+      .case {
+        margin: 0 8px 12px;
+        border: 1px dashed rgba(109, 140, 255, 0.35);
+        padding: 8px;
+      }
+      .case-label {
+        font-size: 10px;
+        color: #64748b;
+        padding-bottom: 6px;
+      }
+      /* 复刻 ChatConversationView 的消息列：纵向 flex 容器，行宽自适应。 */
+      .message-stack {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/user-message-fold-entry.tsx"></script>
+  </body>
+</html>

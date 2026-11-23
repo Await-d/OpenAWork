@@ -1,6 +1,7 @@
 import {
   extractJsonErrorMessage,
   isGenericFetchErrorMessage,
+  jsonAuthHeaders,
   type JsonErrorData,
   fetchWithTimeout,
 } from './http.js';
@@ -101,6 +102,41 @@ export async function refreshAccessToken(
     return res.json() as Promise<TokenPair>;
   } catch (error) {
     throw normalizeAuthError('刷新凭证', error);
+  }
+}
+
+const CHANGE_PASSWORD_TIMEOUT_MS = 20_000;
+
+/**
+ * 修改当前登录账号的密码（Web / 桌面端共用同一份凭据 —— 服务端写的是同一行
+ * `users.password_hash`）。
+ *
+ * 服务端要求提供旧密码；旧密码错误（400）与失败过多（429）都以中文说明返回，直接
+ * 透出给用户即可。**成功时必须用返回的新令牌对覆盖本地登录态**：服务端改密后作废了
+ * 该账号的全部 refresh token，不覆盖则当前会话在 access token 过期后无法刷新，表现
+ * 为「改完密码就被登出」。
+ */
+export async function changePassword(
+  gatewayUrl: string,
+  accessToken: string,
+  currentPassword: string,
+  newPassword: string,
+  timeoutMs = CHANGE_PASSWORD_TIMEOUT_MS,
+): Promise<TokenPair> {
+  try {
+    const res = await fetchWithTimeout(`${gatewayUrl}/auth/change-password`, {
+      method: 'POST',
+      headers: jsonAuthHeaders(accessToken),
+      body: JSON.stringify({ currentPassword, newPassword }),
+      timeoutMs,
+    });
+    if (!res.ok) {
+      const err = await readAuthError(res);
+      throw new Error(extractJsonErrorMessage(err) ?? '修改密码失败。');
+    }
+    return res.json() as Promise<TokenPair>;
+  } catch (error) {
+    throw normalizeAuthError('修改密码', error);
   }
 }
 

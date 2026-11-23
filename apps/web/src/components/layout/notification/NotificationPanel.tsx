@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { AlwaysScopeLevel } from '@openAwork/shared-ui';
+import { parseServerTimestamp } from '@openAwork/shared';
 import type {
   NotificationRecord,
   NotificationView,
@@ -80,7 +81,8 @@ function groupNotificationsByDate(notifications: NotificationRecord[]): DateGrou
   const earlierItems: NotificationRecord[] = [];
 
   notifications.forEach((notification) => {
-    const d = startOfDay(new Date(notification.createdAt));
+    const createdAtMs = parseServerTimestamp(notification.createdAt);
+    const d = startOfDay(createdAtMs === null ? new Date(0) : new Date(createdAtMs));
     if (d.getTime() === today.getTime()) {
       todayItems.push(notification);
     } else if (d.getTime() === yesterday.getTime()) {

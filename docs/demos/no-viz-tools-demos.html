@@ -1,0 +1,1572 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>工具结果可视化 · 设计稿（管理类 / 会话读取 / 渠道读取）</title>
+    <style>
+      /* ══ 设计 token（取自 apps/web/src/index.css 的 linear 主题） ══ */
+      :root {
+        --bg-base: #0a0c10;
+        --bg-raised: #0c0f15;
+        --bg-overlay: #11151c;
+        --bg-surface: #161b25;
+        --bg-elevated: #1d2230;
+        --bg-hover: #232a3a;
+        --fg-strong: #e8eaf2;
+        --fg-default: #b8bdcb;
+        --fg-muted: #7a8194;
+        --fg-subtle: #4a5168;
+        --fg-on-accent: #0a0c1f;
+        --accent: #5b6cff;
+        --accent-muted: rgba(91, 108, 255, 0.14);
+        --aux: #38bdf8;
+        --aux-muted: rgba(56, 189, 248, 0.14);
+        --success: #2cc28a;
+        --success-muted: rgba(44, 194, 138, 0.14);
+        --warning: #f0b429;
+        --warning-muted: rgba(240, 180, 41, 0.14);
+        --complement: #f06464;
+        --complement-muted: rgba(240, 100, 100, 0.14);
+        --border-subtle: hsl(215 20% 60% / 0.09);
+        --border-default: hsl(215 18% 60% / 0.15);
+        --border-emphasis: hsl(215 16% 65% / 0.24);
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+        --sans:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+          'Microsoft YaHei', sans-serif;
+      }
+
+      html[data-mode='light'] {
+        --bg-base: #fbfbfd;
+        --bg-raised: #ffffff;
+        --bg-overlay: #f4f5f9;
+        --bg-surface: #ffffff;
+        --bg-elevated: #f4f5f9;
+        --bg-hover: #eef0f5;
+        --fg-strong: #0c0e14;
+        --fg-default: #3d4458;
+        --fg-muted: #6a7184;
+        --fg-subtle: #9aa1b4;
+        --fg-on-accent: #ffffff;
+        --accent: #4f63e8;
+        --accent-muted: rgba(79, 99, 232, 0.1);
+        --aux: #0284c7;
+        --aux-muted: rgba(2, 132, 199, 0.1);
+        --success: #12885f;
+        --success-muted: rgba(18, 136, 95, 0.1);
+        --warning: #b57d0a;
+        --warning-muted: rgba(181, 125, 10, 0.1);
+        --complement: #d94a4a;
+        --complement-muted: rgba(217, 74, 74, 0.1);
+        --border-subtle: rgb(15 23 60 / 0.07);
+        --border-default: rgb(15 23 60 / 0.12);
+        --border-emphasis: rgb(15 23 60 / 0.2);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family: var(--sans);
+        font-size: 13px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .page {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 40px 24px 120px;
+      }
+
+      .page-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 30px;
+      }
+
+      .page-head h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        color: var(--fg-strong);
+      }
+
+      .page-head p {
+        margin: 0;
+        max-width: 640px;
+        font-size: 12.5px;
+        color: var(--fg-muted);
+      }
+
+      .page-head p + p {
+        margin-top: 4px;
+      }
+
+      .theme-btn {
+        flex: none;
+        margin-left: auto;
+        padding: 6px 12px;
+        border: 1px solid var(--border-default);
+        border-radius: 6px;
+        background: var(--bg-overlay);
+        color: var(--fg-muted);
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .theme-btn:hover {
+        background: var(--bg-hover);
+        color: var(--fg-strong);
+      }
+
+      /* ══ 场景分区 ══ */
+      .scene {
+        margin-bottom: 54px;
+      }
+
+      .scene-tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--accent);
+        background: var(--accent-muted);
+      }
+
+      .scene h2 {
+        display: inline-block;
+        margin: 0 0 0 10px;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--fg-strong);
+        vertical-align: 1px;
+      }
+
+      .scene-note {
+        margin: 8px 0 14px;
+        font-size: 12.5px;
+        color: var(--fg-muted);
+      }
+
+      .scene-note code {
+        padding: 1px 4px;
+        border-radius: 3px;
+        background: var(--bg-elevated);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .variant-label {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin: 18px 0 8px;
+        font-size: 12px;
+        color: var(--fg-muted);
+      }
+
+      .variant-label b {
+        color: var(--fg-default);
+        font-weight: 600;
+      }
+
+      .variant-label span {
+        color: var(--fg-subtle);
+        font-size: 11.5px;
+      }
+
+      .stage {
+        padding: 16px;
+        border: 1px dashed var(--border-subtle);
+        border-radius: 14px;
+        background: var(--bg-base);
+      }
+
+      /* ══ 工具卡壳（= .tool-call-block） ══ */
+      .tool-card {
+        border: 1px solid var(--border-default);
+        border-radius: 10px;
+        background: var(--bg-overlay);
+        overflow: hidden;
+      }
+
+      .tc-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 8px 10px;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font-family: inherit;
+        font-size: 12.5px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .tc-head:hover {
+        background: var(--bg-raised);
+      }
+
+      .tc-ico {
+        flex: none;
+        display: inline-flex;
+        color: var(--fg-muted);
+      }
+
+      .tc-ico svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .tc-title {
+        flex: none;
+        font-weight: 500;
+        color: var(--fg-default);
+      }
+
+      .tc-dot {
+        color: var(--fg-subtle);
+      }
+
+      .tc-brief {
+        flex: none;
+        font-size: 12px;
+        color: var(--fg-muted);
+      }
+
+      .tc-grow {
+        flex: 1;
+        min-width: 8px;
+      }
+
+      .tc-time {
+        flex: none;
+        font-size: 11px;
+        color: var(--fg-subtle);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .tc-chev {
+        flex: none;
+        display: inline-flex;
+        color: var(--fg-subtle);
+        transition: transform 0.18s ease;
+      }
+
+      .tc-chev svg {
+        width: 12px;
+        height: 12px;
+      }
+
+      .tool-card.is-open .tc-chev {
+        transform: rotate(90deg);
+      }
+
+      .tc-body {
+        display: none;
+        padding: 0 10px 10px;
+      }
+
+      .tool-card.is-open .tc-body {
+        display: block;
+      }
+
+      /* 徽章 */
+      .badge {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        height: 17px;
+        padding: 0 7px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .badge-count {
+        background: var(--bg-elevated);
+        color: var(--fg-muted);
+        font-family: var(--mono);
+      }
+
+      .badge-on {
+        color: var(--success);
+        background: var(--success-muted);
+      }
+
+      .badge-off {
+        color: var(--fg-muted);
+        background: var(--bg-elevated);
+      }
+
+      .badge-fail {
+        color: var(--complement);
+        background: var(--complement-muted);
+      }
+
+      .badge-pending {
+        color: var(--warning);
+        background: var(--warning-muted);
+      }
+
+      .badge-soft {
+        color: var(--fg-subtle);
+        background: var(--bg-elevated);
+        font-family: var(--mono);
+      }
+
+      /* ══ 通用行卡（管理类变体 A / 渠道消息） ══ */
+      .row-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 7px 8px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+      }
+
+      .row:hover {
+        background: color-mix(in oklch, var(--bg-surface) 60%, transparent);
+        border-color: var(--border-subtle);
+      }
+
+      .row-avatar {
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: var(--accent);
+        color: var(--fg-on-accent);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .row-avatar[data-tone='1'] {
+        background: var(--aux);
+      }
+      .row-avatar[data-tone='2'] {
+        background: var(--success);
+      }
+      .row-avatar[data-tone='3'] {
+        background: var(--warning);
+      }
+      .row-avatar[data-tone='4'] {
+        background: var(--complement);
+      }
+
+      .row-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+
+      .row-line1 {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        font-size: 12px;
+      }
+
+      .row-name {
+        flex-shrink: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+        color: var(--fg-strong);
+      }
+
+      .row-sub {
+        flex-shrink: 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--fg-subtle);
+      }
+
+      .row-desc {
+        display: -webkit-box;
+        overflow: hidden;
+        font-size: 11px;
+        line-height: 1.45;
+        color: var(--fg-default);
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .row-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-top: 1px;
+        font-size: 10px;
+        color: var(--fg-subtle);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ══ 表格（变体 B） ══ */
+      .tbl {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11.5px;
+      }
+
+      .tbl th {
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border-default);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: var(--fg-subtle);
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      .tbl td {
+        padding: 5px 8px;
+        border-bottom: 1px solid var(--border-subtle);
+        color: var(--fg-default);
+        vertical-align: top;
+      }
+
+      .tbl tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .tbl tr:hover td {
+        background: color-mix(in oklch, var(--bg-surface) 55%, transparent);
+      }
+
+      .tbl .mono {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-muted);
+      }
+
+      .tbl .strong {
+        font-weight: 600;
+        color: var(--fg-strong);
+      }
+
+      .tbl .nowrap {
+        white-space: nowrap;
+      }
+
+      /* ══ 会话转录 ══ */
+      .transcript {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .msg {
+        display: flex;
+        gap: 9px;
+        padding: 7px 2px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .msg:last-child {
+        border-bottom: 0;
+      }
+
+      .role {
+        flex: none;
+        width: 42px;
+        padding-top: 1px;
+        font-size: 10px;
+        font-weight: 600;
+        text-align: right;
+      }
+
+      .role[data-role='user'] {
+        color: var(--accent);
+      }
+      .role[data-role='assistant'] {
+        color: var(--success);
+      }
+      .role[data-role='tool'] {
+        color: var(--aux);
+      }
+
+      .msg-body {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .msg-time {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--fg-subtle);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .msg-text {
+        font-size: 12px;
+        color: var(--fg-default);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .msg-tool {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 3px;
+        padding: 3px 7px;
+        border-radius: 5px;
+        background: var(--bg-surface);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-muted);
+      }
+
+      .msg-tool b {
+        color: var(--aux);
+        font-weight: 600;
+      }
+
+      /* 紧凑日志（会话变体 B） */
+      .log {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        font-size: 11.5px;
+      }
+
+      .log-row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 3px 6px;
+        border-radius: 4px;
+      }
+
+      .log-row:hover {
+        background: color-mix(in oklch, var(--bg-surface) 55%, transparent);
+      }
+
+      .log-time {
+        flex: none;
+        width: 42px;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--fg-subtle);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .log-role {
+        flex: none;
+        width: 38px;
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .log-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg-default);
+      }
+
+      .log-text code {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-muted);
+      }
+
+      /* ══ 分组小标题（渠道/Bitable） ══ */
+      .group-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 8px 0 4px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: var(--fg-muted);
+      }
+
+      .group-title:first-child {
+        margin-top: 0;
+      }
+
+      /* ══ 成本条形（models 变体 C） ══ */
+      .cost-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 8px;
+        border-radius: 5px;
+      }
+
+      .cost-row:hover {
+        background: color-mix(in oklch, var(--bg-surface) 55%, transparent);
+      }
+
+      .cost-name {
+        flex: none;
+        width: 168px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11.5px;
+        color: var(--fg-strong);
+      }
+
+      .cost-bar {
+        flex: 1;
+        min-width: 40px;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--bg-surface);
+        overflow: hidden;
+      }
+
+      .cost-bar i {
+        display: block;
+        height: 100%;
+        border-radius: 3px;
+        background: var(--accent);
+      }
+
+      .cost-bar[data-tone='cheap'] i {
+        background: var(--success);
+      }
+
+      .cost-bar[data-tone='pricey'] i {
+        background: var(--warning);
+      }
+
+      .cost-val {
+        flex: none;
+        width: 58px;
+        text-align: right;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ══ 底部建议 ══ */
+      .recommend {
+        margin-top: 18px;
+        padding: 16px 18px;
+        border: 1px solid var(--border-default);
+        border-radius: 12px;
+        background: var(--bg-overlay);
+      }
+
+      .recommend h3 {
+        margin: 0 0 10px;
+        font-size: 13.5px;
+        color: var(--fg-strong);
+      }
+
+      .recommend ul {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 12.5px;
+        color: var(--fg-muted);
+      }
+
+      .recommend li + li {
+        margin-top: 5px;
+      }
+
+      .recommend b {
+        color: var(--fg-default);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol
+        id="i-chevron"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+      >
+        <path d="M9 6l6 6-6 6" />
+      </symbol>
+      <symbol id="i-db" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <ellipse cx="12" cy="6" rx="8" ry="3" />
+        <path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+      </symbol>
+    </svg>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>工具结果可视化 · 设计稿</h1>
+          <p>
+            四个场景、各两到三个变体。数据取自代码里的真实构造处（不是编的）： 管理类工具的
+            <code>action: 'list'</code> 返回、<code>session_read</code> 的文本转录、渠道读取类的数组
+            / 信封、以及 <code>models</code> 的 provider 分组目录。
+          </p>
+          <p>点标题栏可折叠展开；右上角切换明暗主题。</p>
+        </div>
+        <button class="theme-btn" type="button" id="themeBtn">切换主题</button>
+      </div>
+
+      <!-- ═══════ 场景 1：管理类 ═══════ -->
+      <section class="scene">
+        <span class="scene-tag">场景 1</span>
+        <h2>管理类工具（7 件套）</h2>
+        <p class="scene-note">
+          信封统一为 <code>{ ok, action, count, &lt;列表&gt; }</code>，列表字段分别是
+          <code>servers / memories / skills / plugins / jobs / agents / workspaces</code>。
+          两个变体的差别只是「一行多少信息」。
+        </p>
+
+        <div class="variant-label">
+          <b>变体 A · 统一行卡</b><span>每行带描述与状态，扫读友好；一次能看 5–8 项</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已列举了 MCP 服务器</span>
+              <span class="badge badge-count">4</span>
+              <span class="tc-grow"></span>
+              <span class="tc-time">0.4s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="row-list">
+                <div class="row">
+                  <span class="row-avatar" data-tone="0">CD</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">Chrome DevTools</span>
+                      <span class="badge badge-on">已启用</span>
+                      <span class="badge badge-soft">stdio</span>
+                    </span>
+                    <span class="row-meta">
+                      <span>id chrome-devtools</span><span>来源 user</span><span>内置</span>
+                    </span>
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="1">GR</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">grep_app</span>
+                      <span class="badge badge-on">已启用</span>
+                      <span class="badge badge-soft">sse</span>
+                    </span>
+                    <span class="row-meta">
+                      <span>mcp.grep.app</span><span>来源 system</span><span>内置</span>
+                    </span>
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="2">FS</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">文件系统</span>
+                      <span class="badge badge-off">已停用</span>
+                      <span class="badge badge-soft">stdio</span>
+                    </span>
+                    <span class="row-meta"
+                      ><span>id filesystem</span><span>3 个工具被禁用</span></span
+                    >
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="4">$</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">shell-runner</span>
+                      <span class="badge badge-fail">连接失败</span>
+                      <span class="badge badge-soft">stdio</span>
+                    </span>
+                    <span class="row-desc">ENOENT: spawn npx ENOENT</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant-label">
+          <b>变体 B · 紧凑表格</b><span>列对齐，一次能看 15+ 项；代价是没有描述</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已列举了定时任务</span>
+              <span class="badge badge-count">4</span>
+              <span class="tc-grow"></span>
+              <span class="tc-time">0.3s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th>任务</th>
+                    <th>状态</th>
+                    <th>调度</th>
+                    <th>下次触发</th>
+                    <th>已触发</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="strong nowrap">每日站会提醒</td>
+                    <td><span class="badge badge-on">启用</span></td>
+                    <td class="mono">0 9 * * 1-5</td>
+                    <td class="mono nowrap">01-03 09:00</td>
+                    <td class="mono">12</td>
+                  </tr>
+                  <tr>
+                    <td class="strong nowrap">周报汇总</td>
+                    <td><span class="badge badge-on">启用</span></td>
+                    <td class="mono">every 7d</td>
+                    <td class="mono nowrap">01-08 18:00</td>
+                    <td class="mono">5</td>
+                  </tr>
+                  <tr>
+                    <td class="strong nowrap">依赖巡检</td>
+                    <td><span class="badge badge-off">停用</span></td>
+                    <td class="mono">0 3 * * *</td>
+                    <td class="mono">—</td>
+                    <td class="mono">87</td>
+                  </tr>
+                  <tr>
+                    <td class="strong nowrap">临时测试</td>
+                    <td><span class="badge badge-on">启用</span></td>
+                    <td class="mono">at 01-05</td>
+                    <td class="mono nowrap">01-05 10:30</td>
+                    <td class="mono">0</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant-label">
+          <b>变体 C · 状态摘要 + 行卡</b
+          ><span>有停用 / 失败项时，头部先给一句结论；项目少时比纯列表有用</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已列举了技能</span>
+              <span class="badge badge-count">3</span>
+              <span class="badge badge-fail">1 个已停用</span>
+              <span class="tc-grow"></span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="row-list">
+                <div class="row">
+                  <span class="row-avatar" data-tone="0">P</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">PDF 工具箱</span>
+                      <span class="badge badge-on">已启用</span>
+                      <span class="badge badge-soft">v1.2.0</span>
+                    </span>
+                    <span class="row-desc">拆分、合并、提取文本与图片，支持扫描件 OCR。</span>
+                    <span class="row-meta"
+                      ><span>pdf-tools</span><span>来自 openAwork/skills</span></span
+                    >
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="3">W</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">网页抓取增强</span>
+                      <span class="badge badge-on">已启用</span>
+                      <span class="badge badge-soft">v0.9.1</span>
+                      <span class="badge badge-pending">含 MCP</span>
+                    </span>
+                    <span class="row-desc">按站点规则清洗正文，输出 Markdown。</span>
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="4">L</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">老版日志分析</span>
+                      <span class="badge badge-off">已停用</span>
+                      <span class="badge badge-soft">v0.3.0</span>
+                    </span>
+                    <span class="row-desc">依赖已下线的 log-parser 服务。</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ 场景 2：session_read ═══════ -->
+      <section class="scene">
+        <span class="scene-tag">场景 2</span>
+        <h2>会话读取（session_read）</h2>
+        <p class="scene-note">
+          输出是一整块纯文本：头部三行元信息，正文用
+          <code>[Message i/N] role (时间)</code> 作分节，工具调用是
+          <code>[tool_call] name {json}</code> 与 <code>[tool_result] …</code>
+          两行。关键是把这层文本结构解析回来。
+        </p>
+
+        <div class="variant-label">
+          <b>变体 A · 转录卡</b
+          ><span>角色分工 + 工具调用折叠成 chip；长转录时最像「读聊天记录」</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已读取了会话</span>
+              <span class="badge badge-count">42 条</span>
+              <span class="tc-brief">01-01 09:00 → 01-02 18:00</span>
+              <span class="tc-grow"></span>
+              <span class="tc-time">0.6s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="transcript">
+                <div class="msg">
+                  <span class="role" data-role="user">用户</span>
+                  <span class="msg-body">
+                    <span class="msg-time">01-02 11:04:05</span>
+                    <div class="msg-text">帮我查一下北京的天气</div>
+                  </span>
+                </div>
+                <div class="msg">
+                  <span class="role" data-role="assistant">助手</span>
+                  <span class="msg-body">
+                    <span class="msg-time">01-02 11:04:10</span>
+                    <div class="msg-tool"><b>get_weather</b> {"city":"北京"}</div>
+                  </span>
+                </div>
+                <div class="msg">
+                  <span class="role" data-role="tool">工具</span>
+                  <span class="msg-body">
+                    <span class="msg-time">01-02 11:04:11</span>
+                    <div class="msg-tool">{"temp":3,"desc":"晴"}</div>
+                  </span>
+                </div>
+                <div class="msg">
+                  <span class="role" data-role="assistant">助手</span>
+                  <span class="msg-body">
+                    <span class="msg-time">01-02 11:04:12</span>
+                    <div class="msg-text">北京今天晴，3℃。需要我看看明天的吗？</div>
+                  </span>
+                </div>
+                <div class="msg">
+                  <span class="role" data-role="user">用户</span>
+                  <span class="msg-body">
+                    <span class="msg-time">01-02 11:05:30</span>
+                    <div class="msg-text">不用了，谢谢</div>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant-label">
+          <b>变体 B · 紧凑日志</b><span>一条一行，40 条一屏看得完；适合快速定位</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已读取了会话</span>
+              <span class="badge badge-count">42 条</span>
+              <span class="tc-brief">最近 40 条</span>
+              <span class="tc-grow"></span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="log">
+                <div class="log-row">
+                  <span class="log-time">11:04:05</span>
+                  <span class="log-role" style="color: var(--accent)">用户</span>
+                  <span class="log-text">帮我查一下北京的天气</span>
+                </div>
+                <div class="log-row">
+                  <span class="log-time">11:04:10</span>
+                  <span class="log-role" style="color: var(--aux)">调用</span>
+                  <span class="log-text"><code>get_weather {"city":"北京"}</code></span>
+                </div>
+                <div class="log-row">
+                  <span class="log-time">11:04:11</span>
+                  <span class="log-role" style="color: var(--fg-muted)">结果</span>
+                  <span class="log-text"><code>{"temp":3,"desc":"晴"}</code></span>
+                </div>
+                <div class="log-row">
+                  <span class="log-time">11:04:12</span>
+                  <span class="log-role" style="color: var(--success)">助手</span>
+                  <span class="log-text">北京今天晴，3℃。需要我看看明天的吗？</span>
+                </div>
+                <div class="log-row">
+                  <span class="log-time">11:05:30</span>
+                  <span class="log-role" style="color: var(--accent)">用户</span>
+                  <span class="log-text">不用了，谢谢</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ 场景 3：渠道读取 ═══════ -->
+      <section class="scene">
+        <span class="scene-tag">场景 3</span>
+        <h2>渠道读取类</h2>
+        <p class="scene-note">
+          三种形状：消息 / 群列表是<b>裸数组</b>，飞书成员是
+          <code>{ items, pageToken, hasMore }</code>，Bitable 记录的
+          <code>items[].fields</code> 是<b>开放的键值映射</b>（字段名由用户自建，不能写死列）。
+        </p>
+
+        <div class="variant-label">
+          <b>变体 A · 消息列表</b><span>发送者 + 时间 + 内容；消息类数据最自然的形态</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已读取了群消息</span>
+              <span class="badge badge-count">3 条</span>
+              <span class="tc-brief">项目群</span>
+              <span class="tc-grow"></span>
+              <span class="tc-time">0.5s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="row-list">
+                <div class="row">
+                  <span class="row-avatar" data-tone="0">张</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">张三</span>
+                      <span class="row-meta" style="margin: 0"><span>11:04</span></span>
+                    </span>
+                    <span class="row-desc">你好，今天的版本什么时候发？</span>
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="2">李</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">李四</span>
+                      <span class="row-meta" style="margin: 0"><span>11:05</span></span>
+                    </span>
+                    <span class="row-desc">已经提测了，明天上午上灰度。</span>
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="1">王</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">王五</span>
+                      <span class="row-meta" style="margin: 0"
+                        ><span>11:06</span><span>回复 张三</span></span
+                      >
+                    </span>
+                    <span class="row-desc">那我先把公告写好。</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant-label">
+          <b>变体 B · 键值表格</b
+          ><span>Bitable 记录的字段名是用户自建的，只能按实际出现的键动态生成列</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已读取了数据表记录</span>
+              <span class="badge badge-count">3 条</span>
+              <span class="tc-brief">项目台账</span>
+              <span class="tc-grow"></span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>状态</th>
+                    <th>负责人</th>
+                    <th>截止</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="strong">发布 v2</td>
+                    <td><span class="badge badge-pending">进行中</span></td>
+                    <td>李四</td>
+                    <td class="mono nowrap">01-08</td>
+                  </tr>
+                  <tr>
+                    <td class="strong">接入飞书</td>
+                    <td><span class="badge badge-on">已完成</span></td>
+                    <td>张三</td>
+                    <td class="mono nowrap">01-02</td>
+                  </tr>
+                  <tr>
+                    <td class="strong">灰度回滚预案</td>
+                    <td><span class="badge badge-off">未开始</span></td>
+                    <td>王五</td>
+                    <td class="mono nowrap">01-10</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant-label">
+          <b>变体 C · 分组列表</b
+          ><span>同一工具返回多种实体时（群组 + 成员），分组展示比混在一起清楚</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已列举了群组</span>
+              <span class="badge badge-count">2</span>
+              <span class="tc-grow"></span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="group-title">群组<span class="badge badge-count">2</span></div>
+              <div class="row-list">
+                <div class="row">
+                  <span class="row-avatar" data-tone="0">项</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">项目群</span>
+                      <span class="row-sub">12 人</span>
+                    </span>
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="1">产</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">产品群</span>
+                      <span class="row-sub">8 人</span>
+                    </span>
+                  </span>
+                </div>
+              </div>
+              <div class="group-title">成员<span class="badge badge-count">2</span></div>
+              <div class="row-list">
+                <div class="row">
+                  <span class="row-avatar" data-tone="2">李</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">李四</span>
+                      <span class="row-sub">ou_9f2c…</span>
+                    </span>
+                  </span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="3">王</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">王五</span>
+                      <span class="row-sub">ou_3a71…</span>
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ 场景 4：models ═══════ -->
+      <section class="scene">
+        <span class="scene-tag">场景 4</span>
+        <h2>模型检索（models）</h2>
+        <p class="scene-note">
+          返回 <code>{ providers: [{ id, name, models }], total, next }</code>，按 provider 分组、
+          当前会话自身 provider 排最前。每个模型带 <code>id</code>（provider/model）、
+          <code>status</code>（active / deprecated）、<code>released</code>（毫秒时间戳）与
+          <code>cost</code>（输入 / 输出 / 缓存读写，美元每百万 token）。
+          <code>variants</code> 恒为空数组，不必展示；<code>next</code> 非 null 表示还有下一页。
+        </p>
+
+        <div class="variant-label">
+          <b>变体 A · 分组行卡</b><span>与场景 1 同一套语言；定价靠右，模型名是视觉主体</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已搜索了可用模型</span>
+              <span class="badge badge-count">20</span>
+              <span class="tc-brief">共 42 个</span>
+              <span class="tc-grow"></span>
+              <span class="badge badge-pending">还有更多</span>
+              <span class="tc-time">0.3s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="group-title">Anthropic<span class="badge badge-count">3</span></div>
+              <div class="row-list">
+                <div class="row">
+                  <span class="row-avatar" data-tone="0">CS</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">Claude Sonnet 4.5</span>
+                      <span class="badge badge-on">可用</span>
+                    </span>
+                    <span class="row-meta"
+                      ><span>anthropic/claude-sonnet-4-5</span><span>09-30 发布</span></span
+                    >
+                  </span>
+                  <span class="row-sub" title="输入 / 输出，每百万 token">$3 / $15</span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="1">CH</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">Claude Haiku 4.5</span>
+                      <span class="badge badge-on">可用</span>
+                    </span>
+                    <span class="row-meta"
+                      ><span>anthropic/claude-haiku-4-5</span><span>09-30 发布</span></span
+                    >
+                  </span>
+                  <span class="row-sub">$1 / $5</span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="4">C3</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">Claude 3.5 Haiku</span>
+                      <span class="badge badge-off">已下线</span>
+                    </span>
+                    <span class="row-meta"
+                      ><span>anthropic/claude-3-5-haiku</span><span>2024-10-23 发布</span></span
+                    >
+                  </span>
+                  <span class="row-sub">$0.8 / $4</span>
+                </div>
+              </div>
+
+              <div class="group-title">OpenAI<span class="badge badge-count">3</span></div>
+              <div class="row-list">
+                <div class="row">
+                  <span class="row-avatar" data-tone="2">G5</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">GPT-5.1</span>
+                      <span class="badge badge-on">可用</span>
+                    </span>
+                    <span class="row-meta"><span>openai/gpt-5.1</span><span>10-31 发布</span></span>
+                  </span>
+                  <span class="row-sub">$1.25 / $10</span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="3">Gm</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">GPT-5 mini</span>
+                      <span class="badge badge-on">可用</span>
+                    </span>
+                    <span class="row-meta"
+                      ><span>openai/gpt-5-mini</span><span>08-23 发布</span></span
+                    >
+                  </span>
+                  <span class="row-sub">$0.25 / $2</span>
+                </div>
+                <div class="row">
+                  <span class="row-avatar" data-tone="1">o4</span>
+                  <span class="row-main">
+                    <span class="row-line1">
+                      <span class="row-name">o4-mini</span>
+                      <span class="badge badge-on">可用</span>
+                    </span>
+                    <span class="row-meta"><span>openai/o4-mini</span><span>04-19 发布</span></span>
+                  </span>
+                  <span class="row-sub">$1.1 / $4.4</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant-label">
+          <b>变体 B · 分组表格</b><span>定价列对齐，最适合「比价」；一屏能看十几个</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已搜索了可用模型</span>
+              <span class="badge badge-count">20</span>
+              <span class="tc-brief">共 42 个</span>
+              <span class="tc-grow"></span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="group-title">Anthropic<span class="badge badge-count">3</span></div>
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th>模型</th>
+                    <th>状态</th>
+                    <th>输入 / M</th>
+                    <th>输出 / M</th>
+                    <th>缓存读</th>
+                    <th>发布</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="strong nowrap">Claude Sonnet 4.5</td>
+                    <td><span class="badge badge-on">可用</span></td>
+                    <td class="mono">$3.00</td>
+                    <td class="mono">$15.00</td>
+                    <td class="mono">$0.30</td>
+                    <td class="mono nowrap">09-30</td>
+                  </tr>
+                  <tr>
+                    <td class="strong nowrap">Claude Haiku 4.5</td>
+                    <td><span class="badge badge-on">可用</span></td>
+                    <td class="mono">$1.00</td>
+                    <td class="mono">$5.00</td>
+                    <td class="mono">$0.10</td>
+                    <td class="mono nowrap">09-30</td>
+                  </tr>
+                  <tr>
+                    <td class="strong nowrap">Claude 3.5 Haiku</td>
+                    <td><span class="badge badge-off">已下线</span></td>
+                    <td class="mono">$0.80</td>
+                    <td class="mono">$4.00</td>
+                    <td class="mono">$0.08</td>
+                    <td class="mono nowrap">2024-10-23</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="group-title">OpenAI<span class="badge badge-count">3</span></div>
+              <table class="tbl">
+                <tbody>
+                  <tr>
+                    <td class="strong nowrap">GPT-5.1</td>
+                    <td><span class="badge badge-on">可用</span></td>
+                    <td class="mono">$1.25</td>
+                    <td class="mono">$10.00</td>
+                    <td class="mono">$0.125</td>
+                    <td class="mono nowrap">10-31</td>
+                  </tr>
+                  <tr>
+                    <td class="strong nowrap">GPT-5 mini</td>
+                    <td><span class="badge badge-on">可用</span></td>
+                    <td class="mono">$0.25</td>
+                    <td class="mono">$2.00</td>
+                    <td class="mono">$0.025</td>
+                    <td class="mono nowrap">08-23</td>
+                  </tr>
+                  <tr>
+                    <td class="strong nowrap">o4-mini</td>
+                    <td><span class="badge badge-on">可用</span></td>
+                    <td class="mono">$1.10</td>
+                    <td class="mono">$4.40</td>
+                    <td class="mono">$0.275</td>
+                    <td class="mono nowrap">04-19</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant-label">
+          <b>变体 C · 成本条形</b
+          ><span>条形长度 = 输入价，颜色标出贵 / 便宜；「挑个便宜的模型」一眼可判</span>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-db" /></svg
+              ></span>
+              <span class="tc-title">已搜索了可用模型</span>
+              <span class="badge badge-count">20</span>
+              <span class="tc-brief">按输入价排序</span>
+              <span class="tc-grow"></span>
+              <span class="tc-time">0.3s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="cost-row">
+                <span class="cost-name">Claude Sonnet 4.5</span>
+                <span class="cost-bar" data-tone="pricey"><i style="width: 100%"></i></span>
+                <span class="cost-val">$3.00</span>
+              </div>
+              <div class="cost-row">
+                <span class="cost-name">GPT-5.1</span>
+                <span class="cost-bar"><i style="width: 42%"></i></span>
+                <span class="cost-val">$1.25</span>
+              </div>
+              <div class="cost-row">
+                <span class="cost-name">o4-mini</span>
+                <span class="cost-bar"><i style="width: 37%"></i></span>
+                <span class="cost-val">$1.10</span>
+              </div>
+              <div class="cost-row">
+                <span class="cost-name">Claude Haiku 4.5</span>
+                <span class="cost-bar"><i style="width: 33%"></i></span>
+                <span class="cost-val">$1.00</span>
+              </div>
+              <div class="cost-row">
+                <span class="cost-name">Claude 3.5 Haiku</span>
+                <span class="cost-bar"><i style="width: 27%"></i></span>
+                <span class="cost-val">$0.80</span>
+              </div>
+              <div class="cost-row">
+                <span class="cost-name">DeepSeek Chat</span>
+                <span class="cost-bar" data-tone="cheap"><i style="width: 9%"></i></span>
+                <span class="cost-val">$0.27</span>
+              </div>
+              <div class="cost-row">
+                <span class="cost-name">GPT-5 mini</span>
+                <span class="cost-bar" data-tone="cheap"><i style="width: 8%"></i></span>
+                <span class="cost-val">$0.25</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ 建议 ═══════ -->
+      <section class="recommend">
+        <h3>我的建议</h3>
+        <ul>
+          <li>
+            <b>管理类走变体 A</b>，因为它要和其他卡片同一套语言（首字母方块 + 状态徽章 +
+            次要信息行）， 而且七个工具的信息层级其实很像：标题 + 状态 + 一句描述 + 若干技术字段。
+            <b>变体 B 的表格更适合「定时任务」这种天然列对齐的数据</b>，可以只给它用。
+          </li>
+          <li>
+            <b>变体 C 的状态摘要值得单独做</b>：当列表里有停用 / 失败项时， 头部一句「1
+            个已停用」比让用户逐行找要省事得多。
+          </li>
+          <li>
+            <b>会话读取走变体 A</b>——转录卡最能还原「读聊天记录」的心智， 工具调用折叠成 chip
+            后长转录也不会被 JSON 淹没。
+          </li>
+          <li>
+            <b>渠道读取按数据形态分两条</b>：消息 / 群组走行卡（A、C）， Bitable
+            记录走动态列表格（B）——字段名是用户自建的，写死列名一定会错。
+          </li>
+          <li>
+            <b>models 建议 A 打底、C 作为可选视图</b>：A 与管理类共用同一套行卡语言，
+            实现成本可以共享；C 的成本条形只在「挑个便宜的」这个意图下才有价值， 而用
+            <code>models</code> 更常见的场景其实是「确认某个模型在不在」——那种情况下 A 更快读。
+            三列定价的 B 表格最精确，但列一多就会把模型名挤窄，所以我把它排在 A 之后。
+          </li>
+        </ul>
+      </section>
+    </div>
+
+    <script>
+      document.querySelectorAll('[data-toggle]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          btn.closest('.tool-card').classList.toggle('is-open');
+        });
+      });
+
+      document.getElementById('themeBtn').addEventListener('click', function () {
+        var root = document.documentElement;
+        root.dataset.mode = root.dataset.mode === 'dark' ? 'light' : 'dark';
+      });
+    </script>
+  </body>
+</html>

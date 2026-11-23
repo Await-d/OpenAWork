@@ -415,7 +415,11 @@ describe('任务5 stream preflight seam', { timeout: 60_000 }, () => {
 
   it('handleStreamRequest 在 413 context overflow replay 后以第二次主对话完成', async () => {
     streamStub.emitContextLimitOnFirst = true;
-    compactionStub.overflow.mockResolvedValue({ metadataJson: '{}', triggered: true });
+    compactionStub.overflow.mockResolvedValue({
+      metadataJson: '{}',
+      triggered: true,
+      recovered: true,
+    });
 
     const { chunks, result } = await runHandleStreamRequest();
 
@@ -426,6 +430,75 @@ describe('任务5 stream preflight seam', { timeout: 60_000 }, () => {
       expect.objectContaining({ type: 'done', stopReason: 'end_turn' }),
     );
   });
+
+  it.each(['stream', 'resume'] as const)(
+    '%s overflow 失败不因 triggered 继续运行且采用最新 metadata',
+    async (entry) => {
+      streamStub.emitContextLimitOnFirst = true;
+      compactionStub.overflow.mockResolvedValue({
+        metadataJson: '{"cooldown":true}',
+        triggered: true,
+        recovered: false,
+      });
+      if (entry === 'stream') {
+        await runHandleStreamRequest();
+      } else {
+        await resumeAnsweredQuestionRequest({
+          answerOutput: 'answer',
+          payload: {
+            clientRequestId: 'task-5-request',
+            nextRound: 1,
+            rawInput: {},
+            requestData: requestData(),
+            toolCallId: 'q',
+            toolName: 'question',
+          },
+          sessionId,
+          userId,
+        });
+      }
+      expect(compactionStub.overflow).toHaveBeenCalledTimes(1);
+      expect(streamStub.calls).toHaveLength(1);
+    },
+  );
+
+  it.each(['stream', 'resume'] as const)(
+    '%s proactive 失败不递归且同轮 overflow 收到新冷却 metadata',
+    async (entry) => {
+      streamStub.emitContextLimitOnFirst = true;
+      compactionStub.proactive.mockResolvedValue({
+        metadataJson: '{"cooldown":true}',
+        triggered: false,
+      });
+      compactionStub.overflow.mockResolvedValue({
+        metadataJson: '{"cooldown":true}',
+        triggered: false,
+        recovered: false,
+      });
+      if (entry === 'stream') {
+        await runHandleStreamRequest();
+      } else {
+        await resumeAnsweredQuestionRequest({
+          answerOutput: 'answer',
+          payload: {
+            clientRequestId: 'task-5-request',
+            nextRound: 1,
+            rawInput: {},
+            requestData: requestData(),
+            toolCallId: 'q',
+            toolName: 'question',
+          },
+          sessionId,
+          userId,
+        });
+      }
+      expect(compactionStub.proactive).toHaveBeenCalledTimes(1);
+      expect(compactionStub.overflow).toHaveBeenCalledWith(
+        expect.objectContaining({ metadataJson: '{"cooldown":true}' }),
+      );
+      expect(streamStub.calls).toHaveLength(1);
+    },
+  );
 
   it('permission answer resume 经 continueFromApprovedToolResult 只运行一次主对话并结束会话', async () => {
     const observedEvents: unknown[] = [];

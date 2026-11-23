@@ -339,7 +339,7 @@ function extractRoleLabels(template: WorkflowTemplateRecord): string[] {
 function mapTemplatesToSections(templates: WorkflowTemplateRecord[]): AgentTeamsSidebarSection[] {
   const groups = new Map<string, AgentTeamsSidebarSection>();
 
-  for (const template of [...templates].sort(sortTemplates)) {
+  for (const template of templates.toSorted(sortTemplates)) {
     const group = getTemplateGroup(template);
     const sectionId = group.id;
     const section = groups.get(sectionId) ?? {
@@ -666,7 +666,7 @@ export function useTeamWorkflowTemplates() {
   );
 
   const templateCards = useMemo(() => {
-    return [...templates].sort(sortTemplates).map((template) => toTemplateCard(template));
+    return templates.toSorted(sortTemplates).map((template) => toTemplateCard(template));
   }, [templates]);
   const sections = useMemo(() => mapTemplatesToSections(templates), [templates]);
 

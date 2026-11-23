@@ -879,7 +879,8 @@ export default function ImagesPage() {
           </div>
         </aside>
 
-        <main style={mainAreaStyle}>
+        {/* 主内容 landmark 由布局壳提供（嵌套 main 不合规）。 */}
+        <div style={mainAreaStyle}>
           <div style={canvasContainerStyle}>
             {latestResult ? (
               latestResult.imageUrl ? (
@@ -1189,7 +1190,7 @@ export default function ImagesPage() {
               </div>
             )}
           </section>
-        </main>
+        </div>
       </div>
       {lightbox ? (
         <ImageLightbox

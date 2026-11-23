@@ -1,0 +1,1239 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>网页抓取结果可视化 · 设计方案 A / B / C</title>
+    <style>
+      /* ══ 设计 token（取自 apps/web/src/index.css 的 linear 主题） ══ */
+      :root {
+        --bg-base: #0a0c10;
+        --bg-raised: #0c0f15;
+        --bg-overlay: #11151c;
+        --bg-surface: #161b25;
+        --bg-elevated: #1d2230;
+        --bg-hover: #232a3a;
+        --fg-strong: #e8eaf2;
+        --fg-default: #b8bdcb;
+        --fg-muted: #7a8194;
+        --fg-subtle: #4a5168;
+        --accent: #5b6cff;
+        --accent-muted: rgba(91, 108, 255, 0.14);
+        --aux: #38bdf8;
+        --aux-muted: rgba(56, 189, 248, 0.14);
+        --success: #2cc28a;
+        --success-muted: rgba(44, 194, 138, 0.14);
+        --contrast: #f0b429;
+        --complement: #f06464;
+        --border-subtle: hsl(215 20% 60% / 0.09);
+        --border-default: hsl(215 18% 60% / 0.15);
+        --border-emphasis: hsl(215 16% 65% / 0.24);
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+        --sans:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+          'Microsoft YaHei', sans-serif;
+        --r-sm: 6px;
+        --r-md: 10px;
+      }
+
+      html[data-mode='light'] {
+        --bg-base: #fbfbfd;
+        --bg-raised: #ffffff;
+        --bg-overlay: #f4f5f9;
+        --bg-surface: #ffffff;
+        --bg-elevated: #f4f5f9;
+        --bg-hover: #eef0f5;
+        --fg-strong: #0c0e14;
+        --fg-default: #3d4458;
+        --fg-muted: #6a7184;
+        --fg-subtle: #9aa1b4;
+        --accent: #4f63e8;
+        --accent-muted: rgba(79, 99, 232, 0.1);
+        --aux: #0284c7;
+        --aux-muted: rgba(2, 132, 199, 0.1);
+        --success: #12885f;
+        --success-muted: rgba(18, 136, 95, 0.1);
+        --contrast: #b57d0a;
+        --complement: #d94a4a;
+        --border-subtle: rgb(15 23 60 / 0.07);
+        --border-default: rgb(15 23 60 / 0.12);
+        --border-emphasis: rgb(15 23 60 / 0.2);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family: var(--sans);
+        font-size: 13px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .page {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 44px 24px 120px;
+      }
+
+      /* ══ 页头 ══ */
+      .page-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 36px;
+      }
+
+      .page-head h1 {
+        margin: 0 0 8px;
+        font-size: 21px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        color: var(--fg-strong);
+      }
+
+      .page-head p {
+        margin: 0;
+        font-size: 13px;
+        color: var(--fg-muted);
+        max-width: 620px;
+      }
+
+      .page-head p + p {
+        margin-top: 4px;
+      }
+
+      .theme-btn {
+        margin-left: auto;
+        flex: none;
+        padding: 6px 12px;
+        border-radius: var(--r-sm);
+        border: 1px solid var(--border-default);
+        background: var(--bg-overlay);
+        color: var(--fg-muted);
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+      }
+
+      .theme-btn:hover {
+        background: var(--bg-hover);
+        color: var(--fg-strong);
+      }
+
+      /* ══ 方案分区 ══ */
+      .variant {
+        margin-bottom: 56px;
+      }
+
+      .variant-head {
+        margin-bottom: 14px;
+      }
+
+      .variant-tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--accent);
+        background: var(--accent-muted);
+        border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      }
+
+      .variant-tag.is-before {
+        color: var(--fg-muted);
+        background: var(--bg-elevated);
+        border-color: var(--border-default);
+      }
+
+      .variant-head h2 {
+        display: inline-block;
+        margin: 0 0 0 10px;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--fg-strong);
+        vertical-align: 1px;
+      }
+
+      .variant-note {
+        margin: 8px 0 0;
+        font-size: 12.5px;
+        color: var(--fg-muted);
+      }
+
+      .pros-cons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 18px;
+        margin: 10px 0 0;
+        padding: 0;
+        list-style: none;
+        font-size: 12px;
+      }
+
+      .pros-cons li {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        color: var(--fg-muted);
+      }
+
+      .pros-cons li::before {
+        font-size: 11px;
+      }
+
+      .pros-cons .pro::before {
+        content: '✓';
+        color: var(--success);
+      }
+
+      .pros-cons .con::before {
+        content: '✕';
+        color: var(--complement);
+      }
+
+      .stage {
+        padding: 20px;
+        border-radius: 14px;
+        background: var(--bg-base);
+        border: 1px dashed var(--border-subtle);
+      }
+
+      /* ══ 站内工具卡（= .tool-call-block） ══ */
+      .tool-card {
+        border-radius: var(--r-md);
+        border: 1px solid var(--border-default);
+        background: var(--bg-overlay);
+        overflow: hidden;
+      }
+
+      .tool-card + .tool-card {
+        margin-top: 12px;
+      }
+
+      .tc-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 8px 10px;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font-family: inherit;
+        font-size: 12.5px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .tc-head:hover {
+        background: var(--bg-raised);
+      }
+
+      .tc-ico {
+        flex: none;
+        display: inline-flex;
+        color: var(--fg-muted);
+      }
+
+      .tc-ico svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .tc-title {
+        flex: none;
+        color: var(--fg-default);
+        font-weight: 500;
+      }
+
+      .tc-host {
+        flex: none;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--fg-muted);
+      }
+
+      .tc-dot {
+        color: var(--fg-subtle);
+      }
+
+      .tc-brief {
+        flex: none;
+        color: var(--fg-muted);
+        font-size: 12px;
+      }
+
+      .tc-grow {
+        flex: 1;
+        min-width: 8px;
+      }
+
+      .tc-time {
+        flex: none;
+        font-size: 11px;
+        color: var(--fg-subtle);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .tc-chev {
+        flex: none;
+        display: inline-flex;
+        color: var(--fg-subtle);
+        transition: transform 0.18s ease;
+      }
+
+      .tc-chev svg {
+        width: 12px;
+        height: 12px;
+      }
+
+      .tool-card.is-open .tc-chev {
+        transform: rotate(90deg);
+      }
+
+      .tc-body {
+        display: none;
+        padding: 0 10px 10px;
+      }
+
+      .tool-card.is-open .tc-body {
+        display: block;
+      }
+
+      /* 状态徽章 */
+      .pill {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        height: 18px;
+        padding: 0 7px;
+        border-radius: 5px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .pill-ok {
+        color: var(--success);
+        background: var(--success-muted);
+        border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
+      }
+
+      /* 小按钮 */
+      .ghost-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 8px;
+        border-radius: var(--r-sm);
+        border: 1px solid var(--border-subtle);
+        background: transparent;
+        color: var(--fg-muted);
+        font-family: inherit;
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      .ghost-btn:hover {
+        background: var(--bg-hover);
+        color: var(--fg-strong);
+        border-color: var(--border-default);
+      }
+
+      .ghost-btn svg {
+        width: 11px;
+        height: 11px;
+      }
+
+      .tc-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .foot-meta {
+        font-size: 11px;
+        color: var(--fg-subtle);
+      }
+
+      /* ══ 现状（Before） ══ */
+      .b-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 10px;
+        margin-bottom: 2px;
+      }
+
+      .b-status {
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-weight: 600;
+        font-size: 10px;
+        color: var(--fg-on-accent, #0a0c1f);
+        background: color-mix(in oklch, var(--success) 60%, var(--fg-muted) 40%);
+      }
+
+      .b-url {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--fg-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .b-out {
+        margin-top: 6px;
+      }
+
+      .b-out-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 10px;
+        color: var(--fg-muted);
+        margin-bottom: 2px;
+      }
+
+      .b-pre {
+        margin: 0;
+        padding: 4px 8px;
+        border-radius: 4px;
+        background: var(--bg-surface);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.45;
+        color: var(--fg-default);
+        white-space: pre-wrap;
+        word-break: break-all;
+        max-height: 130px;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent);
+        mask-image: linear-gradient(180deg, #000 62%, transparent);
+      }
+
+      .b-params {
+        margin-top: 6px;
+        border-top: 1px solid var(--border-subtle);
+        padding-top: 4px;
+        font-size: 11px;
+      }
+
+      .b-params > summary {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--fg-muted);
+        cursor: pointer;
+      }
+
+      .b-param-row {
+        display: flex;
+        gap: 10px;
+        padding: 2px 0 2px 12px;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .b-param-key {
+        color: var(--fg-subtle);
+        min-width: 46px;
+      }
+
+      .b-param-val {
+        color: var(--fg-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* ══ 方案 A：仓库卡片 ══ */
+      .repo-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .repo-card {
+        display: flex;
+        gap: 10px;
+        padding: 9px 10px;
+        border-radius: 8px;
+        text-decoration: none;
+        color: inherit;
+        border: 1px solid transparent;
+        transition:
+          background 0.14s ease,
+          border-color 0.14s ease;
+      }
+
+      .repo-card:hover {
+        background: var(--bg-surface);
+        border-color: var(--border-default);
+      }
+
+      .repo-avatar {
+        flex: none;
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        font-weight: 700;
+        color: #fff;
+        background: var(--av, var(--bg-elevated));
+        font-family: var(--mono);
+      }
+
+      .repo-main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .repo-line1 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-size: 12.5px;
+      }
+
+      .repo-owner {
+        color: var(--fg-muted);
+      }
+
+      .repo-slash {
+        color: var(--fg-subtle);
+        margin: 0 -4px;
+      }
+
+      .repo-name {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+
+      .repo-card:hover .repo-name {
+        color: var(--accent);
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 0 7px;
+        height: 18px;
+        border-radius: 999px;
+        font-size: 10.5px;
+        color: var(--fg-muted);
+        background: var(--bg-elevated);
+      }
+
+      .chip i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        display: block;
+      }
+
+      .repo-desc {
+        font-size: 12px;
+        color: var(--fg-default);
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+
+      .repo-stats {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 2px;
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+
+      .stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .stat svg {
+        width: 11px;
+        height: 11px;
+        color: var(--fg-subtle);
+      }
+
+      .stat-rel {
+        margin-left: auto;
+        color: var(--fg-subtle);
+        font-size: 10.5px;
+      }
+
+      /* ══ 方案 B：响应体查看器 ══ */
+      .resp-bar {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 2px 6px;
+      }
+
+      .resp-tab {
+        padding: 3px 9px;
+        border-radius: var(--r-sm);
+        font-size: 11.5px;
+        color: var(--fg-muted);
+        cursor: default;
+      }
+
+      .resp-tab.is-active {
+        color: var(--fg-strong);
+        background: var(--bg-surface);
+        font-weight: 500;
+      }
+
+      .resp-meta {
+        font-size: 11px;
+        color: var(--fg-subtle);
+        font-variant-numeric: tabular-nums;
+        margin-right: 6px;
+      }
+
+      .json-tree {
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.65;
+        max-height: 300px;
+        overflow: auto;
+      }
+
+      .jt-row {
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      .jt-in {
+        padding-left: 16px;
+        border-left: 1px solid var(--border-subtle);
+        margin-left: 4px;
+      }
+
+      .jt-key {
+        color: var(--accent);
+      }
+
+      .jt-str {
+        color: var(--aux);
+      }
+
+      .jt-num {
+        color: var(--contrast);
+      }
+
+      .jt-bool {
+        color: var(--success);
+      }
+
+      .jt-punc {
+        color: var(--fg-subtle);
+      }
+
+      .jt-more {
+        color: var(--fg-subtle);
+        font-style: italic;
+      }
+
+      .jt-badge {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 6px;
+        height: 15px;
+        line-height: 15px;
+        border-radius: 4px;
+        background: var(--bg-elevated);
+        color: var(--fg-muted);
+        font-size: 10px;
+        font-family: var(--sans);
+      }
+
+      .resp-note {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+        font-size: 11px;
+        color: var(--fg-subtle);
+      }
+
+      .resp-note svg {
+        width: 11px;
+        height: 11px;
+        flex: none;
+      }
+
+      /* ══ 方案 C：极简语义行 ══ */
+      .fav {
+        flex: none;
+        width: 17px;
+        height: 17px;
+        border-radius: 5px;
+        display: grid;
+        place-items: center;
+        font-size: 10px;
+        font-weight: 700;
+        color: #fff;
+        background: var(--av, var(--accent));
+        font-family: var(--mono);
+        line-height: 1;
+      }
+
+      .dot-ok {
+        flex: none;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--success);
+        box-shadow: 0 0 0 3px var(--success-muted);
+      }
+
+      .c-body {
+        padding: 2px 4px 0 25px;
+      }
+
+      .c-title {
+        margin: 0 0 6px;
+        font-size: 13.5px;
+        font-weight: 600;
+        color: var(--fg-strong);
+      }
+
+      .c-p {
+        margin: 0 0 6px;
+        font-size: 12.5px;
+        color: var(--fg-default);
+      }
+
+      .c-tech {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 10px;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-subtle);
+        font-size: 11px;
+        color: var(--fg-subtle);
+      }
+
+      .c-tech button {
+        border: 0;
+        background: transparent;
+        color: var(--fg-subtle);
+        font-family: inherit;
+        font-size: 11px;
+        padding: 0;
+        cursor: pointer;
+        text-decoration: underline dotted;
+        text-underline-offset: 3px;
+      }
+
+      .c-tech button:hover {
+        color: var(--fg-default);
+      }
+
+      /* ══ 建议区块 ══ */
+      .recommend {
+        margin-top: 20px;
+        padding: 16px 18px;
+        border-radius: 12px;
+        background: var(--bg-overlay);
+        border: 1px solid var(--border-default);
+      }
+
+      .recommend h3 {
+        margin: 0 0 10px;
+        font-size: 13.5px;
+        color: var(--fg-strong);
+      }
+
+      .recommend ol {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 12.5px;
+        color: var(--fg-muted);
+      }
+
+      .recommend li + li {
+        margin-top: 5px;
+      }
+
+      .recommend b {
+        color: var(--fg-default);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 图标定义 -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18" />
+      </symbol>
+      <symbol
+        id="i-chevron"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+      >
+        <path d="M9 6l6 6-6 6" />
+      </symbol>
+      <symbol id="i-star" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z" />
+      </symbol>
+      <symbol id="i-fork" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="6" cy="5" r="2.5" />
+        <circle cx="18" cy="5" r="2.5" />
+        <circle cx="12" cy="19" r="2.5" />
+        <path d="M6 7.5v2a4 4 0 004 4h4a4 4 0 004-4v-2" />
+      </symbol>
+      <symbol id="i-issue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 8v5M12 16.5v.01" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="9" y="9" width="11" height="11" rx="2" />
+        <path d="M5 15V6a2 2 0 012-2h9" />
+      </symbol>
+      <symbol id="i-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l-6-6 6-6M15 6l6 6-6 6" />
+      </symbol>
+      <symbol id="i-eyeoff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8" />
+        <path
+          d="M6.7 6.7C4.6 8 3 10 2 12c1.8 3.6 5.6 6 10 6 1.6 0 3.1-.3 4.5-.9M20.9 14C21.3 13.4 21.7 12.7 22 12c-1.8-3.6-5.6-6-10-6"
+        />
+      </symbol>
+      <symbol id="i-ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5" />
+      </symbol>
+    </svg>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>网页抓取结果可视化 · 三个设计方案</h1>
+          <p>
+            数据取自截图里的真实场景：<code>api.github.com/search/repositories</code>， 返回 2.1 KB
+            JSON、5 条结果。三个方案用同一份数据、同一套设计 token（linear 主题）。
+          </p>
+          <p>点卡片标题栏可折叠 / 展开；右上角可切换明暗主题。</p>
+        </div>
+        <button class="theme-btn" type="button" id="themeBtn">切换主题</button>
+      </div>
+
+      <!-- ═══════════ 现状 ═══════════ -->
+      <section class="variant">
+        <div class="variant-head">
+          <span class="variant-tag is-before">现状</span>
+          <h2>原始 JSON 平铺</h2>
+          <p class="variant-note">
+            当前实现：状态徽章 + URL + 「N 行 N 字符」+ 原始 JSON 纯文本 + 与之重复的参数区。
+            技术信息与内容信息混在一层，字号 10–11px，长 JSON 被硬截断成破碎的字符串片段。
+          </p>
+          <ul class="pros-cons">
+            <li class="pro">零解析成本，任何接口都能显示</li>
+            <li class="con">内容几乎不可读，像调试输出而非对话</li>
+            <li class="con">URL 与参数重复，视觉噪声大</li>
+          </ul>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-globe" /></svg
+              ></span>
+              <span class="tc-title">已抓取了网页</span>
+              <span class="tc-grow"></span>
+              <span class="tc-time">0.8s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="b-meta">
+                <span class="b-status">200</span>
+                <span class="b-url"
+                  >https://api.github.com/search/repositories?q=workbuddy&register&per_page=5</span
+                >
+              </div>
+              <div class="b-out">
+                <div class="b-out-head"><span>2 行 · 213 字符</span></div>
+                <pre class="b-pre">
+{"gists_url":"https://api.github.com/users/darker2016/gists","starred_url":"https://api.github.com/users/darker2016/starred","subscriptions_url":"https://api.github.com/users/darker2016/subscriptions","organizations_url":"https://api.github.com/users/darker2016/orgs","repos_url":"https://api.github.com/users/darker2016/repos","events_url":"https://api.github.com/users/darker2016/events{/privacy}","received_events_url":"https://api.github.com/users/darker2016/received_events","type":"User","site_admin":false,...</pre>
+                <div class="b-out-head" style="margin-top: 4px">
+                  <span style="color: var(--fg-subtle)">…[truncated, 28780 chars omitted]</span>
+                </div>
+              </div>
+              <details class="b-params" open>
+                <summary>▾ 参数 (2)</summary>
+                <div class="b-param-row">
+                  <span class="b-param-key">format</span><span class="b-param-val">text</span>
+                </div>
+                <div class="b-param-row">
+                  <span class="b-param-key">url</span>
+                  <span class="b-param-val"
+                    >https://api.github.com/search/repositories?q=workbuddy&register&per_page=5</span
+                  >
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ 方案 A ═══════════ -->
+      <section class="variant">
+        <div class="variant-head">
+          <span class="variant-tag">方案 A</span>
+          <h2>结构化识别 · 结果卡片</h2>
+          <p class="variant-note">
+            识别出常见接口的响应结构（GitHub 仓库 / 用户、搜索结果、RSS、通用 JSON 对象）， 把
+            payload 直接渲染成语义卡片：一眼看到名称、描述、语言、star 数。 顶部一行把「状态码 +
+            域名 + 结果量 + 耗时」压成一行，不再单列 URL。
+          </p>
+          <ul class="pros-cons">
+            <li class="pro">信息密度最高，扫一眼就知道抓到了什么</li>
+            <li class="pro">技术细节退到页脚，只有需要时才去找</li>
+            <li class="con">每种接口要写解析器，长尾接口覆盖不到</li>
+          </ul>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-globe" /></svg
+              ></span>
+              <span class="tc-title">已抓取了网页</span>
+              <span class="pill pill-ok">200</span>
+              <span class="tc-host">api.github.com</span>
+              <span class="tc-dot">·</span>
+              <span class="tc-brief">5 个仓库</span>
+              <span class="tc-grow"></span>
+              <span class="tc-time">0.8s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="repo-list">
+                <a class="repo-card" href="#">
+                  <span class="repo-avatar" style="--av: #3178c6">W</span>
+                  <span class="repo-main">
+                    <span class="repo-line1">
+                      <span class="repo-owner">darker2016</span><span class="repo-slash">/</span
+                      ><span class="repo-name">workbuddy</span>
+                      <span class="chip"><i style="background: #3178c6"></i>TypeScript</span>
+                    </span>
+                    <span class="repo-desc"
+                      >本地优先的 AI 工作台：把会话、技能与自动化收进一个跨平台桌面应用。</span
+                    >
+                    <span class="repo-stats">
+                      <span class="stat"
+                        ><svg><use href="#i-star" /></svg>1,243</span
+                      >
+                      <span class="stat"
+                        ><svg><use href="#i-fork" /></svg>87</span
+                      >
+                      <span class="stat"
+                        ><svg><use href="#i-issue" /></svg>12</span
+                      >
+                      <span class="stat-rel">10 月 28 日更新</span>
+                    </span>
+                  </span>
+                </a>
+                <a class="repo-card" href="#">
+                  <span class="repo-avatar" style="--av: #8b5cf6">A</span>
+                  <span class="repo-main">
+                    <span class="repo-line1">
+                      <span class="repo-owner">Alpha-Park</span><span class="repo-slash">/</span
+                      ><span class="repo-name">workbuddy-cli</span>
+                      <span class="chip"><i style="background: #f1e05a"></i>JavaScript</span>
+                    </span>
+                    <span class="repo-desc"
+                      >workbuddy 的命令行外壳：批处理任务、CI 钩子与脚本化编排。</span
+                    >
+                    <span class="repo-stats">
+                      <span class="stat"
+                        ><svg><use href="#i-star" /></svg>312</span
+                      >
+                      <span class="stat"
+                        ><svg><use href="#i-fork" /></svg>24</span
+                      >
+                      <span class="stat"
+                        ><svg><use href="#i-issue" /></svg>3</span
+                      >
+                      <span class="stat-rel">10 月 21 日更新</span>
+                    </span>
+                  </span>
+                </a>
+                <a class="repo-card" href="#">
+                  <span class="repo-avatar" style="--av: #e34c26">w</span>
+                  <span class="repo-main">
+                    <span class="repo-line1">
+                      <span class="repo-owner">workbuddy-labs</span><span class="repo-slash">/</span
+                      ><span class="repo-name">workbuddy-web</span>
+                      <span class="chip"><i style="background: #e34c26"></i>HTML</span>
+                    </span>
+                    <span class="repo-desc">实验性的 Web 端原型，用于验证渠道路由与技能沙箱。</span>
+                    <span class="repo-stats">
+                      <span class="stat"
+                        ><svg><use href="#i-star" /></svg>96</span
+                      >
+                      <span class="stat"
+                        ><svg><use href="#i-fork" /></svg>11</span
+                      >
+                      <span class="stat"
+                        ><svg><use href="#i-issue" /></svg>7</span
+                      >
+                      <span class="stat-rel">9 月 30 日更新</span>
+                    </span>
+                  </span>
+                </a>
+              </div>
+              <div class="tc-foot">
+                <button class="ghost-btn" type="button">
+                  <svg><use href="#i-code" /></svg>原始 JSON
+                </button>
+                <span class="foot-meta">2.1 KB</span>
+                <span class="tc-grow"></span>
+                <button class="ghost-btn" type="button">
+                  <svg><use href="#i-copy" /></svg>复制
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ 方案 B ═══════════ -->
+      <section class="variant">
+        <div class="variant-head">
+          <span class="variant-tag">方案 B</span>
+          <h2>通用响应查看器 · 语法化 JSON</h2>
+          <p class="variant-note">
+            不做接口级别解析，只把 JSON 渲染成可读的树：键名 / 字符串 / 数字 / 布尔分色、
+            缩进引导线、长字符串省略、数组超出 N 条折叠。并自动隐藏
+            <code>gists_url</code>、<code>starred_url</code> 这类模板 URL 冗余字段。
+          </p>
+          <ul class="pros-cons">
+            <li class="pro">零接口适配，任何 JSON 接口立刻变好看</li>
+            <li class="pro">保留了完整数据，可逐层展开核对</li>
+            <li class="con">仍偏「开发者视角」，非 JSON 的长文抓取需另一条路径</li>
+          </ul>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="tc-ico"
+                ><svg><use href="#i-globe" /></svg
+              ></span>
+              <span class="tc-title">已抓取了网页</span>
+              <span class="pill pill-ok">200</span>
+              <span class="tc-host">api.github.com</span>
+              <span class="tc-dot">·</span>
+              <span class="tc-brief">JSON · 2.1 KB</span>
+              <span class="tc-grow"></span>
+              <span class="tc-time">0.8s</span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="resp-bar">
+                <span class="resp-tab is-active">响应体</span>
+                <span class="resp-tab">请求参数</span>
+                <span class="tc-grow"></span>
+                <span class="resp-meta">JSON · 2.1 KB · 78 键</span>
+                <button class="ghost-btn" type="button">
+                  <svg><use href="#i-copy" /></svg>复制
+                </button>
+              </div>
+              <div class="json-tree">
+                <div class="jt-row"><span class="jt-punc">{</span></div>
+                <div class="jt-in">
+                  <div class="jt-row">
+                    <span class="jt-key">"total_count"</span><span class="jt-punc">:</span>
+                    <span class="jt-num">1284</span><span class="jt-punc">,</span>
+                  </div>
+                  <div class="jt-row">
+                    <span class="jt-key">"incomplete_results"</span><span class="jt-punc">:</span>
+                    <span class="jt-bool">false</span><span class="jt-punc">,</span>
+                  </div>
+                  <div class="jt-row">
+                    <span class="jt-key">"items"</span><span class="jt-punc">:</span>
+                    <span class="jt-punc">[</span><span class="jt-badge">5 项</span>
+                  </div>
+                  <div class="jt-in">
+                    <div class="jt-row"><span class="jt-punc">{</span></div>
+                    <div class="jt-in">
+                      <div class="jt-row">
+                        <span class="jt-key">"id"</span><span class="jt-punc">:</span>
+                        <span class="jt-num">741236</span><span class="jt-punc">,</span>
+                      </div>
+                      <div class="jt-row">
+                        <span class="jt-key">"full_name"</span><span class="jt-punc">:</span>
+                        <span class="jt-str">"darker2016/workbuddy"</span
+                        ><span class="jt-punc">,</span>
+                      </div>
+                      <div class="jt-row">
+                        <span class="jt-key">"description"</span><span class="jt-punc">:</span>
+                        <span class="jt-str"
+                          >"本地优先的 AI 工作台：把会话、技能与自动化收进一个跨平台桌…"</span
+                        ><span class="jt-punc">,</span>
+                      </div>
+                      <div class="jt-row">
+                        <span class="jt-key">"language"</span><span class="jt-punc">:</span>
+                        <span class="jt-str">"TypeScript"</span><span class="jt-punc">,</span>
+                      </div>
+                      <div class="jt-row">
+                        <span class="jt-key">"stargazers_count"</span><span class="jt-punc">:</span>
+                        <span class="jt-num">1243</span><span class="jt-punc">,</span>
+                      </div>
+                      <div class="jt-row">
+                        <span class="jt-key">"forks_count"</span><span class="jt-punc">:</span>
+                        <span class="jt-num">87</span><span class="jt-punc">,</span>
+                      </div>
+                      <div class="jt-row jt-more">… 还有 24 个字段</div>
+                    </div>
+                    <div class="jt-row"><span class="jt-punc">},</span></div>
+                    <div class="jt-row jt-more">… 还有 4 项</div>
+                  </div>
+                  <div class="jt-row"><span class="jt-punc">]</span></div>
+                </div>
+                <div class="jt-row"><span class="jt-punc">}</span></div>
+              </div>
+              <div class="resp-note">
+                <svg><use href="#i-eyeoff" /></svg>
+                已隐藏 6 个模板 URL 字段（gists_url / starred_url / subscriptions_url …）
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ 方案 C ═══════════ -->
+      <section class="variant">
+        <div class="variant-head">
+          <span class="variant-tag">方案 C</span>
+          <h2>对话优先 · 极简语义行</h2>
+          <p class="variant-note">
+            场景换成抓取网页正文。折叠态只有一行：站点图标 + 域名 + 「读到了什么」+ 状态点。
+            展开后是干净的正文排版，状态码 / 耗时 / 体积 / 参数 / 原始数据全部收进底部一行
+            「技术详情」，默认不打扰阅读。
+          </p>
+          <ul class="pros-cons">
+            <li class="pro">最安静，和对话流融为一体</li>
+            <li class="pro">正文（Markdown / 纯文本）阅读体验最好</li>
+            <li class="con">技术信息要多点一次，排查问题时略慢</li>
+          </ul>
+        </div>
+        <div class="stage">
+          <div class="tool-card is-open">
+            <button class="tc-head" type="button" data-toggle>
+              <span class="fav" style="--av: #6366f1">B</span>
+              <span class="tc-host">blog.example.dev</span>
+              <span class="tc-brief">读到了正文 · 8 段</span>
+              <span class="tc-grow"></span>
+              <span class="dot-ok"></span>
+              <span class="tc-chev"
+                ><svg><use href="#i-chevron" /></svg
+              ></span>
+            </button>
+            <div class="tc-body">
+              <div class="c-body">
+                <p class="c-title">本地优先的 AI 工作台：为什么我们把状态留在磁盘上</p>
+                <p class="c-p">
+                  过去一年里，我们把大部分会话状态从云端搬回了本地
+                  SQLite。原因很直接：模型的响应速度已经不再是瓶颈，真正的等待来自往返同步——一次网络抖动就会让整个编辑循环卡住。
+                </p>
+                <p class="c-p">
+                  本地优先带来的第二个好处是可审计。每一次工具调用、每一条消息、每一个产物都落在磁盘上，
+                  排查问题时不必再去翻服务端日志；代价是必须处理冲突与并发，这也是我们引入租约与幂等键的原因。
+                </p>
+                <p class="c-p">
+                  本文记录了迁移过程中踩到的坑，以及为什么最终选择了「先写本地、再异步回传」这条路径……
+                </p>
+                <div class="c-tech">
+                  <span>200 OK</span>
+                  <span>1.2s</span>
+                  <span>46 KB</span>
+                  <button type="button">技术详情</button>
+                  <span class="tc-grow"></span>
+                  <button type="button">复制正文</button>
+                  <button type="button">打开原文 ↗</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ 建议 ═══════════ -->
+      <section class="recommend">
+        <h3>我的建议</h3>
+        <ol>
+          <li>
+            <b>以方案 B 为通用基线</b>——所有 JSON 输出立刻受益，零接口适配，改动集中在
+            <code>tool-output-preview.tsx</code> 与一处新样式表。
+          </li>
+          <li>
+            <b>叠加方案 A 作为高价值增强</b>——先只覆盖 GitHub / 搜索结果这类高频接口，
+            命中就升级成卡片，未命中自然回落到 B。
+          </li>
+          <li>
+            <b>方案 C 用于正文型抓取</b>——Markdown / HTML 文章走极简行 + 技术详情折叠，
+            这块正好是现在最丑的那条路径。
+          </li>
+        </ol>
+      </section>
+    </div>
+
+    <script>
+      document.querySelectorAll('[data-toggle]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          btn.closest('.tool-card').classList.toggle('is-open');
+        });
+      });
+
+      document.getElementById('themeBtn').addEventListener('click', function () {
+        var root = document.documentElement;
+        root.dataset.mode = root.dataset.mode === 'dark' ? 'light' : 'dark';
+      });
+    </script>
+  </body>
+</html>

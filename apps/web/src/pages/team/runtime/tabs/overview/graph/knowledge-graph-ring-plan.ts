@@ -113,7 +113,7 @@ export function planRings(input: PlanRingsInput): RingAssignment {
     if (!nodes || nodes.length === 0) {
       continue;
     }
-    const ordered = [...nodes].sort((left, right) => {
+    const ordered = nodes.toSorted((left, right) => {
       const angleDiff = (angles.get(left.id) ?? 0) - (angles.get(right.id) ?? 0);
       return angleDiff !== 0 ? angleDiff : left.id.localeCompare(right.id, 'zh-CN');
     });

@@ -24,6 +24,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SubagentLoadMore } from '../../../components/chat/subagent-progress.js';
+import { ShellLoadMore } from '../../../components/chat/shell-progress.js';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
 import type {
   CommandDescriptor,
@@ -867,6 +869,8 @@ export function ChatConversationView(props: ChatConversationViewProps): React.Re
                       条隐藏）
                     </button>
                   )}
+                  <SubagentLoadMore />
+                  <ShellLoadMore />
                   <ChatMessageGroupList
                     activeModelId={activeModelId}
                     activeModelLabel={activeModelLabel}

@@ -107,6 +107,7 @@ export const DEFERRED_TOOL_NAMES: ReadonlySet<string> = new Set([
   'session_read',
   'session_search',
   'session_info',
+  'permission_get',
   'session_rename',
   'session_move',
   // 任务图管理（非委派本身）

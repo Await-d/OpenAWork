@@ -62,6 +62,39 @@ describe('useDisplayPreferencesStore', () => {
     expect(useDisplayPreferencesStore.getState().toolExpandedOverrides.fileEdit).toBe(true);
   });
 
+  it('默认只给最新一条消息展示统计信息', async () => {
+    const { useDisplayPreferencesStore } = await import('./display-preferences.js');
+
+    expect(useDisplayPreferencesStore.getState().metaLineScope).toBe('latest');
+  });
+
+  it('v8 状态升级到 v9 时不会重开用户显式关闭的 fileEdit', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          metaLineScope: 'all',
+          toolExpandedOverrides: {
+            bash: false,
+            fileEdit: false,
+            fileRead: false,
+            mcp: false,
+            skill: false,
+            web: false,
+            batch: false,
+            other: false,
+          },
+        },
+        version: 8,
+      }),
+    );
+
+    const { useDisplayPreferencesStore } = await import('./display-preferences.js');
+
+    expect(useDisplayPreferencesStore.getState().toolExpandedOverrides.fileEdit).toBe(false);
+    expect(useDisplayPreferencesStore.getState().metaLineScope).toBe('all');
+  });
+
   it('setter 写回的持久化版本号与 persist 声明一致，重载不会强制开启 fileEdit', async () => {
     const { useDisplayPreferencesStore } = await import('./display-preferences.js');
 
@@ -72,8 +105,8 @@ describe('useDisplayPreferencesStore', () => {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw ?? '{}') as { version?: number };
-    // 手工写入的 version 若低于 persist 声明的 8，下次加载会跑 migrate 覆盖用户选择。
-    expect(parsed.version).toBe(8);
+    // 手工写入的 version 若低于 persist 声明的 9，下次加载会跑 migrate 覆盖用户选择。
+    expect(parsed.version).toBe(9);
 
     // 模拟刷新：重新加载模块后，用户的显式关闭必须保留。
     vi.resetModules();

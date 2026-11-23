@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ArtifactRecord, ArtifactVersionRecord } from '@openAwork/artifacts';
 import { tokens } from '@openAwork/shared-ui';
 import { toast } from '../../../components/common/feedback/ToastNotification.js';
-import { exportFile } from '../../../utils/export-file.js';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
+import { exportFile, getFileExportLabel } from '../../../utils/export-file.js';
 import { TrashIcon } from '../../team/runtime/shared/TeamIcons.js';
 import { ArtifactCodeEditor } from '../views/artifact-code-editor.js';
 import { buildArtifactImageGallery } from '../views/artifact-image-gallery.js';
@@ -199,8 +200,11 @@ export function ArtifactWorkbench({
               <button
                 type="button"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(draftContent);
-                  toast('已复制当前产物内容', 'success');
+                  void copyTextToClipboard(draftContent)
+                    .then(() => toast('已复制当前产物内容', 'success'))
+                    .catch((copyError: unknown) => {
+                      toast(copyError instanceof Error ? copyError.message : '复制失败', 'error');
+                    });
                 }}
                 style={secondaryButtonStyle}
               >
@@ -211,7 +215,7 @@ export function ArtifactWorkbench({
                 onClick={() => void downloadArtifact(artifact, draftContent)}
                 style={secondaryButtonStyle}
               >
-                下载
+                {getFileExportLabel()}
               </button>
               <button
                 type="button"

@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>方案 B · 工具条 + 紧凑表格 + 历史抽屉 · 定时任务布局候选</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <style>
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        flex-wrap: wrap;
+      }
+
+      .toolbar input[type='search'] {
+        min-width: 220px;
+      }
+
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--border-emphasis);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
+
+      .seg button {
+        border: none;
+        background: transparent;
+        color: var(--fg-muted);
+        font-family: inherit;
+        font-size: 11.5px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .seg button[aria-pressed='true'] {
+        background: var(--accent-muted);
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      .table-wrap {
+        overflow: auto;
+        border-radius: var(--radius-md);
+        max-height: calc(100vh - 250px);
+      }
+
+      table.jobs {
+        width: 100%;
+        min-width: 940px;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      table.jobs thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--bg-raised);
+        border-bottom: 1px solid var(--border-emphasis);
+        text-align: left;
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--fg-subtle);
+        padding: 9px 12px;
+        white-space: nowrap;
+      }
+
+      table.jobs tbody td {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-default);
+        vertical-align: middle;
+      }
+
+      table.jobs tbody tr {
+        cursor: pointer;
+      }
+
+      table.jobs tbody tr:hover {
+        background: var(--bg-hover);
+      }
+
+      table.jobs tbody tr[data-selected='true'] {
+        background: var(--accent-subtle);
+      }
+
+      table.jobs tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      .cell-name {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 180px;
+        max-width: 300px;
+      }
+
+      .cell-name strong {
+        font-size: 12.5px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .cell-sub {
+        font-size: 11px;
+        color: var(--fg-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .row-actions {
+        display: flex;
+        gap: 4px;
+        justify-content: flex-end;
+        opacity: 0.3;
+        transition: opacity 120ms ease;
+      }
+
+      table.jobs tbody tr:hover .row-actions,
+      table.jobs tbody tr[data-selected='true'] .row-actions {
+        opacity: 1;
+      }
+
+      .bulkbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-color: var(--accent-border);
+        background: var(--accent-subtle);
+      }
+
+      .table-foot {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 9px 12px;
+        border-top: 1px solid var(--border-default);
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+
+      /* ── 抽屉 ── */
+      .scrim {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 160ms ease;
+        z-index: 40;
+      }
+
+      .scrim[data-open='true'] {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 52px;
+        width: min(460px, 92vw);
+        background: var(--bg-overlay);
+        border-left: 1px solid var(--border-emphasis);
+        transform: translateX(100%);
+        transition: transform 200ms cubic-bezier(0.22, 0.68, 0.28, 1);
+        z-index: 45;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .drawer[data-open='true'] {
+        transform: translateX(0);
+        box-shadow: var(--shadow-lg);
+      }
+
+      .drawer-head {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border-default);
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .drawer-body {
+        flex: 1;
+        overflow: auto;
+        padding: 14px 16px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 84px minmax(0, 1fr);
+        gap: 6px 12px;
+        font-size: 12px;
+      }
+
+      .kv dt {
+        color: var(--fg-muted);
+      }
+
+      .kv dd {
+        margin: 0;
+      }
+
+      .timeline {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .tl-entry {
+        border-left: 2px solid var(--border-emphasis);
+        padding: 0 0 0 10px;
+      }
+
+      .tl-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .tl-output,
+      .tl-error {
+        margin-top: 5px;
+        font-size: 11.5px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .tl-output {
+        color: var(--fg-default);
+        background: var(--bg-base);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-sm);
+        padding: 8px 10px;
+        max-height: 150px;
+        overflow: auto;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 68px;
+        transform: translateX(-50%) translateY(8px);
+        background: var(--bg-elevated);
+        border: 1px solid var(--accent-border);
+        color: var(--fg-strong);
+        border-radius: 999px;
+        padding: 7px 14px;
+        font-size: 12px;
+        box-shadow: var(--shadow-md);
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 160ms ease,
+          transform 160ms ease;
+        z-index: 60;
+      }
+
+      .toast[data-show='true'] {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-root">
+      <header class="page-header">
+        <span class="page-title">定时任务</span>
+        <span class="page-subtitle">一行一个任务，详情与历史走右侧抽屉</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-accent" data-action="新建任务">+ 添加任务</button>
+      </header>
+
+      <main class="page-content">
+        <div class="page-inner">
+          <div class="card toolbar">
+            <input type="search" id="q" placeholder="搜索名称 / 提示词…" />
+            <select id="status-filter" aria-label="状态筛选">
+              <option value="all">全部状态</option>
+              <option value="enabled">仅已启用</option>
+              <option value="disabled">仅已停用</option>
+              <option value="running">仅运行中</option>
+            </select>
+            <div class="seg" id="kind-filter" role="group" aria-label="调度类型筛选">
+              <button type="button" data-kind="all" aria-pressed="true">全部类型</button>
+              <button type="button" data-kind="cron" aria-pressed="false">cron</button>
+              <button type="button" data-kind="every" aria-pressed="false">间隔</button>
+              <button type="button" data-kind="at" aria-pressed="false">单次</button>
+            </div>
+            <select id="sort" aria-label="排序">
+              <option value="next">按下次执行时间</option>
+              <option value="name">按名称</option>
+              <option value="fires">按运行次数</option>
+              <option value="result">按上次结果</option>
+            </select>
+            <span class="spacer"></span>
+            <span class="demo-note" id="visible-count"></span>
+          </div>
+
+          <div class="card bulkbar" id="bulkbar" hidden>
+            <strong style="font-size: 12px">已选 <span id="bulk-count">0</span> 项</strong>
+            <span class="spacer"></span>
+            <button type="button" class="btn btn-success" data-action="批量启用">批量启用</button>
+            <button type="button" class="btn btn-danger" data-action="批量停用">批量停用</button>
+            <button type="button" class="btn" data-action="批量删除">删除</button>
+            <button type="button" class="btn btn-ghost" id="clear-selection">取消选择</button>
+          </div>
+
+          <div class="card" style="padding: 0; overflow: hidden">
+            <div class="table-wrap">
+              <table class="jobs">
+                <thead>
+                  <tr>
+                    <th style="width: 34px">
+                      <input type="checkbox" id="check-all" aria-label="全选" />
+                    </th>
+                    <th>任务</th>
+                    <th>调度</th>
+                    <th>状态</th>
+                    <th>下次执行</th>
+                    <th>上次结果</th>
+                    <th>投递</th>
+                    <th style="text-align: right">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="rows"></tbody>
+              </table>
+            </div>
+            <div class="table-foot">
+              <span id="foot-summary"></span>
+              <span class="spacer"></span>
+              <span class="demo-note">点击任意一行在右侧展开详情与执行历史</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="scrim" id="scrim"></div>
+    <aside class="drawer" id="drawer" aria-hidden="true" aria-label="任务详情"></aside>
+    <div class="toast" id="toast"></div>
+
+    <script src="./demo-core.js"></script>
+    <script>
+      (function () {
+        var sd = window.SD;
+        var state = {
+          keyword: '',
+          status: 'all',
+          kind: 'all',
+          sort: 'next',
+          selectedId: null,
+          checked: {},
+        };
+
+        function filtered() {
+          var list = sd.jobs.filter(function (job) {
+            if (state.status === 'running' && !job.running) return false;
+            if (state.status === 'enabled' && job.status !== 'enabled') return false;
+            if (state.status === 'disabled' && job.status !== 'disabled') return false;
+            if (state.kind !== 'all' && job.kind !== state.kind) return false;
+            if (!state.keyword) return true;
+            return (
+              (job.name + ' ' + job.prompt + ' ' + job.expr)
+                .toLowerCase()
+                .indexOf(state.keyword.toLowerCase()) !== -1
+            );
+          });
+          var order = { failed: 0, skipped: 1, running: 2, completed: 3 };
+          list.sort(function (a, b) {
+            if (state.sort === 'name') return a.name.localeCompare(b.name, 'zh-Hans-CN');
+            if (state.sort === 'fires') return b.fireCount - a.fireCount;
+            if (state.sort === 'result') {
+              return (
+                (order[a.lastResult] === undefined ? 9 : order[a.lastResult]) -
+                (order[b.lastResult] === undefined ? 9 : order[b.lastResult])
+              );
+            }
+            var av = a.status === 'disabled' || !a.nextFireAt ? Infinity : new Date(a.nextFireAt);
+            var bv = b.status === 'disabled' || !b.nextFireAt ? Infinity : new Date(b.nextFireAt);
+            return av - bv;
+          });
+          return list;
+        }
+
+        function nextCell(job) {
+          if (job.status === 'disabled') return '<span class="muted">已停用</span>';
+          return (
+            '<div style="font-weight:600">' +
+            sd.relative(job.nextFireAt) +
+            '</div><div class="subtle" style="font-size:10.5px">' +
+            sd.absTime(job.nextFireAt) +
+            '</div>'
+          );
+        }
+
+        function resultCell(job) {
+          if (!job.lastResult) return '<span class="muted">尚未执行</span>';
+          return (
+            '<span class="status ' +
+            sd.resultClass(job.lastResult) +
+            '">' +
+            sd.resultLabel(job.lastResult) +
+            '</span>' +
+            '<div class="subtle" style="font-size:10.5px;margin-top:3px">' +
+            sd.absTime(job.lastFiredAt) +
+            '</div>'
+          );
+        }
+
+        function render() {
+          var list = filtered();
+          var host = document.getElementById('rows');
+          document.getElementById('visible-count').textContent =
+            '显示 ' + list.length + ' / ' + sd.jobs.length + ' 条';
+
+          if (list.length === 0) {
+            host.innerHTML =
+              '<tr><td colspan="8"><div class="empty">没有符合筛选条件的任务</div></td></tr>';
+          } else {
+            host.innerHTML = list
+              .map(function (job) {
+                return (
+                  '<tr data-id="' +
+                  job.id +
+                  '" data-selected="' +
+                  (job.id === state.selectedId) +
+                  '">' +
+                  '<td><input type="checkbox" data-check="' +
+                  job.id +
+                  '" aria-label="选择 ' +
+                  sd.escapeHtml(job.name) +
+                  '"' +
+                  (state.checked[job.id] ? ' checked' : '') +
+                  ' /></td>' +
+                  '<td><div class="cell-name"><strong>' +
+                  sd.escapeHtml(job.name) +
+                  '</strong><span class="cell-sub">' +
+                  sd.escapeHtml(job.prompt) +
+                  '</span></div></td>' +
+                  '<td><div style="display:flex;align-items:center;gap:6px">' +
+                  sd.kindTag(job) +
+                  '<span class="mono">' +
+                  sd.escapeHtml(job.expr) +
+                  '</span></div><div class="subtle" style="font-size:10.5px">' +
+                  sd.escapeHtml(job.tz || '跟随网关') +
+                  '</div></td>' +
+                  '<td>' +
+                  sd.statusBadge(job) +
+                  '</td>' +
+                  '<td>' +
+                  nextCell(job) +
+                  '</td>' +
+                  '<td>' +
+                  resultCell(job) +
+                  '</td>' +
+                  '<td><span class="muted" style="font-size:11px">' +
+                  sd.deliveryLabel(job.delivery) +
+                  '</span></td>' +
+                  '<td><div class="row-actions">' +
+                  '<button type="button" class="btn btn-accent" data-action="立即运行：' +
+                  sd.escapeHtml(job.name) +
+                  '"' +
+                  (job.running ? ' disabled' : '') +
+                  '>运行</button>' +
+                  '<button type="button" class="btn" data-action="' +
+                  (job.status === 'enabled' ? '停用' : '启用') +
+                  '：' +
+                  sd.escapeHtml(job.name) +
+                  '">' +
+                  (job.status === 'enabled' ? '停用' : '启用') +
+                  '</button>' +
+                  '<button type="button" class="btn btn-ghost btn-icon" title="删除" data-action="删除：' +
+                  sd.escapeHtml(job.name) +
+                  '">✕</button>' +
+                  '</div></td>' +
+                  '</tr>'
+                );
+              })
+              .join('');
+          }
+
+          var enabled = sd.jobs.filter(function (job) {
+            return job.status === 'enabled';
+          }).length;
+          document.getElementById('foot-summary').textContent =
+            '共 ' +
+            sd.jobs.length +
+            ' 条 · ' +
+            enabled +
+            ' 条启用 · ' +
+            (sd.jobs.length - enabled) +
+            ' 条停用';
+
+          var checkedIds = Object.keys(state.checked).filter(function (id) {
+            return state.checked[id];
+          });
+          document.getElementById('bulkbar').hidden = checkedIds.length === 0;
+          document.getElementById('bulk-count').textContent = String(checkedIds.length);
+          var allChecked =
+            list.length > 0 &&
+            list.every(function (job) {
+              return state.checked[job.id];
+            });
+          document.getElementById('check-all').checked = allChecked;
+        }
+
+        function renderDrawer() {
+          var job = sd.jobs.filter(function (item) {
+            return item.id === state.selectedId;
+          })[0];
+          var drawer = document.getElementById('drawer');
+          if (!job) return;
+          var entries = sd.historyFor(job.id);
+          drawer.innerHTML =
+            '<div class="drawer-head">' +
+            '<div style="min-width:0;flex:1">' +
+            '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><strong style="font-size:14px">' +
+            sd.escapeHtml(job.name) +
+            '</strong>' +
+            sd.kindTag(job) +
+            sd.statusBadge(job) +
+            '</div>' +
+            '<div class="mono muted" style="font-size:11px;margin-top:4px">' +
+            sd.escapeHtml(job.expr) +
+            '</div>' +
+            '</div>' +
+            '<button type="button" class="btn btn-ghost btn-icon" id="drawer-close" title="关闭">✕</button>' +
+            '</div>' +
+            '<div class="drawer-body">' +
+            (job.lastResult === 'failed'
+              ? '<div class="banner banner-danger"><span>⚠</span><div><strong>最近一次执行失败</strong><div class="muted" style="margin-top:2px">' +
+                sd.escapeHtml(job.lastError || '未记录失败原因') +
+                '</div></div></div>'
+              : '') +
+            '<dl class="kv">' +
+            '<dt>调度</dt><dd class="mono">' +
+            sd.escapeHtml(job.expr) +
+            '</dd>' +
+            '<dt>时区</dt><dd>' +
+            sd.escapeHtml(job.tz || '跟随网关') +
+            '</dd>' +
+            '<dt>下次执行</dt><dd>' +
+            (job.status === 'disabled'
+              ? '已停用'
+              : sd.absTime(job.nextFireAt) + '（' + sd.relative(job.nextFireAt) + '）') +
+            '</dd>' +
+            '<dt>上次执行</dt><dd>' +
+            sd.absTime(job.lastFiredAt) +
+            (job.lastResult ? '（' + sd.resultLabel(job.lastResult) + '）' : '') +
+            '</dd>' +
+            '<dt>累计运行</dt><dd>' +
+            job.fireCount +
+            ' 次</dd>' +
+            '<dt>投递方式</dt><dd>' +
+            sd.deliveryLabel(job.delivery) +
+            (job.deliveryTarget ? ' · ' + sd.escapeHtml(job.deliveryTarget) : '') +
+            '</dd>' +
+            '</dl>' +
+            '<div><div class="section-label" style="margin-bottom:6px">任务提示词</div><div class="tl-output">' +
+            sd.escapeHtml(job.prompt) +
+            '</div></div>' +
+            '<div><div class="section-label" style="margin-bottom:8px">执行历史（最近 ' +
+            entries.length +
+            ' 条）</div>' +
+            (entries.length === 0
+              ? '<div class="muted" style="font-size:12px">暂无执行记录</div>'
+              : '<div class="timeline">' +
+                entries
+                  .map(function (entry) {
+                    return (
+                      '<div class="tl-entry"><div class="tl-line">' +
+                      '<span class="status ' +
+                      sd.resultClass(entry.status) +
+                      '">' +
+                      sd.resultLabel(entry.status) +
+                      '</span>' +
+                      '<span class="muted" style="font-size:11px">' +
+                      sd.absTime(entry.startedAt) +
+                      ' · ' +
+                      sd.duration(entry.durationMs) +
+                      '</span>' +
+                      (entry.sessionId
+                        ? '<button type="button" class="btn btn-ghost" data-action="查看执行现场 ' +
+                          entry.sessionId +
+                          '">查看执行现场</button>'
+                        : '') +
+                      '</div>' +
+                      (entry.error
+                        ? '<div class="tl-error" style="color:' +
+                          (entry.status === 'skipped' ? 'var(--fg-muted)' : 'var(--complement)') +
+                          '">' +
+                          sd.escapeHtml(entry.error) +
+                          '</div>'
+                        : '') +
+                      (entry.outputPreview
+                        ? '<div class="tl-output">' + sd.escapeHtml(entry.outputPreview) + '</div>'
+                        : '') +
+                      '</div>'
+                    );
+                  })
+                  .join('') +
+                '</div>') +
+            '</div>' +
+            '</div>' +
+            '<div style="border-top:1px solid var(--border-default);padding:12px 16px;display:flex;gap:6px;flex-wrap:wrap">' +
+            '<button type="button" class="btn btn-accent" data-action="立即运行：' +
+            sd.escapeHtml(job.name) +
+            '"' +
+            (job.running ? ' disabled' : '') +
+            '>立即运行</button>' +
+            '<button type="button" class="btn ' +
+            (job.status === 'enabled' ? 'btn-danger' : 'btn-success') +
+            '" data-action="' +
+            (job.status === 'enabled' ? '停用' : '启用') +
+            '：' +
+            sd.escapeHtml(job.name) +
+            '">' +
+            (job.status === 'enabled' ? '停用' : '启用') +
+            '</button>' +
+            '<button type="button" class="btn" data-action="编辑：' +
+            sd.escapeHtml(job.name) +
+            '">编辑</button>' +
+            '<span class="spacer"></span>' +
+            '<button type="button" class="btn btn-ghost" data-action="删除：' +
+            sd.escapeHtml(job.name) +
+            '">删除任务</button>' +
+            '</div>';
+          drawer.setAttribute('aria-hidden', 'false');
+          drawer.dataset.open = 'true';
+          document.getElementById('scrim').dataset.open = 'true';
+          document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+        }
+
+        function openDrawer(id) {
+          state.selectedId = id;
+          renderDrawer();
+          render();
+        }
+
+        function closeDrawer() {
+          document.getElementById('drawer').dataset.open = 'false';
+          document.getElementById('drawer').setAttribute('aria-hidden', 'true');
+          document.getElementById('scrim').dataset.open = 'false';
+          state.selectedId = null;
+          render();
+        }
+
+        var toastTimer = null;
+        function toast(text) {
+          var node = document.getElementById('toast');
+          node.textContent = text;
+          node.dataset.show = 'true';
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(function () {
+            node.dataset.show = 'false';
+          }, 1600);
+        }
+
+        document.getElementById('q').addEventListener('input', function (event) {
+          state.keyword = event.target.value.trim();
+          render();
+        });
+        document.getElementById('status-filter').addEventListener('change', function (event) {
+          state.status = event.target.value;
+          render();
+        });
+        document.getElementById('sort').addEventListener('change', function (event) {
+          state.sort = event.target.value;
+          render();
+        });
+        document.getElementById('kind-filter').addEventListener('click', function (event) {
+          var button = event.target.closest('button[data-kind]');
+          if (!button) return;
+          state.kind = button.dataset.kind;
+          Array.prototype.forEach.call(this.querySelectorAll('button'), function (node) {
+            node.setAttribute('aria-pressed', String(node === button));
+          });
+          render();
+        });
+
+        document.getElementById('rows').addEventListener('click', function (event) {
+          var check = event.target.closest('[data-check]');
+          if (check) {
+            event.stopPropagation();
+            state.checked[check.dataset.check] = check.checked;
+            render();
+            return;
+          }
+          if (event.target.closest('[data-action]')) return;
+          var row = event.target.closest('tr[data-id]');
+          if (row) openDrawer(row.dataset.id);
+        });
+
+        document.getElementById('check-all').addEventListener('change', function (event) {
+          filtered().forEach(function (job) {
+            state.checked[job.id] = event.target.checked;
+          });
+          render();
+        });
+
+        document.getElementById('clear-selection').addEventListener('click', function () {
+          state.checked = {};
+          render();
+        });
+
+        document.getElementById('scrim').addEventListener('click', closeDrawer);
+        document.addEventListener('keydown', function (event) {
+          if (event.key === 'Escape') closeDrawer();
+        });
+        document.body.addEventListener('click', function (event) {
+          var trigger = event.target.closest('[data-action]');
+          if (trigger) toast(trigger.dataset.action);
+        });
+
+        render();
+        sd.mountShell('b');
+      })();
+    </script>
+  </body>
+</html>

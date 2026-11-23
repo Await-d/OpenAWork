@@ -29,10 +29,25 @@ import {
   subscribeToNotificationEvents,
   type NotificationChangedEvent,
 } from '../session/notification-events-bus.js';
-import { buildPendingNotificationSnapshot } from '../session/notification-store.js';
+import {
+  buildPendingNotificationSnapshot,
+  reconcileActionableNotifications,
+} from '../session/notification-store.js';
+import { logGatewayWarn } from '../infra/gateway-logger.js';
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const IDLE_TIMEOUT_MS = 45_000;
+
+/**
+ * 兜底对账的节拍：每 N 次心跳（10s × 6 = 60s）对账一次。
+ *
+ * 为什么必须挂在心跳上：对账目前只在「读 pending 快照」时触发，而快照只在握手 /
+ * 重连 / 收到 `notification.changed` 后请求。若某条处理路径漏了收口，就不会有事件，
+ * 客户端也就永远不读快照——兜底形同虚设，用户开着页面时铃铛会一直亮到手动点开
+ * 面板为止。心跳是唯一稳定存在的节拍，而对账是纯本地 SQL（零网络开销），
+ * 只在真的收口时才推一次事件，不会刷屏。
+ */
+const RECONCILE_EVERY_N_HEARTBEATS = 6;
 
 /** 与前端铃铛的 `limit: 30` 对齐，避免首屏快照比轮询首拉还短。 */
 const SNAPSHOT_LIMIT = 30;
@@ -58,6 +73,7 @@ export async function notificationEventsRoutes(app: FastifyInstance): Promise<vo
       let closed = false;
       let lastActivityAt = Date.now();
       let heartbeat: NodeJS.Timeout | null = null;
+      let heartbeatTicks = 0;
       let unsubscribe: (() => void) | null = null;
 
       const touchActivity = (): void => {
@@ -110,6 +126,20 @@ export async function notificationEventsRoutes(app: FastifyInstance): Promise<vo
 
       heartbeat = setInterval(() => {
         if (closed) return;
+        // 周期性兜底对账（见 RECONCILE_EVERY_N_HEARTBEATS 的注释）。失败只告警：
+        // 它只是兜底，主路径收口仍在工作，绝不能因此断掉实时通道。
+        heartbeatTicks += 1;
+        if (heartbeatTicks % RECONCILE_EVERY_N_HEARTBEATS === 0) {
+          try {
+            reconcileActionableNotifications(userId);
+          } catch (error) {
+            logGatewayWarn(
+              `[notification-events] 周期性对账失败（user=${userId}）：${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
         if (Date.now() - lastActivityAt > IDLE_TIMEOUT_MS) {
           // 空闲超时主动断开，让客户端走「重连即重拉快照」的既定恢复路径，
           // 而不是留一条半开连接假装还活着。

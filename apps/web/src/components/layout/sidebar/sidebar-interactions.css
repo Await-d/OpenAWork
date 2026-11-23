@@ -92,7 +92,13 @@
 .sidebar-primary-action {
   border: none;
   background: var(--accent-subtle);
-  color: var(--accent);
+  /* 8 套主题 × 明暗回归的结论：彩字压在 accent 淡底上跨主题不可控 ——
+     --accent 在浅色主题 4.2~4.3、--accent-hover 在 forest-light 4.18 / nebula-light 3.75，
+     再往深一档（--accent-active）又会在暗色主题反向变差。
+     改为「强调由底色 + 内描边承担、文字用 --fg-strong」，
+     与页面内 `.sch-chip[aria-pressed]` 的既定约定一致（状态靠背景与描边表达）。 */
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+  color: var(--fg-strong);
   cursor: pointer;
   transition:
     background 120ms ease-out,

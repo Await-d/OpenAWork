@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { registerSettingsMessageLimitsRoutes } from './settings-message-limits.js';
 import { registerSettingsUserRoutes } from './settings-user-routes.js';
 import { registerSettingsMcpRoutes } from './settings-mcp-routes.js';
 import { registerSettingsAdminRoutes } from './settings-admin-routes.js';
@@ -10,6 +11,7 @@ import { registerSettingsModelRoutes } from './settings-model-routes.js';
  * 各分区实现见 settings-*-routes.ts，共享支撑见 settings-support.ts。
  */
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
+  await registerSettingsMessageLimitsRoutes(app);
   await registerSettingsUserRoutes(app);
   await registerSettingsMcpRoutes(app);
   await registerSettingsAdminRoutes(app);

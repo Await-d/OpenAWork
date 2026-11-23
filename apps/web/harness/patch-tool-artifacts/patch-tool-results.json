@@ -1,0 +1,1154 @@
+{
+  "passed": 270,
+  "failed": 0,
+  "results": [
+    {
+      "name": "dark/375 collapsed page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":375,\"scroll\":375}"
+    },
+    {
+      "name": "dark/375 completed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/375 completed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/375 completed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/375 completed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 completed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 completed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 completed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 completed state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/375 completed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/375 rich has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/375 rich outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/375 rich exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/375 rich file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 rich file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 rich file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 rich file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 rich state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/375 rich deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/375 running has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/375 running outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/375 running exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/375 running file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 running file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 running file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 running file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 running header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\n执行中…"
+    },
+    {
+      "name": "dark/375 running state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/375 running deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/375 failed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failed header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\nPatch failed: context mismatch in src/existing.ts\n140ms"
+    },
+    {
+      "name": "dark/375 failed state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/375 failed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/375 snapshot truncation notice",
+      "passed": true
+    },
+    {
+      "name": "dark/375 exact changed lines",
+      "passed": true
+    },
+    {
+      "name": "dark/375 expanded page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":375,\"scroll\":375}"
+    },
+    {
+      "name": "dark/375 keyboard focus visible",
+      "passed": true,
+      "detail": "{\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\",\"visible\":true}"
+    },
+    {
+      "name": "dark/375 keyboard summary toggles",
+      "passed": true
+    },
+    {
+      "name": "dark/375 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/768 collapsed page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":768,\"scroll\":768}"
+    },
+    {
+      "name": "dark/768 completed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/768 completed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/768 completed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/768 completed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 completed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 completed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 completed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 completed state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/768 completed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/768 rich has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/768 rich outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/768 rich exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/768 rich file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 rich file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 rich file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 rich file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 rich state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/768 rich deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/768 running has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/768 running outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/768 running exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/768 running file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 running file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 running file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 running file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 running header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\n执行中…"
+    },
+    {
+      "name": "dark/768 running state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/768 running deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/768 failed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failed header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\nPatch failed: context mismatch in src/existing.ts\n140ms"
+    },
+    {
+      "name": "dark/768 failed state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/768 failed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/768 snapshot truncation notice",
+      "passed": true
+    },
+    {
+      "name": "dark/768 exact changed lines",
+      "passed": true
+    },
+    {
+      "name": "dark/768 expanded page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":768,\"scroll\":768}"
+    },
+    {
+      "name": "dark/768 keyboard focus visible",
+      "passed": true,
+      "detail": "{\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\",\"visible\":true}"
+    },
+    {
+      "name": "dark/768 keyboard summary toggles",
+      "passed": true
+    },
+    {
+      "name": "dark/768 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dark/1440 collapsed page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":1440,\"scroll\":1440}"
+    },
+    {
+      "name": "dark/1440 completed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 completed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 completed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/1440 completed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 completed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 completed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 completed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 completed state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 completed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 rich has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 rich outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 rich exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/1440 rich file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 rich file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 rich file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 rich file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 rich state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 rich deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 running has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 running outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 running exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/1440 running file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 running file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 running file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 running file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 running header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\n执行中…"
+    },
+    {
+      "name": "dark/1440 running state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 running deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "dark/1440 failed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failed header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\nPatch failed: context mismatch in src/existing.ts\n140ms"
+    },
+    {
+      "name": "dark/1440 failed state semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 failed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 snapshot truncation notice",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 exact changed lines",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 expanded page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":1440,\"scroll\":1440}"
+    },
+    {
+      "name": "dark/1440 keyboard focus visible",
+      "passed": true,
+      "detail": "{\"outline\":\"rgb(0, 180, 255) solid 2px\",\"shadow\":\"rgba(0, 180, 255, 0.07) 0px 0px 0px 4px\",\"visible\":true}"
+    },
+    {
+      "name": "dark/1440 keyboard summary toggles",
+      "passed": true
+    },
+    {
+      "name": "dark/1440 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/375 collapsed page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":375,\"scroll\":375}"
+    },
+    {
+      "name": "light/375 completed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/375 completed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/375 completed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/375 completed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 completed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 completed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 completed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 completed state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/375 completed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/375 rich has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/375 rich outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/375 rich exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/375 rich file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 rich file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 rich file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 rich file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 rich state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/375 rich deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/375 running has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/375 running outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/375 running exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/375 running file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 running file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 running file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 running file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 running header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\n执行中…"
+    },
+    {
+      "name": "light/375 running state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/375 running deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/375 failed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/375 failed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/375 failed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/375 failed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 failed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 failed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 failed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/375 failed header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\nPatch failed: context mismatch in src/existing.ts\n140ms"
+    },
+    {
+      "name": "light/375 failed state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/375 failed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/375 snapshot truncation notice",
+      "passed": true
+    },
+    {
+      "name": "light/375 exact changed lines",
+      "passed": true
+    },
+    {
+      "name": "light/375 expanded page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":375,\"scroll\":375}"
+    },
+    {
+      "name": "light/375 keyboard focus visible",
+      "passed": true,
+      "detail": "{\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\",\"visible\":true}"
+    },
+    {
+      "name": "light/375 keyboard summary toggles",
+      "passed": true
+    },
+    {
+      "name": "light/375 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/768 collapsed page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":768,\"scroll\":768}"
+    },
+    {
+      "name": "light/768 completed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/768 completed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/768 completed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/768 completed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 completed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 completed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 completed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 completed state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/768 completed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/768 rich has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/768 rich outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/768 rich exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/768 rich file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 rich file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 rich file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 rich file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 rich state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/768 rich deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/768 running has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/768 running outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/768 running exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/768 running file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 running file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 running file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 running file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 running header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\n执行中…"
+    },
+    {
+      "name": "light/768 running state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/768 running deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/768 failed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/768 failed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/768 failed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/768 failed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 failed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 failed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 failed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/768 failed header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\nPatch failed: context mismatch in src/existing.ts\n140ms"
+    },
+    {
+      "name": "light/768 failed state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/768 failed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/768 snapshot truncation notice",
+      "passed": true
+    },
+    {
+      "name": "light/768 exact changed lines",
+      "passed": true
+    },
+    {
+      "name": "light/768 expanded page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":768,\"scroll\":768}"
+    },
+    {
+      "name": "light/768 keyboard focus visible",
+      "passed": true,
+      "detail": "{\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\",\"visible\":true}"
+    },
+    {
+      "name": "light/768 keyboard summary toggles",
+      "passed": true
+    },
+    {
+      "name": "light/768 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "light/1440 collapsed page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":1440,\"scroll\":1440}"
+    },
+    {
+      "name": "light/1440 completed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/1440 completed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/1440 completed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/1440 completed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 completed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 completed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 completed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 completed state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/1440 completed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/1440 rich has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/1440 rich outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/1440 rich exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/1440 rich file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 rich file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 rich file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 rich file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 rich state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/1440 rich deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/1440 running has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/1440 running outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/1440 running exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/1440 running file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 running file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 running file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 running file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 running header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\n执行中…"
+    },
+    {
+      "name": "light/1440 running state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/1440 running deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failed has accessible disclosure",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failed outer toggle",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failed exactly four files",
+      "passed": true,
+      "detail": "count=4"
+    },
+    {
+      "name": "light/1440 failed file 0 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failed file 1 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failed file 2 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failed file 3 expands",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failed header does not claim applied",
+      "passed": true,
+      "detail": "应用补丁\nPatch failed: context mismatch in src/existing.ts\n140ms"
+    },
+    {
+      "name": "light/1440 failed state semantics",
+      "passed": true
+    },
+    {
+      "name": "light/1440 failed deletion semantics",
+      "passed": true
+    },
+    {
+      "name": "light/1440 snapshot truncation notice",
+      "passed": true
+    },
+    {
+      "name": "light/1440 exact changed lines",
+      "passed": true
+    },
+    {
+      "name": "light/1440 expanded page overflow",
+      "passed": true,
+      "detail": "{\"viewport\":1440,\"scroll\":1440}"
+    },
+    {
+      "name": "light/1440 keyboard focus visible",
+      "passed": true,
+      "detail": "{\"outline\":\"rgb(0, 119, 204) solid 2px\",\"shadow\":\"rgba(0, 119, 204, 0.05) 0px 0px 0px 4px\",\"visible\":true}"
+    },
+    {
+      "name": "light/1440 keyboard summary toggles",
+      "passed": true
+    },
+    {
+      "name": "light/1440 no browser exceptions",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "screenshots": [
+    "/home/await/project/OpenAWork/apps/web/harness/patch-tool-artifacts/patch-tool-dark-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/patch-tool-artifacts/patch-tool-dark-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/patch-tool-artifacts/patch-tool-dark-1440.png",
+    "/home/await/project/OpenAWork/apps/web/harness/patch-tool-artifacts/patch-tool-light-375.png",
+    "/home/await/project/OpenAWork/apps/web/harness/patch-tool-artifacts/patch-tool-light-768.png",
+    "/home/await/project/OpenAWork/apps/web/harness/patch-tool-artifacts/patch-tool-light-1440.png"
+  ]
+}

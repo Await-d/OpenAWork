@@ -7,21 +7,47 @@ import {
 
 describe('shouldPreserveFreshBootstrapStream', () => {
   it('新会话首条消息正在流式时保留本地状态（此时尚未加载过任何会话）', () => {
-    expect(shouldPreserveFreshBootstrapStream({ isStreaming: true, loadedSessionId: null })).toBe(
-      true,
-    );
+    expect(
+      shouldPreserveFreshBootstrapStream({
+        activeSessionId: 'session-1',
+        isStreaming: true,
+        loadedSessionId: null,
+        requestedSessionId: 'session-1',
+      }),
+    ).toBe(true);
   });
 
   it('已加载过会话后切走不得跳过重置，否则会串会话', () => {
     expect(
-      shouldPreserveFreshBootstrapStream({ isStreaming: true, loadedSessionId: 'session-1' }),
+      shouldPreserveFreshBootstrapStream({
+        activeSessionId: 'session-2',
+        isStreaming: true,
+        loadedSessionId: 'session-1',
+        requestedSessionId: 'session-2',
+      }),
+    ).toBe(false);
+  });
+
+  it('首轮流式属于其他会话时不得当作目标会话的 bootstrap', () => {
+    expect(
+      shouldPreserveFreshBootstrapStream({
+        activeSessionId: 'session-1',
+        isStreaming: true,
+        loadedSessionId: null,
+        requestedSessionId: 'session-2',
+      }),
     ).toBe(false);
   });
 
   it('没有流式时按正常加载路径处理', () => {
-    expect(shouldPreserveFreshBootstrapStream({ isStreaming: false, loadedSessionId: null })).toBe(
-      false,
-    );
+    expect(
+      shouldPreserveFreshBootstrapStream({
+        activeSessionId: 'session-1',
+        isStreaming: false,
+        loadedSessionId: null,
+        requestedSessionId: 'session-1',
+      }),
+    ).toBe(false);
   });
 });
 

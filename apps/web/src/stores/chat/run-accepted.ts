@@ -13,9 +13,10 @@ import { create } from 'zustand';
  * 的代价不划算。
  *
  * **为什么可以只存最近一次而不按请求索引**：同一页面同一时刻只会有一个本端发起的
- * 活跃流（多端并发由网关单飞锁与消费租约隔开），并且每轮开始都由
- * `startStandardChatStream` 复位。因此消费者只需判断「有没有」，不必比较时间戳——
- * 浏览器与服务端的时钟偏差也不会影响判定。
+ * 活跃流（多端并发由网关单飞锁与消费租约隔开），并且「新一轮发送」与「会话切换 /
+ * 流收尾 / 错误清理」都经过复位——前者在 `startStandardChatStream`，后者统一在
+ * `resetStreamState()`（`use-chat-streaming.ts`）。因此消费者只需判断「有没有」，
+ * 不必比较时间戳，浏览器与服务端的时钟偏差也不影响判定。
  */
 interface RunAcceptedState {
   /** 最近一次受理确认的时间戳；`null` 表示本轮尚未收到确认。 */
@@ -24,8 +25,15 @@ interface RunAcceptedState {
   reset: () => void;
 }
 
-export const useRunAcceptedStore = create<RunAcceptedState>((set) => ({
+export const useRunAcceptedStore = create<RunAcceptedState>((set, get) => ({
   acceptedAt: null,
   markAccepted: (acceptedAt) => set({ acceptedAt }),
-  reset: () => set({ acceptedAt: null }),
+  reset: () => {
+    // 早退：`resetStreamState` 在流收尾、会话切换等多条路径上都会调用，已经为 null 时
+    // 不必再造一个新 state 对象去通知订阅者。
+    if (get().acceptedAt === null) {
+      return;
+    }
+    set({ acceptedAt: null });
+  },
 }));

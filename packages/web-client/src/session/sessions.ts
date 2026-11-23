@@ -1,4 +1,5 @@
 import type {
+  CreatedSessionModelConfig,
   FileBackupKind,
   FileChangeGuaranteeLevel,
   FileChangeSourceKind,
@@ -569,8 +570,12 @@ export interface SessionsClient {
   ): Promise<SharedSessionSummaryRecord[]>;
   create(
     token: string,
-    opts?: { title?: string; metadata?: Record<string, unknown> },
-  ): Promise<Session>;
+    opts?: {
+      title?: string;
+      metadata?: Record<string, unknown>;
+      resolveModelConfig?: { useDefaultModel: boolean; useDefaultThinking: boolean };
+    },
+  ): Promise<Session & { modelConfig?: CreatedSessionModelConfig }>;
   getResult(
     token: string,
     sessionId: string,
@@ -1181,7 +1186,11 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
     },
 
     async create(token, opts = {}) {
-      const data = await performSessionRequest<{ session?: Session; sessionId?: string }>({
+      const data = await performSessionRequest<{
+        session?: Session;
+        sessionId?: string;
+        modelConfig?: CreatedSessionModelConfig;
+      }>({
         actionLabel: '创建会话',
         request: () =>
           fetchWithTimeout(`${gatewayUrl}/sessions`, {
@@ -1190,7 +1199,8 @@ export function createSessionsClient(gatewayUrl: string): SessionsClient {
             body: JSON.stringify(opts),
           }),
       });
-      return data.session ?? { id: data.sessionId ?? '' };
+      const session = data.session ?? { id: data.sessionId ?? '' };
+      return data.modelConfig ? { ...session, modelConfig: data.modelConfig } : session;
     },
 
     getResult,

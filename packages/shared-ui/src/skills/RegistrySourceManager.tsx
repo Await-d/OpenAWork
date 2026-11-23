@@ -1,6 +1,7 @@
 import { color, font, radius, spacing } from '../tokens.js';
 import type { CSSProperties } from 'react';
 import { useState } from 'react';
+import { isImeComposingKeyboardEvent } from '../utils/ime-composition.js';
 
 export interface RegistrySource {
   id: string;
@@ -357,6 +358,7 @@ export function RegistrySourceManager({
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposingKeyboardEvent(e)) return;
             if (e.key === 'Enter') handleAdd();
           }}
         />

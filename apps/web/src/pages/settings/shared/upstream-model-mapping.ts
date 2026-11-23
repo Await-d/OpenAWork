@@ -167,7 +167,7 @@ export function buildLocalMetadataIndex(
     : providers;
   // 低优先级先写入、高优先级后覆盖(仅覆盖已定义字段,后写入者胜出)。
   // 键做大小写归一,避免「上游 GPT-4o / 本地 gpt-4o」这类差异导致匹配失败。
-  for (const provider of [...ordered].reverse()) {
+  for (const provider of ordered.toReversed()) {
     for (const model of provider.defaultModels) {
       const picked = pickLocalMetadata(model);
       if (!picked) continue;

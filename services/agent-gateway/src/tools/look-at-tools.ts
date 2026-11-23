@@ -588,7 +588,7 @@ export async function resolveLookAtRoute(
     `SELECT value FROM user_settings WHERE user_id = ? AND key = 'active_selection'`,
     [userId],
   );
-  const delegatedModel = selectDelegatedModelForUser(
+  const delegatedModel = await selectDelegatedModelForUser(
     userId,
     managedEntries.length > 0 ? managedEntries : getReferenceAgentModelEntries('multimodal-looker'),
   );

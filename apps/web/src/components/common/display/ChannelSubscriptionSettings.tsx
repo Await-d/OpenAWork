@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { ChannelAccessConfigSection } from './ChannelAccessConfigSection.js';
 import { validateMemberAclDocumentForSave } from './ChannelMemberAclEditor.js';
 import { ChannelDiagnosticsPanel } from './ChannelDiagnosticsPanel.js';
@@ -513,6 +514,9 @@ export function ChannelSubscriptionSettings({
   }
 
   function handleReadPathKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {
+    if (isImeComposingKeyboardEvent(event)) {
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       addReadablePath();

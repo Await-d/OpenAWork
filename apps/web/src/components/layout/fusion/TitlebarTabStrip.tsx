@@ -13,8 +13,10 @@ import { useSessions } from '../../../hooks/workspace/useSessions.js';
 import {
   extractSessionIcon,
   extractDialogueMode,
+  isSourceManagedSessionMetadata,
 } from '../../../utils/session/session-metadata.js';
 import { toast } from '../../common/feedback/ToastNotification.js';
+import { copyTextToClipboard } from '../file-tree/file-tree-actions.js';
 import { TitlebarHomeButton } from './TitlebarHomeButton.js';
 import { TeamTitlebarSummary } from '../shared/TeamTitlebarSummary.js';
 import { TitlebarTab } from './TitlebarTab.js';
@@ -28,6 +30,7 @@ import {
 import { useTitlebarKeyboardShortcuts } from './useTitlebarKeyboardShortcuts.js';
 import { useTitlebarResponsiveState } from './useTitlebarResponsiveState.js';
 import { useHorizontalWheelScroll } from '../../../hooks/use-horizontal-wheel-scroll.js';
+import { useScrollActiveTitlebarTab } from './use-scroll-active-titlebar-tab.js';
 import './TitlebarTabStrip.css';
 import { loadTauriWindowOnce } from '../../../utils/lazy/lazy-assets.js';
 
@@ -83,7 +86,12 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const { stackedTeamTitlebar } = useTitlebarResponsiveState();
-  const { attachRef: attachTabListRef } = useHorizontalWheelScroll<HTMLDivElement>();
+  const { ref: tabListRef, attachRef: attachTabListRef } =
+    useHorizontalWheelScroll<HTMLDivElement>();
+
+  // 切换会话时把激活标签滚进标签栏可视区：标签一多就只剩手动滚动，
+  // 否则用户看不到「我当前在哪个会话上」。
+  useScrollActiveTitlebarTab(tabListRef, activeTabId);
 
   const currentSessionId = location.pathname.split('/chat/')[1]?.split('/')[0] ?? null;
   const isTeamRoute = location.pathname.startsWith('/team');
@@ -93,12 +101,28 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   // 已经没有它的"夹缝"渲染。若不跳过，下面的同步 effect 会把它误判为新会话重新建 tab。
   const pendingCloseSessionIdRef = useRef<string | null>(null);
 
+  // 记录「已选中但路由还没跟上」的会话 ID。`selectTab` 是同步的 store 更新，
+  // 而 `navigate` 走 React Router 的 transition，中间会有一帧「activeTabId 指向新会话、
+  // location 仍是旧会话」。若这段夹缝里让下面的路由同步 effect 按旧 URL 把 activeTabId
+  // 抢回去，顶部标签就会先亮新标签再跳回旧标签——自动入视随之来回滚动，看着像抽搐。
+  const pendingSelectSessionIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     // 一旦路由不再指向"正在关闭"的会话（无论是切到新会话还是回到首页），
     // 待跳过标记就失去意义，必须清掉，否则用户之后重新打开同一会话时会被误跳过。
     const pendingCloseSessionId = pendingCloseSessionIdRef.current;
     if (pendingCloseSessionId !== null && pendingCloseSessionId !== currentSessionId) {
       pendingCloseSessionIdRef.current = null;
+    }
+
+    // 主动选中的会话一旦与路由对齐，标记就失去意义（后续路由变化要靠本 effect 同步）。
+    const pendingSelectSessionId = pendingSelectSessionIdRef.current;
+    if (pendingSelectSessionId !== null) {
+      if (pendingSelectSessionId !== currentSessionId) {
+        return;
+      }
+
+      pendingSelectSessionIdRef.current = null;
     }
 
     if (!currentSessionId) {
@@ -196,6 +220,8 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
         return;
       }
 
+      pendingSelectSessionIdRef.current =
+        tab.type === 'session' && tab.sessionId ? tab.sessionId : null;
       navigateToTab(tab);
     },
     [navigateToTab, selectTab],
@@ -241,14 +267,7 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
   }, [closeTabs, navigateToTab, tabs]);
 
   const handleCopySessionId = useCallback((sessionIdToCopy: string) => {
-    const clipboard = navigator.clipboard;
-    if (!clipboard) {
-      toast('当前环境不支持复制到剪贴板', 'warning');
-      return;
-    }
-
-    void clipboard
-      .writeText(sessionIdToCopy)
+    void copyTextToClipboard(sessionIdToCopy)
       .then(() => toast('已复制会话 ID', 'success'))
       .catch(() => toast('复制会话 ID 失败', 'error'));
   }, []);
@@ -411,9 +430,11 @@ export function TitlebarTabStrip({ theme, onToggleTheme }: TitlebarTabStripProps
                     ? sessions.find((s) => s.id === tab.sessionId)
                     : undefined;
                 const sessionIcon = session ? extractSessionIcon(session.metadata_json) : undefined;
-                const sessionDialogueMode = session
-                  ? extractDialogueMode(session.metadata_json)
-                  : undefined;
+                // 来源会话（渠道 / 定时任务）没有对话模式：不用假模式的字形冒充。
+                const sessionDialogueMode =
+                  session && !isSourceManagedSessionMetadata(session.metadata_json)
+                    ? extractDialogueMode(session.metadata_json)
+                    : undefined;
                 const sessionPinned =
                   tab.type === 'session' && tab.sessionId ? isPinned(tab.sessionId) : false;
 

@@ -28,6 +28,27 @@ describe('createWorkflowsClient.listTemplatesResult', () => {
     });
   });
 
+  it('响应体不是数组时返回结构化失败，而不是把坏数据塞进状态', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const client = createWorkflowsClient('http://localhost:3000');
+    const result = await client.listTemplatesResult('token-1');
+
+    // 关键：templates 必须是数组（页面会直接 `templates.find(...)`），
+    // 且这一路径要显式报错——静默返回空列表会把「网关契约坏了」伪装成「没有模板」。
+    expect(result.ok).toBe(false);
+    expect(result.retryable).toBe(true);
+    expect(result.errorMessage).toBe('工作流模板响应格式异常（预期数组）。');
+    expect(result.templates).toEqual([]);
+    await expect(client.listTemplates('token-1')).rejects.toThrow('工作流模板响应格式异常');
+  });
+
   it('HTTP 错误时返回结构化失败信息', async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

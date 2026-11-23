@@ -93,6 +93,19 @@ export interface TeamConversationState {
   setThinkingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   reasoningEffort: ReasoningEffort;
   setReasoningEffort: React.Dispatch<React.SetStateAction<ReasoningEffort>>;
+  /**
+   * 当前渲染的会话 id（写会话级设置时需要，例如上下文挡位的 metadata PATCH）。
+   */
+  sessionId: string | null;
+  /**
+   * 会话级上下文窗口挡位（`metadata.contextWindowOverride` 的本地镜像）。
+   *
+   * `undefined` = 本会话未覆盖 → 运行时回退到模型级配置 / 模型 preset。
+   * 与 chat 侧同契约：挡位是会话级设置，写会话 metadata，
+   * 不再改 `user_settings.providers`。
+   */
+  sessionContextWindowOverride: number | undefined;
+  setSessionContextWindowOverride: React.Dispatch<React.SetStateAction<number | undefined>>;
 
   // ─── 滚动 + 加载 ──────────────────────────────────────────────────
   scrollRegionRef: React.RefObject<HTMLDivElement | null>;

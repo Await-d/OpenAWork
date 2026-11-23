@@ -110,8 +110,15 @@
   overflow: auto;
   max-height: min(64vh, 560px);
   overscroll-behavior-x: contain;
+  /* 标准属性：Firefox 64+ / Chrome 121+ / Safari 26.2+ 走这条；
+     Safari 16.2–26.1 与 macOS WKWebView 不认 scrollbar-color，
+     由下面成对的 ::-webkit-scrollbar 规则兜底（两者都必须写，缺一条就有引擎拿不到样式）。
+     颜色取全局 token，不写死色值。 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
+/* WebKit 回退：Safari < 26.2 只认伪元素，不能删。 */
 .chat-markdown-table-wrap::-webkit-scrollbar {
   width: 8px;
   height: 8px;

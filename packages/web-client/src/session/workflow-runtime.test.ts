@@ -25,6 +25,38 @@ describe('getSessionWorkflowRuntime', () => {
     );
   });
 
+  it('来源会话（渠道 / 定时任务）的脏 dialogueMode 不投影成「规划中」', () => {
+    // 来源会话没有对话模式：脏 clarify 只影响状态投影，不得让它显示成 planning。
+    expect(
+      getSessionWorkflowRuntime({
+        metadata_json: JSON.stringify({ source: 'channel', dialogueMode: 'clarify' }),
+      }).mode,
+    ).toBe('normal');
+    expect(
+      getSessionWorkflowRuntime({
+        metadata_json: JSON.stringify({ source: 'cron', dialogueMode: 'clarify' }),
+      }).mode,
+    ).toBe('normal');
+
+    // 真实进度（activePlan / activeLoop）与对话模式无关，必须照常投影。
+    expect(
+      getSessionWorkflowRuntime({
+        metadata_json: JSON.stringify({
+          source: 'channel',
+          dialogueMode: 'clarify',
+          activeWorkflowPlanPath: '.agentdocs/workflow/plan.md',
+        }),
+      }).mode,
+    ).toBe('execution');
+
+    // 普通会话不受影响：clarify 仍是 planning。
+    expect(
+      getSessionWorkflowRuntime({
+        metadata_json: JSON.stringify({ dialogueMode: 'clarify' }),
+      }).mode,
+    ).toBe('planning');
+  });
+
   it('旧 session 只有 metadata_json 时仍能构造空状态', () => {
     const runtime = getSessionWorkflowRuntime({
       metadata_json: '{"workingDirectory":"/workspace/demo"}',

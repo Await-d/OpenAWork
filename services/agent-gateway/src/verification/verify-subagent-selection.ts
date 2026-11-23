@@ -25,12 +25,14 @@ import {
 } from '../claude-code/claude-code-input-adapters.js';
 import { CLAUDE_CODE_AGENT_ALLOWED_AGENTS } from '../claude-code/claude-code-agent-allowed-agents.js';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun, WORKSPACE_ROOT } from '../infra/db.js';
+import { invalidateCatalog } from '../provider/provider-catalog.js';
 import { resolveDelegatedAgent } from '../task/task-agent-resolution.js';
 import { buildGatewayToolDefinitions } from '../tools/tool-definitions.js';
 import { createDefaultSandbox } from '../tools/tool-sandbox.js';
 import {
   assert,
   createProtocolAwareStream,
+  readFetchBody,
   waitFor,
   withMockFetch,
   withTempEnv,
@@ -48,6 +50,7 @@ function readOutputText(output: unknown): string {
 }
 
 async function main(): Promise<void> {
+  const requestedModels: string[] = [];
   await withTempEnv(
     {
       DATABASE_URL: ':memory:',
@@ -57,7 +60,14 @@ async function main(): Promise<void> {
     },
     async () => {
       await withMockFetch(
-        async (url) => createProtocolAwareStream(url, '子代理已经执行完成。'),
+        async (url, init) => {
+          const body = await readFetchBody(url, init);
+          if (body) {
+            const parsed = JSON.parse(body) as { model?: string };
+            if (parsed.model) requestedModels.push(parsed.model);
+          }
+          return createProtocolAwareStream(url, '子代理已经执行完成。');
+        },
         async () => {
           await connectDb();
           await migrate();
@@ -224,6 +234,67 @@ async function main(): Promise<void> {
                 (task) => task.sessionId === childSessionId && task.status === 'completed',
               );
             }, 'web-researcher child task should complete');
+
+            // 推荐模型未接入时，检索子代理应继承父会话模型及其平台，不能强行发送 MiniMax。
+            sqliteRun('INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)', [
+              userId,
+              'providers',
+              JSON.stringify([
+                {
+                  id: 'relay',
+                  type: 'custom',
+                  name: '已接入平台',
+                  enabled: true,
+                  baseUrl: 'https://unit-test.invalid/v1',
+                  apiKey: 'test-key',
+                  defaultModels: [{ id: 'relay-chat', label: '主对话模型', enabled: true }],
+                },
+              ]),
+            ]);
+            sqliteRun('UPDATE sessions SET metadata_json = ? WHERE id = ?', [
+              JSON.stringify({
+                permissionMode: 'yolo',
+                modelId: 'relay-chat',
+                providerId: 'relay',
+              }),
+              parentSessionId,
+            ]);
+            invalidateCatalog(userId);
+            const fallbackResult = await sandbox.execute(
+              {
+                toolCallId: 'subagent-model-fallback',
+                toolName: 'subagent',
+                rawInput: {
+                  subagent_type: 'librarian',
+                  prompt: '核查本地插件安装机制',
+                  run_in_background: true,
+                },
+              },
+              new AbortController().signal,
+              parentSessionId,
+              {
+                ...executionContext,
+                requestData: { ...executionContext.requestData, model: 'default' },
+              },
+            );
+            assert(!fallbackResult.isError, '未接入推荐模型不应阻断检索子代理');
+            const fallbackChild = sqliteGet<{ id: string }>(
+              `SELECT id FROM sessions WHERE user_id = ?
+               AND metadata_json LIKE '%"subagentType":"librarian"%' LIMIT 1`,
+              [userId],
+            );
+            assert(fallbackChild, '检索子会话应创建成功');
+            await waitFor(async () => {
+              const graph = await taskManager.loadOrCreate(WORKSPACE_ROOT, parentSessionId);
+              return Object.values(graph.tasks).some(
+                (task) => task.sessionId === fallbackChild.id && task.status === 'completed',
+              );
+            }, '检索子代理应使用主对话模型完成任务');
+            assert(requestedModels.includes('relay-chat'), '实际请求应使用主对话已接入的模型');
+            assert(
+              !requestedModels.some((model) => model.startsWith('minimax-')),
+              '不得向未接入的 MiniMax 模型发起请求',
+            );
 
             console.log(
               ': ok  子代理选型契约（web-researcher 放行 / 错误选择被纠正 / 指引可见 / 边界不丢失）',

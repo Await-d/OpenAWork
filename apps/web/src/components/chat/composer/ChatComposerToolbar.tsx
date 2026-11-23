@@ -56,6 +56,7 @@ export interface ChatComposerToolbarProps {
   readonly showStopAction: boolean;
   readonly showQueueAction: boolean;
   readonly queuedMessageCount: number;
+  readonly characterCountControl?: React.ReactNode;
   readonly optimizeError: ComposerOptimizeError | null;
   readonly optimizeLoading: boolean;
   readonly optimizeResult: PromptOptimizerResult | null;
@@ -137,29 +138,32 @@ export function ChatComposerToolbar(props: ChatComposerToolbarProps) {
         onToggleModelPicker={props.onToggleModelPicker}
         onToggleModelSettings={props.onToggleModelSettings}
       />
-      <ChatComposerPrimaryActions
-        input={props.input}
-        streaming={props.streaming}
-        imageGenerationMode={props.imageGenerationMode}
-        imageGenerationBusy={props.imageGenerationBusy}
-        canSubmit={props.canSubmit}
-        stoppingStream={props.stoppingStream}
-        submitPending={props.submitPending}
-        sessionBusyState={props.sessionBusyState}
-        effectiveStopCapability={props.effectiveStopCapability}
-        showStopAction={props.showStopAction}
-        showQueueAction={props.showQueueAction}
-        queuedMessageCount={props.queuedMessageCount}
-        optimizeError={props.optimizeError}
-        optimizeLoading={props.optimizeLoading}
-        optimizeResult={props.optimizeResult}
-        onRunOptimizePrompt={props.onRunOptimizePrompt}
-        onClearOptimizeResult={props.onClearOptimizeResult}
-        onClearOptimizeError={props.onClearOptimizeError}
-        onQueueMessage={props.onQueueMessage}
-        onSend={props.onSend}
-        onStop={props.onStop}
-      />
+      <div className="composer-toolbar-right">
+        {props.characterCountControl}
+        <ChatComposerPrimaryActions
+          input={props.input}
+          streaming={props.streaming}
+          imageGenerationMode={props.imageGenerationMode}
+          imageGenerationBusy={props.imageGenerationBusy}
+          canSubmit={props.canSubmit}
+          stoppingStream={props.stoppingStream}
+          submitPending={props.submitPending}
+          sessionBusyState={props.sessionBusyState}
+          effectiveStopCapability={props.effectiveStopCapability}
+          showStopAction={props.showStopAction}
+          showQueueAction={props.showQueueAction}
+          queuedMessageCount={props.queuedMessageCount}
+          optimizeError={props.optimizeError}
+          optimizeLoading={props.optimizeLoading}
+          optimizeResult={props.optimizeResult}
+          onRunOptimizePrompt={props.onRunOptimizePrompt}
+          onClearOptimizeResult={props.onClearOptimizeResult}
+          onClearOptimizeError={props.onClearOptimizeError}
+          onQueueMessage={props.onQueueMessage}
+          onSend={props.onSend}
+          onStop={props.onStop}
+        />
+      </div>
     </div>
   );
 }

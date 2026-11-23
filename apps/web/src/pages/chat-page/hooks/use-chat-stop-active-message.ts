@@ -96,8 +96,9 @@ export function useChatStopActiveMessage(options: UseChatStopActiveMessageOption
     setStreamError(null);
     await runStopActiveMessageOnce({
       onError: (error) => {
-        writeRefCurrent(stoppingStreamRef, false);
         logger.error('stop stream failed', error);
+        if (currentSessionViewRef.current.epoch !== stopSessionViewEpoch) return;
+        writeRefCurrent(stoppingStreamRef, false);
         setStoppingStream(false);
         setStreamError(error instanceof Error ? error.message : '停止对话失败');
       },
@@ -111,6 +112,7 @@ export function useChatStopActiveMessage(options: UseChatStopActiveMessageOption
               (await sessionsClient.stopActiveStream(token, currentSessionId)),
             )
           : await client.stopStream();
+        if (currentSessionViewRef.current.epoch !== stopSessionViewEpoch) return;
         if (!stopped) {
           writeRefCurrent(stoppingStreamRef, false);
           setStoppingStream(false);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createSessionsClient } from '@openAwork/web-client';
+import { createRandomUuid, createSessionsClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
 import { recordReactUpdateSource } from '../../utils/log/react-commit-cascade.js';
 import { stripOversizedInlineImageUrls } from './sanitize-input-image-parts.js';
@@ -195,6 +195,9 @@ export interface ActiveStreamSnapshot {
   startedAt: number;
   transport: 'attach-sse' | 'sse' | 'ws';
 }
+
+// WS/SSE 提交和停止 HTTP 请求走不同连接，后者可能先到网关。
+const EARLY_STOP_RETRY_DELAYS_MS = [100, 250, 500, 1000] as const;
 
 export interface AttachEventSourceLike {
   /**
@@ -652,6 +655,14 @@ export function useGatewayClient(token: string | null): GatewayClient {
   // matches, preventing stale fallback attempts from racing with a
   // newer stream or attach flow.
   const streamGenerationRef = useRef(0);
+  const localStreamSendRef = useRef<{
+    clientRequestId: string;
+    dispatched: boolean;
+    stopConfirmed: boolean;
+    isSettled: () => boolean;
+    cancel: () => void;
+    resumeFallback: () => void;
+  } | null>(null);
   // SSE 回退的有界重连定时器。跨 stream() 生命周期持有，确保新消息 / attach
   // 接管时能取消上一条流遗留的重试，而不是让旧闭包静默重开连接。
   const sseRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -679,6 +690,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
    */
   const closeTransports = useCallback(() => {
     streamGenerationRef.current += 1;
+    localStreamSendRef.current = null;
     attachControllerRef.current?.abort();
     attachControllerRef.current = null;
     streamProbeCleanupRef.current?.();
@@ -757,30 +769,65 @@ export function useGatewayClient(token: string | null): GatewayClient {
       return false;
     }
 
+    const localSend = localStreamSendRef.current;
+    const ownsSend = localSend?.clientRequestId === activeRequest.clientRequestId;
+    if (ownsSend && !localSend.dispatched) {
+      localSend.cancel();
+      return true;
+    }
+
     // 用户已明确停止：取消待触发的 SSE 自动重连，避免停止后又被重试拉活。
-    clearSseRetryTimer();
+    if (!ownsSend) clearSseRetryTimer();
     stopRequestedRef.current = true;
     const gatewayUrl = useAuthStore.getState().gatewayUrl;
     const sessionsClient = createSessionsClient(gatewayUrl);
-    const stopped = await sessionsClient.stopStream(
-      token,
-      activeRequest.sessionId,
-      activeRequest.clientRequestId,
-    );
-    if (!stopped) {
-      syncActiveRequest(null);
-      stopRequestedRef.current = false;
-      callbacksRef.current = null;
-      return false;
-    }
+    const generation = streamGenerationRef.current;
+    const stillOwnsRequest = () =>
+      streamGenerationRef.current === generation &&
+      activeRequestRef.current?.clientRequestId === activeRequest.clientRequestId;
+    const requestStop = () =>
+      sessionsClient.stopStream(token, activeRequest.sessionId, activeRequest.clientRequestId);
+    let stopped = false;
+    try {
+      stopped = await requestStop();
+      if (ownsSend && activeRequest.lastSeq === 0) {
+        // 停止绑定原请求；切换会话仅放弃本地传输，不撤销停止意图。
+        for (const delay of EARLY_STOP_RETRY_DELAYS_MS) {
+          if (stopped || localSend.isSettled()) break;
+          await new Promise<void>((resolve) => setTimeout(resolve, delay));
+          if (localSend.isSettled()) break;
+          stopped = await requestStop();
+        }
+      }
 
-    if (!wsRef.current && !sseRef.current) {
-      syncActiveRequest(null);
-      stopRequestedRef.current = false;
-      callbacksRef.current = null;
-    }
+      // 失去本地流的控制权不代表网关已停止；也不能用旧回包清理新流。
+      if (!stillOwnsRequest()) {
+        return (
+          stopped ||
+          (ownsSend && localSend.isSettled()) ||
+          (streamGenerationRef.current === generation && activeRequestRef.current === null)
+        );
+      }
+      if (ownsSend) {
+        if (stopped) {
+          localSend.stopConfirmed = true;
+          clearSseRetryTimer();
+          if (!wsRef.current && !sseRef.current) localSend.cancel();
+        }
+      } else if (!stopped || (!wsRef.current && !sseRef.current)) {
+        syncActiveRequest(null);
+        stopRequestedRef.current = false;
+        callbacksRef.current = null;
+      }
 
-    return stopped;
+      return stopped;
+    } finally {
+      // 网关未确认停止时保留本地句柄，用户仍可以重试精确停止。
+      if (!stopped && stillOwnsRequest()) {
+        stopRequestedRef.current = false;
+        if (ownsSend) localSend.resumeFallback();
+      }
+    }
   }, [clearSseRetryTimer, syncActiveRequest, token]);
 
   const getActiveStreamSessionId = useCallback((): string | null => {
@@ -798,7 +845,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
       const streamGeneration = streamGenerationRef.current;
 
       const gatewayUrl = useAuthStore.getState().gatewayUrl;
-      const clientRequestId = crypto.randomUUID();
+      const clientRequestId = createRandomUuid();
       syncActiveRequest({
         clientRequestId,
         lastSeq: 0,
@@ -828,6 +875,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
 
       let settled = false;
       let fallbackStarted = false;
+      let fallbackDeferredByStop = false;
       // SSE 回退的有界重连状态（见 SSE_FALLBACK_RETRY_DELAYS_MS 注释）。
       let sseAttempt = 0;
       let sseOpened = false;
@@ -858,9 +906,28 @@ export function useGatewayClient(token: string | null): GatewayClient {
         wsRef.current = null;
         sseRef.current = null;
         callbacksRef.current = null;
+        localStreamSendRef.current = null;
         syncActiveRequest(null);
         stopRequestedRef.current = false;
       };
+
+      const localSend = {
+        clientRequestId,
+        dispatched: false,
+        stopConfirmed: false,
+        isSettled: () => settled,
+        cancel: () => {
+          settled = true;
+          cleanup();
+          callbacks.onDone('cancelled');
+        },
+        resumeFallback: () => {
+          if (!fallbackDeferredByStop) return;
+          fallbackDeferredByStop = false;
+          startSse();
+        },
+      };
+      localStreamSendRef.current = localSend;
 
       const dispatchChunk = createGatewayChunkDispatcher({
         callbacks,
@@ -934,6 +1001,10 @@ export function useGatewayClient(token: string | null): GatewayClient {
           );
           return;
         }
+        if (stopRequestedRef.current) {
+          fallbackDeferredByStop = true;
+          return;
+        }
         fallbackStarted = true;
         void (async () => {
           // 回退打开前取最新 token（必要时单飞刷新），避免长回合里闭包 token
@@ -947,6 +1018,11 @@ export function useGatewayClient(token: string | null): GatewayClient {
             streamGenerationRef.current !== streamGeneration ||
             activeRequestRef.current?.clientRequestId !== clientRequestId
           ) {
+            return;
+          }
+          if (stopRequestedRef.current) {
+            fallbackStarted = false;
+            fallbackDeferredByStop = true;
             return;
           }
           console.log(
@@ -986,6 +1062,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
           const es = new EventSource(
             `${gatewayUrl}/sessions/${sessionId}/stream/sse?${params.toString()}`,
           );
+          localSend.dispatched = true;
           sseRef.current = es;
           es.onopen = () => {
             sseOpened = true;
@@ -1024,18 +1101,20 @@ export function useGatewayClient(token: string | null): GatewayClient {
             if (settled || streamGenerationRef.current !== streamGeneration) {
               return;
             }
-            if (stopRequestedRef.current) {
-              settled = true;
-              cleanup();
-              callbacks.onDone('cancelled');
-              return;
-            }
             // 统一由下面的退避重试接管重连：浏览器对已关闭的 EventSource
             // 不会再自动重连，而重连必须携带新 token 与最新 afterSeq 游标
             // （网关支持按 clientRequestId + afterSeq 重放，不会重复执行）。
             es.close();
             if (sseRef.current === es) {
               sseRef.current = null;
+            }
+            if (stopRequestedRef.current) {
+              if (localSend.stopConfirmed) localSend.cancel();
+              else {
+                fallbackStarted = false;
+                fallbackDeferredByStop = true;
+              }
+              return;
             }
             // 同一次失败的连接可能派发多次 onerror（浏览器重连尝试）；已排期
             // 重试时直接忽略，避免覆盖定时器引用造成重复重连。
@@ -1073,6 +1152,9 @@ export function useGatewayClient(token: string | null): GatewayClient {
         wsRef.current = ws;
 
         ws.onopen = () => {
+          if (settled || fallbackStarted || streamGenerationRef.current !== streamGeneration) {
+            return;
+          }
           ws.send(
             JSON.stringify({
               ...(agentId ? { agentId } : {}),
@@ -1089,6 +1171,7 @@ export function useGatewayClient(token: string | null): GatewayClient {
               yoloMode,
             }),
           );
+          localSend.dispatched = true;
           // §0.153: arm the half-open liveness probe. The server answers our
           // `{type:'ping'}` with `pong` and emits chunks during a live turn;
           // if NOTHING arrives within the tolerance window the socket is
@@ -1187,10 +1270,11 @@ export function useGatewayClient(token: string | null): GatewayClient {
           if (settled || streamGenerationRef.current !== streamGeneration) {
             return;
           }
+          stopLivenessProbe();
+          if (wsRef.current === ws) wsRef.current = null;
           if (stopRequestedRef.current) {
-            settled = true;
-            cleanup();
-            callbacks.onDone('cancelled');
+            if (localSend.stopConfirmed) localSend.cancel();
+            else startSse();
             return;
           }
           startSse();

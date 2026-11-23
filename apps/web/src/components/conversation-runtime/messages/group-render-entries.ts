@@ -23,15 +23,32 @@ import type {
   ChatRenderEntry,
   ChatRenderGroup,
 } from '../../chat/message/chat-message-group-list.js';
+import { isCompactionMessage } from './compaction.js';
 
 /** 相邻 entry 是否满足并入同一消息组的条件（role + 来源身份一致）。 */
 function canJoinEntry(
   lastEntry: ChatRenderEntry | undefined,
   entry: ChatRenderEntry | undefined,
 ): boolean {
+  if (lastEntry === undefined || entry === undefined) {
+    return false;
+  }
+  /*
+   * 压缩提示（「已自动压缩上下文」）是**会话级系统事件**，必须独占一组。
+   *
+   * 它与相邻助手消息同为 `assistant` 角色，按 role 会并入同一组，后果是双向的：
+   * - 它自己带 `is-grouped` → `.chat-message-row.is-grouped` 的负 margin 把它
+   *   压到上一条消息底部，一条系统事件看起来像上一条回复的附属；
+   * - 紧跟其后的助手消息也因「上一条是 compression」被判为续行 →
+   *   `groupedWithPrevious=true` 会隐藏它的头像与消息头，用户看到的是系统提示
+   *   「吞掉」了后面那条回复的标题。
+   *
+   * 分组是纯数据协议，这里只按消息内容判定，不涉及渲染。
+   */
+  if (isCompactionMessage(lastEntry.message) || isCompactionMessage(entry.message)) {
+    return false;
+  }
   return (
-    lastEntry !== undefined &&
-    entry !== undefined &&
     lastEntry.message.role === entry.message.role &&
     (lastEntry.groupIdentityKey ?? null) === (entry.groupIdentityKey ?? null)
   );

@@ -32,7 +32,7 @@ interface OpenerSpies {
 
 function renderOpener(
   overrides: Partial<OpenFusionBrowserPreviewOptions> = {},
-): OpenerSpies & { readonly result: { readonly current: () => void } } {
+): OpenerSpies & { readonly result: { readonly current: (url?: string) => void } } {
   // 与 ChatPage 的 openWorkspacePanelTab('preview') 同语义：打开面板并切到预览一级 tab。
   const openPreviewPanel = vi.fn(() => {
     useUIStateStore.getState().setSidePanelActiveTab('preview');
@@ -106,6 +106,25 @@ describe('resolveFusionBrowserPreviewRoute', () => {
 });
 
 describe('useOpenFusionBrowserPreview', () => {
+  it.each([true, false])(
+    '显式地址覆盖已有 URL 并激活正确浏览器 tab，dock=%s',
+    (dockOwnsWorkspacePanels) => {
+      const { result, ...spies } = renderOpener({
+        dockOwnsWorkspacePanels,
+        browserPreviewUrl: PREVIEW_URL,
+      });
+      result.current('http://localhost:5173/');
+      expect(spies.setBrowserPreviewUrl).toHaveBeenCalledWith('http://localhost:5173/');
+      if (dockOwnsWorkspacePanels) {
+        expect(spies.openPreviewPanel).toHaveBeenCalledTimes(1);
+        expect(spies.setEditorMode).not.toHaveBeenCalled();
+      } else {
+        expect(spies.setEditorPaneTab).toHaveBeenCalledWith('browser');
+        expect(spies.setEditorMode).toHaveBeenCalledWith(true);
+      }
+    },
+  );
+
   it('桌面 Fusion：落到预览一级 tab，绝不伪造默认地址', () => {
     const { result, ...spies } = renderOpener();
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionTask } from '@openAwork/web-client';
 import { formatTimeoutSourceLabel, getStatusLabel } from './sub-agent-run-list.js';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import './SubSessionFailureBanner.css';
 
 export interface SubSessionFailureBannerProps {
@@ -88,7 +89,7 @@ export function SubSessionFailureBanner({
     [],
   );
 
-  const orderedFailedTasks = [...failedTasks].sort(
+  const orderedFailedTasks = failedTasks.toSorted(
     (left, right) => right.updatedAt - left.updatedAt,
   );
   const hasSessionLevelError = sessionStateStatus === 'error';
@@ -110,16 +111,9 @@ export function SubSessionFailureBanner({
 
   const handleCopy = async (): Promise<void> => {
     const report = buildFailureReport(childSessionId, orderedFailedTasks, sessionStateStatus);
-    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
-
-    if (!clipboard || typeof clipboard.writeText !== 'function') {
-      setCopyFeedback('failed');
-      scheduleCopyReset();
-      return;
-    }
 
     try {
-      await clipboard.writeText(report);
+      await copyTextToClipboard(report);
       setCopyFeedback('copied');
     } catch {
       setCopyFeedback('failed');

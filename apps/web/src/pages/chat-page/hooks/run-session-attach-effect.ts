@@ -194,9 +194,8 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
     setActiveStreamFirstTokenLatencyMs,
     setActiveStreamRoundStartedAt,
     setActiveStreamStartedAt,
-    setBrowserPreviewUrl,
+    openBrowserPreview,
     setChildSessions,
-    setEditorMode,
     setHasPendingFollowContent,
     setLatestUpstreamSummary,
     setMessages,
@@ -1027,9 +1026,7 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
               devServerDetectedTerminalIdsRef.current.add(terminalEvent.terminalId);
             }
             if (detected.detectedUrl) {
-              setBrowserPreviewUrl(detected.detectedUrl);
-              // Open the editor pane with browser preview
-              setEditorMode(true);
+              openBrowserPreview(detected.detectedUrl, 'currentTab');
             }
           }
         }
@@ -1255,6 +1252,8 @@ export function runSessionAttachEffect(deps: SessionAttachDeps): (() => void) | 
         // question_asked already called resetStreamState(), so an unexpected onDone
         // would create a duplicate assistant message with a fresh ID. Bail out.
         if (pausedForQuestion) {
+          streamingRef.current = false;
+          setStreaming(false);
           requestSessionListRefresh();
           return;
         }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { createSessionsClient, HttpError, withTokenRefresh } from '@openAwork/web-client';
 import type { SessionSearchResult, TokenStore } from '@openAwork/web-client';
 import { useAuthStore } from '../../stores/auth/auth.js';
@@ -110,6 +111,9 @@ export function HomeSessionSearch<TSession extends HomeSessionLike>({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (isImeComposingKeyboardEvent(event)) {
+      return;
+    }
     if (results.length === 0) {
       return;
     }
@@ -146,8 +150,12 @@ export function HomeSessionSearch<TSession extends HomeSessionLike>({
           autoComplete="off"
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={handleKeyDown}
+          // ARIA combobox 模式：input 上不允许 aria-expanded（axe: aria-allowed-attr），
+          // 补 role="combobox" + aria-autocomplete 才是"输入框 + 下拉列表"的正确语义。
+          role="combobox"
           aria-expanded={normalizedQuery.length > 0 && results.length > 0}
           aria-controls="home-session-search-results"
+          aria-autocomplete="list"
         />
       </div>
 

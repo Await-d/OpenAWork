@@ -83,8 +83,11 @@ export interface ComposerQueueBackend {
    *
    * 未登录 / 网关不可用时返回 `null` 而非空数组——两者语义不同：空数组意味着「服务端
    * 确认没有待发条目」，`null` 意味着「没问成」，调用方据此决定是否保留本地兜底数据。
+   *
+   * `isCancelled` 可选：调用方传 `() => cancelled` 后，卸载之后迟到的失败不再记日志
+   * （见实现处注释）。不传时行为与旧版逐字相同。
    */
-  hydrate: () => Promise<PersistedQueuedComposerMessage[] | null>;
+  hydrate: (isCancelled?: () => boolean) => Promise<PersistedQueuedComposerMessage[] | null>;
   enqueue: (item: PersistedQueuedComposerMessage) => Promise<boolean>;
   remove: (itemId: string) => Promise<boolean>;
   /**
@@ -220,20 +223,30 @@ export function useComposerQueueBackend(
     return { activeSessionId, activeToken, artifactsClient, client };
   }, [artifactsClient, client]);
 
-  const hydrate = useCallback(async (): Promise<PersistedQueuedComposerMessage[] | null> => {
-    const target = resolveTarget();
-    if (!target) {
-      return null;
-    }
-    try {
-      const items = await target.client.list(target.activeToken, target.activeSessionId);
-      return items.map(toPersistedItem);
-    } catch (error) {
-      // 水合失败不能打断会话渲染——本地 IndexedDB 兜底仍可能救回带附件的条目。
-      logger.warn('待发队列水合失败，保留本地数据', error);
-      return null;
-    }
-  }, [resolveTarget]);
+  const hydrate = useCallback(
+    async (isCancelled?: () => boolean): Promise<PersistedQueuedComposerMessage[] | null> => {
+      const target = resolveTarget();
+      if (!target) {
+        return null;
+      }
+      try {
+        const items = await target.client.list(target.activeToken, target.activeSessionId);
+        return items.map(toPersistedItem);
+      } catch (error) {
+        // 水合失败不能打断会话渲染——本地 IndexedDB 兜底仍可能救回带附件的条目。
+        //
+        // 取消判定放在记日志之前：调用方（水合 effect）在卸载后把 `cancelled` 置真，
+        // 但请求的 reject 可能晚于卸载才到达。若无此门，日志会落到已拆解的组件与
+        // 即将关闭的测试 worker 上（teardown 竞态），而这条诊断对用户已无意义。
+        // 返回契约不变：调用方仍需 `null` 以保留本地数据。
+        if (!isCancelled?.()) {
+          logger.warn('待发队列水合失败，保留本地数据', error);
+        }
+        return null;
+      }
+    },
+    [resolveTarget],
+  );
 
   const enqueue = useCallback(
     async (item: PersistedQueuedComposerMessage): Promise<boolean> => {

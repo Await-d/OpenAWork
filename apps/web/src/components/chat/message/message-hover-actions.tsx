@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 
 /**
  * How long the copy button stays in its "✓ 已复制" confirmation state
@@ -45,10 +46,7 @@ export function MessageHoverActions({
   const handleCopy = useCallback(() => {
     const text = getCopyText();
     if (!text) return;
-    const writeText = navigator.clipboard?.writeText;
-    if (!writeText) return;
-    void writeText
-      .call(navigator.clipboard, text)
+    void copyTextToClipboard(text)
       .then(() => {
         setCopied(true);
         if (timerRef.current != null) {

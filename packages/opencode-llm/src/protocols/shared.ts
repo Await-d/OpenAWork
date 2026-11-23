@@ -15,6 +15,7 @@ import {
   type RequestEncoding,
 } from '../schema/index.js';
 import { isRecord } from '../utils/record.js';
+import { decodeUnicodeEscapes } from '../provider-error.js';
 export { isRecord };
 
 export const Json = Schema.fromJsonString(Schema.Unknown);
@@ -125,7 +126,11 @@ export const eventError = (route: string, message: string, raw?: string, cause?:
  * 生产上无法定位——真实端点的排查就卡在这里。
  */
 export const describeInvalidStreamEvent = (route: string, raw: string, limit = 300): string => {
-  const preview = raw.length > limit ? `${raw.slice(0, limit)}…` : raw;
+  // 帧里的 `\uXXXX` 必须先还原：上游（Python `json.dumps` 的 `ensure_ascii=True` 等默认
+  // 行为）会把中文错误体写成 `\u4E0A\u6E38...`，原样贴进消息后日志、审计行与排障面板里
+  // 全是转义序列，等于没有信息量。先还原再截断，避免截在转义序列中间。
+  const readable = decodeUnicodeEscapes(raw);
+  const preview = readable.length > limit ? `${readable.slice(0, limit)}…` : readable;
   return `Invalid ${route} stream event: ${preview}`;
 };
 

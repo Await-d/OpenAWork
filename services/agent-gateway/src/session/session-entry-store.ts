@@ -21,6 +21,7 @@ import {
 } from './session-event.js';
 import { aggregateSessionEntries, type SessionEntry } from './session-entry.js';
 import { logGatewayError, logGatewayWarn } from '../infra/gateway-logger.js';
+import { commitScopeEviction, noteScopeWrite, planScopeEviction } from './scope-recency-index.js';
 
 interface SessionEntryRow {
   id: string;
@@ -90,26 +91,47 @@ function resolveSessionEntryRetention(): number {
   return Math.floor(parsed);
 }
 
-function pruneSessionEntryScopes(sessionId: string, maxScopes: number): void {
-  // Keep the `maxScopes` scopes whose latest seq is highest (most recently
-  // active, which includes any in-flight run); delete every older scope's
-  // rows wholesale. Scope = distinct non-null client_request_id.
-  sqliteRun(
-    `DELETE FROM session_entry
-      WHERE session_id = ?
-        AND client_request_id IS NOT NULL
-        AND client_request_id NOT IN (
-          SELECT client_request_id FROM (
-            SELECT client_request_id, MAX(seq) AS last_seq
-              FROM session_entry
-             WHERE session_id = ? AND client_request_id IS NOT NULL
-             GROUP BY client_request_id
-             ORDER BY last_seq DESC
-             LIMIT ?
-          )
-        )`,
-    [sessionId, sessionId, maxScopes],
+/**
+ * 该会话的 scope 列表，**由新到旧**（按各 scope 的最大 seq）。
+ *
+ * 仅在会话尚未被 `scope-recency-index` 播种时调用一次；走
+ * `idx_session_entry_session_request`，索引有序分组，无临时 B-tree。
+ */
+function loadSessionEntryScopesNewestFirst(sessionId: string): string[] {
+  const rows = sqliteAll<{ client_request_id: string }>(
+    `SELECT client_request_id FROM (
+       SELECT client_request_id, MAX(seq) AS last_seq
+         FROM session_entry
+        WHERE session_id = ? AND client_request_id IS NOT NULL
+        GROUP BY client_request_id
+        ORDER BY last_seq DESC
+     )`,
+    [sessionId],
   );
+  return rows.map((row) => row.client_request_id);
+}
+
+function pruneSessionEntryScopes(sessionId: string, maxScopes: number): void {
+  // Keep the `maxScopes` most recently written scopes (order tracked in memory,
+  // seeded from the DB on first use after a restart); delete every older
+  // scope's rows wholesale. Scope = distinct non-null client_request_id.
+  //
+  // Same rewrite as session-run-events: the old `NOT IN (... GROUP BY ...)`
+  // shape re-scanned the whole session on every prune (this store checks every
+  // 200 inserts, so it fired constantly on long sessions).
+  const evicted = planScopeEviction(sessionId, maxScopes, () =>
+    loadSessionEntryScopesNewestFirst(sessionId),
+  );
+  if (evicted.length === 0) return;
+  sqliteTransaction(() => {
+    for (const scopeId of evicted) {
+      sqliteRun(`DELETE FROM session_entry WHERE session_id = ? AND client_request_id = ?`, [
+        sessionId,
+        scopeId,
+      ]);
+    }
+  });
+  commitScopeEviction(sessionId, evicted);
 }
 
 function maybePruneSessionEntries(sessionId: string): void {
@@ -378,6 +400,9 @@ function insertSessionEventRow(
     throw err;
   }
 
+  // Feed the in-memory scope recency index (see scope-recency-index.ts).
+  noteScopeWrite(input.sessionId, input.clientRequestId);
+
   return event;
 }
 
@@ -450,6 +475,9 @@ export function deleteSessionEventsByRequestScope(input: {
     'DELETE FROM session_entry WHERE session_id = ? AND user_id = ? AND client_request_id = ?',
     [input.sessionId, input.userId, input.clientRequestId],
   );
+  // No rows left for this scope: drop it from the recency index so it stops
+  // occupying one of the retained scope slots.
+  commitScopeEviction(input.sessionId, [input.clientRequestId]);
 }
 
 // ─── RunEvent → SessionEvent translator ───

@@ -37,6 +37,18 @@ function summarizeRawOutput(raw: string, max = 300): string {
   return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
 }
 
+/**
+ * 目录顶层是否存在值得调查的条目（忽略隐藏项与依赖 / 构建产物目录）。
+ *
+ * 与 `collectPlanningProjectContext` 的忽略名单保持一致：它不列出的东西，
+ * 这里也不该当成「有项目可调查」。
+ */
+async function hasInvestigableEntry(root: string): Promise<boolean> {
+  const ignored = new Set(['node_modules', 'dist', 'build']);
+  const entries = await readdir(root, { withFileTypes: true });
+  return entries.some((entry) => !entry.name.startsWith('.') && !ignored.has(entry.name));
+}
+
 /** Model-directed investigation with a strict read-only capability boundary. */
 export async function investigatePlanningProject(input: {
   directory: string;
@@ -46,6 +58,16 @@ export async function investigatePlanningProject(input: {
   callLlm: (system: string, prompt: string) => Promise<string>;
 }): Promise<string> {
   const root = await realpath(input.directory);
+  // 空目录不要进入模型驱动的调查循环。
+  //
+  // 循环里模型的合法动作只有 read / list：目录为空时它只能反复请求 `.`，累计重复
+  // 超过 REPEATED_ACTION_TOLERANCE 后会被判「项目调查无进展」——那是要求人工介入的
+  // 终局失败，会把整条 handoff 拖死（实测：工作区为空/无文件时，任何需求都会在 PM1
+  // 阶段失败，只能刷新后重发）。这里提前带着「没有项目文件」的事实返回，让规划层继续，
+  // 而不是空转 6 轮 LLM 调用再失败。
+  if (!(await hasInvestigableEntry(root))) {
+    return `${input.initialContext}\n（工作目录 ${root} 下没有可调查的项目文件，本次规划不含代码调查结论。）`;
+  }
   const observations: string[] = [];
   const visited = new Set<string>();
   let repeatedActions = 0;

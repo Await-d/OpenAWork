@@ -21,7 +21,11 @@ export interface FreshBootstrapStreamInput {
    * （典型场景：首页 → 新建会话 → 发出第一条消息）。
    */
   readonly loadedSessionId: string | null;
+  /** 当前本地流实际归属的会话 id。 */
+  readonly activeSessionId: string | null;
   readonly isStreaming: boolean;
+  /** 会话切换 effect 当前准备加载的会话 id。 */
+  readonly requestedSessionId: string | null;
 }
 
 /**
@@ -34,9 +38,15 @@ export interface FreshBootstrapStreamInput {
  * 就会把正在进行的首轮对话打断——用户看到的就是「首次发送拿不到对话，只能刷新
  * 或切会话」。因此这段窗口必须与 bootstrap 分支同等对待、整段跳过。
  *
- * 判定刻意要求 `loadedSessionId === null`：正常在 A↔B 间切换时它非空，
- * 此时绝不能跳过（否则会串会话）。
+ * 判定除 `loadedSessionId === null` 外，还要求当前活跃流确实属于请求目标。否则从
+ * 「首页 → 新会话 A 首轮流式」切到「远端正在运行的会话 B」时，A 的流会被误当成 B
+ * 的 bootstrap，跳过复位并把 A 的临时状态带到 B。
  */
 export function shouldPreserveFreshBootstrapStream(input: FreshBootstrapStreamInput): boolean {
-  return input.loadedSessionId === null && input.isStreaming;
+  return (
+    input.loadedSessionId === null &&
+    input.isStreaming &&
+    input.requestedSessionId !== null &&
+    input.requestedSessionId === input.activeSessionId
+  );
 }

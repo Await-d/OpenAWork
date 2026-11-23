@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { createTeamClient, type TeamMemberSlotInput } from '@openAwork/web-client';
+import {
+  createRandomUuid,
+  createTeamClient,
+  type TeamMemberSlotInput,
+} from '@openAwork/web-client';
 import {
   DEFAULT_FIXED_TEAM_MEMBER_SLOTS,
   TEAM_RUNTIME_LAYER_LABELS,
@@ -138,11 +142,7 @@ function serializeRoster(roster: TeamMemberSlotInput[]): string {
 }
 
 function randomSuffix(): string {
-  const cryptoId = globalThis.crypto?.randomUUID?.();
-  return (cryptoId ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`).slice(
-    0,
-    8,
-  );
+  return createRandomUuid().slice(0, 8);
 }
 
 function specialtyOptionsForLayer(layer: TeamRuntimeLayer): TeamMemberSpecialty[] {

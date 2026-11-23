@@ -16,6 +16,7 @@ import {
   writeDesktopGatewayMode,
 } from '../../../utils/gateway/desktop-gateway.js';
 import type { SettingsVersionInfo } from '../state/settings-types.js';
+import { copyTextToClipboard } from '../../../components/layout/file-tree/file-tree-actions.js';
 import { tauriInvoke } from './settings-page-helpers.js';
 
 interface UseSettingsEnvironmentInput {
@@ -372,9 +373,14 @@ export function useSettingsEnvironment(
   }, [input, portInput, refreshLocalDesktopAuth]);
 
   const copyAddress = React.useCallback(() => {
-    void navigator.clipboard.writeText(`http://localhost:${input.webPort}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void copyTextToClipboard(`http://localhost:${input.webPort}`)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch((copyError: unknown) => {
+        console.warn('复制本地地址失败', copyError);
+      });
   }, [input.webPort]);
 
   return {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import Fastify from 'fastify';
 import authPlugin from '../infra/auth.js';
 import { closeDb, connectDb, migrate, sqliteGet, sqliteRun } from '../infra/db.js';
@@ -23,6 +24,14 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
+async function waitForDeletionCleanup(): Promise<void> {
+  const deadline = performance.now() + 5_000;
+  while (sqliteGet('SELECT id FROM session_deletion_cleanup LIMIT 1')) {
+    assert(performance.now() < deadline, 'background session cleanup did not finish');
+    await sleep(20);
+  }
+}
+
 async function main(): Promise<void> {
   const workspaceRoot = path.join('/tmp', `openawork-delete-${randomUUID()}`);
   mkdirSync(workspaceRoot, { recursive: true });
@@ -30,6 +39,7 @@ async function main(): Promise<void> {
   await withTempEnv(
     {
       DATABASE_URL: ':memory:',
+      OPENAWORK_DATA_DIR: workspaceRoot,
       WORKSPACE_ROOT: workspaceRoot,
     },
     async () => {
@@ -279,6 +289,7 @@ async function main(): Promise<void> {
             ['req-parent:tool:write'],
           )?.session_id;
           assert(auditSessionId === null, 'audit_logs should keep rows but null out session_id');
+          await waitForDeletionCleanup();
 
           assert(
             typeof sharedBackupParent.storagePath === 'string' &&
@@ -295,6 +306,7 @@ async function main(): Promise<void> {
             siblingDeleteRes.statusCode === 200,
             'sibling cleanup session should delete successfully',
           );
+          await waitForDeletionCleanup();
           assert(
             typeof sharedBackupParent.storagePath === 'string' &&
               !existsSync(sharedBackupParent.storagePath),

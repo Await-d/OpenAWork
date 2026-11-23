@@ -107,8 +107,8 @@ export function useTeamRunState(input?: {
 
     // 最近活跃 handoff 的目标层（用于「正在 X 层工作」提示）。
     const activeLayer =
-      activeEntries.slice().sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
-        ?.toRoleLayer ?? null;
+      activeEntries.toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]?.toRoleLayer ??
+      null;
     const activeScopeStates = activeEntries.map((entry) => {
       const scopeRootSessionId =
         entry.sessionId ?? entry.toSessionId ?? entry.fromSessionId ?? null;

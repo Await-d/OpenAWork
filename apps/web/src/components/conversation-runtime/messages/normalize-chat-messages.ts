@@ -1,4 +1,5 @@
 import type { AssistantTracePayload, AssistantTraceToolCall, Message } from '@openAwork/shared';
+import { createRandomUuid } from '@openAwork/web-client';
 import type { ChatMessage, ChatToolPart } from './message-model.js';
 import {
   estimateTokenCount,
@@ -70,7 +71,7 @@ export function normalizeChatMessages(rawMessages: unknown): ChatMessage[] {
     // notice channel (`SubagentNoticeRow`) instead of the transcript.
     // Keep this whitelist explicit — do not widen it to accept unknown roles.
     if (role !== 'user' && role !== 'assistant' && role !== 'tool') continue;
-    const id = typeof record['id'] === 'string' ? record['id'] : crypto.randomUUID();
+    const id = typeof record['id'] === 'string' ? record['id'] : createRandomUuid();
     const createdAt =
       typeof record['createdAt'] === 'number' || typeof record['createdAt'] === 'string'
         ? record['createdAt']

@@ -1,5 +1,6 @@
 import SshHostKeyRecovery, { parseHostKeyMismatch } from './SshHostKeyRecovery.js';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { FolderIcon } from '../../file-editor/preview/FileIcon.js';
 import { getParentPath, joinDirectoryPath } from '../../../utils/workspace-path.js';
 import type { FileTreeNode } from './WorkspacePickerModal.js';
@@ -777,6 +778,7 @@ export default function SshWorkspacePickerModal({
                 setPathInput(event.currentTarget.value);
               }}
               onKeyDown={(event) => {
+                if (isImeComposingKeyboardEvent(event)) return;
                 if (event.key === 'Enter') {
                   event.preventDefault();
                   void handleOpenPathInput();
@@ -930,6 +932,7 @@ export default function SshWorkspacePickerModal({
                   setNewDirectoryName(event.currentTarget.value);
                 }}
                 onKeyDown={(event) => {
+                  if (isImeComposingKeyboardEvent(event)) return;
                   if (event.key === 'Enter') {
                     event.preventDefault();
                     void handleCreateDirectory();

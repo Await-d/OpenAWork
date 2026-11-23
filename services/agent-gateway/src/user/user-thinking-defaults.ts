@@ -1,5 +1,6 @@
 import { sqliteGet } from '../infra/db.js';
 import { resolveStoredDefaultThinkingMode } from '../provider/provider-config.js';
+import type { DefaultThinkingSettings } from '../provider/provider-config.js';
 import type { UserDefaultThinkingSelection } from '../session/session-route-selection.js';
 
 interface UserSettingRow {
@@ -7,6 +8,21 @@ interface UserSettingRow {
 }
 
 export const USER_DEFAULT_THINKING_KEY = 'default_thinking';
+
+export function readUserChatThinkingSettings(userId: string): DefaultThinkingSettings['chat'] {
+  const row = sqliteGet<UserSettingRow>(
+    `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
+    [userId, USER_DEFAULT_THINKING_KEY],
+  );
+  let raw: unknown;
+  try {
+    raw = row ? JSON.parse(row.value) : undefined;
+  } catch {
+    // A malformed stored value is treated the same as in the settings page.
+    raw = undefined;
+  }
+  return resolveStoredDefaultThinkingMode(raw, 'chat');
+}
 
 /**
  * 读取用户级「默认思考」设置（设置页 `default_thinking.chat` 档），
@@ -29,29 +45,13 @@ export const USER_DEFAULT_THINKING_KEY = 'default_thinking';
  *   思考」，否则一次 SQLite 异常会让所有通道轮静默失去思考能力。
  */
 export function resolveUserDefaultThinkingForChat(userId: string): UserDefaultThinkingSelection {
-  let row: UserSettingRow | undefined;
   try {
-    row = sqliteGet<UserSettingRow>(
-      `SELECT value FROM user_settings WHERE user_id = ? AND key = ?`,
-      [userId, USER_DEFAULT_THINKING_KEY],
-    );
+    const chat = readUserChatThinkingSettings(userId);
+    return chat.enabled
+      ? { thinkingEnabled: true, reasoningEffort: chat.effort }
+      : { thinkingEnabled: false };
   } catch {
     // 读取失败 → 不兜底（保持改造前行为，不阻断对话）。
     return {};
   }
-
-  let raw: unknown;
-  try {
-    raw = row ? (JSON.parse(row.value) as unknown) : undefined;
-  } catch {
-    // 存储值损坏 → 按默认设置（关闭）处理，与设置页展示保持一致。
-    raw = undefined;
-  }
-
-  const chat = resolveStoredDefaultThinkingMode(raw, 'chat');
-  if (chat.enabled === true) {
-    return { thinkingEnabled: true, reasoningEffort: chat.effort };
-  }
-
-  return { thinkingEnabled: false };
 }

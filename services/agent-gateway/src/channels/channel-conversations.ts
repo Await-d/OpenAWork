@@ -1,8 +1,8 @@
 import { sqliteAll } from '../infra/db.js';
 import { listSessionMessagesV2 } from '../message/message-v2-adapter.js';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
-import { extractMessageText } from '../session/session-message-store.js';
 import type { ChannelInstance } from './types.js';
+import { extractChannelReplyText } from './channel-reply-text.js';
 
 interface ChannelConversationSessionRow {
   id: string;
@@ -77,7 +77,7 @@ function buildLastMessagePreview(input: { sessionId: string; userId: string }): 
     userId: input.userId,
   });
   const latestMessage = messages[messages.length - 1];
-  const preview = extractMessageText(latestMessage);
+  const preview = extractChannelReplyText(latestMessage);
 
   return {
     messageCount: messages.length,

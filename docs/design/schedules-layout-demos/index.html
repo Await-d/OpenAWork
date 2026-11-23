@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>定时任务页布局候选 · 4 个方案对照</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <style>
+      .hero {
+        padding: 20px 22px;
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+
+      .hero h1 {
+        margin: 0 0 6px;
+        font-size: 21px;
+        letter-spacing: -0.02em;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 720px;
+        font-size: 12.5px;
+        line-height: 1.7;
+        color: var(--fg-muted);
+      }
+
+      .eyebrow {
+        font-size: 10.5px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 8px;
+      }
+
+      .hero-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 220px;
+        border-left: 1px solid var(--border-default);
+        padding-left: 18px;
+      }
+
+      .hero-meta div {
+        font-size: 11.5px;
+        color: var(--fg-muted);
+      }
+
+      .hero-meta strong {
+        color: var(--fg-strong);
+      }
+
+      .plan-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+        gap: 16px;
+      }
+
+      @media (max-width: 1120px) {
+        .plan-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      .plan {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .plan-head {
+        padding: 14px 16px 12px;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        border-bottom: 1px solid var(--border-default);
+      }
+
+      .plan-badge {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+        font-size: 13px;
+        background: var(--accent-muted);
+        border: 1px solid var(--accent-border);
+        color: var(--accent);
+        flex-shrink: 0;
+      }
+
+      .plan-title {
+        font-size: 14px;
+        font-weight: 650;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .plan-flag {
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--success);
+        background: var(--success-muted);
+        border: 1px solid var(--success-border);
+        border-radius: 999px;
+        padding: 1px 8px;
+      }
+
+      .plan-tagline {
+        margin-top: 3px;
+        font-size: 11.5px;
+        color: var(--fg-muted);
+      }
+
+      .frame-wrap {
+        position: relative;
+        height: 392px;
+        overflow: hidden;
+        border-bottom: 1px solid var(--border-default);
+        background: var(--bg-base);
+      }
+
+      .frame-wrap iframe {
+        border: 0;
+        width: 1400px;
+        height: 980px;
+        transform: scale(0.44);
+        transform-origin: top left;
+        pointer-events: auto;
+      }
+
+      .frame-hint {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        font-size: 10px;
+        color: var(--fg-subtle);
+        background: color-mix(in srgb, var(--bg-base) 80%, transparent);
+        border: 1px solid var(--border-default);
+        border-radius: 999px;
+        padding: 2px 8px;
+      }
+
+      .plan-body {
+        padding: 14px 16px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .spec {
+        display: grid;
+        grid-template-columns: 62px minmax(0, 1fr);
+        gap: 6px 10px;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .spec dt {
+        color: var(--fg-subtle);
+        font-size: 11px;
+        padding-top: 1px;
+      }
+
+      .spec dd {
+        margin: 0;
+        color: var(--fg-default);
+      }
+
+      .plan-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        border-top: 1px solid var(--border-default);
+        padding-top: 12px;
+      }
+
+      .compare {
+        padding: 16px 18px;
+      }
+
+      table.cmp {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      table.cmp th,
+      table.cmp td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border-default);
+        vertical-align: top;
+      }
+
+      table.cmp th {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--fg-subtle);
+      }
+
+      table.cmp tbody tr:last-child td {
+        border-bottom: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-root">
+      <header class="page-header">
+        <span class="page-title">定时任务页 · 布局候选</span>
+        <span class="page-subtitle">4 个可直接打开的 HTML 原型</span>
+      </header>
+
+      <main class="page-content">
+        <div class="page-inner">
+          <section class="card hero">
+            <div style="flex: 1; min-width: 320px">
+              <div class="eyebrow">Schedules Page Redesign · Layout Options</div>
+              <h1>把「一列堆叠的长卡片」拆成 4 种可选布局</h1>
+              <p>
+                现状：错误提示 / 新建表单 / 失败告警 / 定时规则 /
+                执行历史五块竖着堆在一个宽度里；每个任务
+                挤在一行里放调度、时间、投递、四个按钮，任务一多就要一直往下滚。下面五个方案用的是同一份演示数据（7
+                个任务、含成功 / 失败 / 跳过 / 运行中四种状态），差别只在信息怎么排。
+              </p>
+              <p style="margin-top: 8px">
+                如果 C（卡片概览）和 D（时间轴）都想要：看 <strong>方案 E</strong> ——
+                同一份数据、同一个页面，
+                顶部概览（含今天的执行分布）共用，下面用分段控件在「卡片视图 /
+                时间轴视图」之间切换，选择记忆在 sessionStorage 里。
+              </p>
+            </div>
+            <div class="hero-meta">
+              <div><strong>数据来源</strong>：网关 CronJobRecord / CronExecutionRecord 字段</div>
+              <div><strong>设计 token</strong>：对齐 apps/web 的 aurora 主题（暗色）</div>
+              <div><strong>时间基准</strong>：2026-11-02 14:20（固定，便于对照）</div>
+            </div>
+          </section>
+
+          <div class="plan-grid" id="plan-grid"></div>
+
+          <section class="card compare">
+            <div class="section-label">怎么选</div>
+            <table class="cmp">
+              <thead>
+                <tr>
+                  <th style="width: 130px">方案</th>
+                  <th>最适合的情况</th>
+                  <th style="width: 240px">需要接受</th>
+                </tr>
+              </thead>
+              <tbody id="cmp-body"></tbody>
+            </table>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script src="./demo-core.js"></script>
+    <script>
+      (function () {
+        var sd = window.SD;
+
+        var PLANS = [
+          {
+            id: 'A',
+            file: './option-a-master-detail.html',
+            title: '双栏详情（Master-Detail）',
+            tagline: '左边挑任务，右边读全貌；历史不再需要额外点开',
+            spec: [
+              ['定位', '列表 + 详情双栏，选中态驱动右侧内容'],
+              ['优点', '执行历史、提示词、投递方式全部平铺可见；失败任务在顶部与详情各提示一次'],
+              ['取舍', '右侧内容固定占宽，任务很多时左侧列表需要滚动；窄屏会退化成上下堆叠'],
+              ['适合', '任务数量中等（10–50），用户主要是「检视某个任务最近跑得怎么样」'],
+            ],
+            best: '任务要逐个细看，历史与提示词常驻可见',
+            accept: '窄屏下退化为单列；左列表要自己滚',
+          },
+          {
+            id: 'B',
+            file: './option-b-compact-table.html',
+            title: '工具条 + 紧凑表格 + 历史抽屉',
+            tagline: '一屏看完全部任务，详情按需从右侧滑出',
+            spec: [
+              ['定位', '表格式清单 + 搜索 / 筛选 / 排序 + 批量操作 + 侧滑抽屉'],
+              ['优点', '信息密度最高，排序与批量启停天然成立；行内只留最关键状态'],
+              ['取舍', '提示词要进抽屉才看得到；表格在窄屏需要横向滚动'],
+              ['适合', '任务数量大（50+），经常做批量启停、按状态巡检'],
+            ],
+            best: '任务多、要批量管理和按状态巡检',
+            accept: '窄屏要横向滚动；提示词需点开',
+          },
+          {
+            id: 'C',
+            file: './option-c-card-grid.html',
+            title: '概览 + 任务卡片网格',
+            tagline: '先给结论（几个启用、今天还跑几次、失败几条），再看卡片',
+            spec: [
+              ['定位', 'KPI 概览 + 失败告警条 + 自适应卡片网格'],
+              ['优点', '「下次执行」在卡片上放大显示，状态与倒计时一眼可扫；运行中的卡片有动效'],
+              ['取舍', '卡片占位大，同屏可见任务数少于表格；历史要展开卡片内区块'],
+              ['适合', '任务数量少（< 20），以「今天还会跑什么」为主要诉求'],
+            ],
+            best: '关心今天要跑什么、有没有失败',
+            accept: '同屏任务数少；卡片较高',
+          },
+          {
+            id: 'D',
+            file: './option-d-timeline.html',
+            title: '按执行时间分组的时间轴',
+            tagline: '时间轴优先：今天的执行分布 + 今天 / 明天 / 本周分组',
+            spec: [
+              ['定位', '24 小时刻度条 + 按下次执行时间分组的时间轴'],
+              ['优点', '能看出「任务扎堆在几点」，一眼分清今天 / 明天 / 未排期'],
+              [
+                '取舍',
+                '同一任务只出现一次，看不出它在一天内会跑几轮（间隔型任务的中间轮次看不到）',
+              ],
+              ['适合', '关注执行节奏与时间冲突，例如避免同一时刻撞并发上限'],
+            ],
+            best: '关注执行节奏、避免时间冲突',
+            accept: '间隔任务的中间轮次不可见',
+          },
+          {
+            id: 'E',
+            recommended: true,
+            file: './option-e-hybrid.html',
+            title: '概览 + 卡片 / 时间轴双视图（C + D 融合）',
+            tagline: 'C 和 D 都要：顶部概览共用，下面一键切换卡片视图与时间轴视图',
+            spec: [
+              ['定位', 'KPI + 今日执行分布（共用概览）→ 卡片视图 / 时间轴视图分段切换'],
+              [
+                '优点',
+                '两个方案的内容都在，且筛选 / 搜索 / 展开历史被两视图共用；切视图只换排布，不换数据与状态',
+              ],
+              ['取舍', '一页里有两套渲染分支，实现量最大；概览区固定占掉约 110px 垂直空间'],
+              ['适合', '既想看「今天还会跑什么」的结论，又要按时间核对执行节奏'],
+            ],
+            best: 'C 和 D 的优点都要，用户可自行切换视角',
+            accept: '实现量最大；概览区固定占高',
+          },
+        ];
+
+        var ordered = PLANS.slice().sort(function (a, b) {
+          return (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0);
+        });
+
+        var grid = document.getElementById('plan-grid');
+        grid.innerHTML = ordered
+          .map(function (plan) {
+            return (
+              '<article class="card plan">' +
+              '<div class="plan-head">' +
+              '<span class="plan-badge">' +
+              plan.id +
+              '</span>' +
+              '<div style="min-width:0"><div class="plan-title">' +
+              plan.title +
+              (plan.recommended ? '<span class="plan-flag">推荐</span>' : '') +
+              '</div><div class="plan-tagline">' +
+              plan.tagline +
+              '</div></div>' +
+              '</div>' +
+              '<div class="frame-wrap"><iframe src="' +
+              plan.file +
+              '" loading="lazy" title="' +
+              plan.title +
+              ' 预览"></iframe><span class="frame-hint">预览已缩放到 44%</span></div>' +
+              '<div class="plan-body"><dl class="spec">' +
+              plan.spec
+                .map(function (row) {
+                  return '<dt>' + row[0] + '</dt><dd>' + row[1] + '</dd>';
+                })
+                .join('') +
+              '</dl>' +
+              '<div class="plan-actions">' +
+              '<a class="btn btn-accent" href="' +
+              plan.file +
+              '">打开方案 ' +
+              plan.id +
+              '</a>' +
+              '<a class="btn" href="' +
+              plan.file +
+              '" target="_blank" rel="noopener">新标签打开</a>' +
+              '</div></div>' +
+              '</article>'
+            );
+          })
+          .join('');
+
+        document.getElementById('cmp-body').innerHTML = PLANS.map(function (plan) {
+          return (
+            '<tr><td><strong>' +
+            plan.id +
+            ' · ' +
+            plan.title +
+            '</strong></td><td>' +
+            plan.best +
+            '</td><td class="muted">' +
+            plan.accept +
+            '</td></tr>'
+          );
+        }).join('');
+
+        sd.mountShell(null);
+      })();
+    </script>
+  </body>
+</html>

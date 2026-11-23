@@ -2,7 +2,7 @@
  * 周期整理任务持久化与租约（261101-记忆确认写入与周期整理）。
  *
  * 设计要点：
- * - 任务以 `memory_jobs` 表为唯一真相源，同 `(kind, scope_key, period_key)` 只建一行，
+ * - 任务以 `memory_jobs` 表为唯一真相源，同 `(user_id, kind, scope_key, period_key)` 只建一行，
  *   依赖唯一索引 + `INSERT OR IGNORE` 实现「同周期重复入队是 no-op」。
  * - 领取走**事务内条件更新**：`UPDATE ... WHERE id = ? AND status IN ('queued','retry_wait')`
  *   的 `changes` 才是「是否真正拿到租约」的唯一依据，绝不允许返回未持有租约的 lease。
@@ -159,7 +159,7 @@ function parseMemoryScopeKey(scopeKey: string): MemoryScope | null {
   return { type: type as MemoryScope['type'], id };
 }
 
-/** 入队整理任务；同 `(kind, scope_key, period_key)` 重复调用是 no-op。 */
+/** 入队整理任务；同 `(user_id, kind, scope_key, period_key)` 重复调用是 no-op。 */
 export function enqueueMemoryJob(input: EnqueueMemoryJobInput): void {
   const nowIso = isoOrNow(input.now);
   const scopeKey = memoryScopeKey(input.scope);

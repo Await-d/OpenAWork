@@ -31,7 +31,23 @@ const MAX_CONCURRENT_CONNECTIONS = 3;
 const RECONNECT_BASE_DELAY_MS = 2_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const ON_DONE_RECONNECT_DELAY_MS = 500;
-const NO_STREAM_RECONNECT_DELAY_MS = 500;
+
+/**
+ * 结算「连接成功但一条事件都没收到」场景下的下一次重连延迟。
+ *
+ * 首次仍是 500ms —— 后台流是 fire-and-forget 启动的，提交后往往要等一小会儿
+ * 才注册到事件总线，错过这段窗口就会看不到实时输出。但如果始终没有活跃流，
+ * 固定 500ms 会退化成每秒两次的请求风暴，故按连续失败次数指数退避（上限 30s）；
+ * 收到任意事件即清零（见 onEvent）。
+ */
+function resolveEmptyStreamReconnectDelayMs(
+  attemptsBySession: Map<string, number>,
+  sessionId: string,
+): number {
+  const attempts = (attemptsBySession.get(sessionId) ?? 0) + 1;
+  attemptsBySession.set(sessionId, attempts);
+  return Math.min(ON_DONE_RECONNECT_DELAY_MS * 2 ** (attempts - 1), RECONNECT_MAX_DELAY_MS);
+}
 
 interface UseMultiSessionAttachOptions {
   token: string | null;
@@ -51,6 +67,8 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
   const { token, gatewayUrl, enabled } = options;
   const connectionsRef = useRef<Map<string, ConnectionEntry>>(new Map());
   const runningSessionsRef = useRef<Set<string>>(new Set());
+  /** 每个 session 连续「连上但没有任何事件」的次数，用于重连退避。 */
+  const emptyAttemptsRef = useRef<Map<string, number>>(new Map());
 
   /**
    * `connectSession` 的自我调度桥（trampoline）。
@@ -96,35 +114,23 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
           // No active stream — clean up this connection.
           // Session may still be running but the backend has no active stream
           // to subscribe to. We set state to 'idle' so the consumer falls back
-          // to polling, and schedule a reconnect in case a stream starts soon.
+          // to polling.
+          //
+          // **重连统一交给紧随其后的 `onDone`**：服务端在这种情况下是先发本事件、
+          // 再关闭连接，客户端必然还会收到一次 `onDone`。早前两边各调度一次重连，
+          // onDone 会把 onNoActiveStream 刚建的 phantom entry 当成真实连接删掉并
+          // 清掉重连定时器，于是 running 会话的多路 SSE 一旦空转就再也无法自愈
+          // （用户只能刷新页面）。
           const entry = connectionsRef.current.get(sessionId);
           clearEntryTimer(entry);
           if (entry) {
             connectionsRef.current.delete(sessionId);
           }
           storeGetState().setSessionState(sessionId, 'idle');
-
-          // Schedule a lightweight reconnect — the session might start a new
-          // stream shortly (e.g. handoff just dispatched, or runSessionInBackground
-          // hasn't registered yet). Use a short delay (500ms) to match the
-          // auto-attach timing in useTeamConversationState.
-          if (runningSessionsRef.current.has(sessionId)) {
-            const reconnectTimer = setTimeout(() => {
-              const pending = connectionsRef.current.get(sessionId);
-              if (pending?.reconnectTimer !== reconnectTimer) return;
-              connectionsRef.current.delete(sessionId);
-              if (runningSessionsRef.current.has(sessionId)) connectSessionRef.current(sessionId);
-            }, NO_STREAM_RECONNECT_DELAY_MS);
-            // Track timer in a phantom entry so cleanup can clear it.
-            connectionsRef.current.set(sessionId, {
-              sessionId,
-              close: () => {},
-              reconnectTimer,
-              reconnectAttempt: 0,
-            });
-          }
         },
         onEvent: (event: RunEvent, meta) => {
+          // 收到真实事件 ⇒ 「连上但空转」的计数清零，下一轮重连回到 500ms 快路径。
+          emptyAttemptsRef.current.delete(sessionId);
           // lastRowId / lastEventAt 已并入 dispatchEvent 的单次 set，不再单独写。
           storeGetState().dispatchEvent(sessionId, event, meta);
         },
@@ -167,14 +173,18 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
 
           // If session is still running, try to reconnect after a short delay.
           // The current stream's round ended, but the session may start a new
-          // one (e.g. next handoff in the chain).
+          // one (e.g. next handoff in the chain). 连续空转时按指数退避，
+          // 避免「连接 → 立即 no-active-stream → 再连接」的固定 500ms 风暴。
           if (runningSessionsRef.current.has(sessionId)) {
-            const reconnectTimer = setTimeout(() => {
-              const pending = connectionsRef.current.get(sessionId);
-              if (pending?.reconnectTimer !== reconnectTimer) return;
-              connectionsRef.current.delete(sessionId);
-              if (runningSessionsRef.current.has(sessionId)) connectSessionRef.current(sessionId);
-            }, ON_DONE_RECONNECT_DELAY_MS);
+            const reconnectTimer = setTimeout(
+              () => {
+                const pending = connectionsRef.current.get(sessionId);
+                if (pending?.reconnectTimer !== reconnectTimer) return;
+                connectionsRef.current.delete(sessionId);
+                if (runningSessionsRef.current.has(sessionId)) connectSessionRef.current(sessionId);
+              },
+              resolveEmptyStreamReconnectDelayMs(emptyAttemptsRef.current, sessionId),
+            );
             // Track timer in a phantom entry so cleanup can clear it.
             connectionsRef.current.set(sessionId, {
               sessionId,
@@ -275,6 +285,7 @@ export function useMultiSessionAttach(options: UseMultiSessionAttachOptions): vo
     return () => {
       unsub();
       runningSessionsRef.current.clear();
+      emptyAttemptsRef.current.clear();
       for (const [sessionId, entry] of connectionsRef.current) {
         clearEntryTimer(entry);
         entry.close();

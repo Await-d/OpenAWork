@@ -18,7 +18,7 @@
  * 缺字段会让整条 `.then` 抛错并被静默 `.catch`，表现为「页面永远空白」。
  */
 
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { RouterProvider, createMemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../../stores/auth/auth.js';
@@ -51,6 +51,35 @@ const SESSION_A_MESSAGE = '会话A独有内容-ALPHA-7f3d';
 const SESSION_B_MESSAGE = '会话B独有内容-BRAVO-9c1e';
 const NOTICE_A_DESCRIPTION = '会话A子代理任务-ALPHA';
 const NOTICE_B_DESCRIPTION = '会话B子代理任务-BRAVO';
+const THINKING_DEFAULTS = {
+  activeSelection: { chat: { providerId: 'test-openai', modelId: 'gpt-5' } },
+  defaultThinking: { chat: { enabled: true, effort: 'high' } },
+  providers: [
+    {
+      id: 'test-openai',
+      name: 'OpenAI',
+      type: 'openai',
+      enabled: true,
+      defaultModels: [{ id: 'gpt-5', label: 'GPT-5', enabled: true, supportsThinking: true }],
+    },
+  ],
+};
+
+/**
+ * `/settings/message-limits` 的合法快照。
+ *
+ * 发送前会读它做字符上限校验，而 `createMessageLimitsClient().read()` 对响应做了
+ * 严格结构校验（`parseSnapshot`）；缺字段或 `{}` 会被当作 502 直接抛错，发送在校验
+ * 前就 return false——表现是「点了发送没反应，WS 帧永远不出现」。
+ * 因此凡是会走到发送路径的用例都必须提供这份响应。
+ */
+const MESSAGE_LIMITS_SNAPSHOT = {
+  maxChars: 32768,
+  minChars: 1024,
+  hardMaxChars: 200000,
+  defaultMaxChars: 32768,
+  canEdit: false,
+} as const;
 
 interface RecoveryOptions {
   readonly messages: Array<{ content: string; id: string; role: 'assistant' | 'user' }>;
@@ -145,7 +174,12 @@ class InertWebSocket {
     return undefined;
   }
 
-  send(): void {
+  /*
+   * 入参必须是**可选**的：子类桩要按真实 WebSocket 的 `send(data)` 接收帧内容，
+   * 若这里写成无参 `send()`，子类的 `send(frame: string)` 就成了「参数比基类多」，
+   * TS 会按方法重写的参数兼容性报 TS2416。
+   */
+  send(_frame?: string): void {
     return undefined;
   }
 }
@@ -342,8 +376,213 @@ afterEach(() => {
 });
 
 describe('ChatPage — 会话切换', () => {
+  it('连续从旧会话进入新对话时，输入框使用已保存的默认思考等级', async () => {
+    const defaultFetch = createFetchStub();
+    vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
+      if (readRequestUrl(input).includes('/settings/providers?')) {
+        return Promise.resolve(jsonResponse(THINKING_DEFAULTS));
+      }
+      return defaultFetch(input);
+    });
+    const router = renderChatPageAt('/chat/session-a');
+
+    for (const [path, message] of [
+      ['/chat/session-a', SESSION_A_MESSAGE],
+      ['/chat/session-b', SESSION_B_MESSAGE],
+    ] as const) {
+      if (router.state.location.pathname !== path) await switchToSession(router, path);
+      await waitFor(() => expect(readRenderedMessageGroupTexts().join('\n')).toContain(message));
+      await switchToSession(router, '/chat');
+      await waitFor(() => expect(screen.queryByText('思考 · 高')).not.toBeNull(), {
+        onTimeout: (error) => error,
+      });
+    }
+  });
+
+  it('在同一会话切换模型时，按目标模型调整档位且不丢失原来的思考选择', async () => {
+    const defaultFetch = createFetchStub();
+    const settings = {
+      ...THINKING_DEFAULTS,
+      providers: [
+        {
+          ...THINKING_DEFAULTS.providers[0]!,
+          defaultModels: [
+            {
+              id: 'gpt-5',
+              label: 'GPT-5',
+              enabled: true,
+              supportsThinking: true,
+              reasoningOptions: [{ type: 'effort', values: ['high', 'xhigh'] }],
+            },
+            {
+              id: 'gpt-5-mini',
+              label: 'GPT-5 Mini',
+              enabled: true,
+              supportsThinking: true,
+              reasoningOptions: [{ type: 'effort', values: ['low'] }],
+            },
+            { id: 'gpt-4o', label: 'GPT-4o', enabled: true, supportsThinking: false },
+          ],
+        },
+      ],
+    };
+    const sendFrame = vi.fn<(frame: string) => void>();
+    vi.stubGlobal(
+      'WebSocket',
+      class extends InertWebSocket {
+        onopen: (() => void) | null = null;
+        constructor(url: string) {
+          super(url);
+          queueMicrotask(() => this.onopen?.());
+        }
+        override send(frame: string): void {
+          sendFrame(frame);
+        }
+      },
+    );
+    vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
+      const url = readRequestUrl(input);
+      if (url.includes('/settings/providers?')) return Promise.resolve(jsonResponse(settings));
+      // 发送前会读字符上限；缺这份响应会被 `parseSnapshot` 判成 502，发送在校验前就 return。
+      if (url.includes('/settings/message-limits')) {
+        return Promise.resolve(jsonResponse(MESSAGE_LIMITS_SNAPSHOT));
+      }
+      return defaultFetch(input);
+    });
+    const recovery = buildRecovery('session-a', {
+      messages: [{ content: SESSION_A_MESSAGE, id: 'msg-a-1', role: 'user' }],
+    });
+    getRecoveryMock.mockResolvedValue({
+      ...recovery,
+      session: {
+        ...recovery.session,
+        metadata_json: JSON.stringify({
+          providerId: 'test-openai',
+          modelId: 'gpt-5',
+          modelSelectionSource: 'manual',
+          thinkingEnabled: true,
+          reasoningEffort: 'xhigh',
+        }),
+      },
+    });
+    renderChatPageAt('/chat/session-a');
+    await screen.findByText('思考 · 超高');
+
+    const selectModel = async (name: RegExp) => {
+      fireEvent.click(screen.getByRole('button', { name: '打开模型选择' }));
+      fireEvent.click(await screen.findByRole('option', { name }));
+    };
+    await selectModel(/^GPT-5 Mini\b/);
+    expect(screen.queryByText('思考 · 低')).not.toBeNull();
+    await selectModel(/^GPT-4o\b/);
+    expect(screen.queryByRole('button', { name: '打开模型能力设置' })).not.toBeNull();
+    await selectModel(/^GPT-5(?: 思考)?$/);
+    expect(screen.queryByText('思考 · 超高')).not.toBeNull();
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '切换模型后发送' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(sendFrame).toHaveBeenCalled(), { onTimeout: (error) => error });
+    expect(JSON.parse(sendFrame.mock.calls[0]![0])).toMatchObject({
+      message: '切换模型后发送',
+      providerId: 'test-openai',
+      model: 'gpt-5',
+      thinkingEnabled: true,
+      reasoningEffort: 'xhigh',
+    });
+  });
+
+  it.each([false, true])(
+    '默认设置晚到时，首条消息使用确认的配置（网关回执：%s）',
+    async (hasModelConfig) => {
+      let releaseInitialDefaults: (() => void) | undefined;
+      const initialDefaults = new Promise<Response>((resolve) => {
+        releaseInitialDefaults = () => resolve(jsonResponse(THINKING_DEFAULTS));
+      });
+      const defaultFetch = createFetchStub();
+      const createdMetadata = vi.fn();
+      const modelConfig = {
+        providerId: 'test-openai',
+        modelId: 'gpt-5-mini',
+        modelLabel: 'GPT-5 Mini',
+        thinkingEnabled: true,
+        reasoningEffort: 'low',
+      };
+      const sendFrame = vi.fn<(frame: string) => void>();
+      vi.stubGlobal(
+        'WebSocket',
+        class extends InertWebSocket {
+          onopen: (() => void) | null = null;
+          constructor(url: string) {
+            super(url);
+            queueMicrotask(() => this.onopen?.());
+          }
+          override send(frame?: string): void {
+            if (frame !== undefined) sendFrame(frame);
+          }
+        },
+      );
+      let providerReads = 0;
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+        const { pathname } = new URL(readRequestUrl(input));
+        if (pathname === '/settings/providers') {
+          if (++providerReads === 1) return initialDefaults;
+          return jsonResponse(THINKING_DEFAULTS);
+        }
+        if (pathname === '/sessions' && init?.method === 'POST') {
+          createdMetadata(JSON.parse(String(init.body)));
+          return jsonResponse({
+            sessionId: 'new-thinking-session',
+            ...(hasModelConfig ? { modelConfig } : {}),
+          });
+        }
+        if (pathname === '/sessions/new-thinking-session/status') {
+          return jsonResponse({ status: buildRecovery('new-thinking-session', { messages: [] }) });
+        }
+        if (pathname === '/settings/message-limits') {
+          return jsonResponse(MESSAGE_LIMITS_SNAPSHOT);
+        }
+        return defaultFetch(input);
+      });
+      try {
+        renderChatPageAt('/chat');
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: '首条消息' } });
+        fireEvent.click(screen.getByRole('button', { name: '发送' }));
+        await waitFor(() => expect(sendFrame).toHaveBeenCalled(), {
+          onTimeout: (error) => error,
+          timeout: 3000,
+        });
+        expect(createdMetadata).toHaveBeenCalledWith({
+          metadata: expect.objectContaining({
+            modelId: 'gpt-5',
+            thinkingEnabled: true,
+            reasoningEffort: 'high',
+          }),
+          resolveModelConfig: { useDefaultModel: true, useDefaultThinking: true },
+        });
+        expect(JSON.parse(sendFrame.mock.calls[0]![0])).toMatchObject({
+          message: '首条消息',
+          model: hasModelConfig ? modelConfig.modelId : 'gpt-5',
+          providerId: 'test-openai',
+          thinkingEnabled: true,
+          reasoningEffort: hasModelConfig ? modelConfig.reasoningEffort : 'high',
+        });
+        if (hasModelConfig) {
+          await act(async () => releaseInitialDefaults?.());
+          await waitFor(() => expect(screen.queryByText('思考 · 低')).not.toBeNull());
+        }
+      } finally {
+        await act(async () => releaseInitialDefaults?.());
+      }
+    },
+  );
+
   it.each(['classic', 'fusion'] as const)(
     '%s 布局运行中会话切换并回放工具SSE后更新收敛',
+    // 该用例要真实回放 70+ 帧工具 SSE 并等待滚动收敛：单独跑约 1.4s，但在全量并行
+    // 负载下实测 classic 5.2s / fusion 4.0s（约 4 倍膨胀），会撞上 5s 默认超时并被
+    // 误报成「会话切换回归」。放宽到 20s 仍能拦住真实的十倍级退化。
+    // 注意：Vitest 4 起 options 必须是第二个参数，不能追加在回调之后。
+    { timeout: 20_000 },
     async (layoutMode) => {
       useUIStateStore.setState({ workbenchLayoutMode: layoutMode, rightTab: 'overview' });
       const active = (sessionId: string) => ({

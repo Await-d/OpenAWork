@@ -1,3 +1,4 @@
+import { toServerIsoString } from '@openAwork/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createTeamClient,
@@ -115,7 +116,7 @@ export function formatSharedSessionPresenceLoadError(input: {
 }
 
 function sortMembers(members: TeamMemberRecord[]): TeamMemberRecord[] {
-  return [...members].sort((left, right) => left.createdAt.localeCompare(right.createdAt, 'zh-CN'));
+  return members.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt, 'zh-CN'));
 }
 
 function sortTasks(tasks: TeamTaskRecord[]): TeamTaskRecord[] {
@@ -126,7 +127,7 @@ function sortTasks(tasks: TeamTaskRecord[]): TeamTaskRecord[] {
     completed: 3,
   };
 
-  return [...tasks].sort((left, right) => {
+  return tasks.toSorted((left, right) => {
     const rankDelta = statusRank[left.status] - statusRank[right.status];
     if (rankDelta !== 0) {
       return rankDelta;
@@ -155,25 +156,25 @@ function mapRuntimeTasksToTeamTasks(tasks: SessionTask[]): TeamTaskRecord[] {
               : 'pending',
       priority: task.priority,
       result: task.result ?? task.errorMessage ?? null,
-      createdAt: new Date(task.createdAt).toISOString(),
-      updatedAt: new Date(task.updatedAt).toISOString(),
+      createdAt: toServerIsoString(task.createdAt) ?? String(task.createdAt ?? ''),
+      updatedAt: toServerIsoString(task.updatedAt) ?? String(task.updatedAt ?? ''),
     }));
 }
 
 function sortMessages(messages: TeamMessageRecord[]): TeamMessageRecord[] {
-  return [...messages].sort((left, right) => left.timestamp - right.timestamp);
+  return messages.toSorted((left, right) => left.timestamp - right.timestamp);
 }
 
 function sortSessionShares(shares: TeamSessionShareRecord[]): TeamSessionShareRecord[] {
-  return [...shares].sort((left, right) => right.createdAt.localeCompare(left.createdAt, 'zh-CN'));
+  return shares.toSorted((left, right) => right.createdAt.localeCompare(left.createdAt, 'zh-CN'));
 }
 
 function sortAuditLogs(logs: TeamAuditLogRecord[]): TeamAuditLogRecord[] {
-  return [...logs].sort((left, right) => right.createdAt.localeCompare(left.createdAt, 'zh-CN'));
+  return logs.toSorted((left, right) => right.createdAt.localeCompare(left.createdAt, 'zh-CN'));
 }
 
 function sortSharedSessions(sessions: SharedSessionSummaryRecord[]): SharedSessionSummaryRecord[] {
-  return [...sessions].sort((left, right) =>
+  return sessions.toSorted((left, right) =>
     right.shareUpdatedAt.localeCompare(left.shareUpdatedAt, 'zh-CN'),
   );
 }
@@ -363,7 +364,7 @@ export function useTeamCollaboration(
 
   /**
    * 上一拍已应用快照的指纹。`GET /team/runtime` 是 20s 一次的轮询，而
-   * `normalizeSnapshot` 里的 `sort*` 全是 `[...x].sort()`，每拍必然产生新数组
+   * `normalizeSnapshot` 里的 `sort*` 全是 `x.toSorted()`，每拍必然产生新数组
    * —— 于是 15 个 setter 与 4 个 zustand store hydrate 每拍都无条件执行，团队
    * 运行时整页跟着重渲染，即使服务端数据一字未变。
    *

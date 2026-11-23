@@ -9,6 +9,7 @@ import { useCallback, useState } from 'react';
 import { createTeamClient } from '@openAwork/web-client';
 import { useAuthStore } from '../../../stores/auth/auth.js';
 import { requestSessionListRefresh } from '../../../utils/session/session-list-events.js';
+import { copyTextToClipboard } from '../file-tree/file-tree-actions.js';
 
 export interface SidebarTeamSessionMenuTarget {
   id: string;
@@ -103,7 +104,9 @@ export function useSidebarTeamActions() {
   );
 
   const copySessionId = useCallback((sessionId: string) => {
-    void navigator.clipboard?.writeText(sessionId);
+    void copyTextToClipboard(sessionId).catch((copyError: unknown) => {
+      console.warn('复制团队会话 ID 失败', copyError);
+    });
   }, []);
 
   const deleteSession = useCallback(
@@ -160,7 +163,9 @@ export function useSidebarTeamActions() {
   );
 
   const copyWorkspaceId = useCallback((workspaceId: string) => {
-    void navigator.clipboard?.writeText(workspaceId);
+    void copyTextToClipboard(workspaceId).catch((copyError: unknown) => {
+      console.warn('复制团队工作空间 ID 失败', copyError);
+    });
   }, []);
 
   const deleteWorkspace = useCallback(

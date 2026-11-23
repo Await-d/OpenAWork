@@ -126,6 +126,16 @@ export function useComposerInputHistory(
         replacePersistedEntries(historyScope, entries);
       })
       .catch((error: unknown) => {
+        // 卸载后迟到的水合失败不得记录：此时组件已不存在，日志只会在测试 worker 关闭时
+        // 落进 console，触发 teardown 竞态；且该失败对用户已不可见，记日志没有诊断价值。
+        // 行为契约不变——仍保留本地历史。
+        //
+        // 只以 `cancelled` 为门、**不**再比对 `persistRevisionRef`：该 revision 同时被写入
+        // 路径（`persistHistoryEntries`）推进，而失败分支本就不消费水合结果——一旦写入
+        // 与水合并发（挂载中、未卸载、未换代），比对 revision 会把「旧历史加载失败」这条
+        // 真实诊断一并吞掉。真正的「已被新水合取代」由 effect 重跑时的 cleanup 置
+        // `cancelled` 覆盖，故无需 revision 二次判定。
+        if (cancelled) return;
         // 水合失败保留当前运行期历史，不阻塞输入框。
         logger.warn('输入历史水合失败，保留本地记录', error);
       });

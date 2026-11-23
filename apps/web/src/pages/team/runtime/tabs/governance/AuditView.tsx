@@ -6,6 +6,7 @@
  * 数据来源：useTeamRuntimeReferenceViewData().auditLogs
  */
 
+import { formatServerDateTime } from '@openAwork/shared';
 import { useMemo, type CSSProperties } from 'react';
 import type { TeamAuditLogRecord } from '@openAwork/web-client';
 import { useTeamRuntimeReferenceViewData } from '../../data/team-runtime-reference-data.js';
@@ -139,7 +140,7 @@ export function AuditView({
           (log.actorUserId ?? '').toLowerCase().includes(q),
       );
     }
-    return list.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return list.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [scopedAuditLogs, entityFilter, actorFilter]);
 
   const actorCount = useMemo(() => {
@@ -383,7 +384,7 @@ export function AuditView({
                   ) : null}
                   <span style={{ flex: 1 }} />
                   <span style={{ color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                    {new Date(log.createdAt).toLocaleString()}
+                    {formatServerDateTime(log.createdAt)}
                   </span>
                 </div>
                 <span style={{ fontSize: 12, color: 'var(--fg-strong)', lineHeight: 1.5 }}>

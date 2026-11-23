@@ -17,3 +17,68 @@ export function parseDirectoryListing(content: string): DirectoryListingEntry[] 
   if (!rows.every((line) => /^(dir|file) /.test(line))) return null;
   return rows.map((line) => ({ isDir: line.startsWith('dir '), name: line.slice(4) }));
 }
+
+export interface DirectoryTreeNode {
+  name: string;
+  path?: string;
+  type?: 'file' | 'dir' | 'directory';
+  children?: DirectoryTreeNode[];
+}
+
+export interface DirectoryTreeBundle {
+  path?: string;
+  visited?: number;
+  depth?: number;
+  truncated?: boolean;
+  nodes: DirectoryTreeNode[];
+}
+
+/** 不修补残缺 JSON，也不把错误信封中的 nodes 当成成功结果。 */
+export function parseDirectoryTree(output: unknown): DirectoryTreeBundle | null {
+  let value: unknown = output;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.error || record.isError === true || record.ok === false) return null;
+  if (['pending', 'running', 'error', 'failed', 'cancelled'].includes(String(record.status))) {
+    return null;
+  }
+  if (!Array.isArray(record.nodes)) return null;
+
+  // 有界校验，避免异常深度或恶意载荷使递归预览溢出。
+  let remaining = 20_000;
+  function validateNodes(nodes: unknown[], level: number): nodes is DirectoryTreeNode[] {
+    if (level > 64) return false;
+    for (const node of nodes) {
+      remaining -= 1;
+      if (remaining < 0 || !node || typeof node !== 'object' || Array.isArray(node)) return false;
+      const item = node as Record<string, unknown>;
+      if (typeof item.name !== 'string' || !item.name.trim()) return false;
+      if (item.path !== undefined && typeof item.path !== 'string') return false;
+      if (item.type !== undefined && !['file', 'dir', 'directory'].includes(String(item.type))) {
+        return false;
+      }
+      if (item.children !== undefined) {
+        if (!Array.isArray(item.children) || !validateNodes(item.children, level + 1)) return false;
+        if (item.type === 'file' && item.children.length > 0) return false;
+      }
+    }
+    return true;
+  }
+  if (!validateNodes(record.nodes, 0)) return null;
+  const nonNegativeInteger = (item: unknown): number | undefined =>
+    typeof item === 'number' && Number.isSafeInteger(item) && item >= 0 ? item : undefined;
+  return {
+    path: typeof record.path === 'string' ? record.path : undefined,
+    visited: nonNegativeInteger(record.visitedEntries),
+    depth: nonNegativeInteger(record.depth),
+    truncated: record.truncated === true || record.entryLimitReached === true,
+    nodes: record.nodes,
+  };
+}

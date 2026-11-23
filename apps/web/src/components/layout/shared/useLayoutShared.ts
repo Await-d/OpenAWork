@@ -39,6 +39,7 @@ import {
   fetchSessionRecoveryOnce,
   SESSION_RECOVERY_MESSAGE_LIMIT,
 } from '../../../utils/session/session-recovery-flight.js';
+import { copyTextToClipboard } from '../file-tree/file-tree-actions.js';
 
 type PendingQuestionReplyStatus = 'answered' | 'dismissed';
 
@@ -507,7 +508,9 @@ export function useLayoutShared(
       if (ctrl && e.shiftKey && e.key === 'C') {
         e.preventDefault();
         const text = document.querySelector('.outlet-content-wrap')?.textContent ?? '';
-        void navigator.clipboard.writeText(text);
+        void copyTextToClipboard(text).catch((copyError: unknown) => {
+          console.warn('复制页面内容失败', copyError);
+        });
         return;
       }
       if (e.key === 'Escape') {

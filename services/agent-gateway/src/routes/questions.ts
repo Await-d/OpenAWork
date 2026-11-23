@@ -18,16 +18,15 @@ import {
   serializeGrillState,
 } from '@openAwork/agent-core';
 import { parseSessionMetadataJson } from '../session/session-workspace-metadata.js';
-import {
-  switchSessionDialogueModeToCoding,
-  type DialogueModeSwitchReason,
-} from '../session/dialogue-mode-switch.js';
+import { switchSessionDialogueModeToCoding } from '../session/dialogue-mode-switch.js';
 import { createQuestionRepliedEvent } from '../session/session-question-events.js';
 import { publishSessionRunEvent } from '../session/session-run-events.js';
 import { shouldExitPlanModeFromAnswers } from '../tools/plan-mode-tools.js';
 import { setPersistedSessionStateStatus, type ApprovedPermissionResumePayload } from './stream.js';
 import { resumeAnsweredQuestionRequest } from './stream-runtime.js';
 import { logGatewayWarn } from '../infra/gateway-logger.js';
+import { parseApprovedPermissionResumePayload } from '../permission/permission-contract.js';
+import { markQuestionNotificationsActedByRequestIds } from '../session/notification-store.js';
 
 const replyQuestionSchema = z.object({
   requestId: z.string().min(1),
@@ -267,6 +266,13 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
       );
       if (!questionRequest) {
         if (body.status === 'dismissed') {
+          // 请求行已不在，但通知可能还挂着未读（被裁剪 / 历史脏数据）：按 requestId 收口，
+          // 否则这条通知要等 24h TTL 才消失。
+          markQuestionNotificationsActedByRequestIds({
+            requestIds: [body.requestId],
+            sessionId,
+            userId: user.sub,
+          });
           publishSessionRunEvent(
             sessionId,
             createQuestionRepliedEvent({
@@ -284,6 +290,12 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         throw ApiError.notFound('目标提问请求不存在。');
       }
       if (questionRequest.status !== 'pending') {
+        // 幂等收口：重复提交时仍把对应通知标为已处理，避免通知中心残留已处理完的条目。
+        markQuestionNotificationsActedByRequestIds({
+          requestIds: [body.requestId],
+          sessionId,
+          userId: user.sub,
+        });
         publishSessionRunEvent(
           sessionId,
           createQuestionRepliedEvent({
@@ -341,7 +353,6 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
         userId: user.sub,
       });
 
-      let clarifyCompletionReason: DialogueModeSwitchReason | null = null;
       let autoSwitchedDialogueMode: DialogueMode | undefined;
       if (body.status === 'answered') {
         if (questionRequest.tool_name === 'ExitPlanMode') {
@@ -350,32 +361,22 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
             sessionId,
           });
           if (planApproved) {
-            clarifyCompletionReason = 'plan_approved';
+            // 先同步落库，再续跑并返回新模式供 Chat 刷新。
+            const autoSwitch = switchSessionDialogueModeToCoding({
+              reason: 'plan_approved',
+              sessionId,
+            });
+            autoSwitchedDialogueMode = autoSwitch.dialogueMode;
           }
         }
         const answeredQuestions = JSON.parse(
           questionRequest.questions_json,
         ) as QuestionToolInput['questions'];
-        const { confirmedApplied } = updateSessionClarificationState({
+        updateSessionClarificationState({
           answers: body.answers,
           questions: answeredQuestions,
           sessionId,
         });
-        if (confirmedApplied) {
-          clarifyCompletionReason = 'clarification_confirmed';
-        }
-        if (clarifyCompletionReason) {
-          // 设计已完成（共识确认 / 计划批准）→ 澄清模式自动切换到编程模式。
-          // 必须在返回 HTTP 响应前同步落库：前端紧接着会用会话快照刷新本地模式，
-          // 异步写会让它读到旧的 clarify 值。
-          const autoSwitch = switchSessionDialogueModeToCoding({
-            reason: clarifyCompletionReason,
-            sessionId,
-          });
-          if (autoSwitch.switched) {
-            autoSwitchedDialogueMode = autoSwitch.dialogueMode;
-          }
-        }
         if (resumePayload) {
           const answerOutput = formatAnsweredQuestionOutput({
             questions: answeredQuestions,
@@ -387,6 +388,9 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
               toolName: questionRequest.tool_name,
             },
             answerOutput,
+            ...(autoSwitchedDialogueMode
+              ? { dialogueModeAfterApproval: autoSwitchedDialogueMode }
+              : {}),
             sessionId,
             userId: user.sub,
           }).catch((error) => {
@@ -397,6 +401,16 @@ export async function questionsRoutes(app: FastifyInstance): Promise<void> {
           });
         }
       }
+
+      // 提问已回答 / 忽略：对应的 actionable 通知必须同步收口。这是「用户已经在会话里
+      // 处理完、铃铛却一直亮着」的主因——此前这条通路完全不存在。
+      // 位置放在所有会话状态写完之后：收口本身只写 notifications，不参与本回合的
+      // 状态推进，避免在关键路径中间插入额外写事务。
+      markQuestionNotificationsActedByRequestIds({
+        requestIds: [body.requestId],
+        sessionId,
+        userId: user.sub,
+      });
 
       step.succeed(undefined, { requestId: body.requestId, status: body.status });
       return reply.send({
@@ -442,7 +456,7 @@ function updateSessionClarificationState(input: {
   answers: string[][];
   questions: QuestionToolInput['questions'];
   sessionId: string;
-}): { confirmedApplied: boolean } {
+}): void {
   // 确认节点由引擎按依赖自动构造（`buildConfirmNode`），不接受模型自定义 id，
   // 否则会与引擎节点重名。模型提供的确认题只用于同步选项文案（见下）。
   const incomingConfirmQuestion = input.questions.find(
@@ -463,7 +477,7 @@ function updateSessionClarificationState(input: {
   });
   // 终局确认轮通常只带确认题（frontier 已空），不能因为没有新决策节点就提前返回。
   if (grillNodes.length === 0 && incomingConfirmQuestion === undefined) {
-    return { confirmedApplied: false };
+    return;
   }
 
   const session = sqliteGet<{ metadata_json: string }>(
@@ -471,7 +485,7 @@ function updateSessionClarificationState(input: {
     [input.sessionId],
   );
   if (!session) {
-    return { confirmedApplied: false };
+    return;
   }
 
   const metadata = parseSessionMetadataJson(session.metadata_json);
@@ -482,7 +496,7 @@ function updateSessionClarificationState(input: {
 
   // 只有确认题、却没有已建立的决策树：没有可确认的共识，保持原状。
   if (grillNodes.length === 0 && persisted === null) {
-    return { confirmedApplied: false };
+    return;
   }
 
   let state =
@@ -540,14 +554,10 @@ function updateSessionClarificationState(input: {
     state = applyAnswer(state, nodeId, answer);
   });
 
-  const confirmedApplied = state.confirmedAt !== undefined && persisted?.confirmedAt === undefined;
-
   sqliteRun("UPDATE sessions SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?", [
     JSON.stringify({ ...metadata, clarificationState: serializeGrillState(state) }),
     input.sessionId,
   ]);
-
-  return { confirmedApplied };
 }
 
 function ownsSession(sessionId: string, userId: string): boolean {
@@ -561,72 +571,7 @@ function ownsSession(sessionId: string, userId: string): boolean {
 function parseQuestionResumePayload(
   payloadJson: string | null,
 ): Omit<ApprovedPermissionResumePayload, 'toolName'> | null {
-  if (!payloadJson) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
-    const clientRequestId =
-      typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
-    const toolCallId = typeof parsed['toolCallId'] === 'string' ? parsed['toolCallId'] : null;
-    const nextRound = typeof parsed['nextRound'] === 'number' ? parsed['nextRound'] : null;
-    const rawInput =
-      parsed['rawInput'] && typeof parsed['rawInput'] === 'object'
-        ? (parsed['rawInput'] as Record<string, unknown>)
-        : null;
-    const requestDataCandidate =
-      parsed['requestData'] && typeof parsed['requestData'] === 'object'
-        ? (parsed['requestData'] as Record<string, unknown>)
-        : null;
-
-    if (
-      !clientRequestId ||
-      !toolCallId ||
-      nextRound === null ||
-      !rawInput ||
-      !requestDataCandidate
-    ) {
-      return null;
-    }
-
-    return {
-      clientRequestId,
-      nextRound,
-      toolCallId,
-      rawInput,
-      requestData: requestDataCandidate,
-      ...(parsed['observability'] && typeof parsed['observability'] === 'object'
-        ? {
-            observability: {
-              presentedToolName:
-                typeof (parsed['observability'] as Record<string, unknown>)['presentedToolName'] ===
-                'string'
-                  ? ((parsed['observability'] as Record<string, unknown>)[
-                      'presentedToolName'
-                    ] as string)
-                  : 'unknown',
-              canonicalToolName:
-                typeof (parsed['observability'] as Record<string, unknown>)['canonicalToolName'] ===
-                'string'
-                  ? ((parsed['observability'] as Record<string, unknown>)[
-                      'canonicalToolName'
-                    ] as string)
-                  : 'unknown',
-              adapterVersion:
-                typeof (parsed['observability'] as Record<string, unknown>)['adapterVersion'] ===
-                'string'
-                  ? ((parsed['observability'] as Record<string, unknown>)[
-                      'adapterVersion'
-                    ] as string)
-                  : '1.0.0',
-            },
-          }
-        : {}),
-    };
-  } catch {
-    return null;
-  }
+  return parseApprovedPermissionResumePayload(payloadJson);
 }
 
 function parseQuestionRequestClientRequestId(payloadJson: string | null): string | null {

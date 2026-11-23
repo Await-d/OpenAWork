@@ -573,3 +573,117 @@ NODE_PATH=packages/browser-automation/node_modules \
   `pre.scrollWidth == clientWidth` 且逐行 `scrollWidth > clientWidth`）；把夹具升级为真实
   可点击路径形态后，另暴露可点击路径按钮的 4px 横向溢出（`meta scrollWidth 335 > 331`，
   并向上冒泡到消息卡片），一并修复；修复后 112/112 全绿。
+
+## 文件快照「按需加载完整内容」验收（`file-snapshot-load`）
+
+对应 `components/chat/tool-call/previews/file-change-result-preview.tsx` +
+`use-complete-file-snapshot.ts` + `match-file-diff.ts`。
+
+背景：网关 `/recovery` 把每个字符串叶子瘦到 8000 字符，写入类工具的 `before` / `after`
+双双变成前缀，真实差异可能整段落在截断点之后（实测 15263/15286 字符的文件真实改动
+`+1/-1`，瘦身后显示 `+0/-0`）。默认仍是「部分 diff + 截断提示」，新增的是**用户点击后**
+用 `GET /sessions/:id/file-changes?includeText=true` 拉完整内容重画。
+
+渲染的是真实组件链路（`FileChangeResultPreview` → hook → `createSessionsClient` →
+`matchFileDiff`），只有网络层被 `window.fetch` 拦掉返回固定 `fileDiffs[]`。
+
+覆盖项（375 / 768 / 1440 × dark / light，共 **144 断言**）：
+
+| 项             | 说明                                                                                    |
+| -------------- | --------------------------------------------------------------------------------------- |
+| 按钮出现       | 截断条目 + 有 `sessionId` 时出现「加载完整内容（省略 N 字符）」                         |
+| **不自动加载** | 页面加载完成后 `file-changes` 请求数必须为 **0**（完整 diff 可能几 MB，只能由点击触发） |
+| 无入口场景     | 无 `sessionId` / 已完整（`incomplete=false`）都不渲染按钮，后者也没有截断提示           |
+| 点击 → 加载    | 按钮变 `加载中…` + `disabled`（stub 延迟 120ms 制造可观测窗口）                         |
+| 加载完成       | 按钮消失、截断提示消失、`+0/-0` 变成 `+1/-1`、diff 重新渲染、「原始结果」区块保留       |
+| 单次请求       | 一次点击只产生 1 条 `file-changes` 请求                                                 |
+| 失败态         | 网关 500 → 错误文案可见 + 按钮变「重试」且**不再 disabled**（不停在 loading）           |
+| 无横向溢出     | 整页与每个用例容器 `scrollWidth <= clientWidth`（375 下按钮长文案必须换行）             |
+
+### 运行
+
+```bash
+# 前置：Vite dev server 已在 127.0.0.1:5174 运行（bunx vite --port 5174）
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/file-snapshot-load-verify.ts
+```
+
+截图写到 `apps/web/harness/file-snapshot-load-artifacts/<mode>-<width>-<state>.png`。
+
+### 为什么需要它
+
+- **「绝不自动加载」是性能契约**：hook 在挂载时若顺手取一次数，等于把「打开历史消息」
+  变成「下载整个会话的文件全文」。jsdom 单测只能断言 mock 未被调用，真实浏览器里
+  「页面渲染完成后确实一个请求都没发」由 harness 计数守卫。
+- **按钮文案在展开体内**：`<details>` 未展开时 `innerText` 为空串，文案断言必须放在展开
+  之后——首次运行即因此误报 6 次，是 runner 的坑而不是组件缺陷。
+- **375 下长文案换行**：`加载完整内容（省略 19827 字符）` 在窄视口必须折行而不是撑破
+  卡片，只有真实排版能判定。
+
+## 用户消息超长正文折叠验收（`user-message-fold`）
+
+用户消息是 `white-space: pre-wrap` 的纯文本，长度不受任何约束——粘一段日志 / 源码进来
+就能把整个会话页撑开。这一层折叠此前只存在于助手侧（`CollapsibleAssistantContent`），
+现在两侧共用同一个折叠壳（`MessageFoldShell`）。
+
+| 项          | 说明                                                                       |
+| ----------- | -------------------------------------------------------------------------- |
+| 默认折叠    | 超过 1500 字符时 `data-fold-scope="user"` + `data-expanded="false"`        |
+| 裁剪生效    | `.chat-markdown-fold-body` 计算高度 = `60vh`，内容 `scrollHeight` 明显更高 |
+| 不撑开页面  | 内容区总高度 ≈ 折叠体高度（折叠态按钮绝对定位，不占布局高度）              |
+| 换行保留    | `white-space: pre-wrap` 生效且 300 行文本未被合并                          |
+| 按钮几何    | 「展开全部 · N 字符」可见、水平居中，375px 下也不溢出内容容器              |
+| 展开 / 收起 | 点击后高度放开（> 60vh），再点「收起」回到 60vh                            |
+| 短消息      | 不产生任何折叠容器或按钮                                                   |
+
+### 运行
+
+```bash
+# 前置：Vite dev server 已在 127.0.0.1:5173 运行
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-user-message-fold.ts
+```
+
+### 为什么需要它
+
+- **`60vh` 只有真实引擎才解析**：jsdom 没有布局引擎，`getComputedStyle().maxHeight` 与
+  `getBoundingClientRect()` 都拿不到真实值，「到底裁掉没裁掉」只能靠真实几何判定。
+- **「不撑开页面」本身就是验收目标**：单测能锁住 DOM 结构，但锁不住「整条消息高度 ≈
+  折叠体高度」——若把折叠按钮改成占位布局，jsdom 单测仍会全绿。
+- **375px 下按钮容易顶出边界**：`left: 50%` + `translateX(-50%)` 在窄容器里必须逐视口
+  断言按钮矩形落在内容容器内。
+
+## 派工页面视觉与可及性验收（`dispatch-visual`）
+
+派工页（`/dispatches`）的状态徽标、进度文案、事项卡在暗色/亮色 × 375px/1440px 下的
+实际观感与可读性。网关请求全部由 `page.route` 模拟，不触达真实网关、不产生模型费用。
+
+| 项         | 说明                                                               |
+| ---------- | ------------------------------------------------------------------ |
+| 文字对比度 | 每个状态徽标与次要文案按 WCAG 相对亮度公式实测，要求 ≥ 4.5:1       |
+| 横向溢出   | `.dispatch-page` 的 `scrollWidth` 不得超出视口，覆盖列表页与详情页 |
+| 按钮尺寸   | `.dispatch-page button` 高度 ≥ 28px（主操作实际渲染约 34px）       |
+
+### 运行
+
+```bash
+# 前置：生产预览已在 127.0.0.1:45173 运行
+bun run --filter @openAwork/web build
+bun run --filter @openAwork/web preview -- --port 45173 --strictPort
+# 然后（仓库根目录执行）
+NODE_PATH=packages/browser-automation/node_modules \
+  bun apps/web/harness/verify-dispatch-visual.ts
+```
+
+可用 `OPENAWORK_DISPATCH_ORIGIN` 覆盖预览地址（默认 `http://127.0.0.1:45173`，
+网关端口按「同主机的 45174」推导）。截图产物在 `dispatch-visual-artifacts/`。
+
+### 为什么需要它
+
+- **主题色当小字文字色会静默不达标**：亮色主题下 `--contrast` / `--accent` /
+  `--complement` 落在 7% 同色背景上只有 3.0～4.05，肉眼「看着还行」，只有按公式算
+  才能发现。当前实现因此把语义色只放在圆点上、文字统一用 `--fg-strong`。
+- **`--fg-muted` 在 elevated 背景上不足 4.5**：同样的灰字放在 `--bg-base` 上过关、
+  放进 `.dispatch-inset` 就降到 4.42，必须按真实父级链合成背景后判定。
+- **暗/亮两套 token 是两份取值**：单测不解析 CSS 变量，主题切换后的对比度回归只能
+  靠真实引擎。

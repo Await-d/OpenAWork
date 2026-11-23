@@ -385,10 +385,11 @@ export default function SkillSelectionPage(): React.ReactElement {
 
   return (
     <div className="page-root" style={{ overflowY: 'auto' }}>
-      <div className="page-header">
-        <span className="page-title">Skill 工作区选择集</span>
+      {/* 页头 <header> + 主标题 <h1>：landmark 与 heading-one 无障碍要求。 */}
+      <header className="page-header">
+        <h1 className="page-title">Skill 工作区选择集</h1>
         <span className="page-subtitle">为指定的 chat 工作区选择启用哪些 skill</span>
-      </div>
+      </header>
       <div className="page-content">
         <div style={{ maxWidth: 980, margin: '0 auto', padding: '20px 24px' }}>
           <section style={{ ...PANEL, marginBottom: 16 }}>

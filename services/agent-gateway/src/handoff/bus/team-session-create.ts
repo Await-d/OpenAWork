@@ -136,7 +136,13 @@ export function withRoleLayerDialogueMetadataDefaults(input: {
   if (!Object.prototype.hasOwnProperty.call(metadata, 'defaultModel')) {
     metadata['defaultModel'] = null;
   }
-  if (!Object.prototype.hasOwnProperty.call(metadata, 'dialogueMode')) {
+  // 来源托管会话（渠道 / 定时任务）**没有**对话模式：这里不给它们补角色层默认值。
+  // 本函数是**最后一个**会给 `dialogueMode` 赋值的写入方，且它会作用于既有会话
+  //（`markSessionAsTeamRoleInstance` 对存量团队会话做 UPDATE）——补上这道守卫后，
+  // 「没有任何写入方会给来源会话写 dialogueMode」这条不变量按构造成立，而不只是
+  // 靠调用链分析成立。团队会话从不带 `source`，故实际行为不变。
+  const isSourceManaged = metadata['source'] === 'channel' || metadata['source'] === 'cron';
+  if (!isSourceManaged && !Object.prototype.hasOwnProperty.call(metadata, 'dialogueMode')) {
     metadata['dialogueMode'] = DEFAULT_DIALOGUE_MODE_BY_ROLE_LAYER[input.roleLayer];
   }
 

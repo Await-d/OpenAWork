@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="carbon" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>工具失败态结构化失败卡 · 验收</title>
+    <style>
+      body {
+        margin: 0;
+        background: var(--bg-base);
+        color: var(--fg-default);
+        font-family: var(--font-sans, system-ui);
+      }
+      .tool-failure-harness {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-6);
+        padding: var(--spacing-4);
+        /* 375px 验收：窄屏下内容必须自己换行，不允许整页横向滚动。 */
+        min-width: 0;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+      .tool-failure-harness section {
+        min-width: 0;
+        max-width: 100%;
+        padding: var(--spacing-3);
+        border-radius: var(--radius-md);
+        background: var(--bg-raised);
+      }
+      .tool-failure-harness h1 {
+        font-size: 18px;
+        margin: 0;
+      }
+      .tool-failure-harness h2 {
+        font-size: 12px;
+        color: var(--fg-muted);
+        margin: 0 0 var(--spacing-3);
+      }
+      [data-surface='display'] {
+        min-width: 0;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/harness/tool-failure-entry.tsx"></script>
+  </body>
+</html>

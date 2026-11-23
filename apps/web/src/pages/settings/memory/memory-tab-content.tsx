@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import type {
   MemoryActionFeedback,
   MemoryEntry,
@@ -12,6 +13,7 @@ import { BP, IS, SS, ST } from '../shared/settings-section-styles.js';
 import { MemorySettingsPanel } from './memory-settings-panel.js';
 import { MemoryProposalsPanel } from './memory-proposals-panel.js';
 import { useMemoryProposals } from './use-memory-proposals.js';
+import { MemoryRulesPanel } from './memory-rules-panel.js';
 
 interface MemoryTabContentProps {
   memoryState: UseMemoryManagementResult;
@@ -366,6 +368,9 @@ function MemoryCard({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (isImeComposingKeyboardEvent(event)) {
+      return;
+    }
     if (event.key === 'Escape') {
       setEditValue(entry.value);
       setEditing(false);
@@ -654,6 +659,15 @@ export function MemoryTabContent({ memoryState, gatewayUrl, token }: MemoryTabCo
           decide={proposalsState.decide}
           listRevisions={proposalsState.listRevisions}
           rollback={proposalsState.rollback}
+        />
+      )}
+
+      {gatewayUrl && token && (
+        <MemoryRulesPanel
+          gatewayUrl={gatewayUrl}
+          token={token}
+          refreshKey={proposalsState.pendingCount}
+          onProposed={() => void proposalsState.refresh()}
         />
       )}
 

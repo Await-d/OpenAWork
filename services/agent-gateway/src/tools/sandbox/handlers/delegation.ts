@@ -27,6 +27,7 @@ import {
   UPSTREAM_RETRY_MAX_RETRIES_KEY,
 } from '../../../provider/upstream-retry-policy.js';
 import { publishSessionRunEvent } from '../../../session/session-run-events.js';
+import { resolveInheritedDialogueMode } from '../../../session/session-runtime-policy.js';
 import {
   hasTeamDefinition,
   parseSessionMetadataJson,
@@ -119,7 +120,10 @@ export async function handleTaskTool(ctx: SandboxHandlerContext): Promise<ToolCa
       `[task-delegate] dropped skills outside effective set: parentSession=${sessionId} dropped=${resolvedAgent.droppedSkills.join(',')}`,
     );
   }
-  const selectedDelegatedModel = selectDelegatedModelForUser(userId, resolvedAgent.modelEntries);
+  const selectedDelegatedModel = await selectDelegatedModelForUser(
+    userId,
+    resolvedAgent.modelEntries,
+  );
   const parentSessionRow = sqliteGet<{ metadata_json: string }>(
     'SELECT metadata_json FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
     [sessionId, userId],
@@ -154,7 +158,7 @@ export async function handleTaskTool(ctx: SandboxHandlerContext): Promise<ToolCa
           ...(resolvedAgent.modelVariant ? { variant: resolvedAgent.modelVariant } : {}),
         }
       : undefined;
-  // 「子代理模型来源」策略：inherit-main 时用主对话当前模型替换自动选出的模型；
+  // inherit-main 或自动选择无可用候选时，继承主对话当前模型；
   // thinking 仍由 category 自动决定（buildDelegatedChildRequestData 不变）。
   // 团队模板是权威来源：team role binding 命中、或父会话带 teamDefinition 时不参与本策略，
   // 本设置只治理普通聊天派生的子代理。
@@ -162,17 +166,19 @@ export async function handleTaskTool(ctx: SandboxHandlerContext): Promise<ToolCa
   const inheritedParentModelCandidate =
     !teamRoleBinding &&
     !hasTeamDefinition(parentSessionMetadata) &&
-    subagentModelPolicy.modelMode === 'inherit-main'
+    (subagentModelPolicy.modelMode === 'inherit-main' || !delegatedModel)
       ? resolveInheritedParentModel({
           requestData: executionContext?.requestData,
           parentSessionMetadata,
         })
       : undefined;
   // 父轮请求可能只带 model：反查模型归属 provider，否则子会话流式解析会静默回落到聊天模型。
+  const inheritedParentModelOwner =
+    inheritedParentModelCandidate && !inheritedParentModelCandidate.providerId
+      ? await selectDelegatedModelForUser(userId, [inheritedParentModelCandidate.modelId])
+      : undefined;
   const inheritedParentModel = inheritedParentModelCandidate
-    ? completeInheritedParentModel(inheritedParentModelCandidate, (modelId) =>
-        selectDelegatedModelForUser(userId, [modelId]),
-      )
+    ? completeInheritedParentModel(inheritedParentModelCandidate, () => inheritedParentModelOwner)
     : undefined;
   const effectiveDelegatedModel = inheritedParentModel ?? delegatedModel;
   const requestedSkills = resolvedAgent.requestedSkills;
@@ -270,8 +276,11 @@ export async function handleTaskTool(ctx: SandboxHandlerContext): Promise<ToolCa
     if (typeof inheritedWorkingDirectory === 'string') {
       childSessionMetadata.workingDirectory = inheritedWorkingDirectory;
     }
-    const inheritedDialogueMode = parentSessionMetadata.dialogueMode;
-    if (typeof inheritedDialogueMode === 'string') {
+    // 子会话不带 `source`，故来源托管父会话（渠道 / 定时任务）的脏 `dialogueMode` 一旦被
+    // 继承，子会话就会落进澄清只读白名单（豁免按自身 `source` 判定）——工具面被收敛成只读。
+    // 判定收敛到 `resolveInheritedDialogueMode`：来源托管父会话一律不继承。
+    const inheritedDialogueMode = resolveInheritedDialogueMode(parentSessionMetadata);
+    if (inheritedDialogueMode !== undefined) {
       childSessionMetadata.dialogueMode = inheritedDialogueMode;
     }
     // 继承权限档位：子代理 session 在后台运行，无法与用户交互审批。

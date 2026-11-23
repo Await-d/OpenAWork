@@ -1,3 +1,4 @@
+import { toServerIsoString } from '@openAwork/shared';
 import type {
   SessionTask,
   TeamRuntimeTaskGroupRecord,
@@ -23,7 +24,7 @@ export function sortTeamTaskRecords(tasks: TeamTaskRecord[]): TeamTaskRecord[] {
     completed: 3,
   };
 
-  return [...tasks].sort((left, right) => {
+  return tasks.toSorted((left, right) => {
     const rankDelta = statusRank[left.status] - statusRank[right.status];
     if (rankDelta !== 0) {
       return rankDelta;
@@ -54,8 +55,8 @@ export function mapRuntimeTasksToTeamTaskRecords(tasks: SessionTask[]): TeamTask
               : 'pending',
       priority: task.priority,
       result: task.result ?? task.errorMessage ?? null,
-      createdAt: new Date(task.createdAt).toISOString(),
-      updatedAt: new Date(task.updatedAt).toISOString(),
+      createdAt: toServerIsoString(task.createdAt) ?? String(task.createdAt ?? ''),
+      updatedAt: toServerIsoString(task.updatedAt) ?? String(task.updatedAt ?? ''),
     }));
 }
 

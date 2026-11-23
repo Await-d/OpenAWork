@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { BackgroundTaskRow } from './background-task-model.js';
 import type { BackgroundTaskPanelModel } from './use-background-task-panel.js';
 import { BackgroundTaskPanel } from './background-task-panel.js';
+import { SubagentProgressProvider } from '../../../components/chat/subagent-progress.js';
 
 const FIXED_NOW_MS = 1_700_000_000_000;
 const CHILD_SESSION_ID = 'sess-1234-5678-90ab';
@@ -202,6 +203,136 @@ describe('BackgroundTaskPanel · 三态', () => {
 });
 
 describe('BackgroundTaskPanel · 行渲染与回调', () => {
+  it('共享 Provider 没有子会话时仍展示未绑定任务，操作等待绑定', () => {
+    render(
+      <SubagentProgressProvider sessions={[]}>
+        <BackgroundTaskPanel
+          {...makeProps({
+            model: modelWithRows([
+              subagentRow({ key: 'pending-only', sessionId: undefined, state: 'pending' }),
+            ]),
+          })}
+        />
+      </SubagentProgressProvider>,
+    );
+    expect(screen.getAllByTestId('background-task-row')).toHaveLength(1);
+    expect(screen.queryByTestId('background-task-subagent-empty')).toBeNull();
+    expect(screen.queryByRole('button', { name: /加载更多子代理/ })).toBeNull();
+    expect(
+      (screen.getByTestId('background-task-row-open-session') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect((screen.getByTestId('background-task-row-stop') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it('独立分页按真实创建时间排序，续跑与状态更新不让旧子会话挤入首屏', () => {
+    const rows = Array.from({ length: 6 }, (_, index) =>
+      subagentRow({
+        key: `task-${index}`,
+        sessionId: `child-${index}`,
+        createdAtMs: FIXED_NOW_MS - index * 1_000,
+        startedAtMs: FIXED_NOW_MS + index * 1_000,
+      }),
+    );
+    const resumed = subagentRow({
+      key: 'resumed-oldest',
+      sessionId: 'child-5',
+      createdAtMs: FIXED_NOW_MS + 20_000,
+      startedAtMs: FIXED_NOW_MS + 30_000,
+    });
+    const props = makeProps();
+    const { rerender } = render(
+      <BackgroundTaskPanel {...props} model={modelWithRows([...rows, resumed])} />,
+    );
+    const visibleKeys = () =>
+      screen.getAllByTestId('background-task-row').map((row) => row.getAttribute('data-task-key'));
+    expect(visibleKeys()).toEqual(['task-0', 'task-1', 'task-2', 'task-3', 'task-4']);
+    rerender(
+      <BackgroundTaskPanel
+        {...props}
+        model={modelWithRows([
+          ...rows.map((row) => ({
+            ...row,
+            state: 'succeeded' as const,
+            startedAtMs: FIXED_NOW_MS + 60_000,
+          })),
+          resumed,
+        ])}
+      />,
+    );
+    expect(visibleKeys()).toEqual(['task-0', 'task-1', 'task-2', 'task-3', 'task-4']);
+    fireEvent.click(screen.getByRole('button', { name: /加载更多子代理/ }));
+    expect(visibleKeys()).toEqual([
+      'task-0',
+      'task-1',
+      'task-2',
+      'task-3',
+      'task-4',
+      'resumed-oldest',
+    ]);
+  });
+
+  it('共享分页下未绑定任务始终可见，绑定后按子会话分页且不重复', () => {
+    const sessions = Array.from({ length: 6 }, (_, index) => ({
+      sessionId: `child-${index}`,
+      createdAt: FIXED_NOW_MS - index * 1_000,
+    }));
+    const boundRows = sessions.map((session) =>
+      subagentRow({
+        key: session.sessionId,
+        sessionId: session.sessionId,
+      }),
+    );
+    const pending = subagentRow({ key: 'unbound', sessionId: undefined, state: 'pending' });
+    const props = makeProps();
+    const { rerender } = render(
+      <SubagentProgressProvider sessions={sessions}>
+        <BackgroundTaskPanel {...props} model={modelWithRows([...boundRows, pending])} />
+      </SubagentProgressProvider>,
+    );
+
+    expect(screen.getAllByTestId('background-task-row')).toHaveLength(6);
+    expect(document.querySelector('[data-task-key="unbound"]')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /加载更多子代理/ }));
+    expect(screen.getAllByTestId('background-task-row')).toHaveLength(7);
+    expect(document.querySelector('[data-task-key="unbound"]')).toBeTruthy();
+
+    rerender(
+      <SubagentProgressProvider sessions={sessions}>
+        <BackgroundTaskPanel
+          {...props}
+          model={modelWithRows([
+            ...boundRows,
+            { ...pending, sessionId: 'child-5', state: 'running' },
+          ])}
+        />
+      </SubagentProgressProvider>,
+    );
+    expect(screen.getAllByTestId('background-task-row')).toHaveLength(6);
+  });
+
+  it('同一子会话的历史续跑只展示一行，优先保留运行任务的查看与停止操作', () => {
+    const props = makeProps({
+      model: modelWithRows([
+        subagentRow({ key: 'completed-new', state: 'succeeded', startedAtMs: FIXED_NOW_MS }),
+        subagentRow({ key: 'active', title: '仍在运行', startedAtMs: FIXED_NOW_MS - 5_000 }),
+        subagentRow({ key: 'completed-old', state: 'succeeded' }),
+        subagentRow({ key: 'queued', state: 'pending' }),
+      ]),
+    });
+    render(<BackgroundTaskPanel {...props} />);
+
+    const rows = screen.getAllByTestId('background-task-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.getAttribute('data-task-key')).toBe('active');
+    fireEvent.click(screen.getByTestId('background-task-row-open-session'));
+    expect(props.onOpenSession).toHaveBeenCalledWith(CHILD_SESSION_ID);
+    fireEvent.click(screen.getByTestId('background-task-row-stop'));
+    fireEvent.click(screen.getByTestId('background-task-confirm-stop'));
+    expect(props.onStopSubagent).toHaveBeenCalledWith(CHILD_SESSION_ID);
+  });
+
   it('同时渲染子代理行与后台命令行，「查看」直接转发 onPreviewTerminal', () => {
     const onPreviewTerminal = vi.fn();
     render(

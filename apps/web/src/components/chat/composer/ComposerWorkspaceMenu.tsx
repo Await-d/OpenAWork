@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { createPortal } from 'react-dom';
 import { getPathBasename } from '../../../utils/workspace-path.js';
 
@@ -274,6 +275,9 @@ export function ComposerWorkspaceMenu({
 
   const handleSearchKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (isImeComposingKeyboardEvent(event)) {
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();

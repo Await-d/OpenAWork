@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from './TerminalIcons.js';
 
 export interface TerminalSearchBarProps {
@@ -69,6 +70,7 @@ export function TerminalSearchBar({
           runFind('next', value, caseSensitive);
         }}
         onKeyDown={(event) => {
+          if (isImeComposingKeyboardEvent(event)) return;
           if (event.key === 'Escape') {
             event.stopPropagation();
             setNoResult(false);

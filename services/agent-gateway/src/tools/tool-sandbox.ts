@@ -23,6 +23,7 @@ import { transitionToolToRunning } from '../message/message-store-v2.js';
 import { pluginManageToolDefinition } from '../plugin/plugin-admin-tools.js';
 import { executePluginTool, getPluginToolRegistry } from '../plugin/tool-registry.js';
 import { injectDirectoryAgentsIntoReadResult } from '../session/directory-agents-injection.js';
+import { recordFileReadFromToolOutput } from '../session/session-file-reads.js';
 import {
   sessionInfoToolDefinition,
   sessionListToolDefinition,
@@ -204,6 +205,7 @@ import {
   handleModelSearchTool,
   handleReadToolOutputTool,
   handleSessionInfoTool,
+  handlePermissionGetTool,
   handleSessionListTool,
   handleSessionMoveTool,
   handleSessionReadTool,
@@ -471,6 +473,8 @@ async function executeGatewayManagedToolImpl(
 
     if (request.toolName === sessionInfoToolDefinition.name)
       return await handleSessionInfoTool(handlerContext);
+
+    if (request.toolName === 'permission_get') return await handlePermissionGetTool(handlerContext);
 
     if (request.toolName === sessionRenameToolDefinition.name)
       return await handleSessionRenameTool(handlerContext);
@@ -1101,6 +1105,7 @@ export class ToolSandbox {
               sessionId,
               effectiveFilePath,
               validation.reason,
+              effectiveRequest.toolName === 'write',
             ),
             isError: true,
             durationMs: 0,
@@ -1120,7 +1125,12 @@ export class ToolSandbox {
         safeFilePath = validation.safePath;
         await ensureIgnoreRulesLoadedForPath(safeFilePath);
       }
-      if (safeFilePath && defaultIgnoreManager.shouldIgnore(safeFilePath)) {
+      // 精确读写闸用 `shouldProtect`（跳过 `.gitignore`）：`.gitignore` 只表达
+      // 「不进版本库」，不构成读写禁止。用 `shouldIgnore` 会让 `temp/`、`dist/`
+      // 这类目录连 write / read 都进不去，把「写脚本再单行执行」这条官方补救
+      // 路径反向焊死（2026-11-18 排障）。内置敏感模式（`.env` / `*.pem` /
+      // `node_modules` / `.git`）与 `.agentignore` 仍然硬拒绝。
+      if (safeFilePath && defaultIgnoreManager.shouldProtect(safeFilePath)) {
         const result: ToolCallResult = {
           toolCallId: request.toolCallId,
           toolName: request.toolName,
@@ -1304,6 +1314,9 @@ export class ToolSandbox {
     // 失败不影响读取本身）。SSH 远程 read 走 executeGatewayManagedTool 提前返回，
     // 不会到达此处，符合「远程文件不注入本地指令」的预期。
     if (!result.isError && effectiveRequest.toolName === readTool.name) {
+      // 编辑前置校验的证据记账（见 session/session-file-reads.ts）。
+      // 必须在**成功**分支：失败的 read 不能当证据，否则模型会以为读过。
+      recordFileReadFromToolOutput(sessionId, result.output);
       try {
         result = await injectDirectoryAgentsIntoReadResult(result, {
           sessionId,

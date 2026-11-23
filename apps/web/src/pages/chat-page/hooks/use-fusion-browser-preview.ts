@@ -1,3 +1,8 @@
+import {
+  requestBrowserOpen,
+  type BrowserOpenMode,
+} from '../../../components/chat/misc/browser/browser-open-request.js';
+
 /** 经典布局 / 移动端在无地址时填入的兜底地址，保持既有行为不变。 */
 export const DEFAULT_BROWSER_PREVIEW_URL = 'http://localhost:3000';
 
@@ -30,6 +35,7 @@ export function resolveFusionBrowserPreviewRoute(
 }
 
 export interface OpenFusionBrowserPreviewOptions {
+  readonly workspacePath?: string | null;
   readonly browserPreviewUrl: string | null;
   readonly collapseWorkspaceToPanel: () => void;
   readonly dockOwnsWorkspacePanels: boolean;
@@ -45,8 +51,14 @@ export interface OpenFusionBrowserPreviewOptions {
  * 命令面板 / `/browser` 事件共用的「打开浏览器预览」编排：按
  * {@link resolveFusionBrowserPreviewRoute} 的决策落地到面板预览 tab 或主内容区。
  */
-export function useOpenFusionBrowserPreview(options: OpenFusionBrowserPreviewOptions): () => void {
-  return () => {
+export function useOpenFusionBrowserPreview(
+  options: OpenFusionBrowserPreviewOptions,
+): (url?: string, mode?: BrowserOpenMode) => void {
+  return (url, mode = 'currentTab') => {
+    if (url !== undefined) {
+      if (options.workspacePath) requestBrowserOpen(options.workspacePath, url, mode);
+      options.setBrowserPreviewUrl(url);
+    }
     const route = resolveFusionBrowserPreviewRoute({
       dockOwnsWorkspacePanels: options.dockOwnsWorkspacePanels,
       hasPreviewUrl: options.browserPreviewUrl !== null,
@@ -61,7 +73,7 @@ export function useOpenFusionBrowserPreview(options: OpenFusionBrowserPreviewOpt
       return;
     }
 
-    if (route.fillDefaultUrl) {
+    if (url === undefined && route.fillDefaultUrl) {
       options.setBrowserPreviewUrl(DEFAULT_BROWSER_PREVIEW_URL);
     }
     options.setEditorMode(true);

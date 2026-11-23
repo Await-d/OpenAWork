@@ -44,11 +44,14 @@ export type { SubagentToolName } from '../../../../../packages/shared-ui/src/too
 export {
   detectLanguage,
   highlightCodeLines,
+  summarizeSnapshotDiff,
+  summarizeUnifiedDiff,
 } from '../../../../../packages/shared-ui/src/tools/UnifiedCodeDiff.js';
 
 // 工具视觉状态判定是纯函数（只依赖入参），ToolGlyph 是纯内联 SVG：一并转发真实
 // 实现，避免未手写 mock 的测试文件在 import 时拿到 undefined（渲染期直接崩掉）。
 export {
+  resolveToolStatusMeta,
   resolveToolVisualStatus,
   ToolGlyph,
 } from '../../../../../packages/shared-ui/src/tools/tool-visual-meta.js';
@@ -78,14 +81,15 @@ export type {
 // 保证路由懒加载自愈与错误边界使用同一套判定口径。
 export { isDynamicImportFailure } from '../../../../../packages/shared-ui/src/feedback/dynamic-import-failure.js';
 
-// `BlockToolCall` 的 web 分支只读 displayData 的 `bashView` / `diffView`，而这两个字段
-// 在 web 路径下本就是 undefined。这里给一个最小替身，避免为了一条卡片测试把 1340 行的
-// `ToolCallCard` 整块拖进测试环境（它连带 diff / 高亮渲染依赖）。
-// 注意：若将来 web 分支开始读 displayData 的其它字段，需要在替身里一并补上，
-// 否则测试会静默通过而真实环境取不到值。
-export function resolveToolCallCardDisplayData(): {
-  bashView?: undefined;
-  diffView?: undefined;
-} {
-  return {};
-}
+// 使用真实归一化，避免空替身掩盖 diff 与兜底预览的优先级冲突。
+export { resolveToolCallCardDisplayData } from '../../../../../packages/shared-ui/src/tools/ToolCallCard.js';
+export {
+  parseFileChangeResult,
+  isIncompleteFileSnapshot,
+  readFileSnapshot,
+} from '../../../../../packages/shared-ui/src/tools/file-change-result.js';
+export { parseJsonObjectTolerant } from '../../../../../packages/shared-ui/src/tools/truncated-json.js';
+
+// IME 组合态判定是纯函数（只依赖入参，无副作用）：转发真实实现，
+// 避免 composer 的键盘接线测试与真实判定口径（keyCode 229 / isComposing）漂移。
+export { isImeComposingKeyboardEvent } from '../../../../../packages/shared-ui/src/utils/ime-composition.js';

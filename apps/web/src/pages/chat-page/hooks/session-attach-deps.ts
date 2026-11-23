@@ -131,9 +131,8 @@ export interface SessionAttachDeps {
   readonly setActiveStreamFirstTokenLatencyMs: Dispatch<SetStateAction<number | null>>;
   readonly setActiveStreamRoundStartedAt: Dispatch<SetStateAction<number | null>>;
   readonly setActiveStreamStartedAt: Dispatch<SetStateAction<number | null>>;
-  readonly setBrowserPreviewUrl: (url: string | null) => void;
+  readonly openBrowserPreview: (url: string, mode?: 'newTab' | 'currentTab') => void;
   readonly setChildSessions: Dispatch<SetStateAction<Session[]>>;
-  readonly setEditorMode: (v: boolean) => void;
   readonly setHasPendingFollowContent: Dispatch<SetStateAction<boolean>>;
   readonly setLatestUpstreamSummary: Dispatch<SetStateAction<UpstreamStreamSummary | null>>;
   readonly setMessages: Dispatch<SetStateAction<ChatMessage[]>>;

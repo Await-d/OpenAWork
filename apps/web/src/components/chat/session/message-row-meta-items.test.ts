@@ -86,7 +86,7 @@ describe('buildAssistantMetaItems', () => {
       showToolCount: false,
     });
 
-    expect(items).toEqual([{ label: '已执行工具', tone: 'accent' }]);
+    expect(items).toEqual([{ label: '包含工具调用', tone: 'accent' }]);
   });
 
   it('team 模式在没有额外元信息时不注入 chat 专属兜底文案', () => {
@@ -107,5 +107,54 @@ describe('buildAssistantMetaItems', () => {
     });
 
     expect(items).toEqual([]);
+  });
+
+  it('includeStats=false 时省略全部统计项，不注入兜底文案', () => {
+    const items = buildAssistantMetaItems({
+      messageStatus: 'completed',
+      presentationMode: 'chat',
+      toolLabel: '2 工具',
+      modifiedFileCount: 0,
+      tokenCount: 128,
+      usageDetails: {
+        requestIndex: 3,
+        totalTokens: 128,
+        inputTokens: 64,
+        outputTokens: 64,
+        durationMs: 2400,
+      },
+      durationLabel: '2.4s',
+      stopReasonLabel: null,
+      showDuration: true,
+      showStopReason: true,
+      showTokenBreakdown: true,
+      showEstimatedTokens: true,
+      showRequestIndex: true,
+      showToolCount: true,
+      includeStats: false,
+    });
+
+    expect(items).toEqual([]);
+  });
+
+  it('includeStats=false 时仍保留修改文件数与异常终态', () => {
+    const items = buildAssistantMetaItems({
+      messageStatus: 'error',
+      presentationMode: 'chat',
+      toolLabel: '2 工具',
+      modifiedFileCount: 3,
+      tokenCount: 128,
+      durationLabel: '2.4s',
+      stopReasonLabel: null,
+      showDuration: true,
+      showStopReason: true,
+      showTokenBreakdown: true,
+      showEstimatedTokens: true,
+      showRequestIndex: true,
+      showToolCount: true,
+      includeStats: false,
+    });
+
+    expect(items).toEqual([{ label: '修改 3 文件' }, { label: '错误', tone: 'danger' }]);
   });
 });

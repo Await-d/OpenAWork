@@ -8,6 +8,23 @@ import { resolveGatewayFileBackupsDir } from '../infra/storage-paths.js';
 export type SessionFileBackupContentTier = 'text' | 'notebook' | 'binary';
 export type SessionFileBackupFailurePolicy = 'block' | 'degrade';
 
+const backupFileOperations = new Map<string, Promise<unknown>>();
+
+function withBackupFileOperation<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const previous = backupFileOperations.get(path);
+  const current = previous ? previous.then(operation, operation) : operation();
+  backupFileOperations.set(path, current);
+  return current.finally(() => {
+    if (backupFileOperations.get(path) === current) backupFileOperations.delete(path);
+  });
+}
+
+function hasBackupStorageReference(storagePath: string): boolean {
+  return Boolean(
+    sqliteGet('SELECT 1 FROM session_file_backups WHERE storage_path = ? LIMIT 1', [storagePath]),
+  );
+}
+
 interface BackupContentDescriptor {
   contentFormat: string;
   contentHash: string;
@@ -142,40 +159,43 @@ export async function persistSessionFileBackup(input: {
       descriptor.contentTier,
       `${descriptor.contentHash}.${descriptor.contentFormat}`,
     );
-  if (!dedupedStorage?.storage_path) {
-    await mkdir(dirname(storagePath), { recursive: true });
-    await writeFile(storagePath, input.content, 'utf8');
-  }
+  return withBackupFileOperation(storagePath, async () => {
+    // 清理与写入共用路径锁；等待期间最后一个旧引用可能已消失，此时重写文件。
+    if (!dedupedStorage?.storage_path || !hasBackupStorageReference(storagePath)) {
+      await mkdir(dirname(storagePath), { recursive: true });
+      await writeFile(storagePath, input.content, 'utf8');
+    }
 
-  sqliteRun(
-    `INSERT INTO session_file_backups
+    sqliteRun(
+      `INSERT INTO session_file_backups
      (backup_id, session_id, user_id, file_path, content_hash, content_tier, content_format, hash_scope, kind, source_tool, source_request_id, tool_call_id, storage_path, artifact_id, size_bytes, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [
-      backupId,
-      input.sessionId,
-      input.userId,
-      input.filePath,
-      descriptor.contentHash,
-      descriptor.contentTier,
-      descriptor.contentFormat,
-      descriptor.hashScope,
-      input.kind,
-      input.toolName,
-      input.requestId ?? null,
-      input.toolCallId ?? null,
-      storagePath,
-      dedupedStorage?.artifact_id ?? null,
-      Buffer.byteLength(input.content, 'utf8'),
-    ],
-  );
+      [
+        backupId,
+        input.sessionId,
+        input.userId,
+        input.filePath,
+        descriptor.contentHash,
+        descriptor.contentTier,
+        descriptor.contentFormat,
+        descriptor.hashScope,
+        input.kind,
+        input.toolName,
+        input.requestId ?? null,
+        input.toolCallId ?? null,
+        storagePath,
+        dedupedStorage?.artifact_id ?? null,
+        Buffer.byteLength(input.content, 'utf8'),
+      ],
+    );
 
-  return {
-    backupId,
-    kind: input.kind,
-    contentHash: descriptor.contentHash,
-    storagePath,
-  };
+    return {
+      backupId,
+      kind: input.kind,
+      contentHash: descriptor.contentHash,
+      storagePath,
+    };
+  });
 }
 
 export async function captureBeforeWriteBackup(input: {
@@ -265,26 +285,23 @@ export function collectSessionBackupStoragePaths(input: {
   sessionId: string;
   userId: string;
 }): string[] {
-  return Array.from(
-    new Set(
-      listSessionFileBackups(input)
-        .map((backup) => backup.storagePath)
-        .filter((path): path is string => Boolean(path)),
-    ),
-  );
+  return sqliteAll<{ storage_path: string }>(
+    `SELECT DISTINCT storage_path FROM session_file_backups
+     WHERE session_id = ? AND user_id = ? AND storage_path IS NOT NULL AND storage_path <> ''`,
+    [input.sessionId, input.userId],
+  ).map(({ storage_path }) => storage_path);
+}
+
+export function removeUnreferencedBackupFile(storagePath: string): Promise<void> {
+  return withBackupFileOperation(storagePath, async () => {
+    if (!hasBackupStorageReference(storagePath)) await rm(storagePath, { force: true });
+  });
 }
 
 export async function garbageCollectBackupStoragePaths(paths: string[]): Promise<void> {
   for (const storagePath of Array.from(new Set(paths))) {
-    const remaining = sqliteGet<{ count: number }>(
-      'SELECT COUNT(*) as count FROM session_file_backups WHERE storage_path = ? LIMIT 1',
-      [storagePath],
-    );
-    if ((remaining?.count ?? 0) > 0) {
-      continue;
-    }
     try {
-      await rm(storagePath, { force: true });
+      await removeUnreferencedBackupFile(storagePath);
     } catch {
       continue;
     }

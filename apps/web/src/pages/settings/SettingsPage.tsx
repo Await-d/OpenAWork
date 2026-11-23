@@ -461,6 +461,7 @@ export default function SettingsPage() {
                 )}
                 {activeTab === 'memory' && (
                   <MemoryTabContent
+                    key={JSON.stringify([gatewayUrl, token])}
                     memoryState={memoryManagement}
                     gatewayUrl={gatewayUrl}
                     token={token}

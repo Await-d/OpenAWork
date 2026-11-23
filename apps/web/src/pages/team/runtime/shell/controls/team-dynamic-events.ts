@@ -251,7 +251,7 @@ export function buildClarificationPushEvents(
   }
 
   return Array.from(uncoveredBySession.values()).map((group) => {
-    const latest = group.slice().sort((left, right) => right.createdAt - left.createdAt)[0]!;
+    const latest = group.toSorted((left, right) => right.createdAt - left.createdAt)[0]!;
     const summary =
       latest.context.trim().length > 0
         ? latest.context.trim()
@@ -338,7 +338,7 @@ export function filterTeamDynamicEventsForScope(
 
 export function buildTeamDynamicEntries(events: HandoffEvent[]): TeamDynamicEntry[] {
   const groups: TeamDynamicEntry[] = [];
-  const sorted = [...events].sort((left, right) => left.timestamp - right.timestamp);
+  const sorted = events.toSorted((left, right) => left.timestamp - right.timestamp);
 
   for (let index = 0; index < sorted.length; index += 1) {
     const event = sorted[index]!;

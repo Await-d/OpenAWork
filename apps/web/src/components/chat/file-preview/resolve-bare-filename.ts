@@ -93,7 +93,7 @@ const MAX_RESOLUTION_CACHE_ENTRIES = 200;
  */
 function pickLeastSegments(paths: readonly string[]): string | null {
   if (paths.length === 0) return null;
-  const sorted = [...paths].sort((left, right) => {
+  const sorted = paths.toSorted((left, right) => {
     const segmentDelta = left.split('/').length - right.split('/').length;
     return segmentDelta !== 0 ? segmentDelta : left.localeCompare(right);
   });

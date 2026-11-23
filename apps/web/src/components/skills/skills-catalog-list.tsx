@@ -6,6 +6,7 @@
  */
 
 import { Fragment } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { SkillsTabBar } from './skills-tab-bar.js';
 import { buildVisiblePages, formatSourceLabel } from './skills-page-model.js';
 import type { SkillRow } from './skills-page-model.js';
@@ -124,6 +125,7 @@ export function SkillsCatalogList({
           aria-label="搜索技能"
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
+            if (isImeComposingKeyboardEvent(event)) return;
             if (event.key === 'Enter') {
               onSearch();
             }

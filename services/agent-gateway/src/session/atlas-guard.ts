@@ -3,7 +3,7 @@
  *
  * Ported from oh-my-opencode's atlas hook.
  * Enforces orchestrator protocol for Atlas/Zeus/Sisyphus agents:
- * 1. Blocks orchestrators from writing outside .sisyphus/ (except for verification)
+ * 1. Reminds Atlas and Zeus of their delegation role after direct writes
  * 2. Injects single-task directive when delegating via delegate_task
  * 3. Appends verification reminder after delegate_task completes
  * 4. Appends boulder progress + orchestrator reminder when boulder state exists
@@ -193,8 +193,8 @@ export function checkAtlasGuard(input: {
     return { injectSingleTaskDirective: false, injectDelegationWarning: false };
   }
 
-  // Write/edit tools: check if outside .sisyphus/
-  if (WRITE_EDIT_TOOLS.has(input.toolName.toLowerCase())) {
+  // Sisyphus may implement directly when the user has authorized the work.
+  if (input.agentId !== 'sisyphus' && WRITE_EDIT_TOOLS.has(input.toolName.toLowerCase())) {
     const filePath = input.filePath ?? '';
     if (filePath && !isSisyphusPath(filePath)) {
       return {
@@ -230,7 +230,7 @@ export async function buildAtlasPostProcessReminder(input: {
   const toolLower = input.toolName.toLowerCase();
 
   // Write/edit outside .sisyphus/: append direct-work reminder
-  if (WRITE_EDIT_TOOLS.has(toolLower)) {
+  if (input.agentId !== 'sisyphus' && WRITE_EDIT_TOOLS.has(toolLower)) {
     // We don't have the filePath here; the pre-check already injected the warning
     // For post-processing, we just append a generic reminder
     return DIRECT_WORK_REMINDER;

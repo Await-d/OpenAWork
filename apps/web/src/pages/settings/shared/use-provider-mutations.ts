@@ -8,6 +8,7 @@ import type {
   UpstreamModelItem,
 } from '@openAwork/shared-ui';
 import { canRemoveProvider } from '@openAwork/shared-ui';
+import { createRandomUuid } from '@openAwork/web-client';
 import { logger } from '../../../utils/log/logger.js';
 import type { ProviderEditData, ThinkingDefaultsRef } from '../state/settings-types.js';
 import {
@@ -62,13 +63,10 @@ export function useProviderMutations({
       // 实例的 id 漂移，因此用 UUID 后缀而非基于当前列表的序号。
       const makeStableId = (base: string): string => {
         if (!takenIds.has(base)) return base;
-        const uuid =
-          typeof globalThis.crypto?.randomUUID === 'function'
-            ? globalThis.crypto.randomUUID().slice(0, 8)
-            : Math.random().toString(36).slice(2, 10);
+        const uuid = createRandomUuid().slice(0, 8);
         let candidate = `${base}-${uuid}`;
         while (takenIds.has(candidate)) {
-          candidate = `${base}-${Math.random().toString(36).slice(2, 10)}`;
+          candidate = `${base}-${createRandomUuid().slice(0, 8)}`;
         }
         return candidate;
       };

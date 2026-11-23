@@ -352,7 +352,10 @@ export function useTeamConversationSnapshot(
       const recovery = result.recovery;
 
       const normalized = normalizeChatMessages(recovery.session?.messages ?? []);
-      if (!streamingRef.current) {
+      // 多路 SSE 只提供增量 token，服务端快照始终是权威真相：multi-attach 活跃时
+      // 必须继续合流，否则「连接在、事件无」的窗口里所有快照更新都会被丢弃
+      // （现象：AI 回复不出现、层级消息停更，必须刷新页面才看得到）。
+      if (!streamingRef.current || multiAttachActive) {
         setMessages((previous) => reconcileSnapshotChatMessages(previous, normalized));
       }
       setSubagentNotices(collectSubagentNotices(recovery.session?.messages ?? []));
@@ -447,6 +450,7 @@ export function useTeamConversationSnapshot(
     clearRetry,
     enabled,
     gatewayUrl,
+    multiAttachActive,
     resetRetry,
     scheduleRetry,
     sessionId,
@@ -639,8 +643,10 @@ export function useTeamConversationSnapshot(
   useEffect(() => {
     if (!sessionId || !enabled) return undefined;
     if (sessionStateStatus !== 'running') return undefined;
-    // 如果多路 SSE 已连接，跳过轮询（effect 会在 multiAttachActive 变化时重新执行）
-    if (multiAttachActive) return undefined;
+    // 多路 SSE 已连接时跳过轮询，但**仅限它当前确实在推送内容**（streaming 为 true）。
+    // 连接是常驻的：流结束或流尚未注册的空窗里 SSE 不会再送任何事件，若此时仍然
+    // 跳过轮询，消息就会永久停更直到刷新页面。effect 会在两个依赖变化时重新执行。
+    if (multiAttachActive && streaming) return undefined;
     // 使用 visibility check：只在 tab 可见时 poll
     let active = true;
     const interval = setInterval(() => {
@@ -652,7 +658,7 @@ export function useTeamConversationSnapshot(
       active = false;
       clearInterval(interval);
     };
-  }, [sessionId, enabled, sessionStateStatus, reload, multiAttachActive]);
+  }, [sessionId, enabled, sessionStateStatus, reload, multiAttachActive, streaming]);
 
   // ─── 把"当前正在看的这个 session"注册到 layer store ────────────────
   // 「层级流动 / 层级 / 消息」三个 tab 的数据源是 useLayerStore.nodes +

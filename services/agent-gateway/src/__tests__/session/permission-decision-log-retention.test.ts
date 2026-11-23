@@ -100,3 +100,65 @@ describe('permission_decision_logs retention', () => {
     expect(countRows()).toBe(25);
   });
 });
+
+describe('permission_decision_logs 自动决策记账', () => {
+  it('迁移后 reason 列存在，人工批准写入 user_approved', () => {
+    store.__setPermissionDecisionLogRetentionForTesting(0);
+    store.appendPermissionDecisionLog({
+      requestId: 'req-human',
+      sessionId: SESSION_ID,
+      toolName: 'bash',
+      scope: '*',
+      decision: 'session',
+      reason: store.PERMISSION_DECISION_REASONS.USER_APPROVED,
+    });
+
+    const row = dbModule.sqliteGet<{ reason: string | null }>(
+      'SELECT reason FROM permission_decision_logs ORDER BY id DESC LIMIT 1',
+      [],
+    );
+    expect(row?.reason).toBe('user_approved');
+  });
+
+  it('recordLadderPermissionDecision 记录自动档位理由且不写成 user_approved', () => {
+    store.__setPermissionDecisionLogRetentionForTesting(0);
+    store.recordLadderPermissionDecision({
+      sessionId: SESSION_ID,
+      toolName: 'bash',
+      scope: '*',
+      outcome: 'not_needed',
+      reason: store.PERMISSION_DECISION_REASONS.MODE_YOLO,
+    });
+
+    const row = dbModule.sqliteGet<{ decision: string; reason: string | null }>(
+      'SELECT decision, reason FROM permission_decision_logs ORDER BY id DESC LIMIT 1',
+      [],
+    );
+    expect(row?.decision).toBe('not_needed');
+    expect(row?.reason).toBe('mode_yolo');
+    expect(row?.reason).not.toBe('user_approved');
+  });
+
+  it('recordLadderPermissionDecision 在写入失败时吞掉异常（不中断权限流程）', () => {
+    store.__setPermissionDecisionLogRetentionForTesting(0);
+    dbModule.sqliteRun(
+      `CREATE TRIGGER fail_ladder_decision BEFORE INSERT ON permission_decision_logs
+       BEGIN SELECT RAISE(ABORT, 'ladder audit write failed'); END`,
+      [],
+    );
+    try {
+      expect(() =>
+        store.recordLadderPermissionDecision({
+          sessionId: SESSION_ID,
+          toolName: 'bash',
+          scope: '*',
+          outcome: 'denied',
+          reason: store.PERMISSION_DECISION_REASONS.RULE_DENIED,
+        }),
+      ).not.toThrow();
+      expect(countRows()).toBe(0);
+    } finally {
+      dbModule.sqliteRun('DROP TRIGGER fail_ladder_decision', []);
+    }
+  });
+});

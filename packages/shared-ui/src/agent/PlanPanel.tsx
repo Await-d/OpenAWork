@@ -125,9 +125,7 @@ function buildOrderedTasks(tasks: PlanTask[]): Array<{ task: PlanTask; depth: nu
   }
 
   const sortTasks = (items: PlanTask[]): PlanTask[] =>
-    [...items].sort(
-      (left, right) => (orderById.get(left.id) ?? 0) - (orderById.get(right.id) ?? 0),
-    );
+    items.toSorted((left, right) => (orderById.get(left.id) ?? 0) - (orderById.get(right.id) ?? 0));
 
   const orderedTasks: Array<{ task: PlanTask; depth: number }> = [];
   const visitedTaskIds = new Set<string>();

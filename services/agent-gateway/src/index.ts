@@ -71,6 +71,7 @@ import { resourcesRoutes } from './routes/resources.js';
 import { streamRoutes } from './routes/stream-routes-plugin.js';
 import { usageRoutes } from './routes/usage.js';
 import { agentsRoutes } from './routes/agents.js';
+import { promptOverridesRoutes } from './routes/prompt-overrides.js';
 import { teamRoutes } from './routes/team.js';
 import { teamInboundRoutes } from './routes/team-inbound.js';
 import { teamInitRoutes } from './routes/team-init.js';
@@ -85,6 +86,8 @@ import { lspRoutes, lspManager } from './lsp/router.js';
 import { autoStartConfiguredChannels, channelRoutes } from './channels/router.js';
 import { channelManager } from './channels/manager.js';
 import { cronRoutes, cronScheduler } from './cron/router.js';
+import { dispatchScheduler } from './dispatch/dispatch-scheduler.js';
+import { registerDispatchRoutes } from './routes/dispatches.js';
 import { githubRoutes, restoreGitHubTriggers } from './github/router.js';
 import { workspaceRoutes } from './routes/workspace.js';
 import { desktopAutomationRoutes } from './routes/desktop-automation.js';
@@ -108,6 +111,7 @@ import { sessionImagesRoutes } from './routes/session-images.js';
 import { sessionTerminalsRoutes } from './routes/session-terminals.js';
 import { portsRoutes } from './routes/ports.js';
 import { mcpEventsRoutes } from './routes/mcp-events.js';
+import { cronEventsRoutes } from './routes/cron-events.js';
 import { mcpOAuthRoutes } from './routes/mcp-oauth.js';
 import { snapshotTreeRoutes } from './routes/snapshot-tree-routes.js';
 import { ensurePluginsLoaded } from './runtime/plugin-host.js';
@@ -251,6 +255,7 @@ await app.register(resourcesRoutes);
 await app.register(streamRoutes);
 await app.register(usageRoutes);
 await app.register(agentsRoutes);
+await app.register(promptOverridesRoutes);
 await app.register(teamRoutes);
 await app.register(teamInboundRoutes);
 await app.register(teamInitRoutes);
@@ -264,6 +269,7 @@ await app.register(webStaticPlugin, { spaFallback: errorHandlerControls });
 await app.register(lspRoutes);
 await app.register(channelRoutes);
 await app.register(cronRoutes);
+await app.register(registerDispatchRoutes);
 await app.register(githubRoutes);
 await app.register(workspaceRoutes);
 await app.register(desktopAutomationRoutes);
@@ -289,6 +295,7 @@ await app.register(sessionImagesRoutes);
 await app.register(sessionTerminalsRoutes);
 await app.register(portsRoutes);
 await app.register(mcpEventsRoutes);
+await app.register(cronEventsRoutes);
 await app.register(mcpOAuthRoutes);
 await app.register(snapshotTreeRoutes);
 
@@ -339,6 +346,11 @@ app.addHook('onClose', async () => {
     cronScheduler.stopAll();
   } catch (err) {
     app.log.error({ err }, 'cronScheduler.stopAll failed');
+  }
+  try {
+    await dispatchScheduler.stop();
+  } catch (err) {
+    app.log.error({ err }, 'dispatchScheduler.stop failed');
   }
   try {
     await backgroundScheduler.stopAll();
@@ -779,6 +791,15 @@ try {
   // 端口仍可能被占用一段时间。listen 之后注册可保证绑定成功后才进入监视循环。
   startParentProcessWatch();
   bootLogger.flush(bootContext, 200);
+
+  step = bootLogger.start('gateway.dispatch-recovery');
+  try {
+    dispatchScheduler.start();
+    bootLogger.succeed(step);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bootLogger.fail(step, message);
+  }
 
   // 260924：cron 持久化恢复——把 `cron_jobs` 装回调度器，并把上次进程残留的
   // running 执行标记为中断（网关重启中断）。与其它恢复扫描同批次、listen 之后执行。

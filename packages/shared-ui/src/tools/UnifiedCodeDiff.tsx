@@ -2,6 +2,7 @@ import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { common, createLowlight } from 'lowlight';
 import type { Root, RootContent } from 'hast';
 import { tokens } from '../tokens.js';
+import './UnifiedCodeDiff.css';
 
 const lowlight = createLowlight(common);
 
@@ -536,6 +537,86 @@ function parseHunkRange(text: string): { newCount: number; newStart: number } | 
 }
 
 /**
+ * 变更块前后保留的上下文行数（与 git diff 的默认 `-U3` 一致）。
+ *
+ * 太小会看不出改动落在哪个函数里；太大则失去「只看变更」的意义。
+ */
+const DEFAULT_CONTEXT_LINES = 3;
+
+/** 该行是否代表一次真实变更（新增或删除）。 */
+function isChangedRow(row: DiffRow): boolean {
+  return row.type === 'change' && (row.left.kind === 'removed' || row.right.kind === 'added');
+}
+
+/**
+ * 把快照 diff 折叠成「变更块 + 上下文」，大段未变更内容压成一条占位行。
+ *
+ * 为什么必须有这一层：`parseSnapshotDiffRows` 是逐行全量输出（快照没有 patch 自带的
+ * hunk 信息），于是渲染量随文件行数线性增长。此前只靠 `MAX_RENDERED_DIFF_ROWS`
+ * **从第 1 行截断**兜底，带来两个问题：
+ *
+ * 1. **变更可能被完全截掉**：改动落在第 700 行时，前 600 行未变更内容占满窗口，
+ *    用户看到的是「无改动」——比不渲染更误导。
+ * 2. **渲染量与文件大小绑死**：1359 行的文件只改 3 行，仍要渲染 1359 行。
+ *
+ * 折叠后渲染量只与「变更块数量 × 上下文」相关，与文件总行数解耦，变更永远可见。
+ *
+ * 保持原数组（不折叠）的两种情形：
+ * - 没有任何变更（纯上下文没有折叠意义）；
+ * - 折叠后行数没有减少（变更过于密集）。
+ */
+export function collapseSnapshotRows(
+  rows: readonly DiffRow[],
+  contextLines: number = DEFAULT_CONTEXT_LINES,
+): DiffRow[] {
+  if (rows.length === 0) return [];
+
+  const keep = new Array<boolean>(rows.length).fill(false);
+  let hasChange = false;
+  for (let index = 0; index < rows.length; index += 1) {
+    if (!isChangedRow(rows[index]!)) continue;
+    hasChange = true;
+    const start = Math.max(0, index - contextLines);
+    const end = Math.min(rows.length - 1, index + contextLines);
+    for (let cursor = start; cursor <= end; cursor += 1) keep[cursor] = true;
+  }
+  if (!hasChange) return [...rows];
+
+  const collapsed: DiffRow[] = [];
+  let index = 0;
+  while (index < rows.length) {
+    if (keep[index]) {
+      collapsed.push(rows[index]!);
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < rows.length && !keep[end]) end += 1;
+    collapsed.push(createCollapsedRow(end - index, index));
+    index = end;
+  }
+
+  // 折叠没有带来收益时保留原样：占位行本身也要占一行，不省反而更碎。
+  return collapsed.length < rows.length ? collapsed : [...rows];
+}
+
+/**
+ * 「⋯ N 行未变更」占位行。
+ *
+ * 复用 `hunk` 类型：unified 与 split 两种布局都已把它渲染成通栏分隔条，
+ * 无需再为它新增一种行类型和两套渲染分支。
+ */
+function createCollapsedRow(hiddenCount: number, offset: number): DiffRow {
+  const text = `⋯ ${hiddenCount} 行未变更`;
+  return {
+    key: `collapsed:${offset}:${hiddenCount}`,
+    type: 'hunk',
+    left: { kind: 'context', text },
+    right: { kind: 'context', text },
+  };
+}
+
+/**
  * 返回第一处真实变更行的索引（无变更时返回 -1）。
  * 变更行定义为 `type === 'change'` 且左右任一侧为 removed / added 的行。
  */
@@ -735,6 +816,11 @@ function DiffSideCell({
           fontSize: 12,
           lineHeight: 1.4,
           whiteSpace: 'pre',
+          /* 双栏时每个代码列只有约半栏宽，长行（深层 import、压缩代码、超长字符串）
+             会以 `pre` 的固有宽度撑出单元格并压到右栏上。这里必须显式裁切并让外层
+             滚动容器承接横向滚动，否则窄屏（768px）出现跨栏重叠。 */
+          overflow: 'hidden',
+          minWidth: 0,
           color: side.kind === 'empty' ? 'transparent' : tokens.color.text,
           fontFamily:
             'ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
@@ -760,6 +846,14 @@ export function UnifiedCodeDiff({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [showAllRows, setShowAllRows] = useState(false);
+  /**
+   * 是否放弃「只渲染变更区」的折叠。
+   *
+   * 折叠是默认路径（省渲染、保证变更可见），但「核对某处没被误删」是真实需求，
+   * 必须留出口。只在用户点击后按完整行数渲染；展开后仍受 `MAX_RENDERED_DIFF_ROWS`
+   * 约束，避免一次点击把几万行塞进 DOM。
+   */
+  const [expandCollapsed, setExpandCollapsed] = useState(false);
   // `auto` 模式的宽度判定结果。首帧按窄屏（unified）兜底：测量在 layout effect
   // 里同步完成，React 会在绘制前重渲染，用户看不到「先上下、再左右」的跳动。
   const [autoSplit, setAutoSplit] = useState(false);
@@ -803,15 +897,33 @@ export function UnifiedCodeDiff({
     const parsedRows = usingSnapshot
       ? parseSnapshotDiffRows(normalizedBefore, normalizedAfter)
       : parseUnifiedDiffRows(diffText ?? '');
+    // 快照对比没有 patch 自带的 hunk 信息，逐行全量输出。大文件下这既浪费渲染，
+    // 又会让 `MAX_RENDERED_DIFF_ROWS` 的「从第 1 行截断」把靠后的真实变更整个切掉。
+    // 折叠成「变更块 + 上下文」后，渲染量与文件大小解耦，变更永远可见。
+    //
+    // `expandCollapsed` 是用户的显式覆盖：折叠省的是默认路径，但「我要核对某处没被误删」
+    // 是真实需求，必须留出口。只在点击后按完整行数渲染，默认永不铺全文。
+    const shouldCollapse = usingSnapshot && !expandCollapsed;
+    const rows = shouldCollapse ? collapseSnapshotRows(parsedRows) : parsedRows;
     return {
-      rows: parsedRows,
+      rows,
+      /** 折叠前的完整行数，用于「显示全部」按钮文案与是否展示该按钮。 */
+      sourceRowCount: parsedRows.length,
+      collapsible: rows.length < parsedRows.length,
       summary: usingSnapshot
         ? summarizeSnapshotDiff(normalizedBefore, normalizedAfter)
         : summarizeUnifiedDiff(diffText ?? ''),
-      unifiedRows: resolvedViewMode === 'split' ? null : toUnifiedDisplayRows(parsedRows),
+      unifiedRows: resolvedViewMode === 'split' ? null : toUnifiedDisplayRows(rows),
     };
-  }, [diffText, normalizedAfter, normalizedBefore, usingSnapshot, resolvedViewMode]);
-  const { rows, summary, unifiedRows } = derived;
+  }, [
+    diffText,
+    expandCollapsed,
+    normalizedAfter,
+    normalizedBefore,
+    usingSnapshot,
+    resolvedViewMode,
+  ]);
+  const { collapsible, rows, sourceRowCount, summary, unifiedRows } = derived;
   // split 与 unified 共用同一份 hunk 文案（见 `computeHunkLabels`）：左右布局下
   // 分隔条也必须说「⋯ N 行未变更」，不能退回原始 `@@ … @@`。unified 分支的文案
   // 已由 `toUnifiedDisplayRows` 算好，这里只在 split 下额外计算，避免重复遍历。
@@ -1133,8 +1245,28 @@ export function UnifiedCodeDiff({
                   tokens={rowTokens.get(row.key)}
                 />
               ))}
+          {/*
+           * 折叠默认只画「变更块 + 上下文」。但「核对某处没被误删」是真实需求，
+           * 必须留出口——所以给一个显式入口，点了才按完整行数渲染。
+           * 展开后若仍超过 `MAX_RENDERED_DIFF_ROWS`，下面的按钮继续兜底。
+           */}
+          {collapsible && !expandCollapsed && (
+            <button
+              type="button"
+              className="diff-expand-button"
+              data-diff-expand-collapsed="true"
+              onClick={() => setExpandCollapsed(true)}
+            >
+              显示全部 {sourceRowCount} 行
+            </button>
+          )}
           {hiddenRowCount > 0 && (
-            <button type="button" data-diff-expand="true" onClick={() => setShowAllRows(true)}>
+            <button
+              type="button"
+              className="diff-expand-button"
+              data-diff-expand="true"
+              onClick={() => setShowAllRows(true)}
+            >
               ⋯ 还有 {hiddenRowCount} 行未展示（点击展开）
             </button>
           )}

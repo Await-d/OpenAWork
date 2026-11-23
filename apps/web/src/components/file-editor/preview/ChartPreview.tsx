@@ -12,6 +12,7 @@ import { PreviewToolbar, ZoomControls } from './PreviewToolbar.js';
 import { usePreviewZoom } from './use-preview-zoom.js';
 import './preview-surface.css';
 import { loadMermaidOnce } from '../../../utils/lazy/lazy-assets.js';
+import { copyTextToClipboard } from '../../layout/file-tree/file-tree-actions.js';
 
 type MermaidApi = (typeof import('mermaid'))['default'];
 
@@ -122,7 +123,7 @@ export const ChartPreview = memo(function ChartPreview({
   }, [mermaid, code, theme, showSource]);
 
   const handleCopy = useCallback(() => {
-    void navigator.clipboard?.writeText(code).catch(() => undefined);
+    void copyTextToClipboard(code).catch(() => undefined);
   }, [code]);
 
   const handleDownloadSvg = useCallback(() => {

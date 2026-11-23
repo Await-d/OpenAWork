@@ -128,6 +128,40 @@ describe('memory-job-store · 入队与领取', () => {
     expect(readJob(jobId).attempts).toBe(1);
   });
 
+  it('不同用户的相同 workspace 同周期任务独立入队并分别领取', () => {
+    const otherUserId = 'u-memory-jobs-other';
+    dbModule.sqliteRun("INSERT INTO users (id, email, password_hash) VALUES (?, ?, 'x')", [
+      otherUserId,
+      `${otherUserId}@example.com`,
+    ]);
+    const scope = { type: 'workspace' as const, id: 'shared-workspace' };
+
+    for (const userId of [USER_ID, otherUserId]) {
+      for (let repeat = 0; repeat < 2; repeat += 1) {
+        jobs.enqueueMemoryJob({
+          userId,
+          kind: 'daily_patrol',
+          scope,
+          periodKey: '2026-11-01',
+          dueAt: at(0).toISOString(),
+          now: at(0),
+        });
+      }
+    }
+
+    expect(countJobs()).toBe(2);
+    const first = jobs.claimDueMemoryJob({ owner: OWNER_A, now: at(1) });
+    const second = jobs.claimDueMemoryJob({ owner: OWNER_B, now: at(1) });
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(new Set([first?.userId, second?.userId])).toEqual(new Set([USER_ID, otherUserId]));
+    expect(first?.jobId).not.toBe(second?.jobId);
+    expect(first?.scope).toEqual(scope);
+    expect(second?.scope).toEqual(scope);
+    expect(jobs.claimDueMemoryJob({ owner: OWNER_A, now: at(1) })).toBeNull();
+  });
+
   it('未到期任务不可领取', () => {
     jobs.enqueueMemoryJob({
       userId: USER_ID,

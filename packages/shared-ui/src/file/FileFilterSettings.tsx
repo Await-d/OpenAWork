@@ -1,6 +1,7 @@
 import { color } from '../tokens.js';
 import type { CSSProperties, ChangeEvent, KeyboardEvent } from 'react';
 import { useState } from 'react';
+import { isImeComposingKeyboardEvent } from '../utils/ime-composition.js';
 
 export interface FileFilterSettingsProps {
   patterns: string[];
@@ -31,6 +32,7 @@ export function FileFilterSettings({ patterns, onAdd, onRemove, style }: FileFil
   }
 
   function handleKey(e: KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposingKeyboardEvent(e)) return;
     if (e.key === 'Enter') handleAdd();
   }
 

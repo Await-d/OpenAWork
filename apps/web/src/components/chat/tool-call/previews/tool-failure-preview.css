@@ -1,0 +1,175 @@
+/* ═══════════════════════════════════════════════════════════════════
+ * tool-call/previews/tool-failure-preview.css
+ *
+ * 结构化失败卡（`tool-failure-preview.tsx`）。
+ *
+ * 三条约束：
+ * 1. 只用既有 token（`--danger` / `--border-subtle` / `--fg-muted` / `--spacing-*`
+ *    / `--radius-*`），不写死色值——深浅主题都由 `--danger` 派生；
+ * 2. 长路径必须能换行：375px 宽度下不允许出现横向滚动；
+ * 3. 原文（`<pre>`）自带滚动与高度上限，几万字符的栈也不会把卡片撑破。
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.tool-failure-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--spacing-3);
+  border-radius: var(--radius-sm);
+  border: 0.5px solid color-mix(in oklch, var(--danger) 32%, var(--border-subtle));
+  background: color-mix(in oklch, var(--danger) 7%, transparent);
+  color: var(--fg-default);
+  overflow: hidden;
+}
+
+/* ── 标题行：分类标签 + 一句话结论 ── */
+
+.tool-failure-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--spacing-1) var(--spacing-2);
+  min-width: 0;
+}
+
+.tool-failure-badge {
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.tool-failure-label {
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+}
+
+.tool-failure-headline {
+  min-width: 0;
+  color: var(--fg-default);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* ── 字段区：label / value 两列，value 负责换行 ── */
+
+.tool-failure-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  /* 行距 8px：字段之间需要呼吸感，否则「路径 / 原因 / 建议」会糊成一团。 */
+  gap: var(--spacing-2) var(--spacing-3);
+  margin: 0;
+  min-width: 0;
+}
+
+/* `display: contents` 让 dt/dd 直接落进父网格，同时保留语义分组。 */
+.tool-failure-field {
+  display: contents;
+}
+
+.tool-failure-field dt {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.tool-failure-field dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--fg-default);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tool-failure-field dd code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  /* 路径没有空格可断：按字符断，避免长路径把卡片顶出横向滚动。 */
+  word-break: break-all;
+}
+
+/* 建议是「下一步怎么做」，比纯信息字段更值得一眼看到。 */
+.tool-failure-field[data-field='suggestion'] dd {
+  color: var(--fg-default);
+  font-weight: 500;
+}
+
+/* ── 底部：复制 + 原始输出 ── */
+
+.tool-failure-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.tool-failure-raw {
+  min-width: 0;
+}
+
+/* 展开后原文独占一行，避免和复制按钮挤在同一条基线。 */
+.tool-failure-raw[open] {
+  flex: 1 1 100%;
+}
+
+.tool-failure-raw > summary {
+  padding: var(--spacing-1) 0;
+  border-radius: var(--radius-xs);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tool-failure-raw > summary:hover {
+  color: var(--fg-default);
+}
+
+.tool-failure-raw > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tool-failure-raw-body {
+  margin: var(--spacing-1) 0 0;
+  padding: var(--spacing-2);
+  max-height: 220px;
+  overflow: auto;
+  border-radius: var(--radius-xs);
+  border: 0.5px solid var(--border-subtle);
+  background: color-mix(in oklch, var(--bg-overlay) 72%, transparent);
+  /* 用户是**主动**点开这段原文来读细节的，所以用正文级前景色；层次感交给
+     更小的字号与独立底色，不靠降低对比度。 */
+  color: var(--fg-default);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.55;
+  /* 保留原始换行，但不让长行顶出横向滚动（`overflow: auto` 只作兜底）。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 375px：字段区退成「标签在上、值在下」，两列在窄屏会把值压成一条竖线。 */
+@media (max-width: 480px) {
+  .tool-failure-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--spacing-1);
+  }
+
+  .tool-failure-field dt {
+    line-height: 1.4;
+  }
+}

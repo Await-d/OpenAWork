@@ -6,6 +6,7 @@ import React, {
   useState,
   type CSSProperties,
 } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { useWorkspaceReadIdentity } from '../../../stores/ui/uiState.js';
 import { BrowserConsolePanel } from './browser/BrowserConsolePanel.js';
 import type { BrowserInspectorPanelProps } from './browser/BrowserInspectorPanel.js';
@@ -44,6 +45,10 @@ import { resolveQualityPreset } from './browser/quality-presets.js';
 import { applyNavigatedUrl } from './browser/browser-tab-nav.js';
 import { collectRecentLinks, isStartPageUrl } from './browser/browser-start-page.js';
 import { BrowserStartPage } from './browser/BrowserStartPage.js';
+import {
+  consumeBrowserOpenRequest,
+  useBrowserOpenRequest,
+} from './browser/browser-open-request.js';
 import { BrowserShortcutHints } from './browser/browser-shortcut-hints.js';
 import { BrowserTabContextMenu } from './browser/BrowserTabContextMenu.js';
 import { BrowserToolbar } from './browser/BrowserToolbar.js';
@@ -217,6 +222,8 @@ export function BuiltInBrowser({
   // tabs 是否真已属于当前 workspacePath(避免在 ws-effect 还没替换 tabs 前就把旧
   // workspace 的 tabs 写到新 workspace 的 storage key)。
   const lastLoadedWorkspaceRef = useRef<string | null | undefined>(workspacePath);
+  const [loadedWorkspace, setLoadedWorkspace] = useState(workspacePath);
+  const openRequest = useBrowserOpenRequest(workspacePath);
 
   // 持久化(按 workspace key 写)。注意:workspacePath 变化时 ws-effect 会重新 load
   // 并 setTabs,这之前 tabs 还属于旧 workspace,绝不能在这一帧把旧 tabs 写到新 ws key,
@@ -247,6 +254,7 @@ export function BuiltInBrowser({
     if (lastLoadedWorkspaceRef.current === workspacePath) return;
     if (!isWorkspaceStorageReady(workspacePath)) return;
     lastLoadedWorkspaceRef.current = workspacePath;
+    setLoadedWorkspace(workspacePath);
     migrateDefaultWorkspaceTabs(workspacePath);
     const persisted = loadPersistedState(workspacePath);
     if (persisted) {
@@ -402,11 +410,15 @@ export function BuiltInBrowser({
   // 因此用 previewUrl 作为初始值,避免首次 effect 把恢复的 url 推回成 previewUrl。
   const appliedPreviewUrlRef = useRef<string | null>(previewUrl ?? null);
   useEffect(() => {
+    if (openRequest) {
+      appliedPreviewUrlRef.current = previewUrl ?? null;
+      return;
+    }
     if (previewUrl && previewUrl !== appliedPreviewUrlRef.current) {
       appliedPreviewUrlRef.current = previewUrl;
       navigateActiveTab(previewUrl);
     }
-  }, [previewUrl, navigateActiveTab]);
+  }, [previewUrl, navigateActiveTab, openRequest]);
 
   // 监听全局 "open url" 事件:其他模块(agent / dev-server detect / chat 命令)
   // 派发 window.dispatchEvent(new CustomEvent('openawork:browser:open-url',
@@ -899,6 +911,28 @@ export function BuiltInBrowser({
   const [devicePresetId, setDevicePresetId] = useState<string>(DEFAULT_DEVICE_PRESET_ID);
   const [zoom, setZoom] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    if (hidden || !workspacePath || loadedWorkspace !== workspacePath || !openRequest) return;
+    // 外部请求订阅可能先于同一点击中的提升 / 停靠状态更新提交。
+    // 等宿主交接完成再认领；旧实例卸载时取消，避免消费后尚未落盘就丢失新标签。
+    const timer = window.setTimeout(() => {
+      if (!consumeBrowserOpenRequest(workspacePath, openRequest)) return;
+      if (openRequest.mode === 'newTab') openNewTab(openRequest.url);
+      else {
+        navigateActiveTab(openRequest.url);
+        if (activeUrl === openRequest.url) setRefreshKey((value) => value + 1);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [
+    hidden,
+    workspacePath,
+    loadedWorkspace,
+    openRequest,
+    openNewTab,
+    navigateActiveTab,
+    activeUrl,
+  ]);
   // 工作区文件变化（Agent 写盘 / 用户保存）时，通过既有的 refreshKey 机制强制重载预览。
   useWorkspaceIndexRefresh({
     enabled: !hidden && Boolean(workspacePath),
@@ -990,6 +1024,9 @@ export function BuiltInBrowser({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (isImeComposingKeyboardEvent(e)) {
+        return;
+      }
       if (e.key === 'Enter') {
         e.preventDefault();
         handleNavigate();
@@ -1000,7 +1037,7 @@ export function BuiltInBrowser({
 
   const handleCopyUrl = useCallback(() => {
     if (!activeUrl) return;
-    void navigator.clipboard?.writeText(activeUrl).catch(() => undefined);
+    void copyTextToClipboard(activeUrl);
   }, [activeUrl]);
 
   const handleOpenExternal = useCallback(() => {

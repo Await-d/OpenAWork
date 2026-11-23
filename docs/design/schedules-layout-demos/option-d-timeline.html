@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>方案 D · 按执行时间分组的时间轴 · 定时任务布局候选</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <style>
+      .day-strip {
+        padding: 14px 16px 18px;
+      }
+
+      .day-strip-head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      .day-strip-head strong {
+        font-size: 12.5px;
+      }
+
+      .track {
+        position: relative;
+        height: 34px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-base);
+        border: 1px solid var(--border-default);
+        margin-bottom: 6px;
+      }
+
+      .track-hours {
+        display: flex;
+        height: 100%;
+      }
+
+      .track-hours span {
+        flex: 1;
+        border-right: 1px solid var(--border-subtle);
+        font-size: 9px;
+        color: var(--fg-subtle);
+        display: flex;
+        align-items: flex-end;
+        justify-content: flex-start;
+        padding: 0 0 3px 3px;
+      }
+
+      .track-hours span:last-child {
+        border-right: none;
+      }
+
+      .track-mark {
+        position: absolute;
+        top: 6px;
+        width: 3px;
+        height: 22px;
+        border-radius: 3px;
+        background: var(--accent);
+        transform: translateX(-1.5px);
+        cursor: default;
+      }
+
+      .track-mark[data-kind='every'] {
+        background: var(--aux);
+      }
+
+      .track-mark[data-kind='cron'] {
+        background: var(--contrast);
+      }
+
+      .track-now {
+        position: absolute;
+        top: -4px;
+        bottom: -4px;
+        width: 2px;
+        background: var(--complement);
+        transform: translateX(-1px);
+      }
+
+      .track-now::after {
+        content: '现在';
+        position: absolute;
+        top: -14px;
+        left: -10px;
+        font-size: 9.5px;
+        color: var(--complement);
+        white-space: nowrap;
+      }
+
+      .day-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .group-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 0 10px;
+      }
+
+      .group-head strong {
+        font-size: 12.5px;
+      }
+
+      .group-line {
+        flex: 1;
+        height: 1px;
+        background: var(--border-default);
+      }
+
+      .entry {
+        display: grid;
+        grid-template-columns: 74px 20px minmax(0, 1fr);
+        gap: 12px;
+      }
+
+      .entry-time {
+        text-align: right;
+        font-size: 13px;
+        font-weight: 650;
+        padding-top: 12px;
+        letter-spacing: -0.01em;
+      }
+
+      .entry-time small {
+        display: block;
+        font-size: 10.5px;
+        font-weight: 500;
+        color: var(--fg-subtle);
+      }
+
+      .entry-rail {
+        position: relative;
+        display: flex;
+        justify-content: center;
+      }
+
+      .entry-rail::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: var(--border-emphasis);
+      }
+
+      .entry:last-child .entry-rail::before {
+        bottom: 50%;
+      }
+
+      .entry-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-top: 16px;
+        background: var(--bg-base);
+        border: 2px solid var(--border-strong);
+        z-index: 1;
+      }
+
+      .entry-dot[data-kind='cron'] {
+        border-color: var(--contrast);
+      }
+
+      .entry-dot[data-kind='every'] {
+        border-color: var(--aux);
+      }
+
+      .entry-dot[data-kind='at'] {
+        border-color: var(--accent);
+      }
+
+      .entry-card {
+        margin-bottom: 10px;
+        padding: 11px 13px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .entry-card[data-disabled='true'] {
+        opacity: 0.72;
+      }
+
+      .entry-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .entry-name {
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .entry-prompt {
+        font-size: 11.5px;
+        color: var(--fg-muted);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .entry-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .entry-history {
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        border-top: 1px dashed var(--border-emphasis);
+        padding-top: 9px;
+      }
+
+      .entry-card[data-history='true'] .entry-history {
+        display: flex;
+      }
+
+      .tl-entry {
+        border-left: 2px solid var(--border-emphasis);
+        padding-left: 10px;
+        font-size: 11.5px;
+      }
+
+      .tl-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .tl-output,
+      .tl-error {
+        margin-top: 4px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .tl-output {
+        color: var(--fg-default);
+        background: var(--bg-base);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-sm);
+        padding: 7px 9px;
+        max-height: 140px;
+        overflow: auto;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 68px;
+        transform: translateX(-50%) translateY(8px);
+        background: var(--bg-elevated);
+        border: 1px solid var(--accent-border);
+        color: var(--fg-strong);
+        border-radius: 999px;
+        padding: 7px 14px;
+        font-size: 12px;
+        box-shadow: var(--shadow-md);
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 160ms ease,
+          transform 160ms ease;
+        z-index: 60;
+      }
+
+      .toast[data-show='true'] {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      @media (max-width: 700px) {
+        .entry {
+          grid-template-columns: 56px 16px minmax(0, 1fr);
+          gap: 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-root">
+      <header class="page-header">
+        <span class="page-title">定时任务</span>
+        <span class="page-subtitle">按「下一次执行时间」排布，先看什么时候跑，再看任务本身</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-accent" data-action="新建任务">+ 添加任务</button>
+      </header>
+
+      <main class="page-content">
+        <div class="page-inner">
+          <section class="card day-strip">
+            <div class="day-strip-head">
+              <strong>今天的执行分布</strong>
+              <span class="muted" style="font-size: 11.5px" id="strip-note"></span>
+            </div>
+            <div class="track" id="track">
+              <div class="track-hours" id="track-hours"></div>
+            </div>
+            <div class="muted" style="font-size: 11px">
+              圆点颜色对应对调度类型：<span style="color: var(--contrast)">cron</span> /
+              <span style="color: var(--aux)">间隔</span> /
+              <span style="color: var(--accent)">单次</span>
+            </div>
+          </section>
+
+          <div id="groups"></div>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="./demo-core.js"></script>
+    <script>
+      (function () {
+        var sd = window.SD;
+        var state = { openHistory: {} };
+
+        function startOfDay(date) {
+          return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        }
+
+        function dayDiff(iso) {
+          return Math.round((startOfDay(new Date(iso)) - startOfDay(sd.now)) / 86400000);
+        }
+
+        function renderStrip() {
+          var hours = '';
+          for (var hour = 0; hour < 24; hour += 1) {
+            hours += '<span>' + (hour % 3 === 0 ? hour + '时' : '') + '</span>';
+          }
+          document.getElementById('track-hours').innerHTML = hours;
+
+          var track = document.getElementById('track');
+          var marks = sd.jobs.filter(function (job) {
+            if (job.status === 'disabled' || !job.nextFireAt) return false;
+            return new Date(job.nextFireAt) >= sd.now && dayDiff(job.nextFireAt) === 0;
+          });
+          marks.forEach(function (job) {
+            var date = new Date(job.nextFireAt);
+            var ratio = (date.getHours() * 60 + date.getMinutes()) / 1440;
+            var mark = document.createElement('div');
+            mark.className = 'track-mark';
+            mark.dataset.kind = job.kind;
+            mark.style.left = ratio * 100 + '%';
+            mark.title = sd.clockTime(job.nextFireAt) + ' ' + job.name;
+            track.appendChild(mark);
+          });
+
+          var nowRatio = (sd.now.getHours() * 60 + sd.now.getMinutes()) / 1440;
+          var now = document.createElement('div');
+          now.className = 'track-now';
+          now.style.left = nowRatio * 100 + '%';
+          track.appendChild(now);
+
+          document.getElementById('strip-note').textContent =
+            '今天还有 ' + marks.length + ' 次执行；当前时间 ' + sd.clockTime(sd.now.toISOString());
+        }
+
+        function groupOf(job) {
+          if (job.status === 'disabled' || !job.nextFireAt) return 'pending';
+          var diff = dayDiff(job.nextFireAt);
+          if (diff <= 0) return 'today';
+          if (diff === 1) return 'tomorrow';
+          if (diff < 7) return 'week';
+          return 'later';
+        }
+
+        var GROUP_META = {
+          today: { title: '今天', note: '11 月 2 日' },
+          tomorrow: { title: '明天', note: '11 月 3 日' },
+          week: { title: '本周稍后', note: '7 天内' },
+          later: { title: '更晚', note: '7 天及以后' },
+          pending: { title: '未排期 / 已停用', note: '启用后重新排期' },
+        };
+
+        function historyBlock(job) {
+          var entries = sd.historyFor(job.id);
+          if (entries.length === 0) {
+            return '<div class="muted">暂无执行记录</div>';
+          }
+          return entries
+            .map(function (entry) {
+              return (
+                '<div class="tl-entry"><div class="tl-line">' +
+                '<span class="status ' +
+                sd.resultClass(entry.status) +
+                '">' +
+                sd.resultLabel(entry.status) +
+                '</span>' +
+                '<span class="muted">' +
+                sd.absTime(entry.startedAt) +
+                ' · ' +
+                sd.duration(entry.durationMs) +
+                '</span>' +
+                (entry.sessionId
+                  ? '<button type="button" class="btn btn-ghost" data-action="查看执行现场 ' +
+                    entry.sessionId +
+                    '">查看执行现场</button>'
+                  : '') +
+                '</div>' +
+                (entry.error
+                  ? '<div class="tl-error" style="color:' +
+                    (entry.status === 'skipped' ? 'var(--fg-muted)' : 'var(--complement)') +
+                    '">' +
+                    sd.escapeHtml(entry.error) +
+                    '</div>'
+                  : '') +
+                (entry.outputPreview
+                  ? '<div class="tl-output">' + sd.escapeHtml(entry.outputPreview) + '</div>'
+                  : '') +
+                '</div>'
+              );
+            })
+            .join('');
+        }
+
+        function renderGroups() {
+          var buckets = { today: [], tomorrow: [], week: [], later: [], pending: [] };
+          sd.jobs.forEach(function (job) {
+            buckets[groupOf(job)].push(job);
+          });
+          Object.keys(buckets).forEach(function (key) {
+            buckets[key].sort(function (a, b) {
+              if (key === 'pending') return a.name.localeCompare(b.name, 'zh-Hans-CN');
+              return new Date(a.nextFireAt) - new Date(b.nextFireAt);
+            });
+          });
+
+          var html = Object.keys(GROUP_META)
+            .filter(function (key) {
+              return buckets[key].length > 0;
+            })
+            .map(function (key) {
+              var jobs = buckets[key];
+              var meta = GROUP_META[key];
+              return (
+                '<section class="day-group">' +
+                '<div class="group-head"><strong>' +
+                meta.title +
+                '</strong><span class="muted" style="font-size:11px">' +
+                meta.note +
+                ' · ' +
+                jobs.length +
+                ' 个任务</span><span class="group-line"></span></div>' +
+                jobs
+                  .map(function (job) {
+                    var isDisabled = job.status === 'disabled' || !job.nextFireAt;
+                    return (
+                      '<div class="entry">' +
+                      '<div class="entry-time">' +
+                      (isDisabled ? '<span class="muted">—</span>' : sd.clockTime(job.nextFireAt)) +
+                      '<small>' +
+                      (isDisabled ? '未排期' : sd.relative(job.nextFireAt)) +
+                      '</small></div>' +
+                      '<div class="entry-rail"><span class="entry-dot" data-kind="' +
+                      job.kind +
+                      '"></span></div>' +
+                      '<div class="card entry-card" data-disabled="' +
+                      isDisabled +
+                      '" data-history="' +
+                      Boolean(state.openHistory[job.id]) +
+                      '">' +
+                      '<div class="entry-top"><span class="entry-name">' +
+                      sd.escapeHtml(job.name) +
+                      '</span>' +
+                      sd.kindTag(job) +
+                      '<span class="mono muted" style="font-size:11px">' +
+                      sd.escapeHtml(job.expr) +
+                      '</span>' +
+                      sd.statusBadge(job) +
+                      '</div>' +
+                      '<div class="entry-prompt">' +
+                      sd.escapeHtml(job.prompt) +
+                      '</div>' +
+                      '<div class="entry-actions">' +
+                      '<button type="button" class="btn btn-accent" data-action="立即运行：' +
+                      sd.escapeHtml(job.name) +
+                      '"' +
+                      (job.running ? ' disabled' : '') +
+                      '>' +
+                      (job.running ? '运行中…' : '立即运行') +
+                      '</button>' +
+                      '<button type="button" class="btn ' +
+                      (job.status === 'enabled' ? 'btn-danger' : 'btn-success') +
+                      '" data-action="' +
+                      (job.status === 'enabled' ? '停用' : '启用') +
+                      '：' +
+                      sd.escapeHtml(job.name) +
+                      '">' +
+                      (job.status === 'enabled' ? '停用' : '启用') +
+                      '</button>' +
+                      '<button type="button" class="btn" data-toggle-history="' +
+                      job.id +
+                      '">执行历史</button>' +
+                      '<span class="spacer"></span>' +
+                      '<span class="muted" style="font-size:11px">' +
+                      sd.deliveryLabel(job.delivery) +
+                      ' · 已运行 ' +
+                      job.fireCount +
+                      ' 次</span>' +
+                      '<button type="button" class="btn btn-ghost btn-icon" title="编辑" data-action="编辑：' +
+                      sd.escapeHtml(job.name) +
+                      '">✎</button>' +
+                      '<button type="button" class="btn btn-ghost btn-icon" title="删除" data-action="删除：' +
+                      sd.escapeHtml(job.name) +
+                      '">✕</button>' +
+                      '</div>' +
+                      (job.lastResult === 'failed'
+                        ? '<div class="tl-error" style="color:var(--complement)">最近一次失败：' +
+                          sd.escapeHtml(job.lastError || '未记录失败原因') +
+                          '</div>'
+                        : '') +
+                      '<div class="entry-history">' +
+                      historyBlock(job) +
+                      '</div>' +
+                      '</div>' +
+                      '</div>'
+                    );
+                  })
+                  .join('') +
+                '</section>'
+              );
+            })
+            .join('');
+
+          document.getElementById('groups').innerHTML = html;
+        }
+
+        var toastTimer = null;
+        function toast(text) {
+          var node = document.getElementById('toast');
+          node.textContent = text;
+          node.dataset.show = 'true';
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(function () {
+            node.dataset.show = 'false';
+          }, 1600);
+        }
+
+        document.getElementById('groups').addEventListener('click', function (event) {
+          var toggle = event.target.closest('[data-toggle-history]');
+          if (toggle) {
+            var id = toggle.dataset.toggleHistory;
+            state.openHistory[id] = !state.openHistory[id];
+            renderGroups();
+          }
+        });
+
+        document.body.addEventListener('click', function (event) {
+          var trigger = event.target.closest('[data-action]');
+          if (trigger) toast(trigger.dataset.action);
+        });
+
+        renderStrip();
+        renderGroups();
+        sd.mountShell('d');
+      })();
+    </script>
+  </body>
+</html>

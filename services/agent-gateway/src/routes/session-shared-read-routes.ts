@@ -10,7 +10,10 @@ import {
   type PermissionRiskLevel,
 } from '../permission/permission-contract.js';
 import type { JwtPayload } from '../infra/auth.js';
-import { appendPermissionDecisionLog } from '../session/permission-decision-log-store.js';
+import {
+  appendPermissionDecisionLog,
+  PERMISSION_DECISION_REASONS,
+} from '../session/permission-decision-log-store.js';
 import { requireAuth } from '../infra/auth.js';
 import { sqliteAll, sqliteGet, sqliteRun } from '../infra/db.js';
 import { createPermissionRepliedEvent } from '../session/session-permission-events.js';
@@ -60,7 +63,10 @@ import {
 import { logTeamAudit } from '../team/team-audit-store.js';
 import { toPublicSessionResponse } from './session-route-helpers.js';
 import { mergeRuntimeSafeSessionMessages } from '../session/runtime-safe-message-merge.js';
-import { markPermissionNotificationsActedByRequestIds } from '../session/notification-store.js';
+import {
+  markPermissionNotificationsActedByRequestIds,
+  markQuestionNotificationsActedByRequestIds,
+} from '../session/notification-store.js';
 
 interface SessionRow {
   created_at: string;
@@ -169,72 +175,7 @@ function mapQuestionRequestRow(row: QuestionRequestRow) {
 function parseQuestionResumePayload(
   payloadJson: string | null,
 ): Omit<ApprovedPermissionResumePayload, 'toolName'> | null {
-  if (!payloadJson) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
-    const clientRequestId =
-      typeof parsed['clientRequestId'] === 'string' ? parsed['clientRequestId'] : null;
-    const toolCallId = typeof parsed['toolCallId'] === 'string' ? parsed['toolCallId'] : null;
-    const nextRound = typeof parsed['nextRound'] === 'number' ? parsed['nextRound'] : null;
-    const rawInput =
-      parsed['rawInput'] && typeof parsed['rawInput'] === 'object'
-        ? (parsed['rawInput'] as Record<string, unknown>)
-        : null;
-    const requestDataCandidate =
-      parsed['requestData'] && typeof parsed['requestData'] === 'object'
-        ? (parsed['requestData'] as Record<string, unknown>)
-        : null;
-
-    if (
-      !clientRequestId ||
-      !toolCallId ||
-      nextRound === null ||
-      !rawInput ||
-      !requestDataCandidate
-    ) {
-      return null;
-    }
-
-    return {
-      clientRequestId,
-      nextRound,
-      toolCallId,
-      rawInput,
-      requestData: requestDataCandidate,
-      ...(parsed['observability'] && typeof parsed['observability'] === 'object'
-        ? {
-            observability: {
-              presentedToolName:
-                typeof (parsed['observability'] as Record<string, unknown>)['presentedToolName'] ===
-                'string'
-                  ? ((parsed['observability'] as Record<string, unknown>)[
-                      'presentedToolName'
-                    ] as string)
-                  : 'unknown',
-              canonicalToolName:
-                typeof (parsed['observability'] as Record<string, unknown>)['canonicalToolName'] ===
-                'string'
-                  ? ((parsed['observability'] as Record<string, unknown>)[
-                      'canonicalToolName'
-                    ] as string)
-                  : 'unknown',
-              adapterVersion:
-                typeof (parsed['observability'] as Record<string, unknown>)['adapterVersion'] ===
-                'string'
-                  ? ((parsed['observability'] as Record<string, unknown>)[
-                      'adapterVersion'
-                    ] as string)
-                  : '1.0.0',
-            },
-          }
-        : {}),
-    };
-  } catch {
-    return null;
-  }
+  return parseApprovedPermissionResumePayload(payloadJson);
 }
 
 function updateSessionPlanModeForExitDecision(input: {
@@ -621,6 +562,10 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         toolName: permissionRequest.tool_name,
         scope: permissionRequest.scope,
         decision: body.decision,
+        reason:
+          body.decision === 'reject'
+            ? PERMISSION_DECISION_REASONS.USER_REJECTED
+            : PERMISSION_DECISION_REASONS.USER_APPROVED,
       });
 
       const permissionCategory = resolvePermissionReplyCategory(permissionRequest.tool_name);
@@ -788,6 +733,12 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
       );
       if (!questionRequest) {
         if (body.status === 'dismissed') {
+          // 请求行已不在：仍按 requestId 收口会话 owner 的通知，避免已处理的待办赖在铃铛里。
+          markQuestionNotificationsActedByRequestIds({
+            requestIds: [body.requestId],
+            sessionId,
+            userId: sharedAccess.ownerUserId,
+          });
           publishSessionRunEvent(
             sessionId,
             createQuestionRepliedEvent({
@@ -813,6 +764,12 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
         return reply.status(404).send({ error: '目标提问请求不存在。' });
       }
       if (questionRequest.status !== 'pending') {
+        // 幂等收口：重复提交时仍把会话 owner 的通知标为已处理。
+        markQuestionNotificationsActedByRequestIds({
+          requestIds: [body.requestId],
+          sessionId,
+          userId: sharedAccess.ownerUserId,
+        });
         publishSessionRunEvent(
           sessionId,
           createQuestionRepliedEvent({
@@ -846,6 +803,14 @@ export async function registerSessionSharedReadRoutes(app: FastifyInstance): Pro
           sessionId,
         ],
       );
+
+      // 共享会话里回答 / 忽略提问同样要收口会话 owner 的通知：通知属于 owner，
+      // 但处理动作发生在协作者身上，不在这里收口就永远等 TTL。
+      markQuestionNotificationsActedByRequestIds({
+        requestIds: [body.requestId],
+        sessionId,
+        userId: sharedAccess.ownerUserId,
+      });
 
       const requestClientRequestId = (() => {
         if (!questionRequest.request_payload_json) {

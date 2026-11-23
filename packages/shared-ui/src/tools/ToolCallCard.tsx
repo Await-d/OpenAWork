@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { tokens } from '../tokens.js';
+import { copyTextToClipboard } from '../utils/copy-text-to-clipboard.js';
 import type { AlwaysScopeLevel } from '../permissions/PermissionPrompt.js';
 import type { ToolDiffFileView } from './ToolDiffCollection.js';
 import { ToolDiffCollection } from './ToolDiffCollection.js';
 import { parseJsonObjectTolerant } from './truncated-json.js';
+import { isIncompleteFileSnapshot, readFileSnapshot } from './file-change-result.js';
 import { UnifiedCodeDiff, summarizeSnapshotDiff, summarizeUnifiedDiff } from './UnifiedCodeDiff.js';
 import {
   Chevron,
@@ -572,8 +574,9 @@ function resolveDiffView(
     // 摘要里如实标注，避免把截断结果当成完整 diff。
     const tolerant = parseJsonObjectTolerant(trimmed);
     if (tolerant) {
+      if (tolerant.truncated) return undefined;
       const view = resolveDiffView(tolerant.value, pathHint);
-      return view && tolerant.truncated ? markTruncatedDiffView(view) : view;
+      return view;
     }
     // 数组形态保持严格解析：截断修复只覆盖对象信封，bash/grep 的裸文本
     // 依旧不会进入 JSON.parse（`{` 前缀是唯一入口）。
@@ -592,6 +595,8 @@ function resolveDiffView(
   if (!record) {
     return undefined;
   }
+
+  if (isIncompleteFileSnapshot(record)) return undefined;
 
   const diffText = readNonEmptyString(record['diff']);
 
@@ -681,11 +686,9 @@ function resolveDiffView(
     }
   }
 
-  const beforeText = readNonEmptyString(record['before']) ?? '';
-  const afterText = readNonEmptyString(record['after']) ?? '';
-  if (beforeText.length === 0 && afterText.length === 0) {
-    return undefined;
-  }
+  const snapshot = readFileSnapshot(record);
+  if (!snapshot) return undefined;
+  const { before: beforeText, after: afterText } = snapshot;
 
   const summary = summarizeSnapshotDiff(beforeText, afterText);
   return {
@@ -694,21 +697,6 @@ function resolveDiffView(
     filePath,
     summary: `${filePath ? `${trimFileLikePath(filePath)} · ` : ''}+${summary.added} / -${summary.removed}`,
   };
-}
-
-/**
- * 标记「这份 diff 来自修复过的输出」：摘要追加后缀并把 `truncated` 透传给消费者。
- *
- * 文案用「可能不完整」而不是「已截断」——修复只能判定「严格解析失败」，无法区分
- * 真截断与源文本本身格式异常（如尾逗号），过强的断言会变成另一种误导。
- *
- * 只标注最外层返回值——多文件分支内部用子项 `summary` 里的 `+N / -M` 聚合统计，
- * 提前污染子项会把总数算错。
- */
-function markTruncatedDiffView(
-  view: NonNullable<ToolCallCardDisplayData['diffView']>,
-): NonNullable<ToolCallCardDisplayData['diffView']> {
-  return { ...view, summary: `${view.summary} · 输出可能不完整`, truncated: true };
 }
 
 /**
@@ -873,13 +861,7 @@ export function ToolCallCard({
   }, [copyState]);
 
   const handleCopy = () => {
-    if (!navigator.clipboard) {
-      setCopyState('failed');
-      return;
-    }
-
-    const copyRequest = navigator.clipboard.writeText(copyText);
-    void copyRequest
+    void copyTextToClipboard(copyText)
       .then(() => {
         setCopyState('copied');
       })

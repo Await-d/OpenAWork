@@ -100,6 +100,11 @@ export const PRELOADABLE_ROUTE_MODULES = {
     () => import('../pages/misc/SchedulesPage.js'),
     '计划任务',
   ),
+  dispatches: createPreloadableRouteModule(
+    'dispatches',
+    () => import('../pages/dispatches/DispatchesPage.js'),
+    '个人派工',
+  ),
   resources: createPreloadableRouteModule(
     'resources',
     () => import('../pages/resources/ResourcesPage.js'),

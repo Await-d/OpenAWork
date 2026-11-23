@@ -18,6 +18,7 @@ export interface ArtifactManagerOptions {
 
 export class ArtifactManagerImpl implements ArtifactManager {
   private store = new Map<string, RunArtifact>();
+  private indexRevision = 0;
   private readonly indexFilePath?: string;
   private readonly platformAdapter?: ArtifactPlatformAdapter;
 
@@ -34,6 +35,7 @@ export class ArtifactManagerImpl implements ArtifactManager {
   add(artifact: Omit<RunArtifact, 'id' | 'createdAt'>): RunArtifact {
     const full: RunArtifact = { ...artifact, id: randomUUID(), createdAt: Date.now() };
     this.store.set(full.id, full);
+    this.indexRevision += 1;
     this.persistArtifacts();
     return full;
   }
@@ -63,6 +65,7 @@ export class ArtifactManagerImpl implements ArtifactManager {
     if (removed === 0) {
       return 0;
     }
+    this.indexRevision += 1;
     // 索引是唯一真相源，且一次删除只落盘一次——批量清理（队列清空 / 会话删除）逐个
     // 调 `remove` 会退化成 O(n²) 的全量重写。落盘失败会抛出，交由调用方决定重试策略；
     // 此时内存里已删、磁盘未更新，重启后会「复活」，因此不应吞掉这个错误。
@@ -85,6 +88,43 @@ export class ArtifactManagerImpl implements ArtifactManager {
       }
     }
     return removed;
+  }
+
+  /** 后台清理已删除会话。文件先删，索引失败时仍能从原索引找到路径并重试。 */
+  async removeForDeletedSessions(sessionIds: ReadonlySet<string>): Promise<void> {
+    const removed = new Set<string>();
+    for (const artifact of this.store.values()) {
+      if (sessionIds.has(artifact.sessionId)) removed.add(artifact.id);
+    }
+    if (removed.size === 0) return;
+
+    for (const id of removed) {
+      const path = this.store.get(id)?.path;
+      if (path) await fs.rm(path, { force: true });
+    }
+
+    const commit = () => {
+      for (const id of removed) this.store.delete(id);
+      this.indexRevision += 1;
+    };
+    if (!this.indexFilePath) {
+      commit();
+      return;
+    }
+
+    const indexFilePath = this.indexFilePath;
+    const tempPath = `${indexFilePath}.tmp.${randomUUID()}`;
+    try {
+      const revision = this.indexRevision;
+      const retained = [...this.store.values()].filter((artifact) => !removed.has(artifact.id));
+      await fs.writeFile(tempPath, JSON.stringify(retained, null, 2), 'utf-8');
+      // add/remove 仍须同步返回。若等待写入时索引改变，丢弃旧快照并由清理队列重试。
+      if (revision !== this.indexRevision) throw new Error('产物索引已更新，请重试会话清理。');
+      renameSync(tempPath, indexFilePath);
+      commit();
+    } finally {
+      await fs.rm(tempPath, { force: true });
+    }
   }
 
   async open(artifactId: string): Promise<void> {

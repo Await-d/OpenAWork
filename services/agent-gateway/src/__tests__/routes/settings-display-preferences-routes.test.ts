@@ -49,6 +49,7 @@ const FULL_PAYLOAD = {
   showRequestIndex: false,
   showToolCount: true,
   showMetaLine: true,
+  metaLineScope: 'all',
   messageLayout: 'split',
   showReasoningBlock: true,
   reasoningExpandedByDefault: true,

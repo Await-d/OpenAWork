@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>方案 A · 双栏详情（Master-Detail） · 定时任务布局候选</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <style>
+      .split {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+
+      /* ── 左：任务列表 ── */
+      .list-pane {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        position: sticky;
+        top: 0;
+      }
+
+      .list-tools {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+      }
+
+      .list-tools input[type='search'] {
+        width: 100%;
+      }
+
+      .filter-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .job-list {
+        display: flex;
+        flex-direction: column;
+        padding: 6px;
+        gap: 2px;
+        max-height: calc(100vh - 260px);
+        overflow: auto;
+      }
+
+      .job-item {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        padding: 9px 10px;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        font-family: inherit;
+        position: relative;
+      }
+
+      .job-item:hover {
+        background: var(--bg-hover);
+      }
+
+      .job-item[aria-selected='true'] {
+        background: var(--accent-subtle);
+        border-color: var(--accent-border);
+      }
+
+      .job-item[aria-selected='true']::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 8px;
+        bottom: 8px;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--accent);
+      }
+
+      .job-item-name {
+        font-size: 12.5px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .job-item-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 2px;
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+
+      .job-item-next {
+        font-size: 11px;
+        color: var(--fg-subtle);
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      .avatar {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        background: var(--bg-raised);
+        border: 1px solid var(--border-emphasis);
+        color: var(--fg-muted);
+        grid-row: span 2;
+        align-self: start;
+      }
+
+      /* ── 右：详情 ── */
+      .detail {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      .detail-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 16px;
+      }
+
+      .detail-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .detail-title h2 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      .detail-sub {
+        margin-top: 4px;
+        font-size: 11.5px;
+        color: var(--fg-muted);
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .actions {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1px;
+        background: var(--border-default);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        border: 1px solid var(--border-default);
+      }
+
+      .fact {
+        background: var(--bg-overlay);
+        padding: 12px 14px;
+      }
+
+      .fact-label {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--fg-subtle);
+        margin-bottom: 5px;
+      }
+
+      .fact-value {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .fact-note {
+        margin-top: 3px;
+        font-size: 10.5px;
+        color: var(--fg-muted);
+      }
+
+      .block {
+        padding: 14px 16px;
+      }
+
+      .block-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .block-title {
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .prompt-text {
+        font-size: 12.5px;
+        line-height: 1.65;
+        color: var(--fg-default);
+        background: var(--bg-base);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-sm);
+        padding: 10px 12px;
+      }
+
+      /* ── 历史时间线 ── */
+      .timeline {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .tl-item {
+        display: grid;
+        grid-template-columns: 96px 18px minmax(0, 1fr);
+        gap: 10px;
+        padding-bottom: 14px;
+      }
+
+      .tl-item:last-child {
+        padding-bottom: 0;
+      }
+
+      .tl-time {
+        font-size: 11px;
+        color: var(--fg-muted);
+        text-align: right;
+        padding-top: 1px;
+      }
+
+      .tl-time small {
+        display: block;
+        color: var(--fg-subtle);
+        font-size: 10px;
+      }
+
+      .tl-rail {
+        position: relative;
+        display: flex;
+        justify-content: center;
+      }
+
+      .tl-rail::before {
+        content: '';
+        position: absolute;
+        top: 12px;
+        bottom: -14px;
+        width: 1px;
+        background: var(--border-emphasis);
+      }
+
+      .tl-item:last-child .tl-rail::before {
+        display: none;
+      }
+
+      .tl-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        margin-top: 4px;
+        border: 2px solid var(--bg-overlay);
+        z-index: 1;
+      }
+
+      .tl-body {
+        min-width: 0;
+        padding-top: 1px;
+      }
+
+      .tl-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .tl-output {
+        margin-top: 6px;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--fg-default);
+        background: var(--bg-base);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-sm);
+        padding: 8px 10px;
+        max-height: 140px;
+        overflow: auto;
+      }
+
+      .tl-error {
+        margin-top: 5px;
+        font-size: 11.5px;
+        word-break: break-word;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 68px;
+        transform: translateX(-50%) translateY(8px);
+        background: var(--bg-elevated);
+        border: 1px solid var(--accent-border);
+        color: var(--fg-strong);
+        border-radius: 999px;
+        padding: 7px 14px;
+        font-size: 12px;
+        box-shadow: var(--shadow-md);
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 160ms ease,
+          transform 160ms ease;
+        z-index: 60;
+      }
+
+      .toast[data-show='true'] {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      @media (max-width: 980px) {
+        .split {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .list-pane {
+          position: static;
+        }
+
+        .job-list {
+          max-height: 320px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-root">
+      <header class="page-header">
+        <span class="page-title">定时任务</span>
+        <span class="page-subtitle">左侧选任务，右侧看调度与执行历史</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-accent" data-action="新建任务">+ 添加任务</button>
+      </header>
+
+      <main class="page-content">
+        <div class="page-inner">
+          <div class="banner banner-danger" id="fail-banner" hidden></div>
+
+          <div class="split">
+            <aside class="list-pane">
+              <div class="card list-tools">
+                <input type="search" id="job-search" placeholder="搜索任务名 / 提示词…" />
+                <div class="filter-row" id="filters">
+                  <button type="button" class="chip" data-filter="all" aria-pressed="true">
+                    全部 <span class="subtle" id="count-all"></span>
+                  </button>
+                  <button type="button" class="chip" data-filter="enabled" aria-pressed="false">
+                    已启用
+                  </button>
+                  <button type="button" class="chip" data-filter="disabled" aria-pressed="false">
+                    已停用
+                  </button>
+                  <button type="button" class="chip" data-filter="failed" aria-pressed="false">
+                    最近失败
+                  </button>
+                </div>
+              </div>
+              <div
+                class="card job-list"
+                id="job-list"
+                role="listbox"
+                aria-label="定时任务列表"
+              ></div>
+            </aside>
+
+            <section class="detail" id="detail"></section>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="./demo-core.js"></script>
+    <script>
+      (function () {
+        var sd = window.SD;
+        var state = { selectedId: sd.jobs[0].id, filter: 'all', keyword: '' };
+
+        function matches(job) {
+          if (state.filter === 'enabled' && job.status !== 'enabled') return false;
+          if (state.filter === 'disabled' && job.status !== 'disabled') return false;
+          if (state.filter === 'failed' && job.lastResult !== 'failed') return false;
+          if (!state.keyword) return true;
+          var hay = (job.name + ' ' + job.prompt + ' ' + job.expr).toLowerCase();
+          return hay.indexOf(state.keyword.toLowerCase()) !== -1;
+        }
+
+        function avatarText(job) {
+          if (job.running) return '▶';
+          if (job.status === 'disabled') return '⏸';
+          return job.kind === 'at' ? '◔' : job.kind === 'every' ? '↻' : '⏱';
+        }
+
+        function renderList() {
+          var list = sd.jobs.filter(matches);
+          document.getElementById('count-all').textContent = '(' + sd.jobs.length + ')';
+          var host = document.getElementById('job-list');
+          if (list.length === 0) {
+            host.innerHTML = '<div class="empty">没有匹配的任务</div>';
+            return;
+          }
+          if (
+            !list.some(function (job) {
+              return job.id === state.selectedId;
+            })
+          ) {
+            state.selectedId = list[0].id;
+          }
+          host.innerHTML = list
+            .map(function (job) {
+              var nextText = job.status === 'disabled' ? '已停用' : sd.relative(job.nextFireAt);
+              var resultDot =
+                job.lastResult === 'failed'
+                  ? 'status-running'
+                  : job.lastResult === 'skipped'
+                    ? 'status-disabled'
+                    : 'status-enabled';
+              return (
+                '<button type="button" class="job-item" role="option" data-id="' +
+                job.id +
+                '" aria-selected="' +
+                (job.id === state.selectedId) +
+                '">' +
+                '<span class="avatar">' +
+                avatarText(job) +
+                '</span>' +
+                '<span style="min-width:0">' +
+                '<span class="job-item-name">' +
+                sd.escapeHtml(job.name) +
+                '</span>' +
+                '<span class="job-item-meta">' +
+                sd.kindTag(job) +
+                '<span class="mono subtle">' +
+                sd.escapeHtml(job.expr) +
+                '</span>' +
+                '<span class="status ' +
+                resultDot +
+                '" style="padding:1px 6px">' +
+                sd.resultLabel(job.lastResult) +
+                '</span>' +
+                '</span>' +
+                '</span>' +
+                '<span class="job-item-next mono" style="grid-column:2;text-align:left">' +
+                nextText +
+                '</span>' +
+                '</button>'
+              );
+            })
+            .join('');
+        }
+
+        function fact(label, value, note) {
+          return (
+            '<div class="fact"><div class="fact-label">' +
+            label +
+            '</div><div class="fact-value">' +
+            value +
+            '</div>' +
+            (note ? '<div class="fact-note">' + note + '</div>' : '') +
+            '</div>'
+          );
+        }
+
+        function resultDotColor(status) {
+          if (status === 'failed') return 'var(--complement)';
+          if (status === 'skipped' || status === 'expired') return 'var(--fg-subtle)';
+          if (status === 'running') return 'var(--contrast)';
+          return 'var(--success)';
+        }
+
+        function renderHistory(job) {
+          var entries = sd.historyFor(job.id);
+          if (entries.length === 0) {
+            return '<div class="muted" style="font-size:12px">该任务还没有执行记录。</div>';
+          }
+          return (
+            '<div class="timeline">' +
+            entries
+              .map(function (entry) {
+                var output = entry.outputPreview
+                  ? '<div class="tl-output">' + sd.escapeHtml(entry.outputPreview) + '</div>'
+                  : '';
+                var error = entry.error
+                  ? '<div class="tl-error" style="color:' +
+                    (entry.status === 'skipped' ? 'var(--fg-muted)' : 'var(--complement)') +
+                    '">' +
+                    sd.escapeHtml(entry.error) +
+                    '</div>'
+                  : '';
+                return (
+                  '<div class="tl-item">' +
+                  '<div class="tl-time">' +
+                  sd.absTime(entry.startedAt) +
+                  '<small>' +
+                  sd.clockTime(entry.startedAt) +
+                  ' · ' +
+                  sd.duration(entry.durationMs) +
+                  '</small></div>' +
+                  '<div class="tl-rail"><span class="tl-dot" style="background:' +
+                  resultDotColor(entry.status) +
+                  '"></span></div>' +
+                  '<div class="tl-body"><div class="tl-line">' +
+                  '<span class="status ' +
+                  sd.resultClass(entry.status) +
+                  '">' +
+                  sd.resultLabel(entry.status) +
+                  '</span>' +
+                  (entry.sessionId
+                    ? '<button type="button" class="btn btn-ghost" data-action="查看执行现场 ' +
+                      entry.sessionId +
+                      '">查看执行现场</button>'
+                    : '') +
+                  '</div>' +
+                  error +
+                  output +
+                  '</div></div>'
+                );
+              })
+              .join('') +
+            '</div>'
+          );
+        }
+
+        function renderDetail() {
+          var job = sd.jobs.filter(function (item) {
+            return item.id === state.selectedId;
+          })[0];
+          var host = document.getElementById('detail');
+          if (!job) {
+            host.innerHTML = '<div class="card empty">选择左侧任务查看详情</div>';
+            return;
+          }
+          var failure =
+            job.lastResult === 'failed'
+              ? '<div class="banner banner-danger"><span>⚠</span><div><strong>最近一次执行失败</strong><div class="muted" style="margin-top:2px">' +
+                sd.escapeHtml(job.lastError || '未记录失败原因') +
+                '</div></div></div>'
+              : '';
+
+          host.innerHTML =
+            failure +
+            '<div class="card detail-head">' +
+            '<div style="min-width:0;flex:1">' +
+            '<div class="detail-title"><h2>' +
+            sd.escapeHtml(job.name) +
+            '</h2>' +
+            sd.kindTag(job) +
+            sd.statusBadge(job) +
+            '</div>' +
+            '<div class="detail-sub"><span class="mono">' +
+            sd.escapeHtml(job.expr) +
+            '</span><span>' +
+            sd.deliveryLabel(job.delivery) +
+            (job.deliveryTarget ? ' · ' + sd.escapeHtml(job.deliveryTarget) : '') +
+            '</span><span>已运行 ' +
+            job.fireCount +
+            ' 次</span></div>' +
+            '</div>' +
+            '<div class="actions">' +
+            '<button type="button" class="btn btn-accent" data-action="立即运行：' +
+            sd.escapeHtml(job.name) +
+            '"' +
+            (job.running ? ' disabled' : '') +
+            '>' +
+            (job.running ? '运行中…' : '立即运行') +
+            '</button>' +
+            '<button type="button" class="btn ' +
+            (job.status === 'enabled' ? 'btn-danger' : 'btn-success') +
+            '" data-action="' +
+            (job.status === 'enabled' ? '停用' : '启用') +
+            '：' +
+            sd.escapeHtml(job.name) +
+            '">' +
+            (job.status === 'enabled' ? '停用' : '启用') +
+            '</button>' +
+            '<button type="button" class="btn" data-action="编辑：' +
+            sd.escapeHtml(job.name) +
+            '">编辑</button>' +
+            '<button type="button" class="btn btn-ghost btn-icon" title="删除任务" data-action="删除：' +
+            sd.escapeHtml(job.name) +
+            '">✕</button>' +
+            '</div>' +
+            '</div>' +
+            '<div class="facts">' +
+            fact('调度类型', sd.kindLabel(job), '表达式 ' + job.expr) +
+            fact('时区', job.tz || '跟随网关', 'cron 按此时区解释') +
+            fact(
+              '下次执行',
+              job.status === 'disabled' ? '已停用' : sd.absTime(job.nextFireAt),
+              job.status === 'disabled' ? '启用后重新排期' : sd.relative(job.nextFireAt),
+            ) +
+            fact(
+              '上次执行',
+              sd.absTime(job.lastFiredAt),
+              job.lastResult
+                ? sd.resultLabel(job.lastResult) + ' · 耗时 ' + sd.duration(job.durationMs)
+                : '尚未执行',
+            ) +
+            fact(
+              '投递方式',
+              sd.deliveryLabel(job.delivery),
+              job.delivery === 'none' ? '产出只在执行历史可见' : '完成后主动送达',
+            ) +
+            fact(
+              '累计运行',
+              job.fireCount + ' 次',
+              job.running ? '当前有一轮在途' : '无进行中的执行',
+            ) +
+            '</div>' +
+            '<div class="card block"><div class="block-head"><span class="block-title">任务提示词</span><span class="spacer"></span><button type="button" class="btn btn-ghost" data-action="复制提示词">复制</button></div><div class="prompt-text">' +
+            sd.escapeHtml(job.prompt) +
+            '</div></div>' +
+            '<div class="card block"><div class="block-head"><span class="block-title">执行历史</span><span class="muted" style="font-size:11px">最近 ' +
+            sd.historyFor(job.id).length +
+            ' 条</span></div>' +
+            renderHistory(job) +
+            '</div>';
+        }
+
+        function render() {
+          renderList();
+          renderDetail();
+        }
+
+        function renderBanner() {
+          var failed = sd.jobs.filter(function (job) {
+            return job.lastResult === 'failed';
+          });
+          var banner = document.getElementById('fail-banner');
+          if (failed.length === 0) {
+            banner.hidden = true;
+            return;
+          }
+          banner.hidden = false;
+          banner.innerHTML =
+            '<span>⚠</span><div><strong>' +
+            failed.length +
+            ' 个任务最近一次执行失败</strong>' +
+            failed
+              .map(function (job) {
+                return (
+                  '<div style="margin-top:4px"><strong>' +
+                  sd.escapeHtml(job.name) +
+                  '</strong><span class="muted"> · ' +
+                  sd.absTime(job.lastFiredAt) +
+                  '</span><div class="muted">' +
+                  sd.escapeHtml(job.lastError || '未记录失败原因') +
+                  '</div></div>'
+                );
+              })
+              .join('') +
+            '</div>';
+        }
+
+        var toastTimer = null;
+        function toast(text) {
+          var node = document.getElementById('toast');
+          node.textContent = text;
+          node.dataset.show = 'true';
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(function () {
+            node.dataset.show = 'false';
+          }, 1600);
+        }
+
+        document.getElementById('job-list').addEventListener('click', function (event) {
+          var item = event.target.closest('.job-item');
+          if (!item) return;
+          state.selectedId = item.dataset.id;
+          render();
+        });
+
+        document.getElementById('filters').addEventListener('click', function (event) {
+          var chip = event.target.closest('.chip');
+          if (!chip) return;
+          state.filter = chip.dataset.filter;
+          Array.prototype.forEach.call(this.querySelectorAll('.chip'), function (node) {
+            node.setAttribute('aria-pressed', String(node === chip));
+          });
+          render();
+        });
+
+        document.getElementById('job-search').addEventListener('input', function (event) {
+          state.keyword = event.target.value.trim();
+          render();
+        });
+
+        document.body.addEventListener('click', function (event) {
+          var trigger = event.target.closest('[data-action]');
+          if (!trigger) return;
+          toast(trigger.dataset.action);
+        });
+
+        renderBanner();
+        render();
+        sd.mountShell('a');
+      })();
+    </script>
+  </body>
+</html>

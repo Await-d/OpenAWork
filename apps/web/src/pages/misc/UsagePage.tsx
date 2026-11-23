@@ -62,10 +62,12 @@ export default function UsagePage() {
 
   return (
     <div className="page-root">
-      <div className="page-header">
-        <span className="page-title">用量与费用</span>
+      {/* 页头用 <header>（landmark）、主标题用 <h1>：axe 要求页面内容在 landmark 内，
+          且每个页面至少有一个 heading-one。 */}
+      <header className="page-header">
+        <h1 className="page-title">用量与费用</h1>
         <span className="page-subtitle">{loading ? '加载中…' : '本月用量概览'}</span>
-      </div>
+      </header>
       <div className="page-content">
         <div
           style={{

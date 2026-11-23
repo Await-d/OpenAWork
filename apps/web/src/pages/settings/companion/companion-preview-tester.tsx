@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { isImeComposingKeyboardEvent } from '@openAwork/shared-ui';
 import { createSettingsClient } from '@openAwork/web-client';
 import type { useBuddyVoicePreferences } from '../../../components/chat/companion/use-buddy-voice-preferences.js';
 import { useAuthStore } from '../../../stores/auth/auth.js';
@@ -139,6 +140,9 @@ export function CompanionPreviewTester({ buddy }: CompanionPreviewTesterProps) {
           disabled={!accessToken || cooldownActive}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
+            if (isImeComposingKeyboardEvent(event)) {
+              return;
+            }
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               event.preventDefault();
               void handleSend();

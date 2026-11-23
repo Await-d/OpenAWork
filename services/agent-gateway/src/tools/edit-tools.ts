@@ -4,7 +4,7 @@ import { defaultIgnoreManager } from '@openAwork/agent-core';
 import { formatAgentIgnoreDenial } from '../workspace/agentignore-denial.js';
 import { z } from 'zod';
 import { buildFileDiff, fileDiffSchema } from './file-diff-format.js';
-import { sqliteAll } from '../infra/db.js';
+import { hasFileReadEvidence } from '../session/session-file-reads.js';
 import { lspManager } from '../lsp/router.js';
 import { getPostWriteDiagnostics, postWriteDiagnosticSchema } from './lsp-tools.js';
 import { captureBeforeWriteBackup } from '../session/session-file-backup-store.js';
@@ -56,14 +56,11 @@ const editOutputSchema = z.object({
     .optional(),
 });
 
-interface AuditLogRow {
-  input_json: string | null;
-  output_json: string | null;
-}
-
 function assertEditableWorkspaceFilePath(sessionId: string, filePath: string): string {
   const safePath = assertSessionWorkspacePath({ path: filePath, sessionId });
-  if (defaultIgnoreManager.shouldIgnore(safePath)) {
+  // 写语义用 `shouldProtect`（跳过 `.gitignore`）：`.gitignore` 只表达「不进版本库」，
+  // 不应阻断编辑。真正需要保护的是内置敏感模式与 `.agentignore`。
+  if (defaultIgnoreManager.shouldProtect(safePath)) {
     throw new Error(formatAgentIgnoreDenial('file', safePath));
   }
 
@@ -71,34 +68,10 @@ function assertEditableWorkspaceFilePath(sessionId: string, filePath: string): s
 }
 
 export function hasReadEvidenceForPath(sessionId: string, filePath: string): boolean {
-  // 只认规范名 `read`。改名前的审计行一律不算证据：方向是 fail-safe ——
-  // 模型重新读一次即可，不会因此跳过读取。
-  const rows = sqliteAll<AuditLogRow>(
-    `SELECT input_json, output_json
-     FROM audit_logs
-     WHERE session_id = ?
-       AND is_error = 0
-       AND tool_name = 'read'
-     ORDER BY id DESC
-     LIMIT 50`,
-    [sessionId],
-  );
-
-  return rows.some((row) => {
-    try {
-      const input =
-        typeof row.input_json === 'string'
-          ? (JSON.parse(row.input_json) as Record<string, unknown>)
-          : null;
-      const output =
-        typeof row.output_json === 'string'
-          ? (JSON.parse(row.output_json) as Record<string, unknown>)
-          : null;
-      return input?.['path'] === filePath || output?.['path'] === filePath;
-    } catch {
-      return false;
-    }
-  });
+  // 证据口径见 `session/session-file-reads.ts`：专用表精确记账（read 成功即
+  // upsert）+ `audit_logs` 旧会话兜底。此前只扫审计日志最近 50 条，工具密集
+  // 会话里必然滚出窗口，导致「读过却报 must read」。
+  return hasFileReadEvidence(sessionId, filePath);
 }
 
 async function touchEditedFile(filePath: string): Promise<void> {

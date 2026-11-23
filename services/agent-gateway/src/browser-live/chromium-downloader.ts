@@ -27,10 +27,11 @@ import type { Agent } from 'node:http';
 import { basename, join } from 'node:path';
 
 import type { ManagedBrowserTarget } from '@openAwork/browser-automation';
+import { redactLogText } from '@openAwork/logger';
 
 import { downloadFile } from './browser-download.js';
 import type { DownloadProgress } from './browser-download.js';
-import { logGatewayWarn } from '../infra/gateway-logger.js';
+import { logGatewayDebug, logGatewayWarn } from '../infra/gateway-logger.js';
 
 /** 标记文件：语义与 Playwright 官方安装器一致。 */
 const INSTALLATION_COMPLETE_MARKER = 'INSTALLATION_COMPLETE';
@@ -140,7 +141,12 @@ export function createChromiumDownloader(deps: ChromiumDownloaderDeps = {}): Chr
   return {
     resolveTargets: (browsersPath) => resolved.resolveTargets(browsersPath),
     ensureInstalled: (browsersPath, onLine, signal) =>
-      ensureInstalledImpl(resolved, browsersPath, onLine, signal),
+      ensureInstalledImpl(
+        resolved,
+        browsersPath,
+        (line) => onLine(sanitizeBrowserInstallText(line)),
+        signal,
+      ),
   };
 }
 
@@ -186,6 +192,7 @@ async function installTarget(
 
     onLine(`[${target.name}] 解压中…`);
     await deps.extractZip(zipPath, tempDir);
+    if (signal.aborted) throw abortErrorFrom(signal);
 
     const executable = join(tempDir, target.executableRelativePath);
     if (process.platform !== 'win32') {
@@ -198,9 +205,16 @@ async function installTarget(
     }
 
     await writeFile(join(tempDir, INSTALLATION_COMPLETE_MARKER), '');
+    if (signal.aborted) throw abortErrorFrom(signal);
     await rm(target.directory, { recursive: true, force: true });
-    await renameWithRetry(tempDir, target.directory);
+    if (signal.aborted) throw abortErrorFrom(signal);
+    await renameWithRetry(tempDir, target.directory, signal);
     onLine(`[${target.name}] 安装完成`);
+  } catch (error) {
+    if (!signal.aborted) {
+      logGatewayWarn('[chromium-downloader] browser target installation failed');
+    }
+    throw error;
   } finally {
     await safeRemove(zipPath, { force: true });
     await safeRemove(tempDir, { recursive: true, force: true });
@@ -237,9 +251,13 @@ async function downloadFromMirrors(
       return;
     } catch (error) {
       if (signal.aborted) {
-        throw error instanceof Error ? error : new Error(describeError(error));
+        throw new Error(describeError(error));
       }
-      lastError = error instanceof Error ? error : new Error(describeError(error));
+      logGatewayWarn('[chromium-downloader] browser mirror download failed', {
+        mirrorIndex: index + 1,
+        mirrorCount: urls.length,
+      });
+      lastError = new Error(describeError(error));
       onLine(`[${target.name}] 镜像下载失败：${describeError(error)}`);
     }
   }
@@ -284,6 +302,7 @@ async function isInstalled(target: ManagedBrowserTarget): Promise<boolean> {
     }
     return true;
   } catch {
+    logGatewayDebug('[chromium-downloader] browser installation probe unavailable');
     return false;
   }
 }
@@ -297,6 +316,7 @@ async function reapStaleArtifacts(
   try {
     entries = await readdir(browsersPath);
   } catch {
+    logGatewayDebug('[chromium-downloader] download artifact scan unavailable');
     return;
   }
 
@@ -310,6 +330,7 @@ async function reapStaleArtifacts(
     try {
       artifactStats = await stat(artifactPath);
     } catch {
+      logGatewayDebug('[chromium-downloader] download artifact probe unavailable');
       continue;
     }
     if (artifactStats.mtimeMs >= cutoff) {
@@ -325,7 +346,7 @@ function isStaleArtifactName(name: string): boolean {
 }
 
 /** 原子 rename；Windows 上杀毒软件 / 文件锁导致的 EPERM / EBUSY 重试一次。 */
-async function renameWithRetry(from: string, to: string): Promise<void> {
+async function renameWithRetry(from: string, to: string, signal: AbortSignal): Promise<void> {
   try {
     await rename(from, to);
     return;
@@ -334,6 +355,7 @@ async function renameWithRetry(from: string, to: string): Promise<void> {
       throw error;
     }
     await delay(RENAME_RETRY_DELAY_MS);
+    if (signal.aborted) throw abortErrorFrom(signal);
     await rename(from, to);
   }
 }
@@ -361,11 +383,26 @@ function abortErrorFrom(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error('下载已取消');
 }
 
+export function sanitizeBrowserInstallText(text: string): string {
+  return redactLogText(
+    text.replace(/https?:\/\/[^\s<>"']+/gi, (value) => {
+      try {
+        const url = new URL(value);
+        url.username = '';
+        url.password = '';
+        url.search = '';
+        url.hash = '';
+        return url.toString();
+      } catch {
+        return '[REDACTED_URL]';
+      }
+    }),
+  );
+}
+
 function describeError(error: unknown): string {
-  if (error instanceof Error && error.message.length > 0) {
-    return error.message;
-  }
-  return String(error);
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return sanitizeBrowserInstallText(message || '调试浏览器下载失败');
 }
 
 function delay(ms: number): Promise<void> {

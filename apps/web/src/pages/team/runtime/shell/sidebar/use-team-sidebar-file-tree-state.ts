@@ -58,7 +58,7 @@ function injectChildren(
 }
 
 function sortTeamSidebarFileTreeNodes(nodes: FileTreeNode[]): FileTreeNode[] {
-  return [...nodes].sort((left, right) => {
+  return nodes.toSorted((left, right) => {
     if (left.type !== right.type) {
       return left.type === 'directory' ? -1 : 1;
     }
@@ -245,7 +245,7 @@ export function useTeamSidebarFileTreeState(
         setTreeNodes(rootNodes);
         return;
       }
-      const orderedDirs = [...wantedDirs].sort(
+      const orderedDirs = wantedDirs.toSorted(
         (left, right) => left.split('/').length - right.split('/').length,
       );
       let nextNodes = rootNodes;

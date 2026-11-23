@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -146,7 +146,7 @@ function buildPreview(
   return trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}\n…` : trimmed;
 }
 
-async function ensureSessionOwned(sessionId: string, userId: string): Promise<boolean> {
+function ensureSessionOwned(sessionId: string, userId: string): boolean {
   const row = sqliteGet<{ id: string }>(
     'SELECT id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1',
     [sessionId, userId],
@@ -191,7 +191,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const user = request.user as JwtPayload;
       const { sessionId } = request.params;
-      const owned = await ensureSessionOwned(sessionId, user.sub);
+      const owned = ensureSessionOwned(sessionId, user.sub);
       if (!owned) {
         return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
       }
@@ -205,7 +205,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
     const user = request.user as JwtPayload;
     const parsed = parseBody(createArtifactSchema, request.body);
 
-    const owned = await ensureSessionOwned(parsed.sessionId, user.sub);
+    const owned = ensureSessionOwned(parsed.sessionId, user.sub);
     if (!owned) {
       return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
     }
@@ -318,7 +318,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
       if (!isSafePathSegment(sessionId)) {
         return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
       }
-      const owned = await ensureSessionOwned(sessionId, user.sub);
+      const owned = ensureSessionOwned(sessionId, user.sub);
       if (!owned) {
         return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
       }
@@ -338,6 +338,14 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
 
       await mkdir(targetDir, { recursive: true });
       await writeFile(targetPath, buffer);
+
+      // 写盘期间会话可能已删除；复查和登记之间不能让出执行权。
+      if (!ensureSessionOwned(sessionId, user.sub)) {
+        await rm(targetPath, { force: true }).catch((error: unknown) => {
+          request.log.warn({ err: error, sessionId }, '删除迟到的会话上传文件失败');
+        });
+        return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
+      }
 
       const artifact = getGatewayArtifactManager().add({
         sessionId,
@@ -370,7 +378,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const user = request.user as JwtPayload;
       const { artifactId, sessionId } = request.params;
-      const owned = await ensureSessionOwned(sessionId, user.sub);
+      const owned = ensureSessionOwned(sessionId, user.sub);
       if (!owned) {
         return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
       }
@@ -411,7 +419,7 @@ export async function artifactsRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const user = request.user as JwtPayload;
       const { artifactId, sessionId } = request.params;
-      const owned = await ensureSessionOwned(sessionId, user.sub);
+      const owned = ensureSessionOwned(sessionId, user.sub);
       if (!owned) {
         return reply.status(404).send({ error: ARTIFACT_ROUTE_ERROR_MESSAGES.sessionNotFound });
       }
