@@ -1,8 +1,8 @@
 {
   "upstream": "https://github.com/anthropics/skills.git",
   "branch": "main",
-  "commit": "1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064",
-  "syncedAt": "2026-11-16T10:40:06Z",
+  "commit": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+  "syncedAt": "2026-11-23T11:49:19Z",
   "skills": [
     "docx",
     "pdf",
