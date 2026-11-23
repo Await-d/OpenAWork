@@ -89,8 +89,17 @@ describe('slimMessagesForRecovery — batch output structure', () => {
   });
 
   it('truncates long leaf strings inside batch sub-results but keeps structure', () => {
+    // stdout 必须超过单字段预算（SLIM_STRING_MAX = 8000）才会被截断；
+    // 旧 fixture 用 2000 字符，在 800 上限时代确实会截断，上限放宽到 8000 后
+    // 它已属于「正常长度」，测不到截断行为。
     const output = {
-      results: [{ tool: 'bash', isError: false, output: bigBashSubOutput('a') }],
+      results: [
+        {
+          tool: 'bash',
+          isError: false,
+          output: { ...bigBashSubOutput('a'), stdout: 'x'.repeat(20_000) },
+        },
+      ],
     };
 
     const [msg] = slimMessagesForRecovery([toolResultMessage(output)]);
@@ -101,7 +110,7 @@ describe('slimMessagesForRecovery — batch output structure', () => {
     // Bash sub-output keeps its structured fields.
     expect(subOutput.command).toBe('pnpm a');
     expect(subOutput.exitCode).toBe(0);
-    // Long stdout is truncated (>800 chars → truncation marker appended).
+    // Long stdout is truncated (>SLIM_STRING_MAX → truncation marker appended).
     expect(typeof subOutput.stdout).toBe('string');
     expect(subOutput.stdout as string).toContain('truncated');
     // Diffs are capped/truncated but remain an array.

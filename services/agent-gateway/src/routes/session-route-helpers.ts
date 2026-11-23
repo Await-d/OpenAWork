@@ -101,17 +101,26 @@ function safeStringify(value: unknown): string | null {
   }
 }
 
-/** 统计「会被截断的长字符串」数量，用于把字节预算摊到各叶子上。 */
-function countLongLeafStrings(value: unknown): number {
+/**
+ * 统计「需要参与预算摊派」的字符串叶子数量。
+ *
+ * 阈值必须是 `MIN_LEAF_BUDGET` 而不是 `SLIM_STRING_MAX`：预算摊派针对的是
+ * **会被字节上限裁剪的叶子**。一个 5000 字符的 stdout 没超过单字段预算
+ * （8000），却一定会被 64KB 上限裁剪；沿用 `SLIM_STRING_MAX` 会把它计成 0，
+ * 预算于是从整个 64KB 起算，四次减半（65536→8192）始终降不到 5000 以下，
+ * 最终整块输出被降级成截断字符串 —— 恰好把 batch / bash / 文件快照要保住的
+ * 对象结构打掉（batch 子行全部渲染成不可解析的字符块）。
+ */
+function countClampableLeafStrings(value: unknown): number {
   if (typeof value === 'string') {
-    return value.length > SLIM_STRING_MAX ? 1 : 0;
+    return value.length > MIN_LEAF_BUDGET ? 1 : 0;
   }
   if (Array.isArray(value)) {
-    return value.reduce<number>((sum, item) => sum + countLongLeafStrings(item), 0);
+    return value.reduce<number>((sum, item) => sum + countClampableLeafStrings(item), 0);
   }
   if (value && typeof value === 'object') {
     return Object.values(value as Record<string, unknown>).reduce<number>(
-      (sum, item) => sum + countLongLeafStrings(item),
+      (sum, item) => sum + countClampableLeafStrings(item),
       0,
     );
   }
@@ -154,7 +163,7 @@ function applyOutputByteLimit(value: unknown, maxBytes: number): unknown {
     return truncStrToBytes(value, maxBytes);
   }
 
-  const leaves = Math.max(1, countLongLeafStrings(value));
+  const leaves = Math.max(1, countClampableLeafStrings(value));
   let budget = Math.max(MIN_LEAF_BUDGET, Math.floor(maxBytes / leaves));
   for (let attempt = 0; attempt < MAX_CAP_ATTEMPTS; attempt += 1) {
     const clamped = clampLeafStrings(value, budget);
