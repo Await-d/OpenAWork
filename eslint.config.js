@@ -240,6 +240,7 @@ export default [
       '**/tmp-*',
       '**/vite.config.*',
       '**/resources/skills/reference/algorithmic-art/templates/**',
+      '**/resources/skills/reference/pptx/scripts/apply_theme.js',
       'packages/opencode-llm/src/**/*.d.ts',
       'packages/opencode-llm/src/**/*.js',
       'packages/opencode-llm/src/**/*.js.map',
