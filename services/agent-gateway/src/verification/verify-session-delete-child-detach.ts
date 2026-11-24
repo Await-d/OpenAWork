@@ -3,7 +3,16 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AgentTaskManagerImpl } from '@openAwork/agent-core';
-import { assert, withTempEnv } from './task-verification-helpers.js';
+import { assert, waitFor, withTempEnv } from './task-verification-helpers.js';
+
+/**
+ * 磁盘清理的等待预算（轮次 × 25ms = 5s）。
+ *
+ * 删除会话后的磁盘产物走 `session_deletion_cleanup` 队列：入库与数据库删除同事务，
+ * 实际删文件由单消费者 worker 在**下一个事件循环**执行，失败还会按退避重试。
+ * 因此「文件已删」是最终一致而非同步完成，校验必须等队列排空。
+ */
+const CLEANUP_WAIT_ATTEMPTS = 200;
 
 async function main(): Promise<void> {
   const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'openawork-session-delete-'));
@@ -157,8 +166,17 @@ async function main(): Promise<void> {
         });
         assert(deleteRes.statusCode === 200, `delete should succeed: ${deleteRes.body}`);
 
-        assert(!existsSync(parentGraphPath), 'parent graph should be removed after delete');
-        assert(!existsSync(childGraphPath), 'child graph should be removed after parent delete');
+        // 清理是异步队列（见 CLEANUP_WAIT_ATTEMPTS 注释），不能要求同一 tick 内删完。
+        await waitFor(
+          () => !existsSync(parentGraphPath),
+          'parent graph should be removed after delete',
+          CLEANUP_WAIT_ATTEMPTS,
+        );
+        await waitFor(
+          () => !existsSync(childGraphPath),
+          'child graph should be removed after parent delete',
+          CLEANUP_WAIT_ATTEMPTS,
+        );
 
         const childRow = dbModule.sqliteGet<{ id: string }>(
           'SELECT id FROM sessions WHERE id = ? LIMIT 1',
