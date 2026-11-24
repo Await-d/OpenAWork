@@ -2,6 +2,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
+import { waitFor } from './task-verification-helpers.js';
+
+/**
+ * 清理队列的等待预算（轮次 × 25ms = 5s）。
+ *
+ * 会话删除后的磁盘清理（含 `removeUnreferencedBackupFile`）走
+ * `session_deletion_cleanup` 队列：入队与数据库删除同事务，实际删文件由单消费者
+ * worker 在下一个事件循环执行，失败还按退避重试。判定口径与
+ * `verify-session-delete-cleanup-matrix` 一致：等队列排空，而不是等固定时长。
+ */
+const CLEANUP_WAIT_ATTEMPTS = 200;
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -1069,6 +1080,12 @@ async function main(): Promise<void> {
         ]),
         'session delete should remove backup metadata rows',
       );
+      // 第一次删除也要等队列排空：否则「文件仍在」是没跑到清理的平凡通过。
+      await waitFor(
+        () => !sqliteGet('SELECT id FROM session_deletion_cleanup LIMIT 1'),
+        'session deletion cleanup queue should drain',
+        CLEANUP_WAIT_ATTEMPTS,
+      );
       assert(
         existsSync(backup.storagePath),
         'shared backup file should remain after first session delete',
@@ -1080,6 +1097,12 @@ async function main(): Promise<void> {
         headers: { authorization: `Bearer ${accessToken}` },
       });
       assert(secondDeleteRes.statusCode === 200, 'second session delete should succeed');
+      // 回收是异步队列（见 CLEANUP_WAIT_ATTEMPTS 注释）：先等队列排空，再断言磁盘结果。
+      await waitFor(
+        () => !sqliteGet('SELECT id FROM session_deletion_cleanup LIMIT 1'),
+        'session deletion cleanup queue should drain',
+        CLEANUP_WAIT_ATTEMPTS,
+      );
       assert(
         !existsSync(backup.storagePath),
         'backup file should be gc’d after final reference is gone',
