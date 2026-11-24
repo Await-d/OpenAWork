@@ -174,7 +174,12 @@ export function useBrowserInstall({
           }
         },
         onFinally: () => {
-          setStarting(false);
+          // 卸载后不得再 setState：测试里父组件 cleanup 后 jsdom 已拆除，迟到的
+          // setStarting(false) 会在 react-dom 调度阶段读 `window` 而抛
+          // `ReferenceError: window is not defined`（表现为未捕获错误污染整份用例）。
+          if (!disposedRef.current) {
+            setStarting(false);
+          }
         },
         run: async () => {
           await browserClient.installBrowser(authToken);

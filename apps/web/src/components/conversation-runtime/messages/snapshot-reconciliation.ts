@@ -321,14 +321,22 @@ export function reconcileSnapshotChatMessages(
     areSnapshotMessagesEquivalent,
   );
   const deduplicated: ChatMessage[] = [];
-  for (const message of reconciled) {
+  // `deduplicated` 每一项在 `reconciled` 中的原始下标（位置判据用）。
+  const reconciledIndexOfOutput: number[] = [];
+  for (const [reconcileIndex, message] of reconciled.entries()) {
     const duplicateIndex = duplicateIndexLookup.find(message, deduplicated);
     const hasUserTurnBetween =
       duplicateIndex >= 0 &&
-      areMessagesSeparatedByUserTurn(deduplicated[duplicateIndex]!, message, reconciled);
+      (areMessagesSeparatedByUserTurn(deduplicated[duplicateIndex]!, message, reconciled) ||
+        hasUserMessageBetweenOutputEntries(
+          reconciled,
+          reconciledIndexOfOutput[duplicateIndex]!,
+          reconcileIndex,
+        ));
     if (duplicateIndex < 0 || hasUserTurnBetween) {
       duplicateIndexLookup.register(deduplicated.length, message);
       deduplicated.push(message);
+      reconciledIndexOfOutput.push(reconcileIndex);
       continue;
     }
 
@@ -345,6 +353,29 @@ export function reconcileSnapshotChatMessages(
   }
 
   return recycleUnchangedMessageReferences(previousMessages, deduplicated);
+}
+
+/**
+ * 位置口径的「中间隔着用户轮」判据。
+ *
+ * `areMessagesSeparatedByUserTurn` 只按 `createdAt` 比较，**任一侧缺时间戳就返回 false**。
+ * 而 `previousWindowStart` 之前的历史（本地乐观消息、快照窗口之外的旧回合）经常没有
+ * 时间戳，此时两条不同轮次的同文回答会被判成同一逻辑消息、在最终去重里折叠掉最新那条。
+ * 这里补一条与时间戳无关的判据：输出序列里两者之间只要存在 user 消息，就属于不同轮次。
+ */
+function hasUserMessageBetweenOutputEntries(
+  messages: readonly ChatMessage[],
+  leftIndex: number,
+  rightIndex: number,
+): boolean {
+  const from = Math.min(leftIndex, rightIndex) + 1;
+  const to = Math.max(leftIndex, rightIndex);
+  for (let index = from; index < to; index += 1) {
+    if (messages[index]?.role === 'user') {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** 完整且非空的请求 ID 才能确认不同消息 ID 的用户副本。 */
